@@ -1,0 +1,729 @@
+/* ============================================================
+   chrome.css — "Crystal instruments over an aurora"
+   Frosted glass panels lit from behind by a blue-violet-teal
+   aurora. Cool ion light marks what is active; one warm amber
+   light means a Claude session is live. Nothing else is colour.
+
+   THEMES. Every colour in this file resolves through a token, so
+   a theme is nothing but a second token block. The source of
+   truth is data-theme on <html>: "dark" (the default, and what an
+   absent attribute means) or "light". theme-boot.js stamps it
+   before first paint; no rule below tests the attribute itself.
+   ============================================================ */
+
+/* --- tokens: dark (default) ---------------------------------- */
+:root {
+  --ink-0: #05060a;
+  --ink-1: #0c0f18;
+
+  --fg:   #eef1f8;
+  --fg-2: #9aa3b8;
+  --fg-3: #5c6478;
+
+  --glass:   rgba(255,255,255,.08);
+  --glass-2: rgba(255,255,255,.13);
+  --glass-3: rgba(255,255,255,.18);
+
+  --edge:     rgba(255,255,255,.22);
+  --specular: rgba(255,255,255,.55);
+
+  --ion:      #7dd3ff;
+  --ion-soft: rgba(125,211,255,.16);
+  --ion-glow: rgba(125,211,255,.45);
+
+  --amber:      #ffab4c;
+  --amber-glow: rgba(255,171,76,.45);
+
+  /* the diagonal reflection every glass surface carries */
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.10)  0%,
+    rgba(255,255,255,.03) 38%,
+    rgba(255,255,255,0)   60%);
+
+  /* --- surfaces and details that are not a plain fill --------- */
+  --glass-thin:  rgba(255,255,255,.06);   /* titlebar: the lightest pane */
+  --shade-in:    rgba(0,0,0,.28);         /* the shaded lower lip of a pane */
+  --shade-drop:  rgba(0,0,0,.35);         /* the 1px shadow a pane casts */
+  --focus-ring:  rgba(255,255,255,.55);
+  --placeholder: rgba(154,163,184,.62);   /* --fg-3 vanished against the glass */
+  --scroll-thumb:       rgba(255,255,255,.18);
+  --scroll-thumb-hover: rgba(255,255,255,.28);
+  --tab-shimmer: rgba(255,255,255,.9);    /* the travelling highlight on a loading tab */
+
+  --ion-line:     rgba(125,211,255,.75);  /* omnibox border, focused */
+  --ion-select:   rgba(125,211,255,.25);
+  --seam-color:   rgba(125,211,255,.45);  /* the lit seam under the chrome */
+  --chamber-seam: rgba(125,211,255,.5);   /* the lit top edge of the chamber */
+
+  --acrylic-bg: rgba(5,6,10,.72);         /* body when DWM acrylic is on */
+  --chamber-bg: rgba(5,6,10,.55);         /* the Claude chamber's own glass */
+
+  /* a lit seam: 1px of ion light, brightest at the centre */
+  --seam: linear-gradient(90deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
+
+  /* the three aurora layers, tokenised whole so a theme relights them */
+  --aurora-band: linear-gradient(-35deg,
+    rgba(140,170,255,0)   50%,
+    rgba(140,170,255,.09) 76%,
+    rgba(140,170,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(75,34,168,.48)  0%,
+    rgba(75,34,168,.22) 45%,
+    rgba(75,34,168,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(15,181,201,.28)  0%,
+    rgba(15,181,201,.11) 46%,
+    rgba(15,181,201,0)   78%);
+
+  /* type + metrics */
+  --ui-font:    'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  --icon-font:  'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
+  --titlebar-h: 40px;
+  --nav-h:      44px;
+}
+
+/* --- tokens: light ------------------------------------------- */
+/* Same instruments, daylight instead of night: white frosted panels
+   over a pale aurora, ink text, edges as soft ink lines, and the ion
+   accent dropped to a deeper blue so it still reads on white.
+   Nothing here but custom properties — every rule below re-themes
+   itself. Type/metric tokens are inherited from the dark block. */
+:root[data-theme="light"] {
+  --ink-0: #eef1f7;
+  --ink-1: #f7f8fc;
+
+  --fg:   #12162a;
+  --fg-2: #4a526b;                        /* ~7:1 on the glass, ~5:1 at the aurora's deepest */
+  --fg-3: #767e94;                        /* 4.5:1 on white glass; #8a92a8 was 3.1:1 */
+
+  --glass:   rgba(255,255,255,.55);
+  --glass-2: rgba(255,255,255,.72);
+  --glass-3: rgba(255,255,255,.9);
+
+  --edge:     rgba(18,22,42,.12);
+  --specular: rgba(255,255,255,.95);
+
+  --ion:      #0b7fd6;
+  --ion-soft: rgba(11,127,214,.14);
+  --ion-glow: rgba(11,127,214,.35);
+
+  --amber:      #f08c00;
+  --amber-glow: rgba(240,140,0,.4);
+
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.7)  0%,
+    rgba(255,255,255,.25) 38%,
+    rgba(255,255,255,0)   60%);
+
+  /* surfaces and details */
+  --glass-thin:  rgba(255,255,255,.42);
+  --shade-in:    rgba(18,22,42,.07);      /* ink, not black: a shaded lip, not a bruise */
+  --shade-drop:  rgba(18,22,42,.10);
+  --focus-ring:  rgba(18,22,42,.55);
+  --placeholder: rgba(74,82,107,.7);
+  --scroll-thumb:       rgba(18,22,42,.2);
+  --scroll-thumb-hover: rgba(18,22,42,.34);
+  --tab-shimmer: rgba(255,255,255,.85);
+
+  --ion-line:     rgba(11,127,214,.75);
+  --ion-select:   rgba(11,127,214,.2);
+  --seam-color:   rgba(11,127,214,.45);
+  --chamber-seam: rgba(11,127,214,.5);
+
+  --acrylic-bg: rgba(238,241,247,.72);
+  --chamber-bg: rgba(255,255,255,.55);
+
+  /* daylight aurora: cornflower band, lilac pool, mint rim */
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,160,255,0)   50%,
+    rgba(120,160,255,.13) 76%,
+    rgba(120,160,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(185,167,255,.55)  0%,
+    rgba(185,167,255,.26) 45%,
+    rgba(185,167,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(127,224,216,.45)  0%,
+    rgba(127,224,216,.18) 46%,
+    rgba(127,224,216,0)   78%);
+}
+
+/* --- reset / window ------------------------------------------ */
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;                /* only a tab's own body scrolls */
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--ink-0);        /* never fully transparent */
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* DWM acrylic on: let the desktop read through faintly, no further. */
+body.acrylic { background: var(--acrylic-bg); }
+body.acrylic .aurora-base { opacity: .45; }
+
+/* Frameless: Win11 rounds the frame itself and guest views do not clip,
+   so no outer radius is added. This stays as the guard the contract asks for. */
+body.maximized { border-radius: 0; margin: 0; }
+
+/* Clicks die inside the drag region unless a control opts out. */
+button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
+
+.spacer { flex: 1 1 auto; min-width: 0; }
+
+/* --- backdrop: coloured light behind the glass ---------------- */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.backdrop > div { position: absolute; inset: 0; }
+
+/* (a) base ink field */
+.aurora-base { background: linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%); }
+
+/* (b) light band entering from the upper-left along the -35deg axis */
+.aurora-band { background: var(--aurora-band); }
+
+/* (c) violet pool low in the window, under the Claude chamber */
+.aurora-pool {
+  background: var(--aurora-pool);
+  /* steps(): the pool nudges twice a second instead of every frame. Each move
+     makes every frosted panel above it re-blur, so continuous motion cost a
+     quarter of a CPU core for a sway nobody can see happen. */
+  animation: pool-drift 60s steps(120) infinite alternate;
+  will-change: transform;
+}
+
+/* (d) teal-cyan rim at the bottom-right, drifting the other way */
+.aurora-rim {
+  background: var(--aurora-rim);
+  animation: rim-drift 80s steps(160) infinite alternate;
+  will-change: transform;
+}
+
+@keyframes pool-drift {
+  from { transform: translate3d(-3%, 0, 0); }
+  to   { transform: translate3d(3%, 1.5%, 0); }
+}
+
+@keyframes rim-drift {
+  from { transform: translate3d(3%, 1%, 0); }
+  to   { transform: translate3d(-3%, -2%, 0); }
+}
+
+/* --- glass recipe -------------------------------------------- */
+.glass {
+  background: var(--sheen), var(--glass);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 1px 0 var(--shade-drop);
+}
+
+/* --- chrome layer + launch entrance --------------------------- */
+.chrome-layer {
+  position: relative;
+  z-index: 3;
+  flex: 0 0 auto;
+}
+
+body:not(.booted) .chrome-layer {
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(-4px);
+}
+
+body.booted .chrome-layer {
+  opacity: 1;
+  filter: none;                    /* back to none so child backdrop-filters work */
+  transform: none;
+  /* the entrance, plus the 180ms theme tempo (see "theme transition") */
+  transition: opacity 600ms ease-out, filter 600ms ease-out, transform 600ms ease-out,
+              background-color 180ms ease, color 180ms ease,
+              border-color 180ms ease, box-shadow 180ms ease;
+}
+
+body:not(.booted) .navrow { opacity: 0; transform: translateY(-3px); }
+body.booted .navrow {
+  opacity: 1;
+  transform: none;
+  transition: opacity 520ms ease-out 120ms, transform 520ms ease-out 120ms;
+}
+
+/* --- icon glyphs --------------------------------------------- */
+.glyph {
+  font-family: var(--icon-font);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* --- shared control reset ------------------------------------ */
+button {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+button:disabled { color: var(--fg-3); }
+
+button:focus-visible,
+.tab:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- titlebar: the thinnest, lightest pane -------------------- */
+#titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--titlebar-h);
+  padding-left: 8px;
+  border-bottom: 1px solid var(--edge);
+  background: var(--sheen), var(--glass-thin);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  -webkit-app-region: drag;
+}
+
+#tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#newtab {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+#newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+#newtab:active { background: var(--sheen), var(--glass-3); }
+
+/* --- tabs (chips injected at runtime) ------------------------- */
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tab:hover {
+  background: var(--sheen), var(--glass-2);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+.tab.active {
+  background: var(--sheen), var(--glass-3);
+  border-color: var(--edge);
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 6px 14px -8px var(--ion-glow);
+}
+
+/* the ion line under the active chip */
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ion), transparent);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+  pointer-events: none;
+}
+
+.tab.active::after { opacity: 1; }
+
+.tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: var(--icon-font);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close { opacity: 1; }
+
+.tab-close:hover { background: var(--glass-3); color: var(--fg); }
+
+/* --- tab chip states (classes set by app.js) ------------------ */
+
+/* the page's own favicon, sitting where the Claude chip keeps its dot */
+img.tab-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  border-radius: 3px;
+  opacity: .9;
+}
+
+/* no favicon yet, or a Claude chamber: the chip shows nothing there */
+img.tab-icon:not([src]),
+img.tab-icon[src=""],
+.tab.claude img.tab-icon { display: none; }
+
+/* loading: a highlight travels the ion line under the chip. The line
+   itself is still only visible while the tab is active. */
+.tab.loading::after {
+  background:
+    linear-gradient(90deg, transparent 0%, var(--tab-shimmer) 50%, transparent 100%),
+    linear-gradient(90deg, transparent, var(--ion), transparent);
+  background-size: 40% 100%, 100% 100%;
+  background-repeat: no-repeat, no-repeat;
+  animation: tab-shimmer 1.2s steps(24) infinite;  /* same reason as live-pulse */
+}
+
+@keyframes tab-shimmer {
+  from { background-position: -30% 0, 0 0; }
+  to   { background-position: 130% 0, 0 0; }
+}
+
+/* --- window controls (monochrome) ----------------------------- */
+.wincontrols {
+  display: flex;
+  align-self: stretch;
+  margin-left: 8px;
+}
+
+#win-min, #win-max, #win-close {
+  width: 46px;
+  height: 100%;
+  border-radius: 0;
+}
+
+#win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
+
+#win-min:hover, #win-max:hover { background: var(--glass-2); color: var(--fg); }
+#win-min:active, #win-max:active { background: var(--glass-3); }
+
+/* the one earned exception to monochrome: the Windows close convention */
+#win-close:hover { background: rgba(232,17,35,.9); color: #ffffff; }
+#win-close:active { background: rgba(232,17,35,.7); color: #ffffff; }
+
+/* --- nav row -------------------------------------------------- */
+.navrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--nav-h);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--edge);
+}
+
+/* the lit seam under the chrome */
+.navrow::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--seam);
+  pointer-events: none;
+}
+
+/* .iconbtn is the same instrument shape, for nav buttons added later
+   (#theme carries it, and .glass, so it reads as a chip when idle). */
+#back, #forward, #reload, .iconbtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--glass-2); color: var(--fg); }
+#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--glass-3); }
+#back:disabled, #forward:disabled { background: none; color: var(--fg-3); }
+
+/* the theme toggle: glyph swapped by app.js (moon in dark, sun in light) */
+#theme .glyph { font-family: var(--icon-font); }
+
+/* the reload button in its "stop loading" state. app.js swaps the glyph
+   to &#xE711; and adds this class; the instrument itself does not change. */
+#reload.stop { /* documented state — no visual override by design */ }
+
+/* the omnibox sits in the middle of the row like a lens */
+#omnibox {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 760px;
+  margin: 0 auto;
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 13.5px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  /* focus keeps its own 200ms ease-out; background-color joins at the
+     180ms theme tempo so a theme switch re-lights the lens in step */
+  transition: box-shadow 200ms ease-out, border-color 200ms ease-out,
+              color 200ms ease-out, background-color 180ms ease;
+}
+
+#omnibox::placeholder { color: var(--placeholder); }
+
+#omnibox:hover { background: var(--sheen), var(--glass-2); }
+
+/* the one place the chrome lights up */
+#omnibox:focus {
+  outline: none;
+  background: var(--sheen), var(--glass-2);
+  border-color: var(--ion-line);
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 0 0 4px var(--ion-soft),
+    0 0 28px var(--ion-glow);
+}
+
+#omnibox::selection { background: var(--ion-select); color: var(--fg); }
+
+/* the pill that opens a new Claude tab */
+#newclaude {
+  gap: 7px;
+  height: 30px;
+  padding: 0 13px 0 11px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  letter-spacing: .01em;
+}
+
+#newclaude:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+#newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
+
+/* --- session light (the only warm colour) --------------------- */
+.tab .dot,
+#newclaude .dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  box-shadow: none;
+  transition: background .2s, box-shadow .2s;
+}
+
+.tab .dot { margin-right: 8px; }
+
+.tab.live .dot,
+body.claude-live #newclaude .dot {
+  background: var(--amber);
+  box-shadow: 0 0 8px 1px var(--amber-glow);
+  /* steps(): the dot lives inside a frosted row, so every frame it changes
+     re-blurs the whole row. A few updates a second reads as the same breathe. */
+  animation: live-pulse 2.4s steps(8) infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .62; }
+}
+
+/* --- tab well ------------------------------------------------- */
+/* No radius, no overflow clipping: guest views do not clip reliably.
+   No ground of its own, so the aurora reaches the glass chamber. */
+#views {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  border-top: 1px solid var(--edge);
+}
+
+#views webview {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* Guest pages are transparent, so this is what a site without its own
+     background paints on. Always white, never the theme ink: otherwise dark
+     mode looked like it forced every plain page dark. Sites that support
+     dark mode still follow the Windows setting, as in any browser. */
+  background: #fff;
+}
+
+#views webview[hidden],
+#views webview.hidden,
+#views webview.inactive { display: none; }
+
+/* --- Claude chamber: the deepest glass, full bleed ------------- */
+/* The fit addon measures this host's client box minus padding, so the
+   padding lives here and never on .xterm. */
+#views > .claude-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  background: var(--chamber-bg);
+  backdrop-filter: blur(28px) saturate(120%);
+  -webkit-backdrop-filter: blur(28px) saturate(120%);
+  box-shadow: inset 0 1px 0 var(--specular);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* the chamber's lit top edge */
+.claude-view::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--chamber-seam) 50%, transparent 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.claude-view > .xterm { flex: 1 1 auto; min-height: 0; }
+
+/* the chamber glass is the ground; xterm paints none of its own */
+.claude-view .xterm-viewport { background: transparent !important; }
+.claude-view .xterm-screen { background-color: transparent; }
+
+.claude-view .xterm-viewport::-webkit-scrollbar { width: 9px; height: 9px; }
+.claude-view .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.claude-view .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+.claude-view .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* --- scrollbars (chrome only) --------------------------------- */
+#tabstrip::-webkit-scrollbar { height: 0; width: 0; }
+
+body ::-webkit-scrollbar { width: 9px; height: 9px; }
+body ::-webkit-scrollbar-track { background: transparent; }
+body ::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+body ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+body ::-webkit-scrollbar-corner { background: transparent; }
+
+/* --- theme transition ----------------------------------------- */
+/* Flipping data-theme should read as the glass being re-lit, not as a
+   snap. Only the lit surfaces carry it; <html> itself never animates,
+   so the very first paint after theme-boot.js is instant.
+   (#omnibox carries background-color in its own rule, above, to keep
+   its 200ms ease-out focus glow.) */
+html { transition: none; }
+
+body,
+.chrome-layer,
+#titlebar,
+.navrow,
+.tab,
+.claude-view {
+  transition: background-color 180ms ease,
+              color 180ms ease,
+              border-color 180ms ease,
+              box-shadow 180ms ease;
+}
+
+/* --- reduced motion ------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-pool, .aurora-rim { animation: none; }
+  body:not(.booted) .chrome-layer { opacity: 1; filter: none; transform: none; }
+  body:not(.booted) .navrow { opacity: 1; transform: none; }
+  body.booted .chrome-layer { transition: none; }
+  body.booted .navrow { transition: none; }
+  .tab.live .dot,
+  body.claude-live #newclaude .dot { animation: none; }
+  .tab.loading::after { animation: none; }
+  .tab::after, .tab-close, #omnibox { transition: none; }
+  /* the theme still switches, it just arrives all at once */
+  html, body, .chrome-layer, #titlebar, .navrow, .tab, .claude-view { transition: none; }
+}

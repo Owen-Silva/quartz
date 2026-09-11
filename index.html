@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Sets data-theme on <html> before the stylesheets apply, so light never flashes dark. -->
+  <script src="theme-boot.js"></script>
+  <title>Browser</title>
+  <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="chrome.css">
+</head>
+<body>
+
+  <!-- Ambient light field. All colour in the app lives here, behind the glass. -->
+  <div class="backdrop" aria-hidden="true">
+    <div class="aurora-base"></div>
+    <div class="aurora-band"></div>
+    <div class="aurora-pool"></div>
+    <div class="aurora-rim"></div>
+  </div>
+
+  <!-- Chrome layer: condenses in one frame after boot (body.booted). -->
+  <div class="chrome-layer">
+
+    <!-- Titlebar: tabs, new tab, window controls. This row drags the window. -->
+    <div id="titlebar" class="glass">
+      <div id="tabstrip"></div>
+      <button id="newtab" type="button" title="New tab" aria-label="New tab">
+        <span class="glyph">&#xE710;</span>
+      </button>
+      <div class="spacer"></div>
+      <div class="wincontrols">
+        <button id="win-min" type="button" title="Minimize" aria-label="Minimize">
+          <span class="glyph">&#xE921;</span>
+        </button>
+        <!-- glyph swaps to &#xE923; (restore) when the window is maximized -->
+        <button id="win-max" type="button" title="Maximize" aria-label="Maximize">
+          <span class="glyph">&#xE922;</span>
+        </button>
+        <button id="win-close" type="button" title="Close" aria-label="Close">
+          <span class="glyph">&#xE8BB;</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Nav row: instruments left, the omnibox lens centred, Claude pill right. -->
+    <div class="navrow glass">
+      <button id="back" type="button" title="Back" aria-label="Back">
+        <span class="glyph">&#xE76B;</span>
+      </button>
+      <button id="forward" type="button" title="Forward" aria-label="Forward">
+        <span class="glyph">&#xE76C;</span>
+      </button>
+      <button id="reload" type="button" title="Reload" aria-label="Reload">
+        <span class="glyph">&#xE72C;</span>
+      </button>
+
+      <input id="omnibox" class="glass" type="text" spellcheck="false" autocomplete="off"
+             autocapitalize="off" placeholder="Search or enter address" aria-label="Address bar">
+
+      <!-- glyph swaps to &#xE706; (sun) when the light theme is on -->
+      <button id="theme" class="glass iconbtn no-drag" type="button" title="Switch theme" aria-label="Switch theme">
+        <span class="glyph">&#xE708;</span>
+      </button>
+
+      <button id="newclaude" class="glass" type="button" title="New Claude tab" aria-label="New Claude tab">
+        <span class="dot"></span><span class="label">Claude</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Tab well. Holds every tab body: <webview> pages and .claude-view chambers,
+       created at runtime. Guest views do not clip, so nothing rounds or hides
+       overflow here. -->
+  <div id="views"></div>
+
+  <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="app.js"></script>
+  <script src="terminal.js"></script>
+</body>
+</html>

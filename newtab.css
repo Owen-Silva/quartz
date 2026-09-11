@@ -1,0 +1,318 @@
+/* ============================================================
+   newtab.css — the browser's own search page.
+   Same world as chrome.css: frosted glass over an aurora,
+   near-monochrome, one ice-cyan light. The field is the only
+   thing that glows, and the only thing worth remembering.
+   ============================================================ */
+
+/* --- tokens (mirrored from chrome.css) ----------------------- */
+:root {
+  --ink-0: #05060a;
+  --ink-1: #0c0f18;
+
+  --fg:   #eef1f8;
+  --fg-2: #9aa3b8;
+  --fg-3: #5c6478;
+
+  --glass:   rgba(255,255,255,.08);
+  --glass-2: rgba(255,255,255,.13);
+  --glass-3: rgba(255,255,255,.18);
+
+  --edge:     rgba(255,255,255,.22);
+  --specular: rgba(255,255,255,.55);
+
+  --ion:      #7dd3ff;
+  --ion-soft: rgba(125,211,255,.16);
+  --ion-glow: rgba(125,211,255,.45);
+  --ion-line: rgba(125,211,255,.75);   /* focus border / focus outline */
+
+  /* the diagonal reflection every glass surface carries */
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.10)  0%,
+    rgba(255,255,255,.03) 38%,
+    rgba(255,255,255,0)   60%);
+
+  /* the three coloured washes of the backdrop, whole gradients so a
+     theme swaps the light itself and not the geometry */
+  --aurora-band: linear-gradient(-35deg,
+    rgba(140,170,255,0)   50%,
+    rgba(140,170,255,.09) 76%,
+    rgba(140,170,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(75,34,168,.48)  0%,
+    rgba(75,34,168,.22) 45%,
+    rgba(75,34,168,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(15,181,201,.28)  0%,
+    rgba(15,181,201,.11) 46%,
+    rgba(15,181,201,0)   78%);
+
+  --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+}
+
+/* --- light theme --------------------------------------------- */
+/* Set by newtab-theme.js before first paint, and re-set by the
+   browser chrome whenever the user flips theme. Tokens only —
+   every rule below is written once and reads through them. */
+:root[data-theme="light"] {
+  --ink-0: #eef1f7;
+  --ink-1: #f7f8fc;
+
+  --fg:   #12162a;
+  --fg-2: #4a526b;
+  --fg-3: #767e94;  /* 4.5:1 on the white capsule; mirrors chrome.css */
+
+  --glass:   rgba(255,255,255,.55);
+  --glass-2: rgba(255,255,255,.72);
+  --glass-3: rgba(255,255,255,.9);
+
+  --edge:     rgba(18,22,42,.12);
+  --specular: rgba(255,255,255,.95);
+
+  --ion:      #0b7fd6;
+  --ion-soft: rgba(11,127,214,.14);
+  --ion-glow: rgba(11,127,214,.35);
+  --ion-line: rgba(11,127,214,.75);
+
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.7)  0%,
+    rgba(255,255,255,.25) 38%,
+    rgba(255,255,255,0)   60%);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,160,255,0)   50%,
+    rgba(120,160,255,.13) 76%,
+    rgba(120,160,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(185,167,255,.55)  0%,
+    rgba(185,167,255,.25) 45%,
+    rgba(185,167,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(127,224,216,.45)  0%,
+    rgba(127,224,216,.18) 46%,
+    rgba(127,224,216,0)   78%);
+}
+
+/* --- page ---------------------------------------------------- */
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ink-0);        /* never fully transparent */
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-x: hidden;              /* the page never scrolls sideways */
+  -webkit-font-smoothing: antialiased;
+  /* a theme flip is a crossfade, not a cut */
+  transition:
+    background-color 180ms ease,
+    color            180ms ease,
+    border-color     180ms ease,
+    box-shadow       180ms ease;
+}
+
+/* --- backdrop ------------------------------------------------ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: .7;                     /* stand back so the board reads */
+}
+
+.backdrop > div { position: absolute; inset: 0; }
+
+/* (a) base ink field */
+.aurora-base { background: linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%); }
+
+/* (b) light band entering from the upper-left along the -35deg axis */
+.aurora-band { background: var(--aurora-band); }
+
+/* (c) violet pool low in the window */
+.aurora-pool {
+  background: var(--aurora-pool);
+  /* steps(): nudge twice a second, not every frame. Every move re-blurs the
+     frosted capsule and chips above it; continuous drift cost real CPU for a
+     sway nobody can see happen. Mirrors chrome.css. */
+  animation: pool-drift 60s steps(120) infinite alternate;
+  will-change: transform;
+}
+
+/* (d) teal-cyan rim at the bottom-right, drifting the other way */
+.aurora-rim {
+  background: var(--aurora-rim);
+  animation: rim-drift 80s steps(160) infinite alternate;
+  will-change: transform;
+}
+
+@keyframes pool-drift {
+  from { transform: translate3d(-3%, 0, 0); }
+  to   { transform: translate3d(3%, 1.5%, 0); }
+}
+
+@keyframes rim-drift {
+  from { transform: translate3d(3%, 1%, 0); }
+  to   { transform: translate3d(-3%, -2%, 0); }
+}
+
+/* --- the board ----------------------------------------------- */
+/* Generated in newtab-bg.js: socket, traces, vias, chips, packets.
+   Sits between the aurora and the glass, and fades out at the edges. */
+#board {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
+          mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
+}
+
+/* --- layout -------------------------------------------------- */
+.stage {
+  position: relative;
+  z-index: 2;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px 14vh;         /* bottom padding = the upward bias */
+}
+
+.column {
+  position: relative;
+  z-index: 2;                      /* the glass always sits above the board */
+  width: 100%;
+  max-width: 720px;
+  text-align: center;
+}
+
+/* --- wordmark ------------------------------------------------ */
+.wordmark {
+  margin: 0 0 14px;
+  color: var(--fg-2);
+  font-size: 13px;
+  letter-spacing: .04em;
+}
+
+/* --- the field: the one memorable thing ---------------------- */
+.searchform { margin: 0; }
+
+.field {
+  display: block;
+  width: 100%;
+  height: 56px;
+  padding: 0 22px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--sheen), var(--glass);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: inset 0 1px 0 var(--specular);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1.2;
+  text-align: center;
+  transition:
+    background-color 180ms ease,
+    color            180ms ease,
+    border-color     180ms ease,
+    box-shadow       180ms ease;
+}
+
+.field::placeholder { color: var(--fg-3); }
+
+.field:focus,
+.field:focus-visible {
+  outline: none;                   /* the glow below is the focus ring */
+  border-color: var(--ion-line);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 0 0 4px var(--ion-soft),
+    0 0 32px var(--ion-glow);
+}
+
+/* --- shortcut chips ------------------------------------------ */
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--sheen), var(--glass);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 180ms ease,
+    color            180ms ease,
+    border-color     180ms ease,
+    box-shadow       180ms ease;
+}
+
+.chip:hover {
+  background-color: var(--glass-2);
+  border-color: var(--glass-3);
+  color: var(--fg);
+}
+
+.chip:active { background-color: var(--glass-3); }
+
+.chip:focus-visible {
+  outline: 2px solid var(--ion-line);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
+/* --- launch motion: one rise, and that is all ---------------- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.searchform { animation: rise 500ms ease-out both; }
+.links      { animation: rise 500ms ease-out 80ms both; }
+
+/* --- narrow windows ------------------------------------------ */
+@media (max-width: 460px) {
+  .stage { padding: 28px 24px 12vh; }
+  .field { font-size: 16px; padding: 0 18px; }
+}
+
+/* --- reduced motion ------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-pool,
+  .aurora-rim,
+  .searchform,
+  .links { animation: none; }
+
+  /* a theme flip lands instantly instead of crossfading */
+  body,
+  .field,
+  .chip { transition: none; }
+}

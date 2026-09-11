@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New tab</title>
+<!-- Sets data-theme on <html>. Must stay the first script, and must stay
+     above the stylesheet, or a light window flashes dark on load. -->
+<script src="newtab-theme.js"></script>
+<link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+
+<!-- Coloured light behind the glass. Fixed, inert, always the bottom layer. -->
+<div class="backdrop" aria-hidden="true">
+  <div class="aurora-base"></div>
+  <div class="aurora-band"></div>
+  <div class="aurora-pool"></div>
+  <div class="aurora-rim"></div>
+</div>
+
+<!-- The board: a circuit around the field, drawn in JS. Inert, above the aurora. -->
+<canvas id="board" aria-hidden="true"></canvas>
+
+<main class="stage">
+  <div class="column">
+    <p class="wordmark">Search</p>
+
+    <form id="search" class="searchform" autocomplete="off" novalidate>
+      <input id="q"
+             class="field"
+             type="text"
+             name="q"
+             placeholder="Search Google or type a URL"
+             aria-label="Search Google or type a URL"
+             autofocus
+             spellcheck="false"
+             autocapitalize="off"
+             autocorrect="off">
+    </form>
+
+    <nav id="links" class="links" aria-label="Shortcuts"></nav>
+  </div>
+</main>
+
+<script src="newtab-bg.js"></script>
+<script src="newtab.js"></script>
+</body>
+</html>
