@@ -115,7 +115,7 @@
   border-radius: var(--bevel);
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 13px;
+  font-size: 12.5px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
      through it. Opaque, so the rim only shows where it should. */
@@ -136,20 +136,6 @@
   #siteinfo-panel { corner-shape: round bevel round bevel; }
 }
 
-/* The lamp: 2px of the seam's light along the pane's top edge, the same
-   light every other pane in this pass wears. */
-#siteinfo-panel::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--seam);
-  pointer-events: none;
-  z-index: 1;
-}
-
 #siteinfo-panel .si-body {
   display: flex;
   flex: 1 1 auto;
@@ -157,22 +143,7 @@
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 16px 16px 12px;
-}
-
-/* a 6px thumb: 10px of track less 2px of transparent border each side */
-#siteinfo-panel .si-body::-webkit-scrollbar { width: 10px; }
-
-#siteinfo-panel .si-body::-webkit-scrollbar-thumb {
-  background: var(--scroll-thumb);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
-}
-
-#siteinfo-panel .si-body::-webkit-scrollbar-thumb:hover {
-  background: var(--scroll-thumb-hover);
-  background-clip: padding-box;
+  padding: 14px 14px 12px;
 }
 
 /* --- the header: which site, and what the connection is --------
@@ -182,11 +153,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 2px;
-  /* the pane's header: the host is its title, so the block holds the same
-     44px the other panes' header rows do */
-  min-height: 44px;
   padding-bottom: 12px;
   border-bottom: 1px solid transparent;
 }
@@ -205,7 +172,7 @@
 #siteinfo-panel .si-host {
   color: var(--fg);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 350;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   overflow: hidden;
@@ -270,15 +237,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  /* 36px: the row height every list in this pass is set to */
-  min-height: 36px;
+  min-height: 28px;
 }
 
 #siteinfo-panel .si-label {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg-2);
-  font-size: 13px;
+  font-size: 12.5px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 1.35;
@@ -317,40 +283,29 @@
   pointer-events: none;
 }
 
-/* The field recipe the settings pane uses: an opaque --panel-bg interior
-   with the soft rim in the border box, and the focused rim plus the pip
-   halo while it is being used. */
 #siteinfo-panel .si-sel {
   -webkit-appearance: none;
   appearance: none;
-  box-sizing: border-box;
-  height: 32px;
+  height: 28px;
   padding: 0 26px 0 9px;
-  border: 1px solid transparent;
+  border: 1px solid var(--edge);
   border-radius: var(--radius-ctl);
-  background:
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim-soft) border-box;
+  background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
-  font-size: 13px;
+  font-size: 12px;
   font-stretch: var(--readout-stretch);
   cursor: pointer;
   box-shadow: inset 0 1px 0 var(--specular);
-  transition: box-shadow 120ms steps(2);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
 }
 
-#siteinfo-panel .si-sel:hover {
-  background:
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-}
+#siteinfo-panel .si-sel:hover { background: var(--glass-2); }
 
 #siteinfo-panel .si-sel:focus {
   outline: none;
-  background:
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim-focus) border-box;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
   box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
 }
 
@@ -360,22 +315,17 @@
   color: var(--fg);
 }
 
-/* --- buttons ----------------------------------------------------
-   The secondary button: --glass-2 under a soft rim ring, 32px, control
-   corners. The ring is a masked pseudo-element rather than the two-layer
-   trick — the fill is translucent glass and a border-box gradient would
-   wash straight through it. */
+/* --- buttons ---------------------------------------------------- */
 #siteinfo-panel .si-btn {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 32px;
+  height: 28px;
   padding: 0 12px;
-  border: 1px solid transparent;
+  border: 1px solid var(--edge);
   border-radius: var(--radius-ctl);
-  background: var(--glass-2);
-  color: var(--fg);
+  background: var(--glass);
+  color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
   font-stretch: var(--readout-stretch);
@@ -384,21 +334,7 @@
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
 
-#siteinfo-panel .si-btn::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim-soft);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-
-#siteinfo-panel .si-btn:hover { background: var(--glass-3); color: var(--fg); }
+#siteinfo-panel .si-btn:hover { background: var(--glass-2); color: var(--fg); }
 #siteinfo-panel .si-btn:active { background: var(--glass-3); }
 
 #siteinfo-panel .si-btn:focus-visible,
@@ -416,16 +352,11 @@
 
 #siteinfo-panel .si-btn--thin { padding: 0 10px; }
 
-/* The second half of the two-step clear: the pane's one primary action,
-   so it takes the primary treatment — the accent as a fill, the focused
-   rim as its edge. */
+/* the second half of the two-step clear: same chip, lit */
 #siteinfo-panel .si-btn--go {
-  background: var(--ion-soft);
+  background: var(--glass-2);
   color: var(--fg);
 }
-
-#siteinfo-panel .si-btn--go::before { background: var(--rim-focus); }
-#siteinfo-panel .si-btn--go:hover { background: var(--ion-select); }
 
 #siteinfo-panel .si-btn-ico {
   font-family: var(--icon-font);
@@ -470,7 +401,7 @@
   flex: 1 1 140px;
   min-width: 0;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 12.5px;
   font-stretch: var(--readout-stretch);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -489,7 +420,7 @@
    occupy the same width and the row never twitches as you step it */
 #siteinfo-panel .si-zoom-val {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 12.5px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   font-variant-numeric: tabular-nums;
@@ -502,12 +433,12 @@
 }
 
 #siteinfo-panel .si-step {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-ctl);
-  background: var(--glass-2);
-  color: var(--fg);
+  background: var(--glass);
+  color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 13px;
   font-stretch: var(--readout-stretch);

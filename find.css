@@ -24,13 +24,11 @@
 
   width: 360px;
   max-width: calc(100vw - 32px);
-  /* 44px and a 16px gutter: the bar is a one-row pane, so it is set to the
-     same header height every other pane's head carries. */
-  height: 44px;
+  height: 40px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px 0 16px;
+  padding: 0 6px 0 12px;
 
   /* A cut edge that catches light: two corners on the diagonal are
      bevelled (see the @supports below), and the 1px border is left
@@ -99,20 +97,6 @@
   #findbar::before { corner-shape: round bevel round bevel; }
 }
 
-/* The lamp: 2px of the seam's light along the top edge. ::before is the
-   rim ring, so the lamp takes ::after; the seam fades to nothing at both
-   ends, so the bevelled corners have nothing to clip. */
-#findbar::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--seam);
-  pointer-events: none;
-}
-
 /* The reset in this app does not carry [hidden]{display:none}, and a
    flex container would otherwise ignore the attribute entirely. */
 #findbar[hidden] { display: none; }
@@ -146,7 +130,7 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
 #find-input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 32px;
+  height: 28px;
   margin: 0;
   padding: 0 8px;
   border: 1px solid transparent;
@@ -157,7 +141,7 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 350;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   -webkit-user-select: text;
@@ -217,8 +201,8 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
 /* .iconbtn already supplies the instrument shape and its hover/active
    glass from chrome.css. Only the size changes, and only in here. */
 #findbar .iconbtn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-ctl);
 }
 

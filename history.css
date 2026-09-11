@@ -47,19 +47,6 @@
   #omni-suggest { corner-shape: round bevel round bevel; }
 }
 
-/* The lamp: 2px of the seam's light along the top edge, so the lens reads
-   as wired to the omnibox above it the way every pane reads as powered. */
-#omni-suggest::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--seam);
-  pointer-events: none;
-}
-
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #omni-suggest[hidden] { display: none; }
 
@@ -68,7 +55,7 @@
    tracked, and closed by a hairline that fades out to the right — the
    seam motif at pane scale, used instead of a solid border rule. */
 #omni-suggest .omni-cap {
-  padding: 8px 12px 5px;
+  padding: 7px 10px 5px 12px;
   color: var(--fg-3);
   font-size: 12px;
   font-weight: 600;
@@ -89,10 +76,8 @@
 #omni-suggest .omni-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  /* 36px: the row height every list in this pass is set to. The 2px rail
-     plus 10px of padding and the pane's own 4px is the 16px gutter. */
-  height: 36px;
+  gap: 10px;
+  height: 40px;
   padding: 0 10px;
   border-left: 2px solid transparent;
   /* A menu row is a control: round corners, so the bevel stays the
@@ -145,23 +130,21 @@
 
 #omni-suggest .omni-primary {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 400;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
-  line-height: 16px;
 }
 
 /* The second line carries hosts, dates and counts: tabular digits keep
    a list of them from shuffling column to column. */
 #omni-suggest .omni-secondary {
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 350;
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
   letter-spacing: .01em;
-  line-height: 14px;
 }
 
 /* the default row's "Google search" note: a label, not content */

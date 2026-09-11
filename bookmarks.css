@@ -95,7 +95,7 @@
   border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 350;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -212,28 +212,11 @@
   #bm-overflow { corner-shape: round bevel round bevel; }
 }
 
-/* The lamp: 2px of the seam's light along the popover's top edge, the same
-   light every pane in this pass wears. The seam fades to nothing at both
-   ends, so the bevelled corners have nothing to clip. */
-#bm-overflow::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--seam);
-  pointer-events: none;
-}
-
 /* In the list, an item is a full-width row rather than a chip — still a
-   control, so still round, and set to the 36px every pane row is set to.
-   The row's 7px of padding plus the popover's 4px is a 11px gutter; 12px
-   of padding puts it on 16. */
+   control, so still round. */
 #bm-overflow .bm {
   width: 100%;
-  height: 36px;
-  padding: 0 12px;
+  height: 26px;
   border-radius: var(--radius-ctl);
 }
 
