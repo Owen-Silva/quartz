@@ -4,8 +4,8 @@ This is the record of what changed in the browser, written so you can catch up w
 diffs. Everything below landed overnight, commit by commit, on the local `master` branch (the table
 at the end lists them; `git log --oneline` is always current) — there is no
 remote, so the repo in `C:\Users\you\browser` is the only copy. Run it with `npm start` or the
-taskbar pin; a copy that is already open keeps running the old code, so close it and launch again
-to pick any of this up.
+taskbar pin; a copy that is already open keeps running the old code, so close it and launch again —
+or use Restart browser in Settings → About — to pick any of this up.
 
 ## What's new, by area
 
@@ -14,8 +14,13 @@ to pick any of this up.
 - A Claude tab now carries a working folder. Shift+click the Claude button, press Ctrl+Shift+`, or
   use the bare-strip menu to pick one through the native dialog; the tab title is the folder name.
   A folder that has been deleted or mistyped falls back to the default rather than failing the tab.
-- Settings has a Claude section: a default folder with a picker and validation, plus a resume
-  switch.
+- Settings has a Claude section: a default folder with a picker and validation, a resume switch,
+  and a skip-permissions switch.
+- Claude tabs skip permission prompts. Every chamber starts
+  `claude --dangerously-skip-permissions`; Settings → Claude has a "Skip permission prompts"
+  switch, on by default, and with it off a new tab starts plain `claude`. pty.js allowlists the
+  flag alongside `--continue` and `--resume`, and the Enter-to-restart path keeps it through a
+  pushed pref.
 - Resume a conversation opens Claude Code's own picker, from the strip menu, the Claude chip menu,
   Ctrl+click on the Claude button, or the command palette. Restarting after the picker does not
   re-pass the flag.
@@ -129,6 +134,27 @@ to pick any of this up.
 - A reloaded new tab page keeps the theme it is looking at. The chrome pushes theme, settings,
   background and recents again on every `dom-ready`, so F5, a crash reload or a script reload no
   longer brings back the theme and settings the tab was created with.
+- Instrument glass, pass two. The chrome is deep glass carrying exactly three horizontal lines: a
+  specular hairline at the top, an edge hairline between the titlebar and the nav row, and the lit
+  seam. Tabs are flush segments with hairline dividers, the active one wearing a 2px accent lamp
+  on its bottom edge. Back, forward and reload are plain glyphs; shield, theme and settings form
+  one segmented cluster, and the Claude button keeps a ring of its own. Every hairline is 1px,
+  every glyph 16px, and the spacing is on a 4px grid.
+- Every pane and popover is cut the same way now: a 44px header with a 14px/600 title and the
+  close glyph at the right, a 2px seam lamp along the top edge, 13px body, 12px captions, 36px
+  rows, 32px buttons, 16px gutters and 6px scrollbar thumbs. Rims are still masked rings on a
+  pseudo-element, the rule from pass one.
+- The new tab seats two live glass modules on the circuit board: a clock, updated once a minute
+  rather than on a per-second timer, and a session readout of tabs open, Claude sessions and
+  Spotify auto-pause (Off, On or Holding). The chrome feeds it through
+  `window.__applyReadout({tabs, claude, autopause})`. "Holding" means something is holding Spotify
+  through the bridge, which can be another source — the LessonPlayer desktop app, say — and not only
+  this browser.
+- The board pauses only when the real window loses focus. It used to freeze whenever a page inside
+  a tab took focus, because the chrome document's own blur was being read as the window's; main
+  sends `win:focus` from the BrowserWindow's focus and blur now. The board also resumes on
+  `visibilitychange`, `pageshow` and `focus`, and a 2-second watchdog restarts the frame loop if it
+  has stalled.
 
 ### Shortcuts
 
@@ -229,6 +255,14 @@ the aurora's stepped keyframes.
 - If a browser style you wrote breaks the UI, Ctrl+Alt+Shift+R resets it from anywhere.
 - Anything started with `--test-profile` uses `%TEMP%\browser-test-profile` and never touches the
   real profile at `%APPDATA%\browser`.
+- Restart browser — Settings → About, or the command palette — flushes the session and window
+  state, releases any Spotify auto-pause hold, and relaunches with the same arguments and the tabs
+  restored. Use it after pulling an update: code changes only take effect after a restart.
+- Maximised, a 2-3px band of bare acrylic shows at the left, right and bottom edges. It is the
+  native resize border Windows keeps around a window using the acrylic material, outside the
+  document, so no stylesheet reaches it; fixing it would cost either the acrylic (`frame: false`
+  renders it black) or native snap and restore, so it is left alone. The measurement is written
+  down in main.js.
 - The Spotify section needs the separate helper installed at `~/spotify-autopause`. Without it the
   switches are drawn but disabled and the readout says "Not installed on this computer", rather
   than claiming something is running.
@@ -268,3 +302,7 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 33d4fac | 10:51 | Ask Claude about a downloaded file; chambers open synchronously on activation |
 | 627b163 | 11:40 | Instrument glass: bevelled containers, light rims, pips, readout type |
 | 23f7b31 | 11:44 | Spotify auto-pause in the browser; new tab keeps live settings across a reload |
+| 34d7bbe | 12:19 | Spotify auto-pause: Twitch and other video sites watched by default; saved lists take new defaults |
+| ba743da | 12:35 | Spotify auto-pause: a muted tab hands the music back |
+| 149a033 | 13:08 | Instrument glass, pass two: ink chrome, segment tabs, live new-tab modules, one pane header |
+| b3d6f41 | 13:08 | Claude tabs skip permission prompts; board follows the real window focus; Restart browser action; new-tab readout |

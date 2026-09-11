@@ -19,6 +19,11 @@ The Start Menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Browser.ln
 `electron.exe` with this project path as its argument. It is pinned to the taskbar by hand:
 Windows 11 refuses scripted pinning, so a lost pin has to be re-done from the Start Menu.
 
+Settings → About has a "Restart browser" button, and the command palette has a "Restart browser"
+row. Either one flushes the session and the window state, releases any Spotify auto-pause hold,
+and relaunches with the same arguments, tabs restored. Use it after pulling an update: a copy that
+is already running keeps the old code, and a code change only takes effect after a restart.
+
 Two CLI flags:
 
 | Flag | Effect |
@@ -156,11 +161,11 @@ from tabs to the browser's own verbs, each with its keycaps down the right-hand 
 Enter. Deleting the `>` puts the tabs back; one input, one row recipe, one set of arrow keys,
 only the model underneath changes. The verbs come in families: making things (tabs, chambers, the
 four Claude hand-offs, split/unsplit); this page (reader, find, screenshot, print, pin, mute,
-sleep others, reload, close, reopen); workspaces; how it looks; and the panels. A row reads its
-keycaps out of shortcuts.js as it is built, so they are your bindings and not a printed guess, and
-half the rows read the world too — "Unsplit" or "Split with next tab" depending on the tab under
-the cursor. Clearing history asks twice, the first Enter swapping the two lines rather than
-acting.
+sleep others, reload, close, reopen); workspaces; how it looks; the panels; and "Restart browser".
+A row reads its keycaps out of shortcuts.js as it is built, so they are your bindings and not a
+printed guess, and half the rows read the world too — "Unsplit" or "Split with next tab" depending
+on the tab under the cursor. Clearing history asks twice, the first Enter swapping the two lines
+rather than acting.
 
 **Split view.** Two tabs side by side in one well — two pages, a page and a Claude chamber, or
 two chambers. Ctrl+\ pairs the active tab with the next splittable tab in the strip or breaks
@@ -414,19 +419,22 @@ and so the one id that must never reach the attribute. The choice is stored in b
 Look (dark/light, the six palette swatches as one radiogroup with a roving tabindex, accent hue,
 and the bookmarks-bar switch); Claude — the folder new Claude tabs start in (typed, or through
 the native picker, and only written once main confirms it is a real directory), the switch for
-resuming the last conversation on restore, and `claudeNotify`, behind the Windows notification
-described above; Tabs (the background idle time before a tab sleeps, or never); Downloads ("Ask
+resuming the last conversation on restore, "Skip permission prompts" (on by default, described
+above), and `claudeNotify`, behind the Windows notification described above; Tabs (the background
+idle time before a tab sleeps, or never); Downloads ("Ask
 where to save each file", off by default); Search (Google, DuckDuckGo, Bing, Brave, Startpage);
 Websites (the site theme guests see through `prefers-color-scheme`); Site styles and scripts;
 Browser style, below; New tab; Privacy (clear browsing history, clear downloads list); Spotify,
 the auto-pause switches, the site list and the health check described above; Shortcuts,
 the editor described
-above rather than a printed table; and About (Electron and Chromium versions). Everything but the
-site styles — a view onto sitestyles.js's own store — and the key bindings, which live in their
+above rather than a printed table; and About (Electron and Chromium versions, and the Restart
+browser button). Everything but the site styles — a view onto sitestyles.js's own store — and the
+key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
 (`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `homepage`, `claudeDir`,
-`claudeResume`, `claudeNotify`, `tabSleepMinutes`, `downloadsAskWhere`, `newtabBackground`,
-`bookmarksBar`); missing keys fall back to defaults, so an older stored object still reads.
+`claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`, `downloadsAskWhere`,
+`newtabBackground`, `bookmarksBar`); missing keys fall back to defaults, so an older stored object
+still reads.
 
 **Browser style.** Site styles paint web pages across an async boundary; this paints the chrome —
 titlebar, tabs, omnibox, panels — the document the script is already running in, so there is no
@@ -473,6 +481,13 @@ so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become til
 chips, the rest feed the capsule's dropdown. Behind the search field is the circuit
 board — a socket ring around the capsule, 45-degree traces out to vias and peripheral chips.
 
+Two live glass modules sit on that board. A clock, updated once a minute rather than on a
+per-second timer, and a session readout: tabs open, Claude sessions, and Spotify auto-pause as
+Off, On or Holding. The chrome feeds the readout the same way it feeds everything else on this
+page, through `window.__applyReadout({tabs, claude, autopause})`, pushed on tab, chamber and
+auto-pause changes. "Holding" means something is holding Spotify through the bridge, and that can
+be another source — the LessonPlayer desktop app, say — not only this browser.
+
 **New tab backgrounds.** Three of them, picked in Settings → New tab. *Circuit board* is the
 page's own default. *Aurora only* hides the canvas and the packet layer and stops newtab-bg.js
 drawing at all, on the same `data-bg` attribute the CSS reads, so nothing hidden still costs
@@ -487,9 +502,15 @@ it on every painted frame — about eleven points of CPU on top of the overlay's
 panel, menu or suggestion list is open, app.js calls `window.__boardPaused(true)` in every new-tab
 guest and the board freezes as a hidden page does: sprites are `Animation.pause()`d rather than
 cancelled, so they resume instead of respawning. One `MutationObserver` on `hidden` catches every
-pane, so none has to report itself. The same freeze now runs off window focus — `blur` pauses,
-`focus` resumes — because visible-but-unfocused is the common case, the window sitting behind
-something else while its aurora and board keep the GPU busy for no one.
+pane, so none has to report itself. The same freeze runs off window focus — pause on blur, resume
+on focus — because visible-but-unfocused is the common case, the window sitting behind something
+else while its aurora and board keep the GPU busy for no one.
+
+That focus is the *window's*, not the chrome document's. Reading the chrome's own `blur` froze the
+board the moment a page inside a tab took focus, which is most of the time you are using the
+browser; main sends `win:focus` from the BrowserWindow's own focus and blur now, and app.js drives
+the pause from that alone. The page also resumes itself on `visibilitychange`, `pageshow` and
+`focus`, and a 2-second watchdog restarts the frame loop if it is found stalled.
 
 **Claude tabs.** pty.js spawns `C:\Users\you\.local\bin\claude.exe` under a real ConPTY, wired
 to xterm.js. The cwd is whatever the caller asked for, falling back to the Claude folder from
@@ -501,6 +522,12 @@ chamber is its own trust prompt — that one is Claude's. The environment is scr
 Security notes), and xterm is opened lazily, because building it into a hidden 0x0 container
 gives a permanently broken session. When a session exits the pane prints `[session ended] press
 Enter to start a new one`, and Enter restarts it in place.
+
+Every chamber starts `claude --dangerously-skip-permissions`. Settings → Claude has a "Skip
+permission prompts" switch, on by default; with it off, a new tab starts plain `claude`. app.js
+builds the arguments, pty.js allowlists the flag alongside `--continue` and `--resume` (see
+Security notes), and preload carries it onto the Enter-to-restart path through a pushed pref, so a
+restarted chamber is not quietly stricter than the one it replaced.
 
 **Resuming a conversation.** Four ways in, all the same door: right-click bare strip → "Resume a
 Claude conversation…", a Claude chip's menu → "Resume another conversation here", Ctrl+click the
@@ -519,7 +546,9 @@ switch is on — a tab you open by hand always starts clean. `claudeStartArgs()`
 one place a `resume` option becomes flags, and pty.js allowlists exactly those two, bare (see
 Security notes). They are honoured on the first spawn only: Enter-to-restart in a finished pane
 always starts a plain session, because a conversation that has already ended must not be resumed
-twice and re-passing `--resume` would reopen the picker instead.
+twice and re-passing `--resume` would reopen the picker instead. "Plain" means without a resume
+flag: `--dangerously-skip-permissions` does ride along, since that one is a setting and not a
+one-time act.
 
 **Permissions.** Electron grants everything by default, which would make this the most generous
 browser on the machine, so the handler is explicit: a short silent-allow list, a prompted list,
@@ -569,9 +598,9 @@ The chrome is trusted and every guest is not. These are the places that line is 
   dirty. The sweep drops every script, frame, plugin, `style`, `link`, `meta`, `base` and `form`
   node, then every `on*`, `srcdoc` and `style` attribute plus any URL attribute whose value —
   control characters squeezed out first — starts `javascript:`, `vbscript:` or `data:text/html`.
-- **PTY arguments are allowlisted.** `ALLOWED_ARGS` in pty.js is `--continue` and `--resume`,
-  bare. Anything else is dropped with a warning and the session still starts, plain, so a bad
-  argument costs you a resume and never a tab.
+- **PTY arguments are allowlisted.** `ALLOWED_ARGS` in pty.js is `--continue`, `--resume` and
+  `--dangerously-skip-permissions`, bare. Anything else is dropped with a warning and the session
+  still starts, plain, so a bad argument costs you a resume and never a tab.
 - **The PTY environment is cleaned.** Every `CLAUDE*` variable is deleted before the spawn except
   `CLAUDE_CODE_GIT_BASH_PATH` and `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, the two genuinely persisted at
   user level. Stripping by prefix rather than by name means a marker added upstream is scrubbed
@@ -601,7 +630,7 @@ With it frozen and no page animating, the idle cost is the aurora's stepped keyf
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
-| `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, bare). |
+| `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, `--dangerously-skip-permissions`, bare). |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
 | `index.html` / `theme-boot.js` | The shell document — backdrop layers, titlebar, nav row, `#views`, `#tabmenu`, script order — and the first script in its `<head>`, which stamps `data-theme` and `data-palette` on `<html>` before any stylesheet paints. |
@@ -656,6 +685,17 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   edge. An `<input>` has no pseudo-element, so the omnibox's ring is anchored to it from
   `.navrow::after`; the two-layer version survives only in the `@supports not (anchor-name)`
   fallback, where the interior is painted opaque first.
+- The chrome carries exactly three horizontal lines: a specular hairline at the top, an edge
+  hairline between the titlebar and the nav row, and the lit seam. Nothing else rules across it.
+  Tabs are flush segments divided by hairlines, and the active one is marked by a 2px accent lamp
+  on its bottom edge rather than by a box of its own. Back, forward and reload are plain glyphs;
+  shield, theme and settings are one segmented cluster, and the Claude button keeps a ring, which
+  is the one control allowed to stand apart. Hairlines are 1px, glyphs are 16px, and spacing sits
+  on a 4px grid.
+- Every pane and popover is cut to the same pattern: a 44px header with a 14px/600 title and the
+  close glyph at the right, a 2px seam lamp along the top edge, 13px body, 12px captions, 36px
+  rows, 32px buttons, 16px gutters, 6px scrollbar thumbs. A new pane inherits the pattern instead
+  of inventing a head of its own.
 - A label inside a control that transitions `color` declares its own colour. The theme switch
   rewrites `--fg` underneath that transition, so an inherited label spends its first step on the
   old theme's value, which after a flip to light is near-white type on a white pane.
@@ -672,6 +712,12 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   is what a site without its own background paints on.
 - A guest is never trusted with a preference it can set itself. Anything a page can flip is
   re-pinned in main before the guest attaches, not read back and checked afterwards.
+- The 2-3px band of bare acrylic along the left, right and bottom edges of a maximised window is
+  left alone, and the measurement is written down in main.js. It is the native resize border
+  Windows keeps around a window using the acrylic material — outside the document, so no
+  stylesheet reaches it. Every fix costs more than the band does: `frame: false` renders the
+  material black, and growing the bounds while maximised un-maximises the window and takes native
+  snap and restore with it.
 
 ## Development
 
