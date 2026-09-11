@@ -93,7 +93,8 @@ to pick any of this up.
 - Per-site styles: per-host CSS, per-host scripts and a force-dark mode with already-dark
   detection, global or per host.
 - Settings (Ctrl+,) is now sectioned: Look, New tab, Tabs, Claude, Site styles, Shortcuts,
-  Downloads, Privacy and About.
+  Downloads, Privacy and About, with a Find a setting box at the top that narrows the panel to
+  whatever you type.
 - Contrast and copy pass: the muted foreground now clears 4.5:1 on panel grounds in both themes,
   captions are sentence case throughout, and the split divider is visible in light.
 
