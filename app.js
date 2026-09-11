@@ -862,6 +862,14 @@ function dragTabTo(dx) {
       if (centre >= drag.rows[i].center) { target = i; break; }
     }
   }
+  // Hauled past the end of the travel the chip is pinned to the outer chip's
+  // LEFT edge, so a chip wider than the ones it passed lands with its centre
+  // short of that chip's centre and the outermost slot is unreachable. The
+  // pointer overshooting the allowed travel is the unambiguous "all the way
+  // there" gesture, so read it as exactly that.
+  if (dx < drag.min) target = drag.lowIndex;
+  else if (dx > drag.max) target = drag.highIndex;
+
   // Never across the pinned/unpinned seam, whatever the pointer says.
   target = Math.max(drag.lowIndex, Math.min(target, drag.highIndex));
   if (target === drag.target) return; // the slot has not moved

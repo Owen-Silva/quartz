@@ -1206,6 +1206,9 @@ function shortcutFor(input) {
   // Ctrl+Shift+T reopens the last closed tab. It has to be caught before the
   // lowercasing lookup below, which would otherwise read it as Ctrl+T.
   if (input.shift && (key === 't' || key === 'T')) return { action: 'reopen-tab' };
+  // Ctrl+Shift+R hands the page to the reader, plain Ctrl+R reloads it. Also
+  // caught before the lowercasing lookup, which would read Shift away.
+  if (key === 'r' || key === 'R') return { action: input.shift ? 'reader' : 'reload' };
   const action = SHORTCUTS[key.toLowerCase()];
   return action ? { action } : null;
 }
