@@ -439,8 +439,8 @@
   border-radius: 999px;
   border: 1px solid var(--edge);
   background: linear-gradient(to right,
-    hsl(0 85% 58%), hsl(60 85% 58%), hsl(120 85% 58%),
-    hsl(180 85% 58%), hsl(240 85% 58%), hsl(300 85% 58%), hsl(360 85% 58%));
+    hsl(0 42% 52%), hsl(60 42% 52%), hsl(120 42% 52%),
+    hsl(180 42% 52%), hsl(240 42% 52%), hsl(300 42% 52%), hsl(360 42% 52%));
   box-shadow: inset 0 1px 0 var(--shade-in);
 }
 
