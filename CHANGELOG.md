@@ -136,8 +136,8 @@ or use Restart browser in Settings → About — to pick any of this up.
   longer brings back the theme and settings the tab was created with.
 - Instrument glass, pass two. The chrome is deep glass carrying exactly three horizontal lines: a
   specular hairline at the top, an edge hairline between the titlebar and the nav row, and the lit
-  seam. Tabs are flush segments with hairline dividers, the active one wearing a 2px accent lamp
-  on its bottom edge. Back, forward and reload are plain glyphs; shield, theme and settings form
+  seam. Tabs were cut as flush segments here and went back to the pass-one chips in ca3256b at
+  The user's request. Back, forward and reload are plain glyphs; shield, theme and settings form
   one segmented cluster, and the Claude button keeps a ring of its own. Every hairline is 1px,
   every glyph 16px, and the spacing is on a 4px grid.
 - Every pane and popover is cut the same way now: a 44px header with a 14px/600 title and the
@@ -306,3 +306,5 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | ba743da | 12:35 | Spotify auto-pause: a muted tab hands the music back |
 | 149a033 | 13:08 | Instrument glass, pass two: ink chrome, segment tabs, live new-tab modules, one pane header |
 | b3d6f41 | 13:08 | Claude tabs skip permission prompts; board follows the real window focus; Restart browser action; new-tab readout |
+| db73723 | 13:14 | CHANGELOG + README: design pass two, Claude skip-permissions, Restart browser, new-tab readout, edge band note |
+| ca3256b | 13:40 | Tab strip back to the pass-one chips; the rest of pass two stays |

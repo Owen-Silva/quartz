@@ -687,8 +687,9 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   fallback, where the interior is painted opaque first.
 - The chrome carries exactly three horizontal lines: a specular hairline at the top, an edge
   hairline between the titlebar and the nav row, and the lit seam. Nothing else rules across it.
-  Tabs are flush segments divided by hairlines, and the active one is marked by a 2px accent lamp
-  on its bottom edge rather than by a box of its own. Back, forward and reload are plain glyphs;
+  Tabs stay the pass-one chips: the active one is a rounded glass chip with its rim and bevel,
+  inactive tabs are plain titles (The user preferred these to segment tabs, which were tried and
+  reverted in ca3256b). Back, forward and reload are plain glyphs;
   shield, theme and settings are one segmented cluster, and the Claude button keeps a ring, which
   is the one control allowed to stand apart. Hairlines are 1px, glyphs are 16px, and spacing sits
   on a 4px grid.
