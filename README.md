@@ -685,18 +685,21 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   edge. An `<input>` has no pseudo-element, so the omnibox's ring is anchored to it from
   `.navrow::after`; the two-layer version survives only in the `@supports not (anchor-name)`
   fallback, where the interior is painted opaque first.
-- The chrome carries exactly three horizontal lines: a specular hairline at the top, an edge
-  hairline between the titlebar and the nav row, and the lit seam. Nothing else rules across it.
-  Tabs stay the pass-one chips: the active one is a rounded glass chip with its rim and bevel,
-  inactive tabs are plain titles (The user preferred these to segment tabs, which were tried and
-  reverted in ca3256b). Back, forward and reload are plain glyphs;
-  shield, theme and settings are one segmented cluster, and the Claude button keeps a ring, which
-  is the one control allowed to stand apart. Hairlines are 1px, glyphs are 16px, and spacing sits
-  on a 4px grid.
-- Every pane and popover is cut to the same pattern: a 44px header with a 14px/600 title and the
-  close glyph at the right, a 2px seam lamp along the top edge, 13px body, 12px captions, 36px
-  rows, 32px buttons, 16px gutters, 6px scrollbar thumbs. A new pane inherits the pattern instead
-  of inventing a head of its own.
+- The chrome and the panes are the pass-one look: design pass two restyled both and was reverted at
+  The user's request, and only the new tab page kept it. The chrome is layered glass rather than a ruled
+  panel. The titlebar is the thinnest, lightest pane in it, an edge hairline separates it from the
+  nav row, and the lit seam runs under the nav row — it rides `.navrow::before` so that
+  `::after` stays free to anchor the omnibox's rim ring. Hairlines are 1px and spacing sits on a
+  4px grid.
+- The active tab is the one chip in the strip that is a container: it takes the cut corners and the
+  lit rim, over an opaque interior so the gradient stops at the edge, with the ion line under it.
+  Inactive chips stay quiet — hover is a lighter glass and a hairline, nothing more. Back, forward,
+  reload and the icon buttons are controls, not containers: round at `--radius-ctl`, never
+  bevelled.
+- A pane keeps its own header rather than a shared one, and the rule under a header fades out
+  instead of ruling all the way across. What panes and popovers share is the container treatment —
+  the bevel, the masked rim ring, `--panel-bg` over glass, pips for status and readout type for
+  figures — not one head geometry.
 - A label inside a control that transitions `color` declares its own colour. The theme switch
   rewrites `--fg` underneath that transition, so an inherited label spends its first step on the
   old theme's value, which after a flip to light is near-white type on a white pane.

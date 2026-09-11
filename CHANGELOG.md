@@ -134,16 +134,18 @@ or use Restart browser in Settings → About — to pick any of this up.
 - A reloaded new tab page keeps the theme it is looking at. The chrome pushes theme, settings,
   background and recents again on every `dom-ready`, so F5, a crash reload or a script reload no
   longer brings back the theme and settings the tab was created with.
-- Instrument glass, pass two. The chrome is deep glass carrying exactly three horizontal lines: a
-  specular hairline at the top, an edge hairline between the titlebar and the nav row, and the lit
-  seam. Tabs were cut as flush segments here and went back to the pass-one chips in ca3256b at
-  The user's request. Back, forward and reload are plain glyphs; shield, theme and settings form
-  one segmented cluster, and the Claude button keeps a ring of its own. Every hairline is 1px,
-  every glyph 16px, and the spacing is on a 4px grid.
-- Every pane and popover is cut the same way now: a 44px header with a 14px/600 title and the
-  close glyph at the right, a 2px seam lamp along the top edge, 13px body, 12px captions, 36px
-  rows, 32px buttons, 16px gutters and 6px scrollbar thumbs. Rims are still masked rings on a
-  pseudo-element, the rule from pass one.
+- Instrument glass, pass two. What survives of it is the new tab page — the live modules below and
+  the board changes under them. The chrome was recut as deep glass ruled by three horizontal lines
+  (a specular hairline at the top, an edge hairline between the titlebar and the nav row, and the
+  lit seam), with flush segment tabs, plain back/forward/reload glyphs and shield, theme and
+  settings gathered into one segmented cluster. The tab strip went back to the pass-one chips in
+  ca3256b, and the rest of the chrome was reverted in 97267eb at the user's request: the chrome is the
+  pass-one look again.
+- The eleven pane and popover stylesheets were recut the same way — a 44px header with a 14px/600
+  title and the close glyph at the right, a 2px seam lamp along the top edge, 13px body, 12px
+  captions, 36px rows, 32px buttons, 16px gutters and 6px scrollbar thumbs — and were reverted in
+  97267eb with the chrome. Each pane keeps its own header again, and rims are masked rings on a
+  pseudo-element either way, the rule from pass one.
 - The new tab seats two live glass modules on the circuit board: a clock, updated once a minute
   rather than on a per-second timer, and a session readout of tabs open, Claude sessions and
   Spotify auto-pause (Off, On or Holding). The chrome feeds it through
@@ -308,3 +310,5 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | b3d6f41 | 13:08 | Claude tabs skip permission prompts; board follows the real window focus; Restart browser action; new-tab readout |
 | db73723 | 13:14 | CHANGELOG + README: design pass two, Claude skip-permissions, Restart browser, new-tab readout, edge band note |
 | ca3256b | 13:40 | Tab strip back to the pass-one chips; the rest of pass two stays |
+| bb53ae4 | 13:41 | CHANGELOG + README: tabs are the pass-one chips again; rows for db73723 and ca3256b |
+| 97267eb | 13:50 | Revert the pass-two chrome and pane styling; the new tab keeps its board, clock and readout |
