@@ -2014,8 +2014,10 @@
      something honest to show before the first status() answers — the list in
      force is always the one status() reports. */
   var AUTOPAUSE_SITES = [
-    'youtube.com', 'youtube-nocookie.com', 'lessonplayer.example',
-    'lessonplayer-academy.example', 'lessons.example'
+    'youtube.com', 'youtube-nocookie.com', 'twitch.tv', 'kick.com', 'vimeo.com',
+    'dailymotion.com', 'tiktok.com', 'netflix.com', 'hulu.com', 'disneyplus.com',
+    'primevideo.com', 'max.com', 'peacocktv.com', 'crunchyroll.com',
+    'lessonplayer.example', 'lessonplayer-academy.example', 'lessons.example'
   ];
 
   /* 4s: live enough that the readout follows a video starting, slow enough

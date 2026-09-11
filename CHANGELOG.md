@@ -165,8 +165,10 @@ it displaces the other action, and the displaced one is left unbound and named.
   launches the bridge directly and remembers the choice.
 - This browser's own tabs hold Spotify paused too, behind a second switch, "Also pause for videos
   in this browser", with a line under it counting the tabs playing right now. A tab making sound
-  on youtube.com, youtube-nocookie.com, lessonplayer.example, lessonplayer-academy.example or lessons.example,
-  or any tab at all with "Any tab that makes sound" on, registers a hold at the bridge on
+  on a watched site (YouTube, Twitch, Kick, Vimeo, Dailymotion, TikTok, Netflix, Hulu, Disney+,
+  Prime Video, Max, Peacock, Crunchyroll and the LessonPlayer sites out of the box; Twitch was the
+  first miss the user hit, so the list grew past the extension's), or any tab at all with "Any tab
+  that makes sound" on, registers a hold at the bridge on
   127.0.0.1 (the first free of ports 8787 to 8790) under its own `src=owen-browser`, so the two
   browsers can never release each other's hold. The hold refreshes every 60 seconds and is handed
   back 1.5 seconds after the sound stops, or on quit. Spotify's own web player never counts as a
@@ -265,3 +267,4 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 19c5c2b | 06:07 | CHANGELOG: intro no longer hardcodes the commit count |
 | 33d4fac | 10:51 | Ask Claude about a downloaded file; chambers open synchronously on activation |
 | 627b163 | 11:40 | Instrument glass: bevelled containers, light rims, pips, readout type |
+| 23f7b31 | 11:44 | Spotify auto-pause in the browser; new tab keeps live settings across a reload |

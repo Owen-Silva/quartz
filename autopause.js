@@ -86,10 +86,27 @@ const RESUME_DELAY_MS = 1500;
  */
 const REFRESH_MS = 60000;
 
-/** Sites watched out of the box -- the extension's list, minus the Spotify web player. */
+/**
+ * Sites watched out of the box: the extension's list (minus the Spotify web
+ * player) plus the streaming and video sites the user actually opens. Twitch was
+ * the first miss reported (2026-09-11): a list only ever covers what someone
+ * thought of, so "Any tab that makes sound" stays one switch away.
+ */
 const DEFAULT_SITES = [
   'youtube.com',
   'youtube-nocookie.com',
+  'twitch.tv',
+  'kick.com',
+  'vimeo.com',
+  'dailymotion.com',
+  'tiktok.com',
+  'netflix.com',
+  'hulu.com',
+  'disneyplus.com',
+  'primevideo.com',
+  'max.com',
+  'peacocktv.com',
+  'crunchyroll.com',
   'lessonplayer.example',
   'lessonplayer-academy.example',
   'lessons.example',
@@ -103,10 +120,16 @@ const DEFAULT_SITES = [
  */
 const NEVER_SITES = ['spotify.com', 'open.spotify.com'];
 
+/** The defaults a config file written before `sitesBase` existed was built on. */
+const LEGACY_BASE_SITES = [
+  'youtube.com', 'youtube-nocookie.com', 'lessonplayer.example', 'lessonplayer-academy.example', 'lessons.example',
+];
+
 const DEFAULT_CONFIG = {
   browserHold: true,
   anySite: false,
   sites: DEFAULT_SITES.slice(),
+  sitesBase: DEFAULT_SITES.slice(),
   // Only consulted when the scheduled task is missing: with no task to enable,
   // the switch is a remembered choice plus a directly launched bridge.
   directEnabled: false,
@@ -562,7 +585,21 @@ function create(deps) {
     if (typeof parsed.anySite === 'boolean') config.anySite = parsed.anySite;
     if (typeof parsed.directEnabled === 'boolean') config.directEnabled = parsed.directEnabled;
     const sites = sanitiseSites(parsed.sites);
-    if (sites && sites.length) config.sites = sites;
+    if (sites && sites.length) {
+      // A saved list would otherwise freeze the day it was written, so a site
+      // added to the defaults later (Twitch, 2026-09-11) never reached anyone
+      // who had touched a Spotify setting. `sitesBase` records which defaults
+      // the saved list was built on; anything that joined the defaults since
+      // is merged in, while a default the user removed on purpose (present in
+      // the base, absent from the list) stays removed. Files written before
+      // the base existed were built on the original five.
+      const base = sanitiseSites(parsed.sitesBase) || LEGACY_BASE_SITES;
+      for (const site of DEFAULT_SITES) {
+        if (!base.includes(site) && !sites.includes(site)) sites.push(site);
+      }
+      config.sites = sites;
+    }
+    config.sitesBase = DEFAULT_SITES.slice();
     return config;
   }
 

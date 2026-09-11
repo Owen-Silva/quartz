@@ -390,9 +390,10 @@ Two prongs. Settings → Spotify's first switch is the whole computer: on enable
 carries a repeating keepalive trigger and one that is only ended restarts itself within minutes.
 Where the task is missing altogether, the switch launches the bridge directly and remembers the
 choice. The second prong, behind its own switch ("Also pause for videos in this browser"), is this
-browser's own tabs: a guest that is audible on a watched site (youtube.com, youtube-nocookie.com,
-lessonplayer.example, lessonplayer-academy.example and lessons.example out of the box, editable a host per line,
-or any tab at all behind "Any tab that makes sound") registers
+browser's own tabs: a guest that is audible on a watched site (YouTube, Twitch, Kick, Vimeo,
+Dailymotion, TikTok, Netflix, Hulu, Disney+, Prime Video, Max, Peacock, Crunchyroll and the
+LessonPlayer sites out of the box, editable a host per line, or any tab at all behind "Any tab that
+makes sound") registers
 a hold with the bridge under `src=owen-browser`, an id of its own, because the bridge resumes only
 when the last hold is released and a tab closing here must not hand back Opera's. The hold is taken
 after 1.5s of sound, refreshed every 60s against the bridge's 180s TTL, which is what stops a hold
