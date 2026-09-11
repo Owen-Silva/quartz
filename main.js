@@ -1209,6 +1209,8 @@ function shortcutFor(input) {
   // Ctrl+Shift+R hands the page to the reader, plain Ctrl+R reloads it. Also
   // caught before the lowercasing lookup, which would read Shift away.
   if (key === 'r' || key === 'R') return { action: input.shift ? 'reader' : 'reload' };
+  // Ctrl+Shift+A opens tab search; plain Ctrl+A stays the page's select-all.
+  if (input.shift && (key === 'a' || key === 'A')) return { action: 'tabsearch' };
   const action = SHORTCUTS[key.toLowerCase()];
   return action ? { action } : null;
 }

@@ -73,6 +73,7 @@ function newTabUrl() {
       if (typeof all.accentHue === 'number' && isFinite(all.accentHue)) params.set('hue', String(all.accentHue));
       if (all.searchEngine && all.searchEngine !== 'google') params.set('engine', String(all.searchEngine));
       if (Array.isArray(all.chips)) params.set('chips', JSON.stringify(all.chips));
+      if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
     } catch (err) { /* defaults are fine */ }
   }
   return NEWTAB_URL + '?' + params.toString();
@@ -86,7 +87,8 @@ function pushSettingsToTab(tab) {
   let all = null;
   try { all = settings.all(); } catch (err) { return; }
   const payload = JSON.stringify({
-    accentHue: all.accentHue, searchEngine: all.searchEngine, chips: all.chips
+    accentHue: all.accentHue, searchEngine: all.searchEngine, chips: all.chips,
+    palette: all.palette || null
   });
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -2867,7 +2869,7 @@ function historyCall(method, url, title) {
 function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
-    window.Settings, window.Shield, window.Reader
+    window.Settings, window.Shield, window.Reader, window.TabSearch
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -2926,6 +2928,7 @@ function wireKeyboard() {
       // main.js does not send 'reader' yet; like 'print', the entry costs
       // nothing and means Ctrl+Shift+R works from a focused page the day it does.
       'reader': () => moduleShortcut('reader'),
+      'tabsearch': () => moduleShortcut('tabsearch'),
       'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
@@ -3036,6 +3039,12 @@ function wireKeyboard() {
     if (key === 'r' && event.shiftKey) {
       event.preventDefault();
       moduleShortcut('reader');
+      return;
+    }
+    // Ctrl+Shift+A: tab search. Plain Ctrl+A is select-all wherever focus is.
+    if (key === 'a' && event.shiftKey) {
+      event.preventDefault();
+      moduleShortcut('tabsearch');
       return;
     }
     if (key === 'r') {

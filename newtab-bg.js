@@ -84,8 +84,11 @@
   /* keep the relationships they were drawn with. Neutrals do not move — */
   /* the near-black ground, the white chip lines, the light theme's ink. */
   /*                                                                     */
-  /* With no accent set (hue null) the base IS the authored hue, so the  */
-  /* board paints the exact colours it always has.                       */
+  /* With no accent set the base is read back off the --ion token, which */
+  /* is the authored one by default and a preset's when data-palette is  */
+  /* set: the board follows the palette the same way it follows a hue,   */
+  /* and the default round-trips to the exact colours it always had.     */
+  /* Saturation follows too, so mono's near-grey accent greys the board. */
   /* ------------------------------------------------------------------ */
 
   /* Measured off the authored art, so the default round-trips:
@@ -174,16 +177,22 @@
     return 'hsla(' + (Math.round(hue * 1000) / 1000) + ', ' + s + '%, ' + l + '%, ' + a + ')';
   }
 
-  /* hue === null means "no accent": every ink sits on its authored base. */
-  function buildTheme(name, hueValue) {
+  /* hue === null means "no accent": every ink sits on its authored base.
+     satScale (default 1) multiplies every authored saturation — see
+     currentSatScale() for why a pale accent has to pull the board with it. */
+  function buildTheme(name, hueValue, satScale) {
     const spec = PALETTE[name] || PALETTE.dark;
     const base = (typeof hueValue === 'number' && isFinite(hueValue)) ? hueValue : spec.base;
+    const scale = (typeof satScale === 'number' && isFinite(satScale))
+      ? Math.max(0, Math.min(1, satScale))
+      : 1;
     const out = {};
     let key;
 
     function tinted(entry) {
       const ink = spec.ink[entry[0]];
-      return hsla(base + ink.dh, ink.s, ink.l, entry[1]);
+      const s = Math.round(ink.s * scale * 100) / 100;   // scale 1 round-trips exactly
+      return hsla(base + ink.dh, s, ink.l, entry[1]);
     }
 
     for (key in spec.fixed) out[key] = spec.fixed[key];
@@ -206,25 +215,62 @@
     return ((value % 360) + 360) % 360;
   }
 
-  /* The hue the accent is currently set to, or null for the authored one.
-     newtab-theme.js hands it over directly; reading --ion back off <html>
-     is the fallback for a page that somehow loaded without that helper. */
+  /* The hue the accent is currently set to.
+
+     A user-chosen hue comes straight from newtab-theme.js. With no custom
+     hue that helper returns null, and the accent is then whatever the
+     stylesheet authored — which a data-palette preset moves. So the token
+     is read back off <html> EVERY time rather than cached: a palette swap
+     changes nothing else observable, and the board has to follow it.
+     Reading --ion is also the fallback for a page loaded without the
+     helper at all. null only when neither can name a hue (a grey accent,
+     or no computed style). */
   function currentHue() {
     if (typeof window.__accentHue === 'function') {
-      return normalizeHue(window.__accentHue());
+      const custom = normalizeHue(window.__accentHue());
+      if (custom !== null) return custom;
     }
     return hueFromIonToken();
   }
 
-  function hueFromIonToken() {
+  /* How saturated the board should paint, 0-1, as a multiplier on the
+     authored inks.
+
+     The board's colours are fixed S/L offsets from a base hue, so a hue
+     alone cannot express a near-grey accent: the mono preset's
+     hsl(215 25% 88%) would still come out as saturated blue traces. Scale
+     by the accent's own saturation instead, relative to 0.9 — the authored
+     accents sit at 100% (dark) and 90.22% (light), so both round-trip at
+     scale 1 and only a genuinely pale accent pulls the circuitry toward
+     grey. A user-chosen hue is always painted at full strength (the chrome
+     derives it at s 90-100%), so it never desaturates anything. */
+  function currentSatScale() {
+    if (typeof window.__accentHue === 'function' &&
+        normalizeHue(window.__accentHue()) !== null) {
+      return 1;
+    }
+    const s = satFromIonToken();
+    if (s === null) return 1;
+    return Math.min(1, s / 0.9);
+  }
+
+  function ionToken() {
     if (!window.getComputedStyle) return null;
-    let value;
     try {
-      value = window.getComputedStyle(document.documentElement).getPropertyValue('--ion');
+      return window.getComputedStyle(document.documentElement).getPropertyValue('--ion');
     } catch (err) {
       return null;
     }
-    return hueOfColor(value);
+  }
+
+  function hueFromIonToken() {
+    const value = ionToken();
+    return value === null ? null : hueOfColor(value);
+  }
+
+  function satFromIonToken() {
+    const value = ionToken();
+    return value === null ? null : satOfColor(value);
   }
 
   /* Just enough colour parsing for what can land in --ion: an hsl() in
@@ -243,19 +289,53 @@
       return normalizeHue(h);
     }
 
-    let rgb = null;
+    const rgb = rgbOfColor(text);
+    if (!rgb) return null;
+    return hueOfRgb(rgb[0], rgb[1], rgb[2]);
+  }
+
+  /* The same value's saturation, 0-1. An hsl() states it; a hex or an
+     rgb() is converted with the HSL formula. A grey is 0 — not null —
+     because "no saturation" is exactly the answer there. */
+  function satOfColor(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (!text) return null;
+
+    const hsl = /^hsla?\(\s*[+-]?\d*\.?\d+(?:deg|grad|rad|turn)?\s*[\s,]\s*([+-]?\d*\.?\d+)%/i.exec(text);
+    if (hsl) {
+      const s = parseFloat(hsl[1]) / 100;
+      if (!isFinite(s)) return null;
+      return Math.max(0, Math.min(1, s));
+    }
+
+    const rgb = rgbOfColor(text);
+    if (!rgb) return null;
+    return satOfRgb(rgb[0], rgb[1], rgb[2]);
+  }
+
+  function rgbOfColor(text) {
     const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
     if (hex) {
       const d = hex[1];
-      rgb = d.length === 3
+      return d.length === 3
         ? [parseInt(d[0] + d[0], 16), parseInt(d[1] + d[1], 16), parseInt(d[2] + d[2], 16)]
         : [parseInt(d.slice(0, 2), 16), parseInt(d.slice(2, 4), 16), parseInt(d.slice(4, 6), 16)];
-    } else {
-      const fn = /^rgba?\(\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)/i.exec(text);
-      if (fn) rgb = [parseFloat(fn[1]), parseFloat(fn[2]), parseFloat(fn[3])];
     }
-    if (!rgb) return null;
-    return hueOfRgb(rgb[0], rgb[1], rgb[2]);
+    const fn = /^rgba?\(\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)/i.exec(text);
+    if (fn) return [parseFloat(fn[1]), parseFloat(fn[2]), parseFloat(fn[3])];
+    return null;
+  }
+
+  function satOfRgb(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    if (!(d > 0)) return 0;
+    const l = (max + min) / 2;
+    const denom = 1 - Math.abs(2 * l - 1);
+    if (!(denom > 0)) return 0;
+    return Math.max(0, Math.min(1, d / denom));
   }
 
   function hueOfRgb(r, g, b) {
@@ -273,7 +353,8 @@
 
   let themeName = currentThemeName();
   let hue = currentHue();
-  let theme = buildTheme(themeName, hue);
+  let satScale = currentSatScale();
+  let theme = buildTheme(themeName, hue, satScale);
 
   /* ------------------------------------------------------------------ */
   /* Small helpers                                                       */
@@ -941,8 +1022,9 @@
     scheduleSpawn();
   }
 
-  /* data-theme and the accent both land as attributes on <html>, and a
-     hue drag fires a burst of them. Coalesce to one check per frame: the
+  /* data-theme, data-palette and the accent all land as attributes on
+     <html>, and a hue drag fires a burst of them. Coalesce to one check
+     per frame: the
      static canvas is still painted once per CHANGE, never per frame, and
      an unchanged palette costs nothing but the compare. */
   let paletteFrame = 0;
@@ -958,10 +1040,12 @@
   function applyPalette() {
     const nextName = currentThemeName();
     const nextHue = currentHue();
-    if (nextName === themeName && nextHue === hue) return;
+    const nextSat = currentSatScale();
+    if (nextName === themeName && nextHue === hue && nextSat === satScale) return;
     themeName = nextName;
     hue = nextHue;
-    theme = buildTheme(themeName, hue);
+    satScale = nextSat;
+    theme = buildTheme(themeName, hue, satScale);
     repaintBoard();
     applyThemeVars();                // running packets pick the colours up
   }
@@ -980,7 +1064,7 @@
     if (window.MutationObserver) {
       const themeWatch = new window.MutationObserver(onRootAttrChange);
       themeWatch.observe(document.documentElement,
-        { attributes: true, attributeFilter: ['data-theme', 'style'] });
+        { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'style'] });
     }
 
     // Settle passes: newtab.js fills the shortcut row in its own

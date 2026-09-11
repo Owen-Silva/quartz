@@ -11,6 +11,12 @@
      1. ?theme=light / ?theme=dark, appended by the browser chrome
      2. dark
 
+   The palette preset comes from ?palette=<name> and lands as
+   data-palette on <html>, the same way and for the same reason:
+   the stylesheet carries a block per preset per theme, so the
+   right aurora and the right accent are in place for the first
+   paint. No palette (or "aurora") = no attribute = the default.
+
    The accent comes from ?hue=<0-360>, painted over the authored
    --ion* tokens as inline custom properties on <html> (inline
    beats both :root blocks, so one pass covers either theme).
@@ -45,6 +51,26 @@
   if (theme !== 'light' && theme !== 'dark') theme = 'dark';
 
   root.setAttribute('data-theme', theme);
+
+  /* --- palette preset ---------------------------------------- */
+
+  /* The five presets chrome.css and newtab.css both carry. Anything
+     else — no param, 'aurora', junk — means the authored default,
+     which is the absence of the attribute rather than a value. */
+  var PALETTES = ['ember', 'forest', 'ocean', 'midnight', 'mono'];
+
+  function applyPalette(name) {
+    var value = (name === null || name === undefined) ? '' : String(name);
+    if (PALETTES.indexOf(value) < 0) {
+      root.removeAttribute('data-palette');
+      return;
+    }
+    root.setAttribute('data-palette', value);
+  }
+
+  window.__applyPalette = applyPalette;
+
+  applyPalette(params ? params.get('palette') : null);
 
   /* --- accent ------------------------------------------------ */
 

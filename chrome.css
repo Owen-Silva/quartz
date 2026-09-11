@@ -154,6 +154,389 @@
     rgba(127,224,216,0)   78%);
 }
 
+/* --- tokens: palette presets --------------------------------- */
+/* A palette relights the room without redesigning it. data-palette on
+   <html> picks a colour world: the three aurora layers, and the ion
+   accent derived from it. Absent — or "aurora" — is the original look,
+   so nothing above this comment changes.
+
+   Two rules per palette, dark then light, and each selector matches
+   BOTH the root and any descendant carrying the attribute, because
+   settings paints its swatches with <button data-palette="ember">:
+     dark   [data-palette="x"]                                  (0,1,0)
+     light  :root[data-theme="light"][data-palette="x"],
+            :root[data-theme="light"] [data-palette="x"]        (0,3,0)
+   The light pair outranks both the dark palette rule and the light
+   default block, so a light window always lands on the light palette.
+
+   Every block overrides the same ten tokens — the three aurora
+   gradients, --ion / --ion-soft / --ion-glow / --ion-line /
+   --ion-select, --seam-color and --chamber-seam — plus a whisper of
+   the palette in --ink-0 / --ink-1 / --acrylic-bg, and
+   --palette-preview: the 48x32 swatch a settings button wears.
+
+   Two rules the palettes keep. The gradients reuse the default
+   geometry and alphas exactly (only the RGB triples move), so the
+   stepped pool and rim drifts animate identically. And no accent goes
+   near --amber, which is reserved for "a Claude session is live": the
+   closest any palette comes is ember at hue 345 — rose, not orange —
+   and forest's gold lives in the rim wash, never in the accent. */
+
+/* the default world, named, so an "aurora" swatch can paint itself */
+:root,
+[data-palette="aurora"] {
+  --palette-preview: linear-gradient(135deg, #05060a 0%, #4b22a8 40%, #0fb5c9 72%, #7dd3ff 100%);
+}
+
+:root[data-theme="light"],
+:root[data-theme="light"] [data-palette="aurora"] {
+  --palette-preview: linear-gradient(135deg, #eef1f7 0%, #b9a7ff 40%, #7fe0d8 72%, #0b7fd6 100%);
+}
+
+/* --- ember: warm dusk ---------------------------------------- */
+/* Rose band, deep plum pool, magenta rim; the accent a coral-pink at
+   hue 345, kept off orange so it can never be read as the amber. */
+[data-palette="ember"] {
+  --ink-0: #0a0509;
+  --ink-1: #150c13;
+  --acrylic-bg: rgba(10,5,9,.72);
+
+  --ion:      #ff7d9e;
+  --ion-soft: rgba(255,125,158,.16);
+  --ion-glow: rgba(255,125,158,.45);
+
+  --ion-line:     rgba(255,125,158,.75);
+  --ion-select:   rgba(255,125,158,.25);
+  --seam-color:   rgba(255,125,158,.45);
+  --chamber-seam: rgba(255,125,158,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(255,160,190,0)   50%,
+    rgba(255,160,190,.09) 76%,
+    rgba(255,160,190,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(112,26,96,.48)  0%,
+    rgba(112,26,96,.22) 45%,
+    rgba(112,26,96,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(201,35,118,.28)  0%,
+    rgba(201,35,118,.11) 46%,
+    rgba(201,35,118,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #0a0509 0%, #701a60 40%, #c92376 72%, #ff7d9e 100%);
+}
+
+:root[data-theme="light"][data-palette="ember"],
+:root[data-theme="light"] [data-palette="ember"] {
+  --ink-0: #f7edf1;
+  --ink-1: #fdf7f9;
+  --acrylic-bg: rgba(247,237,241,.72);
+
+  --ion:      #c1113d;
+  --ion-soft: rgba(193,17,61,.14);
+  --ion-glow: rgba(193,17,61,.35);
+
+  --ion-line:     rgba(193,17,61,.75);
+  --ion-select:   rgba(193,17,61,.2);
+  --seam-color:   rgba(193,17,61,.45);
+  --chamber-seam: rgba(193,17,61,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(255,150,185,0)   50%,
+    rgba(255,150,185,.13) 76%,
+    rgba(255,150,185,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(246,176,205,.55)  0%,
+    rgba(246,176,205,.26) 45%,
+    rgba(246,176,205,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(232,160,214,.45)  0%,
+    rgba(232,160,214,.18) 46%,
+    rgba(232,160,214,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #fdf7f9 0%, #f6b0cd 40%, #e8a0d6 72%, #c1113d 100%);
+}
+
+/* --- forest: deep green -------------------------------------- */
+/* Teal band over a forest-floor pool, with the rim carrying the one
+   hint of gold — a wash, well off the amber's saturation, and never
+   the accent. The accent is mint at hue 160. */
+[data-palette="forest"] {
+  --ink-0: #040806;
+  --ink-1: #0a1310;
+  --acrylic-bg: rgba(4,8,6,.72);
+
+  --ion:      #89f5d1;
+  --ion-soft: rgba(137,245,209,.16);
+  --ion-glow: rgba(137,245,209,.45);
+
+  --ion-line:     rgba(137,245,209,.75);
+  --ion-select:   rgba(137,245,209,.25);
+  --seam-color:   rgba(137,245,209,.45);
+  --chamber-seam: rgba(137,245,209,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,225,200,0)   50%,
+    rgba(120,225,200,.09) 76%,
+    rgba(120,225,200,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(16,84,60,.48)  0%,
+    rgba(16,84,60,.22) 45%,
+    rgba(16,84,60,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(178,166,104,.28)  0%,
+    rgba(178,166,104,.11) 46%,
+    rgba(178,166,104,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #040806 0%, #10543c 40%, #b2a668 72%, #89f5d1 100%);
+}
+
+:root[data-theme="light"][data-palette="forest"],
+:root[data-theme="light"] [data-palette="forest"] {
+  --ink-0: #ecf4ef;
+  --ink-1: #f6fbf8;
+  --acrylic-bg: rgba(236,244,239,.72);
+
+  --ion:      #067a53;
+  --ion-soft: rgba(6,122,83,.14);
+  --ion-glow: rgba(6,122,83,.35);
+
+  --ion-line:     rgba(6,122,83,.75);
+  --ion-select:   rgba(6,122,83,.2);
+  --seam-color:   rgba(6,122,83,.45);
+  --chamber-seam: rgba(6,122,83,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,220,190,0)   50%,
+    rgba(120,220,190,.13) 76%,
+    rgba(120,220,190,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(158,226,190,.55)  0%,
+    rgba(158,226,190,.26) 45%,
+    rgba(158,226,190,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(226,214,148,.45)  0%,
+    rgba(226,214,148,.18) 46%,
+    rgba(226,214,148,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #f6fbf8 0%, #9ee2be 40%, #e2d694 72%, #067a53 100%);
+}
+
+/* --- ocean: navy and cyan ------------------------------------ */
+/* A steel band falling into a navy pool, cyan surfacing at the rim.
+   Accent cyan at hue 190 — the default ion's neighbourhood, pushed
+   greener and hung in a much colder room. */
+[data-palette="ocean"] {
+  --ink-0: #030810;
+  --ink-1: #081422;
+  --acrylic-bg: rgba(3,8,16,.72);
+
+  --ion:      #7de8ff;
+  --ion-soft: rgba(125,232,255,.16);
+  --ion-glow: rgba(125,232,255,.45);
+
+  --ion-line:     rgba(125,232,255,.75);
+  --ion-select:   rgba(125,232,255,.25);
+  --seam-color:   rgba(125,232,255,.45);
+  --chamber-seam: rgba(125,232,255,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(130,190,255,0)   50%,
+    rgba(130,190,255,.09) 76%,
+    rgba(130,190,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(16,44,120,.48)  0%,
+    rgba(16,44,120,.22) 45%,
+    rgba(16,44,120,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(24,190,214,.28)  0%,
+    rgba(24,190,214,.11) 46%,
+    rgba(24,190,214,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #030810 0%, #102c78 40%, #18bed6 72%, #7de8ff 100%);
+}
+
+:root[data-theme="light"][data-palette="ocean"],
+:root[data-theme="light"] [data-palette="ocean"] {
+  --ink-0: #eaf1f8;
+  --ink-1: #f5f9fd;
+  --acrylic-bg: rgba(234,241,248,.72);
+
+  --ion:      #087a91;
+  --ion-soft: rgba(8,122,145,.14);
+  --ion-glow: rgba(8,122,145,.35);
+
+  --ion-line:     rgba(8,122,145,.75);
+  --ion-select:   rgba(8,122,145,.2);
+  --seam-color:   rgba(8,122,145,.45);
+  --chamber-seam: rgba(8,122,145,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,175,255,0)   50%,
+    rgba(120,175,255,.13) 76%,
+    rgba(120,175,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(150,190,250,.55)  0%,
+    rgba(150,190,250,.26) 45%,
+    rgba(150,190,250,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(126,222,238,.45)  0%,
+    rgba(126,222,238,.18) 46%,
+    rgba(126,222,238,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #f5f9fd 0%, #96befa 40%, #7edeee 72%, #087a91 100%);
+}
+
+/* --- midnight: indigo and violet ----------------------------- */
+/* The darkest room here: near-black indigo ink, a violet pool, a
+   periwinkle rim. Accent violet at hue 262. */
+[data-palette="midnight"] {
+  --ink-0: #04040c;
+  --ink-1: #0c0a1c;
+  --acrylic-bg: rgba(4,4,12,.72);
+
+  --ion:      #b68cff;
+  --ion-soft: rgba(182,140,255,.16);
+  --ion-glow: rgba(182,140,255,.45);
+
+  --ion-line:     rgba(182,140,255,.75);
+  --ion-select:   rgba(182,140,255,.25);
+  --seam-color:   rgba(182,140,255,.45);
+  --chamber-seam: rgba(182,140,255,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,130,235,0)   50%,
+    rgba(120,130,235,.09) 76%,
+    rgba(120,130,235,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(84,34,178,.48)  0%,
+    rgba(84,34,178,.22) 45%,
+    rgba(84,34,178,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(138,104,245,.28)  0%,
+    rgba(138,104,245,.11) 46%,
+    rgba(138,104,245,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #04040c 0%, #5422b2 40%, #8a68f5 72%, #b68cff 100%);
+}
+
+:root[data-theme="light"][data-palette="midnight"],
+:root[data-theme="light"] [data-palette="midnight"] {
+  --ink-0: #efedf9;
+  --ink-1: #f8f7fd;
+  --acrylic-bg: rgba(239,237,249,.72);
+
+  --ion:      #6322d3;
+  --ion-soft: rgba(99,34,211,.14);
+  --ion-glow: rgba(99,34,211,.35);
+
+  --ion-line:     rgba(99,34,211,.75);
+  --ion-select:   rgba(99,34,211,.2);
+  --seam-color:   rgba(99,34,211,.45);
+  --chamber-seam: rgba(99,34,211,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(150,152,255,0)   50%,
+    rgba(150,152,255,.13) 76%,
+    rgba(150,152,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(198,176,255,.55)  0%,
+    rgba(198,176,255,.26) 45%,
+    rgba(198,176,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(178,158,250,.45)  0%,
+    rgba(178,158,250,.18) 46%,
+    rgba(178,158,250,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #f8f7fd 0%, #c6b0ff 40%, #b29efa 72%, #6322d3 100%);
+}
+
+/* --- mono: graphite ------------------------------------------ */
+/* No chroma in the aurora at all: the three layers are pure grey, so
+   they read as luminance alone — a band of light, a pool, a rim. The
+   accent carries the only colour, and barely: a cool off-white at hue
+   215 in the dark, graphite blue-grey in daylight. */
+[data-palette="mono"] {
+  --ink-0: #07070a;
+  --ink-1: #101116;
+  --acrylic-bg: rgba(7,7,10,.72);
+
+  --ion:      #dbdfe6;
+  --ion-soft: rgba(219,223,230,.16);
+  --ion-glow: rgba(219,223,230,.45);
+
+  --ion-line:     rgba(219,223,230,.75);
+  --ion-select:   rgba(219,223,230,.25);
+  --seam-color:   rgba(219,223,230,.45);
+  --chamber-seam: rgba(219,223,230,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(214,214,214,0)   50%,
+    rgba(214,214,214,.09) 76%,
+    rgba(214,214,214,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(128,128,128,.48)  0%,
+    rgba(128,128,128,.22) 45%,
+    rgba(128,128,128,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(186,186,186,.28)  0%,
+    rgba(186,186,186,.11) 46%,
+    rgba(186,186,186,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #07070a 0%, #3a3a3e 40%, #8a8a8e 72%, #dbdfe6 100%);
+}
+
+:root[data-theme="light"][data-palette="mono"],
+:root[data-theme="light"] [data-palette="mono"] {
+  --ink-0: #eff0f2;
+  --ink-1: #f8f9fa;
+  --acrylic-bg: rgba(239,240,242,.72);
+
+  --ion:      #495565;
+  --ion-soft: rgba(73,85,101,.14);
+  --ion-glow: rgba(73,85,101,.35);
+
+  --ion-line:     rgba(73,85,101,.75);
+  --ion-select:   rgba(73,85,101,.2);
+  --seam-color:   rgba(73,85,101,.45);
+  --chamber-seam: rgba(73,85,101,.5);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(140,140,140,0)   50%,
+    rgba(140,140,140,.13) 76%,
+    rgba(140,140,140,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(176,176,176,.55)  0%,
+    rgba(176,176,176,.26) 45%,
+    rgba(176,176,176,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(196,196,196,.45)  0%,
+    rgba(196,196,196,.18) 46%,
+    rgba(196,196,196,0)   78%);
+
+  --palette-preview: linear-gradient(135deg, #f8f9fa 0%, #c4c4c4 40%, #8c8c8c 72%, #495565 100%);
+}
+
 /* --- reset / window ------------------------------------------ */
 * { box-sizing: border-box; }
 

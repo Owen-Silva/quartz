@@ -1,0 +1,304 @@
+/* ============================================================
+   tabsearch.css — #tabsearch-btn and #tabsearch, the tab palette
+
+   One more crystal instrument: a glass pane that hangs in the
+   upper third of the window listing every open tab and the ones
+   just closed. It borrows chrome.css's .glass frost and the row
+   recipe from #omni-suggest — a 2px rail of ion light, never a
+   moving background — and every colour here resolves through a
+   chrome.css token, so the light theme re-lights it without a
+   single rule of its own.
+
+   Motion budget: the chrome already runs a backdrop-filter, so
+   every transition in this file is a short stepped one. Nothing
+   here animates continuously.
+   ============================================================ */
+
+/* --- the titlebar instrument ---------------------------------- */
+/* #newtab's shape exactly — 28px, 8px corners — one slot to its right,
+   so the pair reads as one control group rather than two sizes. */
+#tabsearch-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  transition: background-color 120ms steps(3, end), color 120ms steps(3, end);
+}
+
+#tabsearch-btn:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+#tabsearch-btn:active { background: var(--sheen), var(--glass-3); }
+
+/* while the pane is open the button stays lit, so it reads as the thing
+   holding it open rather than a button that did nothing */
+#tabsearch-btn.is-on {
+  background: var(--sheen), var(--glass-3);
+  color: var(--ion);
+}
+
+#tabsearch-btn:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- the pane -------------------------------------------------- */
+/* Fixed and centred in its own column: it floats over the page, and there
+   is nothing behind it worth blurring, so --panel-bg is near-opaque. */
+#tabsearch {
+  position: fixed;
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;                 /* above #views (1) and .chrome-layer (3) */
+  box-sizing: border-box;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: var(--sheen), var(--panel-bg);
+  font-family: var(--ui-font);
+  color: var(--fg);
+  overflow: hidden;            /* the rows' corners never poke the radius */
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 18px 46px var(--shade-drop);
+}
+
+/* There is no CSS reset in this app, so [hidden] is spelled out. */
+#tabsearch[hidden] { display: none; }
+
+/* --- the query field ------------------------------------------- */
+#tabsearch .ts-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--edge);
+}
+
+#tabsearch .ts-field-ico {
+  flex: 0 0 auto;
+  width: 16px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+#tabsearch-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 13.5px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#tabsearch-input::placeholder { color: var(--placeholder); }
+#tabsearch-input:focus { outline: none; }
+
+#tabsearch-input:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/* --- the list -------------------------------------------------- */
+#tabsearch .ts-list {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+#tabsearch .ts-list::-webkit-scrollbar { width: 10px; }
+#tabsearch .ts-list::-webkit-scrollbar-track { background: transparent; }
+
+#tabsearch .ts-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+#tabsearch .ts-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
+
+/* --- the "Recently closed" caption ------------------------------ */
+#tabsearch .ts-cap {
+  padding: 10px 10px 5px 12px;
+  color: var(--fg-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* --- a row ------------------------------------------------------ */
+/* The left rail is always 2px and merely changes colour, so lighting a
+   row never shifts its text sideways. */
+#tabsearch .ts-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 8px 0 10px;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 120ms steps(3, end);
+}
+
+#tabsearch .ts-row.is-hi {
+  background: var(--glass-2);
+  border-left-color: var(--ion);
+}
+
+/* --- the icon column -------------------------------------------- */
+#tabsearch .ts-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+#tabsearch .ts-row.is-hi .ts-ico { color: var(--ion); }
+
+#tabsearch img.ts-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  opacity: .9;
+}
+
+/* the session light: the one warm colour, exactly as the chip wears it */
+#tabsearch .ts-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 8px 1px var(--amber-glow);
+}
+
+/* --- the two text lines ----------------------------------------- */
+#tabsearch .ts-body {
+  flex: 1 1 auto;
+  min-width: 0;                /* the ellipsis needs a shrinkable box */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+#tabsearch .ts-primary,
+#tabsearch .ts-secondary {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tabsearch .ts-primary {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: .01em;
+}
+
+#tabsearch .ts-secondary {
+  color: var(--fg-2);
+  font-size: 11px;
+  font-weight: 350;
+  letter-spacing: .01em;
+}
+
+/* a closed row's second line is the whole url: a note, not content */
+#tabsearch .ts-row--closed .ts-secondary { color: var(--fg-3); }
+
+/* --- the state tags --------------------------------------------- */
+/* Pinned, muted, playing, sleeping, current: a word each, dimmer than the
+   host they follow, so the line still reads host-first. */
+#tabsearch .ts-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  font-weight: 350;
+  letter-spacing: .02em;
+}
+
+#tabsearch .ts-tag-ico { font-size: 10px; }
+
+/* --- the per-row close ------------------------------------------ */
+/* Present in every row so the layout never jumps; only reachable once the
+   row is under the pointer or under the highlight. */
+#tabsearch .ts-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--fg-3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms steps(3, end), background-color 120ms steps(3, end);
+}
+
+#tabsearch .ts-row:hover .ts-close,
+#tabsearch .ts-row.is-hi .ts-close,
+#tabsearch .ts-row:focus-within .ts-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#tabsearch .ts-close:hover { background: var(--glass-3); color: var(--fg); }
+#tabsearch .ts-close:active { background: var(--glass-2); }
+
+#tabsearch .ts-close:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- the overflow count and the empty note ---------------------- */
+#tabsearch .ts-more {
+  padding: 6px 12px 8px;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-weight: 350;
+  letter-spacing: .02em;
+}
+
+#tabsearch .ts-empty {
+  padding: 16px 12px;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  font-weight: 350;
+}
+
+/* --- narrow windows --------------------------------------------- */
+@media (max-width: 620px) {
+  #tabsearch { top: 8vh; }
+  #tabsearch .ts-list { max-height: 62vh; }
+}
+
+/* --- reduced motion --------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  #tabsearch-btn,
+  #tabsearch .ts-row,
+  #tabsearch .ts-close { transition: none; }
+}

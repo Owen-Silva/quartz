@@ -13,12 +13,18 @@
  *
  *   { searchEngine: 'google'|'duckduckgo'|'bing'|'brave'|'startpage',
  *     siteTheme:    'system'|'light'|'dark',
+ *     palette:      'aurora'|'ember'|'forest'|'ocean'|'midnight'|'mono',
  *     accentHue:    null | 0..360,
  *     chips:        null | [{ label, url }, ...],
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
  *     claudeResume: true | false,           // --continue on a restored tab
  *     tabSleepMinutes: 0|15|30|60|180 }     // 0 = never sleep a background tab
+ *
+ * THE PALETTE IS MIRRORED. `palette` also lives under its own localStorage
+ * key ('palette', absent for the default aurora) because theme-boot.js has to
+ * stamp <html data-palette> before the first paint, long before this file
+ * parses. applyPalette() writes both, so the two never drift.
  *
  * Per-site CSS is NOT stored here: it belongs to window.SiteStyles, which
  * keeps its own localStorage key and pushes changes into open tabs itself.
@@ -46,12 +52,16 @@
   var GLYPH_UP = '\uE70E';
   var GLYPH_DOWN = '\uE70D';
   var GLYPH_CLOSE = '\uE711';
+  var GLYPH_CHECK = '\uE73E';
 
   var STORAGE_KEY = 'settings';
+  /* theme-boot.js reads this one, before anything else runs. */
+  var PALETTE_KEY = 'palette';
 
   var DEFAULTS = {
     searchEngine: 'google',
     siteTheme: 'system',
+    palette: 'aurora',
     accentHue: null,
     chips: null,
     homepage: 'newtab',
@@ -66,6 +76,18 @@
     { id: 'bing', name: 'Bing', url: 'https://www.bing.com/search?q=' },
     { id: 'brave', name: 'Brave', url: 'https://search.brave.com/search?q=' },
     { id: 'startpage', name: 'Startpage', url: 'https://www.startpage.com/do/search?q=' }
+  ];
+
+  /* The palettes chrome.css authors. 'aurora' is the file's own :root, so it
+     is the one id that must never reach the attribute — the swatch for it
+     carries no data-palette either, and so previews the root's tokens. */
+  var PALETTES = [
+    { id: 'aurora', name: 'Aurora' },
+    { id: 'ember', name: 'Ember' },
+    { id: 'forest', name: 'Forest' },
+    { id: 'ocean', name: 'Ocean' },
+    { id: 'midnight', name: 'Midnight' },
+    { id: 'mono', name: 'Mono' }
   ];
 
   var SITE_THEMES = [
@@ -218,6 +240,7 @@
 
   /** Side effects a changed key owes the rest of the app. */
   function react(keys) {
+    if (keys.indexOf('palette') >= 0) applyPalette(get('palette'));
     if (keys.indexOf('accentHue') >= 0) applyAccent(get('accentHue'));
     if (keys.indexOf('siteTheme') >= 0) pushSiteTheme(get('siteTheme'));
   }
@@ -383,6 +406,45 @@
   }
 
   /* ============================================================
+     Palette
+     A named set of chrome tokens, authored in chrome.css and chosen
+     by one attribute on <html>. The accent slider still wins over it.
+     ============================================================ */
+
+  /** A stored value from another build, or a corrupt one, reads as aurora. */
+  function paletteName(name) {
+    for (var i = 0; i < PALETTES.length; i++) {
+      if (PALETTES[i].id === name) return PALETTES[i].id;
+    }
+    return 'aurora';
+  }
+
+  function palettes() {
+    return PALETTES.map(function (p) { return { id: p.id, name: p.name }; });
+  }
+
+  /**
+   * Wear a palette: the attribute chrome.css keys off, the key theme-boot.js
+   * reads on the next cold start, and then the accent — a hue the user picked
+   * is theirs and outranks the palette's, so it is painted back on top;
+   * otherwise the inline props come off and the palette's own accent shows.
+   */
+  function applyPalette(name) {
+    var id = paletteName(name);
+    var root = document.documentElement;
+    if (id === 'aurora') {
+      root.removeAttribute('data-palette');
+      try { window.localStorage.removeItem(PALETTE_KEY); } catch (err) { /* fine */ }
+    } else {
+      root.setAttribute('data-palette', id);
+      try { window.localStorage.setItem(PALETTE_KEY, id); } catch (err) { /* fine */ }
+    }
+    var hue = get('accentHue');
+    applyAccent(hue === null || hue === undefined ? null : hue);
+    return id;
+  }
+
+  /* ============================================================
      Site theme (the pages, not the chrome)
      ============================================================ */
 
@@ -478,6 +540,60 @@
     return wrap;
   }
 
+  /**
+   * The palettes as six painted chips. One radiogroup with a roving tabindex:
+   * the arrows carry the selection along the row the way a radio group does,
+   * Space and Enter confirm whatever is focused. Each button wears the palette
+   * it offers, so the row is its own legend.
+   */
+  function paletteSwatches(current, onPick) {
+    var wrap = el('div', 'set-swatches');
+    wrap.setAttribute('role', 'radiogroup');
+    wrap.setAttribute('aria-label', 'Palette');
+    var buttons = [];
+
+    function moveTo(i) {
+      var n = buttons.length;
+      var next = buttons[((i % n) + n) % n];
+      if (!next) return;
+      if (typeof next.focus === 'function') next.focus();
+      onPick(next.getAttribute('data-value'));
+    }
+
+    PALETTES.forEach(function (p, index) {
+      var on = p.id === current;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'set-swatch' + (on ? ' is-on' : '');
+      b.setAttribute('data-value', p.id);
+      /* aurora is chrome.css's own :root and has no block of its own, so
+         leaving the attribute off is exactly what previews the default. */
+      if (p.id !== 'aurora') b.setAttribute('data-palette', p.id);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.setAttribute('aria-label', p.name);
+      b.title = p.name;
+      b.tabIndex = on ? 0 : -1;
+      b.appendChild(el('span', 'set-swatch-check', GLYPH_CHECK));
+      b.addEventListener('click', function () { onPick(p.id); });
+      b.addEventListener('keydown', function (event) {
+        var k = event.key;
+        if (k === 'ArrowRight' || k === 'ArrowDown') { event.preventDefault(); moveTo(index + 1); }
+        else if (k === 'ArrowLeft' || k === 'ArrowUp') { event.preventDefault(); moveTo(index - 1); }
+        else if (k === 'Home') { event.preventDefault(); moveTo(0); }
+        else if (k === 'End') { event.preventDefault(); moveTo(buttons.length - 1); }
+        else if (k === ' ' || k === 'Spacebar' || k === 'Enter') { event.preventDefault(); onPick(p.id); }
+      });
+      buttons.push(b);
+      wrap.appendChild(b);
+
+      var name = el('span', 'set-swatch-name', p.name);
+      name.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(name);
+    });
+    return wrap;
+  }
+
   /** A vertical list of options, each with its own lit dot. */
   function optionList(options, current, onPick) {
     var wrap = el('div', 'set-opts');
@@ -565,10 +681,27 @@
     seg.setAttribute('data-field', 'theme');
     s.appendChild(seg);
 
+    var palette = el('div', 'set-field');
+    palette.setAttribute('data-field', 'palette');
+    s.appendChild(palette);
+
     var accent = el('div', 'set-field set-accent');
     accent.setAttribute('data-field', 'accent');
     s.appendChild(accent);
     return s;
+  }
+
+  /* Set for the length of one pick, so the re-render it causes knows to take
+     the keyboard back to the swatch that was just chosen. */
+  var paletteFocus = false;
+
+  /** A swatch was chosen: wear it now, then store it so everyone else hears. */
+  function pickPalette(name) {
+    if (paletteName(name) !== name) return;   // not one of ours: ignore it
+    paletteFocus = true;
+    applyPalette(name);
+    set({ palette: name });
+    paletteFocus = false;
   }
 
   function renderLook() {
@@ -588,6 +721,19 @@
       }
     ));
 
+    var paletteField = bodyEl.querySelector('[data-field="palette"]');
+    if (paletteField) {
+      paletteField.textContent = '';
+      paletteField.appendChild(paletteSwatches(paletteName(get('palette')), pickPalette));
+      paletteField.appendChild(el('p', 'set-hint',
+        'The aurora and the accent change together. Pick your own accent below to override the palette’s.'));
+      /* A pick rebuilt this row out from under the keyboard; put it back. */
+      if (paletteFocus) {
+        var picked = paletteField.querySelector('.set-swatch.is-on');
+        if (picked && typeof picked.focus === 'function') picked.focus();
+      }
+    }
+
     var hue = get('accentHue');
     accentField.textContent = '';
     var row = el('div', 'set-accent-row');
@@ -606,7 +752,12 @@
     slider.addEventListener('change', function () { set({ accentHue: Number(slider.value) }); });
     row.appendChild(slider);
 
-    var def = textButton('Default', 'set-text', function () { set({ accentHue: null }); });
+    /* "Default" now means the palette's accent, not aurora's: drop the custom
+       hue, then let the current palette repaint what it authored. */
+    var def = textButton('Default', 'set-text', function () {
+      set({ accentHue: null });
+      applyPalette(get('palette'));
+    });
     def.disabled = hue === null || hue === undefined;
     row.appendChild(def);
 
@@ -1408,7 +1559,7 @@
     // The panel mirrors the store, whoever wrote to it.
     on(function (_snapshot, keys) {
       if (!bodyEl) return;
-      if (keys.indexOf('accentHue') >= 0) renderLook();
+      if (keys.indexOf('accentHue') >= 0 || keys.indexOf('palette') >= 0) renderLook();
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
@@ -1436,6 +1587,7 @@
 
   /* Accent and site theme are applied at script load, not at DOMContentLoaded:
      the boot should paint in the chosen colour, not swap into it. */
+  applyPalette(get('palette'));   // theme-boot.js usually stamped this already
   applyAccent(get('accentHue'));
   pushSiteTheme(get('siteTheme'));
   watchTheme();
@@ -1466,6 +1618,8 @@
     isSearchUrl: isSearchUrl,
 
     applyAccent: applyAccent,
+    applyPalette: applyPalette,
+    palettes: palettes,
     open: openPanel,
     close: closePanel,
     toggle: toggle,

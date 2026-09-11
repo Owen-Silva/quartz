@@ -8,11 +8,11 @@
    The browser's settings reach it two ways:
 
      1. query params, for the first paint —
-        ?theme=dark&hue=300&engine=duckduckgo&chips=<JSON>
-        (every param optional; theme and hue are handled earlier,
-        in newtab-theme.js, so colour never flashes)
+        ?theme=dark&palette=ocean&hue=300&engine=duckduckgo&chips=<JSON>
+        (every param optional; theme, palette and hue are handled
+        earlier, in newtab-theme.js, so colour never flashes)
 
-     2. window.__applySettings({ accentHue, searchEngine, chips })
+     2. window.__applySettings({ accentHue, palette, searchEngine, chips })
         pushed later with executeJavaScript. A null or missing
         field means "back to this page's own default".
    ============================================================ */
@@ -598,6 +598,9 @@ window.__applySettings = function (settings) {
   const next = settings || {};
   setEngine(next.searchEngine);
   setChips(next.chips);
+  // Palette first: it authors the accent the hue is then painted over, so
+  // a push that clears the hue lands on the new preset's own colour.
+  if (typeof window.__applyPalette === 'function') window.__applyPalette(next.palette);
   if (typeof window.__applyAccent === 'function') window.__applyAccent(next.accentHue);
 };
 
