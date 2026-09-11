@@ -1,0 +1,40 @@
+/* ============================================================
+   reader.css — the Reader view instrument in the nav row.
+
+   Loaded after chrome.css, and scoped entirely to #reader:
+   nothing here reaches another element. The reading page has its
+   own stylesheet (reader-page.css) and shares nothing with this.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own — :root[data-theme="light"]
+   relights all of it for free.
+
+   MOTION. The nav row sits on a backdrop-filter, so an animated
+   frame re-blurs the page behind it. Nothing animates continuously
+   here; the only transition is the one .iconbtn already carries.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   The button is hidden far more often than it is shown — only a page
+   that passes the readability probe reveals it — so this rule is
+   load-bearing, not housekeeping. */
+#reader[hidden] { display: none; }
+
+/* Shape, hover, radius and glass all come from `.iconbtn` in
+   chrome.css. This file adds only the icon font and the one state
+   chrome.css cannot know about: the instrument under the pointer. */
+#reader .glyph {
+  font-family: var(--icon-font);
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* The glyph is the only thing that lights: the button itself keeps
+   the same glass as every other instrument in the row. */
+#reader:hover .glyph { color: var(--ion); }
+
+#reader:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

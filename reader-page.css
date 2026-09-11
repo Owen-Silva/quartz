@@ -1,0 +1,441 @@
+/* ============================================================
+   reader-page.css — the reading page.
+
+   Same world as chrome.css and newtab.css — frosted glass, near
+   monochrome, one ice-cyan light — turned down to read on. The
+   aurora is a single still wash, the only glass is the slim bar
+   at the top, and the article itself is set in a reading serif
+   at a size the reader chose.
+
+   THEMES. Set by newtab-theme.js from ?theme= before first paint,
+   and re-set by the browser chrome on every theme flip. The tokens
+   are mirrored from newtab.css; every rule below reads through them
+   and none tests the attribute itself.
+
+   METRICS. Two more things live on <html>, written by reader-page.js
+   from this page's localStorage before first paint:
+     --body-size  the article's text size, 16-26px
+     data-width   narrow (62ch) / wide (84ch); unset is this file's 68ch
+   ============================================================ */
+
+/* --- tokens: dark (default) ---------------------------------- */
+:root {
+  --ink-0: #05060a;
+  --ink-1: #0c0f18;
+
+  --fg:   #eef1f8;
+  --fg-2: #9aa3b8;
+  --fg-3: #5c6478;
+
+  --glass:   rgba(255,255,255,.08);
+  --glass-2: rgba(255,255,255,.13);
+  --glass-3: rgba(255,255,255,.18);
+
+  --edge:     rgba(255,255,255,.22);
+  --specular: rgba(255,255,255,.55);
+
+  --ion:      #7dd3ff;
+  --ion-soft: rgba(125,211,255,.16);
+  --ion-glow: rgba(125,211,255,.45);
+  --ion-line: rgba(125,211,255,.75);
+
+  --bar-shadow: rgba(0,0,0,.45);
+  --rule:       rgba(255,255,255,.12);   /* hairlines inside the article */
+  --code-bg:    rgba(255,255,255,.07);
+
+  /* the diagonal reflection the bar carries, as every glass surface does */
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.10)  0%,
+    rgba(255,255,255,.03) 38%,
+    rgba(255,255,255,0)   60%);
+
+  /* One still wash instead of the new-tab page's three drifting ones: a
+     reading page has no business moving, and no business being loud. */
+  --wash: radial-gradient(1100px 620px at 50% 0%,
+    rgba(75,34,168,.30)  0%,
+    rgba(75,34,168,.12) 46%,
+    rgba(75,34,168,0)   76%);
+
+  --ui-font:      'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  --reading-font: Georgia, 'Cambria', 'Times New Roman', serif;
+  --mono-font:    Consolas, 'Cascadia Mono', 'Courier New', monospace;
+
+  --body-size: 19px;    /* reader-page.js overwrites this from storage */
+  /* The measure: 68 characters, with the narrow and wide settings at 62 and
+     84. It is written in em of the reading font rather than in ch because
+     Georgia sets its digits old-style and wide — its "0" is .61em, so 68ch
+     comes out at ~94 characters a line, a third past the measure asked for.
+     One em here is one --body-size, so the column grows with the text. */
+  --column:    32em;    /* ~68 characters; data-width overrides it below */
+  --bar-h:     40px;
+}
+
+/* --- tokens: light ------------------------------------------- */
+/* Tokens only — every rule below is written once and reads through
+   them, exactly as chrome.css and newtab.css do. */
+:root[data-theme="light"] {
+  --ink-0: #eef1f7;
+  --ink-1: #f7f8fc;
+
+  --fg:   #12162a;
+  --fg-2: #4a526b;
+  --fg-3: #767e94;
+
+  --glass:   rgba(255,255,255,.55);
+  --glass-2: rgba(255,255,255,.72);
+  --glass-3: rgba(255,255,255,.9);
+
+  --edge:     rgba(18,22,42,.12);
+  --specular: rgba(255,255,255,.95);
+
+  --ion:      #0b7fd6;
+  --ion-soft: rgba(11,127,214,.14);
+  --ion-glow: rgba(11,127,214,.35);
+  --ion-line: rgba(11,127,214,.75);
+
+  --bar-shadow: rgba(18,22,42,.16);
+  --rule:       rgba(18,22,42,.12);
+  --code-bg:    rgba(18,22,42,.05);
+
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.7)  0%,
+    rgba(255,255,255,.25) 38%,
+    rgba(255,255,255,0)   60%);
+
+  --wash: radial-gradient(1100px 620px at 50% 0%,
+    rgba(185,167,255,.36)  0%,
+    rgba(185,167,255,.14) 46%,
+    rgba(185,167,255,0)   76%);
+}
+
+/* --- column width -------------------------------------------- */
+:root[data-width="narrow"] { --column: 29em; }    /* ~62 characters */
+:root[data-width="wide"]   { --column: 39.5em; }  /* ~84 characters */
+
+/* --- page ---------------------------------------------------- */
+* { box-sizing: border-box; }
+
+html { height: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--ink-0);          /* never fully transparent */
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  /* a theme flip is a crossfade, not a cut */
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+/* One fixed, inert wash. It does not move, ever. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    var(--wash),
+    linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%);
+}
+
+/* --- the top bar --------------------------------------------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--bar-h);
+  padding: 0 14px;
+  background: var(--sheen), var(--glass);
+  border-bottom: 1px solid var(--edge);
+  box-shadow: 0 1px 0 var(--bar-shadow);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.topbar .sitename {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  text-align: center;
+  color: var(--fg-2);
+  font-size: 12px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar .controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* Every control in the bar is the same instrument, whether it is a
+   link or a button: small glass, ion on hover, nothing on idle. */
+.barbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.barbtn:hover {
+  background: var(--glass-2);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+.barbtn:active { background: var(--glass-3); }
+
+.barbtn:focus-visible {
+  outline: 2px solid var(--ion-line);
+  outline-offset: 2px;
+}
+
+.barbtn[hidden] { display: none; }
+
+.back { flex: 0 0 auto; }
+.back .arrow { color: var(--ion); font-size: 13px; }
+
+/* The width toggle carries its state, so it stays lit while it is wide. */
+.wide-toggle[aria-pressed="true"] {
+  background: var(--ion-soft);
+  border-color: var(--ion-line);
+  color: var(--fg);
+}
+
+/* --- the reading column -------------------------------------- */
+.stage {
+  position: relative;
+  z-index: 1;
+  padding: 44px 24px 120px;
+}
+
+/* The measure is in ch, and ch is the width of a "0" in the element's OWN
+   font — so the column has to be set in the reading serif at the reading
+   size, or 68ch would silently mean 68 characters of 14px Bahnschrift and
+   the line would come out a third too short. Everything inside that is not
+   the article body names its own font again. */
+.column {
+  max-width: var(--column);
+  margin: 0 auto;
+  font-family: var(--reading-font);
+  font-size: var(--body-size);
+}
+
+.placeholder {
+  margin: 40px 0;
+  font-family: var(--ui-font);
+  color: var(--fg-3);
+  font-size: 13px;
+  letter-spacing: .04em;
+}
+
+.placeholder[hidden] { display: none; }
+
+.title {
+  margin: 0 0 10px;
+  font-family: var(--ui-font);
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+  color: var(--fg);
+}
+
+.title[hidden], .meta[hidden] { display: none; }
+
+.meta {
+  margin: 0 0 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+/* --- the article itself -------------------------------------- */
+/* The only place on this page set in the reading serif, at the size
+   the reader chose. Everything inside is the source page's markup, so
+   these rules are written to land on whatever shape arrives. */
+.content-root {
+  display: block;
+  font-family: var(--reading-font);
+  font-size: var(--body-size);
+  line-height: 1.6;
+  color: var(--fg);
+}
+
+.content-root > :first-child { margin-top: 0; }
+
+.content-root p,
+.content-root li {
+  margin: 0 0 1.15em;
+}
+
+.content-root ul,
+.content-root ol { padding-left: 1.4em; margin: 0 0 1.15em; }
+
+.content-root li { margin-bottom: .5em; }
+
+.content-root h1,
+.content-root h2,
+.content-root h3,
+.content-root h4 {
+  font-family: var(--ui-font);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.8em 0 .6em;
+  color: var(--fg);
+}
+
+.content-root h1 { font-size: 1.5em; }
+.content-root h2 { font-size: 1.3em; }
+.content-root h3 { font-size: 1.12em; }
+.content-root h4 { font-size: 1em; letter-spacing: .02em; }
+
+.content-root a {
+  color: var(--ion);
+  text-decoration: none;
+  border-bottom: 1px solid var(--ion-soft);
+}
+
+.content-root a:hover { border-bottom-color: var(--ion-line); }
+
+.content-root a:focus-visible {
+  outline: 2px solid var(--ion-line);
+  outline-offset: 2px;
+}
+
+.content-root strong, .content-root b { font-weight: 700; }
+
+.content-root img,
+.content-root video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.4em auto;
+  border-radius: 6px;
+}
+
+.content-root figure { margin: 1.6em 0; }
+
+.content-root figcaption {
+  margin-top: .6em;
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fg-3);
+  text-align: center;
+}
+
+/* A quote is marked by one rail of ion light, nothing else. */
+.content-root blockquote {
+  margin: 1.5em 0;
+  padding: .1em 0 .1em 1.1em;
+  border-left: 2px solid var(--ion);
+  color: var(--fg-2);
+  font-style: italic;
+}
+
+.content-root blockquote p:last-child { margin-bottom: 0; }
+
+.content-root code,
+.content-root kbd,
+.content-root samp {
+  font-family: var(--mono-font);
+  font-size: .88em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: .12em .35em;
+}
+
+.content-root pre {
+  margin: 1.5em 0;
+  padding: 14px 16px;
+  background: var(--code-bg);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--mono-font);
+  font-size: .86em;
+  line-height: 1.5;
+}
+
+.content-root pre code {
+  background: none;
+  padding: 0;
+  font-size: 1em;
+}
+
+.content-root hr {
+  margin: 2.2em 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.content-root table {
+  width: 100%;
+  margin: 1.5em 0;
+  border-collapse: collapse;
+  font-family: var(--ui-font);
+  font-size: .82em;
+}
+
+.content-root th,
+.content-root td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.content-root th { color: var(--fg-2); font-weight: 600; }
+
+/* --- scrollbar ------------------------------------------------ */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--glass-2);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--glass-3); background-clip: content-box; }
+
+/* --- narrow windows ------------------------------------------ */
+@media (max-width: 620px) {
+  .stage { padding: 28px 16px 80px; }
+  .topbar { gap: 8px; padding: 0 8px; }
+  .topbar .sitename { display: none; }   /* the column is the page at this width */
+  .topbar .controls { margin-left: auto; }  /* the sitename was the spacer */
+  .back span:not(.arrow) { display: none; }
+}
+
+/* --- reduced motion ------------------------------------------ */
+/* There is nothing here that loops, so this only has to take away the
+   two crossfades: the theme flip and the control hovers. */
+@media (prefers-reduced-motion: reduce) {
+  body, .barbtn { transition: none; }
+  * { scroll-behavior: auto; }
+}

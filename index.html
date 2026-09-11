@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="downloads.css">
   <link rel="stylesheet" href="shield.css">
   <link rel="stylesheet" href="history.css">
+  <link rel="stylesheet" href="reader.css">
   <link rel="stylesheet" href="settings.css">
 </head>
 <body>
@@ -96,7 +97,12 @@
   <script src="find.js"></script>
   <script src="downloads.js"></script>
   <script src="shield.js"></script>
+  <!-- Classic script: leaves a global `Readability` behind. Must stay above
+       reader.js, which is the only thing that uses it. -->
+  <script src="node_modules/@mozilla/readability/Readability.js"></script>
+  <script src="reader.js"></script>
   <script src="history.js"></script>
+  <script src="sitestyles.js"></script>
   <script src="settings.js"></script>
   <script src="terminal.js"></script>
 </body>

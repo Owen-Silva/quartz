@@ -17,7 +17,12 @@
  *     chips:        null | [{ label, url }, ...],
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
- *     claudeResume: true | false }          // --continue on a restored tab
+ *     claudeResume: true | false,           // --continue on a restored tab
+ *     tabSleepMinutes: 0|15|30|60|180 }     // 0 = never sleep a background tab
+ *
+ * Per-site CSS is NOT stored here: it belongs to window.SiteStyles, which
+ * keeps its own localStorage key and pushes changes into open tabs itself.
+ * This panel only draws it, and only when that module is present.
  *
  * Missing keys fall back to DEFAULTS, so an older stored object still reads.
  * `chips: null` means "never touched" — the new tab page shows its own list
@@ -51,7 +56,8 @@
     chips: null,
     homepage: 'newtab',
     claudeDir: null,
-    claudeResume: true
+    claudeResume: true,
+    tabSleepMinutes: 30
   };
 
   var ENGINES = [
@@ -68,6 +74,16 @@
     { id: 'dark', name: 'Always dark' }
   ];
 
+  /* How long a background tab may sit untouched before app.js puts it to
+     sleep. Values are minutes; 0 is the off switch, not a zero timer. */
+  var SLEEP_TIMES = [
+    { value: 0, name: 'Never' },
+    { value: 15, name: '15 minutes' },
+    { value: 30, name: '30 minutes' },
+    { value: 60, name: '1 hour' },
+    { value: 180, name: '3 hours' }
+  ];
+
   /* The keyboard map, as the user would describe it to themselves. */
   var SHORTCUTS = [
     ['Ctrl+T', 'New tab'],
@@ -77,6 +93,7 @@
     ['Ctrl+1-9', 'Jump to a tab'],
     ['Ctrl+L', 'Address bar'],
     ['Ctrl+F', 'Find on page'],
+    ['Ctrl+Shift+R', 'Reader view'],
     ['Ctrl+P', 'Print page'],
     ['Ctrl+J', 'Downloads'],
     ['Ctrl+H', 'History'],
@@ -115,6 +132,9 @@
   var toastTimer = 0;
   var toastHideTimer = 0;
   var focusHint = null;        // [selector] to refocus after a chips re-render
+  var siteOpen = null;         // the host whose CSS editor is expanded
+  var siteFocus = null;        // [selector] to focus after a site-styles render
+  var siteBound = false;       // subscribed to SiteStyles.on exactly once
 
   /* ============================================================
      Store
@@ -477,6 +497,47 @@
   }
 
   /**
+   * A <select> dressed as one of the panel's fields. The chevron is drawn by
+   * the wrapper's ::after — a native dropdown arrow would be the only piece
+   * of Windows grey in the whole pane.
+   */
+  function glassSelect(id, options, current, onPick) {
+    var wrap = el('span', 'set-select');
+    var sel = document.createElement('select');
+    sel.className = 'set-sel';
+    if (id) sel.id = id;
+
+    var match = -1;
+    options.forEach(function (opt, i) {
+      var o = document.createElement('option');
+      o.value = String(opt.value);
+      o.textContent = opt.name;
+      if (String(opt.value) === String(current)) match = i;
+      sel.appendChild(o);
+    });
+    /* A stored value from a future build (or a corrupt one) still has to
+       show something honest, so fall back to the option list's own first. */
+    sel.selectedIndex = match >= 0 ? match : 0;
+
+    sel.addEventListener('change', function () {
+      var picked = options[sel.selectedIndex];
+      onPick(picked ? picked.value : options[0].value);
+    });
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
+  /** A label and one control on the same line, wrapping when it must. */
+  function controlRow(labelText, id, control) {
+    var row = el('div', 'set-ctl-row');
+    var label = el('label', 'set-ctl-label', labelText);
+    if (id) label.setAttribute('for', id);
+    row.appendChild(label);
+    row.appendChild(control);
+    return row;
+  }
+
+  /**
    * A whole-row switch: the row itself is the control, like .set-opt, so the
    * label is as clickable as the track beside it.
    */
@@ -687,6 +748,35 @@
     field.appendChild(hint);
   }
 
+  function buildTabs() {
+    var s = section('Tabs');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'tabsleep');
+    s.appendChild(field);
+    return s;
+  }
+
+  function renderTabs() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="tabsleep"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var minutes = Number(get('tabSleepMinutes'));
+    if (!isFinite(minutes) || minutes < 0) minutes = DEFAULTS.tabSleepMinutes;
+
+    field.appendChild(controlRow(
+      'Put background tabs to sleep after',
+      'set-tab-sleep',
+      glassSelect('set-tab-sleep', SLEEP_TIMES, minutes, function (value) {
+        set({ tabSleepMinutes: Number(value) });
+      })
+    ));
+
+    field.appendChild(el('p', 'set-hint',
+      'Sleeping tabs free their memory and reload when you come back. ' +
+      'Pinned tabs and tabs playing sound stay awake.'));
+  }
+
   function buildSearch() {
     var s = section('Search');
     var field = el('div', 'set-field');
@@ -722,6 +812,201 @@
     field.appendChild(optionList(SITE_THEMES, get('siteTheme'), function (id) {
       set({ siteTheme: id });
     }));
+  }
+
+  /* ============================================================
+     Site styles
+
+     These do NOT live in the settings object: window.SiteStyles owns its own
+     storage and pushes every change into the open tabs itself. The panel is
+     one more view of it, and a build without that module simply says so.
+     ============================================================ */
+
+  /** The module, or null when this build shipped without it. */
+  function siteStyles() {
+    var m = window.SiteStyles;
+    if (!m) return null;
+    if (typeof m.hosts !== 'function' || typeof m.get !== 'function') return null;
+    if (typeof m.set !== 'function' || typeof m.remove !== 'function') return null;
+    return m;
+  }
+
+  /** Re-render whenever the module changes, whoever changed it. Once. */
+  function bindSiteStyles(api) {
+    if (siteBound || typeof api.on !== 'function') return;
+    siteBound = true;
+    try {
+      api.on(function () { if (bodyEl) renderSiteStyles(); });
+    } catch (err) { siteBound = false; }
+  }
+
+  /**
+   * What someone types vs. what a host actually is: 'https://WWW.Example.com/x'
+   * and 'Example.com' are the same site, and the list should say so once.
+   */
+  function normalizeHost(raw) {
+    var s = String(raw == null ? '' : raw).trim().toLowerCase();
+    if (!s) return '';
+    s = s.replace(/^[a-z][a-z0-9+.\-]*:\/\//, '');   // scheme
+    s = s.split(/[/?#]/)[0];                          // path, query, fragment
+    s = s.replace(/^[^@]*@/, '');                     // user:pass@
+    s = s.replace(/^www\./, '');
+    s = s.replace(/\.+$/, '');                        // the root dot
+    if (!s || /\s/.test(s)) return '';
+    return s;
+  }
+
+  /** A host is safe inside a selector once its two dangerous glyphs are. */
+  function attrEscape(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function buildSiteStyles() {
+    var s = section('Site styles');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'sitestyles');
+    s.appendChild(field);
+    return s;
+  }
+
+  /** One site: its name, its dark switch, and the CSS drawer under them. */
+  function siteRow(api, host) {
+    var rec = null;
+    try { rec = api.get(host); } catch (err) { rec = null; }
+    rec = rec || { css: '', dark: false };
+
+    var row = el('div', 'set-site');
+    row.setAttribute('data-host', host);
+
+    var head = el('div', 'set-site-head');
+    head.appendChild(el('span', 'set-site-host', host));
+
+    var sw = switchRow('Dark', !!rec.dark, function (next) {
+      try { api.set(host, { dark: next }); } catch (err) { /* module's problem */ }
+      renderSiteStyles();
+    });
+    sw.classList.add('is-inline');
+    sw.title = 'Force dark mode on ' + host;
+    head.appendChild(sw);
+
+    var expanded = siteOpen === host;
+    var edit = textButton('Edit', 'set-text set-site-edit', function () {
+      siteOpen = expanded ? null : host;
+      siteFocus = expanded ? null : '.set-site[data-host="' + attrEscape(host) + '"] .set-css';
+      renderSiteStyles();
+    });
+    edit.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    head.appendChild(edit);
+    row.appendChild(head);
+
+    if (!expanded) return row;
+
+    var editor = el('div', 'set-site-editor');
+    var ta = document.createElement('textarea');
+    ta.className = 'set-css';
+    ta.spellcheck = false;
+    ta.setAttribute('aria-label', 'Custom CSS for ' + host);
+    ta.value = typeof rec.css === 'string' ? rec.css : '';
+    // Escape leaves the field first; a second press then closes the panel.
+    ta.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      ta.blur();
+    });
+    editor.appendChild(ta);
+
+    var acts = el('div', 'set-site-acts');
+    acts.appendChild(textButton('Save', 'set-btn', function () {
+      try { api.set(host, { css: ta.value }); } catch (err) { /* module's problem */ }
+      var toast = window.Toast;
+      if (toast && typeof toast.show === 'function') toast.show('Saved ' + host);
+    }));
+    acts.appendChild(textButton('Remove site', 'set-text set-site-remove', function () {
+      try { api.remove(host); } catch (err) { /* module's problem */ }
+      if (siteOpen === host) siteOpen = null;
+      renderSiteStyles();
+    }));
+    editor.appendChild(acts);
+    row.appendChild(editor);
+    return row;
+  }
+
+  function renderSiteStyles() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="sitestyles"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var api = siteStyles();
+    if (!api) {
+      field.appendChild(el('p', 'set-na', 'Not available'));
+      return;
+    }
+    bindSiteStyles(api);
+
+    if (typeof api.globalDark === 'function' && typeof api.setGlobalDark === 'function') {
+      var on_ = false;
+      try { on_ = !!api.globalDark(); } catch (err) { on_ = false; }
+      field.appendChild(switchRow('Force dark mode on every site', on_, function (next) {
+        try { api.setGlobalDark(next); } catch (err) { /* module's problem */ }
+        renderSiteStyles();
+      }));
+      field.appendChild(el('p', 'set-hint', 'Sites that are already dark are left alone.'));
+    }
+
+    var hosts = [];
+    try { hosts = api.hosts() || []; } catch (err) { hosts = []; }
+
+    var list = el('div', 'set-sites');
+    if (!hosts.length) {
+      list.appendChild(el('p', 'set-empty',
+        'No site styles yet. Add a site to give it your own CSS or force dark mode.'));
+    }
+    hosts.forEach(function (host) { list.appendChild(siteRow(api, host)); });
+    field.appendChild(list);
+
+    /* The add row: a host, however the user happens to have copied it. */
+    var add = el('div', 'set-path-row set-site-add');
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'set-site-host';
+    input.className = 'set-path';
+    input.placeholder = 'example.com';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Add a site');
+
+    function commitAdd() {
+      /* The module's own normaliser wins when it has one: both sides have to
+         agree on what counts as the same site, or the list doubles up. */
+      var host = '';
+      try {
+        host = typeof api.normalizeHost === 'function'
+          ? String(api.normalizeHost(String(input.value)) || '')
+          : normalizeHost(input.value);
+      } catch (err) { host = normalizeHost(input.value); }
+      if (!host) { input.focus(); return; }
+      var known = false;
+      try { known = (api.hosts() || []).indexOf(host) >= 0; } catch (err) { known = false; }
+      if (!known) {
+        try { api.set(host, { css: '', dark: false }); } catch (err) { /* module's problem */ }
+      }
+      input.value = '';
+      siteOpen = host;
+      siteFocus = '.set-site[data-host="' + attrEscape(host) + '"] .set-css';
+      renderSiteStyles();
+    }
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); commitAdd(); }
+    });
+    add.appendChild(input);
+    add.appendChild(textButton('Add', 'set-btn', commitAdd));
+    field.appendChild(add);
+
+    if (siteFocus) {
+      var target = field.querySelector(siteFocus);
+      siteFocus = null;
+      if (target && typeof target.focus === 'function') target.focus();
+    }
   }
 
   function buildChips() {
@@ -994,8 +1279,10 @@
     bodyEl = el('div', 'set-body');
     bodyEl.appendChild(buildLook());
     bodyEl.appendChild(buildClaude());
+    bodyEl.appendChild(buildTabs());
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildSites());
+    bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildChips());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildShortcuts());
@@ -1009,8 +1296,10 @@
   function renderAll() {
     renderLook();
     renderClaude();
+    renderTabs();
     renderSearch();
     renderSites();
+    renderSiteStyles();
     renderChips();
     renderPrivacy();
   }
@@ -1122,6 +1411,7 @@
       if (keys.indexOf('accentHue') >= 0) renderLook();
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
+      if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0) renderChips();
@@ -1185,6 +1475,8 @@
     // test seams
     _defaults: DEFAULTS,
     _normalizeUrl: normalizeUrl,
-    _hostnameOf: hostnameOf
+    _hostnameOf: hostnameOf,
+    _normalizeHost: normalizeHost,
+    _sleepTimes: SLEEP_TIMES
   };
 })();

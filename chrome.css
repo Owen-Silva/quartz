@@ -467,6 +467,16 @@ img.tab-icon[src=""],
 
 .tab.broken img.tab-icon { display: none; }
 
+/* asleep: the tab gave its renderer back. Deliberately quiet — no badge, no
+   glyph, nothing that changes the chip's width — because the strip must not
+   reshuffle when a tab sleeps or wakes. The title drops to --fg-3 and the
+   favicon dims; hovering brings the title back up, so the chip still answers. */
+.tab.asleep .tab-title { color: var(--fg-3); }
+
+.tab.asleep img.tab-icon { opacity: .55; }
+
+.tab.asleep:hover .tab-title { color: var(--fg-2); }
+
 /* audible / muted: a speaker button left of the title, which app.js only
    hangs on a chip that has actually made a sound. Clicking it mutes the tab
    without raising it, so it must read as a control, not as a status dot. */
@@ -754,6 +764,17 @@ body.claude-live #newclaude .dot {
 #views webview[hidden],
 #views webview.hidden,
 #views webview.inactive { display: none; }
+
+/* The stand-in a sleeping tab leaves in #views. It only exists so the chrome
+   has an element to toggle display on where the <webview> used to be; it holds
+   no space and never paints. app.js also sets [hidden] on it. */
+#views > .sleeping-view {
+  flex: 0 0 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 
 /* --- Claude chamber: the deepest glass, full bleed ------------- */
 /* The fit addon measures this host's client box minus padding, so the

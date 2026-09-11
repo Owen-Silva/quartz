@@ -362,6 +362,77 @@
 /* the buttons sit on the field's line, not under it */
 #settings-panel .set-path-row .set-btn { margin-top: 0; }
 
+/* --- a sentence and one control on the same line --------------- */
+#settings-panel .set-ctl-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+#settings-panel .set-ctl-label {
+  flex: 1 1 150px;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+/* --- the select ------------------------------------------------
+   appearance:none drops the Windows arrow, which is the one piece of
+   system grey the pane cannot tint; the wrapper draws ours instead. */
+#settings-panel .set-select {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+#settings-panel .set-select::after {
+  content: '\E70D';
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  color: var(--fg-3);
+  font-family: var(--icon-font);
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+#settings-panel .set-sel {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  padding: 0 26px 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#settings-panel .set-sel:hover { background: var(--glass-2); }
+
+#settings-panel .set-sel:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+/* the open list is drawn by the OS: hand it opaque ground, not glass */
+#settings-panel .set-sel option {
+  background: var(--ink-1);
+  color: var(--fg);
+}
+
 #settings-panel .set-note {
   margin: 6px 0 0;
   color: var(--fg-3);
@@ -444,6 +515,108 @@
   white-space: nowrap;
   box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
 }
+
+/* ============================================================
+   Site styles
+   ============================================================ */
+
+/* a build without the module says so, quietly */
+#settings-panel .set-na {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+#settings-panel .set-sites {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+#settings-panel .set-site {
+  border-radius: 9px;
+  transition: background-color 120ms steps(2);
+}
+
+#settings-panel .set-site:hover,
+#settings-panel .set-site:focus-within { background: var(--glass); }
+
+#settings-panel .set-site-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 8px;
+}
+
+#settings-panel .set-site-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the same switch, shrunk onto a row it shares with two other controls */
+#settings-panel .set-row.is-inline {
+  flex: 0 0 auto;
+  width: auto;
+  gap: 7px;
+  padding: 4px 7px;
+  font-size: 11.5px;
+}
+
+#settings-panel .set-row.is-inline .set-row-label { flex: 0 0 auto; }
+#settings-panel .set-row.is-inline:hover { background: var(--glass-2); }
+
+#settings-panel .set-site-editor { padding: 2px 7px 8px; }
+
+/* the CSS itself: a code field, so it is set in code type */
+#settings-panel .set-css {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  padding: 8px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#settings-panel .set-css::placeholder { color: var(--placeholder); }
+#settings-panel .set-css:hover { background: var(--glass-2); }
+
+#settings-panel .set-css:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+#settings-panel .set-css::selection { background: var(--ion-select); color: var(--fg); }
+
+#settings-panel .set-site-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#settings-panel .set-site-acts .set-btn { margin-top: 0; }
+#settings-panel .set-site-remove { color: var(--fg-3); }
+#settings-panel .set-site-remove:hover { color: var(--fg); }
+
+#settings-panel .set-site-add { margin-top: 8px; }
 
 /* ============================================================
    New tab shortcuts
@@ -653,6 +826,9 @@
   #settings-panel .set-chip,
   #settings-panel .set-chip-text,
   #settings-panel .set-path,
+  #settings-panel .set-sel,
+  #settings-panel .set-css,
+  #settings-panel .set-site,
   #settings-panel .set-row,
   #settings-panel .set-switch,
   #settings-panel .set-switch-knob { transition: none; }

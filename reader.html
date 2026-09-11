@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reader</title>
+<!-- Sets data-theme on <html> from ?theme=, before anything paints, so a light
+     window never flashes dark. Shared with newtab.html: the file reads ?theme=
+     and ?hue= and touches nothing else, and the reader URL carries no hue, so
+     the stylesheet's own ion light stands. Must stay the first script and must
+     stay above the stylesheets. -->
+<script src="newtab-theme.js"></script>
+<!-- Second: it re-reads this page's saved text size and column width and puts
+     them on <html> before first paint, for the same reason. The rest of its
+     work waits for DOMContentLoaded. -->
+<script src="reader-page.js"></script>
+<link rel="stylesheet" href="reader-page.css">
+</head>
+<body>
+
+<!-- A single quiet wash behind the reading column. Fixed, inert, bottom layer,
+     and unlike the new-tab page it does not move: this is a page to read on. -->
+<div class="backdrop" aria-hidden="true"></div>
+
+<!-- The one piece of chrome: where the article came from, and how it reads. -->
+<header class="topbar glass">
+  <a id="back" class="barbtn back" href="#">
+    <span class="arrow" aria-hidden="true">&#8592;</span><span>Back to page</span>
+  </a>
+
+  <p id="sitename" class="sitename"></p>
+
+  <div class="controls">
+    <button id="smaller" class="barbtn" type="button" title="Smaller text" aria-label="Smaller text">A&#8722;</button>
+    <button id="bigger" class="barbtn" type="button" title="Larger text" aria-label="Larger text">A+</button>
+    <button id="width" class="barbtn wide-toggle" type="button" title="Column width">Narrow</button>
+  </div>
+</header>
+
+<main class="stage">
+  <div class="column">
+
+    <!-- Up until the chrome hands the article over, this is the whole page. -->
+    <p id="placeholder" class="placeholder">Preparing&#8230;</p>
+
+    <h1 id="title" class="title" hidden></h1>
+    <p id="meta" class="meta" hidden></p>
+
+    <!-- window.__applyArticle() fills this, and only this, with the parsed and
+         sanitised article body. Nothing else on the page is ever written to. -->
+    <article id="content" class="content-root"></article>
+
+  </div>
+</main>
+
+</body>
+</html>

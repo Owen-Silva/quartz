@@ -151,7 +151,8 @@ const CLAUDE_DEFAULT_TITLE = 'Claude';
  *   term?:Object|null, live?:boolean, termOff?:Function[],
  *   cardEl?:Element|null, warnEl?:Element|null, broken?:boolean,
  *   failedThisLoad?:boolean, audible?:boolean, muted?:boolean,
- *   audioEl?:Element|null, pinned?:boolean, globeEl?:Element|null
+ *   audioEl?:Element|null, pinned?:boolean, globeEl?:Element|null,
+ *   asleep?:boolean, openedAt?:number
  * }>}
  */
 const tabs = [];
@@ -225,6 +226,20 @@ function toNavigationUrl(rawInput) {
 /** True for the bundled new-tab page, query string and hash included. */
 function isNewTabUrl(url) {
   return typeof url === 'string' && url.indexOf(NEWTAB_URL) === 0;
+}
+
+// reader.html?src=<article url> is our own page wrapping someone else's article.
+// Everywhere a URL is shown or stored, the article's address is what matters.
+const READER_URL = new URL('reader.html', window.location.href).href;
+
+/** The article URL behind a reader-view URL, or null for anything else. */
+function readerSourceOf(url) {
+  if (typeof url !== 'string' || url.indexOf(READER_URL) !== 0) return null;
+  const parsed = parseUrlOrNull(url);
+  const src = parsed && parsed.searchParams.get('src');
+  const source = src && parseUrlOrNull(src);
+  if (!source || (source.protocol !== 'http:' && source.protocol !== 'https:')) return null;
+  return source.href;
 }
 
 function shortLabelFor(url) {
@@ -319,10 +334,12 @@ function isClaudeTab(tab) {
 /**
  * <webview> methods do not exist until 'dom-ready' fires, and they throw once
  * the element has been detached. Every call site goes through this guard.
- * Claude tabs have no webview at all, so they never pass.
+ * Claude tabs have no webview at all, so they never pass — and neither does a
+ * sleeping tab, whose viewEl is a placeholder <div> with no guest behind it.
  */
 function isViewUsable(tab) {
-  return !!(tab && tab.kind === 'page' && tab.ready && tab.viewEl && tab.viewEl.isConnected);
+  if (!tab || tab.kind !== 'page' || tab.asleep) return false;
+  return !!(tab.ready && tab.viewEl && tab.viewEl.isConnected);
 }
 
 /**
@@ -371,7 +388,8 @@ function setOmniboxValue(url, force) {
   // about:blank and the new-tab page both read as "empty": the user should see
   // the placeholder, never a file:// path they did not type.
   const blank = !url || url === 'about:blank' || isNewTabUrl(url);
-  omniboxEl.value = blank ? '' : url;
+  // A reader tab shows the article it is reading, not our wrapper page.
+  omniboxEl.value = blank ? '' : (readerSourceOf(url) || url);
 }
 
 function syncOmniboxFromActive(force) {
@@ -522,8 +540,10 @@ function chipTooltip(tab) {
     return (cwd && cwd !== tab.title) ? tab.title + ' — ' + cwd : tab.title;
   }
   const short = shortLabelFor(readCurrentUrl(tab) || tab.url);
-  if (!short || short === tab.title) return tab.title;
-  return tab.title + ' — ' + short;
+  const base = (!short || short === tab.title) ? tab.title : tab.title + ' — ' + short;
+  // A sleeping chip keeps its title and its favicon, so the tooltip is the only
+  // place the state is spelled out.
+  return tab.asleep ? 'Sleeping — ' + base : base;
 }
 
 /**
@@ -946,11 +966,34 @@ function wireChipDrag(tab, chip) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * The one place a page tab's <webview> is built and wired. createTab() and
+ * wakeTab() both come through here, so a woken tab is indistinguishable from a
+ * fresh one — same attributes, same event wiring, same born-hidden state.
+ * Sets tab.viewEl; the caller decides where in #views the element goes.
+ */
+function buildWebview(tab, url) {
+  const viewEl = document.createElement('webview');
+  // Popups stay off: the `allowpopups` attribute is deliberately never set.
+  viewEl.removeAttribute('allowpopups');
+  viewEl.setAttribute('src', url);
+  viewEl.style.width = '100%';
+  viewEl.style.height = '100%';
+  viewEl.style.display = 'none'; // activateTab() reveals the active one
+
+  tab.viewEl = viewEl;
+  tab.ready = false; // dom-ready on the NEW element is what flips this
+  wireViewEvents(tab);
+  return viewEl;
+}
+
+/**
  * @param {string} [url]
- * @param {{background?:boolean, pinned?:boolean, muted?:boolean}} [options]
+ * @param {{background?:boolean, pinned?:boolean, muted?:boolean, afterId?:number}} [options]
  *        background:true opens the tab behind the current one (Ctrl+click,
  *        target="_blank" with a background hint). pinned/muted are only used by
- *        restoreSession(), which rebuilds both from the stored entry.
+ *        restoreSession(), which rebuilds both from the stored entry. afterId
+ *        slots the new tab in directly behind that tab id instead of at the end
+ *        of the strip (the reader opens next to the page it was made from).
  */
 function createTab(url, options) {
   if (!viewsEl || !tabstripEl) return null;
@@ -964,18 +1007,10 @@ function createTab(url, options) {
     target = newTabUrl();
   }
 
-  const viewEl = document.createElement('webview');
-  // Popups stay off: the `allowpopups` attribute is deliberately never set.
-  viewEl.removeAttribute('allowpopups');
-  viewEl.setAttribute('src', target);
-  viewEl.style.width = '100%';
-  viewEl.style.height = '100%';
-  viewEl.style.display = 'none'; // activateTab() reveals the active one
-
   const tab = {
     id: nextTabId++,
     kind: 'page',
-    viewEl: viewEl,
+    viewEl: null,   // buildWebview() fills this in, below
     chipEl: null,
     titleEl: null,
     title: shortLabelFor(target),
@@ -993,17 +1028,27 @@ function createTab(url, options) {
     audioEl: null,
     pinned: false,
     globeEl: null,
-    lastActive: 0
+    asleep: false,
+    lastActive: 0,
+    // The idle clock a never-activated background tab is measured from; without
+    // it lastActive 0 would read as "idle since 1970" and sleep it on sight.
+    openedAt: Date.now()
   };
 
+  const viewEl = buildWebview(tab, target);
   tab.chipEl = buildChip(tab);
-  wireViewEvents(tab);
 
   tabs.push(tab);
   viewsEl.appendChild(viewEl);
   tabstripEl.appendChild(tab.chipEl);
-  // After the push: pinning is a move inside the strip, so the tab has to be
-  // in it first. A restored pinned tab is already in place, so this is a no-op.
+  // Both of these are moves inside the strip, so they run after the push. The
+  // pinned move is last: a pinned tab belongs in its own group whatever else
+  // was asked for.
+  if (opts.afterId !== undefined && opts.afterId !== null) {
+    const after = tabs.findIndex((t) => t.id === opts.afterId);
+    if (after !== -1) moveTabToIndex(tab.id, after + 1);
+  }
+  // A restored pinned tab is already in place, so this is a no-op.
   if (opts.pinned) setTabPinned(tab, true);
   if (tab.muted) syncTabAudio(tab);
   saveSession(); // debounced: activateTab() below folds into the same write
@@ -1014,6 +1059,153 @@ function createTab(url, options) {
 
   activateTab(tab.id);
   return tab;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tab sleeping                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A background tab that has sat untouched gives its renderer back: the
+ * <webview> is removed from #views (which is what destroys the guest) and a
+ * placeholder <div> takes its place in the tab model. The chip does not move,
+ * does not lose its title and does not lose its favicon — only the light goes
+ * out of it — so waking a tab never reshuffles the strip.
+ *
+ * The placeholder exists for one reason: activateTab() toggles
+ * tab.viewEl.style.display on EVERY tab, so a sleeping tab still has to have an
+ * element there. It is hidden and never paints.
+ */
+
+const TAB_SLEEP_DEFAULT_MINUTES = 30;
+const TAB_SLEEP_SWEEP_MS = 60000;
+
+/** Idle minutes before a background tab sleeps; 0 means never. */
+function tabSleepMinutes() {
+  const value = settingGet('tabSleepMinutes');
+  if (value === null || value === undefined || value === '') return TAB_SLEEP_DEFAULT_MINUTES;
+  const minutes = Number(value);
+  // A malformed setting is not an instruction to sleep everything.
+  if (!isFinite(minutes) || minutes < 0) return TAB_SLEEP_DEFAULT_MINUTES;
+  return minutes;
+}
+
+/** When this tab was last in front — its creation time until it ever has been. */
+function tabIdleSince(tab) {
+  if (!tab) return 0;
+  return tab.lastActive || tab.openedAt || 0;
+}
+
+/**
+ * Whether a tab may be slept right now, idle time aside. Everything excluded
+ * here is something the user would notice losing: the tab on screen, a pinned
+ * tab, anything playing (muted or not — media-started-playing fires either
+ * way), a blank new tab (nothing to reload), a broken one (its card is the
+ * page), and anything with no live guest to give back.
+ */
+function canSleepTab(tab) {
+  if (!tab || tab.kind !== 'page') return false;
+  if (tab.asleep) return false;
+  if (tab.id === activeTabId) return false;
+  if (tab.pinned) return false;
+  if (tab.audible) return false;
+  if (tab.broken) return false;
+  if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return false;
+  return isViewUsable(tab);
+}
+
+/**
+ * Put one tab to sleep. The url is snapshotted first: it can only be read while
+ * the guest is still attached, and it is the whole of what wakeTab() needs.
+ * @returns {boolean} true when the tab actually went to sleep.
+ */
+function sleepTab(tab) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return false;
+  if (tab.id === activeTabId) return false; // the tab on screen is never asleep
+  if (!viewsEl || !tab.viewEl) return false;
+
+  tab.url = readCurrentUrl(tab) || tab.url;
+
+  const placeholder = document.createElement('div');
+  placeholder.className = 'sleeping-view';
+  placeholder.hidden = true;
+
+  const viewEl = tab.viewEl;
+  try {
+    if (viewEl.isConnected && viewEl.parentNode) viewEl.parentNode.insertBefore(placeholder, viewEl);
+    else viewsEl.appendChild(placeholder);
+  } catch (err) {
+    return false; // could not stand anything in for the view: leave it alone
+  }
+  // Removing the element from the document is what tears the guest down.
+  try { viewEl.remove(); } catch (err) { /* already detached */ }
+
+  tab.viewEl = placeholder;
+  tab.ready = false;
+  tab.asleep = true;
+  setTabLoading(tab, false); // a load in flight died with the guest
+  if (tab.chipEl) {
+    tab.chipEl.classList.add('asleep');
+    tab.chipEl.title = chipTooltip(tab);
+  }
+  saveSession(); // the snapshotted url may be newer than the last write
+  return true;
+}
+
+/**
+ * Build the tab a guest again, on the url it was sleeping on. The mute and the
+ * site's zoom are re-applied by the dom-ready handler, exactly as they are for
+ * a tab that has just been restored from the session.
+ * @returns {boolean} true when the tab actually woke.
+ */
+function wakeTab(tab) {
+  if (!tab || !tab.asleep) return false;
+  if (!viewsEl) return false;
+
+  const placeholder = tab.viewEl;
+  const viewEl = buildWebview(tab, tab.url || HOME_URL);
+  try {
+    // Back in its own slot, so #views keeps the strip's order.
+    if (placeholder && placeholder.isConnected) viewsEl.insertBefore(viewEl, placeholder);
+    else viewsEl.appendChild(viewEl);
+  } catch (err) {
+    try { viewsEl.appendChild(viewEl); } catch (err2) { return false; }
+  }
+  try { if (placeholder) placeholder.remove(); } catch (err) { /* already detached */ }
+
+  tab.asleep = false;
+  if (tab.chipEl) {
+    tab.chipEl.classList.remove('asleep');
+    tab.chipEl.title = chipTooltip(tab);
+  }
+  return true;
+}
+
+/**
+ * One sweep of the strip, on the 60s interval init() starts.
+ * @returns {number} how many tabs were put to sleep.
+ */
+function sleepIdleTabs() {
+  const minutes = tabSleepMinutes();
+  if (!minutes) return 0; // 0 = never
+  const cutoff = Date.now() - minutes * 60000;
+  let slept = 0;
+  // A copy: sleepTab() only swaps one element, but the sweep should not care.
+  for (const tab of tabs.slice()) {
+    if (!canSleepTab(tab)) continue;
+    if (tabIdleSince(tab) > cutoff) continue;
+    if (sleepTab(tab)) slept++;
+  }
+  return slept;
+}
+
+/** Strip menu: sleep every eligible tab now. canSleepTab() spares the active one. */
+function sleepOtherTabs() {
+  let slept = 0;
+  for (const tab of tabs.slice()) {
+    if (canSleepTab(tab) && sleepTab(tab)) slept++;
+  }
+  return slept;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1241,6 +1433,11 @@ function activateTab(id) {
   const target = tabs.find((t) => t.id === id);
   if (!target) return;
 
+  // Synchronously, before the display swap: the tab in front is never asleep,
+  // so everything below — and everything that reads getActiveTab().viewEl —
+  // is looking at a real <webview> again.
+  if (target.asleep) wakeTab(target);
+
   activeTabId = target.id;
   target.lastActive = Date.now();
 
@@ -1295,6 +1492,7 @@ function closeTab(id) {
   tab.ready = false;
   disposeClaudeTab(tab); // no-op for page tabs
   clearTabCard(tab);     // the card lives in #views, not on the view
+  // On a sleeping tab this drops the placeholder: the guest is long gone.
   try { tab.viewEl.remove(); } catch (err) { /* already detached */ }
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
@@ -1351,6 +1549,9 @@ function printActiveTab() {
 }
 
 function reloadTab(tab) {
+  // A sleeping tab has no guest to reload; waking it loads the page from
+  // scratch, which is exactly what was asked for.
+  if (tab && tab.asleep) { wakeTab(tab); return; }
   if (!isViewUsable(tab)) return;
   try { tab.viewEl.reload(); } catch (err) { /* view went away mid-call */ }
 }
@@ -1491,6 +1692,11 @@ function tabMenuItemsForTab(tab) {
       run: () => setTabMuted(tab, !tab.muted)
     });
     items.push({ label: 'Print…', run: () => printTab(tab) });
+    // Sleeping is reversible and costs nothing to offer, so the row is always
+    // there: disabled on a tab that is not allowed to sleep right now.
+    items.push(tab.asleep
+      ? { label: 'Wake tab', run: () => wakeTab(tab) }
+      : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepTab(tab) });
   } else {
     // Same folder, fresh session — the chamber already running is untouched.
     // Duplicate is deliberately not offered: a PTY cannot be copied.
@@ -1519,11 +1725,13 @@ function tabMenuItemsForTab(tab) {
   return items;
 }
 
-/** Right-click on bare strip: there is no tab to act on, so only these three. */
+/** Right-click on bare strip: there is no tab to act on, so only these four. */
 function tabMenuItemsForStrip() {
   return [
     { label: 'New tab', run: () => createTab(HOME_URL) },
     { label: 'New Claude tab in folder…', run: newClaudeTabInFolder },
+    // The manual version of the idle sweep: the tab in front is never touched.
+    { label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepTab) },
     { label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() }
   ];
 }
@@ -1629,7 +1837,9 @@ function sessionUrlFor(tab) {
   if (!tab || tab.kind !== 'page') return null;
   const url = readCurrentUrl(tab) || tab.url;
   if (isNewTabUrl(url)) return SESSION_NEWTAB;
-  const parsed = parseUrlOrNull(url);
+  // The article itself is what comes back after a restart: the reader wrapper
+  // has no article to show until someone opens it from a loaded page.
+  const parsed = parseUrlOrNull(readerSourceOf(url) || url);
   // Web pages only: a file:// or data: tab is not worth reopening cold.
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return null;
   return parsed.href;
@@ -1857,7 +2067,7 @@ function pushClosedTab(tab) {
   const url = readCurrentUrl(tab) || tab.url;
   // A blank new tab is not worth a slot on the stack.
   if (!url || isNewTabUrl(url)) return;
-  closedStack.push(url);
+  closedStack.push(readerSourceOf(url) || url); // reopen the article, not the wrapper
   while (closedStack.length > CLOSED_STACK_MAX) closedStack.shift();
 }
 
@@ -1872,10 +2082,39 @@ function reopenClosedTab() {
 /* webview events                                                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * sitestyles.js is optional and loads after this file, so the hook is
+ * feature-detected on every call. It may hand back a promise
+ * (executeJavaScript), which must never surface as an unhandled rejection.
+ */
+function applySiteStyles(tab) {
+  const mod = window.SiteStyles;
+  if (!mod || typeof mod.applyTo !== 'function') return;
+  try {
+    const pending = mod.applyTo(tab);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* per-site CSS is decoration: it never breaks a load */ }
+}
+
+/**
+ * Tell the chrome modules a page tab reached a milestone. Same shape as
+ * 'tabchange': the id plus the url, so nothing has to reach into the tab model.
+ */
+function emitTabEvent(name, tab) {
+  document.dispatchEvent(new CustomEvent(name, {
+    detail: { id: tab.id, url: readCurrentUrl(tab) || tab.url }
+  }));
+}
+
 function wireViewEvents(tab) {
   const viewEl = tab.viewEl;
+  // A view that has been slept (or replaced by wakeTab) is detached but can
+  // still fire one last event. Its tab has moved on to another element by then,
+  // so those land here and are dropped.
+  const stale = () => tab.viewEl !== viewEl;
 
   viewEl.addEventListener('dom-ready', () => {
+    if (stale()) return;
     tab.ready = true;
     // The guest only exists from here: a restored mute is re-applied to it, and
     // the new-tab page gets the recent list it cannot read for itself.
@@ -1891,23 +2130,36 @@ function wireViewEvents(tab) {
       // new-tab page focus now so its autofocused search field gets the keys.
       if (isNewTabUrl(readCurrentUrl(tab))) focusViewSoon(tab);
     }
+    // Per-document, once the guest exists: this is the only point where the
+    // page is there to take CSS and is not yet on screen.
+    applySiteStyles(tab);
+    emitTabEvent('tabready', tab);
   });
 
   // The page started or stopped making a sound. Chromium fires these per media
   // element, so they are a level, not an event: the chip just follows.
-  viewEl.addEventListener('media-started-playing', () => setTabAudible(tab, true));
-  viewEl.addEventListener('media-paused', () => setTabAudible(tab, false));
+  viewEl.addEventListener('media-started-playing', () => {
+    if (stale()) return;
+    setTabAudible(tab, true);
+  });
+  viewEl.addEventListener('media-paused', () => {
+    if (stale()) return;
+    setTabAudible(tab, false);
+  });
 
   viewEl.addEventListener('destroyed', () => {
+    if (stale()) return;
     tab.ready = false;
   });
 
   viewEl.addEventListener('page-title-updated', (event) => {
+    if (stale()) return;
     setTabTitle(tab, event && event.title);
     historyCall('updateTitle', tab.url, event && event.title);
   });
 
   const onNavigate = (event) => {
+    if (stale()) return;
     if (event && event.url) tab.url = event.url;
     // did-fail-load can land either side of the error page's own did-navigate,
     // so a navigation only clears the card when THIS load did not fail.
@@ -1931,6 +2183,7 @@ function wireViewEvents(tab) {
   });
 
   viewEl.addEventListener('did-start-loading', () => {
+    if (stale()) return;
     setTabLoading(tab, true);
     clearTabIcon(tab); // the incoming page reports its own, or stays blank
     tab.failedThisLoad = false;
@@ -1938,11 +2191,14 @@ function wireViewEvents(tab) {
   });
 
   viewEl.addEventListener('did-stop-loading', () => {
+    if (stale()) return;
     setTabLoading(tab, false);
     if (tab.id === activeTabId) updateNavState();
+    emitTabEvent('tabloaded', tab);
   });
 
   viewEl.addEventListener('did-fail-load', (event) => {
+    if (stale()) return;
     // Aborted and failed loads both end here; the spinner must not stick.
     setTabLoading(tab, false);
     if (!event) return;
@@ -1961,6 +2217,7 @@ function wireViewEvents(tab) {
   // The guest's renderer died. 'crashed' is the pre-Electron-22 spelling and is
   // kept so the card still appears on an older runtime.
   const onGone = (reason) => {
+    if (stale()) return; // we took the guest away ourselves: not a crash
     if (reason === 'clean-exit') return; // an ordinary teardown, not a crash
     tab.ready = false;
     setTabLoading(tab, false);
@@ -1980,6 +2237,7 @@ function wireViewEvents(tab) {
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
+    if (stale()) return;
     try {
       const icons = event && event.favicons;
       if (Array.isArray(icons) && icons.length) setTabIcon(tab, icons[0]);
@@ -1989,6 +2247,7 @@ function wireViewEvents(tab) {
   // target="_blank" and Ctrl+click. `allowpopups` stays off, so the guest never
   // gets a real popup window; we turn the request into a tab ourselves.
   viewEl.addEventListener('new-window', (event) => {
+    if (stale()) return;
     if (!event || typeof event.url !== 'string') return;
     const parsed = parseUrlOrNull(event.url);
     // Web only: a page must not talk us into opening file:// or a custom scheme.
@@ -2125,6 +2384,8 @@ function retryTab(tab) {
   if (!tab) return;
   const url = tab.url || HOME_URL;
   clearTabCard(tab); // did-fail-load puts it straight back if this fails too
+  // A sleeping tab (a card can outlive one) has no guest: waking it IS the retry.
+  if (tab.asleep) { wakeTab(tab); return; }
   if (!tab.viewEl || !tab.viewEl.isConnected) return;
 
   if (isViewUsable(tab)) {
@@ -2596,7 +2857,10 @@ function historyCall(method, url, title) {
 // Actions the modules own. Each exposes handleShortcut(action) -> true when it
 // consumed the action; 'escape' is offered to all of them until one takes it.
 function moduleShortcut(action) {
-  const modules = [window.FindBar, window.Downloads, window.History, window.Settings, window.Shield];
+  const modules = [
+    window.FindBar, window.Downloads, window.History,
+    window.Settings, window.Shield, window.Reader
+  ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
     let took = false;
@@ -2651,6 +2915,9 @@ function wireKeyboard() {
       'history': () => moduleShortcut('history'),
       'settings': () => moduleShortcut('settings'),
       'bookmark': () => moduleShortcut('bookmark'),
+      // main.js does not send 'reader' yet; like 'print', the entry costs
+      // nothing and means Ctrl+Shift+R works from a focused page the day it does.
+      'reader': () => moduleShortcut('reader'),
       'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
@@ -2755,6 +3022,14 @@ function wireKeyboard() {
       focusOmnibox();
       return;
     }
+    // Ctrl+Shift+R hands the page to the reader. Tested BEFORE plain Ctrl+R,
+    // which does not look at Shift and would otherwise swallow it. main.js does
+    // not replay this one yet, so it only fires while the chrome has focus.
+    if (key === 'r' && event.shiftKey) {
+      event.preventDefault();
+      moduleShortcut('reader');
+      return;
+    }
     if (key === 'r') {
       event.preventDefault(); // never let Ctrl+R reload the shell window
       reloadActiveTab(); // no-op on a Claude tab
@@ -2812,6 +3087,11 @@ function init() {
     pushRecentToTab(getActiveTab());
   });
 
+  // Tab sleeping: one sweep a minute for the life of the window. Deliberately
+  // never cleared — the chrome outlives every tab in it, and the setting is
+  // re-read on each sweep, so a change takes effect without a restart.
+  window.setInterval(sleepIdleTabs, TAB_SLEEP_SWEEP_MS);
+
   // Re-apply the theme theme-boot.js already stamped on <html>: this is what
   // paints the toggle glyph and hands the theme to terminal.js. Runs before the
   // first tab so that tab is born with the right ?theme= on its URL.
@@ -2841,6 +3121,14 @@ function init() {
     openStrip(readSession());
   }
 }
+
+// Top-level declarations in a classic script are already window properties;
+// these are said out loud because the sleep harness and settings.js address
+// them through window, and a future bundling pass must not quietly drop them.
+window.sleepTab = sleepTab;
+window.wakeTab = wakeTab;
+window.sleepIdleTabs = sleepIdleTabs;
+window.canSleepTab = canSleepTab;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });
