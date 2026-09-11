@@ -148,6 +148,84 @@ function pushSettingsToTab(tab) {
   } catch (err) { /* guest went away mid-call */ }
 }
 
+/* ------------------------------------------------------------------ */
+/* The new-tab readout                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The little live line on the new-tab page: how many tabs are open, how many
+ * Claude chambers are live, and what Spotify auto-pause is doing right now.
+ * The page is a guest on file:// and can see none of that for itself, so the
+ * chrome pushes it — same shape, and the same two guards, as every other push
+ * above.
+ */
+
+// Cached so a tab change never has to ask main again: main pushes every change
+// down api.autopause.onStatus, and that is what refreshes this.
+let autopauseReadout = 'unknown';
+
+/** One autopause status object -> the four words the page understands. */
+function autopauseWord(status) {
+  if (!status || typeof status !== 'object') return 'unknown';
+  // A hold that is actually out beats the switch: that is the state the user
+  // can hear. `wePaused` is the bridge's word for it, `browserHold` is ours.
+  if (status.browserHold || status.wePaused) return 'holding';
+  if (status.enabled && status.bridge === 'running') return 'on';
+  return 'off';
+}
+
+function readoutSnapshot() {
+  let claude = 0;
+  for (const tab of tabs) if (isClaudeTab(tab) && tab.live) claude += 1;
+  // Every open tab, in every workspace: the page is describing the browser,
+  // not the strip in front of it.
+  return { tabs: tabs.length, claude: claude, autopause: autopauseReadout };
+}
+
+/** Hand the readout to one open new-tab guest (no-op for anything else). */
+function pushReadoutToTab(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const payload = JSON.stringify(readoutSnapshot());
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyReadout && window.__applyReadout(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+function pushReadoutToAll() {
+  for (const tab of tabs) pushReadoutToTab(tab);
+}
+
+/**
+ * Called once from init(): seed the cached word with one status() call, then
+ * follow main's pushes for the rest of the window's life. Feature-detected —
+ * a preload without the group leaves the readout saying 'unknown'.
+ */
+function wireAutopauseReadout() {
+  const ap = (window.api && window.api.autopause) ? window.api.autopause : null;
+  if (!ap) return;
+  if (typeof ap.onStatus === 'function') {
+    ap.onStatus((status) => {
+      const word = autopauseWord(status);
+      if (word === autopauseReadout) return; // nothing moved: no guest work
+      autopauseReadout = word;
+      pushReadoutToAll();
+    });
+  }
+  if (typeof ap.status !== 'function') return;
+  Promise.resolve()
+    .then(() => ap.status())
+    .then((status) => {
+      const word = autopauseWord(status);
+      if (word === autopauseReadout) return;
+      autopauseReadout = word;
+      pushReadoutToAll();
+    })
+    .catch(() => { /* nothing running: 'unknown' is the honest answer */ });
+}
+
 // How many recent sites the new-tab page is given. Its own layout decides how
 // many of them it shows.
 const RECENT_SITES = 8;
@@ -224,8 +302,22 @@ function wireOverlayWatch() {
   // attribute observer on the whole document catches every one of them.
   const observer = new MutationObserver(() => syncBoardPause());
   observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['hidden'] });
-  window.addEventListener('blur', () => { windowBlurred = true; syncBoardPause(); });
-  window.addEventListener('focus', () => { windowBlurred = false; syncBoardPause(); });
+
+  // The REAL window's focus, from main. This document's own blur/focus is the
+  // wrong signal: clicking into a page focuses the <webview> guest, which
+  // blurs the chrome document while the window itself never moved -- and the
+  // board would freeze the moment the user touched the page. Only a preload
+  // that predates api.win.onFocus falls back to the document events.
+  const win = winApi();
+  if (win && typeof win.onFocus === 'function') {
+    win.onFocus((payload) => {
+      windowBlurred = !(payload && payload.focused);
+      syncBoardPause();
+    });
+  } else {
+    window.addEventListener('blur', () => { windowBlurred = true; syncBoardPause(); });
+    window.addEventListener('focus', () => { windowBlurred = false; syncBoardPause(); });
+  }
   // A freshly loaded new-tab guest has to learn the current state too.
   document.addEventListener('tabready', (event) => {
     const tab = tabs.find((t) => t.id === (event.detail && event.detail.id));
@@ -237,7 +329,9 @@ function wireOverlayWatch() {
 function wireSettings() {
   const settings = window.Settings;
   if (!settings || typeof settings.on !== 'function') return;
+  pushClaudeSkipToPreload(); // the switch as it stands at boot
   settings.on(() => {
+    pushClaudeSkipToPreload(); // ...and after any write, including that switch
     for (const tab of tabs) {
       pushSettingsToTab(tab);
       pushBackgroundToTab(tab); // the store emits on every image replace/remove too
@@ -1544,6 +1638,7 @@ function createTab(url, options) {
   if (opts.pinned) setTabPinned(tab, true);
   if (tab.muted) syncTabAudio(tab);
   emitWorkspaceChange(); // a tab count moved
+  pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession(); // debounced: activateTab() below folds into the same write
 
   // Never leave the window with nothing on screen: the very first tab is opened
@@ -2262,6 +2357,9 @@ function onGuestFocused(payload) {
 function recomputeClaudeLive() {
   const any = tabs.some((t) => isClaudeTab(t) && t.live);
   document.body.classList.toggle('claude-live', any);
+  // A session coming up or ending moves the new-tab readout's Claude count;
+  // this is the one place every such change already passes through.
+  pushReadoutToAll();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2553,17 +2651,45 @@ function claudeDefaultTitle(tab) {
   return claudeTitleFor(tab && tab.cwd);
 }
 
+// Every chamber starts with this unless the Settings switch says otherwise:
+// a session that stops to ask for a confirmation is a session nobody is
+// watching. pty.js allowlists it; preload.js puts it on the Enter-to-restart
+// spawn too (terminal.js drops the first-spawn flags on purpose).
+const CLAUDE_SKIP_ARG = '--dangerously-skip-permissions';
+
+/** The setting, read the same way everywhere: unset means yes. */
+function claudeSkipPermissions() {
+  return settingGet('claudeSkipPermissions') !== false;
+}
+
 /**
  * The one place a `resume` option becomes claude.exe flags.
  *
  * 'pick' -> `--resume` with no id, which is the CLI's own picker of past
  * conversations in that folder; true -> `--continue`, the latest one without
- * asking. pty.js allows exactly these two, bare, and drops the rest.
+ * asking. pty.js allows exactly these, bare, and drops the rest.
+ *
+ * The skip-permissions flag is PREPENDED, so it is on the command line for a
+ * plain new tab as well as for either resume spelling.
  */
 function claudeStartArgs(resume) {
-  if (resume === 'pick') return ['--resume'];
-  if (resume) return ['--continue'];
-  return [];
+  const args = [];
+  if (claudeSkipPermissions()) args.push(CLAUDE_SKIP_ARG);
+  if (resume === 'pick') args.push('--resume');
+  else if (resume) args.push('--continue');
+  return args;
+}
+
+/**
+ * Hand the preference down to preload, which is the one funnel EVERY spawn
+ * goes through -- including terminal.js's Enter-to-restart, which deliberately
+ * forgets the flags the first spawn was given. Called at init and again on
+ * every settings write; a preload that predates it is simply skipped.
+ */
+function pushClaudeSkipToPreload() {
+  const pty = (window.api && window.api.pty) ? window.api.pty : null;
+  if (!pty || typeof pty.setPrefs !== 'function') return;
+  try { pty.setPrefs({ skipPermissions: claudeSkipPermissions() }); } catch (err) { /* preload's problem */ }
 }
 
 /**
@@ -2633,6 +2759,7 @@ function createClaudeTab(options) {
   viewsEl.appendChild(viewEl);
   tabstripEl.appendChild(tab.chipEl);
   emitWorkspaceChange(); // a tab count moved
+  pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession(); // a chamber is a session entry now; debounced with the rest
 
   // Never leave the window with nothing on screen: the very first tab of a boot
@@ -2879,6 +3006,7 @@ function closeTab(id) {
   recomputeClaudeLive();
   recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
   emitWorkspaceChange(); // a tab count moved
+  pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession();
 
   if (tabs.length === 0) {
@@ -3714,6 +3842,7 @@ function wireViewEvents(tab) {
     pushRecentToTab(tab);
     pushBackgroundToTab(tab);
     pushHistoryToTab(tab);
+    pushReadoutToTab(tab);
     // did-navigate can land before the guest exists, so the site's remembered
     // zoom is applied here too. It paints the badge when this tab is in front.
     applyStoredZoom(tab);
@@ -4733,6 +4862,27 @@ function applyMaximized(isMax) {
   setMaximizedGlyph(on);
 }
 
+/**
+ * "Restart browser": close and reopen with the tabs restored. Every update to
+ * this app needs a close-and-reopen, so this is the one click that does it.
+ *
+ * The session snapshot is flushed SYNCHRONOUSLY first — the debounced save can
+ * still be pending, and a restart that dropped the last tab you opened would
+ * be worse than no button at all. writeSession() hands it to main over the
+ * same ordered channel the restart message uses, so session.json is on disk
+ * before main reads 'app:restart'.
+ *
+ * @returns {boolean} false when preload predates api.app.restart (nothing
+ *          happened, and the caller can say so).
+ */
+function restartBrowser() {
+  try { writeSession(); } catch (err) { /* a lost snapshot must not block the restart */ }
+  const appApi = (window.api && window.api.app) ? window.api.app : null;
+  if (!appApi || typeof appApi.restart !== 'function') return false;
+  try { appApi.restart(); } catch (err) { return false; }
+  return true;
+}
+
 function wireWindowControls() {
   if (winMinBtn) {
     winMinBtn.addEventListener('click', () => {
@@ -5007,6 +5157,9 @@ const ACTIONS = {
   'back': goBack,
   'forward': goForward,
   'fullscreen': toggleFullscreen,
+  // No default binding: it is reached from Settings > About and from the
+  // command palette, never from a key nobody meant to press.
+  'restart-browser': restartBrowser,
   'split': toggleSplit,
   'claude-split': toggleClaudeSplit,
   // Carries no payload: the selection is read back off the guest here.
@@ -5327,6 +5480,7 @@ function init() {
   wireKeyboard();
   wireSettings();
   wireOverlayWatch();
+  wireAutopauseReadout();
 
   // The chrome follows its own tabchange event, exactly like find.js and the
   // other modules do: the badge belongs to the tab you are looking at, and a
@@ -5334,6 +5488,9 @@ function init() {
   document.addEventListener('tabchange', () => {
     updateZoomBadge();
     pushRecentToTab(getActiveTab());
+    // Cheap: the counts are already in hand and the autopause word is cached,
+    // so coming back to a new tab never costs a round trip to main.
+    pushReadoutToAll();
   });
 
   // The split focus mark and a split crash card are parked over measured rects,
@@ -5403,6 +5560,11 @@ window.askArticlePromptText = askArticlePromptText;
 window.askClaudeAboutFile = askClaudeAboutFile;
 window.filePromptText = filePromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
+
+// Close and reopen with the tabs restored. settings.js (About) and the command
+// palette both go through this rather than api.app.restart(), so the session
+// snapshot is flushed the same way whoever asks.
+window.restartBrowser = restartBrowser;
 
 // Workspaces. This is the whole contract workspaces.js (the switcher UI) and
 // tabsearch.js drive; neither reaches into `workspaces` or `tabs` to change

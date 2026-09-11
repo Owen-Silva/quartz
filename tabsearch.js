@@ -654,6 +654,11 @@
       run: function () { callModule('Settings', 'open'); }
     });
     list.push({
+      id: 'restart-browser', glyph: GLYPH.reload, label: 'Restart browser',
+      hint: 'Closes and reopens with your tabs restored. Use it after an update',
+      run: function () { if (typeof window.restartBrowser === 'function') window.restartBrowser(); }
+    });
+    list.push({
       id: 'downloads', glyph: GLYPH.down, label: 'Downloads', keys: ['Ctrl', 'J'],
       action: 'downloads',
       run: function () { callModule('Downloads', 'open'); }

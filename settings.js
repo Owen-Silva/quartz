@@ -19,6 +19,7 @@
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
  *     claudeResume: true | false,           // --continue on a restored tab
+ *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions
  *     claudeNotify: true | false,           // toast when a tab goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     newtabBackground: { kind: 'board'|'aurora'|'image',
@@ -81,6 +82,10 @@
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
+    /* Every Claude tab starts with --dangerously-skip-permissions. On by
+       default on purpose: these chambers run on the user's own machine, and a
+       session sitting on a confirmation nobody is watching is a stuck tab. */
+    claudeSkipPermissions: true,
     /* A quiet Windows notification when a background Claude tab stops working
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
@@ -1107,6 +1112,10 @@
     resume.setAttribute('data-field', 'clauderesume');
     s.appendChild(resume);
 
+    var skip = el('div', 'set-field');
+    skip.setAttribute('data-field', 'claudeskip');
+    s.appendChild(skip);
+
     var notify = el('div', 'set-field');
     notify.setAttribute('data-field', 'claudenotify');
     s.appendChild(notify);
@@ -1116,6 +1125,7 @@
   function renderClaude() {
     renderClaudeDir();
     renderClaudeResume();
+    renderClaudeSkip();
     renderClaudeNotify();
   }
 
@@ -1223,6 +1233,24 @@
     hint.appendChild(document.createTextNode('Restored Claude tabs run '));
     hint.appendChild(el('code', 'set-code', 'claude --continue'));
     hint.appendChild(document.createTextNode(' in their folder. Turn off to start fresh every time.'));
+    field.appendChild(hint);
+  }
+
+  function renderClaudeSkip() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="claudeskip"]');
+    if (!field) return;
+    field.textContent = '';
+
+    field.appendChild(switchRow(
+      'Skip permission prompts',
+      get('claudeSkipPermissions') !== false,
+      function (next) { set({ claudeSkipPermissions: next }); }
+    ));
+
+    var hint = el('p', 'set-hint');
+    hint.appendChild(document.createTextNode('Every Claude tab starts with '));
+    hint.appendChild(el('code', 'set-code', 'claude --dangerously-skip-permissions'));
+    hint.appendChild(document.createTextNode(', so nothing waits on a confirmation.'));
     field.appendChild(hint);
   }
 
@@ -2706,6 +2734,27 @@
       } catch (err) { /* older preload: the bare name is still true */ }
     }
     s.appendChild(el('p', 'set-about', line));
+
+    /* Updating this browser means closing and reopening it, so here is the
+       one click that does it. app.js owns the action (window.restartBrowser)
+       because it flushes the session snapshot first; the bare preload call is
+       the fallback for a chrome that has not exposed it. */
+    var restart = el('div', 'set-field');
+    restart.setAttribute('data-field', 'restart');
+    restart.appendChild(textButton('Restart browser', 'set-btn', function () {
+      if (typeof window.restartBrowser === 'function') {
+        window.restartBrowser();
+        return;
+      }
+      var api = window.api && window.api.app;
+      if (api && typeof api.restart === 'function') api.restart();
+    }));
+    restart.appendChild(el(
+      'p',
+      'set-hint',
+      'Closes and reopens the browser with your tabs restored. Use it after an update.'
+    ));
+    s.appendChild(restart);
     return s;
   }
 
@@ -3217,6 +3266,7 @@
       if (keys.indexOf('accentHue') >= 0 || keys.indexOf('palette') >= 0) renderLook();
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
+      if (keys.indexOf('claudeSkipPermissions') >= 0) renderClaudeSkip();
       if (keys.indexOf('claudeNotify') >= 0) renderClaudeNotify();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
       if (keys.indexOf('downloadsAskWhere') >= 0) renderDownloads();

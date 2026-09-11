@@ -4,6 +4,25 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const HOME_DIR = 'C:\\Users\\you';
 
+// Claude chambers start with --dangerously-skip-permissions unless the
+// renderer has said otherwise (api.pty.setPrefs). It is kept HERE rather than
+// only at the call site in app.js because pty.start() is the one funnel every
+// spawn goes through: terminal.js drops the first-spawn flags when the user
+// presses Enter to restart a finished session, and that restart should skip
+// prompts exactly like the tab it replaces. pty.js de-duplicates, so a call
+// that already carries the flag is unaffected.
+const SKIP_PERMISSIONS_ARG = '--dangerously-skip-permissions';
+let ptySkipPermissions = true; // default until the renderer says otherwise
+
+function withSkipPermissions(opts) {
+  const out = (opts && typeof opts === 'object') ? { ...opts } : {};
+  if (!ptySkipPermissions) return out;
+  const args = Array.isArray(out.args) ? out.args.slice() : [];
+  if (args.indexOf(SKIP_PERMISSIONS_ARG) === -1) args.unshift(SKIP_PERMISSIONS_ARG);
+  out.args = args;
+  return out;
+}
+
 contextBridge.exposeInMainWorld('api', {
   homeDir: HOME_DIR,
   // Shortcuts the main process caught on our behalf because focus was inside a
@@ -48,6 +67,11 @@ contextBridge.exposeInMainWorld('api', {
     pickFolder: (defaultPath) => ipcRenderer.invoke('app:pick-folder', { defaultPath }),
     // True only for an existing directory -- used to validate a typed path.
     dirExists: (path) => ipcRenderer.invoke('app:dir-exists', { path }),
+    // Close and reopen the browser, tabs and all: the same graceful shutdown a
+    // window close does, then a relaunch with this run's own argv (so a test
+    // instance comes back a test instance). Nothing to await -- the process is
+    // gone before a reply could arrive.
+    restart: () => ipcRenderer.send('app:restart'),
     // Sync: these are already in this process, so nothing has to be awaited.
     versions: () => ({
       electron: process.versions.electron,
@@ -72,6 +96,15 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on('win:fullscreen', handler);
       return () => ipcRenderer.removeListener('win:fullscreen', handler);
+    },
+    // The REAL window's focus, as { focused }. Not the same thing as this
+    // document's blur/focus: clicking into a <webview> blurs the chrome
+    // document while the window itself never lost focus. Main sends the
+    // current state once the page has loaded, then on every change.
+    onFocus: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('win:focus', handler);
+      return () => ipcRenderer.removeListener('win:focus', handler);
     }
   },
   // Downloads land in the Downloads folder with no prompt; main streams every
@@ -214,7 +247,14 @@ contextBridge.exposeInMainWorld('api', {
   },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
-    start: (opts) => ipcRenderer.invoke('pty:start', opts),
+    // Called by terminal.js for the first spawn AND for the Enter-to-restart
+    // one, so this is where the skip-permissions flag is guaranteed.
+    start: (opts) => ipcRenderer.invoke('pty:start', withSkipPermissions(opts)),
+    // { skipPermissions } -- the Settings switch, pushed by app.js at boot and
+    // on every change. Nothing crosses IPC: it only steers start() above.
+    setPrefs: (prefs) => {
+      ptySkipPermissions = !(prefs && prefs.skipPermissions === false);
+    },
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),
     kill: (id) => ipcRenderer.send('pty:kill', { id }),

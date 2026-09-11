@@ -190,6 +190,30 @@ function saveWindowState(w) {
   }
 }
 
+/*
+ * MEASURED, NOT FIXED: the pale band down the edges of the MAXIMIZED window.
+ *
+ * titleBarStyle:'hidden' keeps the native frame (DWM needs it to paint the
+ * acrylic) and reclaims only the caption, so the resize border on the other
+ * three sides stays non-client. Windows overhangs a maximized window by the
+ * border thickness to push that border off screen, but the overhang is not
+ * scaled the way the border is: at 1920x1080 @125% the window rect is
+ * (-9,-9)-(1929,1089), the DWM frame is exactly the display, and the CONTENT
+ * area covers only x 2..1917, y 0..1076 -- so 2px left, 2px right and 3px
+ * bottom of bare acrylic backdrop stay visible as a pale edge. (A WinUI3
+ * window maximized on the same display puts its content at 0,0 1920x1080, so
+ * this is ours, not Windows being unable to do it.)
+ *
+ * The band is outside the renderer's document, so no stylesheet reaches it --
+ * body.maximized already zeroes the margin and the radius. Growing the window
+ * rect by the shortfall on 'maximize' was tried here and reverted:
+ * BrowserWindow.setBounds() RESTORES a maximized window before applying the
+ * rect, so the nudge silently un-maximized the window instead. The two
+ * remaining options both cost more than 2px does -- frame:false (which makes
+ * backgroundMaterial render solid black, per the note in createWindow) or a
+ * hand-rolled maximize that gives up Windows' own snap and restore semantics.
+ */
+
 /** Coalesce the burst of events a drag or resize produces into one write. */
 function queueWindowStateSave(w) {
   if (saveTimer) clearTimeout(saveTimer);
@@ -308,6 +332,19 @@ function createWindow() {
   // state changes it did not initiate (double-click, Win+Up, snap).
   win.on('maximize', () => send('win:maximized', { maximized: true }));
   win.on('unmaximize', () => send('win:maximized', { maximized: false }));
+
+  // The WINDOW's focus, not the chrome document's. app.js pauses the new-tab
+  // board while the window is behind something else, and a click into a
+  // <webview> blurs the chrome document without the window losing focus at
+  // all -- so that decision has to come from here.
+  win.on('focus', () => send('win:focus', { focused: true }));
+  win.on('blur', () => send('win:focus', { focused: false }));
+  // The state the renderer missed while it was loading.
+  win.webContents.on('did-finish-load', () => {
+    const w = liveWin();
+    if (!w) return;
+    send('win:focus', { focused: w.isFocused() });
+  });
 
   // F11 can also come from the OS or the page, so the chrome is told about the
   // resulting state rather than assuming its own toggle was the only source.
@@ -443,6 +480,37 @@ ipcMain.on('win:maximize', () => {
 ipcMain.on('win:close', () => {
   const w = liveWin();
   if (w) w.close();
+});
+
+/**
+ * "Restart browser" (Settings > About, and the command palette): close and
+ * reopen with the tabs restored, which is what every update to this app needs.
+ *
+ * app.quit() rather than app.exit(): quit is the path that runs 'before-quit'
+ * (killAll() for the PTYs, and autoPause.handleQuit(), which hands our Spotify
+ * hold back and may defer the quit by up to ~1.5 s to do it -- it calls
+ * app.quit() again when it is done). app.exit() would skip all of that and
+ * leave Spotify paused until the bridge's hold expired. The renderer has
+ * already flushed its session snapshot over 'session:write' by the time this
+ * arrives, and the window rect is written here the way 'close' writes it.
+ *
+ * app.relaunch() with no arguments reuses this process's own argv and working
+ * directory, so a test instance (--test-profile, --remote-debugging-port)
+ * comes back as the same test instance.
+ */
+ipcMain.on('app:restart', () => {
+  try {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const w = liveWin();
+    if (w) saveWindowState(w);
+  } catch {
+    // Never let a disk error strand the user in a browser that will not restart.
+  }
+  app.relaunch();
+  app.quit();
 });
 
 ipcMain.on('win:fullscreen-toggle', () => {
