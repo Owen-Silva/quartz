@@ -198,6 +198,16 @@
   var toastEl = null;
   var toastTimer = 0;
   var toastHideTimer = 0;
+
+  /* Shortcut editing: one row records at a time. recPending is the combo
+     already held by another action, waiting for the second press that takes
+     it; recUnbound is the action that press displaced, noted for one render. */
+  var recId = null;
+  var recPending = '';
+  var recNote = '';
+  var recUnbound = null;
+  var resetAllArmed = false;
+  var resetAllTimer = 0;
   var focusHint = null;        // [selector] to refocus after a chips re-render
   var siteOpen = null;         // the host whose CSS editor is expanded
   var siteFocus = null;        // [selector] to focus after a site-styles render
@@ -1823,8 +1833,35 @@
     }));
   }
 
+  /* ------------------------------------------------------------
+     Shortcuts
+
+     When shortcuts.js is loaded the section is an editor over
+     window.Shortcuts. Without it, the printed table below — the
+     map as it was before anything was rebindable — still stands.
+     ------------------------------------------------------------ */
+
+  /** The module, or null when it is absent or too old to drive the editor. */
+  function shortcutsApi() {
+    var mod = window.Shortcuts;
+    if (!mod) return null;
+    var needed = ['all', 'label', 'combo', 'set', 'reset', 'resetAll', 'conflict'];
+    for (var i = 0; i < needed.length; i++) {
+      if (typeof mod[needed[i]] !== 'function') return null;
+    }
+    return mod;
+  }
+
   function buildShortcuts() {
     var s = section('Shortcuts');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'shortcuts');
+    s.appendChild(field);
+    return s;
+  }
+
+  /** The old read-only map: two columns, keycaps and a description. */
+  function staticShortcuts() {
     var table = el('div', 'set-keys');
     SHORTCUTS.forEach(function (pair) {
       var keys = el('div', 'set-keycell');
@@ -1838,8 +1875,217 @@
       table.appendChild(keys);
       table.appendChild(el('div', 'set-keydesc', pair[1]));
     });
-    s.appendChild(table);
-    return s;
+    return table;
+  }
+
+  /* A group caption reads as a sentence, not a title: only the first
+     letter is ours to touch — 'Claude' stays 'Claude'. */
+  function sentenceCase(text) {
+    var s = String(text == null ? '' : text);
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  }
+
+  function shortcutLabelFor(api, id) {
+    var list = [];
+    try { list = api.all() || []; } catch (err) { list = []; }
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) return String(list[i].label || id);
+    }
+    return String(id);
+  }
+
+  /** Keycaps for a combo, or the quiet 'Not set' when it is unbound. */
+  function paintCombo(cell, api, combo) {
+    if (!combo) {
+      cell.appendChild(el('span', 'set-keynone', 'Not set'));
+      return;
+    }
+    var parts = null;
+    try { parts = api.label(combo); } catch (err) { parts = null; }
+    if (!parts || !parts.length) parts = String(combo).split('+');
+    parts.forEach(function (cap, i) {
+      if (i) cell.appendChild(el('span', 'set-keyplus', '+'));
+      cell.appendChild(el('span', 'set-key', cap));
+    });
+  }
+
+  /** The row that is recording, so a click inside it is not 'elsewhere'. */
+  function recordingRow() {
+    if (recId === null || !bodyEl) return null;
+    var rows = bodyEl.querySelectorAll('.set-shortcut');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute('data-id') === recId) return rows[i];
+    }
+    return null;
+  }
+
+  function startRecording(id) {
+    recId = id;
+    recPending = '';
+    recNote = '';
+    recUnbound = null;
+    renderShortcuts();
+  }
+
+  function stopRecording() {
+    if (recId === null) return;
+    recId = null;
+    recPending = '';
+    recNote = '';
+    renderShortcuts();
+  }
+
+  /**
+   * Commit a combo (or null, to unbind) to the row being recorded.
+   * The module's own listeners repaint first; the displaced row's
+   * 'Now unbound' note is ours to add on the render after that.
+   */
+  function commitCombo(api, id, combo) {
+    recId = null;
+    recPending = '';
+    recNote = '';
+    var res = null;
+    try { res = api.set(id, combo); } catch (err) { res = null; }
+    if (res && res.ok === false) {
+      recUnbound = null;
+      renderShortcuts();
+      showToast(res.reason ? String(res.reason) : 'That shortcut is fixed');
+      return;
+    }
+    recUnbound = (res && res.displaced) ? res.displaced : null;
+    renderShortcuts();
+  }
+
+  function shortcutRow(api, item, displaced) {
+    var row = el('div', 'set-shortcut');
+    row.setAttribute('data-id', String(item.id));
+    row.appendChild(el('div', 'set-shortcut-label', String(item.label || item.id)));
+
+    var cell = el('div', 'set-keycell');
+    if (recId === item.id) {
+      var pill = el('span', 'set-rec', recNote || 'Press keys…');
+      pill.setAttribute('role', 'status');
+      cell.appendChild(pill);
+    } else {
+      paintCombo(cell, api, item.combo);
+      if (displaced === item.id) cell.appendChild(el('span', 'set-keynote', 'Now unbound'));
+    }
+    row.appendChild(cell);
+
+    var acts = el('div', 'set-shortcut-acts');
+    if (!item.fixed) {
+      var recording = recId === item.id;
+      acts.appendChild(textButton(recording ? 'Cancel' : 'Change',
+        'set-text set-key-change', function () {
+          if (recording) stopRecording();
+          else startRecording(item.id);
+        }));
+      if (item.changed) {
+        acts.appendChild(textButton('Reset', 'set-text set-key-reset', function () {
+          try { api.reset(item.id); } catch (err) { /* module's problem */ }
+          recUnbound = null;
+          renderShortcuts();
+        }));
+      }
+    }
+    row.appendChild(acts);
+    return row;
+  }
+
+  function renderShortcuts() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="shortcuts"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var api = shortcutsApi();
+    if (!api) {
+      recId = null;
+      field.appendChild(staticShortcuts());
+      return;
+    }
+
+    /* the note lives for exactly one render */
+    var displaced = recUnbound;
+    recUnbound = null;
+
+    var list = [];
+    try { list = api.all() || []; } catch (err) { list = []; }
+    if (!list.length) {
+      field.appendChild(el('p', 'set-empty', 'No shortcuts to show.'));
+      return;
+    }
+
+    var order = [];
+    var byGroup = {};
+    list.forEach(function (item) {
+      if (!item || !item.id) return;
+      var g = item.group ? String(item.group) : 'Other';
+      if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
+      byGroup[g].push(item);
+    });
+
+    order.forEach(function (name) {
+      field.appendChild(el('p', 'set-group', sentenceCase(name)));
+      var table = el('div', 'set-shortcuts');
+      byGroup[name].forEach(function (item) {
+        table.appendChild(shortcutRow(api, item, displaced));
+      });
+      field.appendChild(table);
+    });
+
+    var label = resetAllArmed ? 'Press again to reset every shortcut' : 'Reset all shortcuts';
+    var cls = 'set-text set-keys-resetall' + (resetAllArmed ? ' is-armed' : '');
+    field.appendChild(textButton(label, cls, function () {
+      if (!resetAllArmed) {
+        resetAllArmed = true;
+        renderShortcuts();
+        window.clearTimeout(resetAllTimer);
+        resetAllTimer = window.setTimeout(function () {
+          if (!resetAllArmed) return;
+          resetAllArmed = false;
+          renderShortcuts();
+        }, 4000);
+        return;
+      }
+      resetAllArmed = false;
+      window.clearTimeout(resetAllTimer);
+      try { api.resetAll(); } catch (err) { /* module's problem */ }
+      recUnbound = null;
+      renderShortcuts();
+      showToast('Shortcuts reset');
+    }));
+  }
+
+  /**
+   * The capture-phase pass while a row is recording: the keystroke is the
+   * panel's, not the browser's, so Ctrl+T records instead of opening a tab.
+   */
+  function recordKey(event) {
+    if (recId === null) return;
+    var api = shortcutsApi();
+    if (!api) { stopRecording(); return; }
+
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    event.settingsRecorded = true;          // the panel's Escape stays out of it
+
+    var key = event.key;
+    if (key === 'Escape') { stopRecording(); return; }
+    if (key === 'Backspace' || key === 'Delete') { commitCombo(api, recId, null); return; }
+
+    var combo = null;
+    try { combo = api.combo(event); } catch (err) { combo = null; }
+    if (!combo) return;                     // a bare modifier: keep listening
+
+    var holder = null;
+    try { holder = api.conflict(combo); } catch (err) { holder = null; }
+    if (holder && holder !== recId && recPending !== combo) {
+      recPending = combo;
+      recNote = 'Used by ' + shortcutLabelFor(api, holder) + '. Press again to take it';
+      renderShortcuts();
+      return;
+    }
+    commitCombo(api, recId, combo);
   }
 
   function buildAbout() {
@@ -1940,6 +2186,7 @@
     renderNewtabBg();
     renderChips();
     renderPrivacy();
+    renderShortcuts();
   }
 
   /** Anchor under the gear, like the downloads popover does. */
@@ -2025,15 +2272,24 @@
   function wire() {
     // Escape only reaches this document when focus is inside the chrome; the
     // forwarded 'escape' action covers the case where a page has focus.
+    // A recording row eats the keystroke first, in the capture phase, so
+    // Ctrl+T lands in the editor rather than opening a tab.
+    document.addEventListener('keydown', recordKey, true);
+
     document.addEventListener('keydown', function (event) {
       if (!open_) return;
+      if (event.settingsRecorded) return;   // that Escape cancelled a recording
       if (event.key === 'Escape') closePanel();
     });
 
     // Click-outside. mousedown, so it settles before the button's own click.
     document.addEventListener('mousedown', function (event) {
-      if (!open_) return;
       var t = event.target;
+      if (recId !== null) {
+        var row = recordingRow();
+        if (!row || !row.contains(t)) stopRecording();
+      }
+      if (!open_) return;
       if (panelEl && panelEl.contains(t)) return;
       if (buttonEl && buttonEl.contains(t)) return;
       closePanel();
@@ -2057,6 +2313,12 @@
       if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
       if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
     });
+
+    // The shortcut map has its own store; the section mirrors it the same way.
+    var keysApi = shortcutsApi();
+    if (keysApi && typeof keysApi.on === 'function') {
+      try { keysApi.on(function () { renderShortcuts(); }); } catch (err) { /* module's problem */ }
+    }
   }
 
   /* The chrome's own theme decides which accent formula applies, and app.js

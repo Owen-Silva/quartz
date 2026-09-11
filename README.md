@@ -43,15 +43,13 @@ absent for the default aurora — the one deliberate duplicate, since it also li
 because theme-boot.js reads it long before settings.js parses), `session` (the tab strip
 snapshot — web pages and Claude chambers, capped at 40, with the new-tab page stored as the
 marker `newtab`), `history` (`{v:1, items:[{url,title,visits,last}]}`, capped at 2000),
-`settings` (search engine, site theme, palette, accent hue, new-tab chips, homepage, Claude
-folder, Claude resume, tab sleep minutes, the new-tab background descriptor, the bookmarks-bar
-switch), `zoom` (`{host: level}` — 100% deletes its entry rather than storing a zero), and
-`sitestyles` (`{v:1, globalDark, hosts:{host:{css,dark,js}}}`). An eighth, `reader` (text size,
-column width), belongs to the reading page rather than the chrome. One thing is deliberately not
-in there: the new tab's background picture. A 2560px JPEG as base64 is about a megabyte of
-string that localStorage would rewrite on every unrelated settings write, so the blob lives in
-IndexedDB instead — db `browser`, store `assets`, key `newtab-bg` — and only the tiny descriptor
-stays in the settings JSON.
+`settings` (one JSON object, listed under Settings below), `zoom` (`{host: level}` — 100% deletes
+its entry rather than storing a zero), and `sitestyles` (`{v:1, globalDark,
+hosts:{host:{css,dark,js}}}`). An eighth, `reader` (text size, column width), belongs to the
+reading page. One thing is deliberately not in there: the new tab's background picture. A 2560px
+JPEG as base64 is about a megabyte of string that localStorage would rewrite on every unrelated
+settings write, so the blob lives in IndexedDB instead — db `browser`, store `assets`, key
+`newtab-bg` — and only the tiny descriptor stays in the settings JSON.
 
 ## Keyboard shortcuts
 
@@ -64,12 +62,13 @@ stays in the settings JSON.
 | Ctrl+1–8 / Ctrl+9 | Jump to that position / to the last tab |
 | Ctrl+Shift+PageUp / PageDown | Move the active tab along the strip |
 | Ctrl+Shift+A | Tab search — open tabs and recently closed ones, filtered as you type |
+| Ctrl+K | Command palette — the same pane, showing the browser's own verbs |
 | Ctrl+\ | Split view: pair the active tab with the next splittable one, or break the pair |
 | Ctrl+Shift+\ | Claude beside: stand a Claude chamber next to the page in front, or break the pair |
 | Ctrl+L | Focus the address bar |
 | Ctrl+F | Find on page |
 | Ctrl+J | Downloads |
-| Ctrl+H | History |
+| Ctrl+H | Open the history page (one tab, reused if it is already open) |
 | Ctrl+D | Add this page to the new-tab chips |
 | Ctrl+Shift+B | Show or hide the bookmarks bar |
 | Ctrl+Shift+S | Screenshot the page on screen into the Downloads folder |
@@ -78,6 +77,8 @@ stays in the settings JSON.
 | Ctrl+, | Settings |
 | Ctrl+` | Toggle a Claude tab |
 | Ctrl+Shift+` | New Claude tab in a folder you pick |
+| Ctrl+Shift+K | Ask Claude about this page, quoting whatever is selected on it |
+| Alt+P | Picture in picture for the page's video (chrome-only — a focused page swallows it) |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / reset |
 | Ctrl+R | Reload (never reloads the shell window; no-op on a Claude tab) |
 | F5 | Reload |
@@ -88,54 +89,69 @@ stays in the settings JSON.
 | Middle-click a tab | Close it |
 | Right-click a tab | Duplicate, Close, Close other tabs, Close tabs to the right, Reopen closed tab (right-click on bare strip gives New tab / Reopen closed tab) |
 
-A focused page swallows its own keys, so main.js listens on every guest's
-`before-input-event` and replays the chrome ones to the renderer over the `shortcut` IPC
-channel (`SHORTCUTS` / `shortcutFor` / `BARE_KEYS` in main.js). F12 is handled in main
-directly, because the devtools belong to the guest. Escape is forwarded but not swallowed —
-the page still wants it. Ctrl+R and Ctrl+Shift+R are caught in `shortcutFor` ahead of the
-lowercasing lookup, which would otherwise read the Shift away, and replayed as `reload` and
-`reader`. Ctrl+Shift+A, Ctrl+Shift+S, Ctrl+Shift+B and both spellings of the backslash are
-caught there too, so all of them work from a focused page: Ctrl+Shift+A ahead of the lookup so
-plain Ctrl+A stays the page's own select-all, Ctrl+Shift+S as `capture` while Ctrl+S is absent
-from `SHORTCUTS` so pages keep their own save, Ctrl+Shift+B as `bookmarks-bar`, Ctrl+\ straight
-off `event.key` (a backslash has no case to lower), and Ctrl+Shift+\ — which a US layout
-delivers as `|` — tested for both characters and replayed as `claude-split`. (Three comments in
-app.js's forwarded-action table still claim main sends none of `reader`, `split` or
-`claude-split`. All three are stale.) Three things are chrome-only and do nothing while a page
-has focus, because the table has no entry for them: Ctrl+Shift+PageUp/PageDown, Ctrl+P, and
-Ctrl+Shift+` (Shift turns that key into `~`).
+A focused page swallows its own keys, so main.js listens on every guest's `before-input-event`
+and replays the chrome ones to the renderer over the `shortcut` IPC channel (`SHORTCUTS` /
+`shortcutFor` / `BARE_KEYS` in main.js). F12 is handled in main directly, because the devtools
+belong to the guest. Escape is forwarded but not swallowed — the page still wants it. Ctrl+R and
+Ctrl+Shift+R are caught in `shortcutFor` ahead of the lowercasing lookup, which would otherwise
+read the Shift away, and replayed as `reload` and `reader`. Ctrl+Shift+A, Ctrl+Shift+S,
+Ctrl+Shift+B, Ctrl+Shift+K and both spellings of the backslash are caught there too, so all of
+them work from a focused page: Ctrl+Shift+A ahead of the lookup so plain Ctrl+A stays the page's
+own select-all, Ctrl+Shift+S as `capture` while Ctrl+S is absent from `SHORTCUTS` so pages keep
+their own save, Ctrl+Shift+B as `bookmarks-bar`, Ctrl+Shift+K as `ask-claude` before the lookup
+can read it as Ctrl+K and open the command palette instead (it carries no payload — the renderer
+asks the guest for its own selection, which, unlike the context menu's `selectionText`, is not
+truncated), Ctrl+\ straight off `event.key`, and Ctrl+Shift+\ — which a US layout delivers as
+`|` — tested for both characters and replayed as `claude-split`. Plain Ctrl+K is an ordinary
+`SHORTCUTS` entry (`command-palette`). Four things are chrome-only and do nothing while a page
+has focus, because the table has no entry for them: Ctrl+Shift+PageUp/PageDown, Ctrl+P,
+Ctrl+Shift+` (Shift turns that key into `~`), and Alt+P — main.js's Alt branch replays the two
+arrows and nothing else.
+
+Shortcuts can be changed in Settings.
 
 ## Features
 
 **Tabs.** Drag to reorder (pointer-driven, `body.tab-dragging`), right-click menu, middle-click
 close. A guest whose renderer dies gets a `.tab-card` over it — "This page crashed" or "Can't
-reach this site" — instead of Chromium's grey page; reload rebuilds the guest. Switching tabs
-is a display swap, never a teardown, so page state and live PTYs both survive. Closed page URLs
-go on a 20-deep stack for Ctrl+Shift+T (a reader tab pushes the article, not the wrapper).
-Ctrl+P and the chip menu's Print… call the guest's own `print()`, opening Chromium's preview;
-a Claude chamber has nothing to print, so it is a no-op there.
+reach this site" — instead of Chromium's grey page; reload rebuilds the guest. Switching tabs is
+a display swap, never a teardown, so page state and live PTYs both survive. Closed page URLs go
+on a 20-deep stack for Ctrl+Shift+T (a reader tab pushes the article, not the wrapper). Ctrl+P
+and the chip menu's Print… call the guest's own `print()`; a Claude chamber is a no-op there.
 
 **Tab search.** Ctrl+Shift+A, or the list glyph in the titlebar, opens one glass pane over the
-page: every open tab — title, host or Claude folder, tags for current / pinned / muted /
-playing / sleeping, its own close button — filtered as you type (every word has to land
-somewhere), strip order the tiebreak, capped at 12 with a "+N more" line; then, under "Recently
-closed", up to 8 URLs off the same 20-deep stack Ctrl+Shift+T pops, newest first, duplicates
-dropped. Arrows walk, Enter raises the tab or reopens the URL, Escape closes. tabsearch.js only
-ever adds, and reads app.js's globals through guarded accessors.
+page: every open tab — title, host or Claude folder, tags for current / pinned / muted / playing
+/ sleeping, its own close button — filtered as you type (every word has to land somewhere),
+capped at 12 with a "+N more" line; then, under "Recently closed", up to 8 URLs off the same
+20-deep stack Ctrl+Shift+T pops. Arrows walk, Enter raises the tab or reopens the URL, Escape
+closes. tabsearch.js only ever adds, and reads app.js's globals through guarded accessors.
+
+**Command palette.** The same pane, one character later. Type `>` into tab search — or press
+Ctrl+K, which opens it with the `>` already typed and the caret behind it — and the list swaps
+from tabs to the browser's own verbs, each with its keycaps down the right-hand side, run with
+Enter. Deleting the `>` puts the tabs back; one input, one row recipe, one set of arrow keys,
+only the model underneath changes. The verbs come in families, in this order: making things (new
+tab, new Claude tab, a Claude tab in a folder you pick, Claude beside this page, split/unsplit);
+this page (reader, find, screenshot, print, pin, mute, sleep other tabs, reload, close, reopen);
+how it looks (zoom, bookmarks bar, light, dark, and the six palettes as their own checked rows);
+and the panels (settings, downloads, site info, ad blocking, fullscreen, clear browsing history).
+Half the rows read the world as they are built, so the label says "Unsplit" or "Split with next
+tab" depending on the tab under the cursor. Clearing history is the one row that asks twice: the
+first Enter swaps the two lines rather than acting — the warning takes the label and the verb
+drops to the hint, so a row found by typing "history" cannot vanish out from under the query that
+found it — and only the second Enter clears.
 
 **Split view.** Two tabs side by side in one well — two pages, a page and a Claude chamber, or
 two chambers. Ctrl+\ pairs the active tab with the next splittable tab in the strip or breaks
 the pair it is in; a chip's menu offers "Split with next tab", "Split with this tab" and
-"Unsplit". The pairing is symmetric and lives on the tabs
-(`tab.splitWith` holds the partner's id), and a `<webview>` is never moved in the DOM —
-re-parenting a guest leaves its webContents alive but stops it painting — so a split is nothing
-but flex layout on children already there, in strip order, an inline `flex-basis` carrying the
-ratio. The `.split-divider` drags to resize (clamped to 0.2–0.8, a transparent scrim over the
-window for the drag so the pointer cannot fall into a guest) and double-clicks to even out.
+"Unsplit". The pairing is symmetric and lives on the tabs (`tab.splitWith` holds the partner's
+id), and a `<webview>` is never moved in the DOM — re-parenting a guest leaves its webContents
+alive but stops it painting — so a split is nothing but flex layout on children already there,
+in strip order, an inline `flex-basis` carrying the ratio. The `.split-divider` drags to resize
+(clamped to 0.2–0.8, behind a transparent scrim so the pointer cannot fall into a guest).
 `activeTabId` stays the single source of truth, and clicking the other pane moves it there
 without breaking the pair — a press inside a guest never reaches this document, so main forwards
-guest focus over `api.onGuestFocus`. Splitting to a sleeping tab wakes it. A split is
-deliberately not in the session snapshot: a restart comes back unsplit.
+guest focus over `api.onGuestFocus`. A split is deliberately not in the session snapshot.
 
 **Claude beside a page.** The pairing the whole browser exists for, on one key. Ctrl+Shift+\
 pairs the tab in front with a Claude chamber — the one you used last, or a fresh one in the
@@ -145,125 +161,181 @@ spelling of the same key, and a page chip's menu carries "Open Claude beside thi
 always starts a new chamber. A new chamber is built in the background and appended to the end of
 the strip, so strip order puts the page on the left, the way round the window is meant to be
 read. A chamber is a plain div with `min-width: 0`, so it takes the same flex seat a `<webview>`
-does and terminal.js's ResizeObserver refits the PTY as the divider moves: xterm re-fits and
-`pty.resize` goes out on the new grid, which `ClaudeTerminal.size()` reports. The key works from
+does and terminal.js's ResizeObserver refits the PTY as the divider moves. The key works from
 inside a focused page as well as from the chrome — main.js maps both spellings, Ctrl+Shift+\ and
 the `|` a US layout sends for it, to `claude-split`.
 
+**Claude needs you.** A session that wants you goes quiet, so quiet is the signal. terminal.js
+watches the data pump and raises two events on top of the plain `activity` one: `idle`, once per
+burst, 1200ms after the last byte and only when at least 200 bytes have arrived since the last
+idle — a prompt after real output counts, a cursor blink or a keystroke echo does not, and bytes
+under the threshold keep accumulating so a slow trickle still adds up to a burst — and `bell`,
+whenever a chunk carries BEL (`\x07`), which Claude Code rings on completion when its own
+notification is on. Either one calls for help only if you were not already looking: a chamber on
+screen in a focused window says everything a mark could, so `isTabOnScreen(tab) &&
+document.hasFocus()` returns early and nothing lights up. Otherwise the chip's dot goes amber and
+pulses faster than the live breathe — stepped, three repaints a second, because it sits under a
+`backdrop-filter` — a small amber ● is built in front of the title where the eye is already
+reading, and the Claude button in the titlebar pulses too for as long as *any* chamber is
+waiting. Looking at it clears it. Optionally there is a Windows notification as well — "Claude is
+waiting", body the folder name, `silent: true` because the chime is Claude Code's job, at most
+one per wait, and clicking it raises the window and the tab. It is behind the `claudeNotify`
+switch in Settings and behind the browser's own notification permission; with the toast refused
+or off, the chip still carries the mark.
+
+**Ask Claude about this.** The gesture the whole browser is built around: one move takes what is
+on screen and puts it in front of a session standing beside it. Three ways in — the guest's
+right-click menu — "Ask Claude about this page", and above it `Ask Claude about "<the selection,
+elided>"` when there is one — the page chip's menu, and Ctrl+Shift+K. All three land in
+`askClaude()`, and main.js only ever carries the facts; nothing is executed from there. What gets
+pasted has two shapes, both of which deliberately end where your own typing starts: with a
+selection it is `From <url>` and the text in a `"""` block, cursor under it (a selection over
+4000 characters is cut, with a line saying so); without one it is `Look at <url> (<title>) and `,
+left mid-air so finishing the sentence is the only thing left to do. The chamber it goes to is,
+in order: the one this page is already split with, a free chamber stood beside it, a new one
+beside it, else whatever chamber exists. That chamber is raised so the keystrokes that follow
+land in the terminal. **No Enter is sent anywhere in this path** — the prompt is an opening, and
+the question and the moment to send it are yours.
+
+Pasting goes in through xterm's bracketed paste, so a multi-line quote arrives as one block
+rather than as N submitted lines, which is what the Claude Code input box wants. A chamber opened
+*for* the gesture is still booting when the prompt is composed, so the text waits — and it waits
+for the session's first quiet, not for the PTY. `live` only means ConPTY has a process;
+`claude.exe` takes seconds more to draw its input box, and anything written before that is read
+by whatever it puts up first — a trust prompt, a first-run question — instead of landing in the
+box. So the queue flushes on the first `idle` after `live`, with a 30-second cap so a chatty
+session can never swallow the text for good. An already-running chamber takes it straight away;
+only one that has never settled queues.
+
 **Session.** The strip is snapshotted (debounced 500ms, suppressed while restoring) to two
 places: `localStorage['session']` and, over IPC, `session.json` in the profile, which main
-writes synchronously to a `.tmp` and renames, so a kill mid-write can only destroy the temp
-file. Boot reads both and the newer `savedAt` wins, waiting at most 300ms for the file copy so
-a hung main process cannot hold the window at zero tabs. A page entry carries its URL plus its
-`pinned` and `muted` flags; a Claude entry carries its `cwd`. Chromium flushes localStorage
-lazily, so a forced kill can still lose the last write to it — the file copy is what covers that.
+writes synchronously to a `.tmp` and renames, so a kill mid-write can only destroy the temp file.
+Boot reads both and the newer `savedAt` wins, waiting at most 300ms for the file copy so a hung
+main process cannot hold the window at zero tabs. A page entry carries its URL plus its `pinned`
+and `muted` flags; a Claude entry carries its `cwd`. Chromium flushes localStorage lazily, so a
+forced kill can lose the last write to it — the file copy covers that.
 
 **Blocking.** Ghostery's `@ghostery/adblocker-electron` engine owns the webRequest hooks on
-`session.defaultSession`, so one engine filters every guest and there is nothing per-tab to
-wire up. The serialised engine is cached at `adblock-engine.bin`; a first run fetches a few MB
-of lists and is not awaited by window creation, and with no cache and no network blocking is
-simply unavailable. `adblock.json` holds the on/off switch and the per-site allowlist. A shield
-button in the nav row carries the count blocked on the page in front of you and opens a popover
-with two switches, "Block on this site" and "Block ads and trackers everywhere". An allowlisted
-host gets an exception rule for each half of the engine (`@@*$domain=host` and
-`@@||host^$elemhide`). Cosmetic filtering rides the library's session-level preload, its IPC
-handler wrapped so only `http:`/`https:` frames are served — unwrapped it styles our own
-`file://` chrome. One caveat: turning blocking off calls
-`disableBlockingInSession()`, which clears *all* webRequest listeners on that session, so
-nothing else in the app may register one there.
+`session.defaultSession`, so one engine filters every guest and there is nothing per-tab to wire
+up. The serialised engine is cached at `adblock-engine.bin`; a first run fetches a few MB of
+lists and is not awaited by window creation, and with no cache and no network blocking is simply
+unavailable. `adblock.json` holds the on/off switch and the per-site allowlist. A shield button
+in the nav row carries the count blocked on the page in front of you and opens a popover with two
+switches, "Block on this site" and "Block ads and trackers everywhere"; an allowlisted host gets
+an exception rule for each half of the engine. Cosmetic filtering rides the library's
+session-level preload, its IPC handler wrapped so only `http:`/`https:` frames are served —
+unwrapped it styles our own `file://` chrome. One caveat: turning blocking off calls
+`disableBlockingInSession()`, which clears *all* webRequest listeners on that session.
 
 **Tab audio and pinning.** A chip grows a speaker button the first time its guest plays
 something; clicking it mutes the tab without raising it, and the mute rides along in the session
 entry and is re-applied on `dom-ready`, since a fresh guest is born unmuted. Pinning makes a
 chip icon-only and moves it into the pinned group at the left of the strip — both directions
 land on the same index, so it is reversible without reshuffling anything. A pinned chip ignores
-middle-click close, falls back to a globe glyph with no favicon, and is rebuilt before the
-others on restore.
+middle-click close and is rebuilt before the others on restore.
 
 **Tab sleeping.** A background page tab that has sat untouched past the configured idle time
 (default 30 minutes, `0` = never, swept once a minute) gives its renderer back: the `<webview>`
 is removed from `#views`, which is what destroys the guest, and a hidden placeholder `<div>`
 stands in for it. The chip keeps its title and favicon and does not move. Never slept: the tab
 on screen, a pinned tab, anything audible (muted or not), a blank new tab, a crashed tab, a
-Claude chamber. Waking rebuilds the guest on the URL snapshotted at sleep time and re-applies
-the mute and the site's zoom, so what a live page was holding is gone — scroll position, form
-input, in-page state, the tab's own history. Sleep tab / Wake tab sit in the chip menu.
+Claude chamber. Waking rebuilds the guest on the URL snapshotted at sleep time and re-applies the
+mute and the site's zoom, so what a live page was holding is gone. Sleep tab / Wake tab sit in
+the chip menu.
 
-**Zoom.** Zoom is remembered per `http`/`https` hostname in `localStorage['zoom']`, re-applied
-on `dom-ready`, clamped to Electron levels -3..5 in half steps. Anything but 100% shows a
-`#zoom-badge` beside the omnibox reading the percentage; clicking it resets, and 100% deletes
-the stored entry rather than saving a zero.
+**Zoom.** Zoom is remembered per `http`/`https` hostname in `localStorage['zoom']`, re-applied on
+`dom-ready`, clamped to Electron levels -3..5 in half steps. Anything but 100% shows a
+`#zoom-badge` beside the omnibox; clicking it resets, and 100% deletes the stored entry.
 
 **Site styles and scripts.** sitestyles.js keeps `{ css, dark, js }` per host in
 `localStorage['sitestyles']`, plus one global force-dark switch. `js` joined the entry later and
 the store version did not move: a record written before it reads back with `js: ""`, which is
-exactly what a missing key should mean. Host keys are normalised both in and out — lowercased,
-no scheme, no userinfo, no `www.`, no port, no path, no trailing dot — so
-`https://WWW.Example.com:8443/x` and `example.com` are one entry (a parent-domain walk stops
-short of two-part public suffixes, so nobody styles `co.uk`). CSS is injected per guest on
+exactly what a missing key should mean. Host keys are normalised both in and out — lowercased, no
+scheme, no userinfo, no `www.`, no port, no path, no trailing dot — and the parent-domain walk
+stops short of two-part public suffixes, so nobody styles `co.uk`. CSS is injected per guest on
 `dom-ready` and re-applied live when the store changes, with every `insertCSS()` key tracked per
-tab so a re-apply removes exactly what this module inserted last time. Dark comes two ways: a host entry
-with `dark: true` is unconditional, while the global switch skips any host that has explicitly
-opted out and any page that is already dark, measured by probing the rendered background
-luminance in the guest — inverting an already-dark site turns it white. An empty entry is kept;
-only Remove deletes one.
-
-A host's `js` is the user's own code, run in the page after that host's CSS goes in, once per
-document, under the same gate as the CSS: http(s) only, never the new tab page, never a reader
-page. It is wrapped in an IIFE with a try/catch that reports a throw to the *page's* console as
-`[site script] host: message` — a broken snippet must never take the apply chain down with it —
-and returns `true` so the guest never tries to serialise the last expression. Settings says the
-only thing worth saying here: "Scripts run in the page with the page's own powers. Only paste
-code you trust." Beside Save, Run now re-applies the whole entry and is offered only when that
-host is the tab in front.
+tab so a re-apply removes exactly what this module inserted last time. Dark comes two ways: a
+host entry with `dark: true` is unconditional, while the global switch skips any host that has
+explicitly opted out and any page that is already dark, measured by probing the rendered
+background luminance in the guest — inverting an already-dark site turns it white. A host's `js`
+is the user's own code, run in the page after that host's CSS goes in, once per document, under
+the same gate: http(s) only, never the new tab page, never a reader page. It is wrapped in an
+IIFE with a try/catch that reports a throw to the *page's* console as `[site script] host:
+message`, so a broken snippet cannot take the apply chain down with it.
 
 **Reader view.** Ctrl+Shift+R (or the nav-row button, hidden until the page probes as readable)
 runs `@mozilla/readability` over the active page and opens the article in the bundled
 `reader.html`, next to the tab it came from. Everything coming back out of a guest is treated as
 hostile: the body is parsed into an inert document and stripped of scripts, frames, plugin
-objects, `on*` handlers and `script:` URLs before it is handed over. The reading page owns its
-top bar — back to the source, A- / A+, narrow / wide — saved to `localStorage['reader']` and
-applied from `<head>` before first paint, so the article never visibly resizes. A reader tab's
-URL is `reader.html?src=<article url>`, but the omnibox, history, session and reopen stack all
-use the article's own address, so it restores as the plain article.
+objects, `on*` handlers and `script:` URLs. The reading page owns its top bar — back to the
+source, A- / A+, narrow / wide — saved to `localStorage['reader']` and applied from `<head>`
+before first paint. A reader tab's URL is `reader.html?src=<article url>`, but the omnibox,
+history, session and reopen stack all use the article's own address, so it restores plain.
 
 **Address bar.** A recognised, allow-listed scheme navigates as typed; a localhost or IPv4
 host gets `http://`; any other bare domain gets `https://`; everything else is a search through
 the configured engine. `#omni-suggest` hangs under the capsule and mirrors its geometry: with
-text typed it leads with the row that mirrors what Enter already does, then history matches;
-on an empty focus it shows what was open recently. It never navigates itself — it writes into
-`#omnibox` and hands Enter back to app.js.
+text typed it leads with the row that mirrors what Enter already does, then history matches; on
+an empty focus it shows what was open recently. It never navigates itself — it writes into
+`#omnibox` and hands Enter back.
+
+**History page.** Ctrl+H opens the whole store as a page now, not the recent dropdown — the
+dropdown is still exactly what an empty omnibox focus shows, it just is not what the shortcut is
+for any more. One tab, reused if it is already open, on the bundled `historypage.html` with the
+chrome's theme and palette in the query string so the first frame is painted right. Search at the
+top (`/` focuses it from anywhere on the page, filtering after 60ms of quiet, every word having
+to land on the title or the URL) over rows grouped by day — Today, Yesterday, a weekday inside
+the last week, then a full date — each row carrying its favicon, title, host, visit count and
+time. Enter or a click opens it, Ctrl+click and middle-click open it behind, arrows walk, Delete
+removes the highlighted row. "Clear…" offers three ranges: Last hour, Today, Everything.
+
+The page is a guest with no preload, which makes the plumbing the interesting half. Inbound, the
+chrome calls `window.__applyHistory({ items, total })` through `executeJavaScript` — newest
+first, up to 2000 rows — once on load and again after anything changes the store; historypage.js
+is loaded from `<head>` above the stylesheet, like reader-page.js, precisely so that call can
+never land on nothing. Outbound there is exactly one channel, and it is `console.log`: the page
+writes `__history:{…}`, app.js's `console-message` listener forwards every line from a tab that
+`isHistoryTab()` to `History.handleGuestMessage()`, which parses the four ops — `remove`,
+`clear`, `clearRange` and `open` — and reports whether it actually acted, so a real request can
+be told from an ordinary console line. When it did act, the chrome re-pushes the snapshot to every
+history tab; the page also applies each change to its own copy at once, so a removed row goes now
+rather than on the next push. Everything on it came off the open web, so titles and URLs are
+written with `createElement` and `textContent` only, never by assigning markup.
 
 **Site info.** A lock rides inside the left end of the omnibox capsule and opens a popover saying
 what this origin is, what it may do and what it has stored. Its header is the host and the
 connection: "Connection is secure" for https; "Connection is not secure" for plain http to
 anything but a loopback host; "Certificate isn't trusted" for an https origin Chromium refused
-this run (the `certificate-error` handler lets nothing through — there is no click-through UI —
-it only *remembers* which origins failed so the lock can say why); "Local page" for loopback http
-and for `file:` / `about:` / `data:` / `blob:` / `chrome:`. Then Permissions: every name that can
-actually prompt, each a three-way Ask / Allow / Block, plus "Reset permissions". Allow and Block
-are written to `permissions.json` and outlive the run; Ask deletes the decision rather than
-storing one, so the next request prompts again — forgetting is not blocking. Then "Clear cookies
-and site data", one button that becomes its own confirmation and reports what went; the cookie
-jar is walked by hand, host and parent domain both, because `clearStorageData({ origin })`
-matches scheme, host and port exactly and would leave a domain cookie behind. Last, Zoom, on the
-same store as the zoom badge. A reader tab shows the article's site, not reader.html's.
+this run (the `certificate-error` handler lets nothing through — there is no click-through UI — it
+only *remembers* which origins failed); "Local page" for loopback http and the local schemes. Then
+Permissions: every name that can actually prompt, each a three-way Ask / Allow / Block, plus
+"Reset permissions" — Ask deletes the decision rather than storing one, because forgetting is not
+blocking. Then "Clear cookies and site data", one button that becomes its own confirmation; the
+cookie jar is walked by hand, host and parent domain both, because `clearStorageData({ origin })`
+matches scheme, host and port exactly and would leave a domain cookie behind. Last, Zoom.
 
 **Find in page.** A right-aligned instrument under the nav row driving the active webview's
 `findInPage` / `stopFindInPage`, re-running at most every 60ms while typing.
 
+**Picture in picture.** Alt+P, or the nav-row button that appears once a page proves it has a
+video, lifts that video out of the page and floats it over everything else; pressing again puts
+it back, and the button wears an on state while it is out. It is entirely a guest capability —
+pip.js never touches `window.api`, only `<webview>.executeJavaScript()` — and the toggle runs as
+a user gesture, which is what the browser's own picture-in-picture API demands. A page with no
+`<video>` in it has nothing to float, so the button stays hidden rather than offering a control
+that can only fail; because players are built late and an ad often runs first, the probe re-runs
+on every load and, while the tab is making noise, every three seconds until it passes. The only
+outcome you hear about is "No video on this page", because it is the only one you cannot see for
+yourself, and after every toggle the page is re-asked whether it is floating.
+
 **Page screenshots.** Ctrl+Shift+S writes a PNG of whatever page is on screen to
 `<Downloads>\Screenshot <host> <YYYY-MM-DD HH-mm-ss>.png`, flashes the window white for one
-stepped frame and says so in a toast — "Screenshot saved to Downloads", or one of two failure
-lines, the toast being the whole output. `capturePage()` lives on the guest's webContents, which
-only main can reach, so the renderer hands main a webContents id over `capture:tab`; main
-refuses anything that is not a live `webview` guest, so the chrome's own renderer and a stale id
-from a closed tab both come back as an error rather than a picture. The name is sanitised for
-Windows and passed through the same no-overwrite helper real downloads use, so a second shot in
-the same second lands as `… (1).png` — but it is written with `fs.writeFileSync`, not a
-DownloadItem, so nothing streams over `dl:update` and the PNG never appears in the downloads
-panel. A Claude chamber has no page to capture and says so. `full` is plumbed through the IPC
-but reserved: a full-page shot would mean scrolling the guest under the user.
+stepped frame and says so in a toast, which is the whole output. `capturePage()` lives on the
+guest's webContents, which only main can reach, so the renderer hands main a webContents id over
+`capture:tab`; main refuses anything that is not a live `webview` guest, so the chrome's own
+renderer and a stale id from a closed tab both come back as an error rather than a picture. It is
+written with `fs.writeFileSync`, not a DownloadItem, so the PNG never appears in the downloads
+panel.
 
 **Bookmarks bar.** Ctrl+Shift+B, or the switch in Look, shows a bar of the new-tab chips under
 the address bar. There is no second list of bookmarks in this browser: the chips on the new tab
@@ -271,125 +343,101 @@ page *are* the bookmarks, stored once in `Settings.chips()`, so Ctrl+D still add
 and settings is still the one place to edit. The bar is a block child of `.chrome-layer` right
 after `.navrow`, so it makes the chrome taller and pushes `#views` down like a real bookmarks bar
 rather than floating over the page. Fitting is two passes, since unhiding the "…" button narrows
-the strip: measure once without it, and if anything spills, put it back and measure again. What
-did not fit goes in the overflow popover, a direct child of `<body>` so it stacks over `#views`.
-Plain click navigates the tab you are looking at (which opens a new tab when that tab is a Claude
-session, because that is what `navigateActiveTab()` does); middle-click and Ctrl+click open a
-background tab, like every other link here, with `mousedown` prevented so Chromium's autoscroll
-cursor never lands on the chrome. `settings.bookmarksBar` is the whole feature's state — the key
-the switch writes and the key Ctrl+Shift+B flips — so the two can never be out of step.
+the strip. `settings.bookmarksBar` is the whole feature's state — the key the switch writes and
+the key Ctrl+Shift+B flips — so the two can never be out of step.
 
 **Downloads.** `will-download` picks a unique path in the real Downloads folder and calls
 `setSavePath` up front, which is exactly what suppresses the save dialog; if a path cannot be
-chosen it falls back to Electron's own prompt rather than losing the download. The nav-row
-button carries a progress ring while anything is in flight and opens a glass popover listing
-the session's downloads, with cancel / pause / resume / show in folder / open / clear.
+chosen it falls back to Electron's own prompt rather than losing the download. The nav-row button
+carries a progress ring while anything is in flight and opens a popover listing the session's
+downloads, with cancel / pause / resume / show in folder / open / clear.
 
 **Palette presets.** Six colour worlds, picked as painted swatches in Look: Aurora (the
 original), Ember, Forest, Ocean, Midnight and Mono. A palette relights the room without
 redesigning it — `data-palette` on `<html>` overrides the same ten tokens every time, each
 authored twice, dark and light, and matched on any descendant as well as the root so a settings
-swatch can preview the real tokens. Only the RGB triples move, so the stepped drifts animate
-identically, and no accent goes near `--amber`, still reserved for "a Claude session is live".
+swatch can preview the real tokens. Only the RGB triples move, and no accent goes near `--amber`.
 "Aurora" is chrome.css's own `:root` and so the one id that must never reach the attribute:
-absent, aurora and an unrecognised name all mean the same thing. A custom accent hue outranks
-the palette's, and the accent's "Default" now means the palette's accent rather than aurora's.
-The choice is stored twice, in `settings.palette` and `localStorage['palette']`, written
-together so they cannot drift, because theme-boot.js must stamp the attribute before the first
-stylesheet paints. The new-tab page gets it the same two ways as the theme: `?palette=` first,
-`window.__applyPalette` after.
+absent, aurora and an unrecognised name all mean the same thing. The choice is stored twice, in
+`settings.palette` and `localStorage['palette']`, written together so they cannot drift, because
+theme-boot.js must stamp the attribute before the first stylesheet paints. The new-tab page gets
+it the same two ways as the theme: `?palette=` first, `window.__applyPalette` after.
 
 **Settings.** A gear beside the theme toggle opens a popover with ten sections, in this order:
-Look (dark/light, the six palette swatches as one radiogroup with a roving tabindex, accent
-hue, and the bookmarks-bar switch); Claude (the folder new Claude tabs start in — typed, or
-through the native picker, and only written once main confirms it is a real directory — plus the
-switch for resuming the last conversation on restore); Tabs (how long a background tab may idle
-before it sleeps, or never); Search (Google, DuckDuckGo, Bing, Brave, Startpage); Websites (the
-site theme guests see through `prefers-color-scheme`); Site styles and scripts (force dark
-everywhere, plus the per-host list — a dark switch, a CSS drawer and a JavaScript drawer each,
-Save / Run now / Remove site, and a field to add a host however you happened to copy it); New
-tab — the section that used to be "New tab shortcuts", now the background picker (file button,
-thumbnail, Remove image, the board switch, the dim slider) above the chips, added by Ctrl+D or
-by hand; Privacy (clear browsing history, clear downloads list); Shortcuts (the key table); and
-About (Electron and Chromium versions). Everything but the site styles — which is just a view onto
-sitestyles.js's own store — persists as one JSON object in `localStorage['settings']`
+Look (dark/light, the six palette swatches as one radiogroup with a roving tabindex, accent hue,
+and the bookmarks-bar switch); Claude — the folder new Claude tabs start in (typed, or through
+the native picker, and only written once main confirms it is a real directory), the switch for
+resuming the last conversation on restore, and "Notify me when a Claude tab is waiting", the
+`claudeNotify` switch behind the Windows notification described above; Tabs (how long a
+background tab may idle before it sleeps, or never); Search (Google, DuckDuckGo, Bing, Brave,
+Startpage); Websites (the site theme guests see through `prefers-color-scheme`); Site styles and
+scripts (force dark everywhere, plus the per-host list); New tab (the background picker above the
+chips); Privacy (clear browsing history, clear downloads list); Shortcuts, the key table; and
+About (Electron and Chromium versions). Everything but the site styles — a view
+onto sitestyles.js's own store — persists as one JSON object in `localStorage['settings']`
 (`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `homepage`, `claudeDir`,
-`claudeResume`, `tabSleepMinutes`, `newtabBackground`, `bookmarksBar`); missing keys fall back
-to defaults, so an older stored object still reads.
+`claudeResume`, `claudeNotify`, `tabSleepMinutes`, `newtabBackground`, `bookmarksBar`); missing
+keys fall back to defaults, so an older stored object still reads.
 
 **New tab page.** A plain `file://` page inside a guest — no preload, no `window.api`. The
 chrome passes `?theme`, `?palette`, `?hue`, `?engine`, `?chips` and `?bg` for the first paint
 and pushes later changes in with `window.__applySettings`. Chips show favicons from
 `google.com/s2/favicons`, falling back to the bare label if the request fails. The page cannot
 read the history store, so the chrome pushes it up to 8 recent sites with `window.__applyRecent`
-on every visit: at most 6 become tiles under the chips (skipping any host a chip already covers),
-and the rest feed the capsule's own dropdown. Behind the search field is the circuit board: a
-socket ring around the capsule, 45-degree traces out to vias and peripheral chips, with light
-packets running them.
+on every visit: at most 6 become tiles under the chips, and the rest feed the capsule's own
+dropdown. Behind the search field is the circuit board — a socket ring around the capsule,
+45-degree traces out to vias and peripheral chips, light packets running them.
 
 **New tab backgrounds.** Three of them, picked in Settings → New tab. *Circuit board* is the
 page's own default. *Aurora only* hides the canvas and the packet layer and stops newtab-bg.js
-drawing at all, on the same `data-bg` attribute the CSS reads, so nothing hidden is still
-costing anything. *Your image* is a picture of your own, with a dim slider (0–60%, default 25%)
-and a switch for showing the board over the photo as a texture rather than the subject. A picked
-file is decoded with `createImageBitmap`, drawn down to at most 2560px on its long edge and
-re-encoded as JPEG at 0.86 — GIF and SVG are refused — and the blob goes to IndexedDB
-(`browser` / `assets` / `newtab-bg`). The descriptor left in the settings JSON is
-`{ kind, boardOverImage, dim, rev }`, and every write carries a fresh `rev` because the picture
-is not in that object: replacing it would otherwise leave the JSON byte-identical and `set()`,
-which skips unchanged keys, would never tell app.js to push the new one. `Settings.background()`
-resolves the pair to `{ kind, boardOverImage, dim, dataUrl? }`, reading the blob out once and
-memoising the data URL; app.js pushes it in with `window.__applyBackground` on `dom-ready` and
-on every settings change, and the page only ever writes a `data:image/` URL into the stylesheet.
-The picture never travels on the URL — `?bg=aurora|image` is a first-paint hint only, applied
-before newtab-bg.js's first rAF, so an image user never watches the board draw itself and then
-disappear. Removing the picture puts the kind back to `board`, since leaving it on `image` would
-dim a background that is not there.
+drawing at all, on the same `data-bg` attribute the CSS reads, so nothing hidden is still costing
+anything. *Your image* is a picture of your own, with a dim slider and a switch for showing the
+board over the photo as a texture rather than the subject. A picked file is decoded with
+`createImageBitmap`, drawn down to at most 2560px on its long edge and re-encoded as JPEG at
+0.86 — GIF and SVG are refused — and the blob goes to IndexedDB. The descriptor left in the
+settings JSON is `{ kind, boardOverImage, dim, rev }`, and every write carries a fresh `rev`
+because the picture is not in that object: replacing it would otherwise leave the JSON
+byte-identical and `set()`, which skips unchanged keys, would never tell app.js to push the new
+one. The picture never travels on the URL — `?bg=aurora|image` is a first-paint hint only.
 
 **Board pause under overlays.** A pane with a `backdrop-filter` over the new tab page has to
 re-blur everything under it on every frame the page paints — about eleven points of CPU on top
-of the overlay's own. So while any of them is open (settings, tab search, downloads, the shield,
-site info, the omnibox suggestions, the tab menu, the find bar, the bookmarks overflow) app.js
-calls `window.__boardPaused(true)` in every new-tab guest and the board freezes the way a hidden
-page freezes: in-flight sprites are `Animation.pause()`d rather than cancelled, so they resume
-from where they stopped instead of blinking out and respawning, and a palette repaint that
-arrived while frozen is deferred to the resume rather than dropped. One `MutationObserver` on
-`hidden` over the whole document catches every panel, menu and suggestion list, so no pane has to
-remember to report itself. The chrome pause is only one of three reasons the board can be frozen
-— a hidden page and an inactive `data-bg` mode are the others — so resuming resumes nothing the
-other two still veto. `window.__boardState()` reports all of it for tests.
+of the overlay's own. So while any of them is open — settings, tab search and the command
+palette, downloads, the shield, site info, the omnibox suggestions, the tab menu, the find bar,
+the bookmarks overflow — app.js calls `window.__boardPaused(true)` in every new-tab guest and the
+board freezes the way a hidden page freezes: in-flight sprites are `Animation.pause()`d rather
+than cancelled, so they resume from where they stopped instead of blinking out and respawning.
+One `MutationObserver` on `hidden` over the whole document catches every panel, menu and
+suggestion list, so no pane has to remember to report itself.
 
-**Claude tabs.** pty.js spawns `C:\Users\you\.local\bin\claude.exe` under a real ConPTY,
-wired to xterm.js. The cwd is whatever the caller asked for, falling back to the Claude folder
-from settings and then to the home directory — a folder that has been deleted, renamed or
-mistyped falls back rather than failing the tab. Arguments are allowlisted in pty.js
-(`ALLOWED_ARGS`, currently `--continue` and nothing else); anything else is dropped with a
-warning and the session still starts, plain. Shift+click the Claude button, or Ctrl+Shift+`, to
-pick a folder for one chamber through the native dialog; the chip menu's "Open folder in new
-Claude tab" starts a second chamber in the same folder (Duplicate is not offered — a PTY cannot
-be copied). Restored chambers come back on `claude --continue` unless the resume switch is off.
-In a folder Claude Code has not run in before, the first thing in the chamber is its own trust
-prompt — that one is Claude's, not the browser's. The environment is scrubbed first: every
+**Claude tabs.** pty.js spawns `C:\Users\you\.local\bin\claude.exe` under a real ConPTY, wired
+to xterm.js. The cwd is whatever the caller asked for, falling back to the Claude folder from
+settings and then to the home directory — a folder that has been deleted, renamed or mistyped
+falls back rather than failing the tab. Arguments are allowlisted in pty.js (`ALLOWED_ARGS`,
+currently `--continue` and nothing else); anything else is dropped with a warning and the session
+still starts, plain. Shift+click the Claude button, or Ctrl+Shift+`, to pick a folder for one
+chamber through the native dialog; the chip menu's "Open folder in new Claude tab" starts a
+second chamber in the same folder. Restored chambers come back on `claude --continue` unless the
+resume switch is off, and in a folder Claude Code has not run in before the first thing in the
+chamber is its own trust prompt — that one is Claude's. The environment is scrubbed first: every
 `CLAUDE*` variable is deleted except `CLAUDE_CODE_GIT_BASH_PATH` and
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, because if the browser was launched from inside a Claude Code
 session those markers make the new session think it is a child (transcript saving off, effort
 hard-pinned). xterm is opened lazily — building it into a hidden 0x0 container gives a
-permanently broken session — so a background tab waits on a ResizeObserver. When a session
-exits the pane prints `[session ended] press Enter to start a new one`, and Enter restarts it
-in the same terminal.
+permanently broken session. When a session exits the pane prints `[session ended] press Enter to
+start a new one`, and Enter restarts it in place.
 
 **Permissions.** Electron grants everything by default, which would make this the most generous
 browser on the machine, so the handler is explicit. Silently allowed (they need a user gesture
 anyway): fullscreen, pointerLock, clipboard-sanitized-write, window-placement, window-management,
 keyboardLock. Prompted once per origin: geolocation, notifications, midi, midiSysex,
 display-capture, idle-detection, clipboard-read, openExternal, and camera/microphone. Anything
-else is denied without asking. The answer outlives the run, in `permissions.json` and keyed by
-origin — only ever an origin that parses as http(s) and a permission the app knows, so a
-hand-edited file cannot widen anything.
+else is denied without asking. The answer outlives the run, in `permissions.json` keyed by origin
+— only ever an origin that parses as http(s) and a permission the app knows.
 
 **Context menus.** A `<webview>` has no menu of its own and the built-in `role:` entries act on
 the window, so every item calls the guest's own webContents method: navigation, link, image,
-selection, editing and inspect groups.
+selection, Ask Claude, editing and inspect groups.
 
 ## Files
 
@@ -397,21 +445,23 @@ selection, editing and inspect groups.
 | --- | --- |
 | `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, and `session.json`. |
 | `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`. |
-| `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the new-tab background push, the overlay watch that freezes the board, session save/restore, tab menu, crash cards. |
+| `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the prompt it composes, the history-page push and its `console-message` bridge, the new-tab background push, the overlay watch that freezes the board, session save/restore, tab menu, crash cards. |
 | `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment. |
-| `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart. |
+| `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet. |
 | `index.html` | The shell document: backdrop layers, titlebar, nav row, `#views`, `#tabmenu`, script order. |
 | `theme-boot.js` | Runs first in `<head>`; stamps `data-theme` and `data-palette` on `<html>` before any stylesheet paints. |
 | `chrome.css` | Every token and every chrome rule, dark block then light block, then the palette presets. |
 | `find.js` / `find.css` | Find in page. |
 | `downloads.js` / `downloads.css` | Downloads button, progress ring, popover. |
-| `history.js` / `history.css` | The history store and the omnibox suggestion lens. |
+| `history.js` / `history.css` | The history store, the omnibox suggestion lens, `openPage()` for Ctrl+H, and `handleGuestMessage()` — the parser for the history page's console lines. |
+| `historypage.html` / `historypage.css` / `historypage.js` | The history page itself: search, day groups, row actions, the Clear… menu. `window.__applyHistory` in, `console.log('__history:…')` out. |
+| `pip.js` / `pip.css` | Picture in picture: the nav-row button, the video probe and the toggle, all through `executeJavaScript` in the guest. |
 | `settings.js` / `settings.css` | Settings button and popover; owns `localStorage['settings']` and the IndexedDB asset store holding the new tab's background picture. |
 | `capture.js` | Ctrl+Shift+S: asks main for a screenshot of the guest on screen, flashes the window once, toasts the result. No button, no panel, no stylesheet. |
 | `bookmarks.js` / `bookmarks.css` | The bookmarks bar under the nav row — the new-tab chips, the fit/overflow measurement and the "…" popover. Reads the chips out of settings.js; owns nothing of its own. |
 | `shield.js` / `shield.css` | The blocking instrument: nav button, blocked count, the two switches. Talks to main over `api.adblock`. |
 | `siteinfo.js` / `siteinfo.css` | The site instrument: the lock in the omnibox capsule and its popover — connection, permissions, clear site data, zoom. Talks to main over `api.site`. |
-| `tabsearch.js` / `tabsearch.css` | Tab search: the titlebar button and the filtering pane over open and recently closed tabs. |
+| `tabsearch.js` / `tabsearch.css` | Tab search and the command palette: the titlebar button, the filtering pane over open and recently closed tabs, and — behind a `>` — the browser's own verbs. |
 | `sitestyles.js` | Per-host CSS, per-host scripts and force dark; owns `localStorage['sitestyles']` and injects into each guest. |
 | `reader.js` / `reader.css` | The reader button: probes a page, runs Readability, sanitises the article, opens the reading tab. |
 | `reader.html` / `reader-page.css` / `reader-page.js` | The reading page itself: top bar, text size and width, `window.__applyArticle`. Owns `localStorage['reader']`. |
@@ -427,7 +477,7 @@ Runtime dependencies beyond Electron: `@homebridge/node-pty-prebuilt-multiarch` 
 `@xterm/xterm` with `@xterm/addon-fit`, `@ghostery/adblocker-electron` with
 `@ghostery/adblocker-electron-preload` (which nothing here names — the blocker resolves its path
 itself), and `@mozilla/readability`, loaded out of `node_modules/` by index.html as a classic
-script so it leaves a global `Readability` for reader.js. `ws` is a devDependency, for CDP.
+script so it leaves a global `Readability`. `ws` is a devDependency, for CDP.
 
 ## Design rules worth keeping
 
@@ -442,11 +492,11 @@ script so it leaves a global `Readability` for reader.js. `ws` is a devDependenc
 - System fonts only: `--ui-font` is Bahnschrift / Segoe UI Variable / Segoe UI, `--icon-font`
   is Segoe Fluent Icons with the MDL2 fallback. Glyphs are written as codepoint escapes so no
   encoding round-trip can eat a private-use character.
-- `--ion` (ice cyan, or the palette's accent, or a chosen hue) is the one accent and marks what
-  is active. `--amber` means exactly one thing: a Claude session is live. Nothing else is colour.
-- `#views webview` keeps a white background in both themes. A guest page is transparent, so
-  this is what a site without its own background paints on; using the theme ink made dark mode
-  look like it was forcing every plain page dark.
+- `--ion` (ice cyan, or the palette's accent, or a chosen hue) is the one accent and marks what is
+  active. `--amber` means exactly one thing: a Claude session — live, or waiting on you.
+- `#views webview` keeps a white background in both themes. A guest page is transparent, so this
+  is what a site without its own background paints on; the theme ink made dark mode look like it
+  was forcing every plain page dark.
 
 ## Development
 
@@ -464,9 +514,8 @@ node cdp-profile.js [--guest] [seconds]
 instance you drive by hand should be started with `--test-profile` for the same reason the smoke
 test does: its storage and theme choice stay out of the real profile, at
 `%LOCALAPPDATA%\Temp\browser-test-profile`, which is where a test run's `session.json`,
-`adblock.json` and `adblock-engine.bin` land too (a fresh one pays the filter-list download
-once). The test polls for `body.booted` before it touches any tab, then closes any Claude tabs
-the restored session brought back, so the tab count it asserts against is its own.
+`adblock.json` and `adblock-engine.bin` land too. The test polls for `body.booted` before it
+touches any tab, then closes any Claude tabs the restored session brought back.
 
 Never kill every `electron.exe` — I run my own Claude Code instance on Electron and it will go
 down with it. Kill only the test instance: find the PID whose command line contains

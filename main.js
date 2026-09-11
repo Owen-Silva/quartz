@@ -1546,22 +1546,130 @@ ipcMain.handle('site:clear-data', async (_event, payload) => {
 // when you'd want it -- while you are actually reading a page.
 // ---------------------------------------------------------------------------
 
-const SHORTCUTS = {
-  '`': 'toggle-terminal',
-  t: 'new-tab',
-  w: 'close-tab',
-  l: 'focus-omnibox',
-  '=': 'zoom-in',
-  '+': 'zoom-in',
-  '-': 'zoom-out',
-  '0': 'zoom-reset',
-  f: 'find',
-  j: 'downloads',
-  k: 'command-palette',
-  h: 'history',
-  d: 'bookmark',
-  ',': 'settings',
+/**
+ * What each key means, keyed by combo. This is only the built-in default: the
+ * renderer owns the real map (shortcuts.js) and mirrors it over 'shortcuts:set'
+ * at boot and after every change, so these entries are what a renderer that
+ * never sends would get.
+ *
+ * A combo reads Ctrl, Alt, then Shift, letters uppercase, and the UNSHIFTED
+ * character of a punctuation key -- see comboFromInput() below.
+ */
+const DEFAULT_BINDINGS = {
+  'Ctrl+`': 'toggle-terminal',
+  'Ctrl+T': 'new-tab',
+  'Ctrl+Shift+T': 'reopen-tab',
+  'Ctrl+W': 'close-tab',
+  'Ctrl+L': 'focus-omnibox',
+  'Ctrl+=': 'zoom-in',
+  'Ctrl+Shift+=': 'zoom-in', // the '+' key, which needs Shift on a US layout
+  'Ctrl+-': 'zoom-out',
+  'Ctrl+0': 'zoom-reset',
+  'Ctrl+F': 'find',
+  'Ctrl+J': 'downloads',
+  'Ctrl+K': 'command-palette',
+  'Ctrl+Shift+K': 'ask-claude',
+  'Ctrl+H': 'history',
+  'Ctrl+D': 'bookmark',
+  'Ctrl+,': 'settings',
+  'Ctrl+R': 'reload',
+  'Ctrl+Shift+R': 'reader',
+  'Ctrl+Shift+A': 'tabsearch',
+  'Ctrl+Shift+S': 'capture',
+  'Ctrl+Shift+B': 'bookmarks-bar',
+  'Ctrl+\\': 'split',
+  'Ctrl+Shift+\\': 'claude-split',
+  // Alt+Arrow is history navigation in every browser, and the page eats it.
+  'Alt+Left': 'back',
+  'Alt+Right': 'forward',
 };
+
+let keyBindings = DEFAULT_BINDINGS;
+
+/**
+ * The renderer's map, whenever it changes. Anything that is not a plain object
+ * of string -> string is ignored, and so is one that leaves nothing usable:
+ * main keeps what it already had rather than losing every page-focus shortcut
+ * to a single bad payload.
+ */
+ipcMain.on('shortcuts:set', (_event, payload) => {
+  const next = payload && payload.bindings;
+  if (!next || typeof next !== 'object' || Array.isArray(next)) return;
+  const clean = Object.create(null);
+  let count = 0;
+  for (const combo of Object.keys(next)) {
+    const action = next[combo];
+    if (typeof combo !== 'string' || typeof action !== 'string') continue;
+    if (!combo || !action) continue;
+    clean[combo] = action;
+    count += 1;
+  }
+  if (!count) return;
+  keyBindings = clean;
+});
+
+/** A modifier pressed on its own is never a combo. */
+const MODIFIER_KEYS = {
+  Control: 1, Ctrl: 1, Alt: 1, AltGraph: 1, Shift: 1, Meta: 1,
+  OS: 1, CapsLock: 1, NumLock: 1, ScrollLock: 1, Dead: 1, Unidentified: 1,
+};
+
+/** input.key spellings -> the canonical name a combo is written with. */
+const NAMED_KEYS = {
+  ArrowLeft: 'Left', Left: 'Left',
+  ArrowRight: 'Right', Right: 'Right',
+  ArrowUp: 'Up', Up: 'Up',
+  ArrowDown: 'Down', Down: 'Down',
+  PageUp: 'PageUp', PageDown: 'PageDown',
+  Home: 'Home', End: 'End',
+  Tab: 'Tab', Enter: 'Enter', Return: 'Enter',
+  ' ': 'Space', Space: 'Space', Spacebar: 'Space',
+  Backspace: 'Backspace',
+  Delete: 'Delete', Del: 'Delete',
+  Insert: 'Insert',
+  Escape: 'Escape', Esc: 'Escape',
+};
+
+/**
+ * Shifted characters, back to the key actually pressed. Bindings are written in
+ * unshifted terms ('Ctrl+Shift+\', never 'Ctrl+|'), so the Shift has to come
+ * out of the character and go into the modifier list.
+ */
+const UNSHIFTED_CHARS = {
+  '~': '`', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6',
+  '&': '7', '*': '8', '(': '9', ')': '0', '_': '-', '+': '=', '{': '[',
+  '}': ']', '|': '\\', ':': ';', '"': "'", '<': ',', '>': '.', '?': '/',
+};
+
+/**
+ * An Electron `before-input-event` input object -> the combo string the binding
+ * map is keyed by. Must agree with shortcuts.js's own fromMainInput(): the two
+ * sides meet only through these strings, so the tables above are a copy of the
+ * ones in shortcuts.js and have to move together.
+ */
+function comboFromInput(input) {
+  const key = String((input && input.key) || '');
+  if (!key) return '';
+  if (Object.prototype.hasOwnProperty.call(MODIFIER_KEYS, key)) return '';
+  let name = key;
+  let shift = !!input.shift;
+
+  if (Object.prototype.hasOwnProperty.call(NAMED_KEYS, key)) {
+    name = NAMED_KEYS[key]; // ArrowLeft -> Left, ' ' -> Space
+  } else if (Object.prototype.hasOwnProperty.call(UNSHIFTED_CHARS, key)) {
+    name = UNSHIFTED_CHARS[key]; // the character itself is proof Shift was down
+    shift = true;
+  } else if (key.length === 1) {
+    name = key.toUpperCase();
+  }
+
+  const parts = [];
+  if (input.control) parts.push('Ctrl');
+  if (input.alt) parts.push('Alt');
+  if (shift) parts.push('Shift');
+  parts.push(name);
+  return parts.join('+');
+}
 
 /**
  * Keys that mean something with no modifier at all. Escape is the odd one out:
@@ -1574,35 +1682,19 @@ const BARE_KEYS = {
   Escape: 'escape',
 };
 
-/** Map a Ctrl+key press inside a page to the chrome action it means, or null. */
+/** A key pressed inside a page -> the chrome action it means, or null. */
 function shortcutFor(input) {
   const key = String(input.key);
-  if (key === 'Tab') return { action: input.shift ? 'prev-tab' : 'next-tab' };
-  if (/^[1-9]$/.test(key)) return { action: 'select-tab', index: Number(key) };
-  // Ctrl+Shift+T reopens the last closed tab. It has to be caught before the
-  // lowercasing lookup below, which would otherwise read it as Ctrl+T.
-  if (input.shift && (key === 't' || key === 'T')) return { action: 'reopen-tab' };
-  // Ctrl+Shift+R hands the page to the reader, plain Ctrl+R reloads it. Also
-  // caught before the lowercasing lookup, which would read Shift away.
-  if (key === 'r' || key === 'R') return { action: input.shift ? 'reader' : 'reload' };
-  // Ctrl+Shift+A opens tab search; plain Ctrl+A stays the page's select-all.
-  if (input.shift && (key === 'a' || key === 'A')) return { action: 'tabsearch' };
-  // Ctrl+Shift+S screenshots the page. Plain Ctrl+S is deliberately NOT mapped
-  // (it is absent from SHORTCUTS): pages use it for their own save.
-  if (input.shift && (key === 's' || key === 'S')) return { action: 'capture' };
-  if (input.shift && (key === 'b' || key === 'B')) return { action: 'bookmarks-bar' };
-  // Ctrl+Shift+K hands the page -- and whatever is selected on it -- to a Claude
-  // chamber. Caught before the lowercasing lookup, which reads it as Ctrl+K and
-  // would open the command palette instead. No payload: the renderer asks the
-  // guest for its own selection, which is not truncated the way the context
-  // menu's selectionText is.
-  if (input.shift && (key === 'k' || key === 'K')) return { action: 'ask-claude' };
-  // Ctrl+Shift+backslash (reads as '|' on US layouts) puts Claude beside the
-  // page; plain Ctrl+backslash splits with the next tab.
-  if (key === '|' || (input.shift && key === '\\')) return { action: 'claude-split' };
-  if (key === '\\') return { action: 'split' }; // Ctrl+backslash toggles split view
-  const action = SHORTCUTS[key.toLowerCase()];
-  return action ? { action } : null;
+  // Fixed cases, in front of the binding map because they are not rebindable.
+  if (input.control && !input.alt) {
+    if (key === 'Tab') return { action: input.shift ? 'prev-tab' : 'next-tab' };
+    if (/^[1-9]$/.test(key)) return { action: 'select-tab', index: Number(key) };
+  }
+  // Everything else is whatever the renderer has bound the combo to.
+  const combo = comboFromInput(input);
+  if (!combo || !Object.prototype.hasOwnProperty.call(keyBindings, combo)) return null;
+  const action = keyBindings[combo];
+  return typeof action === 'string' && action ? { action } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1787,15 +1879,6 @@ app.on('web-contents-created', (_event, contents) => {
       return;
     }
 
-    // Alt+Arrow is history navigation in every browser, and the page eats it.
-    if (input.alt && !input.control && !input.meta) {
-      if (key === 'ArrowLeft' || key === 'ArrowRight') {
-        event.preventDefault();
-        send('shortcut', { action: key === 'ArrowLeft' ? 'back' : 'forward' });
-      }
-      return;
-    }
-
     const bare = BARE_KEYS[key];
     if (bare) {
       // Escape is forwarded but not swallowed: the page still wants it.
@@ -1804,7 +1887,9 @@ app.on('web-contents-created', (_event, contents) => {
       return;
     }
 
-    if (!input.control || input.alt || input.meta) return;
+    // Ctrl and Alt combos are the rebindable ones; anything else is the
+    // page's own business.
+    if (input.meta || (!input.control && !input.alt)) return;
     const payload = shortcutFor(input);
     if (!payload) return;
     event.preventDefault();

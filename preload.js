@@ -162,6 +162,13 @@ contextBridge.exposeInMainWorld('api', {
     write: (snapshot) => ipcRenderer.send('session:write', { snapshot }),
     read: () => ipcRenderer.invoke('session:read')
   },
+  // Key bindings live in the renderer (shortcuts.js). A key pressed inside a
+  // guest page is matched by main, so main needs the same map: it is mirrored
+  // over at boot and again after every change. Fire-and-forget -- main keeps
+  // its own defaults until something arrives.
+  shortcuts: {
+    set: (bindings) => ipcRenderer.send('shortcuts:set', { bindings })
+  },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     start: (opts) => ipcRenderer.invoke('pty:start', opts),

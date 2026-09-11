@@ -487,7 +487,9 @@ function setOmniboxValue(url, force) {
   if (!force && omniboxHasFocus()) return;
   // about:blank and the new-tab page both read as "empty": the user should see
   // the placeholder, never a file:// path they did not type.
-  const blank = !url || url === 'about:blank' || isNewTabUrl(url);
+  const store = window.History;
+  const ours = !!(store && typeof store.isHistoryUrl === 'function' && store.isHistoryUrl(url));
+  const blank = !url || url === 'about:blank' || isNewTabUrl(url) || ours;
   // A reader tab shows the article it is reading, not our wrapper page.
   omniboxEl.value = blank ? '' : (readerSourceOf(url) || url);
 }
@@ -3970,209 +3972,305 @@ function setPageFullscreen(on) {
   if (!!on !== windowFullscreen) toggleFullscreen();
 }
 
+/**
+ * Every action a key can be bound to, by id.
+ *
+ * Two callers share it. main.js replays a key pressed inside a guest page over
+ * 'shortcut' (payload.action), and the chrome's own keydown resolves an event
+ * to an id through window.Shortcuts. A binding naming an id that is missing
+ * here simply does nothing, so this map is the single list of what exists.
+ *
+ * 'select-tab', 'next-tab', 'prev-tab' and 'escape' are NOT rebindable -- the
+ * digits, Tab and Escape stay hardcoded below -- but main.js still replays them
+ * from inside a page, so they are listed for that path.
+ */
+const ACTIONS = {
+  'toggle-terminal': toggleClaude,
+  'claude-folder': newClaudeTabInFolder,
+  'new-tab': () => createTab(HOME_URL),
+  'close-tab': closeActiveTab,
+  'reopen-tab': reopenClosedTab,
+  'focus-omnibox': focusOmnibox,
+  'next-tab': () => cycleTab(1),
+  'prev-tab': () => cycleTab(-1),
+  // The only action carrying data: payload.index is 1-9.
+  'select-tab': (payload) => selectTabByIndex(payload && payload.index),
+  'move-tab-left': () => moveActiveTab(-1),
+  'move-tab-right': () => moveActiveTab(1),
+  'zoom-in': () => zoomActiveTab(ZOOM_STEP),
+  'zoom-out': () => zoomActiveTab(-ZOOM_STEP),
+  'zoom-reset': resetZoom,
+  'toggle-theme': toggleTheme,
+  'reload': reloadActiveTab,
+  'print': printActiveTab,
+  'back': goBack,
+  'forward': goForward,
+  'fullscreen': toggleFullscreen,
+  'split': toggleSplit,
+  'claude-split': toggleClaudeSplit,
+  // Carries no payload: the selection is read back off the guest here.
+  'ask-claude': askClaudeAboutActiveTab,
+  // Module actions. Each module decides for itself whether the action is its
+  // own; moduleShortcut() returns false when none of them took it.
+  'find': () => moduleShortcut('find'),
+  'downloads': () => moduleShortcut('downloads'),
+  'history': () => moduleShortcut('history'),
+  'settings': () => moduleShortcut('settings'),
+  'bookmark': () => moduleShortcut('bookmark'),
+  'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
+  'reader': () => moduleShortcut('reader'),
+  'tabsearch': () => moduleShortcut('tabsearch'),
+  'command-palette': () => moduleShortcut('command-palette'),
+  'capture': () => moduleShortcut('capture'),
+  'pip': () => moduleShortcut('pip'),
+  'shield': () => moduleShortcut('shield'),
+  'siteinfo': () => moduleShortcut('siteinfo'),
+  'escape': () => moduleShortcut('escape'),
+};
+
+/**
+ * main.js matches keys pressed inside a guest page itself, so it needs the same
+ * binding map the chrome uses. Sent once at boot and again after every change.
+ * main keeps its own built-in defaults if this never arrives.
+ */
+function pushShortcutBindings() {
+  const bridge = (window.api && window.api.shortcuts) ? window.api.shortcuts : null;
+  if (!bridge || typeof bridge.set !== 'function') return;
+  if (!window.Shortcuts || typeof window.Shortcuts.bindings !== 'function') return;
+  let bindings = null;
+  try { bindings = window.Shortcuts.bindings(); } catch (err) { return; }
+  if (!bindings || typeof bindings !== 'object') return;
+  try { bridge.set(bindings); } catch (err) { /* main keeps its defaults */ }
+}
+
 function wireKeyboard() {
   // Keys pressed while focus is inside a <webview> go to the guest page, not
   // here. main.js intercepts those and replays them over 'shortcut', so the
   // same actions work whether the chrome or a page currently has focus.
   if (window.api && typeof window.api.onShortcut === 'function') {
-    const forwarded = {
-      'toggle-terminal': toggleClaude,
-      'new-tab': () => createTab(HOME_URL),
-      'close-tab': closeActiveTab,
-      'reopen-tab': reopenClosedTab,
-      'focus-omnibox': focusOmnibox,
-      'next-tab': () => cycleTab(1),
-      'prev-tab': () => cycleTab(-1),
-      // The only action carrying data: payload.index is 1-9.
-      'select-tab': (payload) => selectTabByIndex(payload && payload.index),
-      'zoom-in': () => zoomActiveTab(ZOOM_STEP),
-      'zoom-out': () => zoomActiveTab(-ZOOM_STEP),
-      'zoom-reset': resetZoom,
-      'toggle-theme': toggleTheme,
-      'reload': reloadActiveTab,
-      // main.js does not send 'print' yet; the entry costs nothing and means
-      // Ctrl+P starts working from a page with focus the day it does.
-      'print': printActiveTab,
-      'back': goBack,
-      'forward': goForward,
-      'fullscreen': toggleFullscreen,
-      'find': () => moduleShortcut('find'),
-      'downloads': () => moduleShortcut('downloads'),
-      'history': () => moduleShortcut('history'),
-      'settings': () => moduleShortcut('settings'),
-      'bookmark': () => moduleShortcut('bookmark'),
-      // Replayed by main.js from inside pages: Ctrl+Shift+R, Ctrl+Shift+A, Ctrl+\.
-      // 'print' has no replay yet, so Ctrl+P only works while the chrome has focus.
-      'reader': () => moduleShortcut('reader'),
-      'tabsearch': () => moduleShortcut('tabsearch'),
-      'capture': () => moduleShortcut('capture'),
-      'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
-      'split': toggleSplit,
-      // Replayed by main.js from inside pages as Ctrl+Shift+\ (or Ctrl+|).
-      'claude-split': toggleClaudeSplit,
-      // Replayed by main.js from inside pages as Ctrl+Shift+K. It carries no
-      // payload: the selection is read back off the guest here.
-      'ask-claude': askClaudeAboutActiveTab,
-      'command-palette': () => moduleShortcut('command-palette'),
-      'escape': () => moduleShortcut('escape'),
-    };
     window.api.onShortcut((payload) => {
-      const run = payload && forwarded[payload.action];
+      const run = payload && ACTIONS[payload.action];
       if (run) run(payload);
     });
   }
 
+  // Hand main the binding map, and hand it over again after every change.
+  pushShortcutBindings();
+  if (window.Shortcuts && typeof window.Shortcuts.on === 'function') {
+    try { window.Shortcuts.on(pushShortcutBindings); } catch (err) { /* no watcher */ }
+  }
+
   window.addEventListener('keydown', (event) => {
     if (event.metaKey) return;
+    const key = typeof event.key === 'string' ? event.key : '';
 
-    // Keys that mean the same thing without Ctrl.
-    if (!event.ctrlKey && !event.altKey) {
-      // The menu handles its own keys while it holds focus; this is the fallback
-      // for an Escape that arrives once focus has moved on.
-      if (event.key === 'Escape' && tabMenuIsOpen()) {
+    /* Fixed keys first. These are not rebindable, so they are settled before
+       the resolver ever sees the event. */
+
+    // F12 is the GUEST's devtools and main.js owns it: the chrome must neither
+    // act on it nor swallow it.
+    if (key === 'F12') return;
+
+    // Escape: the tab menu first, then whichever module wants it. The menu
+    // handles its own keys while it holds focus; this is the fallback for an
+    // Escape that arrives once focus has moved on.
+    if (key === 'Escape' && !event.ctrlKey && !event.altKey) {
+      if (tabMenuIsOpen()) { event.preventDefault(); closeTabMenu(); return; }
+      if (moduleShortcut('escape')) event.preventDefault();
+      return;
+    }
+
+    if (event.ctrlKey && !event.altKey) {
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle the strip.
+      if (key === 'Tab') {
         event.preventDefault();
-        closeTabMenu();
+        cycleTab(event.shiftKey ? -1 : 1);
         return;
       }
-      if (event.key === 'F5') { event.preventDefault(); reloadActiveTab(); return; }
-      if (event.key === 'F11') { event.preventDefault(); toggleFullscreen(); return; }
-      if (event.key === 'Escape' && moduleShortcut('escape')) { event.preventDefault(); }
-      return;
+      // Ctrl+1..8 jump to that position, Ctrl+9 to the last tab.
+      if (key.length === 1 && key >= '1' && key <= '9') {
+        event.preventDefault();
+        selectTabByIndex(Number(key));
+        return;
+      }
     }
-    if (event.altKey && !event.ctrlKey) {
-      if (event.key === 'ArrowLeft') { event.preventDefault(); goBack(); }
-      if (event.key === 'ArrowRight') { event.preventDefault(); goForward(); }
-      // Alt+P: picture in picture for the page's video.
-      if (typeof event.key === 'string' && event.key.toLowerCase() === 'p') { event.preventDefault(); moduleShortcut('pip'); }
-      return;
-    }
-    if (!event.ctrlKey || event.altKey) return;
 
-    const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+    /* Everything else is rebindable. Only Ctrl, Alt and function keys reach the
+       resolver, so a plain letter typed into the omnibox or the find box is
+       never swallowed. */
+    if (!event.ctrlKey && !event.altKey && !/^F\d+$/.test(key)) return;
 
-    // Ctrl+\ pairs the tab in front with the next one, or breaks the pair it is
-    // already in. The backslash has no case, so it is read off event.key raw.
-    // Ctrl+Shift+\ is "Claude beside" instead. Shift over a US layout turns the
-    // key into '|', but not every layout does, so both characters are read.
-    if (event.key === '\\' || event.key === '|') {
-      event.preventDefault();
-      if (event.shiftKey) toggleClaudeSplit();
-      else toggleSplit();
+    if (window.Shortcuts && typeof window.Shortcuts.actionFor === 'function') {
+      let action = null;
+      try { action = window.Shortcuts.actionFor(event); } catch (err) { action = null; }
+      const run = action ? ACTIONS[action] : null;
+      if (run) {
+        event.preventDefault();
+        run();
+      }
       return;
     }
 
-    // Module bars: find, downloads, history. Each decides whether it applies.
-    if (key === 'f' || key === 'j' || key === 'h' || key === ',' || key === 'd') {
-      const action = { f: 'find', j: 'downloads', h: 'history', ',': 'settings', d: 'bookmark' }[key];
-      if (moduleShortcut(action)) event.preventDefault();
-      return;
-    }
-
-    // Ctrl+Shift+PageUp / PageDown move the ACTIVE tab along the strip. main.js
-    // does not replay these, so they only fire while the chrome has focus — a
-    // page with focus swallows them.
-    if (event.shiftKey && (key === 'pageup' || key === 'pagedown')) {
-      event.preventDefault();
-      moveActiveTab(key === 'pageup' ? -1 : 1);
-      return;
-    }
-
-    // Ctrl+Tab / Ctrl+Shift+Tab cycle the strip. Handled first because it is the
-    // one binding here that wants Shift.
-    if (key === 'tab') {
-      event.preventDefault();
-      cycleTab(event.shiftKey ? -1 : 1);
-      return;
-    }
-
-    // Zoom. Ctrl+0 resets, so it is checked before the 1-9 tab selectors.
-    if (key === '0') {
-      event.preventDefault();
-      resetZoom();
-      return;
-    }
-    if (key === '=' || key === '+' || key === 'add') {
-      event.preventDefault();
-      zoomActiveTab(ZOOM_STEP);
-      return;
-    }
-    if (key === '-' || key === 'subtract') {
-      event.preventDefault();
-      zoomActiveTab(-ZOOM_STEP);
-      return;
-    }
-
-    // Ctrl+1..8 jump to that position, Ctrl+9 to the last tab.
-    if (key.length === 1 && key >= '1' && key <= '9') {
-      event.preventDefault();
-      selectTabByIndex(Number(key));
-      return;
-    }
-
-    // Ctrl+Shift+T reopens the last closed tab. It has to be tested BEFORE the
-    // plain Ctrl+T branch below, which would otherwise swallow it.
-    if (key === 't' && event.shiftKey) {
-      event.preventDefault();
-      reopenClosedTab();
-      return;
-    }
-    if (key === 't') {
-      event.preventDefault();
-      createTab(HOME_URL);
-      return;
-    }
-    if (key === 'w') {
-      event.preventDefault();
-      closeActiveTab(); // either kind
-      return;
-    }
-    if (key === 'l') {
-      event.preventDefault();
-      focusOmnibox();
-      return;
-    }
-    // Ctrl+Shift+R hands the page to the reader. Tested BEFORE plain Ctrl+R,
-    // which does not look at Shift and would otherwise swallow it. main.js does
-    // not replay this one yet, so it only fires while the chrome has focus.
-    if (key === 'r' && event.shiftKey) {
-      event.preventDefault();
-      moduleShortcut('reader');
-      return;
-    }
-    // Ctrl+Shift+A: tab search. Plain Ctrl+A is select-all wherever focus is.
-    if (key === 'a' && event.shiftKey) {
-      event.preventDefault();
-      moduleShortcut('tabsearch');
-      return;
-    }
-    // Ctrl+Shift+S saves a screenshot of the page; Ctrl+Shift+B shows the bookmarks bar.
-    if (key === 's' && event.shiftKey) { event.preventDefault(); moduleShortcut('capture'); return; }
-    // Ctrl+Shift+K hands the page — and anything selected on it — to a Claude
-    // chamber. Tested BEFORE plain Ctrl+K, which would otherwise swallow it.
-    if (key === 'k' && event.shiftKey) { event.preventDefault(); askClaudeAboutActiveTab(); return; }
-    // Ctrl+K: the command palette (tab search in command mode).
-    if (key === 'k') { event.preventDefault(); moduleShortcut('command-palette'); return; }
-    if (key === 'b' && event.shiftKey) { event.preventDefault(); moduleShortcut('bookmarks-bar'); return; }
-    if (key === 'r') {
-      event.preventDefault(); // never let Ctrl+R reload the shell window
-      reloadActiveTab(); // no-op on a Claude tab
-      return;
-    }
-    // Plain Ctrl+P only: Ctrl+Shift+P is left free, as it is in every browser.
-    if (key === 'p' && !event.shiftKey) {
-      event.preventDefault(); // never let Ctrl+P print the chrome window itself
-      printActiveTab(); // no-op on a Claude tab
-      return;
-    }
-    // Shift turns event.key into '~', so the physical key is what is tested.
-    // Ctrl+Shift+` opens a chamber in a folder you pick; main.js does not
-    // replay it, so it only fires while the chrome has focus.
-    if (key === '`' || event.code === 'Backquote') {
-      event.preventDefault();
-      if (event.shiftKey) newClaudeTabInFolder();
-      else toggleClaude(); // same path as the shortcut action and the Claude button
-    }
+    // shortcuts.js did not load: the original hardcoded chain still works.
+    legacyKeydown(event);
   });
+}
+
+/**
+ * The pre-rebinding key chain, kept whole as the fallback for a boot where
+ * shortcuts.js is missing. Nothing else calls it, and nothing new goes in here
+ * -- new bindings belong in shortcuts.js and ACTIONS above.
+ */
+function legacyKeydown(event) {
+  if (event.metaKey) return;
+
+  // Keys that mean the same thing without Ctrl.
+  if (!event.ctrlKey && !event.altKey) {
+    // The menu handles its own keys while it holds focus; this is the fallback
+    // for an Escape that arrives once focus has moved on.
+    if (event.key === 'Escape' && tabMenuIsOpen()) {
+      event.preventDefault();
+      closeTabMenu();
+      return;
+    }
+    if (event.key === 'F5') { event.preventDefault(); reloadActiveTab(); return; }
+    if (event.key === 'F11') { event.preventDefault(); toggleFullscreen(); return; }
+    if (event.key === 'Escape' && moduleShortcut('escape')) { event.preventDefault(); }
+    return;
+  }
+  if (event.altKey && !event.ctrlKey) {
+    if (event.key === 'ArrowLeft') { event.preventDefault(); goBack(); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); goForward(); }
+    // Alt+P: picture in picture for the page's video.
+    if (typeof event.key === 'string' && event.key.toLowerCase() === 'p') { event.preventDefault(); moduleShortcut('pip'); }
+    return;
+  }
+  if (!event.ctrlKey || event.altKey) return;
+
+  const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+
+  // Ctrl+\ pairs the tab in front with the next one, or breaks the pair it is
+  // already in. The backslash has no case, so it is read off event.key raw.
+  // Ctrl+Shift+\ is "Claude beside" instead. Shift over a US layout turns the
+  // key into '|', but not every layout does, so both characters are read.
+  if (event.key === '\\' || event.key === '|') {
+    event.preventDefault();
+    if (event.shiftKey) toggleClaudeSplit();
+    else toggleSplit();
+    return;
+  }
+
+  // Module bars: find, downloads, history. Each decides whether it applies.
+  if (key === 'f' || key === 'j' || key === 'h' || key === ',' || key === 'd') {
+    const action = { f: 'find', j: 'downloads', h: 'history', ',': 'settings', d: 'bookmark' }[key];
+    if (moduleShortcut(action)) event.preventDefault();
+    return;
+  }
+
+  // Ctrl+Shift+PageUp / PageDown move the ACTIVE tab along the strip. main.js
+  // does not replay these, so they only fire while the chrome has focus — a
+  // page with focus swallows them.
+  if (event.shiftKey && (key === 'pageup' || key === 'pagedown')) {
+    event.preventDefault();
+    moveActiveTab(key === 'pageup' ? -1 : 1);
+    return;
+  }
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle the strip. Handled first because it is the
+  // one binding here that wants Shift.
+  if (key === 'tab') {
+    event.preventDefault();
+    cycleTab(event.shiftKey ? -1 : 1);
+    return;
+  }
+
+  // Zoom. Ctrl+0 resets, so it is checked before the 1-9 tab selectors.
+  if (key === '0') {
+    event.preventDefault();
+    resetZoom();
+    return;
+  }
+  if (key === '=' || key === '+' || key === 'add') {
+    event.preventDefault();
+    zoomActiveTab(ZOOM_STEP);
+    return;
+  }
+  if (key === '-' || key === 'subtract') {
+    event.preventDefault();
+    zoomActiveTab(-ZOOM_STEP);
+    return;
+  }
+
+  // Ctrl+1..8 jump to that position, Ctrl+9 to the last tab.
+  if (key.length === 1 && key >= '1' && key <= '9') {
+    event.preventDefault();
+    selectTabByIndex(Number(key));
+    return;
+  }
+
+  // Ctrl+Shift+T reopens the last closed tab. It has to be tested BEFORE the
+  // plain Ctrl+T branch below, which would otherwise swallow it.
+  if (key === 't' && event.shiftKey) {
+    event.preventDefault();
+    reopenClosedTab();
+    return;
+  }
+  if (key === 't') {
+    event.preventDefault();
+    createTab(HOME_URL);
+    return;
+  }
+  if (key === 'w') {
+    event.preventDefault();
+    closeActiveTab(); // either kind
+    return;
+  }
+  if (key === 'l') {
+    event.preventDefault();
+    focusOmnibox();
+    return;
+  }
+  // Ctrl+Shift+R hands the page to the reader. Tested BEFORE plain Ctrl+R,
+  // which does not look at Shift and would otherwise swallow it. main.js does
+  // not replay this one yet, so it only fires while the chrome has focus.
+  if (key === 'r' && event.shiftKey) {
+    event.preventDefault();
+    moduleShortcut('reader');
+    return;
+  }
+  // Ctrl+Shift+A: tab search. Plain Ctrl+A is select-all wherever focus is.
+  if (key === 'a' && event.shiftKey) {
+    event.preventDefault();
+    moduleShortcut('tabsearch');
+    return;
+  }
+  // Ctrl+Shift+S saves a screenshot of the page; Ctrl+Shift+B shows the bookmarks bar.
+  if (key === 's' && event.shiftKey) { event.preventDefault(); moduleShortcut('capture'); return; }
+  // Ctrl+Shift+K hands the page — and anything selected on it — to a Claude
+  // chamber. Tested BEFORE plain Ctrl+K, which would otherwise swallow it.
+  if (key === 'k' && event.shiftKey) { event.preventDefault(); askClaudeAboutActiveTab(); return; }
+  // Ctrl+K: the command palette (tab search in command mode).
+  if (key === 'k') { event.preventDefault(); moduleShortcut('command-palette'); return; }
+  if (key === 'b' && event.shiftKey) { event.preventDefault(); moduleShortcut('bookmarks-bar'); return; }
+  if (key === 'r') {
+    event.preventDefault(); // never let Ctrl+R reload the shell window
+    reloadActiveTab(); // no-op on a Claude tab
+    return;
+  }
+  // Plain Ctrl+P only: Ctrl+Shift+P is left free, as it is in every browser.
+  if (key === 'p' && !event.shiftKey) {
+    event.preventDefault(); // never let Ctrl+P print the chrome window itself
+    printActiveTab(); // no-op on a Claude tab
+    return;
+  }
+  // Shift turns event.key into '~', so the physical key is what is tested.
+  // Ctrl+Shift+` opens a chamber in a folder you pick; main.js does not
+  // replay it, so it only fires while the chrome has focus.
+  if (key === '`' || event.code === 'Backquote') {
+    event.preventDefault();
+    if (event.shiftKey) newClaudeTabInFolder();
+    else toggleClaude(); // same path as the shortcut action and the Claude button
+  }
 }
 
 /* ------------------------------------------------------------------ */
