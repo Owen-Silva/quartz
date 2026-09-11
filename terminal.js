@@ -136,6 +136,9 @@
       bySession.delete(payload.id);
       st.sessionId = null;
       st.live = false;
+      // Nothing is holding a grid any more; the next spawn records its own.
+      st.ptyCols = 0;
+      st.ptyRows = 0;
       // Whatever burst was still settling died with the session; 'live' false
       // is the signal now, and a stale 'idle' a second later would only lie.
       clearIdleTimer(st);
@@ -356,9 +359,18 @@
     var cols = st.term.cols;
     var rows = st.term.rows;
     if (!cols || !rows || cols < 1 || rows < 1) return;
+    // A ConPTY resize is never free: claude.exe reads it as a window change and
+    // repaints its whole TUI, which comes straight back down the data pump as a
+    // full-screen burst. Only the GRID matters to the CLI, so a fit that lands
+    // on the cols/rows the session already has -- a drag along one axis, a
+    // window resize that does not cross a cell boundary, and above all the
+    // synchronous fit() every tab activation makes -- must not be pushed.
+    if (cols === st.ptyCols && rows === st.ptyRows) return;
     if (st.sessionId && window.api && window.api.pty) {
       try {
         window.api.pty.resize(st.sessionId, cols, rows);
+        st.ptyCols = cols;
+        st.ptyRows = rows;
       } catch (err) {
         /* main process may have torn the session down already */
       }
@@ -396,6 +408,13 @@
     var startArgs = st.pendingArgs;
     st.pendingArgs = null;
 
+    // The spawn itself sets the session's grid, so record it as pushed: without
+    // this the first fit after the tab is raised would resize the PTY to the
+    // size it already has and make the CLI redraw before it has finished
+    // drawing the first time.
+    st.ptyCols = cols;
+    st.ptyRows = rows;
+
     var startPromise;
     try {
       startPromise = window.api.pty.start({
@@ -428,10 +447,14 @@
       // Anything handed to this chamber while it was starting is now waiting
       // on the CLI rather than on the PTY; the cap makes sure it goes in.
       armPasteCap(st);
-      // The tab may have been resized between start() and this reply.
-      if (st.term && st.term.cols >= 1 && st.term.rows >= 1) {
+      // The tab may have been resized between start() and this reply -- but
+      // only then: pushing the size it was spawned at is a free full redraw.
+      if (st.term && st.term.cols >= 1 && st.term.rows >= 1 &&
+          (st.term.cols !== st.ptyCols || st.term.rows !== st.ptyRows)) {
         try {
           window.api.pty.resize(id, st.term.cols, st.term.rows);
+          st.ptyCols = st.term.cols;
+          st.ptyRows = st.term.rows;
         } catch (err) {}
       }
     }).catch(function (err) {
@@ -557,6 +580,11 @@
       term: null,
       fitAddon: null,
       sessionId: null,
+      // The grid the PTY was last told about. safeFit() compares against it so
+      // a fit that changes nothing never reaches ConPTY. 0 means "nothing
+      // pushed yet", which no real grid can match.
+      ptyCols: 0,
+      ptyRows: 0,
       live: false,
       starting: false,
       disposed: false,
