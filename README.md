@@ -24,11 +24,12 @@ row. Either one flushes the session and the window state, releases any Spotify a
 and relaunches with the same arguments, tabs restored. Use it after pulling an update: a copy that
 is already running keeps the old code, and a code change only takes effect after a restart.
 
-Two CLI flags:
+Three CLI flags:
 
 | Flag | Effect |
 | --- | --- |
 | `--test-profile` | Points Electron's `userData` at `%TEMP%\browser-test-profile`, so a test run's cookies, storage, theme and window geometry never touch the real profile. |
+| `--profile-name=<x>` | Only read alongside `--test-profile`. Suffixes the test profile directory — `%TEMP%\browser-test-profile-<x>` — so two test instances never share a LevelDB or a window state. The name is stripped to letters, digits and hyphens. |
 | `--no-acrylic` | Skips the DWM acrylic backdrop and opens a flat window. Used to measure what the material costs. Acrylic is only attempted on Windows 11 22H2 (build 22621) or later, and falls back to flat by itself if `backgroundMaterial: 'acrylic'` throws. |
 
 The profile lives at `%APPDATA%\browser` (Electron's default `userData` for the app name
@@ -138,6 +139,17 @@ close. A guest whose renderer dies gets a `.tab-card` over it — "This page cra
 reach this site" — instead of Chromium's grey page; reload rebuilds the guest. Switching tabs is
 a display swap, never a teardown, so page state and live PTYs both survive. Closed page URLs go
 on a 20-deep stack for Ctrl+Shift+T.
+
+**Popups and `target=_blank`.** There is no popup window in this browser; a popup becomes a tab.
+Guests carry `allowpopups`, so Chromium lets `window.open` and `target=_blank` through to a
+handler instead of killing them at the source, and main installs `setWindowOpenHandler` on each
+guest's `webContents`: it denies the window every time and sends `open-url` to the chrome, where
+app.js opens a tab. A disposition of `background-tab` (a middle-click or Ctrl+click on a link)
+opens the tab in the background; everything else opens it in front. `javascript:`, `data:`,
+`file:` and custom schemes are refused there as everywhere else. This replaces the `<webview>`
+`new-window` DOM event, which Electron removed in v22 — the listener app.js had been carrying was
+dead code. One limit worth knowing: the tab has no `window.opener`, so an OAuth popup that expects
+to `postMessage` a result back to the page that opened it will not complete.
 
 **Workspaces.** One window, several named strips. Every tab belongs to a workspace, and the strip
 shows only the current one's chips — a display filter, not a teardown, so pages and live PTYs in
@@ -504,7 +516,7 @@ guest and the board freezes as a hidden page does: sprites are `Animation.pause(
 cancelled, so they resume instead of respawning. One `MutationObserver` on `hidden` catches every
 pane, so none has to report itself. The same freeze runs off window focus — pause on blur, resume
 on focus — because visible-but-unfocused is the common case, the window sitting behind something
-else while its aurora and board keep the GPU busy for no one.
+else while its board keeps the GPU busy for no one.
 
 That focus is the *window's*, not the chrome document's. Reading the chrome's own `blur` froze the
 board the moment a page inside a tab took focus, which is most of the time you are using the
@@ -619,7 +631,39 @@ falls asleep gives that renderer back, and two sleeping tabs handed back about *
 them. Idle CPU is almost entirely GPU compositing — the aurora and the new tab's circuit board,
 both of which cost whether or not anyone is looking, which is why both freezes exist: the board
 pauses under any pane with a `backdrop-filter` over it, and again whenever the window loses focus.
-With it frozen and no page animating, the idle cost is the aurora's stepped keyframes.
+With it frozen and no page animating, the idle cost was the aurora's stepped keyframes, and the
+aurora is static now.
+
+**How any of this is measured.** Launch a second instance of the browser on its own
+`--test-profile --profile-name=<x>` and drive it over CDP, never the real one. Push its window
+behind something before taking a number: an occluded or minimised window composites nothing and
+reads as free, and a window in front reads honestly. Chromium throttles what it thinks nobody is
+watching, so the instance is started with `--disable-background-timer-throttling` and
+`--disable-renderer-backgrounding`. CPU is read per process type — main, renderer, GPU — because
+the same total means different things in each, and a change that only moves cost from the renderer
+to the GPU process is not a win. Frame cost and script cost come from `Performance.getMetrics` over
+a fixed window (8 seconds, median of three or four runs), with an A/B run interleaved rather than
+one run before and one after.
+
+**Rules that came out of it**, worth keeping:
+
+- `webview.getURL`, `canGoBack`, `canGoForward` and `getZoomLevel` are synchronous IPC into main,
+  not property reads. Cache their answers per guest and invalidate on navigation events; never call
+  one in a loop or on every tab switch.
+- One IPC per real change. A push to a guest — readout, recents, settings, theme — is memoised
+  against the last value sent, rolled back if the send fails and cleared on `dom-ready`.
+- Session writes are async and single-flight, newest-wins, with a synchronous flush on `before-quit`
+  and on `beforeunload`. A synchronous write on the main loop is a stall the whole window feels.
+- PTY output is coalesced to one message per frame (a 16ms window, 64KB cap), first chunk immediate
+  and the rest flushed on exit.
+- A resize that does not change anything is not sent. `safeFit` compares the grid it is about to
+  push against the one it pushed last, because a ConPTY resize makes `claude.exe` repaint its whole
+  TUI.
+- Layout reads are cached. `getBoundingClientRect` on every tab change is a forced layout; measure
+  once and re-measure only on a ResizeObserver hit, a child mutation, `load`, `fonts.ready` or a
+  theme swap.
+- Nothing animates at rest under a `backdrop-filter` surface, and something that must pulse inside
+  one gets its own layer.
 
 ## Files
 
@@ -673,6 +717,16 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   `--readout-stretch`) are built out of those theme tokens with `var()`, so the one definition
   covers dark, light and all six palettes, and a palette that relights `--ion` relights them with
   it. They are never copied per palette.
+- The dark theme is charcoal, not ink, and nothing glows at rest. The ground is a neutral
+  `#1a1c20` / `#212429` in every palette rather than the blue-black it started as; a container's
+  edge is a hairline at 11–14%, not a lit rim (`--rim` still runs as a masked ring, it just ends on
+  the plain edge colour); the sheen is a flat 3.5% wash; the accent is desaturated (`#72adca`, not
+  `#7dd3ff`) and its glow tokens are half strength; pips are painted, not haloed; seam and chamber
+  lamps sit at 14–16%; text-shadows are gone. The one thing that still blooms is focus, and it is a
+  3px ring rather than a 28px bloom. `--fg-2` and `--fg-3` are set to hold 4.5:1 on the raised
+  grounds. The hue slider matches: a muted track, and a custom hue derived at 45% saturation and
+  62% lightness in dark so dragging it cannot reintroduce the neon. The aurora behind all of it is
+  static. The light theme is its own token block and none of this touched it.
 - A container is bevelled; a control is not. `corner-shape: round bevel round bevel` cuts two
   corners on the diagonal, echoing the 115deg sheen, and sits inside an `@supports` so anything
   without corner shapes keeps plain radii. Controls stay round at `--radius-ctl` and nothing much
@@ -705,9 +759,13 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
   old theme's value, which after a flip to light is near-white type on a white pane.
 - Anything floating over a page uses `--panel-bg`, not `--glass`. Glass is see-through, and
   there is nothing behind a popover to blur except the guest's own content.
-- No continuous animation under `backdrop-filter`. Everything that moves is stepped, because a
-  drifting full-screen effect behind the blur once cost about a quarter of a core for the chrome
-  alone — and it is why the new tab's board freezes under any pane, and while unfocused.
+- Nothing animates at rest under `backdrop-filter`. A drifting full-screen effect behind the blur
+  once cost about a quarter of a core for the chrome alone, and stepping it was not enough: the
+  aurora's twice-a-second nudge still re-blurred every frosted surface above it, about five points
+  of a core with a Claude tab open, so the aurora is static now. It is the same rule the new tab's
+  board follows when it freezes under any pane and while the window is unfocused. Anything that
+  does move on top of glass is stepped, and pulses that sit inside a frosted row get their own
+  layer rather than dirtying it.
 - System fonts only: `--ui-font` is Bahnschrift / Segoe UI Variable / Segoe UI, `--icon-font` is
   Segoe Fluent Icons. Glyphs are codepoint escapes so no encoding round-trip can eat one.
 - `--ion` (ice cyan, or the palette's accent, or a chosen hue) is the one accent and marks what is
@@ -740,6 +798,15 @@ instance you drive by hand should be started with `--test-profile`: its storage 
 stay out of the real profile, at `%LOCALAPPDATA%\Temp\browser-test-profile`, where a test run's
 `session.json`, `adblock.json` and `adblock-engine.bin` land too. The test polls for `body.booted`
 before it touches any tab, then closes any Claude tabs the restored session brought back.
+
+Add `--profile-name=<x>` beside `--test-profile` to move that storage to
+`browser-test-profile-<x>`. Two test instances on one profile fight over the same LevelDB and the
+same `window-state.json`, so the rule for anything parallel is one port and one profile name each:
+
+```
+npx electron . --test-profile --profile-name=nav --remote-debugging-port=9223
+npx electron . --test-profile --profile-name=perf --remote-debugging-port=9224
+```
 
 Never kill every `electron.exe` — I run my own Claude Code instance on Electron and it will go
 down with it. Kill only the test instance: find the PID whose command line contains

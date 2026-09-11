@@ -65,6 +65,17 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Command palette (Ctrl+K, or a `>` prefix in tab search) lists 30+ of the browser's own verbs with
   keycaps that read your current bindings.
 - Crash and unreachable-site cards replace the blank page when a guest dies or a load fails.
+- Popups open as tabs again, which is what fixed "Add another account" in Gmail doing nothing. Two
+  failures were stacked: the `new-window` DOM event app.js listened for was removed from
+  `<webview>` in Electron 22, so that listener had been dead code, and `will-attach-webview`
+  stripped `allowpopups`, so Chromium killed every `window.open` and `target=_blank` before any
+  handler could run. Only `target=_top` navigations worked, which is why the rest of Google was
+  fine. Guests keep `allowpopups` now, and main's `setWindowOpenHandler` denies the popup window
+  and sends `open-url` to the chrome, which opens a tab — a background tab for background-tab
+  dispositions. `javascript:`, `data:`, `file:` and custom schemes stay blocked, and the rest of
+  the guest hardening is untouched. All nine popup cases on a test page open a tab. Known limit:
+  the new tab has no `window.opener`, so an OAuth popup that posts a result back to its opener
+  still will not work.
 
 ### Address bar and pages
 
@@ -157,6 +168,25 @@ or use Restart browser in Settings → About — to pick any of this up.
   sends `win:focus` from the BrowserWindow's focus and blur now. The board also resumes on
   `visibilitychange`, `pageshow` and `focus`, and a 2-second watchdog restarts the frame loop if it
   has stalled.
+- The dark theme is a neutral charcoal now. The user asked for less neon and less glow — "less ai
+  slop", and for the browser to feel premium. The dark ground moves from blue-black ink (`#05060a`)
+  to charcoal (`#1a1c20` / `#212429`) in every palette; the lit gradient rims end on the plain edge
+  colour, so a container is drawn with hairlines at 11% and 14% instead of a lit edge; the sheen
+  wash is a flat 3.5% tint; the accent desaturates (`#7dd3ff` to `#72adca`, and the palettes with
+  it) and its glow tokens halve; pips lose their halo; the omnibox and the new-tab field trade a
+  28px focus bloom for a 3px ring, which leaves focus as the only thing that glows; the seam and
+  chamber lamps drop to 14–16% and the text-shadows go. `--fg-2` and `--fg-3` lift to keep 4.5:1 on
+  the raised grounds (lowest measured 4.55:1, on a highlighted row). The circuit board paints on
+  the same charcoal, with traces at half contrast, vias and pads at half, and packets as plain dots
+  with no bloom or tail. The light theme block is untouched.
+- The accent hue slider follows the same calming. Its track is a muted spectrum — 42% saturation at
+  52% lightness, down from 85% at 58% — with the thumb still showing the chosen accent, and a
+  custom hue now derives at the dark theme's own strength (45% saturation, 62% lightness, and the
+  alphas chrome.css authors) instead of `hsl(H 100% 75%)`, so dragging the slider no longer brings
+  the neon back. Light keeps its own values, and newtab-theme.js matches.
+- The aurora holds still. It used to step 120 times a minute under every `backdrop-filter` surface;
+  the pool and rim gradients are static in both the chrome and the new tab now. It costs less (see
+  Performance) and it is the calmer look he asked for.
 
 ### Shortcuts
 
@@ -213,8 +243,61 @@ Measured on this machine overnight: cold start is about 550ms from launch to a b
 page tab costs 100–150MB resident, which is Chromium's per-site renderer; a sleeping tab hands that
 back, and two sleeping tabs returned about 240MB between them. Idle cost is almost entirely GPU
 compositing, which is why the circuit board now freezes both under any open chrome pane and
-whenever the window loses focus — with it frozen and no page animating, the only remaining cost is
-the aurora's stepped keyframes.
+whenever the window loses focus — with it frozen and no page animating, the only remaining cost was
+the aurora's stepped keyframes, and those are gone too.
+
+A measured pass over the whole thing, each change profiled before and after on its own test
+instance:
+
+- Claude tab resizes. Every window or pane resize pushed a ConPTY resize even when the column and
+  row count had not changed, and each one made `claude.exe` repaint its whole TUI. `safeFit` and
+  `startPty` cache the pushed grid and skip no-op resizes: a 20-resize storm went from 20 redraws
+  to 0, and a real column change still repaints.
+- Session snapshots in main. The snapshot the chrome sends on every tab change was a synchronous
+  write plus rename on the main loop: 300 snapshots kept main busy for 1367ms with a p99 loop lag
+  of 1169ms. Async, single-flight and newest-wins makes it 206ms busy and 129ms p99, with a
+  synchronous flush on `before-quit` so quit and Restart browser still persist the last state.
+- PTY output. A 2MB flood was 19,774 IPC sends, one per ConPTY chunk. A 16ms window with a 64KB cap
+  coalesces them to 305 — byte-identical, first chunk still immediate, flushed on exit.
+- Guest navigation reads in the chrome. `webview.getURL`, `canGoBack`, `canGoForward` and
+  `getZoomLevel` are synchronous IPC to main, and a tab switch made six of them. A per-guest cache,
+  invalidated on every navigation event, drops script time per switch from 11ms to 3.5ms and long
+  tasks from 5 to 2 over 40 switches. Pushes to guests are memoised to one IPC per real change, and
+  session writes flush on `beforeunload`: an open-and-close cycle goes from 20ms to 14ms of script.
+- The site info seat. `getBoundingClientRect` self time over 40 tab switches was 94–97ms and is now
+  7–8ms, with layouts down from 70 to 38. The seat is measured once and re-measured only when the
+  row's geometry can have changed — a ResizeObserver on the omnibox and the nav row, one re-measure
+  per frame after a child mutation, and on load, `fonts.ready` and a theme swap.
+- Compositing. The pips that pulse inside frosted rows get their own layer, and the board's
+  vignette is painted into the canvas alpha instead of masking a full-window layer that re-masked
+  as packets moved. New tab with the board running: 30.8% of a core and 5.08ms per frame before,
+  27.3% and 4.69ms after. One idle Claude tab: 20.3% and 3.38ms per frame before, 13–15% and 2.21ms
+  after.
+- The aurora. Its pool and rim gradients stepped twice a second under every `backdrop-filter`
+  surface — the Settings pane, the new-tab field, chips and modules — re-blurring each of them on
+  every step, about five points of a core whenever a Claude tab was open. They are static now and
+  the keyframes are gone.
+
+Measured and left alone:
+
+- `@xterm/addon-webgl` drained a 2MB flood 1.33x faster with 1.9x better frame gaps, but moved the
+  cost into the GPU process. That is below the 2x gate for taking on a dependency, so it was
+  uninstalled; the DOM renderer still drains 2MB in about 15s with 34–50ms p95 frame gaps.
+- Chromium command-line switches. Nothing tried measured as a win, so none were added.
+
+Found, and not ours to fix:
+
+- Every `<webview>` removal throws Electron's `Invalid guestInstanceId`. The guest is destroyed
+  first, guest-view-manager drops the registry entry on its `destroyed` event, and then the
+  element's queued `disconnectedCallback` sends a detach that `getGuestForFrame()` rejects. A bare
+  one-webview Electron 44 app throws the same error and five teardown orders all still throw.
+  Nothing leaks without a debugger attached; with DevTools attached the stored exception pins each
+  closed tab until the console entries are discarded. It is written down at `closeTab` and
+  `sleepTab`; the fix belongs upstream.
+- The flicker on Settings open and on the new tab could not be reproduced headlessly — the guest
+  neither repainted nor relaid out, and the only frame differences were the caret blink and blur
+  rounding. The aurora was the one thing moving at rest in both places, so stilling it is the
+  likely fix rather than a proven one.
 
 ### Security notes
 
@@ -312,3 +395,15 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | ca3256b | 13:40 | Tab strip back to the pass-one chips; the rest of pass two stays |
 | bb53ae4 | 13:41 | CHANGELOG + README: tabs are the pass-one chips again; rows for db73723 and ca3256b |
 | 97267eb | 13:50 | Revert the pass-two chrome and pane styling; the new tab keeps its board, clock and readout |
+| eeb1e7a | 13:59 | Test runs can name their profile (--profile-name) so parallel instances never share storage |
+| 85d66c2 | 14:17 | Popups open as tabs again: setWindowOpenHandler on guests replaces the new-window event Electron removed |
+| 8229844 | 14:41 | Dark theme: neutral charcoal ground, hairlines instead of lit rims, glow only on focus, restrained accent |
+| bb996ac | 14:41 | Settings: the accent hue slider track is a muted spectrum, not a saturated rainbow |
+| 039acec | 14:49 | Claude tabs: a resize that does not change the grid no longer resizes the pty |
+| 1b09e9e | 14:54 | Main process: session snapshots write async and single-flight; pty output reaches the renderer once per frame |
+| fe3b38b | 15:04 | Chrome: guest navigation reads are cached, pushes to guests are memoised, session writes flush on unload |
+| b22bd58 | 15:06 | Settings: a custom accent hue derives at the calmed dark-theme strength |
+| 18cd4ad | 15:28 | Site info: the button seats itself from cached row geometry instead of measuring on every tab change |
+| 8fcba52 | 15:43 | app.js: note why every webview removal throws Invalid guestInstanceId (Electron, uncatchable, harmless) |
+| ce6916a | 15:55 | Compositing: pips get their own layer; the board vignette is baked into the canvas instead of a full-window mask |
+| a146cfa | 15:56 | The aurora holds still: no more twice-a-second nudge under the frosted surfaces |
