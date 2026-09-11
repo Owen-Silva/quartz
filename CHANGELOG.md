@@ -29,6 +29,11 @@ to pick any of this up.
 - Show Claude this page: Ctrl+Alt+K, the page context menu, the tab menu or the command palette
   takes a screenshot of the page into Downloads and pastes its path, unsent, into a Claude tab
   beside the page, so Claude can look at what you see.
+- Ask Claude about this article: Ctrl+Alt+Shift+K, the page context menu, the tab menu or the
+  command palette reads the page through Reader view and pastes the article's own text — up to
+  12,000 characters of it, quoted and unsent — into a Claude tab beside the page, so the session
+  can summarise or answer without going to fetch the page. A page with no article in it says so
+  and falls back to sending the link.
 - A Claude tab can sit beside a page in split view — Ctrl+Shift+\, Alt+click the Claude button, or
   the chip menu. The terminal refits when you drag the divider.
 

@@ -80,6 +80,10 @@
     { id: 'claude-split',   label: 'Claude beside the page',  group: 'Claude',   default: 'Ctrl+Shift+\\' },
     { id: 'show-claude',    label: 'Show Claude this page',   group: 'Claude',   default: 'Ctrl+Alt+K' },
     { id: 'ask-claude',     label: 'Ask Claude about this page', group: 'Claude', default: 'Ctrl+Shift+K' },
+    /* The third K: Ask is the link, Ctrl+Alt+K is the picture, and this is the
+       article's text. Ctrl+Alt+Shift+R is the only other three-modifier combo
+       in the table, so nothing collides. */
+    { id: 'ask-article',    label: 'Ask Claude about this article', group: 'Claude', default: 'Ctrl+Alt+Shift+K' },
 
     /* -- Tools ------------------------------------------------- */
     { id: 'command-palette', label: 'Command palette',        group: 'Tools',    default: 'Ctrl+K' },

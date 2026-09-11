@@ -1979,6 +1979,14 @@ function guestMenuTemplate(contents, params) {
     click: () =>
       send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'screenshot' }),
   });
+  // ...and with the article's TEXT attached: the renderer reads the page back
+  // through reader.js and quotes it, so a session that cannot browse can still
+  // answer from it. Main carries no page content either way.
+  ask.push({
+    label: 'Ask Claude about this article',
+    click: () =>
+      send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'article' }),
+  });
 
   const editing = [];
   if (params.isEditable) {

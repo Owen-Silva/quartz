@@ -245,7 +245,7 @@
     if (st.disposed || !body) return false;
     // An already-running chamber takes it straight away: the box is up and the
     // user is looking at it. Only a session that has never settled queues.
-    if (st.term && st.live && st.pasteReady) {
+    if (st.term && st.live && st.pasteReady && !promptBlocked(st)) {
       try {
         st.term.paste(body);
         return true;
@@ -266,10 +266,35 @@
     }, PASTE_CAP_MS);
   }
 
+  // Claude Code puts a question on screen before its input box exists (the
+  // folder trust check, the first-run effort question). Text pasted then is
+  // answered away with the question. Read the visible rows and hold the paste
+  // while one of those is up; the next quiet after it clears lets it through.
+  var BLOCKING_PROMPT = /trust this folder|Quick safety check|Enter to confirm/i;
+
+  function promptBlocked(st) {
+    try {
+      var buf = st.term && st.term.buffer && st.term.buffer.active;
+      if (!buf) return false;
+      var start = Math.max(0, buf.length - 60);
+      for (var i = start; i < buf.length; i++) {
+        var line = buf.getLine(i);
+        if (line && BLOCKING_PROMPT.test(line.translateToString(true))) return true;
+      }
+    } catch (err) { /* buffer not readable: do not block */ }
+    return false;
+  }
+
   function flushPaste(st) {
     if (st.pasteTimer) { clearTimeout(st.pasteTimer); st.pasteTimer = 0; }
     if (st.disposed || !st.term || !st.live) return;
     if (!st.pendingPaste.length) return;
+    if (promptBlocked(st)) {
+      // Not yet: wait for the quiet that follows the answer, capped as before.
+      st.pasteReady = false;
+      armPasteCap(st);
+      return;
+    }
     var queued = st.pendingPaste.slice();
     st.pendingPaste.length = 0;
     for (var i = 0; i < queued.length; i++) {

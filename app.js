@@ -3009,6 +3009,17 @@ function tabMenuItemsForTab(tab) {
         title: tab.title || ''
       })
     });
+    // ...and the same thing with the article's words: only offered when the
+    // reader probe has not already said there is nothing to read here.
+    if (readerSaysArticle(tab) !== false) {
+      items.push({
+        label: 'Ask Claude about this article',
+        run: () => askClaudeAboutArticle({
+          url: readCurrentUrl(tab) || tab.url || '',
+          title: tab.title || ''
+        })
+      });
+    }
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
     // there: disabled on a tab that is not allowed to sleep right now.
@@ -4410,6 +4421,120 @@ function showClaudeThisPage(payload) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Ask Claude about this article                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Ask hands over a link, Show hands over a picture; this hands over the WORDS.
+ * reader.js already knows how to lift an article out of a page, so the text it
+ * would have laid out in the reading page is quoted straight into the chamber
+ * instead — a session that cannot browse can still summarise or answer from it.
+ *
+ * Everything else is Ask's machinery unchanged: the same chamber beside the
+ * same page, the same INPUT, and no Enter sent from here either.
+ */
+
+/** Long enough for a feature-length piece, short enough not to fill a context. */
+const ASK_ARTICLE_MAX = 12000;
+
+const MSG_NO_ARTICLE = 'No article here, sending the link';
+
+/**
+ * Readability's textContent, made safe to read in a terminal: every run of
+ * spaces, tabs and non-breaking spaces becomes one space, and a run of line
+ * breaks becomes one blank line — so the paragraphs the article had survive
+ * and the ragged indentation of the source HTML does not.
+ */
+function articleBodyText(raw) {
+  return String(raw == null ? '' : raw)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')   // inline whitespace, however much of it
+    .replace(/ ?\n ?/g, '\n')    // nothing hugging a break
+    .replace(/\n{2,}/g, '\n\n')  // a gap of any height is one paragraph break
+    .trim();
+}
+
+/** A quote, not an attachment: a long article is cut with a note saying so. */
+function askArticleBody(text) {
+  const body = articleBodyText(text);
+  if (body.length <= ASK_ARTICLE_MAX) return body;
+  return body.slice(0, ASK_ARTICLE_MAX) +
+    '\n… (article truncated at ' + ASK_ARTICLE_MAX.toLocaleString('en-US') + ' characters)';
+}
+
+/**
+ * Where it came from, what it is called, who wrote it, then the article
+ * between triple quotes. Ends on a blank line like askPromptText() does: the
+ * question is the only thing left to write.
+ */
+function askArticlePromptText(article) {
+  const info = article || {};
+  const url = String(info.url == null ? '' : info.url).trim();
+  const title = String(info.title == null ? '' : info.title).trim();
+  const byline = String(info.byline == null ? '' : info.byline).trim();
+  return 'From ' + url + ' — "' + title + '"' + (byline ? ' by ' + byline : '') +
+    '\n\n"""\n' + askArticleBody(info.textContent) + '\n"""\n\n';
+}
+
+/** reader.js is a sibling instrument, not a dependency: feature-detected. */
+function readArticleOf(tab) {
+  const reader = window.Reader;
+  if (!reader || typeof reader.extract !== 'function') return Promise.resolve(null);
+  let pending = null;
+  try { pending = reader.extract(tab); } catch (err) { return Promise.resolve(null); }
+  return Promise.resolve(pending).then((article) => article || null, () => null);
+}
+
+/**
+ * The reader probe's cached verdict for a tab: true, false, or null when it
+ * has not been asked. Only a hard false hides the menu row — an unprobed tab
+ * still offers it, because the fallback below is a perfectly good outcome.
+ */
+function readerSaysArticle(tab) {
+  const reader = window.Reader;
+  if (!reader || typeof reader.readableNow !== 'function') return null;
+  try { return reader.readableNow(tab); } catch (err) { return null; }
+}
+
+/**
+ * @param {{url?:string, title?:string}} [payload] the page the request names;
+ *   omitted (a shortcut, the palette) means whichever page is in front.
+ * @returns {Promise<string>} the text pasted, '' when nothing was — a page
+ *   with no article in it says so in a toast and falls back to Ask, which
+ *   sends the link instead.
+ */
+function askClaudeAboutArticle(payload) {
+  const info = payload || {};
+  const want = String(info.url == null ? '' : info.url);
+  const page = askSourceTab(want);
+
+  return readArticleOf(page).then((article) => {
+    if (!article) {
+      claudeToast(MSG_NO_ARTICLE);
+      // askClaudeAboutActiveTab()'s own path, with the page already resolved.
+      if (page) askClaudeAboutTab(page);
+      else askClaudeAboutActiveTab();
+      return '';
+    }
+
+    const prompt = askArticlePromptText({
+      url: article.url || want || (page ? readCurrentUrl(page) : ''),
+      title: article.title || String(info.title == null ? '' : info.title) ||
+        (page ? page.title : ''),
+      byline: article.byline,
+      textContent: article.textContent
+    });
+
+    const claude = claudeChamberFor(page);
+    if (!claude) return '';
+    // Same as askClaude(): the chamber takes the front so what is typed next
+    // lands in the terminal rather than in the page.
+    activateTab(claude.id);
+    return pasteIntoChamber(claude, prompt) ? prompt : '';
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Window controls (frameless titlebar)                                */
 /* ------------------------------------------------------------------ */
 
@@ -4486,6 +4611,8 @@ function wireWindowControls() {
     window.api.onAskClaude((payload) => {
       // "Show Claude this page" comes down the same channel, marked.
       if (payload && payload.mode === 'screenshot') showClaudeThisPage(payload);
+      // "Ask Claude about this article" comes down it marked too.
+      else if (payload && payload.mode === 'article') askClaudeAboutArticle(payload);
       else askClaude(payload);
     });
   }
@@ -4713,6 +4840,8 @@ const ACTIONS = {
   // The same hand-off with a screenshot attached. shortcuts.js does not name
   // this id yet; the moment it does, every chrome-side path is already wired.
   'show-claude': () => showClaudeThisPage(),
+  // ...and the same hand-off with the article's TEXT, read by reader.js.
+  'ask-article': () => askClaudeAboutArticle(),
   // Module actions. Each module decides for itself whether the action is its
   // own; moduleShortcut() returns false when none of them took it.
   'find': () => moduleShortcut('find'),
@@ -5095,6 +5224,8 @@ window.askClaudeAboutActiveTab = askClaudeAboutActiveTab;
 window.askPromptText = askPromptText;
 window.showClaudeThisPage = showClaudeThisPage;
 window.showPromptText = showPromptText;
+window.askClaudeAboutArticle = askClaudeAboutArticle;
+window.askArticlePromptText = askArticlePromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 // Workspaces. This is the whole contract workspaces.js (the switcher UI) and

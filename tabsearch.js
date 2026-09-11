@@ -483,6 +483,11 @@
       run: function () { callGlobal(function () { return showClaudeThisPage; }); }
     });
     list.push({
+      id: 'ask-article', glyph: GLYPH.claude, label: 'Ask Claude about this article',
+      hint: 'Quotes the readable text, not just the link', action: 'ask-article',
+      run: function () { callGlobal(function () { return askClaudeAboutArticle; }); }
+    });
+    list.push({
       id: 'split', glyph: GLYPH.split,
       label: split ? 'Unsplit' : 'Split with next tab',
       hint: split ? 'Back to one page' : 'Two pages side by side',

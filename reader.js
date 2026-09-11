@@ -424,10 +424,12 @@
      ============================================================ */
 
   /**
-   * Lift the article out of `html` (a whole page) and return the payload the
-   * reading page takes, or null when there is no article in it.
+   * Run Readability over `html` (a whole page) and hand back its raw article,
+   * or null when there is nothing in it. Both shapes below start here: the
+   * reading page wants the sanitised HTML, Ask-about-this-article wants the
+   * text, and neither should parse a 300KB page twice.
    */
-  function extract(html, url) {
+  function parseArticle(html, url) {
     if (typeof Readability !== 'function') return null;
 
     var doc;
@@ -447,12 +449,19 @@
       head.insertBefore(base, head.firstChild);
     } catch (err) { /* relative images will simply not load */ }
 
-    var article = null;
     try {
-      article = new Readability(doc).parse();
+      return new Readability(doc).parse();
     } catch (err) {
       return null;
     }
+  }
+
+  /**
+   * Lift the article out of `html` (a whole page) and return the payload the
+   * reading page takes, or null when there is no article in it.
+   */
+  function extract(html, url) {
+    var article = parseArticle(html, url);
     if (!article || !article.content) return null;
 
     return {
@@ -463,6 +472,70 @@
       url: String(url || ''),
       length: typeof article.length === 'number' ? article.length : 0
     };
+  }
+
+  /**
+   * The same parse, kept as TEXT: what a reading page would have shown, minus
+   * the markup. No sanitising is needed or wanted here — nothing is ever put
+   * back into a document; it goes to a Claude chamber's input as plain text.
+   * Null when there is no article, or when it has no words in it.
+   */
+  function textOf(html, url) {
+    var article = parseArticle(html, url);
+    if (!article) return null;
+    var text = String(article.textContent === null || article.textContent === undefined
+      ? '' : article.textContent);
+    if (!text.trim()) return null;
+    return {
+      title: article.title || '',
+      byline: article.byline || '',
+      siteName: article.siteName || '',
+      textContent: text,
+      length: typeof article.length === 'number' ? article.length : text.length,
+      url: String(url || '')
+    };
+  }
+
+  /**
+   * The readable text of one tab's page, for anything that wants the article
+   * itself rather than a reading tab: the same capture and the same parser
+   * open() uses, with nothing opened. Defaults to the tab in front.
+   *
+   * The probe gates it, which open() does not need to do — the button that
+   * calls open() is only on screen once the probe has passed. Readability is
+   * generous enough to call two sentences on example.com an article; this
+   * answers "is there an article here" the same way the button does, so a
+   * caller that gets null can say so and do something else.
+   *
+   * @param {object} [tab]
+   * @returns {Promise<{title:string, byline:string, siteName:string,
+   *   textContent:string, length:number, url:string}|null>} never rejects.
+   */
+  function extractFromTab(tab) {
+    var target = tab || activeTab();
+    if (!usable(target) || !isProbeableUrl(urlOf(target))) return Promise.resolve(null);
+
+    return canRead(target).then(function (ok) {
+      if (!ok) return null;
+      return Promise.all([loadReadability(), runInGuest(target, CAPTURE_SOURCE)])
+        .then(function (both) {
+          if (!both[0]) return null;
+          var payload = null;
+          try { payload = JSON.parse(String(both[1] || '')); } catch (err) { payload = null; }
+          if (!payload || !payload.html) return null;
+          return textOf(payload.html, payload.url || urlOf(target));
+        });
+    }).then(function (v) { return v; }, function () { return null; });
+  }
+
+  /**
+   * The probe's cached answer for a tab, without running one: true, false, or
+   * null when this tab and url have not been probed yet. A menu being built
+   * right now cannot wait for a promise, and "not known" is not "no".
+   */
+  function readableNow(tab) {
+    var hit = cached(tab);
+    return hit ? hit.ok : null;
   }
 
   /** Hand a parsed article to its reading page. Idempotent: it only fires once. */
@@ -621,6 +694,9 @@
   window.Reader = {
     open: open,
     canRead: canRead,
+    // The article as text, for app.js's "Ask Claude about this article".
+    extract: extractFromTab,
+    readableNow: readableNow,
     isReaderTab: isReaderTab,
     handleShortcut: handleShortcut,
     refresh: refresh,
@@ -633,6 +709,7 @@
       isProbeableUrl: isProbeableUrl,
       readerUrlFor: readerUrlFor,
       extract: extract,
+      textOf: textOf,
       PROBE_SOURCE: PROBE_SOURCE,
       UNSAFE_TAGS: UNSAFE_TAGS
     }
