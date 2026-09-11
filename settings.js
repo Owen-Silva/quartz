@@ -2350,7 +2350,8 @@
     }
 
     field.appendChild(el('p', 'set-hint',
-      'Tabs in this browser hold Spotify the same way the extension does in your other one.'));
+      'Tabs in this browser hold Spotify the same way the extension does in your other one. ' +
+      'A muted tab does not count, so muting the video hands the music back.'));
   }
 
   /** Any sound at all, or only the sites named underneath. */

@@ -87,6 +87,22 @@ const RESUME_DELAY_MS = 1500;
 const REFRESH_MS = 60000;
 
 /**
+ * How often we ask an audible guest whether it is muted.
+ *
+ * Electron fires no event when a tab is muted: the renderer calls
+ * `setAudioMuted()` on the <webview> tag, which goes straight to the guest's
+ * WebContents without anything coming back to main. Worse, Chromium keeps a
+ * muted tab AUDIBLE -- `audio-state-changed` stays true and
+ * `isCurrentlyAudible()` stays true, because "this tab is producing sound" is
+ * what draws Chrome's crossed-out speaker. Audible and audible-but-silenced are
+ * only told apart by `isAudioMuted()`, and the only way to learn it changed is
+ * to ask. 500 ms is under the mute button's own feel and the question is a
+ * cheap in-process read, so it costs nothing a user could measure -- and we
+ * only ever ask while something is audible (see syncMutePoll).
+ */
+const MUTE_POLL_MS = 500;
+
+/**
  * Sites watched out of the box: the extension's list (minus the Spotify web
  * player) plus the streaming and video sites the user actually opens. Twitch was
  * the first miss reported (2026-09-11): a list only ever covers what someone
@@ -549,10 +565,17 @@ function create(deps) {
   const exec = d.run || run;
   const spawnFn = d.spawn || spawn;
   const bridge = d.bridge || createBridgeClient({ get: d.get });
+  /**
+   * Every timer this integration owns -- the hold machine's and the mute poll's
+   * -- goes through these, so a harness can drive the whole guest -> count ->
+   * hold path in virtual time without waiting on a real clock.
+   */
+  const setTimer = d.setTimer || ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = d.clearTimer || ((t) => clearTimeout(t));
 
   let config = null;
   let lastError = null;
-  /** webContents id -> { audible, host } for every live guest. */
+  /** webContents id -> { contents, audible, muted, host } for every live guest. */
   const guests = new Map();
   /** Last probe result, so emit() can push without doing I/O. */
   let lastPing = null;
@@ -621,6 +644,8 @@ function create(deps) {
     holdAfterMs: HOLD_AFTER_MS,
     resumeDelayMs: RESUME_DELAY_MS,
     refreshMs: REFRESH_MS,
+    setTimer,
+    clearTimer,
     onHold: async () => {
       // Never start the bridge just because a tab played. If nothing answers,
       // the whole-computer switch is off and that is the user's decision.
@@ -652,6 +677,11 @@ function create(deps) {
     let n = 0;
     for (const entry of guests.values()) {
       if (!entry.audible) continue;
+      // A muted tab makes no sound in the room, so it has no business holding
+      // Spotify paused -- muting the video is exactly how you say "let the music
+      // through". Chromium still calls it audible, so the mute flag is the only
+      // thing that separates the two.
+      if (entry.muted) continue;
       if (isNeverSite(entry.host)) continue;
       if (cfg.anySite || hostMatchesSites(entry.host, cfg.sites)) n += 1;
     }
@@ -660,11 +690,67 @@ function create(deps) {
 
   function recount() {
     machine.setPlaying(playingCount());
+    syncMutePoll();
     emit();
   }
 
   function safeUrl(contents) {
     try { return contents.getURL(); } catch { return ''; }
+  }
+
+  /** Is this guest muted right now? A guest that is gone is nobody's hold. */
+  function safeMuted(contents) {
+    try {
+      if (!contents || typeof contents.isAudioMuted !== 'function') return false;
+      if (typeof contents.isDestroyed === 'function' && contents.isDestroyed()) return false;
+      return !!contents.isAudioMuted();
+    } catch {
+      return false;
+    }
+  }
+
+  // -- the mute poll --------------------------------------------------------
+  //
+  // The one thing about a guest that changes with no event to announce it (see
+  // MUTE_POLL_MS). We ask only while at least one guest is audible: that is the
+  // only window in which the answer can move the hold either way -- a muted tab
+  // is still audible, so an unmute is caught too -- and it means an idle browser
+  // runs no timer at all. With the browser prong off there is no hold to move,
+  // so the poll never starts.
+
+  let mutePollTimer = null;
+
+  function stopMutePoll() {
+    if (mutePollTimer !== null) { clearTimer(mutePollTimer); mutePollTimer = null; }
+  }
+
+  function anyAudibleGuest() {
+    for (const entry of guests.values()) if (entry.audible) return true;
+    return false;
+  }
+
+  function armMutePoll() {
+    mutePollTimer = setTimer(() => {
+      mutePollTimer = null;
+      let changed = false;
+      for (const entry of guests.values()) {
+        if (!entry.audible) continue;
+        const muted = safeMuted(entry.contents);
+        if (muted !== entry.muted) { entry.muted = muted; changed = true; }
+      }
+      // Re-evaluating twice a second when nothing moved would be pure noise, so
+      // only a real change goes through. recount() re-arms us via syncMutePoll.
+      if (changed) recount();
+      else syncMutePoll();
+    }, MUTE_POLL_MS);
+  }
+
+  /** Start the poll when something is audible, stop it when nothing is. */
+  function syncMutePoll() {
+    const want = readConfig().browserHold && anyAudibleGuest();
+    if (want === (mutePollTimer !== null)) return;
+    if (want) armMutePoll();
+    else stopMutePoll();
   }
 
   /**
@@ -675,13 +761,23 @@ function create(deps) {
     if (!contents || typeof contents.on !== 'function') return;
     const id = contents.id;
     if (guests.has(id)) return;
-    const entry = { audible: false, host: hostOfUrl(safeUrl(contents)) };
+    // The contents is kept so the mute poll has something to ask; the entry is
+    // dropped again on 'destroyed', so nothing outlives the tab.
+    const entry = {
+      contents,
+      audible: false,
+      muted: safeMuted(contents),
+      host: hostOfUrl(safeUrl(contents)),
+    };
     guests.set(id, entry);
 
     contents.on('audio-state-changed', (event) => {
       entry.audible = !!(event && event.audible);
       // Read the host back here too: a navigation can land either side of this.
       entry.host = hostOfUrl(safeUrl(contents));
+      // And the mute flag: a tab muted while it was silent starts making sound
+      // with no poll running yet, and this is the event that starts it.
+      entry.muted = safeMuted(contents);
       recount();
     });
 
@@ -690,6 +786,9 @@ function create(deps) {
     const onNav = () => {
       entry.host = hostOfUrl(safeUrl(contents));
       try { entry.audible = contents.isCurrentlyAudible(); } catch { /* gone */ }
+      // The mute rides on the WebContents, not the page, so it survives a
+      // navigation -- re-read it rather than assume either way.
+      entry.muted = safeMuted(contents);
       recount();
     };
     contents.on('did-navigate', onNav);
@@ -854,6 +953,8 @@ function create(deps) {
       wePaused: !!(ping && ping.heldByUs),
       holds: ping ? ping.holds.slice() : [],
       browserHold: machine.holding,
+      // "Tabs counted as playing", which is what the settings line reads out --
+      // a muted tab is audible to Chromium but is not one of these.
       audibleTabs: machine.playing,
       config: {
         browserHold: cfg.browserHold,
@@ -944,6 +1045,7 @@ function create(deps) {
    */
   function handleQuit(event) {
     machine.stop();
+    stopMutePoll();
     if (!machine.holding || quitting) return false;
     quitting = true;
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
@@ -989,6 +1091,7 @@ module.exports = {
   HOLD_AFTER_MS,
   RESUME_DELAY_MS,
   REFRESH_MS,
+  MUTE_POLL_MS,
   PROBE_TIMEOUT_MS,
   ACTION_TIMEOUT_MS,
 };
