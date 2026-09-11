@@ -8,13 +8,17 @@
    The browser's settings reach it two ways:
 
      1. query params, for the first paint —
-        ?theme=dark&palette=ocean&hue=300&engine=duckduckgo&chips=<JSON>
+        ?theme=dark&palette=ocean&hue=300&engine=duckduckgo&chips=<JSON>&bg=image
         (every param optional; theme, palette and hue are handled
         earlier, in newtab-theme.js, so colour never flashes)
 
      2. window.__applySettings({ accentHue, palette, searchEngine, chips })
         pushed later with executeJavaScript. A null or missing
         field means "back to this page's own default".
+
+     3. window.__applyBackground({ kind, boardOverImage, dim, dataUrl })
+        pushed the same way, because the picture is a data: URL far too
+        big to hang off the URL.
    ============================================================ */
 
 'use strict';
@@ -593,6 +597,86 @@ function watchTheme() {
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 }
 
+/* ------------------------------------------------------------------ */
+/* Background                                                          */
+/*                                                                     */
+/* Three backgrounds, chosen in Settings and pushed in by the chrome:   */
+/*                                                                     */
+/*   board   the circuit board — this page's own default               */
+/*   aurora  the aurora alone; newtab-bg.js then does nothing at all    */
+/*   image   the user's picture, dimmed, with the board optional        */
+/*                                                                     */
+/* The picture never travels on the URL: the chrome keeps the blob in   */
+/* IndexedDB and hands it over as a data: URL inside the push. ?bg= is  */
+/* only a first-paint hint, so an image user never watches the board    */
+/* draw itself and then disappear.                                      */
+/* ------------------------------------------------------------------ */
+
+const BG_KINDS = ['board', 'aurora', 'image'];
+const BG_DIM_DEFAULT = 0.25;
+const BG_DIM_MAX = 0.6;
+
+function bgKind(value) {
+  return BG_KINDS.indexOf(String(value)) >= 0 ? String(value) : 'board';
+}
+
+/** 0..0.6, with anything unreadable falling back to the default wash. */
+function bgDim(value) {
+  if (value === null || value === undefined || value === '') return BG_DIM_DEFAULT;
+  const n = Number(value);
+  if (!isFinite(n)) return BG_DIM_DEFAULT;
+  return Math.min(BG_DIM_MAX, Math.max(0, n));
+}
+
+let bgState = { kind: 'board', boardOverImage: false, dim: 0, hasImage: false };
+
+function applyBackground(bg) {
+  const next = bg && typeof bg === 'object' ? bg : {};
+  const kind = bgKind(next.kind);
+  const over = kind === 'image' && next.boardOverImage === true;
+  const dim = kind === 'image' ? bgDim(next.dim) : 0;
+  /* Only a data: image URL is ever written into the stylesheet. */
+  const url = kind === 'image' && typeof next.dataUrl === 'string' &&
+    /^data:image\//i.test(next.dataUrl) ? next.dataUrl : '';
+
+  const root = document.documentElement;
+  root.setAttribute('data-bg', kind);
+  if (over) root.setAttribute('data-bg-board', 'over');
+  else root.removeAttribute('data-bg-board');
+  /* Only ever inline for a picture: the token has its own default in the
+     stylesheet, and <html>'s inline style is otherwise the accent's alone. */
+  if (kind === 'image') root.style.setProperty('--bg-dim', String(dim));
+  else root.style.removeProperty('--bg-dim');
+
+  const layer = document.getElementById('bg-image');
+  if (layer) {
+    if (url) layer.style.setProperty('background-image', 'url("' + url + '")');
+    else layer.style.removeProperty('background-image');
+  }
+
+  bgState = { kind: kind, boardOverImage: over, dim: dim, hasImage: !!url };
+  return bgState;
+}
+
+/**
+ * The chrome pushes the background in on dom-ready and on every settings
+ * change: __applyBackground({ kind, boardOverImage, dim, dataUrl }).
+ * Anything missing means this page's own default.
+ */
+window.__applyBackground = function (bg) {
+  return applyBackground(bg);
+};
+
+/** The background actually on screen, for tests. */
+window.__background = function () {
+  return {
+    kind: bgState.kind,
+    boardOverImage: bgState.boardOverImage,
+    dim: bgState.dim,
+    hasImage: bgState.hasImage
+  };
+};
+
 /** The chrome pushes settings here with executeJavaScript. */
 window.__applySettings = function (settings) {
   const next = settings || {};
@@ -650,6 +734,9 @@ function init() {
   const params = readParams();
   setEngine(params ? params.get('engine') : null);
   setChips(params ? parseChipsParam(params.get('chips')) : null);
+  /* Before newtab-bg.js draws anything: its first paint is in a rAF after
+     this handler, so ?bg=aurora|image means the board is never drawn. */
+  applyBackground({ kind: params ? params.get('bg') : null });
   watchTheme();
 
   if (form) form.addEventListener('submit', onSubmit);

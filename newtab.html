@@ -20,7 +20,16 @@
   <div class="aurora-rim"></div>
 </div>
 
-<!-- The board: a circuit around the field, drawn in JS. Inert, above the aurora. -->
+<!-- The user's own picture, for newtabBackground.kind === 'image'. Both layers
+     stay display:none until <html data-bg="image">, and the picture itself is
+     only ever set by window.__applyBackground() as an inline background-image
+     (a data: URL the chrome read out of IndexedDB). -->
+<div id="bg-image" aria-hidden="true"></div>
+<div id="bg-dim" aria-hidden="true"></div>
+
+<!-- The board: a circuit around the field, drawn in JS. Inert, above the aurora.
+     Hidden by CSS for data-bg="aurora", and for data-bg="image" unless the
+     picture asked for it back (data-bg-board="over"). -->
 <canvas id="board" aria-hidden="true"></canvas>
 
 <main class="stage">

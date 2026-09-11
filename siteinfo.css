@@ -16,10 +16,16 @@
 
 /* There is no global reset in this app, and chrome.css gives every
    button `display: inline-flex`, which outranks the UA's [hidden].
-   These rules put the attribute back in charge. */
+   These rules put the attribute back in charge.
+
+   !important is what makes them stick. The selectors below score the
+   same (1,1,0) as `#siteinfo-panel .si-confirm`, so without it the
+   later rule wins on source order alone and a row marked hidden keeps
+   its `display: flex` — which is exactly how the clear-site-data
+   confirmation ended up painted the whole time the pane was open. */
 #siteinfo[hidden],
 #siteinfo-panel[hidden],
-#siteinfo-panel [hidden] { display: none; }
+#siteinfo-panel [hidden] { display: none !important; }
 
 /* ============================================================
    The capsule button

@@ -75,12 +75,35 @@ function newTabUrl() {
       if (all.searchEngine && all.searchEngine !== 'google') params.set('engine', String(all.searchEngine));
       if (Array.isArray(all.chips)) params.set('chips', JSON.stringify(all.chips));
       if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
+      // Image users should never see the board flash before the picture lands.
+      const bgKind = (all.newtabBackground && all.newtabBackground.kind) || 'board';
+      if (bgKind === 'aurora' || bgKind === 'image') params.set('bg', bgKind);
     } catch (err) { /* defaults are fine */ }
   }
   return NEWTAB_URL + '?' + params.toString();
 }
 
 /** Hand the current settings to one open new-tab guest (no-op for anything else). */
+/**
+ * The new-tab background (board / aurora / the user's image) is read from
+ * IndexedDB by settings.js, so it travels separately from the plain settings.
+ */
+function pushBackgroundToTab(tab) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.background !== 'function') return;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  Promise.resolve()
+    .then(() => settings.background())
+    .then((bg) => {
+      if (!bg || !isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+      const pending = tab.viewEl.executeJavaScript(
+        'window.__applyBackground && window.__applyBackground(' + JSON.stringify(bg) + ')'
+      );
+      if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+    })
+    .catch(() => { /* guest went away, or no storage: the page keeps its default */ });
+}
+
 function pushSettingsToTab(tab) {
   const settings = window.Settings;
   if (!settings || typeof settings.all !== 'function') return;
@@ -138,7 +161,10 @@ function wireSettings() {
   const settings = window.Settings;
   if (!settings || typeof settings.on !== 'function') return;
   settings.on(() => {
-    for (const tab of tabs) pushSettingsToTab(tab);
+    for (const tab of tabs) {
+      pushSettingsToTab(tab);
+      pushBackgroundToTab(tab); // the store emits on every image replace/remove too
+    }
   });
 }
 
@@ -2674,6 +2700,7 @@ function wireViewEvents(tab) {
     // the new-tab page gets the recent list it cannot read for itself.
     syncTabMutedFromView(tab);
     pushRecentToTab(tab);
+    pushBackgroundToTab(tab);
     // did-navigate can land before the guest exists, so the site's remembered
     // zoom is applied here too. It paints the badge when this tab is in front.
     applyStoredZoom(tab);
@@ -3502,12 +3529,10 @@ function wireKeyboard() {
       'history': () => moduleShortcut('history'),
       'settings': () => moduleShortcut('settings'),
       'bookmark': () => moduleShortcut('bookmark'),
-      // main.js does not send 'reader' yet; like 'print', the entry costs
-      // nothing and means Ctrl+Shift+R works from a focused page the day it does.
+      // Replayed by main.js from inside pages: Ctrl+Shift+R, Ctrl+Shift+A, Ctrl+\.
+      // 'print' has no replay yet, so Ctrl+P only works while the chrome has focus.
       'reader': () => moduleShortcut('reader'),
       'tabsearch': () => moduleShortcut('tabsearch'),
-      // main.js does not send 'split' yet; like 'print' and 'reader', the entry
-      // costs nothing and means Ctrl+\ works from a focused page the day it does.
       'split': toggleSplit,
       'escape': () => moduleShortcut('escape'),
     };

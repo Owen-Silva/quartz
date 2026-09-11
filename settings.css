@@ -694,8 +694,104 @@
 #settings-panel .set-site-add { margin-top: 8px; }
 
 /* ============================================================
-   New tab shortcuts
+   New tab — the background, then the shortcuts
    ============================================================ */
+
+/* The picture's controls: thumbnail, picker, and the way out. */
+#settings-panel .set-bg-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#settings-panel .set-bg-row .set-btn { margin-top: 0; }
+
+/* 96x54 — the window's own proportion, so the crop the new tab will make is
+   the crop shown here. */
+#settings-panel .set-bg-preview {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 54px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  object-fit: cover;
+  box-shadow: inset 0 1px 0 var(--specular);
+}
+
+/* Nothing stored yet: the same box, empty, so the row never jumps. */
+#settings-panel .set-bg-preview.is-empty {
+  display: inline-block;
+  background:
+    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
+    var(--glass);
+}
+
+#settings-panel .set-bg-drop { color: var(--fg-3); }
+#settings-panel .set-bg-drop:hover { color: var(--fg); }
+
+/* The dim slider and its readout share the select's slot on the row. */
+#settings-panel .set-bg-dim {
+  flex: 1 1 160px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#settings-panel .set-bg-dim-value {
+  flex: 0 0 auto;
+  min-width: 30px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A plain track in the panel's own colours — the hue slider's rainbow is the
+   one place a spectrum means anything. */
+#settings-panel .set-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: default;
+}
+
+#settings-panel .set-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--shade-in);
+}
+
+#settings-panel .set-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--glass-3);
+  background: var(--ion);
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 0 10px var(--ion-glow),
+    0 1px 4px var(--shade-drop);
+}
+
+#settings-panel .set-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 0 0 3px var(--focus-ring);
+}
 
 #settings-panel .set-chips {
   display: flex;

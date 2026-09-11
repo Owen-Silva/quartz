@@ -19,7 +19,16 @@
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
  *     claudeResume: true | false,           // --continue on a restored tab
- *     tabSleepMinutes: 0|15|30|60|180 }     // 0 = never sleep a background tab
+ *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
+ *     newtabBackground: { kind: 'board'|'aurora'|'image',
+ *                         boardOverImage: bool, dim: 0..0.6, rev } }
+ *
+ * THE NEW TAB'S PICTURE IS NOT IN THERE. kind 'image' needs a photo, and a
+ * 2560px JPEG as base64 is about a megabyte of string that localStorage would
+ * rewrite on every unrelated write. The blob lives in IndexedDB instead —
+ * db 'browser', store 'assets', key 'newtab-bg' — and Settings.background()
+ * hands app.js the pair as { kind, boardOverImage, dim, dataUrl? }. `rev` is
+ * a stamp, so replacing the picture still counts as a change worth pushing.
  *
  * THE PALETTE IS MIRRORED. `palette` also lives under its own localStorage
  * key ('palette', absent for the default aurora) because theme-boot.js has to
@@ -67,8 +76,34 @@
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
-    tabSleepMinutes: 30
+    tabSleepMinutes: 30,
+    /* What the new tab paints behind the search field:
+         { kind: 'board' }                          the circuit board
+         { kind: 'aurora' }                         the aurora alone
+         { kind: 'image', boardOverImage, dim }     the user's own picture
+       The picture itself is NOT in here — see the asset store below. */
+    newtabBackground: { kind: 'board' }
   };
+
+  /* The three backgrounds, as the select offers them. */
+  var NEWTAB_BACKGROUNDS = [
+    { value: 'board', name: 'Circuit board' },
+    { value: 'aurora', name: 'Aurora only' },
+    { value: 'image', name: 'Your image' }
+  ];
+
+  /* The picture: never bigger than this on its long edge, always re-encoded
+     as a JPEG, and always behind this much black so the capsule stays legible. */
+  var BG_MAX_EDGE = 2560;
+  var BG_JPEG_QUALITY = 0.86;
+  var BG_DIM_DEFAULT = 0.25;
+  var BG_DIM_MAX = 0.6;
+  var BG_REJECT = 'Pick a JPG, PNG or WebP';
+
+  /* IndexedDB, in this renderer: db 'browser', store 'assets', one key. */
+  var ASSET_DB = 'browser';
+  var ASSET_STORE = 'assets';
+  var BG_ASSET_KEY = 'newtab-bg';
 
   var ENGINES = [
     { id: 'google', name: 'Google', url: 'https://www.google.com/search?q=' },
@@ -116,6 +151,8 @@
     ['Ctrl+L', 'Address bar'],
     ['Ctrl+F', 'Find on page'],
     ['Ctrl+Shift+R', 'Reader view'],
+    ['Ctrl+Shift+A', 'Search tabs'],
+    ['Ctrl+\\', 'Split view with the next tab'],
     ['Ctrl+P', 'Print page'],
     ['Ctrl+J', 'Downloads'],
     ['Ctrl+H', 'History'],
@@ -243,6 +280,236 @@
     if (keys.indexOf('palette') >= 0) applyPalette(get('palette'));
     if (keys.indexOf('accentHue') >= 0) applyAccent(get('accentHue'));
     if (keys.indexOf('siteTheme') >= 0) pushSiteTheme(get('siteTheme'));
+  }
+
+  /* ============================================================
+     New tab background
+
+     The choice lives in the settings JSON; the picture does not. A 2560px
+     JPEG as base64 is around a megabyte of string, and localStorage would
+     have to rewrite all of it on every unrelated settings write — so the
+     blob goes in IndexedDB and only the tiny descriptor is stored here.
+
+     app.js reads the pair back through Settings.background(), which hands
+     over { kind, boardOverImage, dim, dataUrl? } for the new tab guest.
+     ============================================================ */
+
+  /** Anything stored (or pushed) read as a complete, in-range descriptor. */
+  function normalizeBackground(value) {
+    var v = value && typeof value === 'object' ? value : {};
+    var kind = 'board';
+    for (var i = 0; i < NEWTAB_BACKGROUNDS.length; i++) {
+      if (NEWTAB_BACKGROUNDS[i].value === v.kind) kind = v.kind;
+    }
+    var dim = (v.dim === null || v.dim === undefined || v.dim === '')
+      ? BG_DIM_DEFAULT : Number(v.dim);
+    if (!isFinite(dim)) dim = BG_DIM_DEFAULT;
+    dim = Math.min(BG_DIM_MAX, Math.max(0, dim));
+    return { kind: kind, boardOverImage: v.boardOverImage === true, dim: dim };
+  }
+
+  /**
+   * Write part of the descriptor back.
+   *
+   * Every write carries a fresh `rev`. The picture is not in this object, so
+   * replacing or removing it would otherwise leave the JSON byte-identical
+   * and set() — which skips unchanged keys — would never tell app.js to push
+   * the new one. The stamp makes every change a change.
+   */
+  function setBackground(patch) {
+    var next = normalizeBackground(get('newtabBackground'));
+    if (patch && typeof patch === 'object') {
+      if (patch.kind !== undefined) next.kind = normalizeBackground({ kind: patch.kind }).kind;
+      if (patch.boardOverImage !== undefined) next.boardOverImage = patch.boardOverImage === true;
+      if (patch.dim !== undefined) next.dim = normalizeBackground({ dim: patch.dim }).dim;
+    }
+    var prev = get('newtabBackground');
+    var stamp = Date.now();
+    if (prev && typeof prev === 'object' && prev.rev >= stamp) stamp = prev.rev + 1;
+    next.rev = stamp;
+    set({ newtabBackground: next });
+    return next;
+  }
+
+  /* --- the asset store ------------------------------------------
+     Opened without a version first, so a store some later feature added to
+     the same db is never clobbered: only a missing 'assets' upgrades, and
+     only to version + 1. Every call closes the connection it opened, so a
+     later upgrade is never blocked by this one. */
+
+  function assetOpen() {
+    return new Promise(function (resolve, reject) {
+      var idb = window.indexedDB;
+      if (!idb) { reject(new Error('No IndexedDB')); return; }
+      var probe;
+      try { probe = idb.open(ASSET_DB); } catch (err) { reject(err); return; }
+      probe.onerror = function () { reject(probe.error || new Error('open failed')); };
+      probe.onsuccess = function () {
+        var db = probe.result;
+        if (db.objectStoreNames && db.objectStoreNames.contains(ASSET_STORE)) {
+          resolve(db);
+          return;
+        }
+        var version = (db.version || 1) + 1;
+        db.close();
+        var up = idb.open(ASSET_DB, version);
+        up.onupgradeneeded = function () {
+          var fresh = up.result;
+          if (!fresh.objectStoreNames.contains(ASSET_STORE)) fresh.createObjectStore(ASSET_STORE);
+        };
+        up.onsuccess = function () { resolve(up.result); };
+        up.onerror = function () { reject(up.error || new Error('upgrade failed')); };
+      };
+    });
+  }
+
+  function assetRun(mode, run) {
+    return assetOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(ASSET_STORE, mode);
+        var req = run(tx.objectStore(ASSET_STORE));
+        tx.oncomplete = function () { db.close(); resolve(req ? req.result : undefined); };
+        tx.onerror = function () { db.close(); reject(tx.error || new Error('transaction failed')); };
+        tx.onabort = tx.onerror;
+      });
+    });
+  }
+
+  var assetStore = {
+    get: function (key) { return assetRun('readonly', function (s) { return s.get(key); }); },
+    put: function (key, blob) { return assetRun('readwrite', function (s) { return s.put(blob, key); }); },
+    'delete': function (key) { return assetRun('readwrite', function (s) { return s['delete'](key); }); }
+  };
+
+  /* --- the picture ---------------------------------------------- */
+
+  var bgDataUrl = null;        // the data: URL app.js hands the guest
+  var bgPreviewBlob = null;    // the blob the panel's thumbnail is made of
+  var bgPreviewUrl = null;
+  var bgPreviewLoaded = false;
+
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var FR = window.FileReader;
+      if (!FR) { reject(new Error('No FileReader')); return; }
+      var reader = new FR();
+      reader.onload = function () { resolve(String(reader.result)); };
+      reader.onerror = function () { reject(reader.error || new Error('read failed')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * A picked file, down to 2560px on its long edge and re-encoded as a JPEG.
+   * GIF and SVG are refused rather than flattened: one would lose its motion
+   * and the other is markup, not pixels.
+   */
+  function downscaleImage(file) {
+    var type = String((file && file.type) || '').toLowerCase();
+    if (type === 'image/gif' || type === 'image/svg+xml') return Promise.reject(new Error(BG_REJECT));
+    if (type.indexOf('image/') !== 0) return Promise.reject(new Error(BG_REJECT));
+    if (typeof window.createImageBitmap !== 'function') return Promise.reject(new Error(BG_REJECT));
+
+    return window.createImageBitmap(file).then(function (bitmap) {
+      var longest = Math.max(bitmap.width, bitmap.height) || 1;
+      var scale = longest > BG_MAX_EDGE ? BG_MAX_EDGE / longest : 1;
+      var w = Math.max(1, Math.round(bitmap.width * scale));
+      var h = Math.max(1, Math.round(bitmap.height * scale));
+
+      var canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      if (typeof bitmap.close === 'function') bitmap.close();
+
+      return new Promise(function (resolve, reject) {
+        canvas.toBlob(function (blob) {
+          if (blob) resolve(blob);
+          else reject(new Error(BG_REJECT));
+        }, 'image/jpeg', BG_JPEG_QUALITY);
+      });
+    });
+  }
+
+  function revokePreview() {
+    if (bgPreviewUrl && window.URL && window.URL.revokeObjectURL) {
+      try { window.URL.revokeObjectURL(bgPreviewUrl); } catch (err) { /* fine */ }
+    }
+    bgPreviewUrl = null;
+  }
+
+  function previewUrl() {
+    if (!bgPreviewBlob) return null;
+    if (bgPreviewUrl) return bgPreviewUrl;
+    if (!window.URL || !window.URL.createObjectURL) return null;
+    try { bgPreviewUrl = window.URL.createObjectURL(bgPreviewBlob); }
+    catch (err) { bgPreviewUrl = null; }
+    return bgPreviewUrl;
+  }
+
+  /** One read of the stored blob per run, then the thumbnail redraws itself. */
+  function loadPreview() {
+    if (bgPreviewLoaded) return;
+    bgPreviewLoaded = true;
+    assetStore.get(BG_ASSET_KEY).then(function (blob) {
+      if (!blob) return;
+      bgPreviewBlob = blob;
+      renderNewtabBg();
+    }).catch(function () { /* no db: the panel just offers the picker */ });
+  }
+
+  /** Downscale, store, and switch the new tab over to it. */
+  function chooseBackgroundImage(file) {
+    return downscaleImage(file).then(function (blob) {
+      return assetStore.put(BG_ASSET_KEY, blob).then(function () {
+        bgDataUrl = null;                 // the memo is a different picture now
+        revokePreview();
+        bgPreviewBlob = blob;
+        bgPreviewLoaded = true;
+        setBackground({ kind: 'image' });
+        return blob;
+      });
+    });
+  }
+
+  /**
+   * Drop the picture. The kind goes back to the board with it: leaving it on
+   * 'image' would leave the new tab dimming a background that isn't there.
+   */
+  function removeBackgroundImage() {
+    return assetStore['delete'](BG_ASSET_KEY).catch(function () { /* already gone */ })
+      .then(function () {
+        bgDataUrl = null;
+        revokePreview();
+        bgPreviewBlob = null;
+        bgPreviewLoaded = true;
+        setBackground({ kind: 'board' });
+      });
+  }
+
+  /**
+   * What app.js pushes into the new tab guest:
+   *   { kind, boardOverImage, dim, dataUrl? }
+   * dataUrl is only present for kind 'image' with a picture actually stored,
+   * and is read out of IndexedDB once and then kept in memory.
+   */
+  function background() {
+    var cfg = normalizeBackground(get('newtabBackground'));
+    var out = { kind: cfg.kind, boardOverImage: cfg.boardOverImage, dim: cfg.dim };
+    if (cfg.kind !== 'image') return Promise.resolve(out);
+    if (bgDataUrl) {
+      out.dataUrl = bgDataUrl;
+      return Promise.resolve(out);
+    }
+    return assetStore.get(BG_ASSET_KEY).then(function (blob) {
+      if (!blob) return out;              // chosen, but nothing stored yet
+      return blobToDataUrl(blob).then(function (url) {
+        bgDataUrl = url;
+        out.dataUrl = url;
+        return out;
+      });
+    }).catch(function () { return out; });  // no db: the dim alone, never a throw
   }
 
   /* ============================================================
@@ -1218,12 +1485,110 @@
     }
   }
 
-  function buildChips() {
-    var s = section('New tab shortcuts');
+  function buildNewTab() {
+    var s = section('New tab');
+
+    var bg = el('div', 'set-field');
+    bg.setAttribute('data-field', 'newtabbg');
+    s.appendChild(bg);
+
     var field = el('div', 'set-field');
     field.setAttribute('data-field', 'chips');
     s.appendChild(field);
     return s;
+  }
+
+  /** The background picker: one select, and the picture's controls under it. */
+  function renderNewtabBg() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="newtabbg"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var cfg = normalizeBackground(get('newtabBackground'));
+
+    field.appendChild(controlRow('Background', 'set-newtab-bg',
+      glassSelect('set-newtab-bg', NEWTAB_BACKGROUNDS, cfg.kind, function (value) {
+        setBackground({ kind: value });
+      })));
+
+    if (cfg.kind !== 'image') {
+      field.appendChild(el('p', 'set-hint', cfg.kind === 'aurora'
+        ? 'The aurora on its own. The circuit board stops drawing entirely.'
+        : 'The circuit board, drawn around your search field.'));
+      return;
+    }
+
+    loadPreview();
+
+    /* The file input is the only way in — no main-process dialog, because a
+       renderer can read a picked file on its own. Hidden, and driven by the
+       button next to it, so the panel keeps its own controls. */
+    var picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'image/*';
+    picker.className = 'set-bg-file';
+    picker.hidden = true;
+    picker.addEventListener('change', function () {
+      var file = picker.files && picker.files[0];
+      picker.value = '';                  // picking the same file again still fires
+      if (!file) return;
+      chooseBackgroundImage(file).then(function () {
+        showToast('New tab background set');
+      }).catch(function (err) {
+        showToast((err && err.message) || BG_REJECT);
+      });
+    });
+
+    var row = el('div', 'set-bg-row');
+    row.appendChild(picker);
+
+    var url = previewUrl();
+    if (url) {
+      var img = document.createElement('img');
+      img.className = 'set-bg-preview';
+      img.src = url;
+      img.width = 96;
+      img.height = 54;
+      img.alt = 'Your new tab background';
+      row.appendChild(img);
+    } else {
+      row.appendChild(el('span', 'set-bg-preview is-empty'));
+    }
+
+    row.appendChild(textButton('Choose image…', 'set-btn set-bg-pick', function () {
+      picker.click();
+    }));
+    if (bgPreviewBlob) {
+      row.appendChild(textButton('Remove image', 'set-text set-bg-drop', function () {
+        removeBackgroundImage();
+      }));
+    }
+    field.appendChild(row);
+
+    field.appendChild(switchRow('Show circuit board over the image', cfg.boardOverImage,
+      function (next) { setBackground({ boardOverImage: next }); }));
+
+    var dim = el('span', 'set-bg-dim');
+    var slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '60';
+    slider.step = '1';
+    slider.className = 'set-range';
+    slider.id = 'set-bg-dim';
+    slider.value = String(Math.round(cfg.dim * 100));
+    slider.setAttribute('aria-label', 'Dim');
+    var readout = el('span', 'set-bg-dim-value', Math.round(cfg.dim * 100) + '%');
+    // input previews the number without writing; change is the one that stores.
+    slider.addEventListener('input', function () { readout.textContent = slider.value + '%'; });
+    slider.addEventListener('change', function () { setBackground({ dim: Number(slider.value) / 100 }); });
+    dim.appendChild(slider);
+    dim.appendChild(readout);
+    field.appendChild(controlRow('Dim', 'set-bg-dim', dim));
+
+    if (!bgPreviewBlob) {
+      field.appendChild(el('p', 'set-hint', 'No picture chosen yet — the new tab dims the aurora until you pick one.'));
+    }
   }
 
   /** A text cell that only looks like text until you click into it. */
@@ -1492,7 +1857,7 @@
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildSiteStyles());
-    bodyEl.appendChild(buildChips());
+    bodyEl.appendChild(buildNewTab());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
@@ -1509,6 +1874,7 @@
     renderSearch();
     renderSites();
     renderSiteStyles();
+    renderNewtabBg();
     renderChips();
     renderPrivacy();
   }
@@ -1624,6 +1990,7 @@
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0) renderChips();
+      if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
     });
   }
 
@@ -1671,6 +2038,12 @@
     updateChip: updateChip,
     moveChip: moveChip,
 
+    /* The new tab's background. background() resolves to
+       { kind, boardOverImage, dim, dataUrl? } — what app.js pushes into the
+       guest with __applyBackground(). */
+    background: background,
+    setBackground: setBackground,
+
     engines: engines,
     searchUrl: searchUrl,
     isSearchUrl: isSearchUrl,
@@ -1689,6 +2062,9 @@
     _normalizeUrl: normalizeUrl,
     _hostnameOf: hostnameOf,
     _normalizeHost: normalizeHost,
-    _sleepTimes: SLEEP_TIMES
+    _sleepTimes: SLEEP_TIMES,
+    _assetStore: assetStore,
+    _normalizeBackground: normalizeBackground,
+    _backgrounds: NEWTAB_BACKGROUNDS
   };
 })();

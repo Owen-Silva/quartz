@@ -956,8 +956,30 @@
   let spawnTimer = 0;
   let resizeTimer = 0;
 
+  /* data-bg on <html> — written by newtab.js from ?bg= and from the chrome's
+     __applyBackground() push — decides whether this file has any work at all:
+
+       board                        yes, the board is the background
+       aurora                       no: the canvas and the live layer are
+                                    display:none, so every packet and every
+                                    repaint would be work nobody can see
+       image                        no, unless the picture asked the board
+       image + data-bg-board="over" back as a texture over it
+
+     A hidden board is not just invisible: it costs a full-canvas commit per
+     repaint and one compositor element per packet. Everything below checks
+     this before spending anything. */
+  function boardActive() {
+    const root = document.documentElement;
+    const kind = root.getAttribute('data-bg') || 'board';
+    if (kind === 'aurora') return false;
+    if (kind === 'image') return root.getAttribute('data-bg-board') === 'over';
+    return true;                     // 'board', and any value we don't know
+  }
+
   function scheduleSpawn() {
     if (reducedMotion || document.hidden || spawnTimer || !live) return;
+    if (!boardActive()) return;
     const wait = SPAWN_MIN_MS + Math.random() * (SPAWN_MAX_MS - SPAWN_MIN_MS);
     spawnTimer = setTimeout(function () {
       spawnTimer = 0;
@@ -972,6 +994,7 @@
   }
 
   function layout(force) {
+    if (!boardActive()) return;      // nothing on screen to lay out
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const w = canvas.clientWidth || document.documentElement.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || document.documentElement.clientHeight || window.innerHeight;
@@ -997,7 +1020,7 @@
   }
 
   function repaintBoard() {
-    if (!board) return;
+    if (!board || !boardActive()) return;
     ctx.clearRect(0, 0, board.w, board.h);
     drawBoard(ctx, board);
   }
@@ -1033,8 +1056,29 @@
     if (paletteFrame) return;
     paletteFrame = requestAnimationFrame(function () {
       paletteFrame = 0;
+      applyBgMode();
       applyPalette();
     });
+  }
+
+  /* Whether the board was doing work the last time we looked. data-bg lands
+     on <html> the same way the palette does, so it arrives here too. */
+  let boardOn = true;
+
+  function applyBgMode() {
+    const next = boardActive();
+    if (next === boardOn) return;
+    boardOn = next;
+    if (!next) {
+      // Off: no timer, no live elements, no canvas commits until it is back.
+      stopSpawn();
+      clearLive();
+      return;
+    }
+    // Back on: the board was never built for the current size, so force it.
+    layout(true);
+    ensureLive();
+    scheduleSpawn();
   }
 
   function applyPalette() {
@@ -1051,8 +1095,10 @@
   }
 
   function start() {
+    boardOn = boardActive();
     layout();
     if (reducedMotion) return;       // static board only: no sprites, no timers
+    if (!boardOn) return;            // aurora or a picture: nothing to run
     ensureLive();
     scheduleSpawn();
   }
@@ -1064,7 +1110,7 @@
     if (window.MutationObserver) {
       const themeWatch = new window.MutationObserver(onRootAttrChange);
       themeWatch.observe(document.documentElement,
-        { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'style'] });
+        { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'data-bg', 'data-bg-board', 'style'] });
     }
 
     // Settle passes: newtab.js fills the shortcut row in its own

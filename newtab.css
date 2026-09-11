@@ -454,6 +454,44 @@ body {
   to   { transform: translate3d(-3%, -2%, 0); }
 }
 
+/* --- the user's own picture ----------------------------------- */
+/* newtabBackground.kind === 'image'. Two fixed layers between the aurora
+   and the board: the picture, then a flat black wash so the capsule keeps
+   its contrast over a bright photo. Both sit at z-index 0 like .backdrop
+   and win on DOM order, so the board (1) and the column (2) stay above.
+
+   The picture is an inline background-image set by __applyBackground; the
+   wash reads --bg-dim, written on <html> by the same call. */
+#bg-image,
+#bg-dim {
+  display: none;                   /* nothing to draw unless a picture is chosen */
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+:root[data-bg="image"] #bg-image,
+:root[data-bg="image"] #bg-dim { display: block; }
+
+#bg-image {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;          /* fill the window, crop the overflow */
+}
+
+#bg-dim {
+  background: rgb(0 0 0 / var(--bg-dim, .25));
+  transition: background-color 180ms steps(4);
+}
+
+/* A picture is the light now, so the aurora stands further back than the
+   .7 it uses behind the board. */
+:root[data-bg="image"] .backdrop {
+  opacity: .25;
+  transition: opacity 180ms steps(4);
+}
+
 /* --- the board ----------------------------------------------- */
 /* Generated in newtab-bg.js: socket, traces, vias, chips, packets.
    Sits between the aurora and the glass, and fades out at the edges. */
@@ -466,6 +504,23 @@ body {
   pointer-events: none;
   -webkit-mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
           mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
+  transition: opacity 180ms steps(4);
+}
+
+/* Aurora-only, and image without the board: the canvas and the packet layer
+   both go. newtab-bg.js stops spawning and stops repainting on the same
+   attribute, so this hides nothing that is still costing anything. */
+:root[data-bg="aurora"] #board,
+:root[data-bg="aurora"] #board-live,
+:root[data-bg="image"] #board,
+:root[data-bg="image"] #board-live { display: none; }
+
+/* ...unless the picture asked for it back, at which point it is a texture
+   over the photo rather than the subject. */
+:root[data-bg="image"][data-bg-board="over"] #board,
+:root[data-bg="image"][data-bg-board="over"] #board-live {
+  display: block;
+  opacity: .55;
 }
 
 /* --- layout -------------------------------------------------- */
@@ -773,6 +828,9 @@ body {
 
   /* a theme flip lands instantly instead of crossfading */
   body,
+  .backdrop,
+  #bg-dim,
+  #board,
   .field,
   .chip,
   .rtile,
