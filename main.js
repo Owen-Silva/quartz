@@ -423,6 +423,74 @@ app.whenReady().then(() => {
 // PTY IPC
 // ---------------------------------------------------------------------------
 
+/*
+ * ConPTY hands us tiny pieces, very fast.
+ *
+ * MEASURED (node-pty, the same spawn path, 2 MB of output): 19,748 chunks,
+ * mean 104 bytes, 829 a second -- and 19,414 of the 19,747 gaps between them
+ * were under 16 ms. One webContents.send per chunk is therefore ~19,700
+ * structured-clone round trips and ~19,700 wake-ups of a renderer that can
+ * only paint 60 of them, which is the classic flood sink.
+ *
+ * So: the FIRST chunk after a quiet spell goes out untouched -- keystroke echo
+ * must never wait -- and that opens a 16 ms window. Anything arriving inside
+ * the window is appended to one buffer and sent when it closes, in order, or
+ * sooner if the buffer passes the byte cap. A window that closes empty goes
+ * back to idle, so a sitting Claude tab holds no timer at all.
+ */
+const PTY_FLUSH_MS = 16;
+const PTY_FLUSH_BYTES = 64 * 1024;
+
+/** pty id -> { parts: string[], bytes: number, timer: Timeout|null } */
+const ptyOut = new Map();
+
+function ptySendNow(buf, id) {
+  const data = buf.parts.length === 1 ? buf.parts[0] : buf.parts.join('');
+  buf.parts.length = 0;
+  buf.bytes = 0;
+  send('pty:data', { id, data });
+}
+
+/** The coalescing window closed. Flush what is waiting, or go idle. */
+function ptyWindowEnd(id) {
+  const buf = ptyOut.get(id);
+  if (!buf) return;
+  buf.timer = null;
+  if (!buf.parts.length) return; // quiet: the next chunk goes out instantly
+  ptySendNow(buf, id);
+  buf.timer = setTimeout(() => ptyWindowEnd(id), PTY_FLUSH_MS);
+}
+
+function ptyPush(id, data) {
+  let buf = ptyOut.get(id);
+  if (!buf) {
+    buf = { parts: [], bytes: 0, timer: null };
+    ptyOut.set(id, buf);
+  }
+  buf.parts.push(data);
+  buf.bytes += data.length;
+  if (buf.timer === null) {
+    // Idle: deliver at once, then open the window.
+    ptySendNow(buf, id);
+  } else if (buf.bytes >= PTY_FLUSH_BYTES) {
+    // The cap beats the clock: never sit on more than 64 KB.
+    clearTimeout(buf.timer);
+    ptySendNow(buf, id);
+  } else {
+    return; // already inside a window; it will carry this out
+  }
+  buf.timer = setTimeout(() => ptyWindowEnd(id), PTY_FLUSH_MS);
+}
+
+/** Everything still buffered goes out before the caller says the session ended. */
+function ptyFlushFinal(id) {
+  const buf = ptyOut.get(id);
+  if (!buf) return;
+  if (buf.timer !== null) clearTimeout(buf.timer);
+  if (buf.parts.length) ptySendNow(buf, id);
+  ptyOut.delete(id);
+}
+
 // `args` is passed straight through: pty.js owns the allowlist (only
 // `--continue` survives) so there is exactly one place that decides what may
 // reach claude.exe's command line.
@@ -432,9 +500,10 @@ ipcMain.handle('pty:start', (_event, { cwd, cols, rows, args } = {}) => {
     cols,
     rows,
     args,
-    onData: (data) => send('pty:data', { id: session.id, data }),
+    onData: (data) => ptyPush(session.id, data),
     onExit: (exitCode) => {
       handles.delete(session.id);
+      ptyFlushFinal(session.id); // the last output, then the exit
       send('pty:exit', { id: session.id, exitCode });
     },
   });
@@ -457,6 +526,7 @@ ipcMain.on('pty:kill', (_event, { id } = {}) => {
   const session = handles.get(id);
   if (!session) return;
   handles.delete(id);
+  ptyFlushFinal(id); // never strand a buffered tail on a closed tab's timer
   session.kill();
 });
 
@@ -595,6 +665,56 @@ function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/*
+ * The write itself is ASYNC, and only one is ever in flight.
+ *
+ * MEASURED: 300 snapshots pushed back to back cost 1367 ms of main-process CPU
+ * when this was writeFileSync + renameSync -- 777 ms of it inside rename() --
+ * and stalled the event loop for 1168 ms at the 99th percentile. Every one of
+ * those milliseconds was the whole UI: main draws no frames, so a disk hiccup
+ * during a burst of tab closes is felt as a freeze. Async takes the same work
+ * off the loop thread; `pendingSession` collapses a burst into one write per
+ * completed write, because only the NEWEST snapshot has ever been worth
+ * keeping. Durability is unchanged where it matters: flushSessionSync() below
+ * runs on quit and restart, when there is no loop left to protect.
+ */
+let pendingSession = null;   // newest snapshot json not yet on disk
+let sessionWriting = false;  // a write is in flight
+
+/** Write-then-rename: a kill mid-write can only ever destroy the .tmp, so
+ *  session.json is either the previous snapshot or the new one, never half. */
+function drainSession() {
+  if (sessionWriting || pendingSession === null) return;
+  const json = pendingSession;
+  pendingSession = null;
+  sessionWriting = true;
+  const target = sessionStatePath();
+  const tmp = `${target}.tmp`;
+  fs.promises
+    .writeFile(tmp, json, 'utf8')
+    .then(() => fs.promises.rename(tmp, target))
+    .catch(() => { /* a disk error must never take down the pump */ })
+    .then(() => {
+      sessionWriting = false;
+      drainSession(); // whatever arrived while that one was in flight
+    });
+}
+
+/** The last moment anything can be written: the process is about to go. */
+function flushSessionSync() {
+  if (pendingSession === null) return;
+  const json = pendingSession;
+  pendingSession = null;
+  try {
+    const target = sessionStatePath();
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, target);
+  } catch {
+    // Nothing useful to do while quitting.
+  }
+}
+
 ipcMain.on('session:write', (_event, { snapshot } = {}) => {
   try {
     if (!isPlainObject(snapshot) || !Array.isArray(snapshot.tabs)) return;
@@ -603,12 +723,8 @@ ipcMain.on('session:write', (_event, { snapshot } = {}) => {
     if (typeof json !== 'string') return;
     if (Buffer.byteLength(json, 'utf8') > SESSION_MAX_BYTES) return;
 
-    // Write-then-rename: a kill mid-write can only ever destroy the .tmp, so
-    // session.json is either the previous snapshot or the new one, never half.
-    const target = sessionStatePath();
-    const tmp = `${target}.tmp`;
-    fs.writeFileSync(tmp, json, 'utf8');
-    fs.renameSync(tmp, target);
+    pendingSession = json;
+    drainSession();
   } catch {
     // A disk error must never take down an IPC handler.
   }
@@ -2275,12 +2391,18 @@ app.on('web-contents-created', (_event, contents) => {
 app.on('window-all-closed', () => {
   killAll();
   handles.clear();
+  for (const id of Array.from(ptyOut.keys())) ptyFlushFinal(id);
   app.quit();
 });
 
 app.on('before-quit', (event) => {
+  // The one place a synchronous write is still right: there is no event loop
+  // left to protect, and a snapshot that never reached disk is a lost session.
+  // (app:restart goes through app.quit(), so a restart lands here too.)
+  flushSessionSync();
   killAll();
   handles.clear();
+  for (const id of Array.from(ptyOut.keys())) ptyFlushFinal(id);
   // Hands our Spotify hold back. That is an HTTP round trip, so it may defer
   // the quit by up to ~1.5 s -- once, and only when a hold is actually out.
   // Skipping it would leave Spotify paused until the bridge's 180 s hold TTL
