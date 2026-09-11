@@ -126,6 +126,7 @@
       var st = bySession.get(payload.id);
       if (!st || !st.term || st.disposed) return;
       st.term.write(payload.data);
+      noteActivity(st, payload.data);
     });
 
     window.api.pty.onExit(function (payload) {
@@ -135,6 +136,10 @@
       bySession.delete(payload.id);
       st.sessionId = null;
       st.live = false;
+      // Whatever burst was still settling died with the session; 'live' false
+      // is the signal now, and a stale 'idle' a second later would only lie.
+      clearIdleTimer(st);
+      st.idleBytes = 0;
       if (st.disposed) return;
       emit(st, 'live', false);
       emit(st, 'exit', { exitCode: payload.exitCode });
@@ -142,6 +147,71 @@
         st.term.write('\r\n\x1b[2m[session ended] press Enter to start a new one\x1b[0m\r\n');
       }
     });
+  }
+
+  // ------------------------------------------------------------ attention --
+  /*
+   * A Claude session that wants you goes QUIET: a burst of output, then
+   * nothing while it waits at a prompt. So three events ride on the data pump:
+   *
+   *   'activity' {bytes}  every chunk, unconditionally.
+   *   'idle'     {bytes}  once per burst, IDLE_MS after the last byte, and only
+   *                       when at least IDLE_MIN_BYTES have arrived since the
+   *                       previous idle — a prompt after real output counts, a
+   *                       lone cursor blink or a keystroke echo does not.
+   *   'bell'     {bytes}  the chunk contained BEL (\x07), which Claude Code
+   *                       rings on completion when its notification is on.
+   *
+   * Bytes under the threshold are NOT discarded: they keep accumulating, so a
+   * trickle that eventually adds up still counts as a burst.
+   */
+  var IDLE_MS = 1200;
+  var IDLE_MIN_BYTES = 200;
+  var BEL = '\x07';
+
+  function chunkLength(data) {
+    if (data == null) return 0;
+    if (typeof data === 'string') return data.length;
+    if (typeof data.byteLength === 'number') return data.byteLength;
+    if (typeof data.length === 'number') return data.length;
+    return 0;
+  }
+
+  function hasBell(data) {
+    if (data == null) return false;
+    if (typeof data === 'string') return data.indexOf(BEL) !== -1;
+    // A byte view, should a future preload hand one over instead of a string.
+    if (typeof data.length === 'number' && typeof data.byteLength === 'number') {
+      for (var i = 0; i < data.length; i++) if (data[i] === 7) return true;
+    }
+    return false;
+  }
+
+  function clearIdleTimer(st) {
+    if (st.idleTimer) {
+      clearTimeout(st.idleTimer);
+      st.idleTimer = 0;
+    }
+  }
+
+  function noteActivity(st, data) {
+    if (st.disposed) return;
+    var bytes = chunkLength(data);
+    st.idleBytes += bytes;
+
+    emit(st, 'activity', { bytes: bytes });
+    if (hasBell(data)) emit(st, 'bell', { bytes: bytes });
+
+    // Each chunk pushes the deadline out, so one burst produces one 'idle'.
+    clearIdleTimer(st);
+    st.idleTimer = setTimeout(function () {
+      st.idleTimer = 0;
+      if (st.disposed) return;
+      if (st.idleBytes < IDLE_MIN_BYTES) return; // noise: keep waiting
+      var total = st.idleBytes;
+      st.idleBytes = 0;
+      emit(st, 'idle', { bytes: total });
+    }, IDLE_MS);
   }
 
   // -------------------------------------------------------------- emitter --
@@ -400,6 +470,10 @@
       rafId: 0,
       ro: null,
       timers: { win: null, ro: null },
+      // The quiet-detector above: bytes seen since the last 'idle', and the
+      // pending deadline that turns silence into one.
+      idleTimer: 0,
+      idleBytes: 0,
       listeners: Object.create(null),
       onWinResize: null
     };
@@ -486,6 +560,8 @@
         }
         if (st.timers.win) { clearTimeout(st.timers.win); st.timers.win = null; }
         if (st.timers.ro) { clearTimeout(st.timers.ro); st.timers.ro = null; }
+        clearIdleTimer(st);
+        st.idleBytes = 0;
 
         if (st.ro) {
           try { st.ro.disconnect(); } catch (err) {}

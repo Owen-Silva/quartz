@@ -19,6 +19,7 @@
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
  *     claudeResume: true | false,           // --continue on a restored tab
+ *     claudeNotify: true | false,           // toast when a tab goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     newtabBackground: { kind: 'board'|'aurora'|'image',
  *                         boardOverImage: bool, dim: 0..0.6, rev } }
@@ -79,6 +80,9 @@
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
+    /* A quiet Windows notification when a background Claude tab stops working
+       and waits on an answer. The chip's amber mark is not optional; this is. */
+    claudeNotify: true,
     tabSleepMinutes: 30,
     /* What the new tab paints behind the search field:
          { kind: 'board' }                          the circuit board
@@ -1087,12 +1091,17 @@
     var resume = el('div', 'set-field');
     resume.setAttribute('data-field', 'clauderesume');
     s.appendChild(resume);
+
+    var notify = el('div', 'set-field');
+    notify.setAttribute('data-field', 'claudenotify');
+    s.appendChild(notify);
     return s;
   }
 
   function renderClaude() {
     renderClaudeDir();
     renderClaudeResume();
+    renderClaudeNotify();
   }
 
   function renderClaudeDir() {
@@ -1200,6 +1209,24 @@
     hint.appendChild(el('code', 'set-code', 'claude --continue'));
     hint.appendChild(document.createTextNode(' in their folder. Turn off to start fresh every time.'));
     field.appendChild(hint);
+  }
+
+  function renderClaudeNotify() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="claudenotify"]');
+    if (!field) return;
+    field.textContent = '';
+
+    field.appendChild(switchRow(
+      'Notify me when a Claude tab is waiting',
+      get('claudeNotify') !== false,
+      function (next) { set({ claudeNotify: next }); }
+    ));
+
+    field.appendChild(el(
+      'p',
+      'set-hint',
+      'A quiet Windows notification when a session finishes while you’re elsewhere.'
+    ));
   }
 
   function buildTabs() {
@@ -2022,6 +2049,7 @@
       if (keys.indexOf('accentHue') >= 0 || keys.indexOf('palette') >= 0) renderLook();
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
+      if (keys.indexOf('claudeNotify') >= 0) renderClaudeNotify();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();

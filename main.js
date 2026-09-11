@@ -1557,6 +1557,7 @@ const SHORTCUTS = {
   '0': 'zoom-reset',
   f: 'find',
   j: 'downloads',
+  k: 'command-palette',
   h: 'history',
   d: 'bookmark',
   ',': 'settings',

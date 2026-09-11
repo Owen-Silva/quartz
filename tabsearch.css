@@ -290,10 +290,68 @@
   font-weight: 350;
 }
 
+/* ============================================================
+   command mode — the same pane with `>` in the field
+
+   Nothing here is a second panel: the field, the list and the row
+   are the ones above. A command row swaps the favicon column for
+   a verb's mark and the host line for a hint, and hangs its
+   keycaps off the right where the close button sits on a tab.
+   ============================================================ */
+
+/* One line more often than two, so it stands shorter than a tab row
+   and the list shows more of the table at once. */
+#tabsearch .ts-row--cmd { height: 40px; }
+
+/* The mark is the only thing in that column — no favicon to defer to —
+   so it reads one step brighter than a tab's globe. */
+#tabsearch .ts-ico--cmd { color: var(--fg-2); }
+
+/* A hint is a gloss on the label, never content: dimmer than a host. */
+#tabsearch .ts-cmd-hint { color: var(--fg-3); }
+
+/* --- the keycaps ------------------------------------------------ */
+/* #settings-panel's .set-key recipe, one size down: the same cap, read
+   at a glance rather than studied. */
+#tabsearch .ts-keys {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding-right: 2px;
+}
+
+#tabsearch .ts-key {
+  min-width: 17px;
+  padding: 1px 5px;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: var(--sheen), var(--glass);
+  color: var(--fg-3);
+  font-family: var(--ui-font);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 14px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+}
+
+/* under the highlight the caps lift with the row, not past it */
+#tabsearch .ts-row.is-hi .ts-key { color: var(--fg-2); }
+
+/* the palette being worn: the one ion mark in the list */
+#tabsearch .ts-check {
+  font-size: 12px;
+  color: var(--ion);
+}
+
 /* --- narrow windows --------------------------------------------- */
 @media (max-width: 620px) {
   #tabsearch { top: 8vh; }
   #tabsearch .ts-list { max-height: 62vh; }
+  /* the label is the command; the caps are the first thing to go */
+  #tabsearch .ts-keys { display: none; }
 }
 
 /* --- reduced motion --------------------------------------------- */

@@ -1864,6 +1864,124 @@ function recomputeClaudeLive() {
   document.body.classList.toggle('claude-live', any);
 }
 
+/* ------------------------------------------------------------------ */
+/* "Claude needs you"                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A session that has gone quiet has almost always stopped to ask something.
+ * terminal.js turns that silence into 'idle' (and Claude Code's own BEL into
+ * 'bell'); the only judgement here is WHERE the user was looking when it landed.
+ * A chamber he is watching needs no mark — he can already see it.
+ */
+
+/** Has this tab ever put up a notification for the run of attention it is in? */
+function claudeNotifyEnabled() {
+  // A settings store that is missing or predates the key reads as "on", which
+  // is what settingGet()'s null stands for. Only an explicit false silences it.
+  return settingGet('claudeNotify') !== false;
+}
+
+let claudeNotifyAsked = false;
+
+/**
+ * The notification permission, asking for it at most once per window. A
+ * 'default' answer means the prompt is out: this idle goes unannounced and the
+ * next one gets the real answer.
+ */
+function claudeNotifyPermission() {
+  if (typeof window.Notification !== 'function') return 'unsupported';
+  let perm = 'default';
+  try { perm = window.Notification.permission; } catch (err) { return 'unsupported'; }
+  if (perm === 'granted' || perm === 'denied') return perm;
+  if (!claudeNotifyAsked) {
+    claudeNotifyAsked = true;
+    try {
+      const answer = window.Notification.requestPermission();
+      if (answer && typeof answer.then === 'function') answer.then(() => {}, () => {});
+    } catch (err) { /* an older shell with the callback form only */ }
+  }
+  return 'default';
+}
+
+/** The Windows toast, at most one per tab per run of attention. */
+function notifyClaudeWaiting(tab) {
+  if (tab.needsYouNotified) return;      // already announced this quiet spell
+  if (!claudeNotifyEnabled()) return;
+  if (document.hasFocus()) return;       // he is right here; the dot is enough
+  if (claudeNotifyPermission() !== 'granted') return;
+
+  const folder = folderBaseName(tab.cwd) || claudeDefaultTitle(tab);
+  let note = null;
+  try {
+    // silent: the chime is Claude Code's job (BEL). This is the visual half.
+    note = new window.Notification('Claude is waiting', { body: folder, silent: true });
+  } catch (err) {
+    return; // no toast: the chip still carries the mark
+  }
+  tab.needsYouNotified = true;
+  try {
+    note.onclick = () => {
+      try { window.focus(); } catch (err) { /* not ours to raise */ }
+      activateTab(tab.id);
+      try { note.close(); } catch (err) { /* already dismissed */ }
+    };
+  } catch (err) { /* an implementation without onclick */ }
+}
+
+/** Mark one Claude chip as waiting on the user: amber glyph, faster dot, toast. */
+function markClaudeNeedsYou(tab) {
+  if (!isClaudeTab(tab)) return;
+  tab.needsYou = true;
+  if (tab.chipEl) {
+    tab.chipEl.classList.add('needs-you');
+    // A leading ● in front of the title, built on demand and dropped on clear
+    // so a chip that is not waiting carries no extra node at all.
+    if (!tab.attnEl) {
+      const attn = document.createElement('span');
+      attn.className = 'tab-attn';
+      attn.textContent = '●';
+      attn.setAttribute('aria-hidden', 'true');
+      try {
+        tab.chipEl.insertBefore(attn, tab.titleEl || null);
+        tab.attnEl = attn;
+      } catch (err) { /* chip went away mid-mark */ }
+    }
+    tab.chipEl.title = chipTooltip(tab);
+  }
+  recomputeClaudeAttn();
+  notifyClaudeWaiting(tab);
+}
+
+/** He looked: the chip goes back to its ordinary live breathe. */
+function clearClaudeNeedsYou(tab) {
+  if (!isClaudeTab(tab)) return;
+  tab.needsYou = false;
+  tab.needsYouNotified = false;
+  if (tab.chipEl) {
+    tab.chipEl.classList.remove('needs-you');
+    tab.chipEl.title = chipTooltip(tab);
+  }
+  if (tab.attnEl) {
+    try { tab.attnEl.remove(); } catch (err) { /* already detached */ }
+    tab.attnEl = null;
+  }
+  recomputeClaudeAttn();
+}
+
+/** The strip's own light: the pill pulses while ANY chamber is waiting. */
+function recomputeClaudeAttn() {
+  const any = tabs.some((t) => isClaudeTab(t) && t.needsYou);
+  if (newClaudeBtn) newClaudeBtn.classList.toggle('attn', any);
+}
+
+/** Every waiting chamber that is on screen now has been seen. */
+function clearClaudeNeedsYouOnScreen() {
+  for (const tab of tabs) {
+    if (isClaudeTab(tab) && tab.needsYou && isTabOnScreen(tab)) clearClaudeNeedsYou(tab);
+  }
+}
+
 /**
  * ConPTY hands us the shell's executable path as the initial window title.
  * Anything that looks like a Windows path or an .exe is noise, not a title.
@@ -1969,7 +2087,11 @@ function createClaudeTab(options) {
     live: false,
     ready: true,
     lastActive: 0,
-    termOff: []
+    termOff: [],
+    // "Claude needs you": set while this chamber has gone quiet off screen.
+    needsYou: false,
+    needsYouNotified: false,
+    attnEl: null
   };
 
   tab.chipEl = buildChip(tab);
@@ -2061,6 +2183,16 @@ function wireTermEvents(tab) {
     }
   });
 
+  // The session stopped talking, or rang the bell. Either only counts as a
+  // call for help if the user was not already looking at it: a chamber in front of
+  // him on a focused window says everything a mark could.
+  const attention = () => {
+    if (isTabOnScreen(tab) && document.hasFocus()) return;
+    markClaudeNeedsYou(tab);
+  };
+  listen('idle', attention);
+  listen('bell', attention);
+
   listen('title', (text) => {
     if (isNoiseTitle(text)) return;
     let clean = String(text == null ? '' : text).trim();
@@ -2117,6 +2249,8 @@ function activateTab(id) {
       tab.chipEl.classList.toggle('active', isActive);
       tab.chipEl.setAttribute('aria-selected', String(isActive));
     }
+    // Raising a waiting chamber IS answering it — and a split raises both.
+    if (shown && isClaudeTab(tab) && tab.needsYou) clearClaudeNeedsYou(tab);
   }
 
   if (isClaudeTab(target)) {
@@ -2170,6 +2304,7 @@ function closeTab(id) {
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
   recomputeClaudeLive();
+  recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
   saveSession();
 
   if (tabs.length === 0) {
@@ -3516,6 +3651,11 @@ function wireChrome() {
       else createClaudeTab();
     });
   }
+
+  // Coming back to the window answers whatever chamber is already in front of
+  // him. Anything still in the background keeps its mark until he switches to
+  // it — that is the whole point of the mark.
+  window.addEventListener('focus', clearClaudeNeedsYouOnScreen);
   // Right-click in the tab row. Delegated from the titlebar so bare strip space
   // is covered too; main.js only pops a native menu over editable fields, so
   // nothing competes with this one.
@@ -3667,10 +3807,9 @@ function wireKeyboard() {
       'capture': () => moduleShortcut('capture'),
       'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
       'split': toggleSplit,
-      // main.js does not replay Ctrl+Shift+\ yet, so "Claude beside" only fires
-      // while the chrome has focus. The entry costs nothing and means the key
-      // starts working from inside a page the day main.js sends it.
+      // Replayed by main.js from inside pages as Ctrl+Shift+\ (or Ctrl+|).
       'claude-split': toggleClaudeSplit,
+      'command-palette': () => moduleShortcut('command-palette'),
       'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
@@ -3802,6 +3941,8 @@ function wireKeyboard() {
     }
     // Ctrl+Shift+S saves a screenshot of the page; Ctrl+Shift+B shows the bookmarks bar.
     if (key === 's' && event.shiftKey) { event.preventDefault(); moduleShortcut('capture'); return; }
+    // Ctrl+K: the command palette (tab search in command mode).
+    if (key === 'k') { event.preventDefault(); moduleShortcut('command-palette'); return; }
     if (key === 'b' && event.shiftKey) { event.preventDefault(); moduleShortcut('bookmarks-bar'); return; }
     if (key === 'r') {
       event.preventDefault(); // never let Ctrl+R reload the shell window
@@ -3916,6 +4057,8 @@ window.toggleClaudeSplit = toggleClaudeSplit;
 window.openClaudeBesideTab = openClaudeBesideTab;
 window.splitPartner = splitPartner;
 window.setSplitRatio = setSplitRatio;
+window.markClaudeNeedsYou = markClaudeNeedsYou;
+window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });

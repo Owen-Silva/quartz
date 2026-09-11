@@ -1137,6 +1137,33 @@ body.claude-live #newclaude .dot {
   50%      { opacity: .62; }
 }
 
+/* --- "Claude needs you" --------------------------------------- */
+/* A chamber that went quiet while he was elsewhere. Brighter and quicker
+   than the live breathe so the two never read as the same light — and
+   still stepped, for the same reason live-pulse is: three repaints a
+   second through the frosted row instead of sixty. */
+.tab.claude.needs-you .dot,
+#newclaude.attn .dot,
+body.claude-live #newclaude.attn .dot {
+  background: var(--amber);
+  box-shadow: 0 0 10px 2px var(--amber-glow);
+  animation: attn-pulse 1.2s steps(3) infinite;
+}
+
+@keyframes attn-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .3; }
+}
+
+/* The dot is small and it is at the far left; the glyph puts the same
+   amber right against the title, where the eye is already reading. */
+.tab-attn {
+  flex: 0 0 auto;
+  color: var(--amber);
+  font-size: 8px;
+  line-height: 1;
+}
+
 /* --- tab well ------------------------------------------------- */
 /* No radius, no overflow clipping: guest views do not clip reliably.
    No ground of its own, so the aurora reaches the glass chamber. */
@@ -1439,6 +1466,10 @@ body,
   body.booted .navrow { transition: none; }
   .tab.live .dot,
   body.claude-live #newclaude .dot { animation: none; }
+  /* The waiting mark stays amber and stays put; only the pulse goes. */
+  .tab.claude.needs-you .dot,
+  #newclaude.attn .dot,
+  body.claude-live #newclaude.attn .dot { animation: none; }
   .tab.loading::after { animation: none; }
   .tab::after, .tab-close, #omnibox, #zoom-badge { transition: none; }
   /* the drop slot still opens, it just arrives all at once */

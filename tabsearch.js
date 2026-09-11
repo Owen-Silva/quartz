@@ -5,6 +5,12 @@
  * titlebar. One glass pane over the page listing every open tab and the
  * handful you just closed, filtered as you type.
  *
+ * Type `>` into it — or open it with Ctrl+K — and the same pane becomes a
+ * COMMAND palette: the list swaps to the browser's own verbs (new tab, split,
+ * reader, palettes, clear history…), each with its keycaps on the right, run
+ * with Enter. Deleting the `>` puts the tabs back. Both modes share one input,
+ * one row recipe and one set of arrow keys; only the model underneath changes.
+ *
  * The renderer runs with contextIsolation ON and nodeIntegration OFF, so this
  * is plain browser script: no require(), no import, no bundler. Loaded after
  * app.js, which owns the strip; this file only ever ADDS — one button in
@@ -42,12 +48,43 @@
     audible: '\uE767',
     asleep:  '\uE708',
     history: '\uE81C',
-    list:    '\uE8FD'
+    list:    '\uE8FD',
+
+    /* command mode: the field's own mark, then one per verb */
+    chevron: '\uE76C',
+    add:     '\uE710',
+    claude:  '\uE756',
+    folder:  '\uE838',
+    beside:  '\uE7C4',
+    split:   '\uE89F',
+    reader:  '\uE736',
+    camera:  '\uE722',
+    print:   '\uE749',
+    unpin:   '\uE77A',
+    reload:  '\uE72C',
+    undo:    '\uE7A7',
+    zoomIn:  '\uE8A3',
+    zoomOut: '\uE71F',
+    zoom:    '\uE71E',
+    star:    '\uE734',
+    sun:     '\uE706',
+    moon:    '\uE708',
+    color:   '\uE790',
+    gear:    '\uE713',
+    down:    '\uE896',
+    info:    '\uE946',
+    shield:  '\uE83D',
+    screen:  '\uE740',
+    trash:   '\uE74D',
+    check:   '\uE73E'
   };
 
   /** The pane is a shortlist, not a tab manager: what does not fit is a count. */
   var MAX_OPEN = 12;
   var MAX_CLOSED = 8;
+
+  /** The one character that turns the pane into a command palette. */
+  var CMD_PREFIX = '>';
 
   /* --- state ---------------------------------------------------- */
   var open_ = false;
@@ -57,6 +94,17 @@
   var rootEl = null;
   var inputEl = null;
   var listEl = null;
+  var fieldIcoEl = null;
+
+  /**
+   * Reader.canRead() is a promise, and a row cannot wait: it is resolved once
+   * per open and the answer parked here, so "Reader view" is simply absent
+   * until the page is known to be readable.
+   */
+  var readerOk = false;
+
+  /** The id of a two-step command waiting for its second Enter. */
+  var pendingId = null;
 
   /**
    * The rendered model, index-aligned with the selectable row elements: what
@@ -131,6 +179,81 @@
     if (typeof url !== 'string' || !url) return 'New tab';
     var m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(url);
     return m ? m[1].replace(/^www\./, '') : 'New tab';
+  }
+
+  /* ============================================================
+     Command bridge — the rest of the app, every call feature-detected
+     ============================================================ */
+
+  /**
+   * app.js's top-level bindings are `const`/`function`: reachable here by bare
+   * name, but not as window properties, and a bare name that no longer exists
+   * is a ReferenceError rather than undefined. So every one is read through a
+   * thunk inside a try, and a global the app dropped simply reads undefined.
+   */
+  function globalRef(thunk) {
+    try { return thunk(); } catch (err) { return undefined; }
+  }
+
+  /** Call a bare global if it is still a function. Never throws. */
+  function callGlobal(thunk, a, b) {
+    var fn = globalRef(thunk);
+    if (typeof fn !== 'function') return false;
+    try { fn(a, b); return true; } catch (err) { return false; }
+  }
+
+  /** The sibling modules ARE window properties: Reader, Settings, Shield… */
+  function moduleRef(name) {
+    try {
+      var mod = window[name];
+      return (mod && typeof mod === 'object') ? mod : null;
+    } catch (err) { return null; }
+  }
+
+  function callModule(name, method, a) {
+    var mod = moduleRef(name);
+    if (!mod || typeof mod[method] !== 'function') return false;
+    try { mod[method](a); return true; } catch (err) { return false; }
+  }
+
+  /** The tab a command acts on: app.js's own accessor, then the strip. */
+  function activeTab() {
+    var fn = globalRef(function () { return getActiveTab; });
+    if (typeof fn === 'function') {
+      try { return fn() || null; } catch (err) { /* strip moved on */ }
+    }
+    var id = activeId();
+    var all = tabList();
+    for (var i = 0; i < all.length; i++) if (all[i] && all[i].id === id) return all[i];
+    return null;
+  }
+
+  function rootAttr(name) {
+    try {
+      var root = document.documentElement;
+      return (root && typeof root.getAttribute === 'function') ? root.getAttribute(name) : null;
+    } catch (err) { return null; }
+  }
+
+  /** 'dark' unless the chrome says otherwise — app.js's own default. */
+  function currentTheme() {
+    var fn = globalRef(function () { return getTheme; });
+    if (typeof fn === 'function') {
+      try { return fn() === 'light' ? 'light' : 'dark'; } catch (err) { /* fall through */ }
+    }
+    return rootAttr('data-theme') === 'light' ? 'light' : 'dark';
+  }
+
+  /** Aurora is the palette that wears no attribute, so it is the fallback. */
+  function currentPalette() {
+    var settings = moduleRef('Settings');
+    if (settings && typeof settings.get === 'function') {
+      try {
+        var name = settings.get('palette');
+        if (typeof name === 'string' && name) return name;
+      } catch (err) { /* fall through */ }
+    }
+    return rootAttr('data-palette') || 'aurora';
   }
 
   /* ============================================================
@@ -241,6 +364,269 @@
   }
 
   /* ============================================================
+     The command table
+     ============================================================ */
+
+  var PALETTES = [
+    { id: 'aurora', label: 'Aurora' },
+    { id: 'ember', label: 'Ember' },
+    { id: 'forest', label: 'Forest' },
+    { id: 'ocean', label: 'Ocean' },
+    { id: 'midnight', label: 'Midnight' },
+    { id: 'mono', label: 'Mono' }
+  ];
+
+  /**
+   * Every verb the palette offers, in the order it offers them. Rebuilt on each
+   * render rather than kept, because half of these read the world: the label is
+   * "Unsplit" or "Split with next tab" depending on the tab under the cursor,
+   * and the palette rows wear a check on whichever one is being worn.
+   */
+  function buildCommands() {
+    var tab = activeTab();
+    var split = !!(tab && tab.splitWith !== null && tab.splitWith !== undefined);
+    var pinned = !!(tab && tab.pinned);
+    var muted = !!(tab && tab.muted);
+    var theme = currentTheme();
+    var palette = currentPalette();
+    var list = [];
+
+    list.push({
+      id: 'new-tab', glyph: GLYPH.add, label: 'New tab', keys: ['Ctrl', 'T'],
+      run: function () { doCreate(globalRef(function () { return HOME_URL; })); }
+    });
+    list.push({
+      id: 'new-claude-tab', glyph: GLYPH.claude, label: 'New Claude tab', keys: ['Ctrl', '`'],
+      run: function () { callGlobal(function () { return createClaudeTab; }); }
+    });
+    list.push({
+      id: 'claude-folder', glyph: GLYPH.folder, label: 'Claude tab in a folder…',
+      hint: 'Pick the working directory first', keys: ['Ctrl', 'Shift', '`'],
+      run: function () { callGlobal(function () { return newClaudeTabInFolder; }); }
+    });
+    list.push({
+      id: 'claude-beside', glyph: GLYPH.beside, label: 'Claude beside this page',
+      hint: 'A session in the other half', keys: ['Ctrl', 'Shift', '\\'],
+      run: function () { callGlobal(function () { return toggleClaudeSplit; }); }
+    });
+    list.push({
+      id: 'split', glyph: GLYPH.split,
+      label: split ? 'Unsplit' : 'Split with next tab',
+      hint: split ? 'Back to one page' : 'Two pages side by side',
+      keys: ['Ctrl', '\\'],
+      run: function () {
+        if (split) callGlobal(function () { return unsplit; }, activeTab());
+        else callGlobal(function () { return toggleSplit; });
+      }
+    });
+    list.push({
+      id: 'reader', glyph: GLYPH.reader, label: 'Reader view',
+      hint: 'Read this page without the furniture', keys: ['Ctrl', 'Shift', 'R'],
+      when: function () { return readerOk; },
+      run: function () { callModule('Reader', 'open'); }
+    });
+    list.push({
+      id: 'find', glyph: GLYPH.search, label: 'Find in page', keys: ['Ctrl', 'F'],
+      run: function () { callModule('FindBar', 'open'); }
+    });
+    list.push({
+      id: 'capture', glyph: GLYPH.camera, label: 'Take a screenshot',
+      hint: 'Saves the page as a PNG', keys: ['Ctrl', 'Shift', 'S'],
+      run: function () { callModule('Capture', 'takeActive'); }
+    });
+    list.push({
+      id: 'print', glyph: GLYPH.print, label: 'Print', keys: ['Ctrl', 'P'],
+      run: function () { callGlobal(function () { return printActiveTab; }); }
+    });
+    list.push({
+      id: 'pin', glyph: pinned ? GLYPH.unpin : GLYPH.pin,
+      label: pinned ? 'Unpin tab' : 'Pin tab',
+      run: function () {
+        var t = activeTab();
+        if (t) callGlobal(function () { return setTabPinned; }, t, !t.pinned);
+      }
+    });
+    list.push({
+      id: 'mute', glyph: muted ? GLYPH.audible : GLYPH.muted,
+      label: muted ? 'Unmute tab' : 'Mute tab',
+      run: function () {
+        var t = activeTab();
+        if (t) callGlobal(function () { return setTabMuted; }, t, !t.muted);
+      }
+    });
+    list.push({
+      id: 'sleep-others', glyph: GLYPH.asleep, label: 'Sleep other tabs',
+      hint: 'Frees the memory idle tabs are holding',
+      run: function () { callGlobal(function () { return sleepIdleTabs; }); }
+    });
+    list.push({
+      id: 'reload', glyph: GLYPH.reload, label: 'Reload', keys: ['F5'],
+      run: function () { callGlobal(function () { return reloadActiveTab; }); }
+    });
+    list.push({
+      id: 'close-tab', glyph: GLYPH.close, label: 'Close tab', keys: ['Ctrl', 'W'],
+      run: function () { callGlobal(function () { return closeActiveTab; }); }
+    });
+    list.push({
+      id: 'reopen-tab', glyph: GLYPH.undo, label: 'Reopen closed tab', keys: ['Ctrl', 'Shift', 'T'],
+      run: function () { callGlobal(function () { return reopenClosedTab; }); }
+    });
+    list.push({
+      id: 'zoom-in', glyph: GLYPH.zoomIn, label: 'Zoom in',
+      run: function () { callGlobal(function () { return zoomActiveTab; }, 0.5); }
+    });
+    list.push({
+      id: 'zoom-out', glyph: GLYPH.zoomOut, label: 'Zoom out',
+      run: function () { callGlobal(function () { return zoomActiveTab; }, -0.5); }
+    });
+    list.push({
+      id: 'zoom-reset', glyph: GLYPH.zoom, label: 'Reset zoom',
+      run: function () { callGlobal(function () { return resetZoom; }); }
+    });
+    list.push({
+      id: 'bookmarks-bar', glyph: GLYPH.star, label: 'Toggle bookmarks bar',
+      hint: 'Show or hide the bar', keys: ['Ctrl', 'Shift', 'B'],
+      run: function () { callModule('Bookmarks', 'toggle'); }
+    });
+    list.push({
+      id: 'theme-light', glyph: GLYPH.sun, label: 'Switch to light theme',
+      when: function () { return theme === 'dark'; },
+      run: function () { callGlobal(function () { return setTheme; }, 'light'); }
+    });
+    list.push({
+      id: 'theme-dark', glyph: GLYPH.moon, label: 'Switch to dark theme',
+      when: function () { return theme === 'light'; },
+      run: function () { callGlobal(function () { return setTheme; }, 'dark'); }
+    });
+
+    for (var i = 0; i < PALETTES.length; i++) {
+      list.push(paletteCommand(PALETTES[i], palette));
+    }
+
+    list.push({
+      id: 'settings', glyph: GLYPH.gear, label: 'Settings', keys: ['Ctrl', ','],
+      run: function () { callModule('Settings', 'open'); }
+    });
+    list.push({
+      id: 'downloads', glyph: GLYPH.down, label: 'Downloads', keys: ['Ctrl', 'J'],
+      run: function () { callModule('Downloads', 'open'); }
+    });
+    list.push({
+      id: 'site-info', glyph: GLYPH.info, label: 'Site info',
+      hint: 'Connection, permissions, stored data',
+      run: function () { callModule('SiteInfo', 'open'); }
+    });
+    list.push({
+      id: 'shield', glyph: GLYPH.shield, label: 'Ad blocking',
+      hint: 'What the shield stopped on this page',
+      run: function () { callModule('Shield', 'open'); }
+    });
+    list.push({
+      id: 'fullscreen', glyph: GLYPH.screen, label: 'Fullscreen', keys: ['F11'],
+      run: function () { callGlobal(function () { return toggleFullscreen; }); }
+    });
+    list.push({
+      id: 'clear-history', glyph: GLYPH.trash,
+      // Half-confirmed, the two lines swap: the warning takes the label, and
+      // the verb drops to the hint so the row still answers the query that
+      // found it ("history" must not make its own row disappear).
+      label: pendingId === 'clear-history' ? 'Press Enter again to clear' : 'Clear browsing history',
+      hint: pendingId === 'clear-history' ? 'Clear browsing history' : 'Every visit this browser remembers',
+      confirm: true,
+      run: function () { callModule('History', 'clear'); }
+    });
+
+    return list;
+  }
+
+  /** One palette row. Split out so the loop does not capture the loop variable. */
+  function paletteCommand(entry, current) {
+    return {
+      id: 'palette-' + entry.id,
+      glyph: GLYPH.color,
+      label: 'Palette: ' + entry.label,
+      check: entry.id === current,
+      run: function () {
+        callModule('Settings', 'applyPalette', entry.id);
+        var settings = moduleRef('Settings');
+        if (settings && typeof settings.set === 'function') {
+          try { settings.set({ palette: entry.id }); } catch (err) { /* storage blocked */ }
+        }
+      }
+    };
+  }
+
+  /** The commands a `when()` lets through, in table order. */
+  function visibleCommands() {
+    var all = buildCommands();
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var cmd = all[i];
+      var on = true;
+      if (typeof cmd.when === 'function') {
+        try { on = !!cmd.when(); } catch (err) { on = false; }
+      }
+      if (on) out.push(cmd);
+    }
+    return out;
+  }
+
+  /* --- command mode: the query, the filter, the ranking ----------- */
+
+  /**
+   * The command query, or null when this is still a tab search. Leading spaces
+   * are ignored so a stray one before the `>` does not drop out of the mode.
+   */
+  function commandQueryOf(value) {
+    var s = String(value == null ? '' : value).replace(/^\s+/, '');
+    if (s.charAt(0) !== CMD_PREFIX) return null;
+    return s.slice(1).trim();
+  }
+
+  function isCommandMode() {
+    return commandQueryOf(inputEl ? inputEl.value : '') !== null;
+  }
+
+  /** Same rule as a tab: every word has to land on the label or the hint. */
+  function commandMatches(cmd, words) {
+    if (!words || !words.length) return true;
+    var label = String(cmd.label || '').toLowerCase();
+    var hint = String(cmd.hint || '').toLowerCase();
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (label.indexOf(w) < 0 && hint.indexOf(w) < 0) return false;
+    }
+    return true;
+  }
+
+  /** 0 label starts with the query, 1 label contains it, 2 the hint carried it. */
+  function commandRank(cmd, query) {
+    var q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q) return 0;
+    var label = String(cmd.label || '').toLowerCase();
+    if (label.indexOf(q) === 0) return 0;
+    if (label.indexOf(q) >= 0) return 1;
+    return 2;
+  }
+
+  /** The command list for a query: filtered, ranked, table order as tiebreak. */
+  function collectCommands(query) {
+    var words = tokenize(query);
+    var all = visibleCommands();
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var cmd = all[i];
+      if (!commandMatches(cmd, words)) continue;
+      cmd.kind = 'command';
+      cmd.order = i;
+      cmd.rank = commandRank(cmd, query);
+      out.push(cmd);
+    }
+    out.sort(function (a, b) { return (a.rank - b.rank) || (a.order - b.order); });
+    return out;
+  }
+
+  /* ============================================================
      DOM
      ============================================================ */
 
@@ -300,7 +686,8 @@
     rootEl.setAttribute('aria-label', 'Search tabs');
 
     var field = el('div', 'ts-field');
-    field.appendChild(glyphEl(GLYPH.search, 'ts-field-ico'));
+    fieldIcoEl = glyphEl(GLYPH.search, 'ts-field-ico');
+    field.appendChild(fieldIcoEl);
 
     inputEl = document.createElement('input');
     inputEl.id = 'tabsearch-input';
@@ -325,7 +712,9 @@
     // Wired here rather than in wire(): these two are the pane's own, so they
     // are attached the moment the pane exists, whatever order boot ran in.
     rootEl.addEventListener('keydown', onKeyDown);
-    inputEl.addEventListener('input', function () { render(0); });
+    // Any edit of the query abandons a half-confirmed command: the row the
+    // second Enter was meant for is not necessarily under the cursor any more.
+    inputEl.addEventListener('input', function () { pendingId = null; render(0); });
   }
 
   function captionEl(text) {
@@ -380,7 +769,9 @@
     var line1 = el('span', 'ts-primary');
     line1.textContent = primary;
     body.appendChild(line1);
-    body.appendChild(secondNode);
+    // A command with no hint is one line: an empty second line would only pad
+    // the row, so it is left out rather than rendered blank.
+    if (secondNode) body.appendChild(secondNode);
     return body;
   }
 
@@ -433,6 +824,46 @@
     return row;
   }
 
+  /** The keycaps on the right of a command row: one cap per key, in order. */
+  function keysEl(keys) {
+    var box = el('span', 'ts-keys');
+    for (var i = 0; i < keys.length; i++) {
+      var cap = el('span', 'ts-key');
+      cap.textContent = keys[i];
+      box.appendChild(cap);
+    }
+    return box;
+  }
+
+  function buildCommandRow(cmd, index) {
+    var row = rowShell(index);
+    row.classList.add('ts-row--cmd');
+
+    var box = el('span', 'ts-ico ts-ico--cmd');
+    box.appendChild(glyphEl(cmd.glyph || GLYPH.chevron));
+    row.appendChild(box);
+
+    var hint = null;
+    if (cmd.hint) {
+      hint = el('span', 'ts-secondary ts-cmd-hint');
+      hint.textContent = cmd.hint;
+    }
+    row.appendChild(bodyEl(cmd.label, hint));
+
+    // The right-hand slot is one or the other: a palette that is being worn
+    // wears a check there, everything else shows the keys that also run it.
+    if (cmd.check) {
+      var mark = el('span', 'ts-keys');
+      mark.appendChild(glyphEl(GLYPH.check, 'ts-check'));
+      row.appendChild(mark);
+    } else if (cmd.keys && cmd.keys.length) {
+      row.appendChild(keysEl(cmd.keys));
+    }
+
+    row.addEventListener('click', function () { activateIndex(indexOfRow(row)); });
+    return row;
+  }
+
   function indexOfRow(row) {
     for (var i = 0; i < rows.length; i++) if (rows[i].el === row) return i;
     return -1;
@@ -444,10 +875,55 @@
 
   function render(keepIndex) {
     if (!listEl) return;
-    var data = collect(inputEl ? inputEl.value : '');
+    var value = inputEl ? inputEl.value : '';
+    var query = commandQueryOf(value);
+    syncMode(query !== null);
+
     rows = [];
     listEl.textContent = '';               // clears the children, no reset needed
 
+    if (query !== null) renderCommands(query);
+    else renderTabs(value);
+
+    if (!rows.length) {
+      var empty = el('div', 'ts-empty');
+      empty.textContent = (query !== null) ? 'No matching commands' : 'No matching tabs';
+      listEl.appendChild(empty);
+    }
+
+    var want = (typeof keepIndex === 'number') ? keepIndex : 0;
+    setHighlight(rows.length ? Math.max(0, Math.min(want, rows.length - 1)) : -1);
+  }
+
+  /**
+   * The field belongs to whichever mode the query is in: its mark, its
+   * placeholder and the pane's label all change, and .is-commands lets the
+   * stylesheet dress the rows differently without a second panel.
+   */
+  function syncMode(on) {
+    if (rootEl) {
+      if (rootEl.classList) rootEl.classList.toggle('is-commands', !!on);
+      rootEl.setAttribute('aria-label', on ? 'Run a command' : 'Search tabs');
+    }
+    if (fieldIcoEl) fieldIcoEl.textContent = on ? GLYPH.chevron : GLYPH.search;
+    if (inputEl) {
+      inputEl.placeholder = on ? 'Type a command' : 'Search tabs';
+      inputEl.setAttribute('aria-label', on ? 'Type a command' : 'Search tabs');
+    }
+  }
+
+  function renderCommands(query) {
+    var list = collectCommands(query);
+    for (var i = 0; i < list.length; i++) {
+      var row = buildCommandRow(list[i], rows.length);
+      list[i].el = row;
+      rows.push(list[i]);
+      listEl.appendChild(row);
+    }
+  }
+
+  function renderTabs(value) {
+    var data = collect(value);
     var i, row;
     for (i = 0; i < data.open.length; i++) {
       row = buildTabRow(data.open[i], rows.length);
@@ -471,15 +947,6 @@
         listEl.appendChild(row);
       }
     }
-
-    if (!rows.length) {
-      var empty = el('div', 'ts-empty');
-      empty.textContent = 'No matching tabs';
-      listEl.appendChild(empty);
-    }
-
-    var want = (typeof keepIndex === 'number') ? keepIndex : 0;
-    setHighlight(rows.length ? Math.max(0, Math.min(want, rows.length - 1)) : -1);
   }
 
   function setHighlight(index) {
@@ -519,9 +986,30 @@
   function activateIndex(index) {
     if (index < 0 || index >= rows.length) return;
     var entry = rows[index];
+    if (entry.kind === 'command') { runCommand(entry); return; }
     if (entry.kind === 'closed') { reopen(entry); return; }
     doActivate(entry.id);
     close();
+  }
+
+  /**
+   * Run a command. The pane goes first — a verb that opens a panel or a dialog
+   * must not have to reach around the palette that launched it — and the action
+   * itself is guarded, so an app.js that dropped the global just does nothing.
+   *
+   * A `confirm` command takes two Enters: the first only relabels its own row,
+   * which is the whole warning. Anything else (a keystroke, a close) drops it.
+   */
+  function runCommand(cmd) {
+    if (!cmd || typeof cmd.run !== 'function') return;
+    if (cmd.confirm && pendingId !== cmd.id) {
+      pendingId = cmd.id;
+      render(hi);
+      return;
+    }
+    pendingId = null;
+    close();
+    try { cmd.run(); } catch (err) { /* the action is gone; the pane still closed */ }
   }
 
   /** Reopen a closed url and take it off the stack, so it is offered once. */
@@ -561,10 +1049,52 @@
       btnEl.setAttribute('aria-expanded', 'true');
     }
     if (inputEl) inputEl.value = '';
+    pendingId = null;
+    probeReader();
     render(0);
     if (inputEl && typeof inputEl.focus === 'function') {
       try { inputEl.focus(); } catch (err) { /* not attached yet */ }
     }
+  }
+
+  /** Straight into command mode: the `>` is typed for you, caret behind it. */
+  function openCommands() {
+    open();
+    if (!inputEl) return;
+    inputEl.value = CMD_PREFIX;
+    render(0);
+    if (typeof inputEl.setSelectionRange === 'function') {
+      try { inputEl.setSelectionRange(1, 1); } catch (err) { /* not a text field yet */ }
+    }
+    if (typeof inputEl.focus === 'function') {
+      try { inputEl.focus(); } catch (err) { /* not attached yet */ }
+    }
+  }
+
+  /**
+   * Reader.canRead() answers on a promise, so the row cannot be built from it
+   * directly: the answer is resolved once per open and parked, and the list
+   * re-renders if it lands while the commands are the thing on screen.
+   */
+  function probeReader() {
+    readerOk = false;
+    var reader = moduleRef('Reader');
+    if (!reader || typeof reader.canRead !== 'function') return;
+    var answer;
+    try { answer = reader.canRead(activeTab()); } catch (err) { return; }
+    if (answer && typeof answer.then === 'function') {
+      try {
+        answer.then(function (ok) { setReaderOk(ok); }, function () { /* unreadable */ });
+      } catch (err) { /* not a real promise */ }
+      return;
+    }
+    setReaderOk(answer);
+  }
+
+  function setReaderOk(ok) {
+    if (readerOk === !!ok) return;
+    readerOk = !!ok;
+    if (open_ && isCommandMode()) render(hi < 0 ? 0 : hi);
   }
 
   function close() {
@@ -577,12 +1107,14 @@
     }
     rows = [];
     hi = -1;
+    pendingId = null;
   }
 
   function toggle() { if (open_) close(); else open(); }
 
   function handleShortcut(action) {
     if (action === 'tabsearch') { toggle(); return true; }
+    if (action === 'command-palette') { openCommands(); return true; }
     if (action === 'escape') {
       if (!open_) return false;
       close();
@@ -646,6 +1178,7 @@
 
   window.TabSearch = {
     open: open,
+    openCommands: openCommands,
     close: close,
     toggle: toggle,
     isOpen: isOpen,
@@ -657,6 +1190,16 @@
       matches: matches,
       rankOf: rankOf,
       collect: collect,
+      // command mode
+      buildCommands: buildCommands,
+      visibleCommands: visibleCommands,
+      collectCommands: collectCommands,
+      commandQueryOf: commandQueryOf,
+      commandMatches: commandMatches,
+      commandRank: commandRank,
+      isCommandMode: isCommandMode,
+      pending: function () { return pendingId; },
+      CMD_PREFIX: CMD_PREFIX,
       render: render,
       rowsOf: function () { return rows; },
       highlight: function () { return hi; },
