@@ -1,0 +1,136 @@
+/* ============================================================
+   history.css — #omni-suggest, the omnibox's lens
+
+   One more crystal instrument: a glass pane that hangs off the
+   bottom of the omnibox capsule and lists what the browser
+   remembers. It borrows .glass for its frost and every colour
+   here resolves through a chrome.css token, so the light theme
+   re-lights it without a single rule of its own.
+
+   Motion budget: the chrome already runs a backdrop-filter, so
+   the only transition in this file is a short stepped one on the
+   row highlight. Nothing here animates continuously.
+   ============================================================ */
+
+/* --- the pane -------------------------------------------------- */
+/* position:fixed and the left/width/top are written by history.js from
+   the omnibox's own client rect, so the pane always hangs in the same
+   column as the capsule — including while the window is resized. */
+#omni-suggest {
+  position: fixed;
+  z-index: 40;                 /* above #views (1) and .chrome-layer (3) */
+  box-sizing: border-box;
+  padding: 4px;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: var(--sheen), var(--panel-bg);
+  font-family: var(--ui-font);
+  color: var(--fg);
+  overflow: hidden;            /* the rows' corners never poke the radius */
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 12px 34px var(--shade-drop);
+}
+
+/* There is no CSS reset in this app, so [hidden] is spelled out. */
+#omni-suggest[hidden] { display: none; }
+
+/* --- the "Recent" caption -------------------------------------- */
+#omni-suggest .omni-cap {
+  padding: 7px 10px 5px 12px;
+  color: var(--fg-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+#omni-suggest .omni-cap[hidden] { display: none; }
+
+/* --- a row ------------------------------------------------------ */
+/* The left rail is always 2px and merely changes colour, so lighting a
+   row never shifts its text sideways. */
+#omni-suggest .omni-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 10px;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 120ms steps(3, end);
+}
+
+#omni-suggest .omni-row.is-hi {
+  background: var(--glass-2);
+  border-left-color: var(--ion);
+}
+
+/* --- the glyph column ------------------------------------------- */
+#omni-suggest .omni-ico {
+  flex: 0 0 auto;
+  width: 16px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+#omni-suggest .omni-row.is-hi .omni-ico { color: var(--ion); }
+
+/* --- the two text lines ----------------------------------------- */
+#omni-suggest .omni-body {
+  min-width: 0;                /* the ellipsis needs a shrinkable box */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+#omni-suggest .omni-primary,
+#omni-suggest .omni-secondary {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#omni-suggest .omni-primary {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: .01em;
+}
+
+#omni-suggest .omni-secondary {
+  color: var(--fg-2);
+  font-size: 11px;
+  font-weight: 350;
+  letter-spacing: .01em;
+}
+
+/* the default row's "Google search" note: a label, not content */
+#omni-suggest .omni-row--faint .omni-secondary { color: var(--fg-3); }
+
+/* a row with nothing on the second line centres its one line */
+#omni-suggest .omni-row--single .omni-body { gap: 0; }
+
+/* --- the matched runs ------------------------------------------- */
+/* Ion light on the letters the query actually hit — never a bold whole
+   line, which reads as a second kind of emphasis fighting the rail. */
+#omni-suggest mark {
+  background: var(--ion-soft);
+  color: var(--ion);
+  border-radius: 3px;
+  padding: 0 1px;
+  font: inherit;
+}
+
+/* --- reduced motion --------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  #omni-suggest .omni-row { transition: none; }
+}

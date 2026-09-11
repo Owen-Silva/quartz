@@ -3,12 +3,23 @@
 // main.js — Electron entry point.
 //
 // Owns the single BrowserWindow, bridges the renderer to pty.js over IPC, and
-// tears every PTY down on quit.
+// tears every PTY down on quit. It also owns everything a <webview> guest
+// cannot do for itself: downloads, permission prompts, context menus, and the
+// keystrokes a focused page would otherwise swallow.
 
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, ipcMain } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  session,
+  dialog,
+  shell,
+  clipboard,
+  Menu,
+} = require('electron');
 const { createSession, killAll } = require('./pty');
 
 /** @type {BrowserWindow | null} */
@@ -261,6 +272,29 @@ function createWindow() {
   win.on('maximize', () => send('win:maximized', { maximized: true }));
   win.on('unmaximize', () => send('win:maximized', { maximized: false }));
 
+  // F11 can also come from the OS or the page, so the chrome is told about the
+  // resulting state rather than assuming its own toggle was the only source.
+  win.on('enter-full-screen', () => send('win:fullscreen', { fullscreen: true }));
+  win.on('leave-full-screen', () => send('win:fullscreen', { fullscreen: false }));
+
+  // The chrome itself only ever needs an editing menu (address bar, find box).
+  // This IS the focused window, so the built-in roles are the right wiring.
+  win.webContents.on('context-menu', (_event, params) => {
+    if (!params || !params.isEditable) return;
+    const menu = Menu.buildFromTemplate([
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' },
+    ]);
+    const w = liveWin();
+    menu.popup(w ? { window: w } : {});
+  });
+
   // Window state: drags and resizes fire continuously, so those are debounced;
   // maximize / unmaximize / close are one-shot and written straight away --
   // 'close' being the last moment anything can be written at all.
@@ -284,6 +318,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  attachSessionHandlers();
   createWindow();
 
   // macOS: re-open a window when the dock icon is clicked with none open.
@@ -363,6 +398,367 @@ ipcMain.on('win:close', () => {
   if (w) w.close();
 });
 
+ipcMain.on('win:fullscreen-toggle', () => {
+  const w = liveWin();
+  if (w) w.setFullScreen(!w.isFullScreen());
+});
+
+/** Paths the renderer wants to show but must not guess at. */
+ipcMain.handle('app:paths', () => ({
+  home: app.getPath('home'),
+  downloads: app.getPath('downloads'),
+}));
+
+// ---------------------------------------------------------------------------
+// Downloads
+//
+// Electron's default is to pop a native save dialog for every file. A real
+// browser does not ask: it drops the file in the Downloads folder, never
+// overwrites anything already there, and shows progress in its own UI. The
+// DownloadItem objects die with their session, so everything the renderer
+// needs is mirrored into a plain record the moment it changes.
+// ---------------------------------------------------------------------------
+
+/** id -> record (plus the live DownloadItem while one exists). */
+const downloads = new Map();
+let nextDownloadId = 1;
+
+/** Progress ticks far faster than anyone can read. ~8/sec is plenty. */
+const DOWNLOAD_UPDATE_MS = 125;
+
+/** Give up de-duplicating a name long before we can hang on a full folder. */
+const MAX_DUPLICATE_TRIES = 500;
+
+/**
+ * The first path in `dir` that does not exist yet: 'a.zip', then 'a (1).zip'.
+ * Silently clobbering a file the user already has is the one download
+ * behaviour nobody forgives.
+ */
+function uniqueDownloadPath(dir, filename) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  let candidate = path.join(dir, filename);
+  for (let i = 1; i <= MAX_DUPLICATE_TRIES && fs.existsSync(candidate); i++) {
+    candidate = path.join(dir, base + ' (' + i + ')' + ext);
+  }
+  return candidate;
+}
+
+/** The renderer-facing shape. The DownloadItem itself never crosses IPC. */
+function downloadPayload(entry) {
+  return {
+    id: entry.id,
+    filename: entry.filename,
+    url: entry.url,
+    savePath: entry.savePath,
+    state: entry.state,
+    received: entry.received,
+    total: entry.total,
+    paused: entry.paused,
+    startedAt: entry.startedAt,
+    finishedAt: entry.finishedAt,
+  };
+}
+
+/** Push an update. `force` is for the first and last one, which never drop. */
+function sendDownloadUpdate(entry, force) {
+  const now = Date.now();
+  if (!force && now - entry.lastSent < DOWNLOAD_UPDATE_MS) return;
+  entry.lastSent = now;
+  send('dl:update', downloadPayload(entry));
+}
+
+/** Read the item's counters into the record, tolerating a dead item. */
+function syncDownloadItem(entry) {
+  const item = entry.item;
+  if (!item) return;
+  try {
+    entry.received = item.getReceivedBytes();
+    entry.total = item.getTotalBytes(); // 0 when the server sent no length
+    entry.paused = item.isPaused();
+  } catch {
+    // The item was destroyed mid-read; the record keeps its last good values.
+  }
+}
+
+function handleWillDownload(_event, item) {
+  const dir = app.getPath('downloads');
+  let savePath = '';
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    savePath = uniqueDownloadPath(dir, item.getFilename());
+    // Setting the path up front is exactly what suppresses the save dialog.
+    item.setSavePath(savePath);
+  } catch {
+    // Could not choose a path -- let Electron fall back to its own prompt
+    // rather than losing the download entirely.
+  }
+
+  const entry = {
+    id: nextDownloadId++,
+    item,
+    filename: path.basename(savePath || item.getFilename()),
+    url: item.getURL(),
+    savePath,
+    state: 'progressing',
+    received: 0,
+    total: 0,
+    paused: false,
+    startedAt: Date.now(),
+    finishedAt: null,
+    lastSent: 0,
+  };
+  syncDownloadItem(entry);
+  downloads.set(entry.id, entry);
+  sendDownloadUpdate(entry, true);
+
+  item.on('updated', (_e, state) => {
+    // 'interrupted' here means stalled-but-resumable, not finished.
+    entry.state = state === 'interrupted' ? 'interrupted' : 'progressing';
+    syncDownloadItem(entry);
+    sendDownloadUpdate(entry, false);
+  });
+
+  item.once('done', (_e, state) => {
+    syncDownloadItem(entry);
+    entry.state = state; // 'completed' | 'cancelled' | 'interrupted'
+    entry.paused = false;
+    entry.finishedAt = Date.now();
+    // The DownloadItem is spent: drop it so pause/resume/cancel become no-ops
+    // and nothing holds a dead native handle.
+    entry.item = null;
+    sendDownloadUpdate(entry, true);
+  });
+}
+
+/** Run `fn` against a download that is still live; otherwise do nothing. */
+function withLiveDownload(id, fn) {
+  const entry = downloads.get(id);
+  if (!entry || !entry.item) return;
+  try {
+    fn(entry.item, entry);
+  } catch {
+    // Racing the 'done' event is normal: the item can die between the
+    // renderer's click and this call.
+  }
+}
+
+ipcMain.handle('dl:list', () =>
+  [...downloads.values()]
+    .sort((a, b) => b.startedAt - a.startedAt || b.id - a.id)
+    .map(downloadPayload)
+);
+
+ipcMain.on('dl:cancel', (_event, { id } = {}) => {
+  withLiveDownload(id, (item) => item.cancel());
+});
+
+ipcMain.on('dl:pause', (_event, { id } = {}) => {
+  withLiveDownload(id, (item, entry) => {
+    item.pause();
+    entry.paused = true;
+    sendDownloadUpdate(entry, true);
+  });
+});
+
+ipcMain.on('dl:resume', (_event, { id } = {}) => {
+  withLiveDownload(id, (item, entry) => {
+    if (!item.canResume()) return;
+    item.resume();
+    entry.paused = false;
+    sendDownloadUpdate(entry, true);
+  });
+});
+
+ipcMain.handle('dl:open', (_event, { id } = {}) => {
+  const entry = downloads.get(id);
+  if (!entry || entry.state !== 'completed' || !entry.savePath) {
+    return 'That download is not finished.';
+  }
+  return shell.openPath(entry.savePath); // '' means it opened
+});
+
+ipcMain.on('dl:show', (_event, { id } = {}) => {
+  const entry = downloads.get(id);
+  if (entry && entry.savePath) shell.showItemInFolder(entry.savePath);
+});
+
+ipcMain.on('dl:clear', () => {
+  for (const [id, entry] of downloads) {
+    if (entry.state !== 'progressing') downloads.delete(id);
+  }
+});
+
+// Used by the context menu's Save link as / Save image, which have a URL but
+// no DownloadItem yet. Going through the window's webContents means the
+// request carries our normal session, cookies included.
+ipcMain.on('dl:download-url', (_event, { url } = {}) => {
+  const w = liveWin();
+  if (w && typeof url === 'string' && url) w.webContents.downloadURL(url);
+});
+
+// ---------------------------------------------------------------------------
+// Permissions
+//
+// Electron grants every permission request by default, which would make this
+// the most generous browser on the machine. Harmless, user-initiated things
+// are allowed silently; the ones that reach hardware, location or the
+// clipboard are asked about once per origin; everything else is denied.
+// ---------------------------------------------------------------------------
+
+/** Allowed with no prompt: all of these need a user gesture anyway. */
+const PERMISSIONS_ALWAYS_ALLOW = new Set([
+  'fullscreen',
+  'pointerLock',
+  'clipboard-sanitized-write',
+  'window-placement',
+  'window-management',
+  'keyboardLock',
+]);
+
+/** Worth interrupting for. Anything not here and not above is denied. */
+const PERMISSION_PHRASES = {
+  geolocation: 'know your location',
+  notifications: 'send you notifications',
+  midi: 'use your MIDI devices',
+  midiSysex: 'use your MIDI devices, including system messages',
+  'display-capture': 'share your screen',
+  'idle-detection': 'know when you are inactive',
+  'clipboard-read': 'read your clipboard',
+  openExternal: 'open another app',
+};
+
+/** 'origin|permission' -> boolean, remembered for the rest of the run. */
+const permissionDecisions = new Map();
+
+/** 'origin|permission' -> in-flight promise, so one dialog serves every ask. */
+const permissionPending = new Map();
+
+function originOf(url) {
+  try {
+    return new URL(String(url)).origin;
+  } catch {
+    return '';
+  }
+}
+
+/** What the user recognises: the host, not the whole origin. */
+function originLabel(origin) {
+  try {
+    return new URL(origin).host || origin;
+  } catch {
+    return origin || 'This page';
+  }
+}
+
+/** The '<host> wants to …' clause for one request. */
+function permissionPhrase(permission, details) {
+  if (permission === 'media') {
+    const types = (details && details.mediaTypes) || [];
+    const wants = [];
+    if (types.includes('video')) wants.push('camera');
+    if (types.includes('audio')) wants.push('microphone');
+    // Chrome asks for both when the page did not say which.
+    if (!wants.length) wants.push('camera', 'microphone');
+    return 'use your ' + wants.join(' and ');
+  }
+  if (permission === 'openExternal') {
+    const external = details && details.externalURL;
+    const scheme = external ? String(external).split(':')[0] : '';
+    return scheme ? 'open a ' + scheme + ': link in another app' : 'open another app';
+  }
+  return PERMISSION_PHRASES[permission] || 'use ' + permission;
+}
+
+/** The small print under the question: the exact target, where we have one. */
+function permissionDetail(permission, origin, details) {
+  if (permission === 'openExternal' && details && details.externalURL) {
+    return String(details.externalURL).slice(0, 200);
+  }
+  return (origin || 'This page') + ' — blocked unless you allow it.';
+}
+
+/**
+ * Resolve to the user's answer, asking at most once per origin+permission and
+ * coalescing simultaneous asks (a page calling getUserMedia twice must not
+ * stack two dialogs).
+ */
+function askPermission(origin, permission, details) {
+  const key = origin + '|' + permission;
+  if (permissionDecisions.has(key)) return Promise.resolve(permissionDecisions.get(key));
+  const pending = permissionPending.get(key);
+  if (pending) return pending;
+
+  const w = liveWin();
+  if (!w) return Promise.resolve(false); // nothing to parent a dialog to
+
+  const promise = dialog
+    .showMessageBox(w, {
+      type: 'question',
+      buttons: ['Allow', 'Block'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: 'Permission request',
+      message: originLabel(origin) + ' wants to ' + permissionPhrase(permission, details),
+      detail: permissionDetail(permission, origin, details),
+    })
+    .then((result) => {
+      const allowed = result.response === 0;
+      permissionDecisions.set(key, allowed);
+      return allowed;
+    })
+    .catch(() => false) // a dialog that failed to show is not consent
+    .finally(() => permissionPending.delete(key));
+
+  permissionPending.set(key, promise);
+  return promise;
+}
+
+/** getURL() throws on a destroyed webContents; never let that reach Electron. */
+function safeUrl(contents) {
+  try {
+    return contents && !contents.isDestroyed() ? contents.getURL() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Webviews carry no `partition` attribute, so every guest page shares
+ * session.defaultSession -- the same session downloads and permissions hang
+ * off here.
+ */
+function attachSessionHandlers() {
+  const sess = session.defaultSession;
+  if (!sess) return;
+
+  sess.on('will-download', handleWillDownload);
+
+  sess.setPermissionRequestHandler((contents, permission, callback, details) => {
+    if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return callback(true);
+    const prompts = permission === 'media' || permission in PERMISSION_PHRASES;
+    if (!prompts) return callback(false);
+
+    const origin = originOf(safeUrl(contents) || (details && details.requestingUrl));
+    askPermission(origin, permission, details).then(
+      (allowed) => callback(allowed),
+      () => callback(false)
+    );
+  });
+
+  // A check must give the same answer a request would, or a site sees itself
+  // as granted and then silently fails.
+  sess.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
+    if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return true;
+    const origin = originOf(
+      requestingOrigin || (details && details.requestingUrl) || safeUrl(contents)
+    );
+    const decision = permissionDecisions.get(origin + '|' + permission);
+    return decision === true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Shortcuts that must survive page focus
 //
@@ -381,6 +777,21 @@ const SHORTCUTS = {
   '+': 'zoom-in',
   '-': 'zoom-out',
   '0': 'zoom-reset',
+  f: 'find',
+  j: 'downloads',
+  h: 'history',
+  d: 'bookmark',
+};
+
+/**
+ * Keys that mean something with no modifier at all. Escape is the odd one out:
+ * it is mirrored to the chrome (to close the find bar) but never swallowed,
+ * because the page still needs it.
+ */
+const BARE_KEYS = {
+  F5: 'reload',
+  F11: 'fullscreen',
+  Escape: 'escape',
 };
 
 /** Map a Ctrl+key press inside a page to the chrome action it means, or null. */
@@ -395,15 +806,185 @@ function shortcutFor(input) {
   return action ? { action } : null;
 }
 
+// ---------------------------------------------------------------------------
+// Guest context menu
+//
+// A <webview> has no menu of its own, and the built-in `role:` entries act on
+// the focused *window*, not the guest -- so every item here calls the guest's
+// own webContents method explicitly.
+// ---------------------------------------------------------------------------
+
+/** navigationHistory is the current API; the old methods are the fallback. */
+function navHistory(contents) {
+  return contents.navigationHistory || null;
+}
+
+function guestCanGoBack(contents) {
+  const nav = navHistory(contents);
+  if (nav && typeof nav.canGoBack === 'function') return nav.canGoBack();
+  return typeof contents.canGoBack === 'function' ? contents.canGoBack() : false;
+}
+
+function guestCanGoForward(contents) {
+  const nav = navHistory(contents);
+  if (nav && typeof nav.canGoForward === 'function') return nav.canGoForward();
+  return typeof contents.canGoForward === 'function' ? contents.canGoForward() : false;
+}
+
+function guestGoBack(contents) {
+  const nav = navHistory(contents);
+  if (nav && typeof nav.goBack === 'function') nav.goBack();
+  else if (typeof contents.goBack === 'function') contents.goBack();
+}
+
+function guestGoForward(contents) {
+  const nav = navHistory(contents);
+  if (nav && typeof nav.goForward === 'function') nav.goForward();
+  else if (typeof contents.goForward === 'function') contents.goForward();
+}
+
+/** Flatten non-empty groups into one template, separated. */
+function joinMenuGroups(groups) {
+  const template = [];
+  for (const group of groups) {
+    if (!group || !group.length) continue;
+    if (template.length) template.push({ type: 'separator' });
+    template.push(...group);
+  }
+  return template;
+}
+
+/** Menu labels are one line: collapse the selection and cap it at 30 chars. */
+function selectionLabel(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 30 ? flat.slice(0, 30) + '…' : flat;
+}
+
+function guestMenuTemplate(contents, params) {
+  const navigation = [
+    { label: 'Back', enabled: guestCanGoBack(contents), click: () => guestGoBack(contents) },
+    {
+      label: 'Forward',
+      enabled: guestCanGoForward(contents),
+      click: () => guestGoForward(contents),
+    },
+    { label: 'Reload', click: () => contents.reload() },
+  ];
+
+  const link = [];
+  if (params.linkURL) {
+    link.push(
+      {
+        label: 'Open link in new tab',
+        click: () => send('open-url', { url: params.linkURL, background: true }),
+      },
+      { label: 'Copy link address', click: () => clipboard.writeText(params.linkURL) },
+      { label: 'Save link as', click: () => contents.downloadURL(params.linkURL) }
+    );
+  }
+
+  const image = [];
+  if (params.mediaType === 'image' && params.srcURL) {
+    image.push(
+      {
+        label: 'Open image in new tab',
+        click: () => send('open-url', { url: params.srcURL, background: true }),
+      },
+      { label: 'Copy image', click: () => contents.copyImageAt(params.x, params.y) },
+      { label: 'Save image', click: () => contents.downloadURL(params.srcURL) }
+    );
+  }
+
+  const selection = [];
+  const selected = String(params.selectionText || '').trim();
+  if (selected) {
+    selection.push(
+      { label: 'Copy', click: () => contents.copy() },
+      {
+        label: 'Search Google for "' + selectionLabel(selected) + '"',
+        click: () =>
+          send('open-url', {
+            url: 'https://www.google.com/search?q=' + encodeURIComponent(selected),
+            background: false,
+          }),
+      }
+    );
+  }
+
+  const editing = [];
+  if (params.isEditable) {
+    const flags = params.editFlags || {};
+    editing.push(
+      { label: 'Undo', enabled: flags.canUndo !== false, click: () => contents.undo() },
+      { label: 'Redo', enabled: flags.canRedo !== false, click: () => contents.redo() },
+      { label: 'Cut', enabled: flags.canCut !== false, click: () => contents.cut() },
+      { label: 'Copy', enabled: flags.canCopy !== false, click: () => contents.copy() },
+      { label: 'Paste', enabled: flags.canPaste !== false, click: () => contents.paste() },
+      { label: 'Select all', click: () => contents.selectAll() }
+    );
+  }
+
+  const inspect = [
+    {
+      label: 'Inspect',
+      click: () => {
+        contents.inspectElement(params.x, params.y);
+        // inspectElement does not raise devtools that are already open.
+        if (contents.isDevToolsOpened() && contents.devToolsWebContents) {
+          contents.devToolsWebContents.focus();
+        }
+      },
+    },
+  ];
+
+  // Selection items sit above editing ones so Copy-the-selection is not buried
+  // under the edit block in a textarea.
+  return joinMenuGroups([navigation, link, image, selection, editing, inspect]);
+}
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
 
   contents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
+    if (input.type !== 'keyDown') return;
+    const key = String(input.key);
+
+    // Devtools belong to the GUEST, and only main has a handle on it -- so this
+    // one is done here instead of round-tripping through the renderer.
+    if (key === 'F12' || (input.control && input.shift && key.toLowerCase() === 'i')) {
+      event.preventDefault();
+      contents.toggleDevTools();
+      return;
+    }
+
+    // Alt+Arrow is history navigation in every browser, and the page eats it.
+    if (input.alt && !input.control && !input.meta) {
+      if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        event.preventDefault();
+        send('shortcut', { action: key === 'ArrowLeft' ? 'back' : 'forward' });
+      }
+      return;
+    }
+
+    const bare = BARE_KEYS[key];
+    if (bare) {
+      // Escape is forwarded but not swallowed: the page still wants it.
+      if (bare !== 'escape') event.preventDefault();
+      send('shortcut', { action: bare });
+      return;
+    }
+
+    if (!input.control || input.alt || input.meta) return;
     const payload = shortcutFor(input);
     if (!payload) return;
     event.preventDefault();
     send('shortcut', payload);
+  });
+
+  contents.on('context-menu', (_e, params) => {
+    const menu = Menu.buildFromTemplate(guestMenuTemplate(contents, params));
+    const w = liveWin();
+    menu.popup(w ? { window: w } : {});
   });
 });
 

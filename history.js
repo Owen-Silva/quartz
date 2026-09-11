@@ -1,0 +1,756 @@
+/* ============================================================
+   history.js — the browser's memory, and the lens that reads it.
+
+   Two halves, one file:
+
+   1. THE STORE (window.History). Every page the browser lands on is
+      upserted by exact URL into localStorage['history'] as
+      { v:1, items:[{url,title,visits,last}] }. Writes are debounced,
+      the list is capped, and a missing or corrupt record is treated
+      as "no history yet" rather than an error. app.js calls record()
+      from did-navigate and updateTitle() from page-title-updated.
+
+   2. THE LENS (#omni-suggest). A glass panel that hangs directly
+      under the omnibox capsule and mirrors its left/width. With text
+      typed it leads with the row that mirrors what Enter already
+      does, then the best history matches; on an empty focus it shows
+      what was open recently. It never navigates by itself: it writes
+      into #omnibox and hands the Enter key to app.js, so tab and
+      Claude handling stay in exactly one place.
+
+   Style: classic script, no modules, every colour a chrome.css token.
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  /* --- constants ---------------------------------------------- */
+
+  var STORAGE_KEY = 'history';
+  var STORAGE_VERSION = 1;
+  var MAX_ITEMS = 2000;      // hard cap; the oldest visit is dropped first
+  var WRITE_DELAY = 500;     // ms of quiet before the list hits localStorage
+  var INPUT_DELAY = 40;      // ms of quiet before the panel re-renders
+  var BLUR_DELAY = 120;      // ms grace so a click outside still lands
+  var MAX_ROWS = 6;          // history rows; the default row makes 7
+  var PANEL_GAP = 6;         // px between the omnibox capsule and the panel
+
+  // Segoe Fluent Icons, same set the rest of the chrome draws from.
+  var GLYPH_SEARCH = '\uE721';   // magnifier: a Google search
+  var GLYPH_GLOBE  = '\uE774';   // globe: a plain address
+  var GLYPH_CLOCK  = '\uE81C';   // clock: something already visited
+
+  // Schemes that are never worth remembering. file: matters most: the
+  // bundled new-tab page is a file:// URL and would otherwise be the
+  // most-visited entry in the list by a wide margin.
+  var IGNORED_SCHEMES = [
+    'about:', 'data:', 'file:', 'blob:', 'javascript:',
+    'chrome:', 'chrome-error:', 'chrome-extension:', 'devtools:', 'claude:'
+  ];
+
+  // Score tiers. A query word scores the best tier it can reach, and an
+  // item that cannot place every word anywhere scores zero and is out.
+  var TIER_HOST_START = 100;
+  var TIER_HOST = 70;
+  var TIER_PATH = 40;
+  var TIER_TITLE = 20;
+  var TIER_URL = 10;
+
+  /* --- state --------------------------------------------------- */
+
+  var items = [];            // the whole list, unsorted
+  var byUrl = Object.create(null);
+  var loaded = false;
+  var writeTimer = null;
+  var fieldCache = new Map();
+
+  /* --- storage ------------------------------------------------- */
+
+  function storage() {
+    try {
+      return (typeof window !== 'undefined' && window.localStorage) || null;
+    } catch (err) {
+      return null; // storage disabled by policy
+    }
+  }
+
+  function reindex() {
+    byUrl = Object.create(null);
+    for (var i = 0; i < items.length; i++) byUrl[items[i].url] = items[i];
+  }
+
+  /** Read the list once. Anything unreadable simply means "start empty". */
+  function load() {
+    loaded = true;
+    items = [];
+    byUrl = Object.create(null);
+    var store = storage();
+    if (!store) return;
+    var raw = null;
+    try {
+      raw = store.getItem(STORAGE_KEY);
+    } catch (err) {
+      return;
+    }
+    if (!raw) return;
+    var parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return; // corrupt record: the next write replaces it
+    }
+    if (!parsed || !Array.isArray(parsed.items)) return;
+    for (var i = 0; i < parsed.items.length; i++) {
+      var row = parsed.items[i];
+      if (!row || typeof row.url !== 'string' || !row.url) continue;
+      if (byUrl[row.url]) continue;
+      var item = {
+        url: row.url,
+        title: typeof row.title === 'string' ? row.title : '',
+        visits: Number(row.visits) > 0 ? Math.floor(Number(row.visits)) : 1,
+        last: Number(row.last) > 0 ? Number(row.last) : 0
+      };
+      items.push(item);
+      byUrl[item.url] = item;
+    }
+    trim();
+  }
+
+  function ready() {
+    if (!loaded) load();
+  }
+
+  function writeNow() {
+    if (writeTimer !== null) {
+      clearTimeout(writeTimer);
+      writeTimer = null;
+    }
+    var store = storage();
+    if (!store) return;
+    try {
+      store.setItem(STORAGE_KEY, JSON.stringify({ v: STORAGE_VERSION, items: items }));
+    } catch (err) {
+      /* quota or a locked profile: the in-memory list still works */
+    }
+  }
+
+  function scheduleWrite() {
+    if (writeTimer !== null) clearTimeout(writeTimer);
+    writeTimer = setTimeout(function () {
+      writeTimer = null;
+      writeNow();
+    }, WRITE_DELAY);
+  }
+
+  /** Drop the oldest visits once the list is over the cap. */
+  function trim() {
+    if (items.length <= MAX_ITEMS) return;
+    items.sort(function (a, b) { return b.last - a.last; });
+    items.length = MAX_ITEMS;
+    reindex();
+  }
+
+  /* --- url helpers --------------------------------------------- */
+
+  function parseUrl(text) {
+    try {
+      return new URL(text);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function isIgnored(url) {
+    if (typeof url !== 'string') return true;
+    var text = url.trim();
+    if (!text) return true;
+    var lower = text.toLowerCase();
+    for (var i = 0; i < IGNORED_SCHEMES.length; i++) {
+      if (lower.indexOf(IGNORED_SCHEMES[i]) === 0) return true;
+    }
+    return false;
+  }
+
+  /** host (www stripped), path, title and whole url, all lowercased. */
+  function fieldsFor(item) {
+    var url = String(item && item.url ? item.url : '');
+    var hit = fieldCache.get(url);
+    if (hit) {
+      hit.title = String(item && item.title ? item.title : '').toLowerCase();
+      return hit;
+    }
+    var lower = url.toLowerCase();
+    var parsed = parseUrl(url);
+    var fields = {
+      host: parsed && parsed.hostname ? parsed.hostname.toLowerCase().replace(/^www\./, '') : '',
+      path: parsed ? (parsed.pathname + parsed.search + parsed.hash).toLowerCase() : lower,
+      title: String(item && item.title ? item.title : '').toLowerCase(),
+      url: lower
+    };
+    if (fieldCache.size > 4000) fieldCache.clear();
+    fieldCache.set(url, fields);
+    return fields;
+  }
+
+  function toWords(query) {
+    return String(query == null ? '' : query).toLowerCase().trim().split(/\s+/)
+      .filter(function (w) { return !!w; });
+  }
+
+  /**
+   * Rank one item against the query words. Host beats path beats title,
+   * a host prefix beats a host substring, and every word must land
+   * somewhere or the item is not a match at all.
+   */
+  function score(item, words) {
+    if (!item || !words || !words.length) return 0;
+    var f = fieldsFor(item);
+    var total = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (!w) continue;
+      var tier = 0;
+      if (f.host && f.host.indexOf(w) === 0) tier = TIER_HOST_START;
+      else if (f.host && f.host.indexOf(w) > 0) tier = TIER_HOST;
+      else if (f.path && f.path.indexOf(w) !== -1) tier = TIER_PATH;
+      else if (f.title && f.title.indexOf(w) !== -1) tier = TIER_TITLE;
+      else if (f.url.indexOf(w) !== -1) tier = TIER_URL;
+      if (!tier) return 0;
+      total += tier;
+    }
+    return total;
+  }
+
+  function copy(item) {
+    return { url: item.url, title: item.title, visits: item.visits, last: item.last };
+  }
+
+  /* --- the store API -------------------------------------------- */
+
+  /** Upsert by exact URL. An empty incoming title never erases a good one. */
+  function record(url, title) {
+    ready();
+    if (isIgnored(url)) return false;
+    var key = String(url).trim();
+    var name = typeof title === 'string' ? title.trim() : '';
+    var item = byUrl[key];
+    if (item) {
+      item.visits += 1;
+      item.last = Date.now();
+      if (name) item.title = name;
+    } else {
+      item = { url: key, title: name, visits: 1, last: Date.now() };
+      items.push(item);
+      byUrl[key] = item;
+      trim();
+    }
+    scheduleWrite();
+    return true;
+  }
+
+  /** Name a page already in the list. Never creates an entry. */
+  function updateTitle(url, title) {
+    ready();
+    if (typeof url !== 'string') return false;
+    var name = typeof title === 'string' ? title.trim() : '';
+    if (!name) return false;
+    var item = byUrl[String(url).trim()];
+    if (!item || item.title === name) return false;
+    item.title = name;
+    scheduleWrite();
+    return true;
+  }
+
+  function search(query, limit) {
+    ready();
+    var cap = typeof limit === 'number' && limit > 0 ? limit : MAX_ROWS;
+    var words = toWords(query);
+    if (!words.length) return [];
+    var hits = [];
+    for (var i = 0; i < items.length; i++) {
+      var s = score(items[i], words);
+      if (s > 0) hits.push({ item: items[i], score: s });
+    }
+    hits.sort(function (a, b) {
+      return (b.score - a.score) ||
+        (b.item.visits - a.item.visits) ||
+        (b.item.last - a.item.last);
+    });
+    return hits.slice(0, cap).map(function (h) { return copy(h.item); });
+  }
+
+  function recent(limit) {
+    ready();
+    var cap = typeof limit === 'number' && limit > 0 ? limit : MAX_ROWS;
+    return items.slice()
+      .sort(function (a, b) { return (b.last - a.last) || (b.visits - a.visits); })
+      .slice(0, cap)
+      .map(copy);
+  }
+
+  function remove(url) {
+    ready();
+    var key = String(url == null ? '' : url).trim();
+    if (!byUrl[key]) return false;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].url === key) { items.splice(i, 1); break; }
+    }
+    delete byUrl[key];
+    scheduleWrite();
+    return true;
+  }
+
+  function clear() {
+    ready();
+    items = [];
+    byUrl = Object.create(null);
+    fieldCache.clear();
+    writeNow();
+  }
+
+  function all() {
+    ready();
+    return items.map(copy);
+  }
+
+  /* ============================================================
+     The lens: #omni-suggest
+     ============================================================ */
+
+  var omniboxEl = null;
+  var panel = null;
+  var listEl = null;
+  var capEl = null;
+  var rows = [];             // [{ url, kind }] parallel to the row elements
+  var rowEls = [];
+  var hi = -1;               // -1 = nothing highlighted; Enter does what it always did
+  var typedValue = '';       // what the user actually typed, before any highlight
+  var openState = false;
+  var forceRecent = false;   // Ctrl+H parks the panel in "Recent" mode
+  var inputTimer = null;
+  var blurTimer = null;
+
+  function el(tag, className) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+
+  /** Paint text into a node, wrapping every matched run in <mark>. */
+  function markInto(host, text, words) {
+    var s = String(text == null ? '' : text);
+    if (!s) return;
+    if (!words || !words.length) {
+      host.appendChild(document.createTextNode(s));
+      return;
+    }
+    var lower = s.toLowerCase();
+    var spans = [];
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (!w) continue;
+      var at = lower.indexOf(w);
+      while (at !== -1) {
+        spans.push([at, at + w.length]);
+        at = lower.indexOf(w, at + 1);
+      }
+    }
+    if (!spans.length) {
+      host.appendChild(document.createTextNode(s));
+      return;
+    }
+    spans.sort(function (a, b) { return (a[0] - b[0]) || (a[1] - b[1]); });
+    var merged = [];
+    for (var j = 0; j < spans.length; j++) {
+      var last = merged[merged.length - 1];
+      if (last && spans[j][0] <= last[1]) {
+        if (spans[j][1] > last[1]) last[1] = spans[j][1];
+      } else {
+        merged.push([spans[j][0], spans[j][1]]);
+      }
+    }
+    var pos = 0;
+    for (var k = 0; k < merged.length; k++) {
+      if (merged[k][0] > pos) {
+        host.appendChild(document.createTextNode(s.slice(pos, merged[k][0])));
+      }
+      var mark = document.createElement('mark');
+      mark.textContent = s.slice(merged[k][0], merged[k][1]);
+      host.appendChild(mark);
+      pos = merged[k][1];
+    }
+    if (pos < s.length) host.appendChild(document.createTextNode(s.slice(pos)));
+  }
+
+  function buildPanel() {
+    panel = el('div', 'glass');
+    panel.id = 'omni-suggest';
+    panel.setAttribute('role', 'listbox');
+    panel.hidden = true;
+    capEl = el('div', 'omni-cap');
+    capEl.textContent = 'Recent';
+    capEl.hidden = true;
+    listEl = el('div', 'omni-list');
+    panel.appendChild(capEl);
+    panel.appendChild(listEl);
+    document.body.appendChild(panel);
+  }
+
+  /** The panel hangs off the omnibox capsule and copies its left/width. */
+  function place() {
+    if (!panel || !omniboxEl) return;
+    var box = omniboxEl.getBoundingClientRect();
+    panel.style.left = Math.round(box.left) + 'px';
+    panel.style.width = Math.round(box.width) + 'px';
+    panel.style.top = Math.round(box.bottom + PANEL_GAP) + 'px';
+  }
+
+  function isSearchUrl(url) {
+    var parsed = parseUrl(url);
+    if (!parsed) return false;
+    return /(^|\.)google\./.test(parsed.hostname) && parsed.pathname.indexOf('/search') === 0;
+  }
+
+  function navUrlFor(text) {
+    if (typeof toNavigationUrl !== 'function') return null;
+    try {
+      return toNavigationUrl(text);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function addRow(spec) {
+    var index = rows.length;
+    var row = el('div', 'omni-row' + (spec.secondary ? '' : ' omni-row--single') +
+      (spec.faint ? ' omni-row--faint' : ''));
+    row.setAttribute('role', 'option');
+    row.dataset.index = String(index);
+
+    var ico = el('span', 'glyph omni-ico');
+    ico.textContent = spec.glyph;
+    row.appendChild(ico);
+
+    var body = el('span', 'omni-body');
+    var primary = el('span', 'omni-primary');
+    markInto(primary, spec.primary, spec.words);
+    body.appendChild(primary);
+    if (spec.secondary) {
+      var secondary = el('span', 'omni-secondary');
+      markInto(secondary, spec.secondary, spec.faint ? null : spec.words);
+      body.appendChild(secondary);
+    }
+    row.appendChild(body);
+
+    // mousedown is swallowed so the omnibox never blurs; click then still
+    // fires on the row and the input keeps its caret and selection.
+    row.addEventListener('mousedown', function (event) { event.preventDefault(); });
+    row.addEventListener('mouseenter', function () { setHighlight(index, false); });
+    row.addEventListener('click', function () { commit(index); });
+
+    listEl.appendChild(row);
+    rowEls.push(row);
+    rows.push({ url: spec.url, kind: spec.kind });
+  }
+
+  function clearRows() {
+    rows = [];
+    rowEls = [];
+    hi = -1;
+    if (listEl) listEl.textContent = '';
+  }
+
+  /** Rebuild the rows for the omnibox's current value. */
+  function render() {
+    if (!panel) return;
+    clearRows();
+    var query = String(omniboxEl.value || '').trim();
+
+    if (forceRecent || !query) {
+      var history = recent(MAX_ROWS);
+      capEl.hidden = history.length === 0;
+      for (var i = 0; i < history.length; i++) {
+        addRow({
+          kind: 'history',
+          url: history[i].url,
+          glyph: GLYPH_CLOCK,
+          primary: history[i].title || shortLabel(history[i].url),
+          secondary: history[i].url,
+          words: null
+        });
+      }
+      return;
+    }
+
+    capEl.hidden = true;
+
+    // Row one always mirrors what Enter does today, so the panel never
+    // changes the meaning of just typing and pressing Enter.
+    var target = navUrlFor(query);
+    if (target) {
+      if (isSearchUrl(target)) {
+        addRow({
+          kind: 'default',
+          url: target,
+          glyph: GLYPH_SEARCH,
+          primary: query,
+          secondary: 'Google search',
+          faint: true,
+          words: null
+        });
+      } else {
+        addRow({
+          kind: 'default',
+          url: target,
+          glyph: GLYPH_GLOBE,
+          primary: target,
+          secondary: '',
+          words: null
+        });
+      }
+    }
+
+    var words = toWords(query);
+    var hits = search(query, MAX_ROWS);
+    for (var j = 0; j < hits.length; j++) {
+      if (target && hits[j].url === target && rows.length && rows[0].kind === 'default') continue;
+      addRow({
+        kind: 'history',
+        url: hits[j].url,
+        glyph: GLYPH_CLOCK,
+        primary: hits[j].title || shortLabel(hits[j].url),
+        secondary: hits[j].url,
+        words: words
+      });
+    }
+  }
+
+  function shortLabel(url) {
+    if (typeof shortLabelFor === 'function') {
+      try { return shortLabelFor(url); } catch (err) { /* fall through */ }
+    }
+    var parsed = parseUrl(url);
+    return parsed && parsed.hostname ? parsed.hostname.replace(/^www\./, '') : url;
+  }
+
+  function paintHighlight() {
+    for (var i = 0; i < rowEls.length; i++) {
+      if (i === hi) rowEls[i].classList.add('is-hi');
+      else rowEls[i].classList.remove('is-hi');
+    }
+    if (panel) {
+      if (hi >= 0 && rowEls[hi]) panel.setAttribute('aria-activedescendant', String(hi));
+      else panel.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  /**
+   * Move the highlight. A keyboard move previews the row in the omnibox
+   * the way a browser bar does; a hover only lights the row.
+   */
+  function setHighlight(index, fromKeyboard) {
+    hi = index;
+    paintHighlight();
+    if (!fromKeyboard) return;
+    // The default row IS the typed text, so previewing it would only swap
+    // "cats" for a google.com/search URL. Only history rows preview.
+    if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') omniboxEl.value = rows[hi].url;
+    else omniboxEl.value = typedValue;
+  }
+
+  function step(delta) {
+    if (!rows.length) return;
+    var next;
+    if (hi === -1) next = delta > 0 ? 0 : rows.length - 1;
+    else {
+      next = hi + delta;
+      if (next >= rows.length) next = -1;
+      else if (next < -1) next = rows.length - 1;
+    }
+    setHighlight(next, true);
+  }
+
+  function open() {
+    if (!panel) return;
+    render();
+    if (!rows.length) { close(); return; }   // never an empty panel
+    panel.hidden = false;
+    openState = true;
+    place();
+    paintHighlight();
+  }
+
+  function close() {
+    if (!panel) return;
+    panel.hidden = true;
+    openState = false;
+    forceRecent = false;
+    clearRows();
+    paintHighlight();
+  }
+
+  function restoreTyped() {
+    if (omniboxEl && omniboxEl.value !== typedValue) omniboxEl.value = typedValue;
+  }
+
+  /**
+   * Navigate by handing the work back to app.js: write the URL into the
+   * omnibox, then send the same Enter keydown app.js already listens for.
+   * Tab creation, Claude tabs and focus handling stay in one place.
+   */
+  function commit(index) {
+    var row = rows[index];
+    if (!row) return;
+    var url = row.url;
+    close();
+    omniboxEl.value = url;
+    typedValue = url;
+    omniboxEl.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true
+    }));
+  }
+
+  function onInput() {
+    forceRecent = false;
+    typedValue = String(omniboxEl.value || '');
+    if (inputTimer !== null) clearTimeout(inputTimer);
+    inputTimer = setTimeout(function () {
+      inputTimer = null;
+      open();
+    }, INPUT_DELAY);
+  }
+
+  /**
+   * Capture phase, so a highlighted row can rewrite the omnibox BEFORE
+   * app.js's own Enter handler reads the value. The event is left alone
+   * from there: app.js does the navigating, exactly as if it were typed.
+   */
+  function onKeydown(event) {
+    if (!panel) return;
+    var key = event.key;
+
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      event.preventDefault();
+      if (!openState) {
+        typedValue = String(omniboxEl.value || '');
+        open();
+        if (!openState) return;
+        if (key === 'ArrowDown') return; // the panel itself is the first step
+      }
+      step(key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+
+    if (key === 'Enter') {
+      if (!openState) return;
+      // A highlighted history row rewrites the bar before app.js reads it.
+      // The default row needs nothing: app.js already resolves the typed text.
+      if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') {
+        omniboxEl.value = rows[hi].url;
+      }
+      close();
+      return; // app.js takes it from here
+    }
+
+    if (key === 'Escape') {
+      if (!openState) return;
+      event.preventDefault();
+      restoreTyped();
+      close();
+      return;
+    }
+
+    if (key === 'Tab') close();
+  }
+
+  function onFocus() {
+    if (blurTimer !== null) { clearTimeout(blurTimer); blurTimer = null; }
+    typedValue = String(omniboxEl.value || '');
+    open();
+  }
+
+  function onBlur() {
+    if (blurTimer !== null) clearTimeout(blurTimer);
+    blurTimer = setTimeout(function () {
+      blurTimer = null;
+      close();
+    }, BLUR_DELAY);
+  }
+
+  function attach() {
+    if (panel) return true;
+    if (typeof document === 'undefined' || !document.getElementById) return false;
+    omniboxEl = document.getElementById('omnibox');
+    if (!omniboxEl || !document.body) return false;
+
+    buildPanel();
+
+    omniboxEl.addEventListener('keydown', onKeydown, true); // capture: before app.js
+    omniboxEl.addEventListener('input', onInput);
+    omniboxEl.addEventListener('focus', onFocus);
+    omniboxEl.addEventListener('blur', onBlur);
+
+    window.addEventListener('resize', function () { if (openState) place(); });
+    window.addEventListener('blur', function () { close(); });
+    return true;
+  }
+
+  /**
+   * Ctrl+H and Escape, routed from app.js's keyboard wiring.
+   * Returns true when the action was consumed.
+   */
+  function handleShortcut(action) {
+    if (action === 'history') {
+      if (!attach()) return false;
+      forceRecent = true;
+      if (typeof focusOmnibox === 'function') focusOmnibox();
+      else { omniboxEl.focus(); omniboxEl.select(); }
+      typedValue = String(omniboxEl.value || '');
+      open();
+      return true;
+    }
+    if (action === 'escape') {
+      if (!openState) return false;
+      restoreTyped();
+      close();
+      return true;
+    }
+    return false;
+  }
+
+  /* --- boot ----------------------------------------------------- */
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { attach(); }, { once: true });
+    } else {
+      attach();
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      // The debounce must not outlive the window.
+      window.addEventListener('pagehide', function () { writeNow(); });
+      window.addEventListener('beforeunload', function () { writeNow(); });
+    }
+  }
+
+  window.History = {
+    record: record,
+    updateTitle: updateTitle,
+    search: search,
+    recent: recent,
+    remove: remove,
+    clear: clear,
+    all: all,
+    handleShortcut: handleShortcut,
+    close: close,
+    isOpen: function () { return openState; },
+
+    // test seams
+    _score: score,
+    _words: toWords,
+    _ignored: isIgnored,
+    _flush: writeNow,
+    _load: load,
+    _max: MAX_ITEMS
+  };
+})();

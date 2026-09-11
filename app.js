@@ -642,6 +642,12 @@ function activateTab(id) {
   updateNavState();
   syncReloadButton(); // the incoming tab may be mid-load, the outgoing one not
   saveSession(); // the active index is part of the session
+
+  // Chrome modules (find bar, downloads, history) follow the active tab
+  // through this event instead of reaching into the tab model.
+  document.dispatchEvent(new CustomEvent('tabchange', {
+    detail: { id: target.id, kind: target.kind }
+  }));
 }
 
 function closeTab(id) {
@@ -864,6 +870,7 @@ function wireViewEvents(tab) {
 
   viewEl.addEventListener('page-title-updated', (event) => {
     setTabTitle(tab, event && event.title);
+    historyCall('updateTitle', tab.url, event && event.title);
   });
 
   const onNavigate = (event) => {
@@ -874,6 +881,7 @@ function wireViewEvents(tab) {
       updateNavState();
     }
     saveSession(); // background tabs move too, and the debounce absorbs bursts
+    historyCall('record', tab.url, tab.title);
   };
 
   viewEl.addEventListener('did-navigate', onNavigate);
@@ -895,6 +903,14 @@ function wireViewEvents(tab) {
   viewEl.addEventListener('did-fail-load', () => {
     // Aborted and failed loads both end here; the spinner must not stick.
     setTabLoading(tab, false);
+  });
+
+  // A video going fullscreen inside the page: the chrome steps aside.
+  viewEl.addEventListener('enter-html-full-screen', () => {
+    if (tab.id === activeTabId) setPageFullscreen(true);
+  });
+  viewEl.addEventListener('leave-html-full-screen', () => {
+    setPageFullscreen(false);
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
@@ -1142,6 +1158,24 @@ function wireWindowControls() {
     });
   }
 
+  if (win && typeof win.onFullscreen === 'function') {
+    win.onFullscreen((payload) => {
+      windowFullscreen = !!(payload && payload.fullscreen);
+      document.body.classList.toggle('fullscreen', windowFullscreen);
+      // Leaving via the OS (Esc, F11) ends a page's fullscreen too.
+      if (!windowFullscreen) document.body.classList.remove('page-fullscreen');
+    });
+  }
+
+  // The context menu's "Open link in new tab" and "Search Google for" land here.
+  if (window.api && typeof window.api.onOpenUrl === 'function') {
+    window.api.onOpenUrl((payload) => {
+      const url = payload && payload.url;
+      if (!url) return;
+      createTab(url, { background: !!(payload && payload.background) });
+    });
+  }
+
   if (win && typeof win.info === 'function') {
     // Wrapped in Promise.resolve so a synchronous throw is caught too.
     Promise.resolve()
@@ -1211,6 +1245,45 @@ function wireChrome() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Chrome modules: find bar, downloads, history                        */
+/* ------------------------------------------------------------------ */
+
+// history.js, find.js and downloads.js are optional: the chrome must boot and
+// behave the same with any of them missing, so every call goes through here.
+function historyCall(method, url, title) {
+  const store = window.History;
+  if (!store || typeof store[method] !== 'function') return;
+  try { store[method](url, title); } catch (err) { /* storage is best-effort */ }
+}
+
+// Actions the modules own. Each exposes handleShortcut(action) -> true when it
+// consumed the action; 'escape' is offered to all of them until one takes it.
+function moduleShortcut(action) {
+  const modules = [window.FindBar, window.Downloads, window.History];
+  for (const mod of modules) {
+    if (!mod || typeof mod.handleShortcut !== 'function') continue;
+    let took = false;
+    try { took = !!mod.handleShortcut(action); } catch (err) { took = false; }
+    if (took) return true;
+  }
+  return false;
+}
+
+let windowFullscreen = false;
+
+function toggleFullscreen() {
+  const w = winApi();
+  if (w && typeof w.toggleFullscreen === 'function') w.toggleFullscreen();
+}
+
+// A page's own fullscreen (a video) should fill the window like it does in
+// any browser: the chrome hides and the OS window follows the page's state.
+function setPageFullscreen(on) {
+  document.body.classList.toggle('page-fullscreen', !!on);
+  if (!!on !== windowFullscreen) toggleFullscreen();
+}
+
 function wireKeyboard() {
   // Keys pressed while focus is inside a <webview> go to the guest page, not
   // here. main.js intercepts those and replays them over 'shortcut', so the
@@ -1230,6 +1303,14 @@ function wireKeyboard() {
       'zoom-out': () => zoomActiveTab(-ZOOM_STEP),
       'zoom-reset': resetZoom,
       'toggle-theme': toggleTheme,
+      'reload': reloadActiveTab,
+      'back': goBack,
+      'forward': goForward,
+      'fullscreen': toggleFullscreen,
+      'find': () => moduleShortcut('find'),
+      'downloads': () => moduleShortcut('downloads'),
+      'history': () => moduleShortcut('history'),
+      'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
       const run = payload && forwarded[payload.action];
@@ -1238,9 +1319,30 @@ function wireKeyboard() {
   }
 
   window.addEventListener('keydown', (event) => {
-    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.metaKey) return;
+
+    // Keys that mean the same thing without Ctrl.
+    if (!event.ctrlKey && !event.altKey) {
+      if (event.key === 'F5') { event.preventDefault(); reloadActiveTab(); return; }
+      if (event.key === 'F11') { event.preventDefault(); toggleFullscreen(); return; }
+      if (event.key === 'Escape' && moduleShortcut('escape')) { event.preventDefault(); }
+      return;
+    }
+    if (event.altKey && !event.ctrlKey) {
+      if (event.key === 'ArrowLeft') { event.preventDefault(); goBack(); }
+      if (event.key === 'ArrowRight') { event.preventDefault(); goForward(); }
+      return;
+    }
+    if (!event.ctrlKey || event.altKey) return;
 
     const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+
+    // Module bars: find, downloads, history. Each decides whether it applies.
+    if (key === 'f' || key === 'j' || key === 'h') {
+      const action = key === 'f' ? 'find' : key === 'j' ? 'downloads' : 'history';
+      if (moduleShortcut(action)) event.preventDefault();
+      return;
+    }
 
     // Ctrl+Tab / Ctrl+Shift+Tab cycle the strip. Handled first because it is the
     // one binding here that wants Shift.

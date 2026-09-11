@@ -1,0 +1,165 @@
+/* ============================================================
+   find.css — the find-in-page instrument
+
+   One more crystal panel, hung under the nav row at the right
+   edge, floating over the guest page. Every colour resolves
+   through a chrome.css token, so the light theme re-lights this
+   bar for free and there is no [data-theme] block below.
+
+   Everything is scoped under #findbar: .glass, .navrow, .iconbtn
+   and .glyph are borrowed as-is and never re-styled globally.
+   ============================================================ */
+
+/* --- the panel ------------------------------------------------ */
+/* Absolute inside .chrome-layer (position:relative, z-index:3), so it
+   paints in the chrome's stacking context and therefore above #views
+   (z-index:1) — a <webview> composites separately, but the layer order
+   still decides. top:100% hangs it off the bottom of the chrome. */
+#findbar {
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  z-index: 4;
+  margin-top: 8px;
+
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 12px;
+
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  font-family: var(--ui-font);
+
+  /* Unlike every other pane, this one hangs over a <webview>, which is a
+     separate compositing surface: the host's backdrop-filter cannot be
+     relied on to blur the guest's pixels. So the glass keeps its sheen and
+     tint but gets the acrylic ground under it — the same token body uses —
+     and the query stays legible over any page. Longhands, so .glass's
+     `background` shorthand cannot put the tint back on its own. */
+  background-color: var(--panel-bg);
+  background-image: var(--sheen), linear-gradient(var(--glass), var(--glass));
+
+  /* the .glass recipe, with real elevation: this one floats over a page */
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 8px 24px var(--shade-drop);
+
+  /* A short stepped entrance. Never a continuous animation: a moving
+     layer under backdrop-filter re-blurs the whole pane every frame. */
+  animation: findbar-in 120ms steps(6, end) both;
+
+  /* re-lit in step with the rest of the chrome (chrome.css, 180ms) */
+  transition: background-color 180ms ease,
+              color 180ms ease,
+              border-color 180ms ease,
+              box-shadow 180ms ease;
+}
+
+/* The reset in this app does not carry [hidden]{display:none}, and a
+   flex container would otherwise ignore the attribute entirely. */
+#findbar[hidden] { display: none; }
+
+/* No chrome layer to hang from (it is missing, or fullscreen has taken it
+   out): the bar re-hangs itself off <body> and measures from the viewport. */
+#findbar.find-detached {
+  position: fixed;
+  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
+  margin-top: 0;
+}
+
+/* In fullscreen there is no chrome above it, so it sits at the top edge. */
+body.fullscreen #findbar.find-detached,
+body.page-fullscreen #findbar.find-detached { top: 8px; }
+
+@keyframes findbar-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- the lens glyph ------------------------------------------- */
+#findbar .find-lens {
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+/* --- the query field ------------------------------------------ */
+/* The same lens as #omnibox, one instrument quieter: it lives inside a
+   pane that is already lit, so it does not take the ion glow. */
+#find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+#find-input::placeholder { color: var(--placeholder); }
+
+#find-input:focus {
+  outline: none;
+  background: var(--sheen), var(--glass);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+/* The app's one focus idiom: a hairline ring, keyboard focus only. */
+#find-input:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+#find-input::selection { background: var(--ion-select); color: var(--fg); }
+
+/* --- the count read-out --------------------------------------- */
+#find-count {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 350;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* "No matches" is a quieter statement than a tally. */
+#find-count.none { color: var(--fg-3); }
+
+/* --- separator ------------------------------------------------ */
+#findbar .find-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--edge);
+}
+
+/* --- the three buttons ---------------------------------------- */
+/* .iconbtn already supplies the instrument shape and its hover/active
+   glass from chrome.css. Only the size changes, and only in here. */
+#findbar .iconbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+/* --- reduced motion ------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  #findbar { animation: none; }
+  #find-input { transition: none; }
+}

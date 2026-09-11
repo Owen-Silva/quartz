@@ -1,0 +1,315 @@
+/* ============================================================
+   downloads.css — the downloads instrument and its popover.
+
+   Loaded after chrome.css, and scoped entirely to #downloads and
+   #downloads-panel: nothing here reaches another element.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own at the bottom of this file —
+   :root[data-theme="light"] relights all of it for free.
+
+   MOTION. Both panes sit on a backdrop-filter, so an animated frame
+   re-blurs everything behind it. Nothing animates continuously here:
+   the two indeterminate states are stepped to 10fps, the "done" flash
+   is two frames and runs once, and hover transitions are steps(2).
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   These three rules put the attribute back in charge. */
+#downloads[hidden],
+#downloads-panel[hidden],
+#downloads-panel [hidden] { display: none; }
+
+/* ============================================================
+   The nav-row instrument
+   Shape, hover and radius come from `.iconbtn` in chrome.css; this
+   file adds only the ring and the arrival flash.
+   ============================================================ */
+
+#downloads {
+  position: relative;                 /* the ring is drawn on ::before */
+}
+
+#downloads .glyph { font-family: var(--icon-font); }
+
+/* the panel is open: the instrument stays lit while it is */
+#downloads.is-open {
+  background: var(--sheen), var(--glass-3);
+  color: var(--fg);
+}
+
+/* --- the progress ring ---------------------------------------
+   A conic sweep of ion light over an --edge track, punched hollow
+   by a radial mask so only a 2px annulus survives. --progress (0..1)
+   is set from downloads.js and is the sum of everything in flight.
+   The mask colour is a stencil, not paint: only its alpha is read,
+   so it is the one value in this file that is not a token. */
+#downloads::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  background: conic-gradient(from -90deg,
+    var(--ion) calc(var(--progress, 0) * 360deg),
+    var(--edge) 0);
+  -webkit-mask: radial-gradient(closest-side,
+    transparent calc(100% - 2px), #000 calc(100% - 2px));
+          mask: radial-gradient(closest-side,
+    transparent calc(100% - 2px), #000 calc(100% - 2px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+#downloads.active::before { opacity: 1; }
+
+/* Size unknown: a fixed arc stepped around the circle. steps(12) is
+   10 frames a second — a rotating ring at that rate still reads as
+   motion, and costs a twelfth of what a linear spin would. */
+#downloads.indeterminate::before {
+  background: conic-gradient(from -90deg,
+    var(--ion) 0deg 96deg,
+    var(--edge) 96deg 360deg);
+  animation: dl-ring-sweep 1.2s steps(12) infinite;
+}
+
+@keyframes dl-ring-sweep {
+  to { transform: rotate(360deg); }
+}
+
+/* --- the arrival flash ----------------------------------------
+   Everything finished: the ring vanishes and the glyph lights ion
+   for one frame, then returns. Two frames, once, never a loop. */
+#downloads.pulse .glyph {
+  animation: dl-arrive 560ms steps(2) 1;
+}
+
+@keyframes dl-arrive {
+  0%,   49.9% { color: var(--ion); }
+  50%,  100%  { color: var(--fg-2); }
+}
+
+/* ============================================================
+   The popover
+   A direct child of <body>, fixed under the button's right edge,
+   above #views (z-index 1) and the chrome layer (z-index 3).
+   downloads.js overwrites top/right on open; these are the
+   fallback for a panel opened while the button is still hidden.
+   ============================================================ */
+
+#downloads-panel {
+  position: fixed;
+  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
+  right: 10px;
+  z-index: 20;
+  width: 380px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - var(--titlebar-h) - var(--nav-h) - 28px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  /* The chamber's ground, not the nav row's: this pane floats over
+     guest pages, and --glass alone would leave a site legible
+     through it. Same recipe the Claude chamber uses. */
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+/* --- header --------------------------------------------------- */
+#downloads-panel .dl-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--edge);
+}
+
+#downloads-panel .dl-title {
+  color: var(--fg);
+  font-size: 13px;
+  letter-spacing: .01em;
+}
+
+/* the small word-buttons: Clear in the header, Retry on a dead row */
+#downloads-panel .dl-text {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  letter-spacing: .01em;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#downloads-panel .dl-text:hover { background: var(--glass-2); color: var(--fg); }
+#downloads-panel .dl-text:active { background: var(--glass-3); }
+
+/* --- list ----------------------------------------------------- */
+#downloads-panel .dl-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+#downloads-panel .dl-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+#downloads-panel .dl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px 7px 8px;
+  border-radius: 8px;
+  transition: background-color 120ms steps(2);
+}
+
+#downloads-panel .dl-row:hover,
+#downloads-panel .dl-row:focus-within { background: var(--glass); }
+
+#downloads-panel .dl-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* one line, always: a filename is whatever the site says it is */
+#downloads-panel .dl-name {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  letter-spacing: .01em;
+}
+
+/* a finished file's name is the shortcut that opens it */
+#downloads-panel .dl-name.is-open:hover { color: var(--ion); }
+
+#downloads-panel .dl-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+  font-size: 11.5px;
+}
+
+/* cancelled and failed: present, but the dimmest type in the app */
+#downloads-panel .dl-meta.is-dim { color: var(--fg-3); }
+
+#downloads-panel .dl-note {
+  margin-top: 4px;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+/* --- the row's progress bar ----------------------------------- */
+#downloads-panel .dl-bar {
+  position: relative;
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--edge);
+  overflow: hidden;
+}
+
+#downloads-panel .dl-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ion);
+  box-shadow: 0 0 8px var(--ion-glow);
+}
+
+/* total unknown: a short bead stepped across the track, same 10fps
+   budget as the ring. */
+#downloads-panel .dl-bar.is-indeterminate .dl-fill {
+  width: 28%;
+  animation: dl-bar-sweep 1.2s steps(12) infinite;
+}
+
+@keyframes dl-bar-sweep {
+  from { transform: translateX(-110%); }
+  to   { transform: translateX(370%); }
+}
+
+/* --- row actions ----------------------------------------------
+   Quiet until the row is pointed at or keyboard focus lands inside
+   it; a touch pointer has no hover, so there they are always out. */
+#downloads-panel .dl-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms steps(2);
+}
+
+#downloads-panel .dl-row:hover .dl-actions,
+#downloads-panel .dl-row:focus-within .dl-actions { opacity: 1; }
+
+@media (pointer: coarse) {
+  #downloads-panel .dl-actions { opacity: 1; }
+}
+
+#downloads-panel .dl-act {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--fg-2);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#downloads-panel .dl-act:hover { background: var(--glass-2); color: var(--fg); }
+#downloads-panel .dl-act:active { background: var(--glass-3); }
+
+#downloads-panel .dl-act .glyph {
+  font-family: var(--icon-font);
+  font-size: 11px;
+}
+
+/* --- focus ----------------------------------------------------
+   chrome.css already rings every button; these repeat it so the
+   panel keeps its keyboard outline even if that rule moves. */
+#downloads:focus-visible,
+#downloads-panel button:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- reduced motion -------------------------------------------
+   The stepped states hold their first frame: a static arc, a static
+   bead. Both still read as "working", just without the travel. */
+@media (prefers-reduced-motion: reduce) {
+  #downloads.indeterminate::before,
+  #downloads.pulse .glyph,
+  #downloads-panel .dl-bar.is-indeterminate .dl-fill { animation: none; }
+
+  #downloads-panel .dl-row,
+  #downloads-panel .dl-act,
+  #downloads-panel .dl-text,
+  #downloads-panel .dl-actions { transition: none; }
+}
