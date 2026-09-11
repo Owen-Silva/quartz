@@ -45,7 +45,11 @@ let acrylicActive = false;
 // Test runs (smoketest.js, verify scripts) pass --test-profile so their cookies,
 // storage and theme choice never land in the real profile.
 if (process.argv.includes('--test-profile')) {
-  app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile'));
+  // --profile-name=<x> gives a test run its own storage, so several test
+  // instances (one per verify agent) never share a LevelDB or a window state.
+  const named = process.argv.find((a) => a.startsWith('--profile-name='));
+  const suffix = named ? '-' + named.slice('--profile-name='.length).replace(/[^a-z0-9-]/gi, '') : '';
+  app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile' + suffix));
 }
 
 /** id -> session handle returned by pty.createSession */
