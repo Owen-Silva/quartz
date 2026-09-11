@@ -78,6 +78,7 @@
     { id: 'toggle-terminal', label: 'Claude chamber',         group: 'Claude',   default: 'Ctrl+`' },
     { id: 'claude-folder',  label: 'Claude in a folder',      group: 'Claude',   default: 'Ctrl+Shift+`' },
     { id: 'claude-split',   label: 'Claude beside the page',  group: 'Claude',   default: 'Ctrl+Shift+\\' },
+    { id: 'show-claude',    label: 'Show Claude this page',   group: 'Claude',   default: 'Ctrl+Alt+K' },
     { id: 'ask-claude',     label: 'Ask Claude about this page', group: 'Claude', default: 'Ctrl+Shift+K' },
 
     /* -- Tools ------------------------------------------------- */

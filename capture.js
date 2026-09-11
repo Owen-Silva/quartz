@@ -157,6 +157,35 @@
   }
 
   /**
+   * The same shot as takeActive(), with none of the theatre: no flash, no
+   * toast, no downloads nudge, and no message of its own for a refusal.
+   *
+   * For callers that DO something with the file rather than just saving it —
+   * "Show Claude this page" pastes the path into a chamber, so the prompt is
+   * the receipt and a second toast would only say the same thing twice.
+   *
+   * @returns {Promise<{ path, width, height } | null>} null for every refusal
+   *   and every failure; the caller decides what to say about it.
+   */
+  function captureActive() {
+    var tab = activePageTab();
+    var cap = tab ? captureApi() : null;
+    var wcId = cap ? wcIdOf(tab) : null;
+    if (wcId === null) return Promise.resolve(null);
+
+    var pending;
+    // `full` stays false for the same reason as above: main reserves it.
+    try { pending = cap.tab(wcId, false); } catch (err) { pending = null; }
+
+    return Promise.resolve(pending).then(function (result) {
+      if (!result || result.error || !result.path) return null;
+      return result;
+    }, function () {
+      return null;
+    });
+  }
+
+  /**
    * Forwarded from app.js, and from main.js when the key was pressed inside a
    * <webview> and never reached this document. Returns true when the action
    * was consumed.
@@ -168,6 +197,7 @@
 
   window.Capture = {
     takeActive: takeActive,
+    captureActive: captureActive,
     handleShortcut: handleShortcut,
     // Reachable so they can be exercised without a real window.
     _helpers: {

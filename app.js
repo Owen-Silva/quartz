@@ -3000,6 +3000,15 @@ function tabMenuItemsForTab(tab) {
       label: 'Ask Claude about this page',
       run: () => askClaudeAboutTab(tab)
     });
+    // …and the same thing with the page's picture attached: a PNG in Downloads
+    // and its path in the chamber's input, which Claude Code can open.
+    items.push({
+      label: 'Show Claude this page',
+      run: () => showClaudeThisPage({
+        url: readCurrentUrl(tab) || tab.url || '',
+        title: tab.title || ''
+      })
+    });
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
     // there: disabled on a tab that is not allowed to sleep right now.
@@ -4304,6 +4313,103 @@ function askClaudeAboutActiveTab() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Show Claude this page                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The same gesture as Ask, one sense further along: Claude Code opens an image
+ * file when it is handed the path, so a screenshot plus a line of text is a
+ * real multimodal hand-off — the layout, the chart, the error dialog, the bit
+ * that has no text to quote.
+ *
+ * Everything else is Ask's machinery unchanged: the same chamber beside the
+ * same page, the same INPUT, the same sentence left mid-air after "and ". No
+ * Enter is sent from here either.
+ */
+
+/** settings.js owns the toast and loads after this file, so this is checked. */
+function claudeToast(message) {
+  const t = window.Toast;
+  if (!t || typeof t.show !== 'function') return;
+  try { t.show(message); } catch (err) { /* a missing toast is not a failure */ }
+}
+
+const MSG_SHOW_FAILED = "Couldn't capture this page";
+
+/**
+ * Backslashes survive fine on the way in, but a forward-slash path meets no
+ * escaping rule anywhere between the terminal and the tool that opens it —
+ * and Claude Code on Windows takes either.
+ */
+function screenshotPathText(target) {
+  return String(target == null ? '' : target).replace(/\\/g, '/');
+}
+
+/**
+ * The image first, because the file is the point; then where it came from, so
+ * the session can go and read the real page. Ends after "and " exactly like
+ * askPromptText() does: the question is the only thing left to write.
+ */
+function showPromptText(target, url, title) {
+  const page = String(url || '').trim();
+  const name = String(title == null ? '' : title).trim();
+  const subject = name ? page + ' (' + name + ')' : page;
+  return 'Look at the screenshot ' + screenshotPathText(target) + ' of ' + subject + ' and ';
+}
+
+/**
+ * Capture.captureActive() shoots the tab in FRONT, and a chip row or a guest's
+ * context menu can fire on a tab that is merely on screen — or on none at all.
+ * Activating is a no-op when it is already there; two frames is enough for the
+ * swap to land before capturePage() reads the guest.
+ */
+function bringToFrontForCapture(tab) {
+  if (!tab || tab.kind !== 'page' || getActiveTab() === tab) return Promise.resolve();
+  activateTab(tab.id);
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+}
+
+/** capture.js is a sibling instrument, not a dependency: feature-detected. */
+function captureForClaude() {
+  const cap = window.Capture;
+  if (!cap || typeof cap.captureActive !== 'function') return Promise.resolve(null);
+  let pending = null;
+  try { pending = cap.captureActive(); } catch (err) { return Promise.resolve(null); }
+  return Promise.resolve(pending).then((shot) => shot || null, () => null);
+}
+
+/**
+ * @param {{url?:string, title?:string}} [payload] the page the request names;
+ *   omitted (a shortcut, the palette) means whichever page is in front.
+ * @returns {Promise<boolean>} true once the prompt is in (or queued for) a
+ *   chamber. A capture that refuses or fails says so in a toast and stops —
+ *   pasting a path to a PNG that is not there would be worse than nothing.
+ */
+function showClaudeThisPage(payload) {
+  const info = payload || {};
+  const want = String(info.url == null ? '' : info.url);
+  const page = askSourceTab(want);
+
+  return bringToFrontForCapture(page).then(captureForClaude).then((shot) => {
+    if (!shot || !shot.path) {
+      claudeToast(MSG_SHOW_FAILED);
+      return false;
+    }
+    const url = want || (page ? readCurrentUrl(page) : '');
+    const title = String(info.title == null ? '' : info.title) || (page ? page.title : '');
+
+    const claude = claudeChamberFor(page);
+    if (!claude) return false;
+    // Same as askClaude(): the chamber takes the front so what is typed next
+    // lands in the terminal rather than in the page.
+    activateTab(claude.id);
+    return pasteIntoChamber(claude, showPromptText(shot.path, url, title));
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Window controls (frameless titlebar)                                */
 /* ------------------------------------------------------------------ */
 
@@ -4377,7 +4483,11 @@ function wireWindowControls() {
   // "Ask Claude about …" in a page's context menu: main hands over the url,
   // the title and the selection, and askClaude() does the rest.
   if (window.api && typeof window.api.onAskClaude === 'function') {
-    window.api.onAskClaude((payload) => { askClaude(payload); });
+    window.api.onAskClaude((payload) => {
+      // "Show Claude this page" comes down the same channel, marked.
+      if (payload && payload.mode === 'screenshot') showClaudeThisPage(payload);
+      else askClaude(payload);
+    });
   }
 
   // A click inside the other half of a split lands in the guest and never
@@ -4600,6 +4710,9 @@ const ACTIONS = {
   'claude-split': toggleClaudeSplit,
   // Carries no payload: the selection is read back off the guest here.
   'ask-claude': askClaudeAboutActiveTab,
+  // The same hand-off with a screenshot attached. shortcuts.js does not name
+  // this id yet; the moment it does, every chrome-side path is already wired.
+  'show-claude': () => showClaudeThisPage(),
   // Module actions. Each module decides for itself whether the action is its
   // own; moduleShortcut() returns false when none of them took it.
   'find': () => moduleShortcut('find'),
@@ -4980,6 +5093,8 @@ window.askClaude = askClaude;
 window.askClaudeAboutTab = askClaudeAboutTab;
 window.askClaudeAboutActiveTab = askClaudeAboutActiveTab;
 window.askPromptText = askPromptText;
+window.showClaudeThisPage = showClaudeThisPage;
+window.showPromptText = showPromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 // Workspaces. This is the whole contract workspaces.js (the switcher UI) and

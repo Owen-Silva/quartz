@@ -1971,6 +1971,14 @@ function guestMenuTemplate(contents, params) {
     label: 'Ask Claude about this page',
     click: () => send('ask-claude', { url: askUrl, title: askTitle, selection: '' }),
   });
+  // The same hand-off with the page's picture attached: the renderer takes the
+  // screenshot (capturePage belongs to the guest, and capture:tab already does
+  // it) and pastes the file's path, which Claude Code can open.
+  ask.push({
+    label: 'Show Claude this page',
+    click: () =>
+      send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'screenshot' }),
+  });
 
   const editing = [];
   if (params.isEditable) {

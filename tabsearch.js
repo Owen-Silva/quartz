@@ -478,6 +478,11 @@
       run: function () { callGlobal(function () { return askClaudeAboutActiveTab; }); }
     });
     list.push({
+      id: 'show-claude', glyph: GLYPH.claude, label: 'Show Claude this page',
+      hint: 'Screenshots it and hands the file over', action: 'show-claude',
+      run: function () { callGlobal(function () { return showClaudeThisPage; }); }
+    });
+    list.push({
       id: 'split', glyph: GLYPH.split,
       label: split ? 'Unsplit' : 'Split with next tab',
       hint: split ? 'Back to one page' : 'Two pages side by side',
