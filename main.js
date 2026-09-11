@@ -319,6 +319,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Before the handlers: a request that arrives first must already see what
+  // the user decided on a previous run.
+  loadPermissionDecisions();
   attachSessionHandlers();
   createWindow();
   // Deliberately not awaited: a cold start fetches filter lists over the
@@ -749,6 +752,90 @@ function originOf(url) {
   }
 }
 
+/**
+ * Decisions outlive the run: <userData>/permissions.json holds
+ * { origin: { permission: 'allow' | 'block' } }. Same best-effort, lazily
+ * resolved path as window-state.json -- a missing or corrupt file just means
+ * nothing has been decided yet, and a failed write never escapes a handler.
+ */
+function permissionsPath() {
+  return path.join(app.getPath('userData'), 'permissions.json');
+}
+
+/** Everything that can actually raise a dialog, in the order they are listed. */
+const PERMISSION_PROMPT_LIST = ['media', ...Object.keys(PERMISSION_PHRASES)];
+
+/** Prompting + silently-allowed names: the only keys the store will accept. */
+const KNOWN_PERMISSIONS = new Set([...PERMISSION_PROMPT_LIST, ...PERMISSIONS_ALWAYS_ALLOW]);
+
+/** An origin we are willing to key a decision on: parses, and is http(s). */
+function validOrigin(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    return '';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+  return url.origin;
+}
+
+/** Fold the file back into the Map, dropping anything no longer meaningful. */
+function loadPermissionDecisions() {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(permissionsPath(), 'utf8'));
+  } catch {
+    return; // no file yet, unreadable, or not JSON -- nothing is remembered
+  }
+  if (!parsed || typeof parsed !== 'object') return;
+  for (const [rawOrigin, perms] of Object.entries(parsed)) {
+    const origin = validOrigin(rawOrigin);
+    if (!origin || !perms || typeof perms !== 'object') continue;
+    for (const [permission, decision] of Object.entries(perms)) {
+      if (!KNOWN_PERMISSIONS.has(permission)) continue;
+      if (decision !== 'allow' && decision !== 'block') continue;
+      permissionDecisions.set(origin + '|' + permission, decision === 'allow');
+    }
+  }
+}
+
+/** The Map, written back out as { origin: { permission: decision } }. */
+function savePermissionDecisions() {
+  try {
+    const out = {};
+    for (const [key, allowed] of permissionDecisions) {
+      const cut = key.lastIndexOf('|');
+      if (cut <= 0) continue;
+      const origin = key.slice(0, cut);
+      // A guest on an opaque origin ('' or 'null') can still be asked about,
+      // but there is nothing stable to remember it under.
+      if (!validOrigin(origin)) continue;
+      (out[origin] = out[origin] || {})[key.slice(cut + 1)] = allowed ? 'allow' : 'block';
+    }
+    fs.writeFileSync(permissionsPath(), JSON.stringify(out, null, 2));
+  } catch {
+    // A disk error must never take down a dialog callback or an IPC handler.
+  }
+}
+
+/** Every explicit decision for one origin: { permission: 'allow'|'block' }. */
+function permissionsForOrigin(origin) {
+  const out = {};
+  const prefix = origin + '|';
+  for (const [key, allowed] of permissionDecisions) {
+    if (!key.startsWith(prefix)) continue;
+    out[key.slice(prefix.length)] = allowed ? 'allow' : 'block';
+  }
+  return out;
+}
+
+/** The one place a decision is written, so file and Map cannot drift apart. */
+function rememberPermission(origin, permission, allowed) {
+  permissionDecisions.set(origin + '|' + permission, allowed);
+  savePermissionDecisions();
+}
+
 /** What the user recognises: the host, not the whole origin. */
 function originLabel(origin) {
   try {
@@ -812,7 +899,7 @@ function askPermission(origin, permission, details) {
     })
     .then((result) => {
       const allowed = result.response === 0;
-      permissionDecisions.set(key, allowed);
+      rememberPermission(origin, permission, allowed);
       return allowed;
     })
     .catch(() => false) // a dialog that failed to show is not consent
@@ -865,6 +952,26 @@ function attachSessionHandlers() {
     return decision === true;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Certificate errors
+//
+// The default answer stays "reject": nothing here grants an exception, and
+// there is no UI to click through one. All we do is REMEMBER which origins
+// failed, so site info can say why the padlock is off instead of reporting a
+// plain https URL as fine.
+// ---------------------------------------------------------------------------
+
+/** Origins whose certificate Chromium refused at least once this run. */
+const certErrors = new Set();
+
+app.on('certificate-error', (_event, _contents, url, _error, _certificate, callback) => {
+  const origin = originOf(url);
+  if (origin) certErrors.add(origin);
+  // No preventDefault(), so Electron applies its own verdict (reject) and
+  // ignores this callback -- answering false keeps that explicit either way.
+  callback(false);
+});
 
 // ---------------------------------------------------------------------------
 // Ad blocking
@@ -1163,6 +1270,188 @@ ipcMain.on('adblock:allow-host', (_event, payload) => {
 });
 
 // ---------------------------------------------------------------------------
+// Site info
+//
+// What sits behind the padlock for the page in the active tab: how the
+// connection is secured, which permissions this origin has been explicitly
+// granted or denied, and the two destructive actions (forget the permissions,
+// clear the site's data). A guest page can inspect none of this itself.
+//
+// Every handler answers with { error: string } instead of throwing: a popover
+// in the chrome must never be able to reject into the renderer.
+// ---------------------------------------------------------------------------
+
+/** Everything clearStorageData() can drop for one origin. */
+const CLEARABLE_STORAGES = [
+  'cookies',
+  'localstorage',
+  'indexdb',
+  'serviceworkers',
+  'cachestorage',
+  'websql',
+];
+
+/** Loopback http IS a secure context in Chromium; do not call it 'http'. */
+function isLoopbackHost(host) {
+  const h = String(host || '')
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost');
+}
+
+/** { secure, reason } for one already-parsed URL. */
+function securityOf(url) {
+  const scheme = url.protocol.replace(':', '');
+  if (scheme === 'https') {
+    return certErrors.has(url.origin)
+      ? { secure: false, reason: 'certificate' }
+      : { secure: true, reason: 'https' };
+  }
+  if (scheme === 'http') {
+    return isLoopbackHost(url.hostname)
+      ? { secure: true, reason: 'local' }
+      : { secure: false, reason: 'http' };
+  }
+  // Pages that never crossed a network: our own chrome, a local file, a blob.
+  if (['file', 'about', 'data', 'blob', 'chrome'].includes(scheme)) {
+    return { secure: true, reason: 'local' };
+  }
+  return { secure: false, reason: 'other' };
+}
+
+/** The message for an { error } reply, without leaking a stack at the UI. */
+function errorText(err) {
+  return String((err && err.message) || err || 'failed');
+}
+
+ipcMain.handle('site:info', (_event, payload) => {
+  try {
+    let url;
+    try {
+      url = new URL(String((payload && payload.url) || ''));
+    } catch {
+      return { error: 'invalid url' };
+    }
+    const origin = validOrigin(url.href);
+    const { secure, reason } = securityOf(url);
+    return {
+      origin: origin || url.origin,
+      host: url.hostname,
+      scheme: url.protocol.replace(':', ''),
+      secure,
+      reason,
+      // Only what was actually decided -- an absent name means "still asks".
+      permissions: origin ? permissionsForOrigin(origin) : {},
+      promptable: [...PERMISSION_PROMPT_LIST],
+    };
+  } catch (err) {
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle('site:set-permission', (_event, payload) => {
+  try {
+    const origin = validOrigin(payload && payload.origin);
+    if (!origin) return { error: 'invalid origin' };
+    const permission = String((payload && payload.permission) || '');
+    if (!KNOWN_PERMISSIONS.has(permission)) return { error: 'unknown permission' };
+    const decision = String((payload && payload.decision) || '');
+    if (decision !== 'allow' && decision !== 'block' && decision !== 'ask') {
+      return { error: 'invalid decision' };
+    }
+
+    if (decision === 'ask') {
+      // Forgetting is not the same as blocking: the next request prompts again.
+      permissionDecisions.delete(origin + '|' + permission);
+      savePermissionDecisions();
+    } else {
+      rememberPermission(origin, permission, decision === 'allow');
+    }
+    send('site:permissions-changed', { origin });
+    return permissionsForOrigin(origin);
+  } catch (err) {
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle('site:reset-permissions', (_event, payload) => {
+  try {
+    const origin = validOrigin(payload && payload.origin);
+    if (!origin) return { error: 'invalid origin' };
+    const prefix = origin + '|';
+    for (const key of [...permissionDecisions.keys()]) {
+      if (key.startsWith(prefix)) permissionDecisions.delete(key);
+    }
+    savePermissionDecisions();
+    send('site:permissions-changed', { origin });
+    return permissionsForOrigin(origin); // {}
+  } catch (err) {
+    return { error: errorText(err) };
+  }
+});
+
+/**
+ * The domains a cookie for this host could have been stored under: the host
+ * itself, and its parent domain when there is one (a cookie set for
+ * `.example.com` by www.example.com belongs to no single origin).
+ */
+function cookieDomainsFor(host) {
+  const labels = String(host || '')
+    .split('.')
+    .filter(Boolean);
+  if (!labels.length) return [];
+  const domains = [labels.join('.')];
+  if (labels.length > 2) domains.push(labels.slice(1).join('.'));
+  return domains;
+}
+
+ipcMain.handle('site:clear-data', async (_event, payload) => {
+  try {
+    const origin = validOrigin(payload && payload.origin);
+    if (!origin) return { error: 'invalid origin' };
+    const sess = session.defaultSession;
+    if (!sess) return { error: 'no session' };
+
+    // The cookie jar is walked FIRST, and by hand: clearStorageData({ origin })
+    // matches scheme+host+port exactly, so a domain cookie set for
+    // `.example.com` would survive it -- and anything it did drop could no
+    // longer be counted. Host and parent domain both.
+    const host = new URL(origin).hostname;
+    const seen = new Set();
+    let cookiesRemoved = 0;
+    for (const domain of cookieDomainsFor(host)) {
+      let cookies = [];
+      try {
+        cookies = await sess.cookies.get({ domain });
+      } catch {
+        cookies = []; // a jar we cannot read is not a reason to fail the clear
+      }
+      for (const cookie of cookies) {
+        const bare = String(cookie.domain || host).replace(/^\./, '');
+        const cookiePath = cookie.path || '/';
+        const key = bare + cookiePath + '|' + cookie.name;
+        if (seen.has(key)) continue; // the parent query re-lists the host's own
+        seen.add(key);
+        const url = (cookie.secure ? 'https://' : 'http://') + bare + cookiePath;
+        try {
+          await sess.cookies.remove(url, cookie.name);
+          cookiesRemoved += 1;
+        } catch {
+          // Already gone, or not ours to remove -- do not count it.
+        }
+      }
+    }
+
+    // Then everything else the origin owns -- plus any cookie the walk above
+    // could not name.
+    await sess.clearStorageData({ origin, storages: CLEARABLE_STORAGES });
+    return { cookiesRemoved };
+  } catch (err) {
+    return { error: errorText(err) };
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Shortcuts that must survive page focus
 //
 // A key pressed while focus sits inside a <webview> never reaches our renderer:
@@ -1211,6 +1500,7 @@ function shortcutFor(input) {
   if (key === 'r' || key === 'R') return { action: input.shift ? 'reader' : 'reload' };
   // Ctrl+Shift+A opens tab search; plain Ctrl+A stays the page's select-all.
   if (input.shift && (key === 'a' || key === 'A')) return { action: 'tabsearch' };
+  if (key === '\\') return { action: 'split' }; // Ctrl+backslash toggles split view
   const action = SHORTCUTS[key.toLowerCase()];
   return action ? { action } : null;
 }
@@ -1353,6 +1643,10 @@ function guestMenuTemplate(contents, params) {
 
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
+
+  // A click inside a guest never reaches the chrome renderer; split view needs
+  // to know which pane took focus so the omnibox and chips can follow it.
+  contents.on('focus', () => send('guest-focus', { wcId: contents.id }));
 
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;

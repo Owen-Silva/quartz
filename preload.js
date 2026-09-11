@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('api', {
   },
   // A context-menu item in a page asked for a URL to be opened as a tab:
   // { url, background }. background:true means do not steal focus.
+  // Fired by main whenever a guest webContents gains focus: { wcId }.
+  onGuestFocus: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on('guest-focus', handler);
+    return () => ipcRenderer.removeListener('guest-focus', handler);
+  },
   onOpenUrl: (cb) => {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on('open-url', handler);
@@ -100,6 +106,32 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on('adblock:state-changed', handler);
       return () => ipcRenderer.removeListener('adblock:state-changed', handler);
+    }
+  },
+  // Everything behind the padlock for one page: how the connection is secured,
+  // the explicit permission decisions for its origin, and the two destructive
+  // actions. Every call resolves -- a failure comes back as { error: string }
+  // rather than rejecting.
+  site: {
+    // { origin, host, scheme, secure, reason, permissions, promptable }.
+    // reason is 'https' | 'http' | 'certificate' | 'local' | 'other';
+    // permissions holds ONLY origins' explicit decisions ('allow' | 'block'),
+    // and promptable lists the names that would raise a dialog.
+    info: (url) => ipcRenderer.invoke('site:info', { url }),
+    // decision: 'allow' | 'block' | 'ask' -- 'ask' forgets it, so the next
+    // request prompts again. Resolves to the origin's updated map.
+    setPermission: (origin, permission, decision) =>
+      ipcRenderer.invoke('site:set-permission', { origin, permission, decision }),
+    // Forget every decision for this origin. Resolves to the (empty) map.
+    resetPermissions: (origin) => ipcRenderer.invoke('site:reset-permissions', { origin }),
+    // Storage + cookies for one origin, host and parent domain: { cookiesRemoved }.
+    clearData: (origin) => ipcRenderer.invoke('site:clear-data', { origin }),
+    // { origin }, pushed after any permission change -- including ones made in
+    // another window's popover or by answering a prompt.
+    onPermissionsChanged: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('site:permissions-changed', handler);
+      return () => ipcRenderer.removeListener('site:permissions-changed', handler);
     }
   },
   // Durable mirror of the session localStorage holds. write() is fire-and-

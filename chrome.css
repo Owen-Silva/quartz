@@ -924,6 +924,24 @@ img.tab-icon[src=""],
 /* broken beats both: the warning glyph is the only icon on the chip */
 .tab.broken .tab-globe { display: none; }
 
+/* the two-panes glyph both halves of a split pair carry, ahead of the
+   title. It is a quiet mark, not a state: an active chip keeps every
+   bit of its own styling underneath it. */
+.tab .tab-split { display: none; }
+
+.tab.split .tab-split {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 12px;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+/* a pinned chip is icon-only; the mark would crowd out the favicon */
+.tab.pinned .tab-split { display: none; }
+
 /* --- drag to reorder (app.js sets the classes and the transforms) ---
    The lifted chip tracks the pointer exactly, so it carries NO transform
    transition; the chips stepping aside carry a stepped one, because the
@@ -1133,6 +1151,9 @@ body.claude-live #newclaude .dot {
 
 #views webview {
   flex: 1 1 auto;
+  /* Split view gives a half an inline flex-basis; without this the
+     automatic minimum size would refuse to shrink past the guest. */
+  min-width: 0;
   min-height: 0;
   width: 100%;
   height: 100%;
@@ -1157,6 +1178,52 @@ body.claude-live #newclaude .dot {
   height: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* --- split view: two page wells side by side ------------------- */
+/* There is no wrapper: a <webview> is NEVER re-parented (a moved guest
+   stops painting), so the two halves are the same direct children of
+   #views they always were. app.js seats them with inline `order` and
+   `flex-basis` — the ratio is one number, not a relayout — and leaves
+   everything else in #views display:none. */
+
+/* which half the omnibox is describing: two pixels of the same ion
+   line the omnibox itself is bordered with, laid along its top edge.
+   A webview cannot carry a ::before, so the mark is its own element,
+   parked over the focused view's measured rect by app.js. */
+#views > .split-focus {
+  position: absolute;
+  height: 2px;
+  background: var(--ion-line);
+  pointer-events: none;
+  z-index: 3;                  /* over the card (2) sharing this well */
+}
+
+/* the grab handle between the halves: an --edge line either side of a
+   glass strip wide enough to catch a pointer. One per window, built
+   into #views on the first split and hidden (inline) the rest of the
+   time, so a split never adds a sibling next to a live guest. */
+#views > .split-divider {
+  order: 2;
+  flex: 0 0 6px;
+  align-self: stretch;
+  border-left: 1px solid var(--edge);
+  border-right: 1px solid var(--edge);
+  background: var(--glass-2);
+  cursor: col-resize;
+}
+
+#views > .split-divider:hover { background: var(--glass-3); }
+
+/* A press that lands on a guest page belongs to the guest, which would
+   swallow the rest of the drag — so app.js lays this over the whole
+   window for as long as the divider is being dragged. */
+.split-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;                 /* above #tabmenu (45): nothing outranks a drag */
+  background: transparent;
+  cursor: col-resize;
 }
 
 /* --- Claude chamber: the deepest glass, full bleed ------------- */

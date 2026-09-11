@@ -1012,19 +1012,48 @@
     return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
+  /**
+   * The open tab, when it is the one this entry would act on. app.js owns
+   * both globals; a build without them simply has no "Run now" to offer.
+   * Matching goes through the module so a parent-domain entry counts for
+   * its subdomains, exactly as it does when the page loads.
+   */
+  function activeTabFor(api, host) {
+    if (typeof window.getActiveTab !== 'function') return null;
+    if (typeof window.readCurrentUrl !== 'function') return null;
+    var tab = null;
+    try { tab = window.getActiveTab(); } catch (err) { return null; }
+    if (!tab) return null;
+    var url = '';
+    try { url = String(window.readCurrentUrl(tab) || ''); } catch (err) { return null; }
+    if (!url) return null;
+    var matched = null;
+    try {
+      matched = typeof api.matchFor === 'function' ? api.matchFor(url) : null;
+    } catch (err) { matched = null; }
+    if (matched) return matched.host === host ? tab : null;
+    var open = '';
+    try {
+      open = typeof api.hostFromUrl === 'function'
+        ? String(api.hostFromUrl(url) || '')
+        : normalizeHost(url);
+    } catch (err) { open = normalizeHost(url); }
+    return open === host ? tab : null;
+  }
+
   function buildSiteStyles() {
-    var s = section('Site styles');
+    var s = section('Site styles and scripts');
     var field = el('div', 'set-field');
     field.setAttribute('data-field', 'sitestyles');
     s.appendChild(field);
     return s;
   }
 
-  /** One site: its name, its dark switch, and the CSS drawer under them. */
+  /** One site: its name, its dark switch, and the code drawer under them. */
   function siteRow(api, host) {
     var rec = null;
     try { rec = api.get(host); } catch (err) { rec = null; }
-    rec = rec || { css: '', dark: false };
+    rec = rec || { css: '', dark: false, js: '' };
 
     var row = el('div', 'set-site');
     row.setAttribute('data-host', host);
@@ -1052,26 +1081,53 @@
 
     if (!expanded) return row;
 
+    // Escape leaves the field first; a second press then closes the panel.
+    function escapesOut(node) {
+      node.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        node.blur();
+      });
+    }
+
     var editor = el('div', 'set-site-editor');
+    editor.appendChild(el('p', 'set-hint', 'CSS'));
     var ta = document.createElement('textarea');
     ta.className = 'set-css';
     ta.spellcheck = false;
     ta.setAttribute('aria-label', 'Custom CSS for ' + host);
     ta.value = typeof rec.css === 'string' ? rec.css : '';
-    // Escape leaves the field first; a second press then closes the panel.
-    ta.addEventListener('keydown', function (event) {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      ta.blur();
-    });
+    escapesOut(ta);
     editor.appendChild(ta);
+
+    editor.appendChild(el('p', 'set-hint', 'JavaScript'));
+    var js = document.createElement('textarea');
+    js.className = 'set-js';
+    js.spellcheck = false;
+    js.placeholder = '// runs after the page loads';
+    js.setAttribute('aria-label', 'Custom JavaScript for ' + host);
+    js.value = typeof rec.js === 'string' ? rec.js : '';
+    escapesOut(js);
+    editor.appendChild(js);
 
     var acts = el('div', 'set-site-acts');
     acts.appendChild(textButton('Save', 'set-btn', function () {
-      try { api.set(host, { css: ta.value }); } catch (err) { /* module's problem */ }
+      try { api.set(host, { css: ta.value, js: js.value }); } catch (err) { /* module's problem */ }
       var toast = window.Toast;
       if (toast && typeof toast.show === 'function') toast.show('Saved ' + host);
     }));
+
+    /* Only when this site is the one on screen: re-applying to a tab that
+       is somewhere else would be a button that visibly does nothing. */
+    if (activeTabFor(api, host) && typeof api.applyTo === 'function') {
+      acts.appendChild(textButton('Run now', 'set-text set-site-run', function () {
+        var tab = activeTabFor(api, host);
+        if (!tab) return;
+        try { api.applyTo(tab); } catch (err) { /* module's problem */ }
+        var toast = window.Toast;
+        if (toast && typeof toast.show === 'function') toast.show('Ran on ' + host);
+      }));
+    }
     acts.appendChild(textButton('Remove site', 'set-text set-site-remove', function () {
       try { api.remove(host); } catch (err) { /* module's problem */ }
       if (siteOpen === host) siteOpen = null;
@@ -1110,7 +1166,7 @@
     var list = el('div', 'set-sites');
     if (!hosts.length) {
       list.appendChild(el('p', 'set-empty',
-        'No site styles yet. Add a site to give it your own CSS or force dark mode.'));
+        'No site styles or scripts yet. Add a site to give it your own CSS, a script, or force dark mode.'));
     }
     hosts.forEach(function (host) { list.appendChild(siteRow(api, host)); });
     field.appendChild(list);
@@ -1152,6 +1208,8 @@
     add.appendChild(input);
     add.appendChild(textButton('Add', 'set-btn', commitAdd));
     field.appendChild(add);
+    field.appendChild(el('p', 'set-hint',
+      "Scripts run in the page with the page's own powers. Only paste code you trust."));
 
     if (siteFocus) {
       var target = field.querySelector(siteFocus);

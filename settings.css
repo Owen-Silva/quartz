@@ -642,7 +642,8 @@
 #settings-panel .set-site-editor { padding: 2px 7px 8px; }
 
 /* the CSS itself: a code field, so it is set in code type */
-#settings-panel .set-css {
+#settings-panel .set-css,
+#settings-panel .set-js {
   display: block;
   width: 100%;
   min-height: 120px;
@@ -659,17 +660,24 @@
   transition: background-color 120ms steps(2), border-color 120ms steps(2);
 }
 
-#settings-panel .set-css::placeholder { color: var(--placeholder); }
-#settings-panel .set-css:hover { background: var(--glass-2); }
+/* the script field is the same instrument, one line shorter */
+#settings-panel .set-js { min-height: 100px; }
 
-#settings-panel .set-css:focus {
+#settings-panel .set-css::placeholder,
+#settings-panel .set-js::placeholder { color: var(--placeholder); }
+#settings-panel .set-css:hover,
+#settings-panel .set-js:hover { background: var(--glass-2); }
+
+#settings-panel .set-css:focus,
+#settings-panel .set-js:focus {
   outline: none;
   border-color: var(--ion-line);
   background: var(--glass-2);
   box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
 }
 
-#settings-panel .set-css::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-css::selection,
+#settings-panel .set-js::selection { background: var(--ion-select); color: var(--fg); }
 
 #settings-panel .set-site-acts {
   display: flex;
@@ -897,6 +905,7 @@
   #settings-panel .set-path,
   #settings-panel .set-sel,
   #settings-panel .set-css,
+  #settings-panel .set-js,
   #settings-panel .set-site,
   #settings-panel .set-row,
   #settings-panel .set-switch,

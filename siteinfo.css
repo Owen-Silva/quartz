@@ -1,0 +1,377 @@
+/* ============================================================
+   siteinfo.css — the site instrument and its popover.
+
+   Loaded after chrome.css, and scoped entirely to #siteinfo,
+   #siteinfo-panel and the one padding class the instrument adds to
+   #omnibox: nothing here reaches another element.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own at the bottom of this file —
+   :root[data-theme="light"] relights all of it for free.
+
+   MOTION. Both panes sit on a backdrop-filter, so an animated frame
+   re-blurs everything behind it. Nothing animates continuously here:
+   every transition is stepped and none runs longer than 150ms.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   These rules put the attribute back in charge. */
+#siteinfo[hidden],
+#siteinfo-panel[hidden],
+#siteinfo-panel [hidden] { display: none; }
+
+/* ============================================================
+   The capsule button
+   It rides inside #omnibox's left padding — .navrow is the
+   positioned ancestor, and siteinfo.js writes left/top from the
+   capsule's own rect, so the values here are only the fallback
+   for the frame before that lands.
+   ============================================================ */
+
+#siteinfo {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 24px;
+  height: 24px;
+  z-index: 2;                       /* over the capsule, under nothing else */
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-2);
+  cursor: default;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#siteinfo .glyph {
+  font-family: var(--icon-font);
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* secure is the quiet state: the lock is furniture, not an alarm */
+#siteinfo.is-secure { color: var(--fg-2); }
+
+/* http, a bad certificate, anything else: quieter still, never red.
+   Colour in this chrome means "active", and a warning is not that. */
+#siteinfo.is-insecure { color: var(--fg-3); }
+
+#siteinfo:hover { background: var(--glass-2); color: var(--fg); }
+#siteinfo:active { background: var(--glass-3); }
+
+#siteinfo:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* the panel is open: the instrument stays lit while it is */
+#siteinfo.is-open {
+  background: var(--glass-3);
+  color: var(--fg);
+}
+
+/* The capsule makes room for the button rather than the button
+   overlapping the text. Only when the instrument is showing, and
+   only on the left: the omnibox's own rule still owns the rest. */
+#omnibox.has-siteinfo { padding-left: 34px; }
+
+/* ============================================================
+   The popover
+   Same ground and lip as the shield and downloads panels, so the
+   three read as siblings. Anchored in JS under the button's left
+   edge; the values here are the fallback for the first frame.
+   ============================================================ */
+
+#siteinfo-panel {
+  position: fixed;
+  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
+  left: 10px;
+  z-index: 20;
+  width: 340px;
+  max-width: calc(100vw - 20px);
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  /* The chamber's ground, not the nav row's: this pane floats over
+     guest pages, and --glass alone would leave a site legible
+     through it. Same recipe the shield panel uses. */
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+#siteinfo-panel .si-body {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 12px;
+}
+
+/* --- the header: which site, and what the connection is -------- */
+#siteinfo-panel .si-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--edge);
+}
+
+#siteinfo-panel .si-host {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#siteinfo-panel .si-note {
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* --- a section: a quiet caption and its rows ------------------- */
+#siteinfo-panel .si-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+#siteinfo-panel .si-sec:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+#siteinfo-panel .si-cap {
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#siteinfo-panel .si-perms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#siteinfo-panel .si-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+}
+
+#siteinfo-panel .si-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#siteinfo-panel .si-empty {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+/* --- the select ------------------------------------------------
+   appearance:none drops the Windows arrow, which is the one piece of
+   system grey the pane cannot tint; the wrapper draws ours instead.
+   (The .set-select recipe from settings.css, scoped to this panel.) */
+#siteinfo-panel .si-select {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+#siteinfo-panel .si-select::after {
+  content: '\E70D';
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  color: var(--fg-3);
+  font-family: var(--icon-font);
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+#siteinfo-panel .si-sel {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  padding: 0 26px 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#siteinfo-panel .si-sel:hover { background: var(--glass-2); }
+
+#siteinfo-panel .si-sel:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+/* the open list is drawn by the OS: hand it opaque ground, not glass */
+#siteinfo-panel .si-sel option {
+  background: var(--ink-1);
+  color: var(--fg);
+}
+
+/* --- buttons ---------------------------------------------------- */
+#siteinfo-panel .si-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#siteinfo-panel .si-btn:hover { background: var(--glass-2); color: var(--fg); }
+#siteinfo-panel .si-btn:active { background: var(--glass-3); }
+
+#siteinfo-panel .si-btn:focus-visible,
+#siteinfo-panel .si-link:focus-visible,
+#siteinfo-panel .si-step:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+#siteinfo-panel .si-btn--thin { padding: 0 10px; }
+
+/* the second half of the two-step clear: same chip, lit */
+#siteinfo-panel .si-btn--go {
+  background: var(--glass-2);
+  color: var(--fg);
+}
+
+#siteinfo-panel .si-btn-ico {
+  font-family: var(--icon-font);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* a text button: the reset link under the permission rows */
+#siteinfo-panel .si-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  color: var(--fg-3);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 120ms steps(2);
+}
+
+#siteinfo-panel .si-link:hover { color: var(--fg); }
+
+#siteinfo-panel .si-link-ico {
+  font-family: var(--icon-font);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* --- the confirm row ------------------------------------------- */
+#siteinfo-panel .si-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#siteinfo-panel .si-confirm-text {
+  flex: 1 1 140px;
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* what happened, once it has: the quietest line in the pane */
+#siteinfo-panel .si-msg {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+/* --- zoom ------------------------------------------------------- */
+#siteinfo-panel .si-zoom-val {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+#siteinfo-panel .si-zoom-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#siteinfo-panel .si-step {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#siteinfo-panel .si-step:hover { background: var(--glass-2); color: var(--fg); }
+#siteinfo-panel .si-step:active { background: var(--glass-3); }
+
+/* ============================================================
+   Reduced motion: the stepped transitions are already close to
+   nothing, but the setting means none.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  #siteinfo,
+  #siteinfo-panel .si-sel,
+  #siteinfo-panel .si-btn,
+  #siteinfo-panel .si-link,
+  #siteinfo-panel .si-step { transition: none; }
+}

@@ -25,8 +25,9 @@
  *   #views #win-min #win-max #win-close #theme #titlebar #tabmenu
  * Body classes owned here: booted, maximized, acrylic, claude-live, tab-dragging.
  * Chip classes owned here: active, claude, live, loading, dragging, drag-shift,
- * broken, pinned, has-icon. Runtime panes owned here: #tabmenu rows, .tab-card
- * over a dead guest.
+ * broken, pinned, has-icon, split. Runtime panes owned here: #tabmenu rows,
+ * .tab-card over a dead guest, and split view's .split-divider / .split-focus /
+ * .split-scrim (siblings of the views in #views — a <webview> is never moved).
  * <html data-theme> is set before first paint by theme-boot.js and from here on.
  */
 
@@ -463,7 +464,7 @@ function setTabLoading(tab, loading) {
 // Segoe Fluent Icons, the same family the nav buttons use.
 //   E767 = speaker (the tab is making a sound), E74F = speaker muted,
 //   E774 = globe (a pinned chip with no favicon of its own).
-const TAB_GLYPH = { audible: '\uE767', muted: '\uE74F', globe: '\uE774' };
+const TAB_GLYPH = { audible: '\uE767', muted: '\uE74F', globe: '\uE774', split: '\uE89F' };
 
 function buildChip(tab) {
   const chip = document.createElement('div');
@@ -489,6 +490,14 @@ function buildChip(tab) {
     globe.setAttribute('aria-hidden', 'true');
     chip.appendChild(globe);
     tab.globeEl = globe;
+
+    // The two-panes glyph: chrome.css only shows it while the chip is .split,
+    // so it is built once here rather than added and removed with the pair.
+    const split = document.createElement('span');
+    split.className = 'glyph tab-split';
+    split.textContent = TAB_GLYPH.split;
+    split.setAttribute('aria-hidden', 'true');
+    chip.appendChild(split);
   }
 
   const title = document.createElement('span');
@@ -747,6 +756,9 @@ function moveTabToIndex(id, toIndex) {
   const [tab] = tabs.splice(from, 1);
   tabs.splice(to, 0, tab);
   syncChipOrder();
+  // A split is seated in STRIP order, so a chip dragged past its partner swaps
+  // which half is on the left. The ratio rides on both tabs, so it survives.
+  refreshSplit();
   saveSession(); // the stored active index is derived from this order
   return true;
 }
@@ -1039,6 +1051,11 @@ function createTab(url, options) {
     pinned: false,
     globeEl: null,
     asleep: false,
+    // Split view: the partner's id while this tab is half of a pair, and that
+    // pair's divider position. No elements — a split is layout on the view
+    // that is already in #views, never a re-parent. Never persisted.
+    splitWith: null,
+    splitRatio: 0.5,
     lastActive: 0,
     // The idle clock a never-activated background tab is measured from; without
     // it lastActive 0 would read as "idle since 1970" and sleep it on sight.
@@ -1120,6 +1137,8 @@ function canSleepTab(tab) {
   if (tab.pinned) return false;
   if (tab.audible) return false;
   if (tab.broken) return false;
+  // The other half of the split on screen is as visible as the active tab is.
+  if (isTabOnScreen(tab)) return false;
   if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return false;
   return isViewUsable(tab);
 }
@@ -1133,6 +1152,10 @@ function sleepTab(tab) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   if (tab.id === activeTabId) return false; // the tab on screen is never asleep
   if (!viewsEl || !tab.viewEl) return false;
+
+  // Giving the guest back would leave half a split pointing at a placeholder,
+  // so the pair breaks up first and the partner goes back to a well of its own.
+  unsplit(tab);
 
   tab.url = readCurrentUrl(tab) || tab.url;
 
@@ -1216,6 +1239,496 @@ function sleepOtherTabs() {
     if (canSleepTab(tab) && sleepTab(tab)) slept++;
   }
   return slept;
+}
+
+/* ------------------------------------------------------------------ */
+/* Split view                                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Two page tabs shown side by side in the same well. The pairing is symmetric
+ * and lives on the tabs themselves — tab.splitWith holds the partner's id — so
+ * there is no second list to keep in step with the strip.
+ *
+ * A <webview> is NEVER moved in the DOM. Re-parenting a guest leaves its
+ * webContents alive (getWebContentsId() does not even change) but stops it
+ * painting — a blank white pane — which is what the wrapper-pane version of
+ * this got wrong. Every view is a direct child of #views from birth to close,
+ * and a split is nothing but layout on the children that are already there:
+ *   - #views is display:flex, so both halves get display:flex, an inline
+ *     flex-basis carrying the ratio, and a CSS `order` seating them left and
+ *     right in STRIP order;
+ *   - one .split-divider is built into #views the first time a pair is made
+ *     and then kept for the life of the window, hidden unless a pair is on
+ *     screen, ordered between the two halves;
+ *   - .split-focus is a 2px line parked over the focused half's top edge — a
+ *     ::before cannot sit on a webview, so the mark is its own element,
+ *     positioned off getBoundingClientRect();
+ *   - a crash card is absolutely positioned against #views, so while split it
+ *     is inset to its own half by the same rect maths.
+ * Everything else in #views stays display:none, exactly as before.
+ *
+ * activeTabId stays the single source of truth: the omnibox, the nav buttons,
+ * the zoom badge, find, shield and site info all still follow it. The second
+ * pane is only a page you can see — clicking into it moves activeTabId to that
+ * tab WITHOUT breaking the pair. A press that lands inside a guest never
+ * reaches this document at all, so that path is main's: it forwards every
+ * guest focus over api.onGuestFocus and onGuestFocused() below turns the
+ * webContents id back into a tab.
+ *
+ * Claude chambers never split (a PTY has no second half), and splits are
+ * deliberately not part of the session snapshot.
+ */
+
+const SPLIT_RATIO_MIN = 0.2;
+const SPLIT_RATIO_MAX = 0.8;
+const SPLIT_RATIO_DEFAULT = 0.5;
+
+/** The pair's ratio never collapses a pane to nothing. */
+function clampSplitRatio(value) {
+  const n = Number(value);
+  if (!isFinite(n)) return SPLIT_RATIO_DEFAULT;
+  return Math.max(SPLIT_RATIO_MIN, Math.min(SPLIT_RATIO_MAX, n));
+}
+
+/** Only a page tab can be half of a pair. */
+function canSplitTab(tab) {
+  return !!(tab && tab.kind === 'page');
+}
+
+/**
+ * The tab this one is split with, or null. The pointer has to be symmetric:
+ * a half-written pairing (a partner that closed, say) reads as no split at all,
+ * which is what keeps every caller below from having to check twice.
+ */
+function splitPartner(tab) {
+  if (!tab || tab.splitWith === null || tab.splitWith === undefined) return null;
+  const other = tabs.find((t) => t.id === tab.splitWith) || null;
+  if (!other || other.splitWith !== tab.id) return null;
+  return other;
+}
+
+/** Both members in strip order, or just the tab itself when it is not split. */
+function splitMembers(tab) {
+  if (!tab) return [];
+  const other = splitPartner(tab);
+  if (!other) return [tab];
+  return tabs.indexOf(tab) <= tabs.indexOf(other) ? [tab, other] : [other, tab];
+}
+
+/**
+ * Whether this tab is on screen right now: the active one, or the other half
+ * of the active one's pair. Everything that used to test `id === activeTabId`
+ * to decide what to show goes through this instead.
+ */
+function isTabOnScreen(tab) {
+  if (!tab || activeTabId === null) return false;
+  if (tab.id === activeTabId) return true;
+  const other = splitPartner(tab);
+  return !!other && other.id === activeTabId;
+}
+
+/*
+ * The two elements a split borrows from #views. Both are built once, on the
+ * first split of the window, and then live there hidden — building them once
+ * is what keeps the divider's drag wiring attached exactly once, and it means
+ * a split never adds or removes a sibling next to a live guest.
+ */
+let splitDividerEl = null;
+let splitFocusEl = null;
+// A drag over a <webview> is swallowed by the guest, so the divider lays a
+// transparent scrim over the whole window for the length of the drag: the
+// pointer stays in the chrome document and the moves keep arriving.
+let splitScrimEl = null;
+
+function showSplitScrim() {
+  if (splitScrimEl) return;
+  const scrim = document.createElement('div');
+  scrim.className = 'split-scrim';
+  document.body.appendChild(scrim);
+  splitScrimEl = scrim;
+}
+
+function hideSplitScrim() {
+  if (!splitScrimEl) return;
+  try { splitScrimEl.remove(); } catch (err) { /* already detached */ }
+  splitScrimEl = null;
+}
+
+/** The divider, built into #views the first time anything asks for it. */
+function ensureSplitDivider() {
+  if (splitDividerEl && splitDividerEl.isConnected) return splitDividerEl;
+  if (!viewsEl) return null;
+
+  const divider = document.createElement('div');
+  divider.className = 'split-divider';
+  divider.setAttribute('role', 'separator');
+  divider.setAttribute('aria-orientation', 'vertical');
+  divider.title = 'Drag to resize — double-click to even out';
+  divider.style.display = 'none';
+  wireSplitDivider(divider);
+
+  viewsEl.appendChild(divider);
+  splitDividerEl = divider;
+  return divider;
+}
+
+/** The focus mark, likewise built once and left in #views. */
+function ensureSplitFocusMark() {
+  if (splitFocusEl && splitFocusEl.isConnected) return splitFocusEl;
+  if (!viewsEl) return null;
+
+  const mark = document.createElement('div');
+  mark.className = 'split-focus';
+  mark.setAttribute('aria-hidden', 'true');
+  mark.style.display = 'none';
+  viewsEl.appendChild(mark);
+  splitFocusEl = mark;
+  return mark;
+}
+
+/**
+ * The pair on screen right now, in strip order, or [] when nothing is split.
+ * Both halves must still have a view: a sleeping placeholder is not a pane.
+ */
+function onScreenSplitPair() {
+  const active = getActiveTab();
+  if (!active) return [];
+  const pair = splitMembers(active);
+  if (pair.length !== 2) return [];
+  if (!pair[0].viewEl || !pair[1].viewEl) return [];
+  return pair;
+}
+
+/** The half the ratio describes: whichever member is seated on the left. */
+function splitLeftTab() {
+  const pair = onScreenSplitPair();
+  return pair.length === 2 ? pair[0] : null;
+}
+
+/**
+ * Seat one member's view as a flex item of #views.
+ * @param {?string} basis a flex-basis for the left half, or null for "the rest"
+ */
+function seatSplitView(tab, order, basis) {
+  const view = tab && tab.viewEl;
+  if (!view) return;
+  const style = view.style;
+  style.order = String(order);
+  style.display = 'flex';
+  if (basis === null) {
+    style.flexGrow = '1';
+    style.flexShrink = '1';
+    style.flexBasis = '0';
+  } else {
+    style.flexGrow = '0';
+    style.flexShrink = '0';
+    style.flexBasis = basis;
+  }
+}
+
+/** Put one view back to the whole-well flex the stylesheet gives it. */
+function clearSplitSeat(tab) {
+  const view = tab && tab.viewEl;
+  if (view) {
+    const style = view.style;
+    style.order = '';
+    style.flexGrow = '';
+    style.flexShrink = '';
+    style.flexBasis = '';
+  }
+  // A card inset to half the well goes back to covering all of it.
+  if (tab && tab.cardEl) {
+    tab.cardEl.style.left = '';
+    tab.cardEl.style.right = '';
+  }
+}
+
+/**
+ * Push the pair's ratio into #views as order + flex-basis, and hide the
+ * divider whenever the thing in front is not half of a pair. Derived entirely
+ * from activeTabId, so it is safe to call after any change at all.
+ */
+function applySplitLayout() {
+  const pair = onScreenSplitPair();
+  if (pair.length !== 2) {
+    for (const tab of tabs) clearSplitSeat(tab);
+    if (splitDividerEl) splitDividerEl.style.display = 'none';
+    return;
+  }
+
+  const ratio = clampSplitRatio(pair[0].splitRatio);
+  // Two decimals: enough to be exact on any window, short enough to read.
+  const left = Math.round(ratio * 10000) / 100;
+
+  for (const tab of tabs) {
+    if (tab !== pair[0] && tab !== pair[1]) clearSplitSeat(tab);
+  }
+  // Odd orders for the halves, even for the divider between them: nothing else
+  // in #views is visible, so the three of them are the whole row.
+  seatSplitView(pair[0], 1, left + '%');
+  seatSplitView(pair[1], 3, null);
+
+  const divider = ensureSplitDivider();
+  if (divider) {
+    divider.style.order = '2';
+    divider.style.display = 'block';
+  }
+}
+
+/**
+ * Park the overlays over live rects: the focus mark on the active half's top
+ * edge, and any crash card on the half it belongs to. Measured rather than
+ * styled because neither one can be a child of the <webview> it describes.
+ */
+function syncSplitOverlays() {
+  const pair = onScreenSplitPair();
+  if (pair.length !== 2) {
+    if (splitFocusEl) splitFocusEl.style.display = 'none';
+    return;
+  }
+  if (!viewsEl) return;
+
+  const box = viewsEl.getBoundingClientRect();
+  for (const tab of pair) {
+    if (!tab.cardEl) continue;
+    const half = tab.viewEl.getBoundingClientRect();
+    tab.cardEl.style.left = Math.round(half.left - box.left) + 'px';
+    tab.cardEl.style.right = Math.round(box.right - half.right) + 'px';
+  }
+
+  const mark = ensureSplitFocusMark();
+  const active = getActiveTab();
+  if (!mark) return;
+  if (!active || !active.viewEl) { mark.style.display = 'none'; return; }
+  const rect = active.viewEl.getBoundingClientRect();
+  if (!rect.width) { mark.style.display = 'none'; return; }
+  mark.style.display = 'block';
+  mark.style.left = Math.round(rect.left - box.left) + 'px';
+  mark.style.top = Math.round(rect.top - box.top) + 'px';
+  mark.style.width = Math.round(rect.width) + 'px';
+}
+
+/** Everything a split has to re-do after any change: one call, idempotent. */
+function refreshSplit() {
+  applySplitLayout();
+  syncSplitOverlays();
+}
+
+/**
+ * Move the divider. The number is the LEFT pane's share of the well.
+ * It is mirrored onto both members so that dragging a chip past its partner —
+ * which swaps which one is "left" — cannot lose the ratio the user set.
+ */
+function setSplitRatio(tab, ratio) {
+  const pair = splitMembers(tab);
+  if (pair.length !== 2) return;
+  const value = clampSplitRatio(ratio);
+  pair[0].splitRatio = value;
+  pair[1].splitRatio = value;
+  refreshSplit();
+}
+
+/** The drag, wired onto the one divider element exactly once. */
+function wireSplitDivider(divider) {
+  let dragging = false;
+
+  const ratioFromX = (clientX) => {
+    if (!viewsEl) return;
+    const box = viewsEl.getBoundingClientRect();
+    if (!box.width) return;
+    // The left tab is read per move, not captured: a chip dragged past its
+    // partner mid-resize must not leave this pointing at the wrong half.
+    const leftTab = splitLeftTab();
+    if (!leftTab) return;
+    setSplitRatio(leftTab, (clientX - box.left) / box.width);
+  };
+
+  const onMove = (event) => {
+    if (!dragging) return;
+    ratioFromX(event.clientX);
+  };
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    hideSplitScrim();
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', endDrag);
+    window.removeEventListener('pointercancel', endDrag);
+  };
+
+  divider.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); // no text selection, no focus move
+    dragging = true;
+    showSplitScrim();
+    // Capture as well as the scrim: capture keeps a release OUTSIDE the window
+    // from stranding the drag, the scrim keeps a guest page from eating the
+    // moves. Neither one alone covers both.
+    try { divider.setPointerCapture(event.pointerId); } catch (err) { /* the scrim is enough */ }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
+  });
+
+  // Double-click is the way back to even halves, as in every split UI.
+  divider.addEventListener('dblclick', () => {
+    const leftTab = splitLeftTab();
+    if (leftTab) setSplitRatio(leftTab, SPLIT_RATIO_DEFAULT);
+  });
+}
+
+/** The two-panes glyph rides on BOTH chips: a pair is a pair from either end. */
+function syncSplitChips() {
+  for (const tab of tabs) {
+    if (!tab.chipEl) continue;
+    tab.chipEl.classList.toggle('split', !!splitPartner(tab));
+  }
+}
+
+/** Back to one well at a time: shown only while this tab is the one in front. */
+function showTabAsWell(tab) {
+  if (!tab) return;
+  const shown = isTabOnScreen(tab);
+  if (tab.viewEl) tab.viewEl.style.display = shown ? 'flex' : 'none';
+  if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
+}
+
+/**
+ * Stop showing a tab beside its partner. Both tabs survive untouched — this is
+ * only a layout change, no element moves — and a dangling pointer is cleared
+ * either way.
+ * @returns {boolean} true when a pair was actually broken up.
+ */
+function unsplit(tab) {
+  if (!tab) return false;
+  const other = splitPartner(tab);
+  if (!other) {
+    // Half a pairing (the partner closed first): tidy this side and stop.
+    tab.splitWith = null;
+    clearSplitSeat(tab);
+    showTabAsWell(tab);
+    if (tab.chipEl) tab.chipEl.classList.remove('split');
+    refreshSplit();
+    return false;
+  }
+
+  tab.splitWith = null;
+  other.splitWith = null;
+  clearSplitSeat(tab);
+  clearSplitSeat(other);
+  showTabAsWell(tab);
+  showTabAsWell(other);
+  syncSplitChips();
+  refreshSplit();
+  return true;
+}
+
+/**
+ * Show two page tabs side by side. Either tab may already be in another pair,
+ * and either may be asleep — both are dealt with before the pair is made.
+ * @returns {boolean} true when the pair is now on screen.
+ */
+function splitTabs(a, b) {
+  if (!viewsEl || !a || !b || a === b) return false;
+  if (!canSplitTab(a) || !canSplitTab(b)) return false;
+
+  // A tab is only ever in one pair, so an older pairing on either side goes.
+  unsplit(a);
+  unsplit(b);
+  // A sleeping tab has no guest to show: waking it is part of splitting to it.
+  if (a.asleep) wakeTab(a);
+  if (b.asleep) wakeTab(b);
+  if (!a.viewEl || !b.viewEl) return false;
+  // No divider, no split: better to leave both tabs whole than half-split.
+  if (!ensureSplitDivider()) return false;
+
+  a.splitWith = b.id;
+  b.splitWith = a.id;
+
+  const pair = splitMembers(a);
+  const ratio = clampSplitRatio(pair[0].splitRatio);
+  pair[0].splitRatio = ratio;
+  pair[1].splitRatio = ratio;
+
+  syncSplitChips();
+  // The layout, the display swap and the focus mark are all activateTab()'s
+  // job — including when the pair is already in front. Whichever half was
+  // there keeps the chrome; otherwise the pair comes forward on the tab the
+  // caller named first.
+  activateTab(activeTabId === b.id ? b.id : a.id);
+  return true;
+}
+
+/** The next page tab after this one in strip order, wrapping. Claude skipped. */
+function nextPageTab(tab) {
+  const start = tabs.indexOf(tab);
+  if (start === -1) return null;
+  for (let step = 1; step < tabs.length; step++) {
+    const candidate = tabs[(start + step) % tabs.length];
+    if (candidate !== tab && canSplitTab(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Menu row on a chip: pair that tab with the next page tab along the strip. */
+function splitTabWithNext(tab) {
+  if (!canSplitTab(tab)) return false;
+  const next = nextPageTab(tab);
+  if (!next) return false;
+  return splitTabs(tab, next);
+}
+
+/** Command: split the ACTIVE page tab with the next page tab in the strip. */
+function splitWithNext() {
+  return splitTabWithNext(getActiveTab());
+}
+
+/** Command: split the active page tab with one named tab (its chip's menu). */
+function splitWithTab(id) {
+  const active = getActiveTab();
+  const other = tabs.find((t) => t.id === id) || null;
+  if (!active || !other) return false;
+  return splitTabs(active, other);
+}
+
+/** Ctrl+\: break the pair if there is one, otherwise pair with the next tab. */
+function toggleSplit() {
+  const active = getActiveTab();
+  if (!active) return false;
+  if (splitPartner(active)) return unsplit(active);
+  return splitWithNext();
+}
+
+/** The page tab whose live guest has this webContents id, or null. */
+function tabForWebContentsId(wcId) {
+  if (wcId === undefined || wcId === null) return null;
+  for (const tab of tabs) {
+    // A Claude chamber has no guest and a sleeping tab's element is a
+    // placeholder: neither one answers getWebContentsId().
+    if (tab.kind !== 'page' || tab.asleep || !tab.viewEl) continue;
+    if (typeof tab.viewEl.getWebContentsId !== 'function') continue;
+    try {
+      if (tab.viewEl.getWebContentsId() === wcId) return tab;
+    } catch (err) { /* not attached yet: it cannot be the one that took focus */ }
+  }
+  return null;
+}
+
+/**
+ * A press inside a guest never reaches this document, so main forwards the
+ * guest's own focus event: { wcId }. Reaching for the other half of a split
+ * with the mouse is the same as asking for that tab — and the guard is the
+ * whole of the safety here, so a stray focus from any page that is NOT the
+ * active tab's partner is ignored rather than stealing the chrome.
+ */
+function onGuestFocused(payload) {
+  const tab = tabForWebContentsId(payload && payload.wcId);
+  if (!tab || tab.id === activeTabId) return;
+  const other = splitPartner(tab);
+  if (!other || other.id !== activeTabId) return;
+  activateTab(tab.id);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1453,11 +1966,17 @@ function activateTab(id) {
 
   for (const tab of tabs) {
     const isActive = tab.id === activeTabId;
-    // Nothing is destroyed on switch — hiding preserves page state and live PTYs.
-    tab.viewEl.style.display = isActive ? 'flex' : 'none';
+    // A split pair is shown whole: both halves are on screen whenever either
+    // of them is the active tab, so this is not the same test as isActive.
+    const shown = isTabOnScreen(tab);
+    // Nothing is destroyed on switch — hiding preserves page state and live
+    // PTYs. The view itself always carries the display, split or not: it never
+    // leaves #views, so there is no wrapper to toggle instead. refreshSplit()
+    // below then gives the pair its side of the well.
+    if (tab.viewEl) tab.viewEl.style.display = shown ? 'flex' : 'none';
     // A crash / failure card covers one tab's well, so it follows exactly the
     // same display swap as the view it sits over.
-    if (tab.cardEl) tab.cardEl.style.display = isActive ? 'flex' : 'none';
+    if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
     if (tab.chipEl) {
       tab.chipEl.classList.toggle('active', isActive);
       tab.chipEl.setAttribute('aria-selected', String(isActive));
@@ -1478,6 +1997,10 @@ function activateTab(id) {
     focusViewSoon(target);
   }
 
+  // The pair's order and flex-basis, the divider, and the mark on whichever
+  // half the chrome is now describing. A no-op when nothing is split.
+  refreshSplit();
+
   syncOmniboxFromActive(true);
   updateNavState();
   syncReloadButton(); // the incoming tab may be mid-load, the outgoing one not
@@ -1496,6 +2019,10 @@ function closeTab(id) {
 
   const tab = tabs[index];
   const wasActive = tab.id === activeTabId;
+
+  // A pair cannot outlive either half: this puts the partner's view back in
+  // #views on its own, before anything here starts removing elements.
+  unsplit(tab);
 
   pushClosedTab(tab); // read the url while the view is still attached
 
@@ -1701,6 +2228,23 @@ function tabMenuItemsForTab(tab) {
       label: tab.muted ? 'Unmute tab' : 'Mute tab',
       run: () => setTabMuted(tab, !tab.muted)
     });
+    // Split view. A pair is broken from either chip; otherwise the two ways in
+    // are "pair this chip with the tab after it" and, when the tab in front is
+    // a different page tab, "pair the tab in front with this chip".
+    const partner = splitPartner(tab);
+    const active = getActiveTab();
+    if (partner) {
+      items.push({ label: 'Unsplit', run: () => unsplit(tab) });
+    } else {
+      items.push({
+        label: 'Split with next tab',
+        run: () => splitTabWithNext(tab),
+        disabled: !nextPageTab(tab)
+      });
+      if (active && active !== tab && canSplitTab(active)) {
+        items.push({ label: 'Split with this tab', run: () => splitWithTab(tab.id) });
+      }
+    }
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
     // there: disabled on a tab that is not allowed to sleep right now.
@@ -2162,6 +2706,18 @@ function wireViewEvents(tab) {
     tab.ready = false;
   });
 
+  // Clicking into the OTHER half of a split moves the chrome to that tab. The
+  // guest eats the press itself, so the element taking focus is the only signal
+  // that it happened. Guarded twice over: this only ever fires for a view that
+  // is on screen beside the active one, so it can never steal the active tab.
+  viewEl.addEventListener('focus', () => {
+    if (stale()) return;
+    if (tab.id === activeTabId) return;
+    const other = splitPartner(tab);
+    if (!other || other.id !== activeTabId) return;
+    activateTab(tab.id);
+  });
+
   viewEl.addEventListener('page-title-updated', (event) => {
     if (stale()) return;
     setTabTitle(tab, event && event.title);
@@ -2356,9 +2912,9 @@ function showTabCard(tab, kind, detail) {
 
   const card = document.createElement('div');
   card.className = 'tab-card';
-  // Born hidden unless this tab is the one on screen; activateTab() takes it
-  // from here.
-  card.style.display = tab.id === activeTabId ? 'flex' : 'none';
+  // Born hidden unless this tab is on screen — which includes the second half
+  // of a split; activateTab() takes it from here.
+  card.style.display = isTabOnScreen(tab) ? 'flex' : 'none';
 
   const glyph = document.createElement('span');
   glyph.className = 'glyph card-glyph';
@@ -2379,14 +2935,28 @@ function showTabCard(tab, kind, detail) {
   again.textContent = 'Try again';
   again.addEventListener('click', () => retryTab(tab));
 
+  // Reaching for the other half of a split with the mouse is the same as asking
+  // for that tab. A live guest reports its own focus through main, but a card
+  // covers its guest, so a press on the card is the only signal there is.
+  // Capture, so the Try again button inside it counts as a reach too.
+  card.addEventListener('mousedown', () => {
+    if (tab.id === activeTabId) return;
+    const other = splitPartner(tab);
+    if (other && other.id === activeTabId) activateTab(tab.id);
+  }, true);
+
   card.appendChild(glyph);
   card.appendChild(head);
   card.appendChild(line);
   card.appendChild(again);
+  // The card is absolutely positioned against #views, which is the whole well.
+  // While this tab is half of a split, syncSplitOverlays() insets it to its own
+  // half — the card never moves in the DOM either.
   viewsEl.appendChild(card);
 
   tab.cardEl = card;
   setTabBroken(tab, true);
+  syncSplitOverlays();
 }
 
 /** Try again: back to the url the tab was on when it broke. */
@@ -2754,6 +3324,13 @@ function wireWindowControls() {
     });
   }
 
+  // A click inside the other half of a split lands in the guest and never
+  // reaches this document, so main forwards which webContents took focus and
+  // the chrome follows it onto that tab.
+  if (window.api && typeof window.api.onGuestFocus === 'function') {
+    window.api.onGuestFocus(onGuestFocused);
+  }
+
   if (win && typeof win.info === 'function') {
     // Wrapped in Promise.resolve so a synchronous throw is caught too.
     Promise.resolve()
@@ -2869,7 +3446,7 @@ function historyCall(method, url, title) {
 function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
-    window.Settings, window.Shield, window.Reader, window.TabSearch
+    window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -2929,6 +3506,9 @@ function wireKeyboard() {
       // nothing and means Ctrl+Shift+R works from a focused page the day it does.
       'reader': () => moduleShortcut('reader'),
       'tabsearch': () => moduleShortcut('tabsearch'),
+      // main.js does not send 'split' yet; like 'print' and 'reader', the entry
+      // costs nothing and means Ctrl+\ works from a focused page the day it does.
+      'split': toggleSplit,
       'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
@@ -2962,6 +3542,14 @@ function wireKeyboard() {
     if (!event.ctrlKey || event.altKey) return;
 
     const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+
+    // Ctrl+\ pairs the tab in front with the next one, or breaks the pair it is
+    // already in. The backslash has no case, so it is read off event.key raw.
+    if (event.key === '\\') {
+      event.preventDefault();
+      toggleSplit();
+      return;
+    }
 
     // Module bars: find, downloads, history. Each decides whether it applies.
     if (key === 'f' || key === 'j' || key === 'h' || key === ',' || key === 'd') {
@@ -3104,6 +3692,10 @@ function init() {
     pushRecentToTab(getActiveTab());
   });
 
+  // The split focus mark and a split crash card are parked over measured rects,
+  // so they are re-measured whenever the well changes size.
+  window.addEventListener('resize', refreshSplit);
+
   // Tab sleeping: one sweep a minute for the life of the window. Deliberately
   // never cleared — the chrome outlives every tab in it, and the setting is
   // re-read on each sweep, so a change takes effect without a restart.
@@ -3146,6 +3738,13 @@ window.sleepTab = sleepTab;
 window.wakeTab = wakeTab;
 window.sleepIdleTabs = sleepIdleTabs;
 window.canSleepTab = canSleepTab;
+window.splitWithNext = splitWithNext;
+window.splitWithTab = splitWithTab;
+window.splitTabs = splitTabs;
+window.unsplit = unsplit;
+window.toggleSplit = toggleSplit;
+window.splitPartner = splitPartner;
+window.setSplitRatio = setSplitRatio;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });

@@ -1,12 +1,16 @@
 /* ============================================================
-   sitestyles.js — per-site CSS, and a dark mode for sites that
-   refuse to have one.
+   sitestyles.js — per-site CSS, per-site scripts, and a dark mode
+   for sites that refuse to have one.
 
    THE STORE. One JSON object in localStorage['sitestyles']:
 
      { v: 1,
        globalDark: false,
-       hosts: { "example.com": { css: "", dark: false }, ... } }
+       hosts: { "example.com": { css: "", dark: false, js: "" }, ... } }
+
+   `js` joined the entry later and the version did not move: a record
+   written before it reads back with js: "" rather than as a corrupt
+   store, which is exactly what a missing key should mean.
 
    Host keys are normalised on the way in and on the way out:
    lowercased, no scheme, no userinfo, no `www.`, no port, no path,
@@ -28,6 +32,16 @@
    into the caller. app.js calls applyTo(tab) on each page webview's
    'dom-ready'; this module calls applyAll() itself whenever the store
    changes, so edits in settings are live without a reload.
+
+   THE SCRIPTS. A host entry's `js` is the user's own code, run in the
+   page after that host's CSS goes in, once per document (dom-ready is
+   per navigation, which is the same thing). It is wrapped in an IIFE
+   with a try/catch that reports a throw to the page's own console as
+   `[site script] host: message` — a broken snippet must never take the
+   apply chain down with it — and the wrapper returns true so the guest
+   never tries to serialise whatever the last expression evaluated to.
+   The same guards as the CSS: http(s) only, never the new tab page,
+   never a reader page. runScript() is the manual "Run now".
 
    Each webview's insertCSS() resolves to a key. Keys are tracked per
    tab id so a re-apply can remove exactly what this module inserted
@@ -101,6 +115,7 @@
   var writeTimer = 0;
   var insertedKeys = {};            // tab id -> [key, ...] this module inserted
   var chains = {};                  // tab id -> promise, serialising per-tab work
+  var scriptErrors = {};            // host -> last executeJavaScript failure (not persisted)
 
   /* ============================================================
      Store
@@ -125,7 +140,8 @@
       if (!entry || typeof entry !== 'object') entry = {};
       out.hosts[host] = {
         css: typeof entry.css === 'string' ? entry.css : '',
-        dark: entry.dark === true
+        dark: entry.dark === true,
+        js: typeof entry.js === 'string' ? entry.js : ''
       };
     }
     return out;
@@ -269,28 +285,30 @@
     if (!key) return null;
     var entry = load().hosts[key];
     if (!entry) return null;
-    return { css: entry.css, dark: entry.dark };
+    return { css: entry.css, dark: entry.dark, js: entry.js || '' };
   }
 
   /**
    * Create or merge. An absent key in the patch leaves the stored value
-   * alone; a new entry starts at { css: '', dark: false }. The entry
-   * survives being emptied — only remove() deletes.
+   * alone; a new entry starts at { css: '', dark: false, js: '' }. The
+   * entry survives being emptied — only remove() deletes.
    */
   function set(host, patch) {
     var key = normalizeHost(host);
     if (!key) return null;
     var s = load();
     var entry = s.hosts[key];
-    if (!entry) entry = { css: '', dark: false };
+    if (!entry) entry = { css: '', dark: false, js: '' };
+    if (typeof entry.js !== 'string') entry.js = '';
     if (patch && typeof patch === 'object') {
       if (typeof patch.css === 'string') entry.css = patch.css;
+      if (typeof patch.js === 'string') entry.js = patch.js;
       if (patch.dark !== undefined) entry.dark = patch.dark === true;
     }
     s.hosts[key] = entry;
     scheduleWrite();
     emit({ host: key });
-    return { css: entry.css, dark: entry.dark };
+    return { css: entry.css, dark: entry.dark, js: entry.js };
   }
 
   function remove(host) {
@@ -335,7 +353,14 @@
     var candidates = candidatesFor(host);
     for (var i = 0; i < candidates.length; i++) {
       var entry = s.hosts[candidates[i]];
-      if (entry) return { host: candidates[i], css: entry.css, dark: entry.dark };
+      if (entry) {
+        return {
+          host: candidates[i],
+          css: entry.css,
+          dark: entry.dark,
+          js: entry.js || ''
+        };
+      }
     }
     return null;
   }
@@ -433,6 +458,114 @@
     }
   }
 
+  /* ============================================================
+     Scripts
+     ============================================================ */
+
+  /**
+   * The user's snippet, sealed. An IIFE so declarations stay out of the
+   * page's globals, a try/catch so a throw is a console line in the page
+   * rather than a rejected promise out here, and a literal `true` at the
+   * end so the guest never has to serialise the snippet's last value
+   * back across the bridge (a DOM node would reject on the way).
+   *
+   * The host is baked in as a JSON literal: it is normalised, but a
+   * stray quote in one must not be able to end the string.
+   */
+  function wrapScript(host, code) {
+    var label = JSON.stringify('[site script] ' + String(host || '') + ': ');
+    return '(function(){try{\n' + code + '\n}catch(err){try{console.error(' + label +
+      ' + (err && err.message ? err.message : String(err)));}catch(e2){}}return true;})()';
+  }
+
+  function noteScriptError(host, err) {
+    var message = '';
+    try {
+      message = (err && err.message) ? String(err.message) : String(err);
+    } catch (e) { message = 'failed'; }
+    scriptErrors[host] = message;
+  }
+
+  /**
+   * The entry whose script should run in this tab right now, or null.
+   * Same gate as the CSS: a usable page guest, an http(s) URL that is
+   * not the new tab page (and not a reader page — those are not http(s)
+   * either), and a stored snippet with something in it.
+   */
+  function scriptFor(tab) {
+    if (!usable(tab)) return null;
+    var url = currentUrl(tab);
+    if (isNewTab(url) || !hostFromUrl(url)) return null;
+    var entry = matchFor(url);
+    if (!entry || typeof entry.js !== 'string' || !entry.js.trim()) return null;
+    return entry;
+  }
+
+  /** Run one entry's snippet in one guest. Resolves true when it ran. */
+  function execScript(tab, entry) {
+    if (!usable(tab) || !entry) return Promise.resolve(false);
+    var view = tab.viewEl;
+    if (!view || typeof view.executeJavaScript !== 'function') return Promise.resolve(false);
+    var p;
+    try {
+      p = view.executeJavaScript(wrapScript(entry.host, entry.js));
+    } catch (err) {
+      noteScriptError(entry.host, err);   // the guest went away mid-call
+      return Promise.resolve(false);
+    }
+    if (!p || typeof p.then !== 'function') {
+      delete scriptErrors[entry.host];
+      return Promise.resolve(true);
+    }
+    return p.then(function () {
+      delete scriptErrors[entry.host];
+      return true;
+    }, function (err) {
+      noteScriptError(entry.host, err);
+      return false;
+    });
+  }
+
+  /** Part of an apply: whatever the matched entry asks for, if anything. */
+  function maybeRunScript(tab, entry) {
+    if (!entry || typeof entry.js !== 'string' || !entry.js.trim()) return Promise.resolve(false);
+    return execScript(tab, entry);
+  }
+
+  /**
+   * The manual "Run now": re-run this tab's matching snippet on demand,
+   * without touching its stylesheets. Queued like everything else, so it
+   * cannot land in the middle of an apply. Resolves false when nothing
+   * matched (no guest, wrong URL, no snippet).
+   */
+  function runScript(tab) {
+    if (!tab || tab.id === undefined || tab.id === null) return Promise.resolve(false);
+    return queue(tab.id, function () {
+      var entry = scriptFor(tab);
+      if (!entry) return false;
+      return execScript(tab, entry);
+    }).then(function (ran) { return ran === true; }, function () { return false; });
+  }
+
+  /**
+   * The last executeJavaScript failure per host, for a UI that wants to
+   * say so. With no argument, a copy of the whole map. Errors thrown by
+   * the snippet itself are caught inside the page and land in the page's
+   * console instead — these are bridge failures: a dead guest, or a
+   * snippet that will not even parse.
+   */
+  function lastError(host) {
+    if (host === undefined) {
+      var copy = {};
+      for (var key in scriptErrors) {
+        if (Object.prototype.hasOwnProperty.call(scriptErrors, key)) copy[key] = scriptErrors[key];
+      }
+      return copy;
+    }
+    var h = normalizeHost(host);
+    return (h && scriptErrors[h]) || '';
+  }
+
   /**
    * Is the page already dark of its own accord? Only the global toggle
    * asks: a host explicitly set to dark is inverted regardless. A guest
@@ -503,6 +636,9 @@
     if (entry && typeof entry.css === 'string' && entry.css.trim()) {
       chain = chain.then(function () { return insertOne(tab, entry.css); });
     }
+    // The script goes last: it should see the page as the user's CSS
+    // leaves it, and a snippet that throws must not cost the sheets.
+    chain = chain.then(function () { return maybeRunScript(tab, entry); });
     return chain.then(function () { return null; }, function () { return null; });
   }
 
@@ -561,6 +697,8 @@
     matchFor: matchFor,
     applyTo: applyTo,
     applyAll: applyAll,
+    runScript: runScript,
+    lastError: lastError,
     isPageDark: isPageDark,
     normalizeHost: normalizeHost,
     hostFromUrl: hostFromUrl,
