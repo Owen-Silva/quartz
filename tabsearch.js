@@ -427,6 +427,36 @@
     } catch (err) { /* no bridge in this build; nothing to open */ }
   }
 
+  /** The last segment of a path, whichever separator it was written with. */
+  function folderBase(cwd) {
+    var text = String(cwd == null ? '' : cwd).replace(/[\\/]+$/, '');
+    if (!text) return '';
+    var at = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
+    return at === -1 ? text : text.slice(at + 1);
+  }
+
+  /** app.js's recent Claude folders, or nothing when that store is not there. */
+  function claudeRecentList() {
+    var fn = globalRef(function () { return claudeRecentFolders; });
+    if (typeof fn !== 'function') return [];
+    var list = null;
+    try { list = fn(); } catch (err) { return []; }
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** One recent folder as a verb: short name on the row, full path as the hint. */
+  function claudeRecentCommand(cwd, index) {
+    return {
+      id: 'claude-recent-' + index,
+      glyph: GLYPH.folder,
+      label: 'Claude in ' + (folderBase(cwd) || cwd),
+      hint: cwd,
+      run: function () {
+        callGlobal(function () { return createClaudeTabIn; }, cwd);
+      }
+    };
+  }
+
   /**
    * Every verb the palette offers, in the order it offers them. Rebuilt on each
    * render rather than kept, because half of these read the world: the label is
@@ -471,6 +501,13 @@
       action: 'claude-split',
       run: function () { callGlobal(function () { return toggleClaudeSplit; }); }
     });
+    /* One row per folder a chamber has actually opened in, read fresh on every
+       render so a session started a minute ago is already at the top. An app
+       without the store (an older app.js) simply contributes no rows. */
+    var recent = claudeRecentList();
+    for (var r = 0; r < recent.length; r++) {
+      list.push(claudeRecentCommand(recent[r], r));
+    }
     list.push({
       id: 'ask-claude', glyph: GLYPH.claude, label: 'Ask Claude about this page',
       hint: 'Hands the page to a Claude session', action: 'ask-claude',

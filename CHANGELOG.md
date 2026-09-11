@@ -36,6 +36,10 @@ to pick any of this up.
   and falls back to sending the link.
 - A Claude tab can sit beside a page in split view — Ctrl+Shift+\, Alt+click the Claude button, or
   the chip menu. The terminal refits when you drag the divider.
+- Recent Claude folders: the last eight folders a session actually started in are remembered, so
+  the bare-strip menu lists the top five as "Claude in <folder>" (full path on hover) and the
+  command palette offers every one of them — one click instead of the folder picker. The default
+  folder from Settings is always in the list, and it all survives a restart.
 
 ### Tabs
 

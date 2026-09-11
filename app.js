@@ -2435,6 +2435,109 @@ function folderBaseName(path) {
   return /^[A-Za-z]:$/.test(base) ? '' : base;
 }
 
+/* ---- recent Claude folders ---------------------------------------------
+ * The user works across several projects at once, so the folders a chamber has
+ * actually opened in are worth keeping: the strip menu and the palette each
+ * offer them as one click, with no folder picker in the way. localStorage,
+ * so the list is there synchronously at boot and survives a relaunch.
+ */
+const CLAUDE_RECENT_KEY = 'claudeRecent';
+const CLAUDE_RECENT_MAX = 8;
+
+/** One spelling for storage and for comparison: forward slashes, no trailing one. */
+function normaliseClaudeFolder(cwd) {
+  let text = String(cwd == null ? '' : cwd).trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (/^[A-Za-z]:$/.test(text)) text += '/'; // a drive root keeps its slash
+  return text;
+}
+
+/** Windows: two spellings of one folder are one folder. */
+function sameClaudeFolder(a, b) {
+  const left = normaliseClaudeFolder(a).toLowerCase();
+  return !!left && left === normaliseClaudeFolder(b).toLowerCase();
+}
+
+/** The stored list exactly as written — nothing merged in, nothing implied. */
+function storedClaudeFolders() {
+  let raw = null;
+  try { raw = window.localStorage.getItem(CLAUDE_RECENT_KEY); } catch (err) { return []; }
+  if (!raw) return [];
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (err) { return []; } // a corrupt list is no list
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const entry of parsed) {
+    const cwd = normaliseClaudeFolder(entry);
+    if (!cwd) continue;
+    if (out.some((seen) => sameClaudeFolder(seen, cwd))) continue;
+    out.push(cwd);
+    if (out.length >= CLAUDE_RECENT_MAX) break;
+  }
+  return out;
+}
+
+function writeClaudeFolders(list) {
+  try {
+    window.localStorage.setItem(
+      CLAUDE_RECENT_KEY, JSON.stringify(list.slice(0, CLAUDE_RECENT_MAX)));
+  } catch (err) { /* storage blocked or full: the list is only a convenience */ }
+}
+
+/**
+ * Most recent first. The folder Settings names is merged in at the front when
+ * it is set and has not been opened yet, so a fresh profile still gets the one
+ * row that matters. Read-time only: it is never written into the store.
+ */
+function claudeRecentFolders() {
+  const list = storedClaudeFolders();
+  const setting = normaliseClaudeFolder(settingGet('claudeDir'));
+  if (setting && !list.some((seen) => sameClaudeFolder(seen, setting))) list.unshift(setting);
+  return list.slice(0, CLAUDE_RECENT_MAX);
+}
+
+/** Called once a chamber has actually spawned in `cwd`. Empty is not a folder. */
+function rememberClaudeFolder(cwd) {
+  const folder = normaliseClaudeFolder(cwd);
+  if (!folder) return claudeRecentFolders();
+  const list = storedClaudeFolders().filter((seen) => !sameClaudeFolder(seen, folder));
+  list.unshift(folder);
+  writeClaudeFolders(list);
+  return claudeRecentFolders();
+}
+
+/** Drop one folder from the list. Returns what is left. */
+function forgetClaudeFolder(cwd) {
+  const folder = normaliseClaudeFolder(cwd);
+  if (!folder) return claudeRecentFolders();
+  writeClaudeFolders(storedClaudeFolders().filter((seen) => !sameClaudeFolder(seen, folder)));
+  return claudeRecentFolders();
+}
+
+/** What the recent rows call: a chamber in that folder, options passed through. */
+function createClaudeTabIn(cwd, options) {
+  const opts = options || {};
+  return createClaudeTab({ cwd: cwd, resume: opts.resume, background: opts.background });
+}
+
+/**
+ * The strip menu's recent rows. Labels are basenames, and basenames collide
+ * across projects ("browser" in Downloads and in home), so a duplicate wears
+ * its parent folder too. The full path rides along as the row's tooltip.
+ */
+function claudeRecentMenuItems(limit) {
+  const folders = claudeRecentFolders().slice(0, limit || 5);
+  const names = folders.map((cwd) => folderBaseName(cwd) || cwd);
+  return folders.map((cwd, at) => {
+    let name = names[at];
+    const clash = names.some((other, i) => i !== at && other.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      const parent = folderBaseName(cwd.replace(/\/[^/]*$/, ''));
+      if (parent) name = name + ' (' + parent + ')';
+    }
+    return { label: 'Claude in ' + name, title: cwd, run: () => createClaudeTabIn(cwd) };
+  });
+}
+
 /**
  * A Claude chip's title before the session names itself: the folder it runs in,
  * so a strip of chambers reads as a list of projects. Home (and anything with
@@ -2556,6 +2659,10 @@ function createClaudeTab(options) {
     setTabTitle(tab, 'Claude (unavailable)');
     return tab;
   }
+
+  // A folder is only "recent" once a chamber has actually started in it: the
+  // two failure paths above return before here, and so never pollute the list.
+  rememberClaudeFolder(cwd);
 
   wireTermEvents(tab);
   return tab;
@@ -2923,6 +3030,9 @@ function openTabMenu(x, y, items) {
     row.className = item.disabled ? 'menu-item is-off' : 'menu-item';
     row.setAttribute('role', 'menuitem');
     row.textContent = item.label;
+    // A row whose label is a short name (a recent folder) can carry the long
+    // one as its tooltip; every other row leaves the attribute off entirely.
+    if (item.title) row.title = item.title;
     tabMenuEl.appendChild(row);
     if (item.disabled) {
       row.setAttribute('aria-disabled', 'true');
@@ -3082,17 +3192,24 @@ function tabMenuItemsForTab(tab) {
   return items;
 }
 
-/** Right-click on bare strip: there is no tab to act on, so only these five. */
+/**
+ * Right-click on bare strip: there is no tab to act on, so only these five —
+ * plus a row per recent Claude folder, which is nothing at all on a profile
+ * that has never opened one.
+ */
 function tabMenuItemsForStrip() {
-  return [
+  const items = [
     { label: 'New tab', run: () => createTab(HOME_URL) },
     { label: 'New Claude tab in folder…', run: newClaudeTabInFolder },
     // The default folder, opened straight onto its past conversations.
-    { label: 'Resume a Claude conversation…', run: resumeClaudeConversation },
-    // The manual version of the idle sweep: the tab in front is never touched.
-    { label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepTab) },
-    { label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() }
+    { label: 'Resume a Claude conversation…', run: resumeClaudeConversation }
   ];
+  // The folders chambers have actually run in: the picker, already answered.
+  for (const row of claudeRecentMenuItems(5)) items.push(row);
+  // The manual version of the idle sweep: the tab in front is never touched.
+  items.push({ label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepTab) });
+  items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
+  return items;
 }
 
 /**
