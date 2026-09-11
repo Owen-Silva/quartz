@@ -175,6 +175,43 @@ contextBridge.exposeInMainWorld('api', {
   shortcuts: {
     set: (bindings) => ipcRenderer.send('shortcuts:set', { bindings })
   },
+  // Spotify auto-pause. Two switches behind one group: `setEnabled` is the
+  // WHOLE COMPUTER (the SpotifyAutoPause scheduled task and its local bridge),
+  // `setConfig.browserHold` is only this browser's own tabs. Every call
+  // resolves -- a bridge that is not running comes back as
+  // { bridge: 'stopped', error: '...' }, never as a rejection.
+  autopause: {
+    // Status = { installed, enabled, bridge, port, spotify, wePaused, holds,
+    //            browserHold, audibleTabs, config, error }. Answers in ~1.5 s
+    //            even with nothing running, so it is safe to poll.
+    status: () => ipcRenderer.invoke('autopause:status'),
+    setEnabled: (on) => ipcRenderer.invoke('autopause:set-enabled', { on: !!on }),
+    // Only the three known keys travel, and only in the right shape: main
+    // re-validates anyway, but a typo here should not reach it as a mystery.
+    // Hosts are sent as trimmed strings; main normalises and de-duplicates.
+    setConfig: (patch) => {
+      const p = patch && typeof patch === 'object' ? patch : {};
+      const out = {};
+      if (typeof p.browserHold === 'boolean') out.browserHold = p.browserHold;
+      if (typeof p.anySite === 'boolean') out.anySite = p.anySite;
+      if (Array.isArray(p.sites)) {
+        out.sites = p.sites
+          .map((s) => String(s == null ? '' : s).trim().slice(0, 253))
+          .filter((s) => s.length > 0)
+          .slice(0, 100);
+      }
+      return ipcRenderer.invoke('autopause:set-config', out);
+    },
+    // Runs doctor.ps1 -Json, which is read-only: { ok, text, json }.
+    doctor: () => ipcRenderer.invoke('autopause:doctor'),
+    // Pushed on every state change main sees (a hold taken or handed back, the
+    // switch moving, a tab starting or stopping). Returns an unsubscribe.
+    onStatus: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('autopause:changed', handler);
+      return () => ipcRenderer.removeListener('autopause:changed', handler);
+    }
+  },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     start: (opts) => ipcRenderer.invoke('pty:start', opts),

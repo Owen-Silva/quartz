@@ -102,6 +102,33 @@ to pick any of this up.
   whatever you type.
 - Contrast and copy pass: the muted foreground now clears 4.5:1 on panel grounds in both themes,
   captions are sentence case throughout, and the split divider is visible in light.
+- Instrument glass: a design pass over the chrome, the panes and the bundled pages. A container
+  (the omnibox slot, the active chip, a popover, a pane) is bevelled, `corner-shape: round bevel
+  round bevel` cutting two corners on the diagonal, inside an `@supports` so a build without it
+  keeps plain rounded corners. Controls keep ordinary round corners at `--radius-ctl`, so the
+  bevel stays a container signature.
+- Those containers wear a 1px lit rim, specular at the top left falling to the accent at the
+  bottom right. It is painted as a masked ring on a pseudo-element, because the same gradient run
+  as a border-box layer under translucent glass washes the whole interior: it took the omnibox's
+  placeholder with it. An `<input>` has no pseudo-element of its own, so the omnibox's ring is
+  anchor-positioned from `.navrow::after`, and the two-layer trick over an opaque interior is left
+  as the fallback where anchor positioning is missing.
+- Status reads as light. A live or playing dot is a pip that glows rather than one that is
+  painted, and amber keeps its two strengths: a live Claude session, and a brighter flash for one
+  waiting on you.
+- Section rules fade out instead of ruling all the way across, readouts are set in Bahnschrift at
+  `font-stretch: 87.5%` with tabular numerals, focus rings are lighter, and every state change is
+  stepped.
+- New tokens, each built out of the theme tokens with `var()`, so one definition covers dark,
+  light and all six palettes: `--bevel`, `--bevel-lg`, `--radius-ctl`, `--rim`, `--rim-focus`,
+  `--rim-soft`, `--pip-glow`, `--pip-amber`, `--pip-amber-strong`, `--seam-v` and
+  `--readout-stretch`.
+- Light theme fix: a switch row's label inherited the row's animating colour, so for the first
+  step after a theme flip it sat on the old theme's `--fg` and went near-white on the white pane.
+  The label names its own colour now, and repeats the row's hover, on and disabled states.
+- A reloaded new tab page keeps the theme it is looking at. The chrome pushes theme, settings,
+  background and recents again on every `dom-ready`, so F5, a crash reload or a script reload no
+  longer brings back the theme and settings the tab was created with.
 
 ### Shortcuts
 
@@ -126,6 +153,29 @@ it displaces the other action, and the displaced one is left unbound and named.
 - Open folder button, and a Downloads section in Settings.
 - Ask Claude about this file: a finished row hands its path, unsent, to a Claude tab beside the
   page you are on — Claude Code reads files and images off disk, so nothing is uploaded.
+
+### Spotify auto-pause
+
+- Settings has a Spotify section, driving the auto-pause helper already installed at
+  `~/spotify-autopause`. The browser is only a client of it: nothing in that folder is written
+  from here.
+- The switch is for the whole computer. On enables the `SpotifyAutoPause` scheduled task and runs
+  it; off ends it and disables it, because the task carries a repeating keepalive trigger and one
+  that is merely ended restarts itself within minutes. Where the task is missing, the switch
+  launches the bridge directly and remembers the choice.
+- This browser's own tabs hold Spotify paused too, behind a second switch, "Also pause for videos
+  in this browser", with a line under it counting the tabs playing right now. A tab making sound
+  on youtube.com, youtube-nocookie.com, lessonplayer.example, lessonplayer-academy.example or lessons.example,
+  or any tab at all with "Any tab that makes sound" on, registers a hold at the bridge on
+  127.0.0.1 (the first free of ports 8787 to 8790) under its own `src=owen-browser`, so the two
+  browsers can never release each other's hold. The hold refreshes every 60 seconds and is handed
+  back 1.5 seconds after the sound stops, or on quit. Spotify's own web player never counts as a
+  video.
+- A readout under the switch says what is actually true, down to the port and whether Spotify is
+  open, and "Check health" runs the helper's own `doctor.ps1` and prints the report without
+  changing anything.
+- Verified live: a tab making sound registered `owen-browser` at the bridge within five seconds
+  and released the hold when it closed.
 
 ### Performance
 
@@ -177,6 +227,9 @@ the aurora's stepped keyframes.
 - If a browser style you wrote breaks the UI, Ctrl+Alt+Shift+R resets it from anywhere.
 - Anything started with `--test-profile` uses `%TEMP%\browser-test-profile` and never touches the
   real profile at `%APPDATA%\browser`.
+- The Spotify section needs the separate helper installed at `~/spotify-autopause`. Without it the
+  switches are drawn but disabled and the readout says "Not installed on this computer", rather
+  than claiming something is running.
 
 ## Commits
 
@@ -210,3 +263,5 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 69599f5 | 04:52 | CHANGELOG: settings filter |
 | 18b55a7 | 06:07 | Recent Claude folders in the strip menu and palette; README for rounds 18-21 |
 | 19c5c2b | 06:07 | CHANGELOG: intro no longer hardcodes the commit count |
+| 33d4fac | 10:51 | Ask Claude about a downloaded file; chambers open synchronously on activation |
+| 627b163 | 11:40 | Instrument glass: bevelled containers, light rims, pips, readout type |

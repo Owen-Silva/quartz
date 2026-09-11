@@ -24,6 +24,7 @@ const {
   webContents,
 } = require('electron');
 const { createSession, killAll } = require('./pty');
+const autopauseModule = require('./autopause');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -59,6 +60,17 @@ function send(channel, payload) {
   if (!canSend()) return;
   win.webContents.send(channel, payload);
 }
+
+/**
+ * Spotify auto-pause. The user's ~/spotify-autopause bridge already pauses Spotify
+ * for the LessonPlayer desktop app and for Opera GX tabs; this makes THIS browser's
+ * tabs do the same, and puts the whole-computer switch in the settings pane.
+ * The module owns all of it -- main only feeds it guests and pushes its state.
+ */
+const autoPause = autopauseModule.create({
+  app,
+  onChange: (status) => send('autopause:changed', status),
+});
 
 // ---------------------------------------------------------------------------
 // Window state
@@ -2019,6 +2031,26 @@ function guestMenuTemplate(contents, params) {
   return joinMenuGroups([navigation, link, image, selection, ask, editing, inspect]);
 }
 
+// ---------------------------------------------------------------------------
+// Spotify auto-pause IPC
+//
+// Every call resolves. A bridge that is not running, a scheduled task that is
+// missing, a schtasks call that fails -- all of it comes back as plain English
+// in `status.error` rather than as a rejected invoke, because the settings pane
+// polls these and a throw there would surface as a dead section.
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('autopause:status', () => autoPause.status());
+
+ipcMain.handle('autopause:set-enabled', (_event, { on } = {}) => autoPause.setEnabled(!!on));
+
+// The patch is re-validated inside the module (hosts are normalised, junk and
+// duplicates dropped, the list capped) -- preload's clamp is the first pass,
+// not the only one.
+ipcMain.handle('autopause:set-config', (_event, patch = {}) => autoPause.setConfig(patch));
+
+ipcMain.handle('autopause:doctor', () => autoPause.doctor());
+
 /** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
 
@@ -2100,6 +2132,11 @@ app.on('web-contents-created', (_event, contents) => {
   });
 
   contents.on('destroyed', () => forgetAdblockTab(contents.id));
+
+  // Spotify auto-pause watches this guest from here on: audible + a watched
+  // host is what counts as "a video is playing". It attaches its own listeners
+  // and drops the tab when it is destroyed.
+  autoPause.watchGuest(contents);
 });
 
 // ---------------------------------------------------------------------------
@@ -2112,7 +2149,12 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   killAll();
   handles.clear();
+  // Hands our Spotify hold back. That is an HTTP round trip, so it may defer
+  // the quit by up to ~1.5 s -- once, and only when a hold is actually out.
+  // Skipping it would leave Spotify paused until the bridge's 180 s hold TTL
+  // expired it.
+  autoPause.handleQuit(event);
 });

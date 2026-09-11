@@ -1993,6 +1993,446 @@
   }
 
   /* ------------------------------------------------------------
+     Spotify — the auto-pause helper
+
+     A bridge outside the browser pauses the Spotify desktop app
+     while something is playing, and this browser's own tabs hold
+     it the way the extension in the other browser does. Main owns
+     all of it; the section is a readout over window.api.autopause
+     and nothing here is stored in localStorage: every value on
+     screen came from status(), and every change goes back through
+     setEnabled() or setConfig().
+
+     A build whose preload has no autopause — an older main, a
+     failed load — renders the "Not installed" state and throws
+     nothing: every call goes through autopauseCall(), where a
+     missing method, a throw and a rejected promise all land in
+     the same handler.
+     ------------------------------------------------------------ */
+
+  /* The hosts a fresh install watches. They are here only so the editor has
+     something honest to show before the first status() answers — the list in
+     force is always the one status() reports. */
+  var AUTOPAUSE_SITES = [
+    'youtube.com', 'youtube-nocookie.com', 'lessonplayer.example',
+    'lessonplayer-academy.example', 'lessons.example'
+  ];
+
+  /* 4s: live enough that the readout follows a video starting, slow enough
+     that an open pane is not a poll loop. It only runs while the pane is
+     open — closePanel() takes the timer and the subscription down again. */
+  var AUTOPAUSE_POLL_MS = 4000;
+
+  var apStatus = null;        // the last Status, shaped; null = nothing asked yet
+  var apError = null;         // the last failure, in plain English
+  var apDrawn = '';           // the signature the section was last drawn from
+  var apWatching = false;     // poll + subscription are live (open pane only)
+  var apTimer = 0;
+  var apOff = null;           // the onStatus unsubscribe, while subscribed
+  var apSitesEl = null;       // the host editor, while it is on screen
+  var apChecking = false;     // doctor() is in flight
+  var apReport = '';          // the last health text
+  var apReportOk = false;
+  var apReportOpen = false;   // the readout survives a re-render open
+
+  /** The preload bridge, or null when this build has none. */
+  function autopauseApi() {
+    try {
+      var api = window.api && window.api.autopause;
+      if (!api || typeof api.status !== 'function') return null;
+      return api;
+    } catch (err) { return null; }
+  }
+
+  /** A failure as a sentence — never an object, never a stack. */
+  function autopauseReason(err) {
+    var text = '';
+    try { text = String((err && err.message) || err || ''); } catch (e) { text = ''; }
+    text = text.replace(/^Error:\s*/i, '').trim();
+    return text || 'That did not work';
+  }
+
+  /**
+   * One call to main. A missing api, a missing method, a throw and a
+   * rejected promise all end in onDone(value, reason), so nothing in this
+   * section can throw out of a click handler. A build with no bridge at all
+   * answers (null, null): that is the "Not installed" state, not an error.
+   */
+  function autopauseCall(name, arg, onDone) {
+    var api = autopauseApi();
+    if (!api || typeof api[name] !== 'function') { onDone(null, null); return; }
+    var answer;
+    try { answer = arg === undefined ? api[name]() : api[name](arg); }
+    catch (err) { onDone(null, autopauseReason(err)); return; }
+    try {
+      Promise.resolve(answer).then(
+        function (value) { onDone(value, null); },
+        function (err) { onDone(null, autopauseReason(err)); }
+      );
+    } catch (err) { onDone(null, autopauseReason(err)); }
+  }
+
+  /** A typed list of hosts, cleaned: no scheme, no path, no repeats. */
+  function autopauseHosts(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    for (var i = 0; i < list.length; i++) {
+      var host = String(list[i] == null ? '' : list[i]).trim().toLowerCase();
+      host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+                 .replace(/[\/?#].*$/, '')
+                 .replace(/^\.+/, '');
+      if (host && out.indexOf(host) < 0) out.push(host);
+    }
+    return out;
+  }
+
+  /** Whatever main sent, as the Status this section can draw without checks. */
+  function autopauseShape(raw) {
+    var s = (raw && typeof raw === 'object') ? raw : {};
+    var c = (s.config && typeof s.config === 'object') ? s.config : {};
+    var sites = autopauseHosts(c.sites);
+    var tabs = Number(s.audibleTabs);
+    var port = Number(s.port);
+    return {
+      installed: s.installed === true,
+      enabled: s.enabled === true,
+      bridge: (s.bridge === 'running' || s.bridge === 'stopped') ? s.bridge : 'unknown',
+      port: isFinite(port) && port > 0 ? Math.round(port) : null,
+      spotify: s.spotify === true,
+      wePaused: s.wePaused === true,
+      browserHold: s.browserHold === true,
+      audibleTabs: isFinite(tabs) && tabs > 0 ? Math.round(tabs) : 0,
+      config: {
+        browserHold: c.browserHold !== false,
+        anySite: c.anySite === true,
+        sites: sites.length ? sites : AUTOPAUSE_SITES.slice()
+      },
+      error: (typeof s.error === 'string' && s.error.trim()) ? s.error.trim() : null
+    };
+  }
+
+  /**
+   * What is true right now, in words. Sentence case and no jargon: this line
+   * is the section's instrument readout, and it is the only place the state
+   * is explained.
+   */
+  function autopauseSentence() {
+    if (!autopauseApi()) return 'Not installed on this computer';
+    var s = apStatus;
+    /* Asked and never answered — a main that threw, a channel that is gone —
+       reads the same as a build with no helper at all. The reason is printed
+       underneath; the readout never claims something is running. */
+    if (!s) return apError ? 'Not installed on this computer' : 'Checking';
+    if (!s.installed) return 'Not installed on this computer';
+    if (s.bridge === 'running') {
+      if (s.wePaused) return 'Running, holding Spotify paused for a video';
+      var where = s.port ? 'Running on port ' + s.port : 'Running';
+      return where + (s.spotify ? ', Spotify open' : ', Spotify not open');
+    }
+    if (s.bridge === 'stopped') return 'Stopped';
+    return s.enabled ? 'Turned on, not answering' : 'Stopped';
+  }
+
+  /** The pip: ion while it runs, amber while it holds, dim otherwise. */
+  function autopauseLight() {
+    var s = apStatus;
+    if (!autopauseApi() || !s || !s.installed) return '';
+    if (s.wePaused) return ' is-hold';
+    return s.bridge === 'running' ? ' is-live' : '';
+  }
+
+  /** The lit sentence: a pip, then what it means. */
+  function autopauseReadout() {
+    var p = el('p', 'set-readout');
+    var pip = el('span', 'set-pip' + autopauseLight());
+    pip.setAttribute('aria-hidden', 'true');    // the sentence carries the meaning
+    p.appendChild(pip);
+    p.appendChild(el('span', 'set-readout-text', autopauseSentence()));
+    return p;
+  }
+
+  /** Everything the section draws, in one string: no change, no re-render. */
+  function autopauseSignature() {
+    var s = apStatus;
+    if (!s) return 'none|' + (apError || '') + '|' + (autopauseApi() ? 'api' : 'none');
+    return [
+      s.installed, s.enabled, s.bridge, s.port, s.spotify, s.wePaused,
+      s.audibleTabs, s.config.browserHold, s.config.anySite,
+      s.config.sites.join(' '), s.error || '', apError || ''
+    ].join('|');
+  }
+
+  /**
+   * A Status arrived — from the poll, from a change main pushed, or from a
+   * switch that was just thrown. Redraw only when something actually moved,
+   * and never out from under a caret sitting in the host editor.
+   */
+  function autopauseTake(raw, reason) {
+    if (raw) apStatus = autopauseShape(raw);
+    apError = reason || null;
+    var sig = autopauseSignature();
+    if (sig === apDrawn) return;
+    var active = null;
+    try { active = document.activeElement; } catch (err) { active = null; }
+    if (apSitesEl && active === apSitesEl) return;   // mid-edit: the blur lands first
+    apDrawn = sig;
+    renderSpotify();
+    refreshFilter();
+  }
+
+  function autopausePoll() {
+    autopauseCall('status', undefined, autopauseTake);
+  }
+
+  /** Open: one subscription and one 4s poll, however often this is called. */
+  function autopauseWatch() {
+    if (apWatching) return;                    // opened twice is still one of each
+    apWatching = true;
+    var api = autopauseApi();
+    if (api && typeof api.onStatus === 'function') {
+      try {
+        var off = api.onStatus(function (s) { autopauseTake(s, null); });
+        if (typeof off === 'function') apOff = off;
+      } catch (err) { apOff = null; }
+    }
+    autopausePoll();
+    if (typeof window.setInterval === 'function') {
+      try { apTimer = window.setInterval(autopausePoll, AUTOPAUSE_POLL_MS); }
+      catch (err) { apTimer = 0; }
+    }
+  }
+
+  /** Closed: nothing of this section is left running. */
+  function autopauseRelease() {
+    apWatching = false;
+    if (apTimer && typeof window.clearInterval === 'function') {
+      try { window.clearInterval(apTimer); } catch (err) { /* already gone */ }
+    }
+    apTimer = 0;
+    if (apOff) {
+      try { apOff(); } catch (err) { /* the channel is already gone */ }
+    }
+    apOff = null;
+  }
+
+  /**
+   * Throw a switch. The row moves at once so the pane never feels dead, and
+   * whatever main answers with replaces that guess. A build with no bridge
+   * does nothing at all: the controls are disabled there anyway.
+   */
+  function autopauseWrite(method, arg, guess, failed) {
+    if (!autopauseApi()) return;
+    if (apStatus && typeof guess === 'function') {
+      guess(apStatus);
+      apDrawn = '';
+      renderSpotify();
+      refreshFilter();
+    }
+    autopauseCall(method, arg, function (value, reason) {
+      autopauseTake(value, reason);
+      if (reason) showToast(failed);
+    });
+  }
+
+  function autopauseSaveSites(text) {
+    var list = autopauseHosts(String(text || '').split(/[\s,]+/));
+    autopauseWrite('setConfig', { sites: list }, function (s) {
+      s.config.sites = list.length ? list : AUTOPAUSE_SITES.slice();
+    }, 'Those sites could not be saved');
+  }
+
+  function autopauseDoctor() {
+    if (apChecking) return;
+    apChecking = true;
+    renderAutopauseHealth();
+    autopauseCall('doctor', undefined, function (value, reason) {
+      apChecking = false;
+      if (reason) {
+        apReportOk = false;
+        apReport = reason;
+      } else {
+        var o = (value && typeof value === 'object') ? value : {};
+        var text = typeof o.text === 'string' ? o.text.replace(/\s+$/, '') : '';
+        if (!text && o.json) {
+          try { text = JSON.stringify(o.json, null, 2); } catch (err) { text = ''; }
+        }
+        apReportOk = o.ok === true;
+        apReport = text || (apReportOk
+          ? 'The health check found nothing wrong.'
+          : 'The health check answered with nothing.');
+      }
+      apReportOpen = true;
+      renderAutopauseHealth();
+      refreshFilter();
+    });
+  }
+
+  function buildSpotify() {
+    var s = section('Spotify');
+
+    var main = el('div', 'set-field');
+    main.setAttribute('data-field', 'autopause');
+    s.appendChild(main);
+
+    var browser = el('div', 'set-field');
+    browser.setAttribute('data-field', 'autopausebrowser');
+    s.appendChild(browser);
+
+    var sites = el('div', 'set-field');
+    sites.setAttribute('data-field', 'autopausesites');
+    s.appendChild(sites);
+
+    var health = el('div', 'set-field');
+    health.setAttribute('data-field', 'autopausehealth');
+    s.appendChild(health);
+    return s;
+  }
+
+  function renderSpotify() {
+    renderAutopauseMain();
+    renderAutopauseBrowser();
+    renderAutopauseSites();
+    renderAutopauseHealth();
+  }
+
+  /** The whole-computer switch, and the line that says what is true. */
+  function renderAutopauseMain() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="autopause"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var s = apStatus;
+    var live = !!(autopauseApi() && s && s.installed);
+
+    var row = switchRow('Pause Spotify while videos play', !!(live && s.enabled), function (next) {
+      autopauseWrite('setEnabled', !!next, function (cur) {
+        cur.enabled = !!next;
+        if (!next) { cur.bridge = 'stopped'; cur.port = null; cur.wePaused = false; }
+      }, next ? 'Spotify auto-pause could not be started' : 'Spotify auto-pause could not be stopped');
+    });
+    if (!live) row.disabled = true;
+    field.appendChild(row);
+
+    field.appendChild(autopauseReadout());
+
+    var trouble = apError || (s && s.error) || null;
+    if (trouble) field.appendChild(el('p', 'set-note', trouble));
+
+    field.appendChild(el('p', 'set-hint',
+      'On means the helper runs for the whole computer, not just this browser: ' +
+      'Spotify pauses while a video plays anywhere, and starts again after.'));
+  }
+
+  /** This browser's own tabs, and how many of them are playing. */
+  function renderAutopauseBrowser() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="autopausebrowser"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var s = apStatus;
+    var usable = !!(autopauseApi() && s && s.installed);
+
+    var row = switchRow('Also pause for videos in this browser',
+      !!(s && s.config.browserHold), function (next) {
+        autopauseWrite('setConfig', { browserHold: !!next }, function (cur) {
+          cur.config.browserHold = !!next;
+        }, 'That switch could not be saved');
+      });
+    if (!usable) row.disabled = true;
+    field.appendChild(row);
+
+    var n = s ? s.audibleTabs : 0;
+    if (n > 0) {
+      field.appendChild(el('p', 'set-count',
+        n === 1 ? '1 tab is playing right now' : n + ' tabs are playing right now'));
+    }
+
+    field.appendChild(el('p', 'set-hint',
+      'Tabs in this browser hold Spotify the same way the extension does in your other one.'));
+  }
+
+  /** Any sound at all, or only the sites named underneath. */
+  function renderAutopauseSites() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="autopausesites"]');
+    if (!field) return;
+    field.textContent = '';
+    apSitesEl = null;
+
+    var s = apStatus;
+    var usable = !!(autopauseApi() && s && s.installed);
+    var any = !!(s && s.config.anySite);
+
+    var row = switchRow('Any tab that makes sound', any, function (next) {
+      autopauseWrite('setConfig', { anySite: !!next }, function (cur) {
+        cur.config.anySite = !!next;
+      }, 'That switch could not be saved');
+    });
+    if (!usable) row.disabled = true;
+    field.appendChild(row);
+
+    if (any) {
+      field.appendChild(el('p', 'set-hint',
+        'Every tab that makes a sound counts. Turn this off to name the sites yourself.'));
+      return;
+    }
+
+    var label = el('label', 'set-label', 'Sites that count as a video');
+    label.setAttribute('for', 'set-autopause-sites');
+    field.appendChild(label);
+
+    var ta = document.createElement('textarea');
+    ta.id = 'set-autopause-sites';
+    ta.className = 'set-hosts';
+    ta.spellcheck = false;
+    ta.setAttribute('aria-label', 'Sites that count as a video');
+    ta.placeholder = 'youtube.com';
+    ta.value = (s ? s.config.sites : AUTOPAUSE_SITES).join('\n');
+    if (!usable) ta.disabled = true;
+    // Escape leaves the field first; a second press then closes the panel.
+    ta.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      ta.blur();
+    });
+    ta.addEventListener('change', function () { autopauseSaveSites(ta.value); });
+    apSitesEl = ta;
+    field.appendChild(ta);
+
+    field.appendChild(el('p', 'set-hint',
+      'One host per line. Subdomains count too, so youtube.com covers m.youtube.com.'));
+  }
+
+  /** doctor(), and its answer kept in a readout you can shut again. */
+  function renderAutopauseHealth() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="autopausehealth"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var api = autopauseApi();
+    var button = textButton(apChecking ? 'Checking…' : 'Check health', 'set-btn', function () {
+      autopauseDoctor();
+    });
+    if (!api || typeof api.doctor !== 'function' || apChecking) button.disabled = true;
+    field.appendChild(button);
+
+    if (apReport) {
+      var box = el('details', 'set-tokens set-health');
+      if (apReportOpen) box.setAttribute('open', '');
+      var sum = el('summary', 'set-tokens-sum' + (apReportOk ? '' : ' is-wrong'),
+        apReportOk ? 'Health report' : 'Health report, something is wrong');
+      box.appendChild(sum);
+      box.appendChild(el('pre', 'set-health-text', apReport));
+      box.addEventListener('toggle', function () {
+        apReportOpen = box.hasAttribute('open');
+      });
+      field.appendChild(box);
+    }
+
+    field.appendChild(el('p', 'set-hint',
+      'Reads the helper without changing anything: the task, the bridge, and Spotify itself.'));
+  }
+
+  /* ------------------------------------------------------------
      Shortcuts
 
      When shortcuts.js is loaded the section is an editor over
@@ -2614,6 +3054,7 @@
     bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
     bodyEl.appendChild(buildPrivacy());
+    bodyEl.appendChild(buildSpotify());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
 
@@ -2639,6 +3080,7 @@
     renderNewtabBg();
     renderChips();
     renderPrivacy();
+    renderSpotify();
     renderShortcuts();
     refreshFilter();          // the text just changed under the index
   }
@@ -2658,6 +3100,9 @@
     renderAll();
     panelEl.hidden = false;
     open_ = true;
+    /* The Spotify readout is live only while the pane is: one subscription
+       and one 4s poll, started here and taken down again in closePanel(). */
+    autopauseWatch();
     position();
     if (buttonEl) {
       buttonEl.classList.add('is-open');
@@ -2677,6 +3122,7 @@
   function closePanel() {
     if (panelEl) panelEl.hidden = true;
     open_ = false;
+    autopauseRelease();
     if (buttonEl) {
       buttonEl.classList.remove('is-open');
       buttonEl.setAttribute('aria-expanded', 'false');

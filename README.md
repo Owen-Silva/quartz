@@ -31,9 +31,10 @@ The profile lives at `%APPDATA%\browser` (Electron's default `userData` for the 
 rectangle plus `maximized`, discarded on read if it is not JSON or if the saved rect no longer
 overlaps a connected display by at least 100px on each axis; `session.json` is the durable copy
 of the tab strip; `adblock.json` holds the blocking preferences (on/off plus the per-site
-allowlist); `adblock-engine.bin` is the serialised filter engine, fetched on first run; and
+allowlist); `adblock-engine.bin` is the serialised filter engine, fetched on first run;
 `permissions.json` holds the per-origin decisions as `{ origin: { permission: 'allow'|'block' } }`,
-read as "nothing decided yet" when it is missing or corrupt.
+read as "nothing decided yet" when it is missing or corrupt; and `autopause.json` holds the
+Spotify auto-pause preferences (the two switches and the site list).
 
 Renderer state is nine `localStorage` keys: `theme` (`light`/`dark`, stamped on `<html>` by
 theme-boot.js before first paint), `palette` (the colour preset, stamped in the same breath and
@@ -373,6 +374,34 @@ store, which main cannot read, so it is replayed over `dl:prefs` at boot and on 
 nav-row button carries a progress ring while anything is in flight and opens a popover listing
 the session's downloads, with cancel / pause / resume / show in folder / open / clear.
 
+**Spotify auto-pause.** The auto-pause tool already installed at `~/spotify-autopause` is a local
+PowerShell HTTP bridge (127.0.0.1, the first free of ports 8787 to 8790) held up by a scheduled
+task, with an Opera GX extension speaking to it. autopause.js is that same client protocol spoken
+from this browser, plus the switch that turns the whole-computer half on and off. Nothing under
+that folder is written from here: this is a client, never an installer, and with the tool absent
+Settings still draws the section, disables the switches and says "Not installed on this computer".
+Preferences are `autopause.json` in the profile, and the renderer reaches main over
+`api.autopause` (status, setEnabled, setConfig, doctor, onStatus), every call resolving, a failure
+arriving as plain English in `status.error` rather than as a rejected invoke, because a throw
+there would surface as a dead section.
+
+Two prongs. Settings → Spotify's first switch is the whole computer: on enables the
+`SpotifyAutoPause` scheduled task and runs it, off ends it *and* disables it, because the task
+carries a repeating keepalive trigger and one that is only ended restarts itself within minutes.
+Where the task is missing altogether, the switch launches the bridge directly and remembers the
+choice. The second prong, behind its own switch ("Also pause for videos in this browser"), is this
+browser's own tabs: a guest that is audible on a watched site (youtube.com, youtube-nocookie.com,
+lessonplayer.example, lessonplayer-academy.example and lessons.example out of the box, editable a host per line,
+or any tab at all behind "Any tab that makes sound") registers
+a hold with the bridge under `src=owen-browser`, an id of its own, because the bridge resumes only
+when the last hold is released and a tab closing here must not hand back Opera's. The hold is taken
+after 1.5s of sound, refreshed every 60s against the bridge's 180s TTL, which is what stops a hold
+outliving the browser and pinning Spotify paused, and released 1.5s after the sound stops or when
+the browser quits. Spotify's own web player is never counted as a video, whatever the site list
+says. A readout under the main switch names the port, whether Spotify is open and whether a hold is
+being held right now; at the foot of the section, "Check health" runs the tool's own `doctor.ps1`
+and shows the report, reading the task, the bridge and Spotify without changing any of them.
+
 **Palette presets.** Six colour worlds, picked as painted swatches in Look: Aurora (the
 original), Ember, Forest, Ocean, Midnight and Mono. `data-palette` on `<html>` overrides the same
 ten tokens every time, each authored twice, dark and light, and matched on any descendant as well
@@ -380,7 +409,7 @@ as the root so a settings swatch previews the real tokens. "Aurora" is chrome.cs
 and so the one id that must never reach the attribute. The choice is stored in both
 `settings.palette` and `localStorage['palette']`, written together so they cannot drift.
 
-**Settings.** A gear beside the theme toggle opens a popover with twelve sections, in this order:
+**Settings.** A gear beside the theme toggle opens a popover with thirteen sections, in this order:
 Look (dark/light, the six palette swatches as one radiogroup with a roving tabindex, accent hue,
 and the bookmarks-bar switch); Claude — the folder new Claude tabs start in (typed, or through
 the native picker, and only written once main confirms it is a real directory), the switch for
@@ -388,7 +417,8 @@ resuming the last conversation on restore, and `claudeNotify`, behind the Window
 described above; Tabs (the background idle time before a tab sleeps, or never); Downloads ("Ask
 where to save each file", off by default); Search (Google, DuckDuckGo, Bing, Brave, Startpage);
 Websites (the site theme guests see through `prefers-color-scheme`); Site styles and scripts;
-Browser style, below; New tab; Privacy (clear browsing history, clear downloads list); Shortcuts,
+Browser style, below; New tab; Privacy (clear browsing history, clear downloads list); Spotify,
+the auto-pause switches, the site list and the health check described above; Shortcuts,
 the editor described
 above rather than a printed table; and About (Electron and Chromium versions). Everything but the
 site styles — a view onto sitestyles.js's own store — and the key bindings, which live in their
@@ -432,7 +462,11 @@ focus to the first control still on screen.
 
 **New tab page.** A plain `file://` page inside a guest — no preload, no `window.api`. The
 chrome passes `?theme`, `?palette`, `?hue`, `?engine`, `?chips` and `?bg` for the first paint
-and pushes later changes in with `window.__applySettings`. Chips show favicons from
+and pushes later changes in with `window.__applySettings`. Those params are frozen when the tab is
+made, so a reload re-reads the old ones and a dark chrome came back light; the chrome now pushes
+theme, settings, background and recents again on every `dom-ready` (theme first, since the accent
+is derived per theme), which covers F5, a crash reload and a script reload alike. Chips show
+favicons from
 `google.com/s2/favicons`, falling back to the bare label. The page cannot read the history store,
 so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become tiles under the
 chips, the rest feed the capsule's dropdown. Behind the search field is the circuit
@@ -561,12 +595,13 @@ With it frozen and no page animating, the idle cost is the aurora's stepped keyf
 
 | File | What it is |
 | --- | --- |
-| `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
-| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`. |
-| `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
+| `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, the Spotify auto-pause IPC and the guests handed to that module, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
+| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus). |
+| `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
 | `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, bare). |
+| `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
 | `index.html` / `theme-boot.js` | The shell document — backdrop layers, titlebar, nav row, `#views`, `#tabmenu`, script order — and the first script in its `<head>`, which stamps `data-theme` and `data-palette` on `<html>` before any stylesheet paints. |
 | `chrome.css` | Every token and every chrome rule, dark block then light block, then the palette presets. |
@@ -576,7 +611,7 @@ With it frozen and no page animating, the idle cost is the aurora's stepped keyf
 | `history.js` / `history.css` | The history store, the omnibox suggestion lens, `openPage()` for Ctrl+H, and `handleGuestMessage()` — the parser for the history page's console lines. |
 | `historypage.html` / `historypage.css` / `historypage.js` | The history page itself: search, day groups, row actions, the Clear… menu. `window.__applyHistory` in, `console.log('__history:…')` out. |
 | `pip.js` / `pip.css` | Picture in picture: the nav-row button, the video probe and the toggle, all through `executeJavaScript` in the guest. |
-| `settings.js` / `settings.css` | Settings button and popover, the "Find a setting" filter over it, and the Browser style view onto userstyle.js; owns `localStorage['settings']` and the IndexedDB asset store holding the new tab's background picture. |
+| `settings.js` / `settings.css` | Settings button and popover, the "Find a setting" filter over it, and the Browser style view onto userstyle.js; owns `localStorage['settings']` and the IndexedDB asset store holding the new tab's background picture. The Spotify section is live only while the pane is: one `api.autopause` subscription and one 4s poll, started on open and taken down on close, and it never redraws out from under a caret in the site list. |
 | `capture.js` | Ctrl+Shift+S: asks main for a screenshot of the guest on screen, flashes the window once, toasts the result. No button, no panel, no stylesheet. |
 | `bookmarks.js` / `bookmarks.css` | The bookmarks bar under the nav row — the new-tab chips, the fit/overflow measurement and the "…" popover. Reads the chips out of settings.js; owns nothing of its own. |
 | `shield.js` / `shield.css` | The blocking instrument: nav button, blocked count, the two switches. Talks to main over `api.adblock`. |
@@ -603,6 +638,26 @@ itself), and `@mozilla/readability`, which index.html no longer loads: reader.js
 - Every colour resolves through a token. A theme is nothing but a second token block and a
   palette a third, and no rule below the token blocks tests `data-theme` or `data-palette`. The
   light theme is custom properties only; type and metric tokens are inherited, not redeclared.
+  The instrument tokens (`--bevel`, `--bevel-lg`, `--radius-ctl`, `--rim`, `--rim-focus`,
+  `--rim-soft`, `--pip-glow`, `--pip-amber`, `--pip-amber-strong`, `--seam-v` and
+  `--readout-stretch`) are built out of those theme tokens with `var()`, so the one definition
+  covers dark, light and all six palettes, and a palette that relights `--ion` relights them with
+  it. They are never copied per palette.
+- A container is bevelled; a control is not. `corner-shape: round bevel round bevel` cuts two
+  corners on the diagonal, echoing the 115deg sheen, and sits inside an `@supports` so anything
+  without corner shapes keeps plain radii. Controls stay round at `--radius-ctl` and nothing much
+  under 28px tall is bevelled, which is what keeps the bevel a container signature instead of a
+  texture.
+- A gradient edge on glass is a ring, not a border. The two-layer `padding-box` / `border-box`
+  background trick needs an opaque interior: run under translucent glass it washes the whole
+  element in the gradient, and in the omnibox it took the placeholder with it. So `--rim` is
+  painted on a pseudo-element with 1px of padding and an xor mask, which leaves nothing but the
+  edge. An `<input>` has no pseudo-element, so the omnibox's ring is anchored to it from
+  `.navrow::after`; the two-layer version survives only in the `@supports not (anchor-name)`
+  fallback, where the interior is painted opaque first.
+- A label inside a control that transitions `color` declares its own colour. The theme switch
+  rewrites `--fg` underneath that transition, so an inherited label spends its first step on the
+  old theme's value, which after a flip to light is near-white type on a white pane.
 - Anything floating over a page uses `--panel-bg`, not `--glass`. Glass is see-through, and
   there is nothing behind a popover to blur except the guest's own content.
 - No continuous animation under `backdrop-filter`. Everything that moves is stepped, because a

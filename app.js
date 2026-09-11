@@ -3705,6 +3705,12 @@ function wireViewEvents(tab) {
     // The guest only exists from here: a restored mute is re-applied to it, and
     // the new-tab page gets the recent list it cannot read for itself.
     syncTabMutedFromView(tab);
+    // dom-ready fires for every document, so a reload lands here too — and a
+    // reloaded new-tab page has re-read the params newTabUrl() froze when the
+    // tab was made (a dark chrome came back light). The live state is pushed
+    // back over them, theme first: the accent is derived per theme.
+    pushThemeToTab(tab, getTheme());
+    pushSettingsToTab(tab);
     pushRecentToTab(tab);
     pushBackgroundToTab(tab);
     pushHistoryToTab(tab);
