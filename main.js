@@ -316,7 +316,15 @@ function createWindow() {
     webPreferences.webviewTag = false;
     if (params) {
       params.nodeintegration = 'false';
-      delete params.allowpopups;        // new-window is handled in app.js instead
+      // allowpopups is FORCED ON, not stripped. It is the only switch that
+      // makes Chromium ask permission before opening a window instead of
+      // silently dropping the request -- and "ask" means our own
+      // setWindowOpenHandler below, which denies the window and opens a TAB.
+      // With it off, window.open() returns null and target="_blank" does
+      // nothing at all: no handler anywhere ever hears about it. (The old
+      // <webview> 'new-window' DOM event that app.js used to listen for was
+      // removed from Electron in v22; it never fires here.)
+      params.allowpopups = true;
       delete params.disablewebsecurity;
       delete params.plugins;
       delete params.enableblinkfeatures;
@@ -2131,8 +2139,57 @@ function isBundledPageUrl(url) {
   return typeof url === 'string' && url.toLowerCase().startsWith(BUNDLED_PAGE_PREFIX.toLowerCase());
 }
 
+/**
+ * The scheme gate for anything a PAGE asks us to open in a new window. Only
+ * http(s) survives: `javascript:` would run in the new document, `data:` and
+ * `blob:` are the classic phishing shells, and `file:` is the one the
+ * will-navigate lock below exists to stop. Returns the normalised href, or
+ * null to deny.
+ */
+function webUrlOrNull(url) {
+  if (typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
+
+  /*
+   * window.open(), target="_blank", and anything else that wants a second
+   * window -- including a link inside a cross-origin iframe, which is how
+   * Google's account popover spells "Add another account".
+   *
+   * This browser has no second window: the chrome owns the tab strip, so the
+   * answer is always 'deny' plus an 'open-url' to the renderer, which turns it
+   * into a tab (the same channel a page's "open link in new tab" menu item
+   * uses). Denying here is what keeps a page from ever getting a bare
+   * BrowserWindow with none of our chrome on it.
+   *
+   * This replaces the <webview> 'new-window' DOM event app.js used to listen
+   * for: that event was removed from Electron in v22 and never fires on 44, so
+   * every popup in the app was silently dying. setWindowOpenHandler is the
+   * modern path -- and it only runs at all because will-attach-webview turns
+   * `allowpopups` on.
+   *
+   * Known trade-off: a page that opens a popup and then talks to it through
+   * `window.opener` (the OAuth "sign in with Google" flow is the one that
+   * matters) gets a tab with no opener, so the postMessage back to the first
+   * page never arrives. Fixing that means letting a real child window through
+   * with { action: 'allow' }, which is a bigger change than this one.
+   */
+  contents.setWindowOpenHandler((details) => {
+    const url = webUrlOrNull(details && details.url);
+    if (url) {
+      send('open-url', { url, background: details.disposition === 'background-tab' });
+    }
+    return { action: 'deny' };
+  });
 
   /*
    * Page-INITIATED navigation to file://. Chromium already refuses this for a

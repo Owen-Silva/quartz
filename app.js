@@ -1545,8 +1545,13 @@ function wireChipDrag(tab, chip) {
  */
 function buildWebview(tab, url) {
   const viewEl = document.createElement('webview');
-  // Popups stay off: the `allowpopups` attribute is deliberately never set.
-  viewEl.removeAttribute('allowpopups');
+  // `allowpopups` is what makes Chromium ASK before opening a window rather
+  // than dropping the request on the floor. It does not give the guest a
+  // window: main's setWindowOpenHandler denies every one and hands the url
+  // back as a tab. Without it, window.open() returns null and target="_blank"
+  // is a no-op. main.js forces the same flag on in will-attach-webview, so
+  // this line is the readable half of a belt-and-braces pair.
+  viewEl.setAttribute('allowpopups', '');
   viewEl.setAttribute('src', url);
   viewEl.style.width = '100%';
   viewEl.style.height = '100%';
@@ -3990,27 +3995,11 @@ function wireViewEvents(tab) {
     } catch (err) { /* malformed event payload */ }
   });
 
-  // target="_blank" and Ctrl+click. `allowpopups` stays off, so the guest never
-  // gets a real popup window; we turn the request into a tab ourselves.
-  viewEl.addEventListener('new-window', (event) => {
-    if (stale()) return;
-    if (!event || typeof event.url !== 'string') return;
-    const parsed = parseUrlOrNull(event.url);
-    // Web only: a page must not talk us into opening file:// or a custom scheme.
-    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return;
-
-    const disposition = event.disposition;
-    if (disposition === 'background-tab') {
-      createTab(parsed.href, { background: true });
-      return;
-    }
-    // Anything that is not a tab request (save-to-disk, other) is ignored.
-    if (disposition && disposition !== 'foreground-tab'
-        && disposition !== 'new-window' && disposition !== 'default') {
-      return;
-    }
-    createTab(parsed.href); // createTab() activates it
-  });
+  // target="_blank", window.open() and Ctrl+click are NOT handled here. The
+  // <webview> 'new-window' DOM event this used to listen for was removed from
+  // Electron in v22, so a listener on it is dead code on 44. Main owns it now:
+  // setWindowOpenHandler() on the guest webContents denies the window and
+  // sends 'open-url', which onOpenUrl() below turns into a tab.
 }
 
 /* ------------------------------------------------------------------ */
