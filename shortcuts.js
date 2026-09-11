@@ -95,7 +95,8 @@
     { id: 'zoom-reset',     label: 'Reset zoom',              group: 'View',     default: 'Ctrl+0' },
     { id: 'fullscreen',     label: 'Fullscreen',              group: 'View',     default: 'F11' },
     { id: 'pip',            label: 'Picture in picture',      group: 'View',     default: 'Alt+P' },
-    { id: 'toggle-theme',   label: 'Switch light / dark',     group: 'View',     default: null }
+    { id: 'toggle-theme',   label: 'Switch light / dark',     group: 'View',     default: null },
+    { id: 'userstyle-reset', label: 'Reset browser style',    group: 'View',     default: 'Ctrl+Alt+Shift+R' }
   ];
 
   /* --- key normalisation -------------------------------------- */

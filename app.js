@@ -208,8 +208,12 @@ function pushBoardPaused(tab, paused) {
   } catch (err) { /* guest went away */ }
 }
 
+let windowBlurred = false;
+
+// The board also freezes while the whole window is behind something else:
+// visible-but-unfocused is the common laptop case and the GPU cost is real.
 function syncBoardPause() {
-  const open = anyOverlayOpen();
+  const open = anyOverlayOpen() || windowBlurred;
   if (open === overlayOpenLast) return;
   overlayOpenLast = open;
   for (const tab of tabs) pushBoardPaused(tab, open);
@@ -220,6 +224,8 @@ function wireOverlayWatch() {
   // attribute observer on the whole document catches every one of them.
   const observer = new MutationObserver(() => syncBoardPause());
   observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['hidden'] });
+  window.addEventListener('blur', () => { windowBlurred = true; syncBoardPause(); });
+  window.addEventListener('focus', () => { windowBlurred = false; syncBoardPause(); });
   // A freshly loaded new-tab guest has to learn the current state too.
   document.addEventListener('tabready', (event) => {
     const tab = tabs.find((t) => t.id === (event.detail && event.detail.id));
@@ -4523,7 +4529,7 @@ function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
     window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo,
-    window.Capture, window.Bookmarks, window.Pip, window.Workspaces
+    window.Capture, window.Bookmarks, window.Pip, window.Workspaces, window.UserStyle
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -4580,6 +4586,7 @@ const ACTIONS = {
   // The switcher panel itself belongs to workspaces.js, which answers through
   // moduleShortcut() exactly as find / downloads / tabsearch do.
   'workspaces': () => moduleShortcut('workspaces'),
+  'userstyle-reset': () => moduleShortcut('userstyle-reset'),
   'zoom-in': () => zoomActiveTab(ZOOM_STEP),
   'zoom-out': () => zoomActiveTab(-ZOOM_STEP),
   'zoom-reset': resetZoom,

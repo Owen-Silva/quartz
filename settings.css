@@ -700,6 +700,84 @@
 #settings-panel .set-site-add { margin-top: 8px; }
 
 /* ============================================================
+   Browser style — the user's own sheet for the chrome
+   ============================================================ */
+
+/* The same code field as a site's CSS, one line taller: this one is
+   written against the browser rather than pasted from somewhere. */
+#settings-panel .set-userstyle { min-height: 140px; }
+
+/* Reset is a quiet second action next to Apply, until it is armed —
+   then it lights the way the reset-all button in Shortcuts does, so
+   "press again" reads as a state and not as a new button. */
+#settings-panel .set-userstyle-reset { color: var(--fg-3); }
+#settings-panel .set-userstyle-reset:hover { color: var(--fg); }
+#settings-panel .set-userstyle-reset.is-armed {
+  background: var(--glass-2);
+  color: var(--fg);
+}
+
+/* The token crib sheet: shut by default, and never more than a hint's
+   worth of weight when it is open. */
+#settings-panel .set-tokens { margin-top: 8px; }
+
+#settings-panel .set-tokens-sum {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  list-style: none;
+  cursor: default;
+  user-select: none;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-tokens-sum::-webkit-details-marker { display: none; }
+#settings-panel .set-tokens-sum::before {
+  margin-right: 6px;
+  color: var(--fg-3);
+  content: '+';
+}
+#settings-panel .set-tokens[open] .set-tokens-sum::before { content: '\2212'; }
+#settings-panel .set-tokens-sum:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-tokens-sum:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ion-soft);
+}
+
+/* name and meaning on one line each, the names in the code type the
+   field above uses so they read as the things you would type. */
+#settings-panel .set-tokens-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 7px 0 0;
+  padding: 8px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+}
+
+#settings-panel .set-token-name {
+  margin: 0;
+  color: var(--ion);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+#settings-panel .set-token-what {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* ============================================================
    New tab — the background, then the shortcuts
    ============================================================ */
 
@@ -1082,6 +1160,7 @@
   #settings-panel .set-sel,
   #settings-panel .set-css,
   #settings-panel .set-js,
+  #settings-panel .set-tokens-sum,
   #settings-panel .set-site,
   #settings-panel .set-rec,
   #settings-panel .set-row,

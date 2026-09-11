@@ -1583,6 +1583,139 @@
     }
   }
 
+  /* ============================================================
+     Browser style
+
+     Site styles paint web pages; this paints the browser around them.
+     window.UserStyle owns the string and the <style> element it goes
+     into, exactly as SiteStyles owns its store — the panel is one more
+     view of it, and a build without that module simply says so.
+
+     One field, two buttons, and a list of the tokens worth knowing:
+     every colour in chrome.css resolves through one, so naming twelve
+     of them turns "restyle the browser" from reading a stylesheet into
+     writing three lines.
+     ============================================================ */
+
+  /** The module, or null when this build shipped without it. */
+  function userStyle() {
+    var m = window.UserStyle;
+    if (!m) return null;
+    if (typeof m.get !== 'function' || typeof m.set !== 'function') return null;
+    if (typeof m.clear !== 'function') return null;
+    return m;
+  }
+
+  /* The tokens a person actually reaches for, in the order chrome.css
+     declares them: the two inks, the three text weights, the three
+     glass steps, the hairline, the two lights, and the panel backing. */
+  var CHROME_TOKENS = [
+    ['--ink-0', 'The deepest background, behind everything else'],
+    ['--ink-1', 'One step up from that: the second ink layer'],
+    ['--fg', 'Text, at full strength'],
+    ['--fg-2', 'Quieter text: labels and second lines'],
+    ['--fg-3', 'The faintest text that is still readable: hints'],
+    ['--glass', 'A frosted surface at rest'],
+    ['--glass-2', 'The same surface, hovered'],
+    ['--glass-3', 'The same surface, held down or selected'],
+    ['--edge', 'The hairline around every glass pane'],
+    ['--ion', 'The cool blue light that marks what is active'],
+    ['--amber', 'The one warm light: a live Claude session'],
+    ['--panel-bg', 'The solid backing of a panel floating over a page']
+  ];
+
+  function buildUserStyle() {
+    var s = section('Browser style');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'userstyle');
+    s.appendChild(field);
+    return s;
+  }
+
+  /** The token crib sheet, closed until someone wants it. */
+  function tokenSheet() {
+    var d = el('details', 'set-tokens');
+    d.appendChild(el('summary', 'set-tokens-sum', 'Common tokens'));
+    var list = el('dl', 'set-tokens-list');
+    CHROME_TOKENS.forEach(function (t) {
+      list.appendChild(el('dt', 'set-token-name', t[0]));
+      list.appendChild(el('dd', 'set-token-what', t[1]));
+    });
+    d.appendChild(list);
+    return d;
+  }
+
+  function renderUserStyle() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="userstyle"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var api = userStyle();
+    if (!api) {
+      field.appendChild(el('p', 'set-na', 'Not available'));
+      return;
+    }
+
+    var current = '';
+    try { current = String(api.get() || ''); } catch (err) { current = ''; }
+
+    var ta = document.createElement('textarea');
+    ta.className = 'set-css set-userstyle';
+    ta.spellcheck = false;
+    ta.placeholder = '/* your CSS for the browser itself */\n#omnibox { border-radius: 6px; }';
+    ta.setAttribute('aria-label', 'CSS for the browser itself');
+    ta.value = current;
+    // Escape leaves the field first; a second press then closes the panel.
+    ta.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      ta.blur();
+    });
+    field.appendChild(ta);
+
+    var acts = el('div', 'set-site-acts');
+    acts.appendChild(textButton('Apply', 'set-btn', function () {
+      /* A module that answers false rejected the sheet and has already
+         said why; anything else (including a bare undefined) took it. */
+      var stored = true;
+      try { stored = api.set(ta.value); } catch (err) { stored = false; }
+      if (stored !== false) showToast('Applied');
+    }));
+
+    /* Reset is two presses, and neither of them re-renders: the field
+       holds whatever the user has typed, and only a real clear empties
+       it. The arming press just relabels the button it is on. */
+    var armed = false;
+    var armTimer = 0;
+    var reset = textButton('Reset', 'set-text set-userstyle-reset', function () {
+      if (!armed) {
+        armed = true;
+        reset.textContent = 'Press again to reset';
+        reset.classList.add('is-armed');
+        window.clearTimeout(armTimer);
+        armTimer = window.setTimeout(function () {
+          if (!armed) return;
+          armed = false;
+          reset.textContent = 'Reset';
+          reset.classList.remove('is-armed');
+        }, 4000);
+        return;
+      }
+      armed = false;
+      window.clearTimeout(armTimer);
+      try { api.clear(); } catch (err) { /* module's problem */ }
+      renderUserStyle();
+      showToast('Browser style reset');
+    });
+    acts.appendChild(reset);
+    field.appendChild(acts);
+
+    field.appendChild(el('p', 'set-hint',
+      "Styles the browser's own chrome, not web pages. Every colour is a token: " +
+      'try --ion, --glass, --panel-bg. Ctrl+Alt+Shift+R resets if you break something.'));
+    field.appendChild(tokenSheet());
+  }
+
   function buildNewTab() {
     var s = section('New tab');
 
@@ -2196,6 +2329,7 @@
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildSiteStyles());
+    bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildShortcuts());
@@ -2214,6 +2348,7 @@
     renderSearch();
     renderSites();
     renderSiteStyles();
+    renderUserStyle();
     renderNewtabBg();
     renderChips();
     renderPrivacy();
