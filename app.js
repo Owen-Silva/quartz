@@ -1845,7 +1845,10 @@ function sleepTab(tab) {
   } catch (err) {
     return false; // could not stand anything in for the view: leave it alone
   }
-  // Removing the element from the document is what tears the guest down.
+  // Removing the element from the document is what tears the guest down. It
+  // also raises the same one-per-removal "Invalid guestInstanceId" from
+  // Electron that closeTab() documents; closing the sleeping tab afterwards is
+  // silent, because a placeholder <div> has no guest to detach.
   try { viewEl.remove(); } catch (err) { /* already detached */ }
 
   tab.viewEl = placeholder;
@@ -3114,6 +3117,24 @@ function closeTab(id) {
   disposeClaudeTab(tab); // no-op for page tabs
   clearTabCard(tab);     // the card lives in #views, not on the view
   // On a sleeping tab this drops the placeholder: the guest is long gone.
+  //
+  // On a page tab this line also raises one UNCATCHABLE "Invalid
+  // guestInstanceId: N" in the console, from Electron, not from here. Taking a
+  // live <webview> out of the document destroys its guest webContents first;
+  // Electron's guest view manager deletes its registry entry on that guest's
+  // 'destroyed', and only then does the element's queued disconnectedCallback
+  // send its detach — which main answers through getGuestForFrame(), and that
+  // throws on a missing entry (the detachGuest() behind it is already
+  // tolerant). Electron 44 and upstream main both still do this. Verified with
+  // a twenty-line Electron app holding one bare <webview>: same error, no app
+  // code involved, and no sequence on this side avoids it (clearing src,
+  // loadURL('about:blank'), stop(), or destroying the guest first all still
+  // detach a guest the registry has already dropped). The error cannot be
+  // caught here either: it is thrown inside Electron's own custom-element
+  // reaction. It leaves nothing behind — no element, no guest, no listeners —
+  // so it is console noise, except under an attached debugger, where the
+  // stored exception keeps the detached <webview> (and so the tab object)
+  // alive until the entries are discarded. Fix belongs upstream.
   try { tab.viewEl.remove(); } catch (err) { /* already detached */ }
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
