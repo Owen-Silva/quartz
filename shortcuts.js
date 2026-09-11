@@ -391,6 +391,18 @@
       var cmb = get(action.id);
       if (cmb && !out[cmb]) out[cmb] = action.id;   // first wins if storage is odd
     }
+    /* Aliases resolve as well as reserve: Ctrl+R has to actually reload, not
+       merely be refused to everything else. They ride with the action, so one
+       the user has unbound answers to neither combo, and a real binding on the
+       same combo still wins. */
+    for (var k = 0; k < ACTIONS.length; k++) {
+      var extra = ACTIONS[k];
+      if (extra.fixed || !extra.alias || !get(extra.id)) continue;
+      for (var j = 0; j < extra.alias.length; j++) {
+        var cmbAlias = canonical(extra.alias[j]);
+        if (cmbAlias && !out[cmbAlias]) out[cmbAlias] = extra.id;
+      }
+    }
     return out;
   }
 

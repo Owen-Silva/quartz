@@ -1894,10 +1894,14 @@
     return String(id);
   }
 
-  /** Keycaps for a combo, or the quiet 'Not set' when it is unbound. */
-  function paintCombo(cell, api, combo) {
+  /**
+   * Keycaps for a combo, or the quiet 'Not set' when it is unbound. A structural
+   * action with no single canonical combo carries a hint instead ('Ctrl+1 ...
+   * Ctrl+9'): it is bound, so printing 'Not set' over it would be a lie.
+   */
+  function paintCombo(cell, api, combo, hint) {
     if (!combo) {
-      cell.appendChild(el('span', 'set-keynone', 'Not set'));
+      cell.appendChild(el('span', 'set-keynone', hint ? String(hint) : 'Not set'));
       return;
     }
     var parts = null;
@@ -1967,7 +1971,7 @@
       pill.setAttribute('role', 'status');
       cell.appendChild(pill);
     } else {
-      paintCombo(cell, api, item.combo);
+      paintCombo(cell, api, item.combo, item.hint);
       if (displaced === item.id) cell.appendChild(el('span', 'set-keynote', 'Now unbound'));
     }
     row.appendChild(cell);

@@ -1682,6 +1682,31 @@ const BARE_KEYS = {
   Escape: 'escape',
 };
 
+/**
+ * Punctuation keys where Shift only changes the character printed. Bindings are
+ * written unshifted ('Ctrl+='), so a shifted press of the same physical key --
+ * which arrives as '+' and canonicalises to 'Ctrl+Shift+=' -- falls back to the
+ * unshifted binding. shortcuts.js's actionFor() does exactly this for the
+ * chrome; without the same tolerance here the '+' key would zoom only while the
+ * chrome had focus and do nothing inside a page.
+ */
+const PUNCTUATION_KEYS = {
+  ',': 1, '.': 1, '/': 1, '\\': 1, '=': 1, '-': 1, '`': 1, '[': 1, ']': 1, ';': 1, "'": 1,
+};
+
+/** A combo -> the bound action id, or null. Exact match first. */
+function bindingFor(combo) {
+  if (!combo) return null;
+  if (Object.prototype.hasOwnProperty.call(keyBindings, combo)) return keyBindings[combo];
+  // An exact match always wins above, which is what keeps Ctrl+Shift+\ apart
+  // from Ctrl+\; only an unclaimed shifted punctuation combo falls back.
+  if (combo.indexOf('Shift+') < 0) return null;
+  const key = combo.slice(combo.lastIndexOf('+') + 1);
+  if (!Object.prototype.hasOwnProperty.call(PUNCTUATION_KEYS, key)) return null;
+  const bare = combo.replace('Shift+', '');
+  return Object.prototype.hasOwnProperty.call(keyBindings, bare) ? keyBindings[bare] : null;
+}
+
 /** A key pressed inside a page -> the chrome action it means, or null. */
 function shortcutFor(input) {
   const key = String(input.key);
@@ -1691,9 +1716,7 @@ function shortcutFor(input) {
     if (/^[1-9]$/.test(key)) return { action: 'select-tab', index: Number(key) };
   }
   // Everything else is whatever the renderer has bound the combo to.
-  const combo = comboFromInput(input);
-  if (!combo || !Object.prototype.hasOwnProperty.call(keyBindings, combo)) return null;
-  const action = keyBindings[combo];
+  const action = bindingFor(comboFromInput(input));
   return typeof action === 'string' && action ? { action } : null;
 }
 
