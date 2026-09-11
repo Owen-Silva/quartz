@@ -63,6 +63,8 @@
     unpin:   '\uE77A',
     reload:  '\uE72C',
     undo:    '\uE7A7',
+    next:    '\uE72A',
+    prev:    '\uE72B',
     zoomIn:  '\uE8A3',
     zoomOut: '\uE71F',
     zoom:    '\uE71E',
@@ -214,6 +216,28 @@
     var mod = moduleRef(name);
     if (!mod || typeof mod[method] !== 'function') return false;
     try { mod[method](a); return true; } catch (err) { return false; }
+  }
+
+  /**
+   * The keycaps a row wears. A command that names an `action` reads the
+   * shortcuts store, so the palette always shows the binding the user has NOW
+   * rather than the one the table was written with. `keys` is the fallback for
+   * a build with no shortcuts module; an action the user unbound wears none.
+   */
+  function keysFor(cmd) {
+    if (!cmd) return null;
+    var fallback = (cmd.keys && cmd.keys.length) ? cmd.keys : null;
+    if (!cmd.action) return fallback;
+    var mod = moduleRef('Shortcuts');
+    if (!mod || typeof mod.get !== 'function' || typeof mod.label !== 'function') return fallback;
+    try {
+      var combo = mod.get(cmd.action);
+      if (!combo) return null;                 // deliberately unbound
+      var parts = mod.label(combo);
+      return (parts && parts.length) ? parts : fallback;
+    } catch (err) {
+      return fallback;
+    }
   }
 
   /** The tab a command acts on: app.js's own accessor, then the strip. */
@@ -376,6 +400,33 @@
     { id: 'mono', label: 'Mono' }
   ];
 
+  /** True only once another lane has actually shipped the workspace globals. */
+  function hasWorkspaces() {
+    return typeof globalRef(function () { return switchWorkspaceBy; }) === 'function';
+  }
+
+  /**
+   * History's own panel. app.js routes shortcut actions to whichever module
+   * claims them, so ask it first and fall back to the module directly for a
+   * build where app.js does not export the router.
+   */
+  function openHistory() {
+    var routed = false;
+    var fn = globalRef(function () { return moduleShortcut; });
+    if (typeof fn === 'function') {
+      try { routed = !!fn('history'); } catch (err) { routed = false; }
+    }
+    if (!routed) callModule('History', 'handleShortcut', 'history');
+  }
+
+  /** The Downloads folder in Explorer — main's job, over the downloads api. */
+  function openDownloadsFolder() {
+    try {
+      var api = window.api && window.api.downloads;
+      if (api && typeof api.openFolder === 'function') api.openFolder();
+    } catch (err) { /* no bridge in this build; nothing to open */ }
+  }
+
   /**
    * Every verb the palette offers, in the order it offers them. Rebuilt on each
    * render rather than kept, because half of these read the world: the label is
@@ -393,27 +444,37 @@
 
     list.push({
       id: 'new-tab', glyph: GLYPH.add, label: 'New tab', keys: ['Ctrl', 'T'],
+      action: 'new-tab',
       run: function () { doCreate(globalRef(function () { return HOME_URL; })); }
     });
     list.push({
       id: 'new-claude-tab', glyph: GLYPH.claude, label: 'New Claude tab', keys: ['Ctrl', '`'],
+      action: 'toggle-terminal',
       run: function () { callGlobal(function () { return createClaudeTab; }); }
     });
     list.push({
       id: 'claude-folder', glyph: GLYPH.folder, label: 'Claude tab in a folder…',
       hint: 'Pick the working directory first', keys: ['Ctrl', 'Shift', '`'],
+      action: 'claude-folder',
       run: function () { callGlobal(function () { return newClaudeTabInFolder; }); }
     });
     list.push({
       id: 'claude-beside', glyph: GLYPH.beside, label: 'Claude beside this page',
       hint: 'A session in the other half', keys: ['Ctrl', 'Shift', '\\'],
+      action: 'claude-split',
       run: function () { callGlobal(function () { return toggleClaudeSplit; }); }
+    });
+    list.push({
+      id: 'ask-claude', glyph: GLYPH.claude, label: 'Ask Claude about this page',
+      hint: 'Hands the page to a Claude session', action: 'ask-claude',
+      keys: ['Ctrl', 'Shift', 'K'],
+      run: function () { callGlobal(function () { return askClaudeAboutActiveTab; }); }
     });
     list.push({
       id: 'split', glyph: GLYPH.split,
       label: split ? 'Unsplit' : 'Split with next tab',
       hint: split ? 'Back to one page' : 'Two pages side by side',
-      keys: ['Ctrl', '\\'],
+      keys: ['Ctrl', '\\'], action: 'split',
       run: function () {
         if (split) callGlobal(function () { return unsplit; }, activeTab());
         else callGlobal(function () { return toggleSplit; });
@@ -422,20 +483,32 @@
     list.push({
       id: 'reader', glyph: GLYPH.reader, label: 'Reader view',
       hint: 'Read this page without the furniture', keys: ['Ctrl', 'Shift', 'R'],
+      action: 'reader',
       when: function () { return readerOk; },
       run: function () { callModule('Reader', 'open'); }
     });
     list.push({
       id: 'find', glyph: GLYPH.search, label: 'Find in page', keys: ['Ctrl', 'F'],
+      action: 'find',
       run: function () { callModule('FindBar', 'open'); }
+    });
+    list.push({
+      id: 'tabsearch', glyph: GLYPH.list, label: 'Search tabs',
+      hint: 'Back to the tab list', action: 'tabsearch',
+      keys: ['Ctrl', 'Shift', 'A'],
+      // open() is the tab mode: it clears the `>` out of the field and
+      // re-renders. runCommand has already closed the pane, so this reopens it.
+      run: function () { open(); }
     });
     list.push({
       id: 'capture', glyph: GLYPH.camera, label: 'Take a screenshot',
       hint: 'Saves the page as a PNG', keys: ['Ctrl', 'Shift', 'S'],
+      action: 'capture',
       run: function () { callModule('Capture', 'takeActive'); }
     });
     list.push({
       id: 'print', glyph: GLYPH.print, label: 'Print', keys: ['Ctrl', 'P'],
+      action: 'print',
       run: function () { callGlobal(function () { return printActiveTab; }); }
     });
     list.push({
@@ -461,31 +534,49 @@
     });
     list.push({
       id: 'reload', glyph: GLYPH.reload, label: 'Reload', keys: ['F5'],
+      action: 'reload',
       run: function () { callGlobal(function () { return reloadActiveTab; }); }
     });
     list.push({
       id: 'close-tab', glyph: GLYPH.close, label: 'Close tab', keys: ['Ctrl', 'W'],
+      action: 'close-tab',
       run: function () { callGlobal(function () { return closeActiveTab; }); }
     });
     list.push({
       id: 'reopen-tab', glyph: GLYPH.undo, label: 'Reopen closed tab', keys: ['Ctrl', 'Shift', 'T'],
+      action: 'reopen-tab',
       run: function () { callGlobal(function () { return reopenClosedTab; }); }
     });
+    /* Workspaces are another lane's work: both rows stay out of the table
+       entirely until the global they call actually exists. */
     list.push({
-      id: 'zoom-in', glyph: GLYPH.zoomIn, label: 'Zoom in',
+      id: 'workspace-next', glyph: GLYPH.next, label: 'Next workspace',
+      action: 'workspace-next', keys: ['Ctrl', 'Shift', '→'],
+      when: hasWorkspaces,
+      run: function () { callGlobal(function () { return switchWorkspaceBy; }, 1); }
+    });
+    list.push({
+      id: 'workspace-prev', glyph: GLYPH.prev, label: 'Previous workspace',
+      action: 'workspace-prev', keys: ['Ctrl', 'Shift', '←'],
+      when: hasWorkspaces,
+      run: function () { callGlobal(function () { return switchWorkspaceBy; }, -1); }
+    });
+    list.push({
+      id: 'zoom-in', glyph: GLYPH.zoomIn, label: 'Zoom in', action: 'zoom-in',
       run: function () { callGlobal(function () { return zoomActiveTab; }, 0.5); }
     });
     list.push({
-      id: 'zoom-out', glyph: GLYPH.zoomOut, label: 'Zoom out',
+      id: 'zoom-out', glyph: GLYPH.zoomOut, label: 'Zoom out', action: 'zoom-out',
       run: function () { callGlobal(function () { return zoomActiveTab; }, -0.5); }
     });
     list.push({
-      id: 'zoom-reset', glyph: GLYPH.zoom, label: 'Reset zoom',
+      id: 'zoom-reset', glyph: GLYPH.zoom, label: 'Reset zoom', action: 'zoom-reset',
       run: function () { callGlobal(function () { return resetZoom; }); }
     });
     list.push({
       id: 'bookmarks-bar', glyph: GLYPH.star, label: 'Toggle bookmarks bar',
       hint: 'Show or hide the bar', keys: ['Ctrl', 'Shift', 'B'],
+      action: 'bookmarks-bar',
       run: function () { callModule('Bookmarks', 'toggle'); }
     });
     list.push({
@@ -505,11 +596,18 @@
 
     list.push({
       id: 'settings', glyph: GLYPH.gear, label: 'Settings', keys: ['Ctrl', ','],
+      action: 'settings',
       run: function () { callModule('Settings', 'open'); }
     });
     list.push({
       id: 'downloads', glyph: GLYPH.down, label: 'Downloads', keys: ['Ctrl', 'J'],
+      action: 'downloads',
       run: function () { callModule('Downloads', 'open'); }
+    });
+    list.push({
+      id: 'downloads-folder', glyph: GLYPH.folder, label: 'Open downloads folder',
+      hint: 'The folder itself, in Explorer',
+      run: function () { openDownloadsFolder(); }
     });
     list.push({
       id: 'site-info', glyph: GLYPH.info, label: 'Site info',
@@ -523,7 +621,14 @@
     });
     list.push({
       id: 'fullscreen', glyph: GLYPH.screen, label: 'Fullscreen', keys: ['F11'],
+      action: 'fullscreen',
       run: function () { callGlobal(function () { return toggleFullscreen; }); }
+    });
+    list.push({
+      id: 'history', glyph: GLYPH.history, label: 'History',
+      hint: 'Everywhere this browser has been', action: 'history',
+      keys: ['Ctrl', 'H'],
+      run: function () { openHistory(); }
     });
     list.push({
       id: 'clear-history', glyph: GLYPH.trash,
@@ -535,6 +640,12 @@
       confirm: true,
       run: function () { callModule('History', 'clear'); }
     });
+
+    // Last: every row that names an action wears the binding it has RIGHT NOW,
+    // so rebinding a shortcut re-labels the palette with no other work.
+    for (var k = 0; k < list.length; k++) {
+      if (list[k].action) list[k].keys = keysFor(list[k]);
+    }
 
     return list;
   }
@@ -1193,6 +1304,7 @@
       // command mode
       buildCommands: buildCommands,
       visibleCommands: visibleCommands,
+      keysFor: keysFor,
       collectCommands: collectCommands,
       commandQueryOf: commandQueryOf,
       commandMatches: commandMatches,

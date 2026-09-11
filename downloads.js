@@ -17,6 +17,8 @@
  *     cancel(id), pause(id), resume(id), show(id), clear(),
  *     open(id): Promise<string>,                // '' ok, else an error string
  *     downloadUrl(url),
+ *     openFolder(),                             // the Downloads folder itself
+ *     setPrefs({ askWhere }),                   // main cannot read our store
  *     onUpdate(cb: (item: Item) => void): () => void
  *   }
  *   Item = { id, filename, url, savePath, state, received, total, paused,
@@ -144,6 +146,50 @@
     } catch (err) { /* the main process is the source of truth; ignore */ }
   }
 
+  /* --- the "ask where to save" preference ----------------------- */
+
+  /** The settings store, if settings.js is in the build at all. */
+  function settingsApi() {
+    var mod = window.Settings;
+    return (mod && typeof mod.get === 'function') ? mod : null;
+  }
+
+  /** What the user asked for. Anything missing means "never ask". */
+  function askWhere() {
+    var mod = settingsApi();
+    if (!mod) return false;
+    try {
+      return mod.get('downloadsAskWhere') === true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * main owns will-download and cannot read localStorage, so the current
+   * value has to be pushed to it — at boot, and again whenever it changes.
+   */
+  function pushPrefs() {
+    send('setPrefs', { askWhere: askWhere() });
+  }
+
+  function watchPrefs() {
+    pushPrefs();
+    var mod = settingsApi();
+    if (!mod || typeof mod.on !== 'function') return;
+    try {
+      mod.on(function (_snapshot, keys) {
+        if (keys && typeof keys.indexOf === 'function' && keys.indexOf('downloadsAskWhere') < 0) return;
+        pushPrefs();
+      });
+    } catch (err) { /* no subscription; the boot push still stands */ }
+  }
+
+  /** Explorer, on the Downloads folder. Nothing here needs a download first. */
+  function openFolder() {
+    send('openFolder');
+  }
+
   function bpsFor(id) {
     var s = speeds.get(id);
     return s ? (s.bps || 0) : 0;
@@ -172,6 +218,24 @@
     b.type = 'button';
     b.className = cls;
     b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /** A text button with a glyph ahead of its label, for the panel header. */
+  function glyphTextButton(glyph, label, cls, onClick) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.title = label;
+    var g = document.createElement('span');
+    g.className = 'glyph';
+    g.textContent = glyph;
+    b.appendChild(g);
+    var t = document.createElement('span');
+    t.className = 'dl-text-label';
+    t.textContent = label;
+    b.appendChild(t);
     b.addEventListener('click', onClick);
     return b;
   }
@@ -231,6 +295,7 @@
     title.className = 'dl-title';
     title.textContent = 'Downloads';
     head.appendChild(title);
+    head.appendChild(glyphTextButton(GLYPH_FOLDER, 'Open folder', 'dl-text dl-folder', openFolder));
     head.appendChild(textButton('Clear', 'dl-text dl-clear', clearAll));
 
     listEl = document.createElement('div');
@@ -633,6 +698,7 @@
     injectButton();
     buildPanel();
     wire();
+    watchPrefs();
     refresh();
   }
 
@@ -648,12 +714,15 @@
     toggle: toggle,
     isOpen: isOpen,
     handleShortcut: handleShortcut,
+    openFolder: openFolder,
     // Pure helpers, reachable so they can be exercised without a window.
     _helpers: {
       formatBytes: formatBytes,
       hostnameOf: hostnameOf,
       trackSpeed: trackSpeed,
-      metaFor: metaFor
+      metaFor: metaFor,
+      askWhere: askWhere,
+      pushPrefs: pushPrefs
     }
   };
 })();

@@ -137,6 +137,9 @@
 }
 
 #downloads-panel .dl-title {
+  /* The header's buttons belong together on the right, so the title takes
+     every bit of slack rather than space-between spreading all three. */
+  margin-right: auto;
   color: var(--fg);
   font-size: 13px;
   letter-spacing: .01em;
@@ -156,6 +159,19 @@
 
 #downloads-panel .dl-text:hover { background: var(--glass-2); color: var(--fg); }
 #downloads-panel .dl-text:active { background: var(--glass-3); }
+
+/* Open folder wears its glyph ahead of the word. */
+#downloads-panel .dl-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+#downloads-panel .dl-folder .glyph {
+  font-family: var(--icon-font);
+  font-size: 12px;
+  line-height: 1;
+}
 
 /* --- list ----------------------------------------------------- */
 #downloads-panel .dl-list {

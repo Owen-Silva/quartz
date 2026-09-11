@@ -534,6 +534,14 @@ ipcMain.on('app:site-theme', (_event, payload) => {
 const downloads = new Map();
 let nextDownloadId = 1;
 
+/**
+ * "Ask where to save each file", pushed over dl:prefs. The preference itself
+ * lives in the renderer's settings store, which this process cannot read, so
+ * the renderer replays it at boot and on every change. Default false: a real
+ * browser does not ask.
+ */
+let downloadAskWhere = false;
+
 /** Progress ticks far faster than anyone can read. ~8/sec is plenty. */
 const DOWNLOAD_UPDATE_MS = 125;
 
@@ -587,6 +595,17 @@ function syncDownloadItem(entry) {
     entry.received = item.getReceivedBytes();
     entry.total = item.getTotalBytes(); // 0 when the server sent no length
     entry.paused = item.isPaused();
+    // With "ask where to save", nothing chose a path up front: the item only
+    // learns one once the user answers the native dialog. Adopt it the moment
+    // it exists so the row's name, its Open and its Show all point at the
+    // real file.
+    if (!entry.savePath) {
+      const chosen = item.getSavePath();
+      if (chosen) {
+        entry.savePath = chosen;
+        entry.filename = path.basename(chosen);
+      }
+    }
   } catch {
     // The item was destroyed mid-read; the record keeps its last good values.
   }
@@ -597,9 +616,21 @@ function handleWillDownload(_event, item) {
   let savePath = '';
   try {
     fs.mkdirSync(dir, { recursive: true });
-    savePath = uniqueDownloadPath(dir, item.getFilename());
-    // Setting the path up front is exactly what suppresses the save dialog.
-    item.setSavePath(savePath);
+    if (downloadAskWhere) {
+      // Handing Electron dialog options INSTEAD of a path is what puts the
+      // native Save dialog on screen. Cancelling it cancels the item ('done'
+      // fires with 'cancelled'), and the path the user picked only becomes
+      // readable through item.getSavePath() afterwards -- see
+      // syncDownloadItem, which adopts it.
+      item.setSaveDialogOptions({
+        title: 'Save as',
+        defaultPath: path.join(dir, item.getFilename())
+      });
+    } else {
+      savePath = uniqueDownloadPath(dir, item.getFilename());
+      // Setting the path up front is exactly what suppresses the save dialog.
+      item.setSavePath(savePath);
+    }
   } catch {
     // Could not choose a path -- let Electron fall back to its own prompt
     // rather than losing the download entirely.
@@ -692,6 +723,25 @@ ipcMain.handle('dl:open', (_event, { id } = {}) => {
 ipcMain.on('dl:show', (_event, { id } = {}) => {
   const entry = downloads.get(id);
   if (entry && entry.savePath) shell.showItemInFolder(entry.savePath);
+});
+
+/**
+ * The renderer's copy of "ask where to save each file". Nothing is persisted
+ * here: the settings store is the source of truth and replays this at boot.
+ */
+ipcMain.on('dl:prefs', (_event, { askWhere } = {}) => {
+  downloadAskWhere = !!askWhere;
+});
+
+/** The panel's "Open folder": the Downloads folder itself, in Explorer. */
+ipcMain.on('dl:open-folder', () => {
+  const dir = app.getPath('downloads');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // Already there, or not ours to make -- openPath says so either way.
+  }
+  shell.openPath(dir);
 });
 
 ipcMain.on('dl:clear', () => {

@@ -85,6 +85,12 @@ contextBridge.exposeInMainWorld('api', {
     open: (id) => ipcRenderer.invoke('dl:open', { id }),
     show: (id) => ipcRenderer.send('dl:show', { id }),
     clear: () => ipcRenderer.send('dl:clear'),
+    // "Ask where to save each file" lives in the renderer's settings store,
+    // which main cannot read -- so the renderer pushes it at boot and on every
+    // change. { askWhere:true } makes main show the native Save dialog.
+    setPrefs: (prefs) => ipcRenderer.send('dl:prefs', { askWhere: !!(prefs && prefs.askWhere) }),
+    // The Downloads folder itself, in Explorer -- not one file in it.
+    openFolder: () => ipcRenderer.send('dl:open-folder'),
     downloadUrl: (url) => ipcRenderer.send('dl:download-url', { url }),
     onUpdate: (cb) => {
       const handler = (_event, payload) => cb(payload);

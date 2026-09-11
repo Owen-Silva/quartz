@@ -84,6 +84,10 @@
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
     tabSleepMinutes: 30,
+    /* Downloads: off means a file goes straight to the Downloads folder with
+       no prompt, which is what every browser does. downloads.js pushes this
+       to main, which is the only process that can act on it. */
+    downloadsAskWhere: false,
     /* What the new tab paints behind the search field:
          { kind: 'board' }                          the circuit board
          { kind: 'aurora' }                         the aurora alone
@@ -1268,6 +1272,27 @@
       'Pinned tabs and tabs playing sound stay awake.'));
   }
 
+  function buildDownloads() {
+    var s = section('Downloads');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'downloads');
+    s.appendChild(field);
+    return s;
+  }
+
+  function renderDownloads() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="downloads"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var on = get('downloadsAskWhere') === true;
+    field.appendChild(switchRow('Ask where to save each file', on, function (next) {
+      set({ downloadsAskWhere: !!next });
+    }));
+    field.appendChild(el('p', 'set-hint',
+      'Off: files go straight to your Downloads folder.'));
+  }
+
   function buildSearch() {
     var s = section('Search');
     var field = el('div', 'set-field');
@@ -2167,6 +2192,7 @@
     bodyEl.appendChild(buildLook());
     bodyEl.appendChild(buildClaude());
     bodyEl.appendChild(buildTabs());
+    bodyEl.appendChild(buildDownloads());
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildSiteStyles());
@@ -2184,6 +2210,7 @@
     renderLook();
     renderClaude();
     renderTabs();
+    renderDownloads();
     renderSearch();
     renderSites();
     renderSiteStyles();
@@ -2311,6 +2338,7 @@
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
       if (keys.indexOf('claudeNotify') >= 0) renderClaudeNotify();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
+      if (keys.indexOf('downloadsAskWhere') >= 0) renderDownloads();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0) renderChips();

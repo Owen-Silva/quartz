@@ -59,6 +59,11 @@
     { id: 'move-tab-right', label: 'Move tab right',          group: 'Tabs',     default: 'Ctrl+Shift+PageDown' },
     { id: 'tabsearch',      label: 'Search tabs',             group: 'Tabs',     default: 'Ctrl+Shift+A' },
     { id: 'split',          label: 'Split with next tab',     group: 'Tabs',     default: 'Ctrl+\\' },
+    /* Ctrl+Shift+W is muscle memory for "close the window" everywhere else,
+       so the workspaces panel takes Ctrl+Shift+E instead. */
+    { id: 'workspaces',     label: 'Workspaces',              group: 'Tabs',     default: 'Ctrl+Shift+E' },
+    { id: 'workspace-next', label: 'Next workspace',          group: 'Tabs',     default: 'Ctrl+Alt+Right' },
+    { id: 'workspace-prev', label: 'Previous workspace',      group: 'Tabs',     default: 'Ctrl+Alt+Left' },
 
     /* -- Navigate ---------------------------------------------- */
     { id: 'focus-omnibox',  label: 'Focus the address bar',   group: 'Navigate', default: 'Ctrl+L' },

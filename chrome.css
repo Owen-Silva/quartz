@@ -776,6 +776,73 @@ button:focus-visible,
 
 .tab.active::after { opacity: 1; }
 
+/* --- workspaces --------------------------------------------------
+   A workspace is a named set of tabs; the strip shows one at a time, so
+   every other workspace's chip is simply [hidden] (.tab is display:flex,
+   which beats the UA's [hidden] rule, hence the explicit line).
+
+   A coloured workspace marks its chips with a 2px bar along the bottom —
+   the one thing on the chip that says which set you are in. It is quiet on
+   purpose: no badge, no glyph, nothing that changes a chip's width. The ion
+   line the active chip already wears steps up 2px so the two stack instead
+   of mixing. Accents are fixed hsl, not --ion, because they have to stay
+   told apart from each other whatever palette is on. */
+.tab[hidden] { display: none; }
+
+:root {
+  --ws-ion:      var(--ion);
+  --ws-ember:    hsl(345 100% 72%);
+  --ws-forest:   hsl(160 84% 68%);
+  --ws-ocean:    hsl(190 100% 70%);
+  --ws-midnight: hsl(262 92% 76%);
+}
+
+/* Light: the same hues, dropped to 44% so they read on a pale strip. */
+:root[data-theme="light"] {
+  --ws-ion:      var(--ion);
+  --ws-ember:    hsl(345 100% 44%);
+  --ws-forest:   hsl(160 84% 44%);
+  --ws-ocean:    hsl(190 100% 44%);
+  --ws-midnight: hsl(262 92% 44%);
+}
+
+.tab[data-ws-colour="ion"]      { --ws-colour: var(--ws-ion); }
+.tab[data-ws-colour="ember"]    { --ws-colour: var(--ws-ember); }
+.tab[data-ws-colour="forest"]   { --ws-colour: var(--ws-forest); }
+.tab[data-ws-colour="ocean"]    { --ws-colour: var(--ws-ocean); }
+.tab[data-ws-colour="midnight"] { --ws-colour: var(--ws-midnight); }
+
+.tab[data-ws-colour]::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ws-colour);
+  opacity: .45;
+  transition: opacity 150ms ease-out;
+  pointer-events: none;
+}
+
+.tab[data-ws-colour]:hover::before { opacity: .7; }
+.tab[data-ws-colour].active::before { opacity: .9; }
+
+/* out of the workspace bar's way */
+.tab[data-ws-colour]::after { bottom: 2px; }
+
+/* The switcher UI's slot, left of the strip. app.js inserts it empty and
+   workspaces.css styles whatever goes in; zero-width until it does. */
+#workspace-slot {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 100%;
+}
+
+#workspace-slot:empty { display: none; }
+
 .tab-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -1471,7 +1538,7 @@ body,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; }
   .tab.loading::after { animation: none; }
-  .tab::after, .tab-close, #omnibox, #zoom-badge { transition: none; }
+  .tab::after, .tab::before, .tab-close, #omnibox, #zoom-badge { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item { transition: none; }
   /* the theme still switches, it just arrives all at once */

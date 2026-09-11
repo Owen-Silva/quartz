@@ -252,12 +252,39 @@ const CLAUDE_DEFAULT_TITLE = 'Claude';
  *   cardEl?:Element|null, warnEl?:Element|null, broken?:boolean,
  *   failedThisLoad?:boolean, audible?:boolean, muted?:boolean,
  *   audioEl?:Element|null, pinned?:boolean, globeEl?:Element|null,
- *   asleep?:boolean, openedAt?:number
+ *   asleep?:boolean, openedAt?:number, workspace?:string
  * }>}
  */
 const tabs = [];
 let activeTabId = null;
 let nextTabId = 1;
+
+/* ------------------------------------------------------------------ */
+/* Workspaces: model state                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A workspace is a named set of tabs. Every tab is in exactly one of them
+ * (tab.workspace, default 'main') and the strip shows only the current one's
+ * chips — the others are still in `tabs`, still in #views, still alive, just
+ * hidden. Nothing is torn down on a switch, exactly like activateTab().
+ *
+ * 'main' always exists and can never be deleted: it is where a deleted
+ * workspace's tabs go, and where an unknown id falls back to.
+ */
+const DEFAULT_WORKSPACE_ID = 'main';
+const WORKSPACE_COLOURS = ['ion', 'ember', 'forest', 'ocean', 'midnight'];
+const WORKSPACE_NAME_MAX = 40;
+
+/**
+ * @type {Array<{id:string, name:string, colour:string|null,
+ *               lastActiveTabId:number|null}>}
+ */
+const workspaces = [
+  { id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActiveTabId: null }
+];
+let currentWorkspaceId = DEFAULT_WORKSPACE_ID;
+let nextWorkspaceSeq = 1;
 
 // DOM refs, resolved in init() so this file can load from <head> or <body>.
 let titlebarEl = null;
@@ -616,6 +643,13 @@ function buildChip(tab) {
   chip.title = chipTooltip(tab);
   if (tab.pinned) chip.classList.add('pinned');
 
+  // Workspaces: a chip is in the strip only while its tab is in the workspace
+  // on screen, and carries that workspace's colour for the underline.
+  // syncChipWorkspace() keeps both in step from here on.
+  chip.hidden = tabWorkspace(tab) !== currentWorkspaceId;
+  const wsColour = (findWorkspace(tabWorkspace(tab)) || {}).colour || null;
+  if (wsColour) chip.dataset.wsColour = wsColour;
+
   chip.addEventListener('click', () => {
     // A drag ends in a click on release. Swallowing that one keeps the plain
     // press-and-release path below exactly as it was.
@@ -791,6 +825,298 @@ function setTabTitle(tab, title) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Workspaces: lookup, chips, switching, API                           */
+/* ------------------------------------------------------------------ */
+
+/** The workspace record for an id, or null. */
+function findWorkspace(id) {
+  if (typeof id !== 'string' || !id) return null;
+  return workspaces.find((w) => w.id === id) || null;
+}
+
+/** An id that certainly names a live workspace: anything unknown is 'main'. */
+function validWorkspaceId(id) {
+  return findWorkspace(id) ? id : DEFAULT_WORKSPACE_ID;
+}
+
+/** The workspace a tab belongs to. A stale or missing id reads as 'main'. */
+function tabWorkspace(tab) {
+  if (!tab) return DEFAULT_WORKSPACE_ID;
+  return findWorkspace(tab.workspace) ? tab.workspace : DEFAULT_WORKSPACE_ID;
+}
+
+/**
+ * The tabs in the current workspace, in strip order. Everything that used to
+ * walk `tabs` to pick a neighbour — cycling, Ctrl+1..9, the Claude toggle, the
+ * tab left behind by a close — goes through this instead, so a hidden chip can
+ * never be raised by accident. tabsearch.js reads the whole `tabs` array (each
+ * item now carries .workspace, so it can group); it can call this for the
+ * current-workspace-only list.
+ */
+function visibleTabs() {
+  return workspaceTabs(currentWorkspaceId);
+}
+
+/** One workspace's tabs, in array order. The strip order of that workspace. */
+function workspaceTabs(id) {
+  const want = validWorkspaceId(id);
+  return tabs.filter((tab) => tabWorkspace(tab) === want);
+}
+
+/** Where a tab sits in its own workspace's strip, or -1. */
+function stripSeat(tab) {
+  return workspaceTabs(tabWorkspace(tab)).indexOf(tab);
+}
+
+/** A name the strip can show: trimmed, capped, never empty. */
+function cleanWorkspaceName(name, fallback) {
+  const text = (typeof name === 'string') ? name.trim().slice(0, WORKSPACE_NAME_MAX) : '';
+  return text || (fallback || 'Workspace');
+}
+
+/** One of the five accents, or null for "no colour". */
+function cleanWorkspaceColour(colour) {
+  return WORKSPACE_COLOURS.indexOf(colour) === -1 ? null : colour;
+}
+
+/** A fresh id that cannot collide with a restored one. */
+function newWorkspaceId() {
+  let id = '';
+  do { id = 'ws' + (nextWorkspaceSeq++); } while (findWorkspace(id));
+  return id;
+}
+
+/**
+ * One chip's workspace state: hidden unless its tab is in the workspace on
+ * screen, and stamped with the workspace colour chrome.css underlines it in.
+ */
+function syncChipWorkspace(tab) {
+  if (!tab || !tab.chipEl) return;
+  const id = tabWorkspace(tab);
+  tab.chipEl.hidden = id !== currentWorkspaceId;
+  const colour = (findWorkspace(id) || {}).colour || null;
+  if (colour) tab.chipEl.dataset.wsColour = colour;
+  else delete tab.chipEl.dataset.wsColour;
+}
+
+/** The same for the whole strip. Cheap: one attribute pass, no layout read. */
+function syncChipWorkspaces() {
+  for (const tab of tabs) syncChipWorkspace(tab);
+}
+
+/** Move one tab between workspaces at the model level; callers handle focus. */
+function setTabWorkspace(tab, id) {
+  if (!tab) return;
+  tab.workspace = validWorkspaceId(id);
+  syncChipWorkspace(tab);
+}
+
+/**
+ * Told on every model change — switch, create, rename, colour, delete, move,
+ * and any change to a tab count. The switcher UI (workspaces.js) follows this
+ * instead of reaching into the model, exactly as find.js follows 'tabchange'.
+ */
+function emitWorkspaceChange() {
+  if (restoring) return; // one event at the end of the rebuild, not forty
+  try {
+    document.dispatchEvent(new CustomEvent('workspacechange', {
+      detail: { id: currentWorkspaceId }
+    }));
+  } catch (err) { /* never fatal */ }
+}
+
+/**
+ * A split is two tabs sharing one well, so it cannot straddle a switch: the
+ * half in the other workspace would be hidden and the layout would be half
+ * empty. Any pair whose halves have drifted apart is broken up.
+ */
+function unsplitAcrossWorkspaces() {
+  for (const tab of tabs.slice()) {
+    const other = splitPartner(tab);
+    if (!other) continue;
+    if (tabWorkspace(tab) !== tabWorkspace(other)) unsplit(tab);
+  }
+}
+
+/**
+ * Raise the current workspace's last active tab, falling back to the last chip
+ * in it — and open a tab when the workspace is empty, because the window must
+ * never sit with nothing on screen.
+ */
+function raiseCurrentWorkspace() {
+  const ws = findWorkspace(currentWorkspaceId);
+  const list = visibleTabs();
+  if (!list.length) {
+    createTab(HOME_URL); // createTab() stamps the current workspace on it
+    return;
+  }
+  const wanted = (ws && list.find((t) => t.id === ws.lastActiveTabId)) || list[list.length - 1];
+  activateTab(wanted.id);
+}
+
+/* --- the API the switcher UI (workspaces.js) drives ----------------- */
+
+/** Copies, never the records themselves: the switcher must not mutate these. */
+function workspaceList() {
+  return workspaces.map((w) => ({
+    id: w.id,
+    name: w.name,
+    colour: w.colour,
+    tabCount: tabs.reduce((n, t) => n + (tabWorkspace(t) === w.id ? 1 : 0), 0),
+    current: w.id === currentWorkspaceId
+  }));
+}
+
+/** The id of the workspace the strip is showing. */
+function currentWorkspace() {
+  return currentWorkspaceId;
+}
+
+/**
+ * Show a different workspace. The outgoing chips and the outgoing view are
+ * hidden (activateTab() does the view half, as it does for any switch) and the
+ * workspace's own last active tab comes back up.
+ * @returns {boolean} true when the strip actually changed workspace.
+ */
+function switchWorkspace(id) {
+  const ws = findWorkspace(id);
+  if (!ws || ws.id === currentWorkspaceId) return false;
+
+  unsplitAcrossWorkspaces();
+  currentWorkspaceId = ws.id;
+  syncChipWorkspaces();
+  raiseCurrentWorkspace();
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/** Ctrl+Alt+Right / Left (rebindable): the next or previous workspace, wrapping. */
+function cycleWorkspace(step) {
+  if (workspaces.length < 2) return;
+  const from = workspaces.findIndex((w) => w.id === currentWorkspaceId);
+  const at = from === -1 ? 0 : from;
+  const next = (at + step + workspaces.length) % workspaces.length;
+  switchWorkspace(workspaces[next].id);
+}
+
+/**
+ * Make one and go there. A new workspace has no tabs, so switchWorkspace()
+ * opens the first one in it.
+ * @returns {string} the new workspace's id.
+ */
+function createWorkspace(name, colour) {
+  const ws = {
+    id: newWorkspaceId(),
+    name: cleanWorkspaceName(name),
+    colour: cleanWorkspaceColour(colour),
+    lastActiveTabId: null
+  };
+  workspaces.push(ws);
+  if (!switchWorkspace(ws.id)) {
+    // Only reachable if the switch was refused; the list still changed.
+    emitWorkspaceChange();
+    saveSession();
+  }
+  return ws.id;
+}
+
+function renameWorkspace(id, name) {
+  const ws = findWorkspace(id);
+  if (!ws) return false;
+  ws.name = cleanWorkspaceName(name, ws.name);
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+function setWorkspaceColour(id, colour) {
+  const ws = findWorkspace(id);
+  if (!ws) return false;
+  ws.colour = cleanWorkspaceColour(colour);
+  syncChipWorkspaces(); // every chip in it wears the new underline
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/**
+ * Delete a workspace. Its tabs are never closed — they move home to 'main',
+ * which is why 'main' itself can never go.
+ */
+function deleteWorkspace(id) {
+  const index = workspaces.findIndex((w) => w.id === id);
+  if (index === -1 || id === DEFAULT_WORKSPACE_ID) return false;
+
+  for (const tab of tabs) {
+    if (tabWorkspace(tab) === id) setTabWorkspace(tab, DEFAULT_WORKSPACE_ID);
+  }
+  const wasCurrent = currentWorkspaceId === id;
+  workspaces.splice(index, 1);
+
+  if (wasCurrent) {
+    currentWorkspaceId = DEFAULT_WORKSPACE_ID;
+    syncChipWorkspaces();
+    raiseCurrentWorkspace();
+  } else {
+    syncChipWorkspaces();
+  }
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/**
+ * Send one tab to another workspace. Its chip leaves the strip when it is on
+ * its way out of the workspace on screen, and if it was the tab in front the
+ * next visible one comes up in its place.
+ */
+function moveTabToWorkspace(tabId, wsId) {
+  const tab = tabs.find((t) => t.id === tabId);
+  const ws = findWorkspace(wsId);
+  if (!tab || !ws) return false;
+  if (tabWorkspace(tab) === ws.id) return true;
+
+  // A pair cannot straddle two workspaces, and the tab is leaving this one.
+  unsplit(tab);
+
+  const wasActive = tab.id === activeTabId;
+  const seat = wasActive ? visibleTabs().indexOf(tab) : -1;
+  setTabWorkspace(tab, ws.id);
+
+  if (wasActive) {
+    const list = visibleTabs();
+    if (!list.length) createTab(HOME_URL);
+    else activateTab(list[Math.min(Math.max(seat, 0), list.length - 1)].id);
+  }
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/** The chip menu's and the switcher's "send this tab there". */
+function moveActiveTabToWorkspace(wsId) {
+  if (activeTabId === null) return false;
+  return moveTabToWorkspace(activeTabId, wsId);
+}
+
+/**
+ * The switcher UI's home in the titlebar. index.html does not own it (it
+ * predates workspaces), so the slot is built here, left of the strip, and
+ * workspaces.js fills it. Empty and zero-width until it does.
+ */
+function ensureWorkspaceSlot() {
+  if (!tabstripEl || !tabstripEl.parentNode) return null;
+  let slot = document.getElementById('workspace-slot');
+  if (slot) return slot;
+  slot = document.createElement('div');
+  slot.id = 'workspace-slot';
+  slot.className = 'no-drag';
+  try { tabstripEl.parentNode.insertBefore(slot, tabstripEl); } catch (err) { return null; }
+  return slot;
+}
+
+/* ------------------------------------------------------------------ */
 /* Tab order: drag to reorder                                          */
 /* ------------------------------------------------------------------ */
 
@@ -814,12 +1140,19 @@ function syncChipOrder() {
     // array order is the whole reorder.
     if (tab.chipEl) tabstripEl.appendChild(tab.chipEl);
   }
+  // Re-parenting drops nothing, but the strip is also the one place the
+  // workspace state has to be right, so it is re-stamped on the same pass.
+  syncChipWorkspaces();
 }
 
-/** Pinned tabs other than this one. The strip keeps them all at the left. */
+/**
+ * Pinned tabs other than this one, IN THIS STRIP. The strip keeps them all at
+ * the left — and the strip is the current workspace, so a pinned tab parked in
+ * another one does not push this workspace's seam along.
+ */
 function pinnedCountExcept(tab) {
   let n = 0;
-  for (const other of tabs) {
+  for (const other of workspaceTabs(tabWorkspace(tab))) {
     if (other === tab) continue;
     if (other.pinned) n++;
   }
@@ -827,11 +1160,12 @@ function pinnedCountExcept(tab) {
 }
 
 /**
- * The slots one tab is allowed to occupy. Pinned and unpinned are two groups
- * with a hard seam between them: neither drag nor menu may cross it.
+ * The slots one tab is allowed to occupy — positions in the STRIP, so among
+ * the current workspace's chips. Pinned and unpinned are two groups with a
+ * hard seam between them: neither drag nor menu may cross it.
  */
 function dropRangeFor(tab) {
-  const others = tabs.length - 1;
+  const others = workspaceTabs(tabWorkspace(tab)).length - 1;
   const pinned = pinnedCountExcept(tab);
   return tab && tab.pinned
     ? { min: 0, max: pinned }
@@ -841,6 +1175,11 @@ function dropRangeFor(tab) {
 /**
  * Move a tab to a position in the strip. Clamped into its own group (pinned or
  * unpinned), never wrapping.
+ *
+ * `toIndex` is a seat in the STRIP — a position among the current workspace's
+ * chips, which is the only order the user can see. The array index it lands on
+ * is worked back from the chip it is being seated in front of, so a workspace
+ * whose tabs are scattered through `tabs` still reorders exactly.
  * @returns {boolean} true when the order actually changed.
  */
 function moveTabToIndex(id, toIndex) {
@@ -850,10 +1189,20 @@ function moveTabToIndex(id, toIndex) {
   if (!isFinite(wanted)) return false;
   const range = dropRangeFor(tabs[from]);
   const to = Math.max(range.min, Math.min(wanted, range.max));
-  if (to === from) return false;
+  // The tab's own workspace, not necessarily the one on screen: restoreSession
+  // pins tabs that belong to a workspace nobody is looking at yet.
+  const group = workspaceTabs(tabWorkspace(tabs[from]));
+  const seat = group.indexOf(tabs[from]);
+  if (to === seat) return false;
 
+  const siblings = group.filter((t) => t.id !== id);
   const [tab] = tabs.splice(from, 1);
-  tabs.splice(to, 0, tab);
+  // Indices are read AFTER the splice, so they already account for the gap.
+  let at;
+  if (!siblings.length) at = Math.min(from, tabs.length);
+  else if (to >= siblings.length) at = tabs.indexOf(siblings[siblings.length - 1]) + 1;
+  else at = tabs.indexOf(siblings[to]);
+  tabs.splice(at, 0, tab);
   syncChipOrder();
   // A split is seated in STRIP order, so a chip dragged past its partner swaps
   // which half is on the left. The ratio rides on both tabs, so it survives.
@@ -869,7 +1218,7 @@ function moveTabToIndex(id, toIndex) {
 function moveActiveTab(step) {
   const tab = getActiveTab();
   if (!tab) return;
-  const from = tabs.indexOf(tab);
+  const from = visibleTabs().indexOf(tab); // a seat in the strip, not in `tabs`
   if (from === -1) return;
   if (!moveTabToIndex(tab.id, from + step)) return;
   try {
@@ -899,7 +1248,9 @@ function setTabPinned(tab, on) {
 /** Measure every chip once, at drag start: the drag itself reads no layout. */
 function chipMetrics() {
   const rows = [];
-  for (const tab of tabs) {
+  // The strip, not the tab list: a chip belonging to another workspace is
+  // [hidden] and would measure as a zero-width box sitting at x=0.
+  for (const tab of visibleTabs()) {
     if (!tab.chipEl) continue;
     const rect = tab.chipEl.getBoundingClientRect();
     rows.push({
@@ -1109,12 +1460,15 @@ function buildWebview(tab, url) {
 
 /**
  * @param {string} [url]
- * @param {{background?:boolean, pinned?:boolean, muted?:boolean, afterId?:number}} [options]
+ * @param {{background?:boolean, pinned?:boolean, muted?:boolean, afterId?:number,
+ *          workspace?:string}} [options]
  *        background:true opens the tab behind the current one (Ctrl+click,
  *        target="_blank" with a background hint). pinned/muted are only used by
  *        restoreSession(), which rebuilds both from the stored entry. afterId
  *        slots the new tab in directly behind that tab id instead of at the end
  *        of the strip (the reader opens next to the page it was made from).
+ *        workspace is restoreSession()'s too: a tab the user opens lands in the
+ *        workspace they are looking at.
  */
 function createTab(url, options) {
   if (!viewsEl || !tabstripEl) return null;
@@ -1156,6 +1510,9 @@ function createTab(url, options) {
     splitWith: null,
     splitRatio: 0.5,
     lastActive: 0,
+    // The workspace this tab lives in. Never null: an unknown id reads as
+    // 'main' through tabWorkspace().
+    workspace: validWorkspaceId(opts.workspace || currentWorkspaceId),
     // The idle clock a never-activated background tab is measured from; without
     // it lastActive 0 would read as "idle since 1970" and sleep it on sight.
     openedAt: Date.now()
@@ -1171,12 +1528,16 @@ function createTab(url, options) {
   // pinned move is last: a pinned tab belongs in its own group whatever else
   // was asked for.
   if (opts.afterId !== undefined && opts.afterId !== null) {
-    const after = tabs.findIndex((t) => t.id === opts.afterId);
+    // A seat in the strip: both tabs are in the same workspace, or the move is
+    // meaningless and is skipped.
+    const group = workspaceTabs(tab.workspace);
+    const after = group.findIndex((t) => t.id === opts.afterId);
     if (after !== -1) moveTabToIndex(tab.id, after + 1);
   }
   // A restored pinned tab is already in place, so this is a no-op.
   if (opts.pinned) setTabPinned(tab, true);
   if (tab.muted) syncTabAudio(tab);
+  emitWorkspaceChange(); // a tab count moved
   saveSession(); // debounced: activateTab() below folds into the same write
 
   // Never leave the window with nothing on screen: the very first tab is opened
@@ -1768,12 +2129,17 @@ function splitTabs(a, b) {
   return true;
 }
 
-/** The next splittable tab after this one in strip order, wrapping. */
+/**
+ * The next splittable tab after this one in strip order, wrapping. Strip order
+ * is one workspace's chips: a pair whose halves are in different workspaces is
+ * broken on the next switch anyway, so it is never offered.
+ */
 function nextSplittableTab(tab) {
-  const start = tabs.indexOf(tab);
+  const strip = workspaceTabs(tabWorkspace(tab));
+  const start = strip.indexOf(tab);
   if (start === -1) return null;
-  for (let step = 1; step < tabs.length; step++) {
-    const candidate = tabs[(start + step) % tabs.length];
+  for (let step = 1; step < strip.length; step++) {
+    const candidate = strip[(start + step) % strip.length];
     if (candidate !== tab && canSplitTab(candidate)) return candidate;
   }
   return null;
@@ -2083,8 +2449,9 @@ function claudeDefaultTitle(tab) {
  * so the host element already has a size when ClaudeTerminal.create() measures
  * it. terminal.js is loaded after this file, hence the typeof guard.
  *
- * @param {{cwd?:string, resume?:boolean, background?:boolean}} [options]
+ * @param {{cwd?:string, resume?:boolean, background?:boolean, workspace?:string}} [options]
  *        cwd: the folder to run in, defaulting to settings / home.
+ *        workspace: restoreSession() only; otherwise the one on screen.
  *        resume: ask the CLI to continue that folder's last conversation
  *        (restoreSession() only — a tab the user opens starts clean).
  *        background: build it behind the current tab. The host is hidden while
@@ -2115,6 +2482,7 @@ function createClaudeTab(options) {
     live: false,
     ready: true,
     lastActive: 0,
+    workspace: validWorkspaceId(opts.workspace || currentWorkspaceId),
     termOff: [],
     // "Claude needs you": set while this chamber has gone quiet off screen.
     needsYou: false,
@@ -2140,6 +2508,7 @@ function createClaudeTab(options) {
   tabs.push(tab);
   viewsEl.appendChild(viewEl);
   tabstripEl.appendChild(tab.chipEl);
+  emitWorkspaceChange(); // a tab count moved
   saveSession(); // a chamber is a session entry now; debounced with the rest
 
   // Never leave the window with nothing on screen: the very first tab of a boot
@@ -2257,8 +2626,22 @@ function activateTab(id) {
   // is looking at a real <webview> again.
   if (target.asleep) wakeTab(target);
 
+  // The tab in front is always in the workspace on screen. Raising one from
+  // another workspace (a restore, a reopened tab, a module reaching in) brings
+  // its workspace forward with it rather than showing an empty strip.
+  const targetWs = tabWorkspace(target);
+  let workspaceMoved = false;
+  if (targetWs !== currentWorkspaceId) {
+    currentWorkspaceId = targetWs;
+    unsplitAcrossWorkspaces();
+    syncChipWorkspaces();
+    workspaceMoved = true;
+  }
+
   activeTabId = target.id;
   target.lastActive = Date.now();
+  const ws = findWorkspace(currentWorkspaceId);
+  if (ws) ws.lastActiveTabId = target.id; // where switchWorkspace() comes back to
 
   for (const tab of tabs) {
     const isActive = tab.id === activeTabId;
@@ -2309,6 +2692,7 @@ function activateTab(id) {
   document.dispatchEvent(new CustomEvent('tabchange', {
     detail: { id: target.id, kind: target.kind }
   }));
+  if (workspaceMoved) emitWorkspaceChange();
 }
 
 function closeTab(id) {
@@ -2317,6 +2701,9 @@ function closeTab(id) {
 
   const tab = tabs[index];
   const wasActive = tab.id === activeTabId;
+  // Where in the STRIP the closing tab sat — the strip being this workspace's
+  // chips, not the whole array, so the tab left in front is one you can see.
+  const seat = wasActive ? visibleTabs().indexOf(tab) : -1;
 
   // A pair cannot outlive either half: this puts the partner's view back in
   // #views on its own, before anything here starts removing elements.
@@ -2333,6 +2720,7 @@ function closeTab(id) {
   tabs.splice(index, 1);
   recomputeClaudeLive();
   recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
+  emitWorkspaceChange(); // a tab count moved
   saveSession();
 
   if (tabs.length === 0) {
@@ -2342,7 +2730,15 @@ function closeTab(id) {
   }
 
   if (wasActive) {
-    const neighbour = tabs[Math.min(index, tabs.length - 1)];
+    // The workspace on screen must not empty out either: the last chip in it
+    // closing opens a fresh tab here, not a jump to somebody else's tabs.
+    const list = visibleTabs();
+    if (!list.length) {
+      activeTabId = null;
+      createTab(HOME_URL);
+      return;
+    }
+    const neighbour = list[Math.min(Math.max(seat, 0), list.length - 1)];
     activateTab(neighbour.id);
   } else {
     updateNavState();
@@ -2393,17 +2789,19 @@ function reloadTab(tab) {
 }
 
 // Both sweeps leave pinned tabs alone: pinning a tab is the user saying it
-// outlives the browsing around it.
+// outlives the browsing around it. Both are also the STRIP's sweeps — another
+// workspace's tabs are not "the other tabs", they are somewhere else entirely.
 function closeOtherTabs(id) {
   // Snapshot the ids first: closeTab() splices the array as it goes.
-  const doomed = tabs.filter((t) => t.id !== id && !t.pinned).map((t) => t.id);
+  const doomed = visibleTabs().filter((t) => t.id !== id && !t.pinned).map((t) => t.id);
   for (const other of doomed) closeTab(other);
 }
 
 function closeTabsToRight(id) {
-  const index = tabs.findIndex((t) => t.id === id);
+  const strip = visibleTabs();
+  const index = strip.findIndex((t) => t.id === id);
   if (index === -1) return;
-  const doomed = tabs.slice(index + 1).filter((t) => !t.pinned).map((t) => t.id);
+  const doomed = strip.slice(index + 1).filter((t) => !t.pinned).map((t) => t.id);
   for (const other of doomed) closeTab(other);
 }
 
@@ -2509,7 +2907,7 @@ function openTabMenu(x, y, items) {
 function tabMenuItemsForTab(tab) {
   const page = tab.kind === 'page';
   const items = [
-    { label: 'New tab to the right', run: () => openTabAt(HOME_URL, tabs.indexOf(tab) + 1) }
+    { label: 'New tab to the right', run: () => openTabAt(HOME_URL, stripSeat(tab) + 1) }
   ];
 
   if (page) {
@@ -2517,7 +2915,7 @@ function tabMenuItemsForTab(tab) {
     // The CURRENT url, not the one the tab was opened on.
     items.push({
       label: 'Duplicate',
-      run: () => openTabAt(readCurrentUrl(tab) || tab.url, tabs.indexOf(tab) + 1)
+      run: () => openTabAt(readCurrentUrl(tab) || tab.url, stripSeat(tab) + 1)
     });
     items.push({
       label: tab.pinned ? 'Unpin tab' : 'Pin tab',
@@ -2582,6 +2980,16 @@ function tabMenuItemsForTab(tab) {
     }
   }
 
+  // Workspaces. The picker itself belongs to workspaces.js, so this row is
+  // feature-detected: an older chrome without that module just greys it out.
+  const mover = (window.Workspaces && typeof window.Workspaces.openMove === 'function')
+    ? window.Workspaces.openMove : null;
+  items.push({
+    label: 'Move to workspace…',
+    run: () => { if (mover) mover(tab.id); },
+    disabled: !mover || workspaces.length < 2
+  });
+
   items.push(null);
   // Close is the one route that still closes a pinned tab: the user asked for
   // this tab by name, so it is not the accident the middle-click guard is for.
@@ -2589,12 +2997,12 @@ function tabMenuItemsForTab(tab) {
   items.push({
     label: 'Close other tabs',
     run: () => closeOtherTabs(tab.id),
-    disabled: !tabs.some((t) => t.id !== tab.id && !t.pinned)
+    disabled: !visibleTabs().some((t) => t.id !== tab.id && !t.pinned)
   });
   items.push({
     label: 'Close tabs to the right',
     run: () => closeTabsToRight(tab.id),
-    disabled: !tabs.slice(tabs.indexOf(tab) + 1).some((t) => !t.pinned)
+    disabled: !visibleTabs().slice(stripSeat(tab) + 1).some((t) => !t.pinned)
   });
   items.push(null);
   items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
@@ -2695,6 +3103,9 @@ const SESSION_SAVE_DELAY = 500;
 // How long boot waits for the file copy before going with localStorage alone.
 const SESSION_READ_TIMEOUT = 300;
 const SESSION_MAX_TABS = 40;
+// 'main' plus however many the user made; a bound so a corrupt file cannot
+// grow the switcher without limit.
+const SESSION_MAX_WORKSPACES = 24;
 // Stand-in for the bundled new-tab page. Storing its file:// URL would freeze a
 // stale ?theme= into the session, so the marker is resolved on restore instead.
 const SESSION_NEWTAB = 'newtab';
@@ -2725,9 +3136,17 @@ function sessionUrlFor(tab) {
  * One stored tab is { url } plus the flags that are worth carrying across a
  * restart (written only when true, so an old session reads the same), or
  * { claude: true, cwd } for a chamber. Order is strip order across both kinds.
+ *
+ * Workspaces ride along the same way: an entry gets `ws` only when it is not
+ * 'main', the list itself goes in under `workspaces` (each one's `lastActive`
+ * being an INDEX into the stored entries, exactly like the top-level `active`,
+ * because tab ids are minted fresh on every boot), and `currentWorkspace` says
+ * which one the strip was showing. A session written before any of this reads
+ * back as one 'main' workspace holding everything.
  */
 function sessionSnapshot() {
   const entries = [];
+  const seatById = new Map(); // tab id -> its index in `entries`
   let active = -1;
   for (const tab of tabs) {
     let entry = null;
@@ -2742,13 +3161,27 @@ function sessionSnapshot() {
       if (tab.pinned) entry.pinned = true;
       if (tab.muted) entry.muted = true;
     }
+    const ws = tabWorkspace(tab);
+    if (ws !== DEFAULT_WORKSPACE_ID) entry.ws = ws;
     if (tab.id === activeTabId) active = entries.length;
+    seatById.set(tab.id, entries.length);
     entries.push(entry);
   }
   const capped = entries.slice(0, SESSION_MAX_TABS);
+  const seatOf = (id) => {
+    const at = seatById.has(id) ? seatById.get(id) : -1;
+    return at < capped.length ? at : -1;
+  };
   return {
     tabs: capped,
     active: active < capped.length ? active : -1,
+    workspaces: workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      colour: w.colour,
+      lastActive: seatOf(w.lastActiveTabId)
+    })),
+    currentWorkspace: currentWorkspaceId,
     savedAt: Date.now() // boot compares the two copies on this
   };
 }
@@ -2788,18 +3221,47 @@ function saveSession() {
  * beside the entries because it is what this has always returned; Claude
  * entries are not urls and are left out of it.
  * @returns {{entries:Array<{claude:boolean,cwd:string,url:string,
- *            pinned:boolean,muted:boolean}>,
- *            urls:string[], active:number, savedAt:number}|null}
+ *            pinned:boolean,muted:boolean,ws:string}>,
+ *            urls:string[], active:number,
+ *            workspaces:Array<{id:string,name:string,colour:string|null,
+ *                              lastActive:number}>,
+ *            currentWorkspace:string, savedAt:number}|null}
  */
 function sanitiseSession(parsed) {
   if (!parsed || !Array.isArray(parsed.tabs)) return null;
 
+  // Workspaces first: an entry's `ws` is only kept when it names one of these,
+  // and 'main' is always the head of the list whatever the file said.
+  const wsList = [{ id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActive: -1 }];
+  const wsSeen = new Set([DEFAULT_WORKSPACE_ID]);
+  const wsRaw = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
+  for (const row of wsRaw) {
+    const id = (row && typeof row.id === 'string') ? row.id.trim() : '';
+    if (!id || id.length > 64) continue;
+    const at = Number(row && row.lastActive);
+    const lastActive = (isFinite(at) && at >= 0) ? Math.floor(at) : -1;
+    const colour = cleanWorkspaceColour(row && row.colour);
+    if (id === DEFAULT_WORKSPACE_ID) {
+      wsList[0].name = cleanWorkspaceName(row && row.name, 'Home');
+      wsList[0].colour = colour;
+      wsList[0].lastActive = lastActive;
+      continue;
+    }
+    if (wsSeen.has(id)) continue;
+    wsSeen.add(id);
+    wsList.push({ id: id, name: cleanWorkspaceName(row && row.name), colour: colour, lastActive: lastActive });
+    if (wsList.length >= SESSION_MAX_WORKSPACES) break;
+  }
+
   const entries = [];
   for (const entry of parsed.tabs) {
+    // An unknown workspace is not a reason to drop a tab: it comes home.
+    const ws = (entry && typeof entry.ws === 'string' && wsSeen.has(entry.ws))
+      ? entry.ws : DEFAULT_WORKSPACE_ID;
     if (entry && entry.claude) {
       const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
-      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false });
+      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
     }
@@ -2816,11 +3278,19 @@ function sanitiseSession(parsed) {
     }
     entries.push({
       claude: false, cwd: '', url: href,
-      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted)
+      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted), ws: ws
     });
     if (entries.length >= SESSION_MAX_TABS) break;
   }
   if (!entries.length) return null;
+
+  // Entries can be dropped above, so every stored index is clamped to what is
+  // actually left — the same latitude the top-level `active` has always had.
+  for (const ws of wsList) {
+    if (ws.lastActive >= entries.length) ws.lastActive = -1;
+  }
+  const current = (typeof parsed.currentWorkspace === 'string' && wsSeen.has(parsed.currentWorkspace))
+    ? parsed.currentWorkspace : DEFAULT_WORKSPACE_ID;
 
   const active = Number(parsed.active);
   const inRange = isFinite(active) && active >= 0 && active < entries.length;
@@ -2829,6 +3299,8 @@ function sanitiseSession(parsed) {
     entries: entries,
     urls: entries.filter((e) => !e.claude).map((e) => e.url),
     active: inRange ? active : entries.length - 1,
+    workspaces: wsList,
+    currentWorkspace: current,
     // A snapshot written before savedAt existed loses every tie-break.
     savedAt: (isFinite(savedAt) && savedAt > 0) ? savedAt : 0
   };
@@ -2905,8 +3377,29 @@ function restoreSession(snapshot) {
   const rows = session.entries.map((entry, index) => ({ entry: entry, index: index }));
   const ordered = rows.filter((r) => r.entry.pinned).concat(rows.filter((r) => !r.entry.pinned));
 
+  // The workspace list is rebuilt BEFORE the first tab, so every chip is born
+  // with the right workspace and the right hidden state — no reshuffle after.
+  const storedWorkspaces = Array.isArray(session.workspaces) ? session.workspaces : null;
+  if (storedWorkspaces && storedWorkspaces.length) {
+    workspaces.length = 0;
+    for (const row of storedWorkspaces) {
+      workspaces.push({
+        id: row.id, name: row.name, colour: row.colour, lastActiveTabId: null
+      });
+      // Never mint an id a restored workspace already holds.
+      const n = /^ws(\d+)$/.exec(row.id);
+      if (n) nextWorkspaceSeq = Math.max(nextWorkspaceSeq, Number(n[1]) + 1);
+    }
+    if (!findWorkspace(DEFAULT_WORKSPACE_ID)) {
+      workspaces.unshift({ id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActiveTabId: null });
+    }
+  }
+  const wantCurrent = validWorkspaceId(session.currentWorkspace);
+  currentWorkspaceId = wantCurrent;
+
   restoring = true;
   const created = [];
+  const bySeat = new Map(); // stored entry index -> the tab rebuilt from it
   let wanted = null;
   try {
     // All background: the strip is built in order, then the saved tab is raised.
@@ -2914,14 +3407,16 @@ function restoreSession(snapshot) {
     for (const row of ordered) {
       const entry = row.entry;
       const tab = entry.claude
-        ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true })
+        ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws })
         : createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
           background: true,
           pinned: entry.pinned,
-          muted: entry.muted
+          muted: entry.muted,
+          workspace: entry.ws
         });
       if (!tab) continue;
       created.push(tab);
+      bySeat.set(row.index, tab);
       if (row.index === session.active) wanted = tab;
     }
   } finally {
@@ -2931,8 +3426,27 @@ function restoreSession(snapshot) {
 
   if (!created.length) return false;
 
-  const target = wanted || created[created.length - 1];
+  // Each workspace's remembered tab, by the index it was stored under. The
+  // build above raised the first tab it made (the window is never empty), so
+  // whatever that wrote is cleared before the stored answers go in.
+  if (storedWorkspaces) {
+    for (const ws of workspaces) ws.lastActiveTabId = null;
+    for (const row of storedWorkspaces) {
+      const ws = findWorkspace(row.id);
+      const tab = bySeat.get(row.lastActive);
+      if (ws && tab) ws.lastActiveTabId = tab.id;
+    }
+  }
+
+  // Come back up in the workspace that was on screen — unless nothing in it
+  // survived the read, in which case the tab we do have decides.
+  let pool = created.filter((t) => tabWorkspace(t) === wantCurrent);
+  if (!pool.length) pool = created;
+  const target = (wanted && pool.indexOf(wanted) !== -1) ? wanted : pool[pool.length - 1];
+  currentWorkspaceId = tabWorkspace(target);
+  syncChipWorkspaces();
   activateTab(target.id);
+  emitWorkspaceChange(); // one event for the whole rebuild
   saveSession(); // one write, now that the strip is settled
   return true;
 }
@@ -3393,20 +3907,25 @@ function focusOmnibox() {
 /* Tab cycling, selection and zoom                                     */
 /* ------------------------------------------------------------------ */
 
-/** Step through the strip in order, wrapping at both ends. */
+/**
+ * Step through the strip in order, wrapping at both ends. The strip is the
+ * current workspace's chips, so cycling never lands on a hidden tab.
+ */
 function cycleTab(step) {
-  if (tabs.length < 2) return;
-  const index = tabs.findIndex((t) => t.id === activeTabId);
+  const list = visibleTabs();
+  if (list.length < 2) return;
+  const index = list.findIndex((t) => t.id === activeTabId);
   const from = index === -1 ? 0 : index;
-  const next = (from + step + tabs.length) % tabs.length;
-  activateTab(tabs[next].id);
+  const next = (from + step + list.length) % list.length;
+  activateTab(list[next].id);
 }
 
-/** Ctrl+1..8 pick that position; Ctrl+9 is always the last tab. */
+/** Ctrl+1..8 pick that position in the strip; Ctrl+9 is always the last tab. */
 function selectTabByIndex(index) {
   const n = Number(index);
   if (!isFinite(n) || n < 1 || n > 9) return;
-  const tab = n === 9 ? tabs[tabs.length - 1] : tabs[n - 1];
+  const list = visibleTabs();
+  const tab = n === 9 ? list[list.length - 1] : list[n - 1];
   if (tab) activateTab(tab.id);
 }
 
@@ -3560,9 +4079,10 @@ function updateZoomBadge() {
 /* Claude toggle                                                       */
 /* ------------------------------------------------------------------ */
 
+/** The most recently raised tab of a kind IN THE WORKSPACE ON SCREEN. */
 function mostRecentTabOfKind(kind) {
   let best = null;
-  for (const tab of tabs) {
+  for (const tab of visibleTabs()) {
     if (tab.kind !== kind) continue;
     if (!best || (tab.lastActive || 0) > (best.lastActive || 0)) best = tab;
   }
@@ -3947,7 +4467,7 @@ function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
     window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo,
-    window.Capture, window.Bookmarks, window.Pip
+    window.Capture, window.Bookmarks, window.Pip, window.Workspaces
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -3997,6 +4517,13 @@ const ACTIONS = {
   'select-tab': (payload) => selectTabByIndex(payload && payload.index),
   'move-tab-left': () => moveActiveTab(-1),
   'move-tab-right': () => moveActiveTab(1),
+  // Workspaces. Ctrl+Alt+Right / Left by default; shortcuts.js owns the binding
+  // binding table, so these two ids are what it has to name to rebind them.
+  'workspace-next': () => cycleWorkspace(1),
+  'workspace-prev': () => cycleWorkspace(-1),
+  // The switcher panel itself belongs to workspaces.js, which answers through
+  // moduleShortcut() exactly as find / downloads / tabsearch do.
+  'workspaces': () => moduleShortcut('workspaces'),
   'zoom-in': () => zoomActiveTab(ZOOM_STEP),
   'zoom-out': () => zoomActiveTab(-ZOOM_STEP),
   'zoom-reset': resetZoom,
@@ -4041,6 +4568,19 @@ function pushShortcutBindings() {
   try { bindings = window.Shortcuts.bindings(); } catch (err) { return; }
   if (!bindings || typeof bindings !== 'object') return;
   try { bridge.set(bindings); } catch (err) { /* main keeps its defaults */ }
+}
+
+/**
+ * Whether a key landed in something the user is typing into — the omnibox, a
+ * module's input, a contenteditable pane. Chords that mean something inside
+ * text (Ctrl+Shift+Arrow) are left alone there.
+ */
+function isEditableTarget(node) {
+  const el = (node && node.nodeType === 1) ? node : null;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 function wireKeyboard() {
@@ -4091,6 +4631,18 @@ function wireKeyboard() {
       if (key.length === 1 && key >= '1' && key <= '9') {
         event.preventDefault();
         selectTabByIndex(Number(key));
+        return;
+      }
+      // Ctrl+Alt+Right / Left step through the workspaces (default binding). Chrome-side only:
+      // main.js does not replay arrows, so they do nothing while a page holds
+      // focus. Never taken from a text field, where the same chord is the
+      // select-by-word every Windows box has.
+      if (event.shiftKey && (key === 'ArrowRight' || key === 'ArrowLeft')) {
+        // In a text field the chord is select-by-word and stays the field's;
+        // returning here also keeps the rebindable resolver off it.
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+        cycleWorkspace(key === 'ArrowRight' ? 1 : -1);
         return;
       }
     }
@@ -4293,6 +4845,9 @@ function init() {
   winCloseBtn = document.getElementById('win-close');
   themeBtn = document.getElementById('theme');
   resolveTabMenu();
+  // The switcher UI's slot in the titlebar, left of the strip. Empty until
+  // workspaces.js fills it; the browser boots fine when it never does.
+  ensureWorkspaceSlot();
 
   wireChrome();
   wireTabMenu();
@@ -4370,6 +4925,25 @@ window.askClaudeAboutTab = askClaudeAboutTab;
 window.askClaudeAboutActiveTab = askClaudeAboutActiveTab;
 window.askPromptText = askPromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
+
+// Workspaces. This is the whole contract workspaces.js (the switcher UI) and
+// tabsearch.js drive; neither reaches into `workspaces` or `tabs` to change
+// anything. Every one of these that changes the model fires 'workspacechange'
+// on `document` with { detail: { id } }.
+window.workspaceList = workspaceList;
+window.currentWorkspace = currentWorkspace;
+window.switchWorkspace = switchWorkspace;
+window.cycleWorkspace = cycleWorkspace;
+window.createWorkspace = createWorkspace;
+window.renameWorkspace = renameWorkspace;
+window.setWorkspaceColour = setWorkspaceColour;
+window.deleteWorkspace = deleteWorkspace;
+window.moveTabToWorkspace = moveTabToWorkspace;
+window.moveActiveTabToWorkspace = moveActiveTabToWorkspace;
+// The current workspace's tabs, in strip order. tabsearch.js can keep reading
+// the whole `tabs` array — every item carries .workspace now, so it can group.
+window.visibleTabs = visibleTabs;
+window.WORKSPACE_COLOURS = WORKSPACE_COLOURS.slice();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });

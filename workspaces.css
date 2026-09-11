@@ -1,0 +1,488 @@
+/* ============================================================
+   workspaces.css — #workspace-pill and #workspaces-panel.
+
+   Loaded after chrome.css, and scoped entirely to the pill, the
+   popover and the .ws-* parts inside them: nothing here reaches
+   another element.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme relights all of it for free. The one exception is the
+   four named workspace colours, which are not tokens anywhere else
+   in the app: they get a :root[data-theme="light"] block at the
+   bottom of this file that drops them to 44% lightness so a 10px
+   dot still reads against white glass.
+
+   MOTION. Both surfaces sit on a backdrop-filter, so an animated
+   frame re-blurs everything behind it. Nothing animates
+   continuously: every transition is stepped and none runs longer
+   than 150ms.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   These rules put the attribute back in charge. */
+#workspace-pill[hidden],
+#workspaces-panel[hidden],
+#workspaces-panel [hidden] { display: none; }
+
+/* ============================================================
+   The titlebar pill
+   #newtab's height and language, stretched into a pill so it reads
+   as a label you can press rather than a sixth icon button. It sits
+   in app.js's #workspace-slot, immediately left of #tabstrip.
+   ============================================================ */
+
+#workspace-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  max-width: 190px;
+  min-width: 0;
+  padding: 0 8px 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  transition: background-color 120ms steps(3, end), color 120ms steps(3, end),
+              border-color 120ms steps(3, end);
+}
+
+#workspace-pill:hover {
+  background: var(--sheen), var(--glass-2);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+#workspace-pill:active { background: var(--sheen), var(--glass-3); }
+
+/* while the popover is open the pill stays lit, so it reads as the thing
+   holding it open rather than a button that did nothing */
+#workspace-pill.is-open {
+  background: var(--sheen), var(--glass-3);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+#workspace-pill:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+#workspace-pill .ws-pill-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#workspace-pill .ws-chev {
+  flex: 0 0 auto;
+  font-size: 8px;
+  color: var(--fg-3);
+}
+
+#workspace-pill:hover .ws-chev,
+#workspace-pill.is-open .ws-chev { color: var(--fg-2); }
+
+/* ============================================================
+   The colour dot
+   The whole vocabulary of the feature: a workspace is a name and a
+   dot. --fg-3 is "no colour" — quiet, but never absent, so the row
+   never changes shape when a colour is set.
+   ============================================================ */
+
+.ws-dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--fg-3);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+  transition: background-color 120ms steps(2);
+}
+
+.ws-dot[data-colour="ion"]      { background: var(--ion); }
+.ws-dot[data-colour="ember"]    { background: hsl(345 100% 72%); }
+.ws-dot[data-colour="forest"]   { background: hsl(160 84% 68%); }
+.ws-dot[data-colour="ocean"]    { background: hsl(190 100% 70%); }
+.ws-dot[data-colour="midnight"] { background: hsl(262 92% 76%); }
+
+/* ============================================================
+   The popover
+   Same ground, lip and radius as the shield and downloads panels, so
+   all three read as siblings. Anchored in JS under the pill; the
+   values here are the fallback for the frame before that lands.
+   ============================================================ */
+
+#workspaces-panel {
+  position: fixed;
+  top: calc(var(--titlebar-h) + 8px);
+  left: 10px;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  padding: 6px 6px 0;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  /* The chamber's ground, not the titlebar's: this pane floats over guest
+     pages, and --glass alone would leave a site legible through it. */
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+#workspaces-panel:focus { outline: none; }
+
+/* the header, in move mode only */
+#workspaces-panel .ws-head {
+  padding: 5px 8px 7px;
+  color: var(--fg-3);
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+#workspaces-panel .ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 52vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#workspaces-panel .ws-list::-webkit-scrollbar { width: 8px; }
+#workspaces-panel .ws-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scroll-thumb);
+}
+#workspaces-panel .ws-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+
+/* ============================================================
+   A workspace row
+   The whole row is the switch; the icon buttons inside it stop the
+   click. The 2px ion rail marks the workspace you are in — the same
+   rail the shield's switch rows use for "on".
+   ============================================================ */
+
+#workspaces-panel .ws-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 6px 0 11px;
+  border-radius: 8px;
+  color: var(--fg-2);
+  cursor: default;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#workspaces-panel .ws-row:hover { background: var(--glass); color: var(--fg); }
+#workspaces-panel .ws-row.is-current { color: var(--fg); }
+
+#workspaces-panel .ws-row:focus { outline: none; }
+#workspaces-panel .ws-row:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+#workspaces-panel .ws-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ion);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms steps(2);
+}
+
+#workspaces-panel .ws-row.is-current::before { opacity: 1; }
+
+#workspaces-panel .ws-row-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+}
+
+#workspaces-panel .ws-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#workspaces-panel .ws-count {
+  flex: 0 0 auto;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#workspaces-panel .ws-check {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 11px;
+  color: var(--ion);
+}
+
+/* --- the per-row buttons ---------------------------------------
+   Their space is always reserved, so a row never changes width when
+   the pointer crosses it; only their opacity moves. */
+#workspaces-panel .ws-row-acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms steps(2);
+}
+
+#workspaces-panel .ws-row:hover .ws-row-acts,
+#workspaces-panel .ws-row:focus-within .ws-row-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#workspaces-panel .ws-act {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--fg-3);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#workspaces-panel .ws-act .glyph { font-family: var(--icon-font); font-size: 11px; }
+#workspaces-panel .ws-act:hover { background: var(--glass-2); color: var(--fg); }
+#workspaces-panel .ws-act:active { background: var(--glass-3); }
+
+#workspaces-panel .ws-act:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* the second press of the two-step delete */
+#workspaces-panel .ws-confirm {
+  width: auto;
+  padding: 0 8px;
+  border: 1px solid var(--edge);
+  background: var(--glass-2);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  letter-spacing: .01em;
+}
+
+#workspaces-panel .ws-confirm:hover { background: var(--glass-3); }
+
+/* --- rename, in place ------------------------------------------ */
+#workspaces-panel .ws-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--ion-line);
+  border-radius: 6px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#workspaces-panel .ws-rename:focus { outline: none; }
+#workspaces-panel .ws-rename::selection { background: var(--ion-select); }
+
+/* ============================================================
+   The colour strip
+   Six dots: none, then the five named colours. The chosen one keeps
+   a lit well under it rather than a ring, so the dot size never
+   changes as you pick along the row.
+   ============================================================ */
+
+#workspaces-panel .ws-colours {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 100%;
+  padding: 2px 0 7px 1px;
+}
+
+#workspaces-panel .ws-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#workspaces-panel .ws-swatch:hover { background: var(--glass-2); }
+
+#workspaces-panel .ws-swatch.is-on {
+  background: var(--glass-3);
+  border-color: var(--edge);
+}
+
+#workspaces-panel .ws-swatch:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* ============================================================
+   The "New workspace" footer
+   ============================================================ */
+
+#workspaces-panel .ws-new {
+  padding: 4px 0 2px;
+  border-top: 1px solid var(--edge);
+  margin-top: 5px;
+}
+
+#workspaces-panel .ws-newbtn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#workspaces-panel .ws-newbtn .glyph { font-family: var(--icon-font); font-size: 11px; }
+#workspaces-panel .ws-newbtn:hover { background: var(--glass); color: var(--fg); }
+
+#workspaces-panel .ws-newbtn:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+#workspaces-panel .ws-newform { padding: 2px 6px 2px 11px; }
+
+#workspaces-panel .ws-newfield {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+}
+
+#workspaces-panel .ws-newinput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--ion-line);
+  border-radius: 6px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#workspaces-panel .ws-newinput::placeholder { color: var(--placeholder); }
+#workspaces-panel .ws-newinput:focus { outline: none; }
+#workspaces-panel .ws-newinput::selection { background: var(--ion-select); }
+
+#workspaces-panel .ws-create {
+  flex: 0 0 auto;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  background: var(--glass-2);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  transition: background-color 120ms steps(2);
+}
+
+#workspaces-panel .ws-create .glyph { font-family: var(--icon-font); font-size: 10px; color: var(--ion); }
+#workspaces-panel .ws-create:hover { background: var(--glass-3); }
+
+#workspaces-panel .ws-create:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* the new form's colour strip sits under the field, flush with the dot */
+#workspaces-panel .ws-newform .ws-colours { padding-left: 0; }
+
+/* ============================================================
+   The hint
+   The one line that teaches the keyboard path, so the popover is not
+   the only way in.
+   ============================================================ */
+
+#workspaces-panel .ws-hint {
+  padding: 7px 11px 9px;
+  border-top: 1px solid var(--edge);
+  color: var(--fg-3);
+  font-size: 10.5px;
+  letter-spacing: .01em;
+}
+
+/* ============================================================
+   Light theme: the four named colours, relit
+   --ion is a token and re-themes itself; these four are not, and at
+   68-76% lightness they vanish on white glass. 44% keeps each hue
+   recognisable while staying legible against --panel-bg.
+   ============================================================ */
+
+:root[data-theme="light"] .ws-dot[data-colour="ember"]    { background: hsl(345 100% 44%); }
+:root[data-theme="light"] .ws-dot[data-colour="forest"]   { background: hsl(160 84% 44%); }
+:root[data-theme="light"] .ws-dot[data-colour="ocean"]    { background: hsl(190 100% 44%); }
+:root[data-theme="light"] .ws-dot[data-colour="midnight"] { background: hsl(262 92% 44%); }
+
+/* the inset ring reads as grime on a light dot; ink it instead */
+:root[data-theme="light"] .ws-dot { box-shadow: inset 0 0 0 1px rgba(18, 22, 42, .10); }
+
+/* ============================================================
+   Reduced motion
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  #workspace-pill,
+  #workspaces-panel .ws-row,
+  #workspaces-panel .ws-row::before,
+  #workspaces-panel .ws-row-acts,
+  #workspaces-panel .ws-act,
+  #workspaces-panel .ws-swatch,
+  #workspaces-panel .ws-newbtn,
+  #workspaces-panel .ws-create,
+  .ws-dot { transition: none; }
+}
