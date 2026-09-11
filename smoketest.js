@@ -105,13 +105,24 @@ const evaluate = async (c, expr) => {
   say(ids.value === '[]' ? `OK: all ${REQUIRED_IDS.length} chrome elements present in the live DOM`
                          : 'FAIL: missing elements ' + ids.value);
 
-  const flags = await evaluate(c, `JSON.stringify({
-    booted: document.body.classList.contains('booted'),
-    acrylic: document.body.classList.contains('acrylic'),
-    maximized: document.body.classList.contains('maximized'),
-  })`);
+  // The strip is built after the durable session copy is read (up to ~300ms),
+  // and body.booted lands only then: poll for it before touching any tab.
+  let flags = null;
+  for (let i = 0; i < 40; i++) {
+    flags = await evaluate(c, `JSON.stringify({
+      booted: document.body.classList.contains('booted'),
+      acrylic: document.body.classList.contains('acrylic'),
+      maximized: document.body.classList.contains('maximized'),
+    })`);
+    if (/"booted":true/.test(String(flags.value))) break;
+    await sleep(250);
+  }
   say('BODY FLAGS: ' + flags.value);
   if (!/"booted":true/.test(String(flags.value))) say('FAIL: body.booted never set, launch animation would stay stuck');
+
+  // A restored session may already hold Claude tabs (they come back as fresh
+  // sessions now). Close them so step 3 below measures the one it opens.
+  await evaluate(c, `(() => { for (const t of tabs.filter((x) => x.kind === 'claude')) closeTab(t.id); return tabs.length; })()`);
 
   // --- 2. a tab webview was created and is loading a real page ---
   await sleep(3000);

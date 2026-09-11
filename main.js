@@ -335,11 +335,15 @@ app.whenReady().then(() => {
 // PTY IPC
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('pty:start', (_event, { cwd, cols, rows } = {}) => {
+// `args` is passed straight through: pty.js owns the allowlist (only
+// `--continue` survives) so there is exactly one place that decides what may
+// reach claude.exe's command line.
+ipcMain.handle('pty:start', (_event, { cwd, cols, rows, args } = {}) => {
   const session = createSession({
     cwd,
     cols,
     rows,
+    args,
     onData: (data) => send('pty:data', { id: session.id, data }),
     onExit: (exitCode) => {
       handles.delete(session.id);
@@ -412,6 +416,93 @@ ipcMain.handle('app:paths', () => ({
   home: app.getPath('home'),
   downloads: app.getPath('downloads'),
 }));
+
+/**
+ * Native folder picker for "which folder should this Claude session run in".
+ * Returns the chosen absolute path, or null for cancel / any failure -- the
+ * caller treats both the same way, so there is nothing to throw about.
+ */
+ipcMain.handle('app:pick-folder', async (_event, { defaultPath } = {}) => {
+  const options = {
+    properties: ['openDirectory'],
+    defaultPath:
+      typeof defaultPath === 'string' && defaultPath.trim()
+        ? defaultPath.trim()
+        : app.getPath('home'),
+    title: 'Choose a folder for Claude',
+  };
+  try {
+    const w = liveWin();
+    // Parented when we have a window, so the sheet is modal to it.
+    const result = w
+      ? await dialog.showOpenDialog(w, options)
+      : await dialog.showOpenDialog(options);
+    if (!result || result.canceled) return null;
+    const picked = Array.isArray(result.filePaths) ? result.filePaths[0] : null;
+    return typeof picked === 'string' && picked ? picked : null;
+  } catch {
+    return null;
+  }
+});
+
+/** Does this path name an existing directory? (settings validates typed paths) */
+ipcMain.handle('app:dir-exists', (_event, { path: target } = {}) => {
+  if (typeof target !== 'string' || !target.trim()) return false;
+  try {
+    return fs.statSync(path.resolve(target.trim())).isDirectory();
+  } catch {
+    return false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Session snapshot
+//
+// The renderer keeps its tab list in localStorage, which Chromium flushes
+// lazily -- a crash or a forced kill loses the last write. This is the durable
+// mirror: main writes it synchronously and atomically on every snapshot, so
+// the newer of (localStorage, session.json) is always a real session.
+// ---------------------------------------------------------------------------
+
+/** Lazy, like windowStatePath(): --test-profile must not touch the real one. */
+function sessionStatePath() {
+  return path.join(app.getPath('userData'), 'session.json');
+}
+
+/** Snapshots are small; anything this big is a bug or a runaway, not a session. */
+const SESSION_MAX_BYTES = 256 * 1024;
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+ipcMain.on('session:write', (_event, { snapshot } = {}) => {
+  try {
+    if (!isPlainObject(snapshot) || !Array.isArray(snapshot.tabs)) return;
+
+    const json = JSON.stringify(snapshot);
+    if (typeof json !== 'string') return;
+    if (Buffer.byteLength(json, 'utf8') > SESSION_MAX_BYTES) return;
+
+    // Write-then-rename: a kill mid-write can only ever destroy the .tmp, so
+    // session.json is either the previous snapshot or the new one, never half.
+    const target = sessionStatePath();
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, target);
+  } catch {
+    // A disk error must never take down an IPC handler.
+  }
+});
+
+ipcMain.handle('session:read', () => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sessionStatePath(), 'utf8'));
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null; // no file yet, unreadable, or not JSON
+  }
+});
 
 /**
  * The theme guest PAGES see -- what a site reads from prefers-color-scheme.

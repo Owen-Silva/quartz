@@ -10,7 +10,9 @@
  *   kind 'page'   — a <webview>, full browser behaviour (history, titles, nav).
  *   kind 'claude' — a <div class="claude-view"> hosting one Claude Code session,
  *                   driven by window.ClaudeTerminal (terminal.js, loaded AFTER
- *                   this file, so it is only ever touched from handlers).
+ *                   this file, so it is only ever touched from handlers). Each
+ *                   one runs in a folder (tab.cwd), which is what names its chip
+ *                   and what the session store rebuilds it from.
  * Exactly one child of #views is visible at a time; switching is a display swap,
  * never a teardown, so page state and live sessions both survive.
  *
@@ -513,8 +515,12 @@ function buildChip(tab) {
 /** The chip's hover text: the page title, and the host it is showing. */
 function chipTooltip(tab) {
   if (!tab) return '';
-  // A Claude chamber has no url worth reading; its title is the whole story.
-  if (isClaudeTab(tab)) return tab.title;
+  // A Claude chamber has no url, but it does have a folder — and the chip only
+  // ever shows that folder's last segment, so the tooltip carries the full path.
+  if (isClaudeTab(tab)) {
+    const cwd = typeof tab.cwd === 'string' ? tab.cwd : '';
+    return (cwd && cwd !== tab.title) ? tab.title + ' — ' + cwd : tab.title;
+  }
   const short = shortLabelFor(readCurrentUrl(tab) || tab.url);
   if (!short || short === tab.title) return tab.title;
   return tab.title + ' — ' + short;
@@ -646,7 +652,7 @@ function clearTabIcon(tab) {
 }
 
 function setTabTitle(tab, title) {
-  const fallback = isClaudeTab(tab) ? CLAUDE_DEFAULT_TITLE : shortLabelFor(tab.url);
+  const fallback = isClaudeTab(tab) ? claudeDefaultTitle(tab) : shortLabelFor(tab.url);
   const text = (title && String(title).trim()) || fallback;
   tab.title = text;
   if (tab.titleEl) tab.titleEl.textContent = text;
@@ -1029,13 +1035,82 @@ function isNoiseTitle(text) {
   return /\.exe$/i.test(t) || /^[A-Za-z]:\\/.test(t);
 }
 
+/** One setting, feature-detected: settings.js is optional and may predate a key. */
+function settingGet(key) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.get !== 'function') return null;
+  try {
+    const value = settings.get(key);
+    return value === undefined ? null : value;
+  } catch (err) {
+    return null; // a settings store that throws is a store that is not there
+  }
+}
+
+/** The user's home folder, or '' when preload predates api.homeDir. */
+function homeDir() {
+  return (window.api && typeof window.api.homeDir === 'string') ? window.api.homeDir : '';
+}
+
+/**
+ * The folder a new Claude tab opens in: the one settings names, else home.
+ * Whether it still exists cannot be checked from here without waiting, so the
+ * path is passed through as written — pty.js falls back to home on a bad cwd.
+ */
+function defaultClaudeCwd() {
+  const dir = settingGet('claudeDir');
+  if (typeof dir === 'string' && dir.trim()) return dir.trim();
+  return homeDir();
+}
+
+/** Windows paths are case-insensitive and differ freely in separator / trailing slash. */
+function samePath(a, b) {
+  const norm = (p) => String(p == null ? '' : p).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const left = norm(a);
+  return !!left && left === norm(b);
+}
+
+/** The last segment of a path. A drive root ("C:\") has none worth showing. */
+function folderBaseName(path) {
+  const text = String(path == null ? '' : path).replace(/[\\/]+$/, '');
+  if (!text) return '';
+  const at = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
+  const base = at === -1 ? text : text.slice(at + 1);
+  return /^[A-Za-z]:$/.test(base) ? '' : base;
+}
+
+/**
+ * A Claude chip's title before the session names itself: the folder it runs in,
+ * so a strip of chambers reads as a list of projects. Home (and anything with
+ * no nameable basename) keeps the bare product name.
+ */
+function claudeTitleFor(cwd) {
+  if (samePath(cwd, homeDir())) return CLAUDE_DEFAULT_TITLE;
+  return folderBaseName(cwd) || CLAUDE_DEFAULT_TITLE;
+}
+
+/** The title one Claude tab falls back to whenever it has nothing better. */
+function claudeDefaultTitle(tab) {
+  return claudeTitleFor(tab && tab.cwd);
+}
+
 /**
  * Order matters: the view is appended and activated BEFORE the session starts,
  * so the host element already has a size when ClaudeTerminal.create() measures
  * it. terminal.js is loaded after this file, hence the typeof guard.
+ *
+ * @param {{cwd?:string, resume?:boolean, background?:boolean}} [options]
+ *        cwd: the folder to run in, defaulting to settings / home.
+ *        resume: ask the CLI to continue that folder's last conversation
+ *        (restoreSession() only — a tab the user opens starts clean).
+ *        background: build it behind the current tab. The host is hidden while
+ *        the session starts, so activateTab() fits it on first raise.
  */
-function createClaudeTab() {
+function createClaudeTab(options) {
   if (!viewsEl || !tabstripEl) return null;
+
+  const opts = options || {};
+  const cwd = (typeof opts.cwd === 'string' && opts.cwd) ? opts.cwd : defaultClaudeCwd();
 
   const viewEl = document.createElement('div');
   viewEl.className = 'claude-view';
@@ -1049,8 +1124,9 @@ function createClaudeTab() {
     viewEl: viewEl,
     chipEl: null,
     titleEl: null,
-    title: CLAUDE_DEFAULT_TITLE,
+    title: claudeTitleFor(cwd),
     url: CLAUDE_URL,
+    cwd: cwd,
     term: null,
     live: false,
     ready: true,
@@ -1063,8 +1139,11 @@ function createClaudeTab() {
   tabs.push(tab);
   viewsEl.appendChild(viewEl);
   tabstripEl.appendChild(tab.chipEl);
+  saveSession(); // a chamber is a session entry now; debounced with the rest
 
-  activateTab(tab.id);
+  // Never leave the window with nothing on screen: the very first tab of a boot
+  // is raised even when the caller asked for a background one.
+  if (!opts.background || activeTabId === null) activateTab(tab.id);
 
   const factory = (typeof window.ClaudeTerminal === 'object' && window.ClaudeTerminal)
     ? window.ClaudeTerminal
@@ -1074,10 +1153,13 @@ function createClaudeTab() {
     return tab;
   }
 
-  const home = (window.api && typeof window.api.homeDir === 'string') ? window.api.homeDir : undefined;
-
   try {
-    tab.term = factory.create(viewEl, { cwd: home });
+    // args is honoured by terminal.js on the FIRST spawn only; an older
+    // terminal.js ignores the key entirely, which just means no resume.
+    tab.term = factory.create(viewEl, {
+      cwd: cwd || undefined,
+      args: opts.resume ? ['--continue'] : []
+    });
   } catch (err) {
     tab.term = null;
     setTabTitle(tab, 'Claude (unavailable)');
@@ -1086,6 +1168,24 @@ function createClaudeTab() {
 
   wireTermEvents(tab);
   return tab;
+}
+
+/**
+ * Shift+click on the Claude pill, Ctrl+Shift+` and the strip menu item: pick a
+ * folder, then open a chamber there. Cancelling the dialog opens nothing.
+ */
+function newClaudeTabInFolder() {
+  const app = (window.api && window.api.app) ? window.api.app : null;
+  if (!app || typeof app.pickFolder !== 'function') {
+    createClaudeTab(); // preload predates the picker: the default folder is all we have
+    return;
+  }
+  let pending = null;
+  try { pending = app.pickFolder(defaultClaudeCwd()); } catch (err) { return; }
+  if (!pending || typeof pending.then !== 'function') return;
+  pending.then((dir) => {
+    if (typeof dir === 'string' && dir) createClaudeTab({ cwd: dir });
+  }, () => { /* dialog failed: same as a cancel */ });
 }
 
 function wireTermEvents(tab) {
@@ -1105,17 +1205,18 @@ function wireTermEvents(tab) {
     if (tab.chipEl) tab.chipEl.classList.toggle('live', live);
     recomputeClaudeLive();
     // Only relabel a tab the session never got round to naming.
-    if (!live && tab.title === CLAUDE_DEFAULT_TITLE) {
-      setTabTitle(tab, 'Claude (ended)');
+    if (!live && tab.title === claudeDefaultTitle(tab)) {
+      setTabTitle(tab, claudeDefaultTitle(tab) + ' (ended)');
     }
   });
 
   listen('title', (text) => {
     if (isNoiseTitle(text)) return;
     let clean = String(text == null ? '' : text).trim();
-    // The CLI reports a bare lowercase "claude" as its title; show the product name.
-    if (/^claude$/i.test(clean)) clean = CLAUDE_DEFAULT_TITLE;
-    setTabTitle(tab, clean ? clean.slice(0, 60) : CLAUDE_DEFAULT_TITLE);
+    // The CLI reports a bare lowercase "claude" as its title; that says less
+    // than the folder does, so it falls back to the chip's own default.
+    if (/^claude$/i.test(clean)) clean = '';
+    setTabTitle(tab, clean ? clean.slice(0, 60) : '');
   });
 }
 
@@ -1234,6 +1335,19 @@ function openTabAt(url, at) {
   const made = createTab(url);
   if (made) moveTabToIndex(made.id, at);
   return made;
+}
+
+/**
+ * Ctrl+P and the chip menu. A <webview> prints itself, chrome and all, through
+ * Chromium's own preview window. A Claude chamber has nothing to print.
+ */
+function printTab(tab) {
+  if (!isViewUsable(tab)) return;
+  try { tab.viewEl.print(); } catch (err) { /* guest went away mid-call */ }
+}
+
+function printActiveTab() {
+  printTab(getActiveTab());
 }
 
 function reloadTab(tab) {
@@ -1376,6 +1490,14 @@ function tabMenuItemsForTab(tab) {
       label: tab.muted ? 'Unmute tab' : 'Mute tab',
       run: () => setTabMuted(tab, !tab.muted)
     });
+    items.push({ label: 'Print…', run: () => printTab(tab) });
+  } else {
+    // Same folder, fresh session — the chamber already running is untouched.
+    // Duplicate is deliberately not offered: a PTY cannot be copied.
+    items.push({
+      label: 'Open folder in new Claude tab',
+      run: () => createClaudeTab({ cwd: tab.cwd })
+    });
   }
 
   items.push(null);
@@ -1397,10 +1519,11 @@ function tabMenuItemsForTab(tab) {
   return items;
 }
 
-/** Right-click on bare strip: there is no tab to act on, so only these two. */
+/** Right-click on bare strip: there is no tab to act on, so only these three. */
 function tabMenuItemsForStrip() {
   return [
     { label: 'New tab', run: () => createTab(HOME_URL) },
+    { label: 'New Claude tab in folder…', run: newClaudeTabInFolder },
     { label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() }
   ];
 }
@@ -1468,15 +1591,25 @@ function wireTabMenu() {
 /* ------------------------------------------------------------------ */
 
 /*
- * Only page tabs are persisted. A Claude tab is a live PTY: there is nothing on
- * disk to rebuild it from, so those are skipped on save and the stored `active`
- * index counts page tabs alone.
+ * Both kinds of tab are persisted, in one list that keeps the strip's order:
+ *   a page tab   — { url, pinned?, muted? }, the flags written only when true.
+ *   a Claude tab — { claude: true, cwd }. The PTY itself cannot be saved, so
+ *                  what is stored is the folder; the chamber is respawned there
+ *                  on boot, resuming that folder's last conversation when
+ *                  settings say so.
+ * `active` is an index into that single list, so it follows either kind.
+ *
+ * The snapshot is written twice: to localStorage (synchronous, authoritative in
+ * practice) and to a file in userData through api.session (durable across a
+ * cleared profile). Boot reads both and takes whichever has the newer savedAt.
  *
  * Every localStorage call below is wrapped — storage can be blocked or full, and
  * losing the session must never take the browser down with it.
  */
 const SESSION_STORAGE_KEY = 'session';
 const SESSION_SAVE_DELAY = 500;
+// How long boot waits for the file copy before going with localStorage alone.
+const SESSION_READ_TIMEOUT = 300;
 const SESSION_MAX_TABS = 40;
 // Stand-in for the bundled new-tab page. Storing its file:// URL would freeze a
 // stale ?theme= into the session, so the marker is resolved on restore instead.
@@ -1504,31 +1637,53 @@ function sessionUrlFor(tab) {
 
 /**
  * One stored tab is { url } plus the flags that are worth carrying across a
- * restart. Both are written only when true, so an old session reads the same.
+ * restart (written only when true, so an old session reads the same), or
+ * { claude: true, cwd } for a chamber. Order is strip order across both kinds.
  */
 function sessionSnapshot() {
   const entries = [];
   let active = -1;
   for (const tab of tabs) {
-    const url = sessionUrlFor(tab);
-    if (!url) continue; // Claude tabs and unpersistable pages shift nothing
+    let entry = null;
+    if (isClaudeTab(tab)) {
+      const cwd = (typeof tab.cwd === 'string' && tab.cwd) ? tab.cwd : '';
+      if (!cwd) continue; // nothing to respawn into: it would be dropped on read
+      entry = { claude: true, cwd: cwd };
+    } else {
+      const url = sessionUrlFor(tab);
+      if (!url) continue; // an unpersistable page shifts nothing
+      entry = { url: url };
+      if (tab.pinned) entry.pinned = true;
+      if (tab.muted) entry.muted = true;
+    }
     if (tab.id === activeTabId) active = entries.length;
-    const entry = { url: url };
-    if (tab.pinned) entry.pinned = true;
-    if (tab.muted) entry.muted = true;
     entries.push(entry);
   }
   const capped = entries.slice(0, SESSION_MAX_TABS);
-  return { tabs: capped, active: active < capped.length ? active : -1 };
+  return {
+    tabs: capped,
+    active: active < capped.length ? active : -1,
+    savedAt: Date.now() // boot compares the two copies on this
+  };
 }
 
 function writeSession() {
   sessionSaveTimer = null;
   if (restoring) return;
+  const snapshot = sessionSnapshot();
   try {
-    // Zero page tabs is a legitimate state and is stored as such.
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionSnapshot()));
+    // Zero tabs is a legitimate state and is stored as such.
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
   } catch (err) { /* storage blocked or full — this run just loses its session */ }
+
+  // The durable copy. preload may predate api.session, and the write is fire
+  // and forget either way: nothing in the chrome waits on it.
+  const store = (window.api && window.api.session) ? window.api.session : null;
+  if (!store || typeof store.write !== 'function') return;
+  try {
+    const pending = store.write(snapshot);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* the file copy is best-effort */ }
 }
 
 /**
@@ -1542,12 +1697,58 @@ function saveSession() {
 }
 
 /**
- * Read and sanitise the stored session. Returns null when there is nothing
- * usable — missing, malformed, or every entry dropped. `urls` is kept beside
- * the entries because it is what this has always returned.
- * @returns {{entries:Array<{url:string,pinned:boolean,muted:boolean}>,
- *            urls:string[], active:number}|null}
+ * Sanitise one parsed snapshot, whichever copy it came from. Returns null when
+ * there is nothing usable — malformed, or every entry dropped. `urls` is kept
+ * beside the entries because it is what this has always returned; Claude
+ * entries are not urls and are left out of it.
+ * @returns {{entries:Array<{claude:boolean,cwd:string,url:string,
+ *            pinned:boolean,muted:boolean}>,
+ *            urls:string[], active:number, savedAt:number}|null}
  */
+function sanitiseSession(parsed) {
+  if (!parsed || !Array.isArray(parsed.tabs)) return null;
+
+  const entries = [];
+  for (const entry of parsed.tabs) {
+    if (entry && entry.claude) {
+      const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
+      if (!cwd) continue; // a chamber with no folder cannot be rebuilt
+      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false });
+      if (entries.length >= SESSION_MAX_TABS) break;
+      continue;
+    }
+    const url = (entry && typeof entry.url === 'string') ? entry.url : '';
+    if (!url) continue;
+    let href = '';
+    if (url === SESSION_NEWTAB) {
+      href = SESSION_NEWTAB;
+    } else {
+      const target = parseUrlOrNull(url);
+      // Anything that is not plain web goes on the floor, whoever wrote it.
+      if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) continue;
+      href = target.href;
+    }
+    entries.push({
+      claude: false, cwd: '', url: href,
+      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted)
+    });
+    if (entries.length >= SESSION_MAX_TABS) break;
+  }
+  if (!entries.length) return null;
+
+  const active = Number(parsed.active);
+  const inRange = isFinite(active) && active >= 0 && active < entries.length;
+  const savedAt = Number(parsed.savedAt);
+  return {
+    entries: entries,
+    urls: entries.filter((e) => !e.claude).map((e) => e.url),
+    active: inRange ? active : entries.length - 1,
+    // A snapshot written before savedAt existed loses every tie-break.
+    savedAt: (isFinite(savedAt) && savedAt > 0) ? savedAt : 0
+  };
+}
+
+/** The localStorage copy, read synchronously. Null when missing or unusable. */
 function readSession() {
   let raw = null;
   try {
@@ -1563,46 +1764,58 @@ function readSession() {
   } catch (err) {
     return null; // malformed
   }
-  if (!parsed || !Array.isArray(parsed.tabs)) return null;
-
-  const entries = [];
-  for (const entry of parsed.tabs) {
-    const url = (entry && typeof entry.url === 'string') ? entry.url : '';
-    if (!url) continue;
-    let href = '';
-    if (url === SESSION_NEWTAB) {
-      href = SESSION_NEWTAB;
-    } else {
-      const target = parseUrlOrNull(url);
-      // Anything that is not plain web goes on the floor, whoever wrote it.
-      if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) continue;
-      href = target.href;
-    }
-    entries.push({ url: href, pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted) });
-    if (entries.length >= SESSION_MAX_TABS) break;
-  }
-  if (!entries.length) return null;
-
-  const active = Number(parsed.active);
-  const inRange = isFinite(active) && active >= 0 && active < entries.length;
-  return {
-    entries: entries,
-    urls: entries.map((e) => e.url),
-    active: inRange ? active : entries.length - 1
-  };
+  return sanitiseSession(parsed);
 }
 
 /**
- * Rebuild last run's page tabs. Returns true when it took over the boot; init()
- * falls back to its single HOME_URL tab when this says no.
+ * Both copies, newest wins. localStorage is there immediately; the file copy
+ * comes over IPC, so boot waits a beat for it rather than racing — but never
+ * longer than SESSION_READ_TIMEOUT, because a hung main process must not hold
+ * the window at zero tabs.
+ * @returns {Promise<object|null>}
  */
-function restoreSession() {
-  const session = readSession();
-  if (!session) return false;
+function loadSession() {
+  const local = readSession();
+  const store = (window.api && window.api.session) ? window.api.session : null;
+  if (!store || typeof store.read !== 'function') return Promise.resolve(local);
+
+  let pending = null;
+  try { pending = store.read(); } catch (err) { return Promise.resolve(local); }
+  if (!pending || typeof pending.then !== 'function') return Promise.resolve(local);
+
+  const raced = new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => { if (!done) { done = true; resolve(value); } };
+    window.setTimeout(() => finish(null), SESSION_READ_TIMEOUT);
+    pending.then((raw) => {
+      let clean = null;
+      try { clean = sanitiseSession(raw); } catch (err) { clean = null; }
+      finish(clean);
+    }, () => finish(null));
+  });
+
+  return raced.then((fromFile) => {
+    if (!fromFile) return local;
+    if (!local) return fromFile;
+    return fromFile.savedAt > local.savedAt ? fromFile : local;
+  });
+}
+
+/**
+ * Rebuild last run's strip — page tabs and Claude chambers alike. Returns true
+ * when it took over the boot; init() falls back to its single HOME_URL tab when
+ * this says no.
+ * @param {object} [snapshot] a session already read (loadSession's winner).
+ *        Omitted, it reads localStorage, which is what this has always done.
+ */
+function restoreSession(snapshot) {
+  const session = (snapshot === undefined) ? readSession() : snapshot;
+  if (!session || !Array.isArray(session.entries)) return false;
 
   // Pinned tabs live at the left of the strip, so they are rebuilt first. The
   // partition is stable, so each group keeps the order it was stored in, and
   // the stored active index is followed through the shuffle by identity.
+  // A Claude chamber is never pinned, so it always lands in the second group.
   const rows = session.entries.map((entry, index) => ({ entry: entry, index: index }));
   const ordered = rows.filter((r) => r.entry.pinned).concat(rows.filter((r) => !r.entry.pinned));
 
@@ -1611,13 +1824,16 @@ function restoreSession() {
   let wanted = null;
   try {
     // All background: the strip is built in order, then the saved tab is raised.
+    const resume = settingGet('claudeResume') !== false; // unset means yes
     for (const row of ordered) {
       const entry = row.entry;
-      const tab = createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
-        background: true,
-        pinned: entry.pinned,
-        muted: entry.muted
-      });
+      const tab = entry.claude
+        ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true })
+        : createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
+          background: true,
+          pinned: entry.pinned,
+          muted: entry.muted
+        });
       if (!tab) continue;
       created.push(tab);
       if (row.index === session.active) wanted = tab;
@@ -2289,7 +2505,11 @@ function wireChrome() {
     newTabBtn.addEventListener('click', () => createTab(HOME_URL));
   }
   if (newClaudeBtn) {
-    newClaudeBtn.addEventListener('click', () => createClaudeTab());
+    // Plain click opens the default folder; Shift+click asks which one.
+    newClaudeBtn.addEventListener('click', (event) => {
+      if (event && event.shiftKey) newClaudeTabInFolder();
+      else createClaudeTab();
+    });
   }
   // Right-click in the tab row. Delegated from the titlebar so bare strip space
   // is covered too; main.js only pops a native menu over editable fields, so
@@ -2420,6 +2640,9 @@ function wireKeyboard() {
       'zoom-reset': resetZoom,
       'toggle-theme': toggleTheme,
       'reload': reloadActiveTab,
+      // main.js does not send 'print' yet; the entry costs nothing and means
+      // Ctrl+P starts working from a page with focus the day it does.
+      'print': printActiveTab,
       'back': goBack,
       'forward': goForward,
       'fullscreen': toggleFullscreen,
@@ -2537,9 +2760,19 @@ function wireKeyboard() {
       reloadActiveTab(); // no-op on a Claude tab
       return;
     }
+    // Plain Ctrl+P only: Ctrl+Shift+P is left free, as it is in every browser.
+    if (key === 'p' && !event.shiftKey) {
+      event.preventDefault(); // never let Ctrl+P print the chrome window itself
+      printActiveTab(); // no-op on a Claude tab
+      return;
+    }
+    // Shift turns event.key into '~', so the physical key is what is tested.
+    // Ctrl+Shift+` opens a chamber in a folder you pick; main.js does not
+    // replay it, so it only fires while the chrome has focus.
     if (key === '`' || event.code === 'Backquote') {
       event.preventDefault();
-      toggleClaude(); // same path as the shortcut action and the Claude button
+      if (event.shiftKey) newClaudeTabInFolder();
+      else toggleClaude(); // same path as the shortcut action and the Claude button
     }
   });
 }
@@ -2587,14 +2820,26 @@ function init() {
   updateNavState();
   syncReloadButton();
 
-  // Last run's page tabs win the boot; a missing, malformed or empty session
-  // falls through to the single home tab this has always opened.
-  if (!restoreSession()) createTab(HOME_URL);
+  // Last run's strip wins the boot; a missing, malformed or empty session falls
+  // through to the single home tab this has always opened. The file copy of the
+  // session arrives over IPC, so the strip is built a turn (at most
+  // SESSION_READ_TIMEOUT) later — everything above is wired by then, and the
+  // window is already on screen.
+  const openStrip = (session) => {
+    if (!restoreSession(session)) createTab(HOME_URL);
+    // One frame later so the launch entrance animation has a state to start from.
+    window.requestAnimationFrame(() => {
+      document.body.classList.add('booted');
+    });
+  };
 
-  // One frame later so the launch entrance animation has a state to start from.
-  window.requestAnimationFrame(() => {
-    document.body.classList.add('booted');
-  });
+  let pending = null;
+  try { pending = loadSession(); } catch (err) { pending = null; }
+  if (pending && typeof pending.then === 'function') {
+    pending.then(openStrip, () => openStrip(readSession()));
+  } else {
+    openStrip(readSession());
+  }
 }
 
 if (document.readyState === 'loading') {

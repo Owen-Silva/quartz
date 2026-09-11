@@ -15,7 +15,9 @@
  *     siteTheme:    'system'|'light'|'dark',
  *     accentHue:    null | 0..360,
  *     chips:        null | [{ label, url }, ...],
- *     homepage:     'newtab' }
+ *     homepage:     'newtab',
+ *     claudeDir:    null | absolute path,   // null means the home folder
+ *     claudeResume: true | false }          // --continue on a restored tab
  *
  * Missing keys fall back to DEFAULTS, so an older stored object still reads.
  * `chips: null` means "never touched" — the new tab page shows its own list
@@ -47,7 +49,9 @@
     siteTheme: 'system',
     accentHue: null,
     chips: null,
-    homepage: 'newtab'
+    homepage: 'newtab',
+    claudeDir: null,
+    claudeResume: true
   };
 
   var ENGINES = [
@@ -73,11 +77,13 @@
     ['Ctrl+1-9', 'Jump to a tab'],
     ['Ctrl+L', 'Address bar'],
     ['Ctrl+F', 'Find on page'],
+    ['Ctrl+P', 'Print page'],
     ['Ctrl+J', 'Downloads'],
     ['Ctrl+H', 'History'],
     ['Ctrl+D', 'Add this page to your new tab'],
     ['Ctrl+,', 'Settings'],
     ['Ctrl+`', 'Claude tab'],
+    ['Ctrl+Shift+`', 'Claude tab in a chosen folder'],
     ['Ctrl+= / Ctrl+- / Ctrl+0', 'Zoom in, out, reset'],
     ['F5', 'Reload'],
     ['F11', 'Fullscreen'],
@@ -470,6 +476,24 @@
     return wrap;
   }
 
+  /**
+   * A whole-row switch: the row itself is the control, like .set-opt, so the
+   * label is as clickable as the track beside it.
+   */
+  function switchRow(label, checked, onToggle) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'set-row' + (checked ? ' is-on' : '');
+    b.setAttribute('role', 'switch');
+    b.setAttribute('aria-checked', checked ? 'true' : 'false');
+    b.appendChild(el('span', 'set-row-label', label));
+    var track = el('span', 'set-switch');
+    track.appendChild(el('span', 'set-switch-knob'));
+    b.appendChild(track);
+    b.addEventListener('click', function () { onToggle(!checked); });
+    return b;
+  }
+
   /* ============================================================
      Sections
      ============================================================ */
@@ -527,6 +551,140 @@
 
     accentField.appendChild(row);
     accentField.appendChild(el('p', 'set-hint', 'One colour marks what is active, everywhere.'));
+  }
+
+  /* ============================================================
+     Claude
+     The folder a new Claude tab opens in, and whether a restored one
+     picks the conversation back up. app.js reads both from the store.
+     ============================================================ */
+
+  /* Set to a selector just before a write that re-renders this section, so
+     the keyboard lands back on the control that was being used. */
+  var claudeFocus = null;
+
+  function buildClaude() {
+    var s = section('Claude');
+    var dir = el('div', 'set-field');
+    dir.setAttribute('data-field', 'claudedir');
+    s.appendChild(dir);
+
+    var resume = el('div', 'set-field');
+    resume.setAttribute('data-field', 'clauderesume');
+    s.appendChild(resume);
+    return s;
+  }
+
+  function renderClaude() {
+    renderClaudeDir();
+    renderClaudeResume();
+  }
+
+  function renderClaudeDir() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="claudedir"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var current = get('claudeDir');
+    var app = (window.api && window.api.app) || null;
+    var home = (window.api && window.api.homeDir) || '';
+
+    var label = el('label', 'set-label', 'Start new Claude tabs in');
+    label.setAttribute('for', 'set-claude-dir');
+    field.appendChild(label);
+
+    var row = el('div', 'set-path-row');
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'set-claude-dir';
+    input.className = 'set-path';
+    input.value = current || '';
+    input.placeholder = 'Your home folder';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.title = 'Type a folder, or choose one';
+    row.appendChild(input);
+
+    var note = el('p', 'set-note', 'That folder doesn’t exist');
+    note.hidden = true;
+
+    // An older preload has no native dialog: then the field is the only way in.
+    if (app && typeof app.pickFolder === 'function') {
+      row.appendChild(textButton('Choose…', 'set-btn set-path-pick', function () {
+        var answer;
+        try { answer = app.pickFolder(current || home || undefined); } catch (err) { return; }
+        Promise.resolve(answer).then(function (path) {
+          if (typeof path !== 'string' || !path) return;   // null: cancelled
+          claudeFocus = '.set-path-pick';
+          set({ claudeDir: path });
+        }, function () { /* the dialog is gone; leave the value alone */ });
+      }));
+    }
+
+    if (current) {
+      row.appendChild(textButton('Use home', 'set-text set-path-home', function () {
+        claudeFocus = '.set-path';
+        set({ claudeDir: null });
+      }));
+    }
+
+    field.appendChild(row);
+    field.appendChild(note);
+
+    /* A typed path is only written once main confirms the folder is real;
+       until then the previous value stands and the note says why. */
+    var before = input.value;
+    input.addEventListener('change', function () {      // fires on blur, and on Enter
+      var next = input.value.trim();
+      note.hidden = true;
+      if (next === before) return;
+      if (!next) { set({ claudeDir: null }); return; }   // emptied: back to home
+      if (!app || typeof app.dirExists !== 'function') { set({ claudeDir: next }); return; }
+      var answer;
+      try { answer = app.dirExists(next); } catch (err) { set({ claudeDir: next }); return; }
+      Promise.resolve(answer).then(function (ok) {
+        if (ok) { set({ claudeDir: next }); return; }
+        note.hidden = false;
+        input.value = before;
+      }, function () { set({ claudeDir: next }); });     // unverifiable: take the user's word
+    });
+
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); input.blur(); return; }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();            // Escape leaves the field, not the panel
+        input.value = before;
+        note.hidden = true;
+        input.blur();
+      }
+    });
+
+    if (claudeFocus) {
+      var target = field.querySelector(claudeFocus);
+      claudeFocus = null;
+      if (target && typeof target.focus === 'function') target.focus();
+    }
+  }
+
+  function renderClaudeResume() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="clauderesume"]');
+    if (!field) return;
+    field.textContent = '';
+
+    field.appendChild(switchRow(
+      'Resume the last conversation when tabs are restored',
+      get('claudeResume') !== false,
+      function (next) { set({ claudeResume: next }); }
+    ));
+
+    var hint = el('p', 'set-hint');
+    hint.appendChild(document.createTextNode('Restored Claude tabs run '));
+    hint.appendChild(el('code', 'set-code', 'claude --continue'));
+    hint.appendChild(document.createTextNode(' in their folder. Turn off to start fresh every time.'));
+    field.appendChild(hint);
   }
 
   function buildSearch() {
@@ -835,6 +993,7 @@
 
     bodyEl = el('div', 'set-body');
     bodyEl.appendChild(buildLook());
+    bodyEl.appendChild(buildClaude());
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildChips());
@@ -849,6 +1008,7 @@
 
   function renderAll() {
     renderLook();
+    renderClaude();
     renderSearch();
     renderSites();
     renderChips();
@@ -960,6 +1120,8 @@
     on(function (_snapshot, keys) {
       if (!bodyEl) return;
       if (keys.indexOf('accentHue') >= 0) renderLook();
+      if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
+      if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0) renderChips();

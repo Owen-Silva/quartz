@@ -310,6 +310,142 @@
 }
 
 /* ============================================================
+   Claude
+   The folder field, and the switch row that carries --continue.
+   ============================================================ */
+
+#settings-panel .set-label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+#settings-panel .set-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A real field, not a chip cell: it holds an absolute path, so it reads
+   as something you can type into before you click it. */
+#settings-panel .set-path {
+  flex: 1 1 190px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#settings-panel .set-path::placeholder { color: var(--placeholder); }
+#settings-panel .set-path:hover { background: var(--glass-2); }
+
+#settings-panel .set-path:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+#settings-panel .set-path::selection { background: var(--ion-select); color: var(--fg); }
+
+/* the buttons sit on the field's line, not under it */
+#settings-panel .set-path-row .set-btn { margin-top: 0; }
+
+#settings-panel .set-note {
+  margin: 6px 0 0;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* --- the switch row ------------------------------------------
+   The whole row is the control, as in .set-opt: the sentence is as
+   clickable as the track at the end of it. */
+#settings-panel .set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-row:hover { background: var(--glass); color: var(--fg); }
+#settings-panel .set-row.is-on { color: var(--fg); }
+
+#settings-panel .set-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+#settings-panel .set-switch {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--glass);
+  box-shadow: inset 0 1px 0 var(--shade-in);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#settings-panel .set-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  transition: transform 120ms steps(2), background-color 120ms steps(2);
+}
+
+#settings-panel .set-row.is-on .set-switch {
+  border-color: var(--ion-line);
+  background: var(--ion-soft);
+}
+
+/* lit, like every other active thing in the chrome */
+#settings-panel .set-row.is-on .set-switch-knob {
+  transform: translateX(16px);
+  background: var(--ion);
+  box-shadow: 0 0 8px var(--ion-glow);
+}
+
+/* a command, keycapped the way the shortcuts table caps a key */
+#settings-panel .set-code {
+  padding: 1px 5px;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: var(--sheen), var(--glass);
+  color: var(--fg-2);
+  font-family: 'Cascadia Mono', Consolas, 'Segoe UI', monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+}
+
+/* ============================================================
    New tab shortcuts
    ============================================================ */
 
@@ -515,7 +651,11 @@
   #settings-panel .set-btn,
   #settings-panel .set-act,
   #settings-panel .set-chip,
-  #settings-panel .set-chip-text { transition: none; }
+  #settings-panel .set-chip-text,
+  #settings-panel .set-path,
+  #settings-panel .set-row,
+  #settings-panel .set-switch,
+  #settings-panel .set-switch-knob { transition: none; }
 
   #settings-toast { transition: none; }
 }

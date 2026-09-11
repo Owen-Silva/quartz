@@ -6,16 +6,23 @@
 // under a real Windows pseudo-console (ConPTY) via node-pty, so the CLI sees a
 // proper TTY and renders its full interactive UI.
 
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
-// Absolute path to the Claude CLI. Spawned with no arguments per the contract.
+// Absolute path to the Claude CLI.
 const CLAUDE_BIN = 'C:\\Users\\you\\.local\\bin\\claude.exe';
 
 // Fallback cwd when the caller does not supply one (or supplies garbage).
 const DEFAULT_CWD = 'C:\\Users\\you';
+
+// The ONLY flags a renderer may put on claude.exe's command line. Everything
+// else is dropped silently (logged, never spawned): the renderer is the least
+// trusted side of this bridge and argv is the one place a string it supplies
+// would change how the CLI behaves.
+const ALLOWED_ARGS = new Set(['--continue']);
 
 /** @type {Map<string, {id: string, pty: any, alive: boolean}>} */
 const sessions = new Map();
@@ -28,6 +35,59 @@ function sanitizeDim(value, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1) return fallback;
   return Math.max(1, Math.floor(n));
+}
+
+/**
+ * Keep only allowlisted flags, in the order given, without duplicates.
+ * A dropped argument is never an error: the session still starts, plain.
+ */
+function sanitizeArgs(args) {
+  if (args === undefined || args === null) return [];
+  if (!Array.isArray(args)) {
+    console.warn('[pty] args must be an array; ignoring', typeof args);
+    return [];
+  }
+  const out = [];
+  for (const raw of args) {
+    if (typeof raw !== 'string') {
+      console.warn('[pty] dropped non-string arg:', typeof raw);
+      continue;
+    }
+    const arg = raw.trim();
+    if (!arg) continue;
+    if (!ALLOWED_ARGS.has(arg)) {
+      console.warn('[pty] dropped arg not on the allowlist:', arg);
+      continue;
+    }
+    if (out.indexOf(arg) === -1) out.push(arg);
+  }
+  return out;
+}
+
+/**
+ * Resolve a caller-supplied cwd to a directory that actually exists.
+ *
+ * node-pty throws if the cwd is missing, which would surface as a failed tab
+ * rather than a usable one -- so a folder that has been deleted, renamed, or
+ * simply typed wrong falls back to the home directory instead.
+ */
+function resolveCwd(cwd) {
+  const home = os.homedir() || DEFAULT_CWD;
+  if (typeof cwd !== 'string' || !cwd.trim()) return home;
+
+  let resolved;
+  try {
+    resolved = path.resolve(cwd.trim());
+  } catch {
+    return home;
+  }
+  try {
+    if (fs.statSync(resolved).isDirectory()) return resolved;
+  } catch {
+    // missing / unreadable -- handled below
+  }
+  console.warn('[pty] cwd is not an existing directory, using home instead:', resolved);
+  return home;
 }
 
 function newId() {
@@ -67,25 +127,22 @@ function cleanEnv() {
  * @param {string} [opts.cwd]     working directory for the shell
  * @param {number} [opts.cols]    initial column count
  * @param {number} [opts.rows]    initial row count
+ * @param {string[]} [opts.args]  extra claude.exe flags; only `--continue` survives
  * @param {(data: string) => void} [opts.onData]
  * @param {(exitCode: number) => void} [opts.onExit]
- * @returns {{ id: string, write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}
+ * @returns {{ id: string, cwd: string, args: string[], write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}
  */
-function createSession({ cwd, cols, rows, onData, onExit } = {}) {
+function createSession({ cwd, cols, rows, args, onData, onExit } = {}) {
   const id = newId();
   const safeCols = sanitizeDim(cols, 80);
   const safeRows = sanitizeDim(rows, 24);
 
   // A non-string / non-existent cwd makes node-pty throw, so normalize first.
   // (see cleanEnv below for why the environment is scrubbed before spawning)
-  let safeCwd = DEFAULT_CWD;
-  if (typeof cwd === 'string' && cwd.trim()) {
-    safeCwd = path.resolve(cwd.trim());
-  } else if (os.homedir()) {
-    safeCwd = DEFAULT_CWD;
-  }
+  const safeCwd = resolveCwd(cwd);
+  const safeArgs = sanitizeArgs(args);
 
-  const p = nodePty.spawn(CLAUDE_BIN, [], {
+  const p = nodePty.spawn(CLAUDE_BIN, safeArgs, {
     name: 'xterm-256color',
     cols: safeCols,
     rows: safeRows,
@@ -121,6 +178,9 @@ function createSession({ cwd, cols, rows, onData, onExit } = {}) {
 
   return {
     id,
+    // What the process actually got, after validation -- not what was asked for.
+    cwd: safeCwd,
+    args: safeArgs.slice(),
 
     write(data) {
       if (!record.alive || typeof data !== 'string') return;

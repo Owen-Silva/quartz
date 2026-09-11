@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('api', {
     // 'system' | 'light' | 'dark'. Main has no access to localStorage, so the
     // renderer replays the stored choice at load and on every change.
     setSiteTheme: (mode) => ipcRenderer.send('app:site-theme', { mode }),
+    // Native "choose a folder for Claude" dialog. Resolves to the chosen
+    // absolute path, or null if the user cancelled.
+    pickFolder: (defaultPath) => ipcRenderer.invoke('app:pick-folder', { defaultPath }),
+    // True only for an existing directory -- used to validate a typed path.
+    dirExists: (path) => ipcRenderer.invoke('app:dir-exists', { path }),
     // Sync: these are already in this process, so nothing has to be awaited.
     versions: () => ({
       electron: process.versions.electron,
@@ -97,7 +102,15 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('adblock:state-changed', handler);
     }
   },
+  // Durable mirror of the session localStorage holds. write() is fire-and-
+  // forget (main writes it atomically); read() returns the parsed object or
+  // null. The renderer decides which copy is newer by comparing savedAt.
+  session: {
+    write: (snapshot) => ipcRenderer.send('session:write', { snapshot }),
+    read: () => ipcRenderer.invoke('session:read')
+  },
   pty: {
+    // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     start: (opts) => ipcRenderer.invoke('pty:start', opts),
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),

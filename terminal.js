@@ -228,9 +228,22 @@
     if (!cols || !rows || cols < 1 || rows < 1) return;
 
     st.starting = true;
+
+    // Launch flags belong to the FIRST spawn only. Consumed here, so the
+    // Enter-to-restart path below always starts a plain session: a resumed
+    // conversation that has already ended must not be resumed again, and
+    // `claude --continue` in a folder with no history just errors and exits.
+    var startArgs = st.pendingArgs;
+    st.pendingArgs = null;
+
     var startPromise;
     try {
-      startPromise = window.api.pty.start({ cwd: st.cwd, cols: cols, rows: rows });
+      startPromise = window.api.pty.start({
+        cwd: st.cwd,
+        cols: cols,
+        rows: rows,
+        args: startArgs && startArgs.length ? startArgs : undefined
+      });
     } catch (err) {
       st.starting = false;
       failStart(st, err);
@@ -375,6 +388,8 @@
       id: 'claude-' + (++seq) + '-' + Math.random().toString(36).slice(2, 8),
       host: hostEl,
       cwd: options.cwd || (window.api && window.api.homeDir) || undefined,
+      // Flags for the first spawn only; startPty() clears this as it uses it.
+      pendingArgs: Array.isArray(options.args) ? options.args.slice() : null,
       term: null,
       fitAddon: null,
       sessionId: null,
@@ -420,6 +435,8 @@
 
     var handle = {
       id: st.id,
+      // The folder this session runs in, for the chrome to label the tab with.
+      cwd: st.cwd || '',
 
       focus: function () {
         if (st.disposed || !st.term) return;
