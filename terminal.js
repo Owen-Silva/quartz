@@ -618,6 +618,10 @@
       },
 
       fit: function () {
+        // A hidden chamber normally opens from its ResizeObserver when the tab
+        // is shown, but an occluded window gets no observer or rAF callbacks at
+        // all, so activation calls this synchronously: open now if measurable.
+        ensureOpen(st);
         safeFit(st); // no-op while hidden
       },
 

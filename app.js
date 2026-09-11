@@ -2819,6 +2819,10 @@ function activateTab(id) {
   }
 
   if (isClaudeTab(target)) {
+    // Synchronously first: the display swap above already landed, and a window
+    // behind another one never gets the animation frame below, so a chamber
+    // that has not opened yet would otherwise stay blank until the next paint.
+    try { if (target.term && typeof target.term.fit === 'function') target.term.fit(); } catch (err) { /* not open yet */ }
     // One frame later: the display swap has to land before xterm measures.
     window.requestAnimationFrame(() => {
       const term = target.term;
@@ -4652,6 +4656,53 @@ function askClaudeAboutArticle(payload) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Ask Claude about a file on disk                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Ask hands over a link, Show a picture, Article the words — this hands over a
+ * FILE. Claude Code opens files and images by path, so the path is the whole
+ * attachment: a finished download can be read, summarised or described without
+ * anything being uploaded anywhere.
+ */
+
+const MSG_FILE_MISSING = "That file has no path yet";
+
+/** Same forward-slash rule as screenshotPathText(); Claude Code takes either. */
+function filePromptText(target) {
+  return 'Look at the file ' + screenshotPathText(target) + ' and ';
+}
+
+/**
+ * @param {string} path the file on disk, in either slash.
+ * @param {{name?:string}} [options] display name, used only to name the file
+ *   in the toast when there is no path to hand over.
+ * @returns {boolean} true once the prompt is in (or queued for) a chamber.
+ */
+function askClaudeAboutFile(path, options) {
+  const target = String(path == null ? '' : path).trim();
+  const opts = options || {};
+  const name = String(opts.name == null ? '' : opts.name).trim();
+  if (!target) {
+    claudeToast(name ? "No path for " + name : MSG_FILE_MISSING);
+    return false;
+  }
+
+  // The request comes from a popover over the chrome, so there is no subject
+  // page to infer: the tab in front is the one to stand the chamber beside,
+  // and anything else (a chamber, the new tab) falls through to claudeChamberFor.
+  const active = getActiveTab();
+  const page = active && active.kind === 'page' ? active : null;
+
+  const claude = claudeChamberFor(page);
+  if (!claude) return false;
+  // Same as askClaude(): the chamber takes the front so what is typed next
+  // lands in the terminal rather than in the page.
+  activateTab(claude.id);
+  return pasteIntoChamber(claude, filePromptText(target));
+}
+
+/* ------------------------------------------------------------------ */
 /* Window controls (frameless titlebar)                                */
 /* ------------------------------------------------------------------ */
 
@@ -5343,6 +5394,8 @@ window.showClaudeThisPage = showClaudeThisPage;
 window.showPromptText = showPromptText;
 window.askClaudeAboutArticle = askClaudeAboutArticle;
 window.askArticlePromptText = askArticlePromptText;
+window.askClaudeAboutFile = askClaudeAboutFile;
+window.filePromptText = filePromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 // Workspaces. This is the whole contract workspaces.js (the switcher UI) and

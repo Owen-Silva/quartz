@@ -124,6 +124,8 @@ it displaces the other action, and the displaced one is left unbound and named.
 - A shelf with a progress ring, saving without a prompt by default.
 - Ask where to save, through the native Save dialog, as a setting.
 - Open folder button, and a Downloads section in Settings.
+- Ask Claude about this file: a finished row hands its path, unsent, to a Claude tab beside the
+  page you are on — Claude Code reads files and images off disk, so nothing is uploaded.
 
 ### Performance
 
@@ -184,21 +186,27 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | --- | --- | --- |
 | 01358c3 | 21:26 | Initial commit: glass Electron browser with Claude tabs, themes, circuit-board new tab |
 | c793070 | 21:42 | Find in page, downloads shelf, history suggestions, context menus, permission prompts, fullscreen |
-| 41be354 | 22:00 | Settings panel, accent colour, search engines, site theme, tab drag and menu, crash cards |
-| 230121f | 22:21 | README and a QA note on the drag-region right-click |
-| cc01d53 | 22:40 | Ad and tracker blocking with shield, tab audio and pinning, zoom badge, new-tab recents |
-| a7ba15e | 22:53 | Claude tabs with a chosen folder, conversation resume and restore, durable session, print |
+| 41be354 | 22:00 | Settings panel, accent colour, search engines, site theme, tab drag/menu, crash cards |
+| 230121f | 22:21 | README and QA note on the drag-region right-click |
+| cc01d53 | 22:40 | Ad/tracker blocking with shield, tab audio and pinning, zoom badge, new-tab recents |
+| a7ba15e | 22:53 | Claude tabs with a chosen folder, conversation resume and restore; durable session; print |
 | 1e5bfa5 | 23:15 | Tab sleeping, per-site styles with force dark, reader view |
-| 37fc4f0 | 23:42 | QA fixes: drag reaches the outermost slot, reader replayed from pages |
+| 37fc4f0 | 23:42 | QA fixes: drag reaches the outermost slot, Ctrl+Shift+R replayed from pages; README for rounds 4-6 |
 | d35c505 | 23:54 | Palette presets (ember, forest, ocean, midnight, mono) and tab search |
 | e60cebd | 00:29 | Site info popover with persisted permissions and site-data clearing, split view, site scripts |
-| 10cf854 | 01:05 | New-tab backgrounds (aurora or your image), QA fixes |
+| 10cf854 | 01:05 | New-tab backgrounds (aurora only, your image), QA fixes, README for rounds 8-9 |
 | a23d9ac | 01:19 | Claude beside a page in split view, page screenshots, bookmarks bar, board pause under overlays |
-| eba95ac | 01:45 | Claude needs-you indicator, command palette |
+| eba95ac | 01:45 | Claude needs-you indicator, command palette, README for rounds 10-11 |
 | e157a7a | 01:59 | Ask Claude about this, history page, picture in picture |
-| 81f81a5 | 02:19 | Customisable keyboard shortcuts |
-| e2e2bca | 02:42 | Shortcut fixes from QA: Ctrl+R alias, shifted punctuation, hints for fixed rows |
+| 81f81a5 | 02:19 | Customisable keyboard shortcuts, README for rounds 12-13 |
+| e2e2bca | 02:42 | Shortcut fixes from QA: Ctrl+R alias kept in bindings, shifted-punctuation lookup in main, hint text for fixed rows |
 | 5ecff29 | 03:01 | Workspaces, downloads save-as and open folder, more palette commands |
-| 7c7598b | 03:38 | QA and design pass: contrast, sentence case, split divider, scrollbars |
+| 7c7598b | 03:38 | QA and design pass over rounds 14-15 |
 | 518d263 | 04:04 | Resume a Claude conversation, security hardening, performance audit |
-| 9cb9fba | 04:19 | Browser style (user CSS for the chrome), board freezes on window blur |
+| 9cb9fba | 04:19 | Browser style (user CSS for the chrome), board freezes on window blur, README for round 17 |
+| c384475 | 04:26 | Show Claude this page (screenshot handed to a Claude tab), CHANGELOG |
+| ec8366f | 04:38 | Ask Claude about this article (readable text, capped), paste waits behind Claude's prompts |
+| 382f1fd | 04:52 | Settings filter box |
+| 69599f5 | 04:52 | CHANGELOG: settings filter |
+| 18b55a7 | 06:07 | Recent Claude folders in the strip menu and palette; README for rounds 18-21 |
+| 19c5c2b | 06:07 | CHANGELOG: intro no longer hardcodes the commit count |

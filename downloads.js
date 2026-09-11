@@ -43,6 +43,8 @@
   var GLYPH_CANCEL = '\uE711';
   var GLYPH_OPEN = '\uE8E5';
 
+  var ASK_LABEL = 'Ask Claude about this file';
+
   /* --- state ---------------------------------------------------- */
   /** id -> Item, the newest snapshot the main process sent. */
   var items = new Map();
@@ -366,6 +368,12 @@
     } else if (item.state === 'completed') {
       actions.appendChild(iconButton(GLYPH_OPEN, 'Open', function () { openItem(item.id); }));
       actions.appendChild(iconButton(GLYPH_FOLDER, 'Show in folder', function () { send('show', item.id); }));
+      if (canAskClaude()) {
+        var ask = textButton('Ask Claude', 'dl-text dl-ask', function () { askClaudeAbout(item.id); });
+        ask.title = ASK_LABEL;
+        ask.setAttribute('aria-label', ASK_LABEL);
+        actions.appendChild(ask);
+      }
     } else {
       actions.appendChild(textButton('Retry', 'dl-text dl-retry', function () {
         var current = items.get(item.id) || item;
@@ -479,6 +487,29 @@
       var text = (typeof msg === 'string') ? msg.trim() : '';
       showNote(id, text ? 'Couldn’t open: ' + text : '');
     }).catch(function () { /* the shell said nothing; leave the row alone */ });
+  }
+
+  /**
+   * app.js owns the Claude chambers and is a sibling instrument, not a
+   * dependency: no session, no button.
+   */
+  function canAskClaude() {
+    return typeof window.askClaudeAboutFile === 'function';
+  }
+
+  /**
+   * The path, unsent, into a chamber beside whatever page is in front — then
+   * the popover gets out of the way, because the next thing typed is the
+   * question and it has to land in the terminal.
+   */
+  function askClaudeAbout(id) {
+    if (!canAskClaude()) return;
+    var current = items.get(id);
+    if (!current) return;
+    try {
+      window.askClaudeAboutFile(current.savePath || '', { name: current.filename || '' });
+    } catch (err) { /* a chamber that refuses is not the panel's problem */ }
+    closePanel();
   }
 
   /**
