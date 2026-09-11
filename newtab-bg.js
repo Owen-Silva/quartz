@@ -36,8 +36,14 @@
      the real one replaces it at the bottom of this file. */
   window.__boardPaused = function () {};
   window.__boardState = function () {
-    return { running: false, paused: false, hidden: !!document.hidden, mode: 'none' };
+    return { running: false, paused: false, hidden: !!document.hidden, mode: 'none', modules: 0 };
   };
+
+  /* newtab.js calls this when a live module appears or disappears (the
+     session readout is hidden until the chrome pushes one), because the
+     board has to re-seat it and re-route around the box it now has. Same
+     reason as above: it must be safe to call before the board exists. */
+  window.__boardRelayout = function () {};
 
   const canvas = document.getElementById('board');
   if (!canvas || !canvas.getContext) return;
@@ -56,6 +62,35 @@
   const SEG_MIN_CELLS = 3;      // cells run before a bend is considered
   const SEG_MAX_CELLS = 10;
   const BEND_GAP_CELLS = 2;     // cells between one 45 degree step and the next
+
+  /* --- components ---------------------------------------------
+     Two to three cells on a side: 44 to 66px, a component rather than a
+     panel. The board used to draw 88-220px rounded rectangles with a fill,
+     which read as empty containers waiting for content instead of as
+     circuitry. These are outlines with one row of pins, drawn at
+     COMPONENT_ALPHA so they stay texture: the inks below are authored at
+     roughly three times their effective strength so that multiplier lands
+     them where the old chip lines measured. */
+  const COMP_MIN_CELLS = 2;
+  const COMP_MAX_CELLS = 3;
+  const COMPONENT_ALPHA = 0.3;
+  const PIN_PX = 4;             // how far a pin stands off its component
+
+  /* --- live module seats --------------------------------------
+     The clock and the session readout are DOM tiles, and the board seats
+     them: a ring 10px off the glass, pads along one edge, and the cells
+     underneath marked so nothing routes below a tile. */
+  const MODULE_INFLATE = 10;    // the seat ring stands this far off the tile
+  const MODULE_CLEAR = 2 * CELL;   // and the tile this far off the socket
+  const MODULE_MARGIN = 24;     // a tile never touches the window edge
+  const MODULE_GAP = CELL;      // between the two tiles, and above the socket
+
+  /* Which end of the column each tile belongs to. Ids, and nothing else,
+     are the contract with newtab.html. */
+  const MODULE_SPEC = [
+    { id: 'mod-clock', end: 'left' },
+    { id: 'mod-session', end: 'right' }
+  ];
 
   /* --- packets and blooms ------------------------------------- */
   const MAX_PACKETS = 16;
@@ -117,10 +152,11 @@
       fixed: {
         under: 'rgba(5,6,10,.9)',
         viaFill: '#05060a',
-        chipFill: 'rgba(255,255,255,.03)',
-        chipLine: 'rgba(255,255,255,.12)',
-        chipPin: 'rgba(255,255,255,.14)',
-        chipNotch: 'rgba(255,255,255,.20)'
+        /* authored at ~1/COMPONENT_ALPHA of the old chip inks, so the 30%
+           multiplier lands them back on the measured .12/.14/.20 */
+        compLine: 'rgba(255,255,255,.40)',
+        compPin: 'rgba(255,255,255,.46)',
+        compMark: 'rgba(255,255,255,.66)'
       },
       tint: {
         dot:         ['cool', 0.045],
@@ -153,10 +189,9 @@
         dot: 'rgba(18,22,42,.08)',
         under: 'rgba(247,248,252,.9)',
         viaFill: '#f7f8fc',
-        chipFill: 'rgba(18,22,42,.04)',
-        chipLine: 'rgba(18,22,42,.14)',
-        chipPin: 'rgba(18,22,42,.16)',
-        chipNotch: 'rgba(18,22,42,.22)'
+        compLine: 'rgba(18,22,42,.46)',
+        compPin: 'rgba(18,22,42,.54)',
+        compMark: 'rgba(18,22,42,.72)'
       },
       tint: {
         trace:       ['cool', 0.22],
@@ -462,8 +497,9 @@
   }
 
   function capsuleBox(w, h) {
-    // The whole column (wordmark, capsule, chips), so traces route around the
-    // chips as well and packets never cross them.
+    // The whole column (capsule, shortcut chips, recents), so traces route
+    // around all of it and packets never cross it. This and the two module
+    // tiles below are the only boxes the board measures out of the page.
     const form = document.querySelector('.column') || document.getElementById('search');
     if (form && form.offsetWidth && form.offsetHeight) return measureBox(form);
     // Fallback: where the capsule would sit if the page had not laid out.
@@ -472,10 +508,120 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* The live modules                                                    */
+  /*                                                                     */
+  /* The clock and the session readout are glass tiles in the page, but   */
+  /* it is the BOARD that decides where they sit: they have to clear the  */
+  /* socket, stay off the window edge, and end up somewhere a chip could  */
+  /* have gone. Two placements, in order:                                 */
+  /*                                                                     */
+  /*   row     the ordinary one — a row above the capsule, each tile on   */
+  /*           the column's own edge (top-left and top-right of it), the  */
+  /*           two bottoms on one line, clear of the socket by            */
+  /*           MODULE_CLEAR. Pads go on the tile's OUTER side, where the  */
+  /*           open board is; pads on the underside would meet the socket */
+  /*           within two cells and grow nothing.                         */
+  /*   corner  a window too short for that: the top two corners, which is */
+  /*           where the biggest chips used to land anyway. Pads go       */
+  /*           underneath, into the open middle.                          */
+  /*                                                                     */
+  /* Neither fits (a narrow window, a short one): the tile is marked      */
+  /* .is-unplaced and goes invisible rather than landing on the capsule.  */
+  /* It keeps its box, so the next resize can measure and seat it again.  */
+  /*                                                                     */
+  /* Returns the seated rects, each with the side its pads belong on, for */
+  /* buildBoard to route around. All the reads happen before any write.   */
+  /* ------------------------------------------------------------------ */
+
+  function seatModule(el, x, y) {
+    el.classList.remove('is-unplaced');
+    const left = Math.round(x) + 'px';
+    const top = Math.round(y) + 'px';
+    // Only touch the style when it actually moved: layout() runs on every
+    // settle pass and most of them change nothing.
+    if (el.style.left !== left) el.style.left = left;
+    if (el.style.top !== top) el.style.top = top;
+    if (el.style.right !== 'auto') el.style.right = 'auto';
+  }
+
+  function placeModules(w, h, cap, socket) {
+    const items = [];
+
+    for (const spec of MODULE_SPEC) {
+      const el = document.getElementById(spec.id);
+      if (!el) continue;
+      // [hidden] is display:none, which is also "the chrome has not pushed
+      // a readout yet": no box, no seat, nothing to route around.
+      const mw = el.offsetWidth;
+      const mh = el.offsetHeight;
+      items.push({ el: el, end: spec.end, w: mw, h: mh, live: !!(mw && mh) });
+    }
+
+    let widest = 0, tallest = 0, span = 0, count = 0;
+    for (const it of items) {
+      if (!it.live) continue;
+      count++;
+      widest = Math.max(widest, it.w);
+      tallest = Math.max(tallest, it.h);
+      span += it.w;
+    }
+    if (count > 1) span += MODULE_GAP * 2;
+
+    const clear = inflateRect(socket, MODULE_CLEAR);
+
+    // (a) the row above the capsule
+    const rowTop = clear.y - MODULE_GAP - tallest;
+    const row = count > 0 &&
+      (rowTop - MODULE_INFLATE) >= MODULE_MARGIN &&
+      cap.w >= span;
+
+    // (b) the window's top corners
+    const cornerSpan = count > 1
+      ? widest * 2 + MODULE_GAP
+      : widest;
+    const corners = count > 0 && w >= MODULE_MARGIN * 2 + cornerSpan;
+
+    const out = [];
+
+    for (const it of items) {
+      let x = null;
+      let y = null;
+      let side = null;
+
+      if (it.live && row) {
+        y = rowTop + (tallest - it.h);                   // bottoms on one line
+        x = it.end === 'left' ? cap.x : cap.x + cap.w - it.w;
+        side = it.end;                                   // pads face open board
+      } else if (it.live && corners) {
+        y = MODULE_MARGIN;
+        x = it.end === 'left' ? MODULE_MARGIN : w - MODULE_MARGIN - it.w;
+        side = 'bottom';
+        /* A window short enough to need the corners can still be short
+           enough that a corner lands on the capsule. The corner is the
+           fallback, so it only has to keep the two rings apart — one
+           MODULE_INFLATE of air between the seat and the socket — rather
+           than the whole MODULE_CLEAR the row above the capsule takes. */
+        const ring = inflateRect({ x: x, y: y, w: it.w, h: it.h }, MODULE_INFLATE);
+        if (rectsOverlap(ring, inflateRect(socket, MODULE_INFLATE))) x = null;
+      }
+
+      if (x === null || y === null) {
+        it.el.classList.add('is-unplaced');
+        continue;
+      }
+
+      seatModule(it.el, x, y);
+      out.push({ x: Math.round(x), y: Math.round(y), w: it.w, h: it.h, side: side });
+    }
+
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Board generation                                                    */
   /* ------------------------------------------------------------------ */
 
-  function buildBoard(w, h, cap) {
+  function buildBoard(w, h, cap, mods) {
     const rng = mulberry32(SEED);
 
     const cols = Math.floor(w / CELL) + 1;
@@ -512,13 +658,72 @@
       }
     }
 
-    /* --- chips: 4 to 7, outside the exclusion zone -------------- */
+    /* --- live module seats -------------------------------------
+       A tile is a hole in the board with a ring around it: its cells are
+       claimed before anything else is placed, so no component lands on one
+       and no trace runs underneath. A trace that meets a seat ends on a pad
+       the same way it does at a component, so the tiles read as wired
+       rather than as cut-outs. Pads sit on ONE edge of the ring — the side
+       facing open board, which placeModules() names — and those pads are
+       grown first, below, so every tile has traces on it whatever the
+       general fan-out does. */
+    const seats = [];
+    for (const mod of (mods || [])) {
+      const box = inflateRect(mod, MODULE_INFLATE);
+
+      for (let c = 0; c < cols; c++) {
+        const x = gx(c);
+        if (x < box.x || x > box.x + box.w) continue;
+        for (let r = 0; r < rows; r++) {
+          const y = gy(r);
+          if (y < box.y || y > box.y + box.h) continue;
+          mark(c, r);
+          chipCells.add(key(c, r));      // met by a trace: end it on a pad
+        }
+      }
+
+      const pins = [];
+      if (mod.side === 'bottom') {
+        const cFrom = Math.ceil(colAt(box.x + CELL));
+        const cTo = Math.floor(colAt(box.x + box.w - CELL));
+        const rOut = Math.floor(rowAt(box.y + box.h)) + 1;
+        for (let c = cFrom; c <= cTo; c += PAD_STEP) {
+          if (c < 0 || c >= cols) continue;
+          pins.push({ x: gx(c), y: box.y + box.h, dir: 4, c: c, r: rOut });
+        }
+      } else {
+        const outLeft = mod.side === 'left';
+        const rFrom = Math.ceil(rowAt(box.y + CELL));
+        const rTo = Math.floor(rowAt(box.y + box.h - CELL));
+        const cOut = outLeft
+          ? Math.ceil(colAt(box.x)) - 1
+          : Math.floor(colAt(box.x + box.w)) + 1;
+        for (let r = rFrom; r <= rTo; r += PAD_STEP) {
+          if (r < 0 || r >= rows) continue;
+          pins.push({
+            x: outLeft ? box.x : box.x + box.w,
+            y: gy(r),
+            dir: outLeft ? 6 : 2,
+            c: cOut,
+            r: r
+          });
+        }
+      }
+
+      seats.push({ box: box, pins: pins });
+    }
+
+    /* --- components: 6 to 10, outside the exclusion zone --------
+       Small: two or three cells on a side, an outline and one row of pins,
+       no fill. A pinned outline at this size reads as a part; the 88-220px
+       filled rectangles it replaces read as an empty container. */
     const chips = [];
-    const chipCount = randInt(rng, 4, 7);
+    const chipCount = randInt(rng, 6, 10);
     for (let i = 0; i < chipCount; i++) {
       for (let attempt = 0; attempt < 140; attempt++) {
-        let wc = randInt(rng, 4, 8);
-        let hc = randInt(rng, 6, 10);
+        let wc = randInt(rng, COMP_MIN_CELLS, COMP_MAX_CELLS);
+        let hc = randInt(rng, COMP_MIN_CELLS, COMP_MAX_CELLS);
+        if (wc === hc && rng() < 0.6) hc = wc === COMP_MIN_CELLS ? COMP_MAX_CELLS : COMP_MIN_CELLS;
         if (rng() < 0.5) { const t = wc; wc = hc; hc = t; }
         if (wc + 4 >= cols || hc + 4 >= rows) break;
 
@@ -531,19 +736,33 @@
         for (const other of chips) {
           if (rectsOverlap(box, inflateRect(other.box, CELL))) { clash = true; break; }
         }
+        if (!clash) {
+          for (const seat of seats) {
+            if (rectsOverlap(box, inflateRect(seat.box, CELL))) { clash = true; break; }
+          }
+        }
         if (clash) continue;
 
         const chip = { c0: c0, r0: r0, wc: wc, hc: hc, box: box, vertical: hc >= wc, pins: [] };
 
-        // Pins every cell along the two long sides, heading outward.
-        if (chip.vertical) {
+        /* One pin row, on one side, heading outward: a part has a footprint,
+           not a perimeter of legs. The side is picked off the grid so the
+           board stays the same board for a given seed. */
+        const side = (chip.vertical ? 2 : 0) + ((c0 + r0) & 1);
+        if (side === 2) {
           for (let r = r0; r < r0 + hc; r++) {
             chip.pins.push({ x: box.x, y: gy(r), dir: 6, c: c0 - 1, r: r });
+          }
+        } else if (side === 3) {
+          for (let r = r0; r < r0 + hc; r++) {
             chip.pins.push({ x: box.x + box.w, y: gy(r), dir: 2, c: c0 + wc, r: r });
+          }
+        } else if (side === 0) {
+          for (let c = c0; c < c0 + wc; c++) {
+            chip.pins.push({ x: gx(c), y: box.y, dir: 0, c: c, r: r0 - 1 });
           }
         } else {
           for (let c = c0; c < c0 + wc; c++) {
-            chip.pins.push({ x: gx(c), y: box.y, dir: 0, c: c, r: r0 - 1 });
             chip.pins.push({ x: gx(c), y: box.y + box.h, dir: 4, c: c, r: r0 + hc });
           }
         }
@@ -678,6 +897,19 @@
     const pinQueue = shuffle(pins, rng);
 
     const traces = [];
+
+    /* The tiles are wired before anything else competes for the cells
+       around them, so each one always has traces landing on it however the
+       general fan-out falls. Three is enough to read as connected. */
+    for (const seat of seats) {
+      const queue = shuffle(seat.pins.slice(), rng);
+      let made = 0;
+      for (let i = 0; i < queue.length && made < 3; i++) {
+        const trace = growTrace(queue[i]);
+        if (trace) { traces.push(trace); made++; }
+      }
+    }
+
     let padIdx = 0, pinIdx = 0;
     for (let i = 0; i < traceCount; i++) {
       let start = null;
@@ -691,7 +923,7 @@
 
     return {
       w: w, h: h, cols: cols, rows: rows, gx: gx, gy: gy,
-      socket: socket, chips: chips, pads: pads, traces: traces
+      socket: socket, chips: chips, pads: pads, traces: traces, seats: seats
     };
   }
 
@@ -723,29 +955,31 @@
       c.stroke();
     }
 
-    // Chips.
+    /* Components: an outline, one row of pins and a polarity dot, the whole
+       group at COMPONENT_ALPHA so it stays texture between the traces. No
+       fill — a filled rectangle at any size reads as a container. */
+    c.globalAlpha = COMPONENT_ALPHA;
+    c.lineWidth = 1;
     for (const chip of board.chips) {
       const b = chip.box;
-      roundRectPath(c, b.x, b.y, b.w, b.h, 6);
-      c.fillStyle = theme.chipFill;
-      c.fill();
-      c.strokeStyle = theme.chipLine;
-      c.lineWidth = 1;
+      roundRectPath(c, b.x, b.y, b.w, b.h, 3);
+      c.strokeStyle = theme.compLine;
       c.stroke();
 
-      c.strokeStyle = theme.chipPin;
+      c.strokeStyle = theme.compPin;
       c.beginPath();
       for (const pin of chip.pins) {
         c.moveTo(pin.x, pin.y);
-        c.lineTo(pin.x + DIRS[pin.dir][0] * 3, pin.y + DIRS[pin.dir][1] * 3);
+        c.lineTo(pin.x + DIRS[pin.dir][0] * PIN_PX, pin.y + DIRS[pin.dir][1] * PIN_PX);
       }
       c.stroke();
 
-      c.fillStyle = theme.chipNotch;
+      c.fillStyle = theme.compMark;
       c.beginPath();
-      c.arc(b.x + 7, b.y + 7, 1.5, 0, Math.PI * 2);
+      c.arc(b.x + 5, b.y + 5, 1.25, 0, Math.PI * 2);
       c.fill();
     }
+    c.globalAlpha = 1;
 
     // The socket around the capsule, and its pads.
     const s = board.socket;
@@ -755,6 +989,18 @@
     c.stroke();
     c.fillStyle = theme.pad;
     for (const pad of board.pads) c.fillRect(pad.x - 1, pad.y - 1, 2, 2);
+
+    /* The live tiles sit in the same kind of seat, one size down: a ring
+       off the glass and a pad under every trace that leaves it. */
+    for (const seat of board.seats) {
+      const b = seat.box;
+      roundRectPath(c, b.x, b.y, b.w, b.h, MODULE_INFLATE);
+      c.strokeStyle = theme.socket;
+      c.lineWidth = 1;
+      c.stroke();
+      c.fillStyle = theme.pad;
+      for (const pin of seat.pins) c.fillRect(pin.x - 1, pin.y - 1, 2, 2);
+    }
 
     // Trace ends: a via, or a pad where the trace met a chip.
     for (const trace of board.traces) {
@@ -859,10 +1105,15 @@
   }
 
   /* The same falloff the static canvas gets from its CSS mask, evaluated at a
-     point, so a packet can carry it as its own opacity. */
+     point, so a packet can carry it as its own opacity.
+
+     The mask is `ellipse 80% 75%`, and in a radial gradient those two numbers
+     are RADII, not diameters: half of them was being used here, so a packet
+     faded out twice as fast as the board it was running on and anything past
+     the middle third of the page ran invisibly. The tiles sit out there. */
   function vignetteAt(x, y, w, h) {
-    const rx = 0.4 * w;
-    const ry = 0.375 * h;
+    const rx = 0.8 * w;
+    const ry = 0.75 * h;
     const r = Math.hypot((x - 0.5 * w) / rx, (y - 0.48 * h) / ry);
     if (r <= 0.45) return 1;
     if (r >= 1) return 0;
@@ -964,6 +1215,7 @@
   let layoutStamp = '';
   let spawnTimer = 0;
   let resizeTimer = 0;
+  let modulesPlaced = 0;
 
   /* Set by the chrome through window.__boardPaused(). An overlay with a
      backdrop-filter (settings, tab search, downloads, shield, site info,
@@ -1026,8 +1278,10 @@
     if (reducedMotion || document.hidden || spawnTimer || !live) return;
     if (chromePaused || !boardActive()) return;
     const wait = SPAWN_MIN_MS + Math.random() * (SPAWN_MAX_MS - SPAWN_MIN_MS);
+    lastTick = Date.now();           // the loop is alive as of now
     spawnTimer = setTimeout(function () {
       spawnTimer = 0;
+      lastTick = Date.now();
       spawnPacket();
       scheduleSpawn();
     }, wait);
@@ -1039,8 +1293,9 @@
   }
 
   function layout(force) {
-    if (!boardActive()) return;      // nothing on screen to lay out
     const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // clientWidth is 0 while the canvas is display:none (aurora, or a
+    // picture without the board), and the tiles still have to be seated.
     const w = canvas.clientWidth || document.documentElement.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || document.documentElement.clientHeight || window.innerHeight;
     if (!w || !h) return;
@@ -1048,7 +1303,21 @@
     // The shortcut row is filled in by newtab.js, which moves the capsule.
     // Keying on its box means a settle pass is free when nothing moved.
     const cap = capsuleBox(w, h);
-    const sig = [w, h, dpr, cap.x, cap.y, cap.w, cap.h].join(':');
+    const socket = inflateRect(cap, SOCKET_INFLATE);
+
+    /* The tiles are seated whether or not the board is drawing: where they
+       sit is the page's business, not the background's. This is the one
+       measurement the board takes beyond .column — deliberate, and keyed
+       into the stamp below so a tile appearing rebuilds the routing. */
+    const mods = placeModules(w, h, cap, socket);
+    modulesPlaced = mods.length;
+
+    if (!boardActive()) return;      // nothing on screen to lay out
+
+    const modSig = mods.map(function (m) {
+      return m.x + ',' + m.y + ',' + m.w + ',' + m.h + ',' + m.side;
+    }).join('|');
+    const sig = [w, h, dpr, cap.x, cap.y, cap.w, cap.h, modSig].join(':');
     if (!force && board && sig === layoutStamp) return;
     layoutStamp = sig;
 
@@ -1057,7 +1326,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    board = buildBoard(w, h, cap);
+    board = buildBoard(w, h, cap, mods);
     drawBoard(ctx, board);
 
     // Every live element points at a path from the old board.
@@ -1089,16 +1358,54 @@
     }, 150);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Never frozen                                                        */
+  /*                                                                     */
+  /* Everything that stops the board is a flag, and every flag has to be  */
+  /* cleared by something. The three events below are the ones that mean  */
+  /* "this page is in front of a person again"; the watchdog is the       */
+  /* backstop for the case where none of them fired (a guest that missed  */
+  /* its visibilitychange, a throttled timer that never came back, an     */
+  /* overlay whose close was never pushed). It looks at the loop itself   */
+  /* rather than at the flags: if the board should be turning and the     */
+  /* last turn is stale, start it again. Nothing is logged — a stall is   */
+  /* not an error, it is a thing to fix in place.                        */
+  /* ------------------------------------------------------------------ */
+
+  const WATCHDOG_MS = 2000;
+  const STALE_MS = 1500;           // > the longest spawn wait (520ms) x 2
+  let lastTick = 0;
+  let watchdog = 0;
+
+  function resumeBoard() {
+    if (document.hidden) return;
+    layout();                        // covers a page that laid out hidden
+    if (reducedMotion) return;       // static board: there is nothing to run
+    // An overlay can outlive a tab switch: coming back visible with the
+    // chrome still paused leaves everything frozen until it says otherwise.
+    if (chromePaused || !boardActive()) return;
+    ensureLive();
+    playAnims();
+    flushRepaint();
+    scheduleSpawn();
+  }
+
   function onVisibility() {
     if (document.hidden) {
       stopSpawn();
       pauseAnims();
       return;
     }
-    layout();                        // covers a page that loaded hidden
-    // An overlay can outlive the tab switch: coming back visible with the
-    // chrome still paused leaves everything frozen until it says otherwise.
-    if (chromePaused) return;
+    resumeBoard();
+  }
+
+  function onWatchdog() {
+    // Frozen on purpose is not frozen: leave every deliberate pause alone.
+    if (reducedMotion || chromePaused || document.hidden || !boardActive()) return;
+    // Turning, and turned recently: nothing to do but the two reads above.
+    if (live && spawnTimer && (Date.now() - lastTick) < STALE_MS) return;
+    stopSpawn();                     // drop whatever is left of the old loop
+    ensureLive();
     playAnims();
     flushRepaint();
     scheduleSpawn();
@@ -1166,6 +1473,15 @@
     window.addEventListener('resize', onResize);
     if (!reducedMotion) document.addEventListener('visibilitychange', onVisibility);
 
+    /* pageshow covers a restored guest (the webview is reattached without a
+       visibilitychange), focus covers a window that was merely behind
+       another one, and the watchdog covers everything neither of them saw.
+       All three land on the same idempotent resume; none of them starts
+       anything the chrome, the page's own mode or a hidden tab still veto. */
+    window.addEventListener('pageshow', resumeBoard);
+    window.addEventListener('focus', resumeBoard);
+    if (!reducedMotion && !watchdog) watchdog = setInterval(onWatchdog, WATCHDOG_MS);
+
     if (window.MutationObserver) {
       const themeWatch = new window.MutationObserver(onRootAttrChange);
       themeWatch.observe(document.documentElement,
@@ -1215,8 +1531,20 @@
       running: !reducedMotion && !!live && !motionFrozen(),
       paused: chromePaused,
       hidden: !!document.hidden,
-      mode: document.documentElement.getAttribute('data-bg') || 'board'
+      mode: document.documentElement.getAttribute('data-bg') || 'board',
+      modules: modulesPlaced
     };
+  };
+
+  /* newtab.js calls this when a live module appears or disappears — the
+     session readout is [hidden] until the chrome pushes one, and a tile
+     with no box is a tile the board has not routed around. A forced layout
+     re-seats both tiles, rebuilds the routing and repaints once. */
+  window.__boardRelayout = function () {
+    layout(true);
+    if (reducedMotion || chromePaused || document.hidden || !boardActive()) return;
+    ensureLive();
+    scheduleSpawn();
   };
 
   if (document.readyState === 'loading') {

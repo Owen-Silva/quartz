@@ -574,13 +574,148 @@ body {
   text-align: center;
 }
 
-/* --- wordmark ------------------------------------------------ */
-.wordmark {
-  margin: 0 0 14px;
+/* --- live modules -------------------------------------------- */
+/* Two glass tiles seated on the board: the clock at the column's top-left,
+   the session readout at its top-right. newtab-bg.js writes left/top and
+   nothing else — it measures the socket, keeps both tiles clear of it, and
+   routes traces onto the pads it draws around them. The corner position
+   below is the default they wear until it has (and the fallback for a
+   window too short for the row above the capsule); .is-unplaced is the
+   third case, a window with no room for them at all.
+
+   Both are 208px wide by authorship rather than by content, and every line
+   in them has a fixed height: the board draws a seat around the box it
+   measured, so 9 tabs becoming 10 — or 9:59 becoming 10:00 — must not move
+   a pixel of it.
+
+   No backdrop-filter here, deliberately. The recents row states the reason:
+   every blurred surface over the drifting aurora is real CPU, and these two
+   are on screen full-time. The sheen, the glass and the rim ring carry the
+   material instead. */
+.module {
+  position: fixed;
+  top: 24px;
+  z-index: 2;                      /* with the column, under the packet layer */
+  width: 208px;
+  padding: 16px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
+  background: var(--sheen), var(--glass);
+  box-shadow: inset 0 1px 0 var(--specular);
+  color: var(--fg);
+  text-align: left;
+  pointer-events: none;            /* a click anywhere still lands in the field */
+  transition:
+    background-color 160ms steps(4, end),
+    color            160ms steps(4, end),
+    box-shadow       160ms steps(4, end);
+}
+
+.module-clock   { left: 24px; }
+.module-session { right: 24px; }
+
+/* No room for a tile in this window: it goes dark rather than landing on
+   the capsule. It still has a box, so the board can measure it again the
+   moment the window grows. */
+.module.is-unplaced { visibility: hidden; }
+
+/* The readout before the chrome has pushed one. */
+.module[hidden] { display: none; }
+
+/* The rim as a ring on the free pseudo-element, never as a background layer
+   under translucent glass — painted into the background it bleeds through
+   the whole tile, exactly as it did on .rtile and the slot. */
+.module::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+/* Cut on the same diagonal as the slot: these are containers, not controls. */
+@supports (corner-shape: bevel) {
+  .module,
+  .module::before { corner-shape: round bevel round bevel; }
+}
+
+/* the clock: the largest readout on the page, and the quietest weight */
+.mod-time {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  height: 66px;
+}
+
+.mod-time-value {
+  color: var(--fg);
+  font-size: 64px;
+  font-weight: 300;
+  font-stretch: 75%;               /* the readout voice, one step tighter */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 66px;
+}
+
+/* AM/PM, and empty in a 24-hour locale — newtab.js asks Intl which it is. */
+.mod-time-period {
   color: var(--fg-2);
   font-size: 13px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
+}
+
+.mod-date {
+  margin: 6px 0 0;
+  height: 18px;
+  line-height: 18px;
+  color: var(--fg-2);
+  font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the session readout: a value, then what it counts */
+.mod-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  height: 24px;
+}
+
+.mod-row + .mod-row { margin-top: 6px; }
+
+.mod-value {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  color: var(--fg);
+  font-size: 18px;
+  font-weight: 500;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 24px;
+}
+
+.mod-label {
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- the field: the one memorable thing ---------------------- */
@@ -742,17 +877,36 @@ body {
 /* display above would otherwise beat the UA's [hidden] rule */
 .recent[hidden] { display: none; }
 
-/* A section title in the readout voice: sentence case, semi-condensed,
-   quiet. No rule under it — the column's own height is what newtab-bg.js
-   measures the circuit socket from, so nothing here may grow. */
+/* The page's one section title, in the readout voice: sentence case,
+   semi-condensed, quiet, left-aligned over the row it names, and closed by
+   the fading rule this system uses instead of a solid border. It is the
+   only label left on the page — the slot above says what it is by being
+   lit, and needs no caption of its own.
+
+   It costs the column ~10px of height. That is a one-off: newtab-bg.js
+   measures the column for its socket, and the measurement is keyed on the
+   box, so the board simply sits 10px lower. Nothing here may CHURN. */
 .recent-caption {
+  position: relative;
   flex: 0 0 100%;               /* own line, above the tiles */
-  margin: 0 0 2px;
+  margin: 0 0 7px;
+  padding-bottom: 5px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
+  text-align: left;
+}
+
+.recent-caption::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
 }
 
 /* A tile at rest carries the soft rim — one lit corner that fades out
@@ -948,6 +1102,7 @@ body {
   .backdrop,
   #bg-dim,
   #board,
+  .module,
   .field,
   .chip,
   .rtile,

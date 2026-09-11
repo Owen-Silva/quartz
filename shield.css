@@ -96,7 +96,7 @@
   border-radius: var(--bevel);
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 12.5px;
+  font-size: 13px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
      through it. Opaque, so the rim only shows where it should. */
@@ -117,11 +117,27 @@
   #shield-panel { corner-shape: round bevel round bevel; }
 }
 
+/* The lamp: 2px of the seam's light along the pane's top edge, the same
+   light every other pane in this pass wears. */
+#shield-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--seam);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 16px gutter, 8px rhythm. This pane has no header row of its own — the
+   big reading is its title — so the lamp is what marks its top edge. */
 #shield-panel .sh-body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 14px 12px 11px;
+  padding: 16px 16px 12px;
 }
 
 /* --- the number ------------------------------------------------
@@ -138,10 +154,10 @@
 
 #shield-panel .sh-sub {
   color: var(--fg-2);
-  font-size: 12.5px;
+  font-size: 13px;
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -159,15 +175,18 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 9px 0 11px;
+  /* 36px rows, pulled 8px back out of the body's gutter so the label sits
+     on the 16px column the reading above it is set on. */
+  width: calc(100% + 16px);
+  min-height: 36px;
+  margin-inline: -8px;
+  padding: 0 8px;
   /* a row is a control: round corners, so the bevel stays the pane's alone */
   border-radius: var(--radius-ctl);
   background: none;
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 12.5px;
+  font-size: 13px;
   font-stretch: var(--readout-stretch);
   text-align: left;
   transition: background-color 120ms steps(2), color 120ms steps(2);
@@ -253,19 +272,19 @@
 
 /* --- the status line ------------------------------------------- */
 #shield-panel .sh-status {
-  margin-top: 9px;
-  padding: 0 2px;
+  margin-top: 8px;
+  padding: 0;
   color: var(--fg-3);
-  font-size: 11.5px;
+  font-size: 12px;
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
 }
 
 /* --- nothing to block ------------------------------------------ */
 #shield-panel .sh-empty {
-  padding: 22px 14px;
+  padding: 24px 16px;
   color: var(--fg-3);
-  font-size: 12.5px;
+  font-size: 13px;
   font-stretch: var(--readout-stretch);
   text-align: center;
 }

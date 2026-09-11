@@ -32,10 +32,39 @@
      picture asked for it back (data-bg-board="over"). -->
 <canvas id="board" aria-hidden="true"></canvas>
 
+<!-- The two live modules, seated on the board where its biggest chips used
+     to sit. newtab-bg.js owns nothing but their left/top: it measures the
+     socket, keeps each tile clear of it, marks the cells underneath so no
+     trace runs below one, and routes traces onto the pads around it. The
+     CSS default (the window's top corners) is what they wear until it has
+     measured, so a board that never starts still leaves them somewhere
+     sensible. Content is newtab.js's: the clock ticks on a minute-aligned
+     timeout, and the readout stays [hidden] until __applyReadout. -->
+<section id="mod-clock" class="module module-clock" aria-label="Clock">
+  <p class="mod-time">
+    <span id="clock-time" class="mod-time-value">--:--</span>
+    <span id="clock-period" class="mod-time-period"></span>
+  </p>
+  <p id="clock-date" class="mod-date"></p>
+</section>
+
+<section id="mod-session" class="module module-session" aria-label="Session" hidden>
+  <p class="mod-row">
+    <span id="read-tabs" class="mod-value">--</span>
+    <span id="read-tabs-label" class="mod-label">tabs open</span>
+  </p>
+  <p class="mod-row">
+    <span id="read-claude" class="mod-value">--</span>
+    <span id="read-claude-label" class="mod-label">Claude sessions</span>
+  </p>
+  <p class="mod-row">
+    <span id="read-autopause" class="mod-value">--</span>
+    <span class="mod-label">Spotify auto-pause</span>
+  </p>
+</section>
+
 <main class="stage">
   <div class="column">
-    <p class="wordmark">Search</p>
-
     <!-- The placeholder below is the pre-script default; newtab.js rewrites
          it for the chosen engine ("Search DuckDuckGo or type a URL"). -->
     <form id="search" class="searchform" autocomplete="off" novalidate>

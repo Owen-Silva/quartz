@@ -115,7 +115,7 @@
   border-radius: var(--bevel-lg);
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 12.5px;
+  font-size: 13px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
      through it. Same recipe the Claude chamber uses; the ground clips
@@ -139,6 +139,20 @@
   #downloads-panel { corner-shape: round bevel round bevel; }
 }
 
+/* The lamp: 2px of the seam's light along the pane's top edge, so the
+   popover reads as powered the way the chamber does. */
+#downloads-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--seam);
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* --- header --------------------------------------------------- */
 /* The rule under the head is the seam motif, not a border: a hairline
    that fades out to the right. The border stays, transparent, so the
@@ -150,7 +164,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 10px 9px 12px;
+  /* 44px: the one header height every pane and popover is set to */
+  height: 44px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid transparent;
   background: linear-gradient(90deg, var(--edge), transparent)
               left bottom / 100% 1px no-repeat border-box;
@@ -161,20 +177,21 @@
      every bit of slack rather than space-between spreading all three. */
   margin-right: auto;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
 /* the small word-buttons: Clear in the header, Retry on a dead row */
 #downloads-panel .dl-text {
-  height: 22px;
+  height: 28px;
   padding: 0 8px;
   /* a control: round corners, so the bevel stays the pane's signature */
   border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
-  font-size: 11.5px;
+  font-size: 12px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   transition: background-color 120ms steps(2), color 120ms steps(2);
@@ -204,18 +221,37 @@
   padding: 4px;
 }
 
-#downloads-panel .dl-empty {
-  padding: 26px 12px;
-  text-align: center;
-  color: var(--fg-3);
-  font-size: 12px;
+/* a 6px thumb: 10px of track less 2px of transparent border each side */
+#downloads-panel .dl-list::-webkit-scrollbar { width: 10px; }
+
+#downloads-panel .dl-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
+#downloads-panel .dl-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
+}
+
+#downloads-panel .dl-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+/* 36px is the floor; a row carrying a progress bar or a note grows from
+   there. The 12px of padding plus the list's own 4px puts the name on
+   the pane's 16px gutter. */
 #downloads-panel .dl-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 6px 7px 8px;
+  min-height: 36px;
+  padding: 6px 6px 6px 12px;
   border-radius: var(--radius-ctl);
   transition: background-color 120ms steps(2);
 }
@@ -239,7 +275,7 @@
   text-align: left;
   color: var(--fg);
   font-family: var(--ui-font);
-  font-size: 12.5px;
+  font-size: 13px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
@@ -255,7 +291,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--fg-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
   letter-spacing: .01em;
@@ -267,13 +303,13 @@
 #downloads-panel .dl-note {
   margin-top: 4px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* --- the row's progress bar ----------------------------------- */
 #downloads-panel .dl-bar {
   position: relative;
-  margin-top: 6px;
+  margin-top: 8px;
   height: 3px;
   border-radius: 2px;
   background: var(--edge);
@@ -323,8 +359,8 @@
 }
 
 #downloads-panel .dl-act {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-ctl);
   color: var(--fg-2);
   transition: background-color 120ms steps(2), color 120ms steps(2);
@@ -343,7 +379,7 @@
 
 #downloads-panel .dl-act .glyph {
   font-family: var(--icon-font);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* --- focus ----------------------------------------------------

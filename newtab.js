@@ -412,6 +412,171 @@ function renderRecent() {
 }
 
 /* ------------------------------------------------------------------ */
+/* The clock module                                                    */
+/*                                                                     */
+/* One timeout, aligned to the next minute, rescheduled from inside     */
+/* itself. No setInterval and no per-second tick: nothing on this face  */
+/* changes between minutes, and a timer that fires sixty times for one  */
+/* repaint is sixty wake-ups of a guest that is often not even on       */
+/* screen. A hidden page's timers are throttled, so coming back from    */
+/* hidden — or from a restored webview — repaints and re-aligns rather  */
+/* than trusting the timer that was asleep.                            */
+/* ------------------------------------------------------------------ */
+
+const clockTime = document.getElementById('clock-time');
+const clockPeriod = document.getElementById('clock-period');
+const clockDate = document.getElementById('clock-date');
+
+let clockTimer = 0;
+
+/** Write only when it actually changed: this runs on every window focus. */
+function setText(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+/**
+ * The time as the window's own locale states it, with the meridiem split
+ * out: "9:05" + "AM" in a 12-hour locale, "09:05" + "" in a 24-hour one,
+ * so the big readout is only ever digits and the AM/PM can sit small
+ * beside it.
+ */
+function clockParts(now) {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+      .formatToParts(now);
+    let time = '';
+    let period = '';
+
+    for (const part of parts) {
+      if (part.type === 'dayPeriod') period = part.value;
+      else if (part.type === 'literal' && !part.value.trim()) continue;  // the space before AM
+      else time += part.value;
+    }
+
+    if (time) return { time: time, period: period };
+  } catch (err) {
+    /* no Intl, or a locale it cannot build: fall through to 24-hour */
+  }
+
+  const m = now.getMinutes();
+  return { time: now.getHours() + ':' + (m < 10 ? '0' + m : String(m)), period: '' };
+}
+
+/** "Thursday, 11 September" — whichever order the locale puts it in. */
+function clockDateText(now) {
+  try {
+    return now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  } catch (err) {
+    return '';
+  }
+}
+
+function paintClock() {
+  const now = new Date();
+  const parts = clockParts(now);
+  setText(clockTime, parts.time);
+  setText(clockPeriod, parts.period);
+  setText(clockDate, clockDateText(now));
+}
+
+function scheduleClock() {
+  if (clockTimer) clearTimeout(clockTimer);
+  const now = new Date();
+  // Just after the turn, never on it: a timer that fires a few ms early
+  // paints the minute it is already showing and then has to do it twice.
+  const wait = (60 - now.getSeconds()) * 1000 - now.getMilliseconds() + 250;
+  clockTimer = setTimeout(function () {
+    clockTimer = 0;
+    paintClock();
+    scheduleClock();
+  }, Math.max(250, wait));
+}
+
+/** Back on screen: the throttled timer may be up to a minute behind. */
+function refreshClock() {
+  if (document.hidden) return;
+  paintClock();
+  scheduleClock();
+}
+
+/* ------------------------------------------------------------------ */
+/* The session readout                                                 */
+/*                                                                     */
+/* The chrome pushes it in on every tab change and every status change: */
+/*                                                                     */
+/*   window.__applyReadout({ tabs, claude, autopause })                 */
+/*     tabs       number of open tabs                                   */
+/*     claude     number of live Claude sessions                        */
+/*     autopause  'off' | 'on' | 'holding' | 'unknown'                  */
+/*                                                                     */
+/* The tile is [hidden] until the first call, because a readout of      */
+/* three dashes is worse than no readout — and because a hidden tile    */
+/* has no box, which is exactly what the board needs to know. Showing   */
+/* it therefore re-seats it on the board (see __boardRelayout).         */
+/* ------------------------------------------------------------------ */
+
+const sessionModule = document.getElementById('mod-session');
+const readTabs = document.getElementById('read-tabs');
+const readTabsLabel = document.getElementById('read-tabs-label');
+const readClaude = document.getElementById('read-claude');
+const readClaudeLabel = document.getElementById('read-claude-label');
+const readAutopause = document.getElementById('read-autopause');
+
+/* Sentence case, and the only four states the bridge can be in. */
+const AUTOPAUSE_TEXT = { off: 'Off', on: 'On', holding: 'Holding', unknown: '--' };
+
+let readoutState = { tabs: null, claude: null, autopause: 'unknown' };
+
+/** A count, or null for "the chrome did not say". Never negative. */
+function readoutCount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!isFinite(n)) return null;
+  return Math.max(0, Math.round(n));
+}
+
+function paintReadout() {
+  const tabs = readoutState.tabs;
+  const claude = readoutState.claude;
+
+  setText(readTabs, tabs === null ? '--' : String(tabs));
+  setText(readTabsLabel, tabs === 1 ? 'tab open' : 'tabs open');
+  setText(readClaude, claude === null ? '--' : String(claude));
+  setText(readClaudeLabel, claude === 1 ? 'Claude session' : 'Claude sessions');
+  setText(readAutopause, AUTOPAUSE_TEXT[readoutState.autopause]);
+}
+
+window.__applyReadout = function (data) {
+  const next = (data && typeof data === 'object') ? data : {};
+  const mode = String(next.autopause == null ? 'unknown' : next.autopause).toLowerCase();
+
+  readoutState = {
+    tabs: readoutCount(next.tabs),
+    claude: readoutCount(next.claude),
+    autopause: Object.prototype.hasOwnProperty.call(AUTOPAUSE_TEXT, mode) ? mode : 'unknown'
+  };
+  paintReadout();
+
+  if (sessionModule && sessionModule.hidden) {
+    sessionModule.hidden = false;
+    // It has a box now: the board has to seat it and route around it.
+    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
+  }
+
+  return window.__readout();
+};
+
+/** What the readout actually shows, for tests. */
+window.__readout = function () {
+  return {
+    tabs: readoutState.tabs,
+    claude: readoutState.claude,
+    autopause: readoutState.autopause,
+    shown: !!(sessionModule && !sessionModule.hidden)
+  };
+};
+
+/* ------------------------------------------------------------------ */
 /* Typed-match dropdown                                                */
 /* ------------------------------------------------------------------ */
 
@@ -747,6 +912,16 @@ function init() {
   }
   document.addEventListener('keydown', onKeydown);
   document.addEventListener('click', onPageClick);
+
+  /* The clock, before the board measures the tile it sits in: newtab-bg.js
+     seats the tiles in a rAF after this handler, and an empty face would be
+     the wrong size. The three listeners are the same "back on screen"
+     signals the board resumes on, for the same reason. */
+  paintClock();
+  scheduleClock();
+  document.addEventListener('visibilitychange', refreshClock);
+  window.addEventListener('pageshow', refreshClock);
+  window.addEventListener('focus', refreshClock);
 
   // autofocus covers the normal load; this covers a restored/backgrounded guest.
   focusField();

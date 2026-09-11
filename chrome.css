@@ -40,8 +40,13 @@
     rgba(255,255,255,.03) 38%,
     rgba(255,255,255,0)   60%);
 
-  /* --- surfaces and details that are not a plain fill --------- */
-  --glass-thin:  rgba(255,255,255,.06);   /* titlebar: the lightest pane */
+  /* --- surfaces and details that are not a plain fill ---------
+     The chrome band is the DEEPEST glass in the window, not the
+     lightest: the titlebar carries almost no white at all and the
+     nav row barely more, so the aurora and the desktop read through
+     the band as ink rather than as grey paint. */
+  --glass-thin:  rgba(255,255,255,.03);   /* titlebar: the thinnest film */
+  --glass-nav:   rgba(255,255,255,.05);   /* nav row: one step up from it */
   --shade-in:    rgba(0,0,0,.28);         /* the shaded lower lip of a pane */
   --shade-drop:  rgba(0,0,0,.35);         /* the 1px shadow a pane casts */
   --focus-ring:  rgba(255,255,255,.55);
@@ -55,7 +60,7 @@
   --seam-color:   rgba(125,211,255,.45);  /* the lit seam under the chrome */
   --chamber-seam: rgba(125,211,255,.5);   /* the lit top edge of the chamber */
 
-  --acrylic-bg: rgba(5,6,10,.72);         /* body when DWM acrylic is on */
+  --acrylic-bg: rgba(5,7,12,.84);         /* body when DWM acrylic is on */
   --chamber-bg: rgba(5,6,10,.55);         /* the Claude chamber's own glass */
   --panel-bg:   rgba(12,15,24,.94);       /* panes floating over a page: nothing behind them to blur */
 
@@ -123,6 +128,30 @@
   /* a quiet row, or a tile at rest */
   --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
 
+  /* The lens's own rim. Same construction as --rim with the flat --edge
+     middle pulled in to 40–60%, so the specular end and the accent end
+     each own a third of the ring rather than a quarter: on the one
+     instrument that is always lit, the light has to be legible. Kept
+     separate from --rim so every other container's edge stays quiet. */
+  --rim-lens: linear-gradient(135deg,
+    var(--specular)  0%,
+    var(--edge)     40%,
+    var(--edge)     60%,
+    var(--ion-glow) 100%);
+
+  /* The first of the chrome's three horizontal lines: the cut edge at
+     the very top of the window. White light in the dark, an ink
+     hairline in daylight, where a specular line on a pale band is
+     invisible. */
+  --hairline-top: rgba(255,255,255,.18);
+
+  /* The one convention the palette does not own: Windows paints a
+     close button red under the pointer, and a browser that does not
+     reads as broken. Identical in both themes, on purpose. */
+  --close-bg:      #c42b1c;
+  --close-bg-down: #a8271a;
+  --close-fg:      #ffffff;              /* 5.7:1 on --close-bg */
+
   /* status as light. A pip is a dot that glows rather than a dot that
      is painted. --pip-glow is the cool instrument light; the amber
      pair is kept separate because amber resolves through --amber, not
@@ -177,7 +206,13 @@
     rgba(255,255,255,0)   60%);
 
   /* surfaces and details */
-  --glass-thin:  rgba(255,255,255,.42);
+  /* The daylight equal of the deep band: less white film, so the pale
+     aurora reads through the chrome instead of being painted over by
+     it. The hairlines go to ink, which is the only thing that reads
+     on a near-white band. */
+  --glass-thin:  rgba(255,255,255,.34);
+  --glass-nav:   rgba(255,255,255,.46);
+  --hairline-top: var(--edge);
   --shade-in:    rgba(18,22,42,.07);      /* ink, not black: a shaded lip, not a bruise */
   --shade-drop:  rgba(18,22,42,.10);
   --focus-ring:  rgba(18,22,42,.55);
@@ -191,7 +226,7 @@
   --seam-color:   rgba(11,127,214,.45);
   --chamber-seam: rgba(11,127,214,.5);
 
-  --acrylic-bg: rgba(238,241,247,.72);
+  --acrylic-bg: rgba(240,243,250,.86);
   --chamber-bg: rgba(255,255,255,.55);
   --panel-bg:   rgba(247,248,252,.96);
 
@@ -257,7 +292,7 @@
 [data-palette="ember"] {
   --ink-0: #0a0509;
   --ink-1: #150c13;
-  --acrylic-bg: rgba(10,5,9,.72);
+  --acrylic-bg: rgba(10,5,9,.84);
 
   --ion:      #ff7d9e;
   --ion-soft: rgba(255,125,158,.16);
@@ -290,7 +325,7 @@
 :root[data-theme="light"] [data-palette="ember"] {
   --ink-0: #f7edf1;
   --ink-1: #fdf7f9;
-  --acrylic-bg: rgba(247,237,241,.72);
+  --acrylic-bg: rgba(247,237,241,.86);
 
   --ion:      #c1113d;
   --ion-soft: rgba(193,17,61,.14);
@@ -326,7 +361,7 @@
 [data-palette="forest"] {
   --ink-0: #040806;
   --ink-1: #0a1310;
-  --acrylic-bg: rgba(4,8,6,.72);
+  --acrylic-bg: rgba(4,8,6,.84);
 
   --ion:      #89f5d1;
   --ion-soft: rgba(137,245,209,.16);
@@ -359,7 +394,7 @@
 :root[data-theme="light"] [data-palette="forest"] {
   --ink-0: #ecf4ef;
   --ink-1: #f6fbf8;
-  --acrylic-bg: rgba(236,244,239,.72);
+  --acrylic-bg: rgba(236,244,239,.86);
 
   --ion:      #067a53;
   --ion-soft: rgba(6,122,83,.14);
@@ -395,7 +430,7 @@
 [data-palette="ocean"] {
   --ink-0: #030810;
   --ink-1: #081422;
-  --acrylic-bg: rgba(3,8,16,.72);
+  --acrylic-bg: rgba(3,8,16,.84);
 
   --ion:      #7de8ff;
   --ion-soft: rgba(125,232,255,.16);
@@ -428,7 +463,7 @@
 :root[data-theme="light"] [data-palette="ocean"] {
   --ink-0: #eaf1f8;
   --ink-1: #f5f9fd;
-  --acrylic-bg: rgba(234,241,248,.72);
+  --acrylic-bg: rgba(234,241,248,.86);
 
   --ion:      #087a91;
   --ion-soft: rgba(8,122,145,.14);
@@ -463,7 +498,7 @@
 [data-palette="midnight"] {
   --ink-0: #04040c;
   --ink-1: #0c0a1c;
-  --acrylic-bg: rgba(4,4,12,.72);
+  --acrylic-bg: rgba(4,4,12,.84);
 
   --ion:      #b68cff;
   --ion-soft: rgba(182,140,255,.16);
@@ -496,7 +531,7 @@
 :root[data-theme="light"] [data-palette="midnight"] {
   --ink-0: #efedf9;
   --ink-1: #f8f7fd;
-  --acrylic-bg: rgba(239,237,249,.72);
+  --acrylic-bg: rgba(239,237,249,.86);
 
   --ion:      #6322d3;
   --ion-soft: rgba(99,34,211,.14);
@@ -533,7 +568,7 @@
 [data-palette="mono"] {
   --ink-0: #07070a;
   --ink-1: #101116;
-  --acrylic-bg: rgba(7,7,10,.72);
+  --acrylic-bg: rgba(7,7,10,.84);
 
   --ion:      #dbdfe6;
   --ion-soft: rgba(219,223,230,.16);
@@ -566,7 +601,7 @@
 :root[data-theme="light"] [data-palette="mono"] {
   --ink-0: #eff0f2;
   --ink-1: #f8f9fa;
-  --acrylic-bg: rgba(239,240,242,.72);
+  --acrylic-bg: rgba(239,240,242,.86);
 
   --ion:      #495565;
   --ion-soft: rgba(73,85,101,.14);
@@ -715,10 +750,14 @@ body.booted .navrow {
   transition: opacity 520ms ease-out 120ms, transform 520ms ease-out 120ms;
 }
 
-/* --- icon glyphs --------------------------------------------- */
+/* --- icon glyphs ---------------------------------------------
+   ONE glyph size in the chrome: 16px, the size Segoe Fluent Icons is
+   drawn at, so a row of instruments reads as one set rather than as
+   several. The caption buttons keep their own 10px below — those are
+   Windows' glyphs, not the app's, and the shell draws them at 10. */
 .glyph {
   font-family: var(--icon-font);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 400;
   line-height: 1;
   display: inline-block;
@@ -761,7 +800,15 @@ button.glass:focus-visible {
     0 0 0 3px var(--ion-soft);
 }
 
-/* --- titlebar: the thinnest, lightest pane -------------------- */
+/* --- titlebar: the top of the deep band -----------------------
+   THREE horizontal lines structure the whole chrome and there are no
+   others: (1) the specular cut edge at the very top of the window,
+   carried on this element's inset shadow; (2) the --edge hairline
+   between this row and the nav row, its border-bottom; (3) the lit
+   seam under the nav row, .navrow::before. The pane shadows the glass
+   recipe would otherwise add here — a shaded lower lip and a dropped
+   hairline — are switched off, because each of them was a fourth and
+   a fifth line across the band. */
 #titlebar {
   position: relative;
   display: flex;
@@ -769,17 +816,22 @@ button.glass:focus-visible {
   gap: 4px;
   height: var(--titlebar-h);
   padding-left: 8px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);          /* line 2 */
   background: var(--sheen), var(--glass-thin);
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--hairline-top); /* line 1 */
   -webkit-app-region: drag;
 }
 
+/* Segments, not chips: the tabs sit flush against each other and are
+   told apart by a hairline, so the strip reads as one instrument
+   divided rather than as a row of pills. app.js reads the flex gap off
+   the measurements rather than hardcoding it, so 0 is safe. */
 #tabstrip {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   flex: 0 1 auto;
   min-width: 0;
   height: 100%;
@@ -787,22 +839,29 @@ button.glass:focus-visible {
   overflow-y: hidden;
 }
 
+/* the "+" and the strip menu next to it are plain glyphs: no box at
+   rest, a film of glass under the pointer, nothing else */
 #newtab {
   width: 28px;
   height: 28px;
+  margin-left: 4px;
   border-radius: var(--radius-ctl);
 }
 
-#newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#newtab:active { background: var(--sheen), var(--glass-3); }
+#newtab:hover { background: var(--glass); color: var(--fg); }
+#newtab:active { background: var(--glass-2); }
 
-/* --- tabs (chips injected at runtime) ------------------------- */
+/* --- tabs (segments injected at runtime) ----------------------
+   A tab is a segment of the band, full height and flush with its
+   neighbours, not a rounded chip floating in it. At rest it carries no
+   fill at all: a title, and a 1px --edge hairline against the tab
+   before it. The light is spent on exactly one of them. */
 .tab {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: 100%;
   max-width: 220px;
   /* A floor, not 0. #tabstrip already hides its scrollbar and app.js already
      scrolls the active chip into view, so the strip is built to scroll once the
@@ -813,11 +872,14 @@ button.glass:focus-visible {
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
-  border-radius: var(--bevel);
+  /* a segment is cut at the top and flush at the bottom, where the
+     lamp runs; the bevel lands on the two corners that are left */
+  border-radius: var(--bevel) var(--bevel) 0 0;
   background: transparent;
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-weight: 500;
   /* the title is a readout: Bahnschrift a notch narrower, opened up a
      hair, and figures in a host or a count line up column to column */
   font-stretch: var(--readout-stretch);
@@ -827,50 +889,47 @@ button.glass:focus-visible {
   cursor: default;
 }
 
-.tab:hover {
-  background: var(--sheen), var(--glass-2);
-  border-color: var(--edge);
-  color: var(--fg);
-}
+/* The separator. Every tab but the first carries a hairline on its
+   left; the active segment and the one that follows it drop theirs, so
+   the lit segment is never boxed in by a line it does not need.
+   :not([hidden]) rather than "+": a tab belonging to another workspace
+   is display:none, and the first tab you can actually see must not
+   inherit a divider from one you cannot. */
+.tab:not([hidden]) ~ .tab:not([hidden]):not(.active) { border-left-color: var(--edge); }
 
-/* The active chip is the one segment of the strip that is a container:
-   it takes the cut corners (in the @supports block near the end) and
-   the lit rim, so it reads as a pane seated in the strip rather than a
-   chip tinted a shade lighter. Inactive chips stay quiet — hover is
-   still nothing but a lighter glass and a hairline.
+.tab.active:not([hidden]) + .tab:not([hidden]) { border-left-color: transparent; }
 
-   The rim is a border-box layer under a transparent border, and the
-   interior above it has to be OPAQUE or the gradient shows through the
-   whole chip instead of sitting on its edge — that bleed is what turned
-   the chip into a grey blob. A chip cannot take the ring-on-a-pseudo
-   treatment: ::after is the ion line (and the loading shimmer) and
-   ::before is the workspace bar, so both are spoken for. So this is the
-   addendum's opaque-interior variant — --panel-bg under the glass tint,
-   which keeps the chip reading lighter than its neighbours while the
-   rim stops at the border. */
+.tab:hover { background: var(--glass); color: var(--fg); }
+
+/* The active tab is a lit segment: a film of glass, the cut top edge
+   catching the specular, and the lamp along its bottom. No opaque
+   interior any more — the band behind it is deep now, so a --panel-bg
+   fill read as the light-grey blob it was, and --glass-2 over ink is
+   both lighter than its neighbours and still glass. The rim went with
+   it: on a segment, the light IS the lamp. */
 .tab.active {
   border-color: transparent;
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
+  background: var(--sheen), var(--glass-2);
   color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 6px 14px -8px var(--ion-glow);
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 var(--specular);
 }
 
-/* the ion line under the active chip */
+/* The lamp. 2px of accent along the bottom edge — the edge that meets
+   the nav row — with the glow it throws, so the active segment reads as
+   wired to the address bar under it rather than merely tinted. */
 .tab::after {
   content: '';
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--ion), transparent);
+  /* -1px on three sides: an abspos child is placed against the PADDING
+     box, and the segment's own 1px transparent border would otherwise
+     hold the lamp a pixel clear of the edge it is meant to sit on. */
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ion);
+  box-shadow: 0 0 8px var(--ion-glow);
   opacity: 0;
   transition: opacity 140ms steps(3, end);
   pointer-events: none;
@@ -917,11 +976,10 @@ button.glass:focus-visible {
 .tab[data-ws-colour]::before {
   content: '';
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 0;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
   height: 2px;
-  border-radius: 2px;
   background: var(--ws-colour);
   opacity: .45;
   transition: opacity 140ms steps(3, end);
@@ -931,19 +989,63 @@ button.glass:focus-visible {
 .tab[data-ws-colour]:hover::before { opacity: .7; }
 .tab[data-ws-colour].active::before { opacity: .9; }
 
-/* out of the workspace bar's way */
-.tab[data-ws-colour]::after { bottom: 2px; }
+/* out of the workspace bar's way: the lamp stacks on top of it rather
+   than mixing with it */
+.tab[data-ws-colour]::after { bottom: 1px; }
 
 /* The switcher UI's slot, left of the strip. app.js inserts it empty and
-   workspaces.css styles whatever goes in; zero-width until it does. */
+   workspaces.css styles whatever goes in; zero-width until it does.
+   The slot closes with a vertical hairline, so the readout is told
+   apart from the first tab the same way the tabs are told apart from
+   each other. Vertical: the three-line rule governs the band's
+   HORIZONTAL structure and this crosses it. */
 #workspace-slot {
+  position: relative;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
   height: 100%;
+  margin-right: 4px;
+  padding-right: 8px;
 }
 
 #workspace-slot:empty { display: none; }
+
+#workspace-slot::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  right: 0;
+  width: 1px;
+  background: var(--edge);
+  pointer-events: none;
+}
+
+/* The pill stops being a pill: a readout, the same way the zoom badge
+   and the tab titles are. Its pip, its name and its chevron, nothing
+   drawn around them until the pointer is on it. Written here rather
+   than in workspaces.css — which owns every .ws-* class — so the two
+   ids are what carry it over that file's own single-id rules. */
+#workspace-slot #workspace-pill {
+  height: 28px;
+  border-radius: var(--radius-ctl);
+  background: none;
+  border-color: transparent;
+}
+
+#workspace-slot #workspace-pill:hover {
+  background: var(--glass);
+  border-color: transparent;
+  color: var(--fg);
+}
+
+#workspace-slot #workspace-pill:active,
+#workspace-slot #workspace-pill.is-open {
+  background: var(--glass-2);
+  border-color: transparent;
+  color: var(--fg);
+}
 
 .tab-title {
   flex: 1 1 auto;
@@ -991,7 +1093,7 @@ img.tab-icon[src=""],
 .tab.loading::after {
   background:
     linear-gradient(90deg, transparent 0%, var(--tab-shimmer) 50%, transparent 100%),
-    linear-gradient(90deg, transparent, var(--ion), transparent);
+    linear-gradient(var(--ion), var(--ion));
   background-size: 40% 100%, 100% 100%;
   background-repeat: no-repeat, no-repeat;
   animation: tab-shimmer 1.2s steps(24) infinite;  /* same reason as live-pulse */
@@ -1123,15 +1225,10 @@ img.tab-icon[src=""],
 .tab.dragging {
   z-index: 4;
   border-color: transparent;
-  /* opaque interior under the tint, for the same reason .tab.active
-     carries one: both of a chip's pseudo-elements are already in use, so
-     the rim stays a border-box layer and --panel-bg is what stops it
-     bleeding across the chip. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
+  /* A segment in the air is the same glass, one step brighter, lifted
+     off the strip by its shadow — the deep band behind it is dark
+     enough now that no opaque interior is needed to tell the two apart. */
+  background: var(--sheen), var(--glass-3);
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
@@ -1159,16 +1256,24 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   border-radius: 0;
 }
 
+/* Windows draws its own caption glyphs at 10px; the app's 16px would
+   read as a different, heavier set bolted onto the frame. */
 #win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
 
-#win-min:hover, #win-max:hover { background: var(--glass-2); color: var(--fg); }
-#win-min:active, #win-max:active { background: var(--glass-3); }
+#win-min:hover, #win-max:hover { background: var(--glass); color: var(--fg); }
+#win-min:active, #win-max:active { background: var(--glass-2); }
 
 /* the one earned exception to monochrome: the Windows close convention */
-#win-close:hover { background: rgba(232,17,35,.9); color: #ffffff; }
-#win-close:active { background: rgba(232,17,35,.7); color: #ffffff; }
+#win-close:hover { background: var(--close-bg); color: var(--close-fg); }
+#win-close:active { background: var(--close-bg-down); color: var(--close-fg); }
 
-/* --- nav row -------------------------------------------------- */
+/* --- nav row --------------------------------------------------
+   One step up from the titlebar's film and no more: the row is deep
+   glass too, and the aurora is meant to come through it. Its bottom
+   edge is the lit seam and nothing else — the .glass recipe's inset
+   lip, its shaded underside and its dropped hairline are all switched
+   off here, and the --edge border-bottom it used to carry is gone, or
+   the band would end in four stacked lines instead of one. */
 .navrow {
   position: relative;
   display: flex;
@@ -1176,7 +1281,8 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   gap: 6px;
   height: var(--nav-h);
   padding: 0 10px;
-  border-bottom: 1px solid var(--edge);
+  background: var(--sheen), var(--glass-nav);
+  box-shadow: none;
 }
 
 /* The lit seam under the chrome. It rides ::before rather than ::after so
@@ -1195,20 +1301,96 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   pointer-events: none;
 }
 
-/* .iconbtn is the same instrument shape, for nav buttons added later
-   (#theme carries it, and .glass, so it reads as a chip when idle). */
-/* Controls, not containers: round corners at --radius-ctl, no bevel.
-   What they gain is the light focus — the ring is in the shared
-   :focus-visible rule, so nothing is repeated here. */
-#back, #forward, #reload, .iconbtn {
+/* --- the three plain glyphs on the left ------------------------
+   Back, forward and reload are glyphs, not buttons with boxes: 32px of
+   hit area each, a film of glass under the pointer, and nothing at all
+   at rest. Disabled is the glyph at 40% rather than a second grey —
+   one colour, two strengths, which is what "unavailable" looks like
+   everywhere else in the window. */
+#back, #forward, #reload {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-ctl);
+  background: none;
 }
 
-#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--glass-2); color: var(--fg); }
-#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--glass-3); }
-#back:disabled, #forward:disabled { background: none; color: var(--fg-3); }
+#back:hover, #forward:hover, #reload:hover { background: var(--glass); color: var(--fg); }
+#back:active, #forward:active, #reload:active { background: var(--glass-2); }
+
+#back:disabled, #forward:disabled {
+  background: none;
+  color: var(--fg-2);
+  opacity: .4;
+}
+
+/* --- the instrument cluster -----------------------------------
+   The shield, the theme toggle and the settings gear (and the
+   downloads, reader and picture-in-picture instruments, when a page
+   earns one) stop being separate boxed buttons and become ONE
+   segmented container: a single --edge ring around the run, --edge
+   hairlines dividing it, --radius-ctl at the two outer ends only.
+
+   There is no wrapper element to hang it on — shield.js, downloads.js,
+   reader.js, pip.js and settings.js all seat their button by testing
+   `parentNode === navrow`, so a <div> around them would scatter five
+   instruments to the end of the row. The run is styled where it lies
+   instead. `:not([hidden])` everywhere because three of the six are
+   display:none most of the time, and a divider must not be drawn
+   against a segment nobody can see; the negative margin cancels the
+   row's 6px gap so the visible segments sit flush. */
+:is(.navrow, .cluster) > .iconbtn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--edge);
+  border-left-width: 0;
+  border-right-width: 0;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* every visible segment: the ring's top and bottom, and the hairline
+   that starts it — which for the first segment is the ring's left end */
+:is(.navrow, .cluster) > .iconbtn:not([hidden]) {
+  margin-left: 0;
+  border-left-width: 1px;
+  border-top-left-radius: var(--radius-ctl);
+  border-bottom-left-radius: var(--radius-ctl);
+  border-top-right-radius: var(--radius-ctl);
+  border-bottom-right-radius: var(--radius-ctl);
+  border-right-width: 1px;
+}
+
+/* not the first: its left hairline is a divider, so it squares off and
+   pulls flush against the segment before it */
+:is(.navrow, .cluster) > .iconbtn:not([hidden]) ~ .iconbtn:not([hidden]) {
+  margin-left: -6px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* not the last: the ring's right end belongs to the last segment only */
+:is(.navrow, .cluster) > .iconbtn:not([hidden]):has(~ .iconbtn:not([hidden])) {
+  border-right-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* the light lands on the segment, never on a box of its own */
+:is(.navrow, .cluster) > .iconbtn:not([hidden]):hover { background: var(--glass-2); color: var(--fg); }
+:is(.navrow, .cluster) > .iconbtn:not([hidden]):active { background: var(--glass-3); }
+
+/* .glass would otherwise put the pane shadows back under the focus
+   halo, and a lit box is exactly what the cluster is here to remove */
+:is(.navrow, .cluster) > .iconbtn:focus-visible { box-shadow: 0 0 0 3px var(--ion-soft); }
+
+/* Insurance, not a layout: should a .cluster wrapper ever be added
+   around the instruments, its children stay flex items of the nav row
+   and every rule above keeps applying. Nothing in the app produces one
+   today. */
+.cluster { display: contents; }
 
 /* the theme toggle: glyph swapped by app.js (moon in dark, sun in light) */
 #theme .glyph { font-family: var(--icon-font); }
@@ -1271,8 +1453,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 0 0 4px var(--ion-soft),
-    0 0 28px var(--ion-glow);
+    0 0 0 3px var(--ion-soft);
 }
 
 #omnibox::selection { background: var(--ion-select); color: var(--fg); }
@@ -1297,7 +1478,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
     pointer-events: none;
     padding: 1px;
     border-radius: var(--bevel);
-    background: var(--rim);
+    background: var(--rim-lens);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
@@ -1314,7 +1495,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
     background:
       var(--sheen) padding-box,
       linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
+      var(--rim-lens) border-box;
   }
 
   #omnibox:hover {
@@ -1322,7 +1503,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
       var(--sheen) padding-box,
       linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
       linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
+      var(--rim-lens) border-box;
   }
 
   #omnibox:focus {
@@ -1339,10 +1520,16 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
    unusual — and [hidden] has to beat the button display:inline-flex reset. */
 #zoom-badge {
   flex: 0 0 auto;
-  height: 26px;
+  height: 28px;
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: var(--radius-ctl);
+  /* a readout in a hairline frame, the cluster's language: the glass
+     recipe's own fill and pane shadows would make it a box again */
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 11.5px;
@@ -1353,17 +1540,27 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   transition: color 140ms steps(3, end), background-color 180ms ease;
 }
 
-#zoom-badge:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#zoom-badge:active { background: var(--sheen), var(--glass-3); }
+#zoom-badge:hover { background: var(--glass-2); color: var(--fg); }
+#zoom-badge:active { background: var(--glass-3); }
 #zoom-badge[hidden] { display: none; }
 
-/* the pill that opens a new Claude tab */
+/* The button that opens a new Claude tab: the cluster's height and the
+   cluster's corners, but its own container — a pip, a label, and the
+   lit rim around both. The rim is a masked ring on ::before rather than
+   a border-box layer, because the interior is translucent glass and a
+   gradient under it would wash the whole button (the addendum's rule);
+   ::before was free here, so no opaque interior is needed. */
 #newclaude {
+  position: relative;
   gap: 7px;
-  height: 30px;
+  height: 32px;
   padding: 0 13px 0 11px;
-  border: 1px solid var(--edge);
+  border: 1px solid transparent;
   border-radius: var(--radius-ctl);
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
@@ -1371,8 +1568,29 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   letter-spacing: .01em;
 }
 
-#newclaude:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
+#newclaude::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+#newclaude:hover { background: var(--glass-2); color: var(--fg); }
+#newclaude:active { background: var(--glass-3); color: var(--fg); }
+
+/* the ring goes to full accent under the pointer, the same move the
+   lens makes when it is focused */
+#newclaude:hover::before,
+#newclaude:active::before { background: var(--rim-focus); }
+
+#newclaude:focus-visible { box-shadow: 0 0 0 3px var(--ion-soft); }
 
 /* --- session light (the only warm colour) --------------------- */
 /* Every status mark in the chrome is a pip: a lamp, not a painted

@@ -26,7 +26,7 @@
    chrome.css cannot know about: the instrument under the pointer. */
 #reader .glyph {
   font-family: var(--icon-font);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
 }
 
