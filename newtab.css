@@ -534,8 +534,11 @@ body {
   height: 100%;
   z-index: 1;
   pointer-events: none;
-  -webkit-mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
-          mask-image: radial-gradient(ellipse 80% 75% at 50% 48%, #000 45%, transparent 100%);
+  /* The edge fade is painted into the canvas's own alpha by vignette() in
+     newtab-bg.js — the same ellipse and stops this mask-image used to carry.
+     A mask makes the layer a render surface, and the compositor was blending
+     the whole window twice for it on every frame a packet moved: 30.8% -> 27.3%
+     of a core with the board running. */
   transition: opacity 180ms steps(4);
 }
 

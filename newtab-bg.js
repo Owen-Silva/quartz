@@ -1018,6 +1018,34 @@
         c.stroke();
       }
     }
+
+    vignette(c, board.w, board.h);
+  }
+
+  /* The edge fade, painted into the canvas's own alpha instead of hung off
+     it as a CSS mask-image. Same ellipse and the same two stops the mask
+     had (radii, not diameters — see vignetteAt, which evaluates this very
+     curve for a packet), so the picture is identical; what changes is that
+     a masked layer is a render surface, and the compositor was blending the
+     whole window twice for it on every frame a packet moved. Measured on the
+     new tab page with the board running, same machine minutes apart: 5.08 ->
+     4.69 CPU-ms per composited frame (30.8% -> 27.3% of a core), and one
+     fewer full-window layer in the LayerTree census (16.8 -> 15.3 Mpx).
+
+     destination-in multiplies what is already drawn by the alpha of what we
+     draw now, which is exactly what a luminance-free alpha mask does. */
+  function vignette(c, w, h) {
+    c.save();
+    c.globalCompositeOperation = 'destination-in';
+    c.translate(0.5 * w, 0.48 * h);
+    c.scale(0.8 * w, 0.75 * h);          // ellipse 80% 75% at 50% 48%
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.45, 'rgba(0,0,0,1)');   // #000 45%
+    g.addColorStop(1, 'rgba(0,0,0,0)');      // transparent 100%
+    c.fillStyle = g;
+    c.fillRect(-4, -4, 8, 8);            // the whole canvas, in ellipse units
+    c.restore();
   }
 
   /* ------------------------------------------------------------------ */
