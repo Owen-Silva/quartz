@@ -210,8 +210,71 @@
       if (st.idleBytes < IDLE_MIN_BYTES) return; // noise: keep waiting
       var total = st.idleBytes;
       st.idleBytes = 0;
+      // The session has drawn something and stopped: its input box is up, so
+      // anything waiting to be pasted can go in now (and a later paste can go
+      // straight through).
+      st.pasteReady = true;
+      flushPaste(st);
       emit(st, 'idle', { bytes: total });
     }, IDLE_MS);
+  }
+
+  // ---------------------------------------------------------------- paste --
+  //
+  // "Ask Claude about this" hands a chamber a block of text. It goes into the
+  // session's INPUT and nothing else: there is no Enter anywhere below, on
+  // purpose -- the user reads what arrived, adds their question, and decides
+  // when to send it.
+  //
+  // xterm has bracketed paste on, so a multi-line quote arrives as ONE block
+  // rather than as N submitted lines, which is exactly what the Claude Code
+  // input box wants.
+
+  // A chamber opened for the gesture is still booting when the prompt is
+  // composed, so the text waits. 'live' is the PTY, NOT the CLI: claude.exe
+  // takes seconds more to draw its input box, and anything written before that
+  // is read by whatever it puts up first (a trust prompt, a first-run
+  // question) instead of landing in the box. So the queue waits for the first
+  // quiet AFTER live -- the session has said its piece and is waiting -- with
+  // a hard cap so a chatty session can never swallow the text for good.
+  var PASTE_CAP_MS = 30000;
+
+  /** Put text in now if the session is ready for it, else hold it. */
+  function pasteInto(st, text) {
+    var body = String(text == null ? '' : text);
+    if (st.disposed || !body) return false;
+    // An already-running chamber takes it straight away: the box is up and the
+    // user is looking at it. Only a session that has never settled queues.
+    if (st.term && st.live && st.pasteReady) {
+      try {
+        st.term.paste(body);
+        return true;
+      } catch (err) { /* fall through and queue it instead */ }
+    }
+    st.pendingPaste.push(body);
+    if (st.live) armPasteCap(st);
+    return false;
+  }
+
+  /** Last resort: put the text in anyway rather than lose it. */
+  function armPasteCap(st) {
+    if (st.disposed || st.pasteTimer) return;
+    st.pasteTimer = setTimeout(function () {
+      st.pasteTimer = 0;
+      st.pasteReady = true;
+      flushPaste(st);
+    }, PASTE_CAP_MS);
+  }
+
+  function flushPaste(st) {
+    if (st.pasteTimer) { clearTimeout(st.pasteTimer); st.pasteTimer = 0; }
+    if (st.disposed || !st.term || !st.live) return;
+    if (!st.pendingPaste.length) return;
+    var queued = st.pendingPaste.slice();
+    st.pendingPaste.length = 0;
+    for (var i = 0; i < queued.length; i++) {
+      try { st.term.paste(queued[i]); } catch (err) { /* terminal went away */ }
+    }
   }
 
   // -------------------------------------------------------------- emitter --
@@ -335,6 +398,9 @@
       bySession.set(id, st);
       st.live = true;
       emit(st, 'live', true);
+      // Anything handed to this chamber while it was starting is now waiting
+      // on the CLI rather than on the PTY; the cap makes sure it goes in.
+      armPasteCap(st);
       // The tab may have been resized between start() and this reply.
       if (st.term && st.term.cols >= 1 && st.term.rows >= 1) {
         try {
@@ -447,6 +513,7 @@
       else st.term.clear();
     } catch (err) {}
     safeFit(st);
+    st.pasteReady = false; // a restarted session has to boot all over again
     startPty(st); // same xterm, same cwd, current cols/rows
   }
 
@@ -474,6 +541,12 @@
       // pending deadline that turns silence into one.
       idleTimer: 0,
       idleBytes: 0,
+      // Text handed over before the session could take it, and the timer that
+      // puts it in once it can. See the paste section above.
+      pendingPaste: [],
+      pasteTimer: 0,
+      // False until the session has drawn something and gone quiet once.
+      pasteReady: false,
       listeners: Object.create(null),
       onWinResize: null
     };
@@ -529,6 +602,13 @@
         return { cols: st.term.cols || 0, rows: st.term.rows || 0 };
       },
 
+      // Put text into the session's input box. Returns true if it went in now,
+      // false if it was queued for the moment the PTY comes live. NOTHING is
+      // submitted: no Enter is ever sent from here.
+      paste: function (text) {
+        return pasteInto(st, text);
+      },
+
       restart: function () {
         restart(st);
       },
@@ -562,6 +642,8 @@
         if (st.timers.ro) { clearTimeout(st.timers.ro); st.timers.ro = null; }
         clearIdleTimer(st);
         st.idleBytes = 0;
+        if (st.pasteTimer) { clearTimeout(st.pasteTimer); st.pasteTimer = 0; }
+        st.pendingPaste.length = 0;
 
         if (st.ro) {
           try { st.ro.disconnect(); } catch (err) {}

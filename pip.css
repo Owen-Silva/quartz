@@ -1,0 +1,67 @@
+/* ============================================================
+   pip.css — the Picture in picture instrument in the nav row.
+
+   Loaded after chrome.css, and scoped entirely to #pip: nothing
+   here reaches another element. The floating window itself is the
+   compositor's, not ours — there is nothing of it to style.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own — :root[data-theme="light"]
+   relights all of it for free.
+
+   MOTION. The nav row sits on a backdrop-filter, so an animated
+   frame re-blurs the page behind it. Every transition here is
+   stepped and none runs longer than 150ms.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   The button is hidden far more often than it is shown — only a page
+   holding a <video> reveals it — so this rule is load-bearing, not
+   housekeeping. */
+#pip[hidden] { display: none; }
+
+/* Shape, hover, radius and glass all come from `.iconbtn` in
+   chrome.css. This file adds only the icon font and the two states
+   chrome.css cannot know about. */
+#pip .glyph {
+  font-family: var(--icon-font);
+  font-size: 15px;
+  line-height: 1;
+  transition: color 120ms steps(3, end);
+}
+
+/* The glyph is the only thing that lights on hover: the button keeps
+   the same glass as every other instrument in the row. */
+#pip:hover .glyph { color: var(--ion); }
+
+/* --- floating right now ----------------------------------------
+   A video is out of the page and over the desktop, and the page it
+   came from may not even be on screen. The instrument stays lit for
+   as long as that is true, because it is the only way back. */
+#pip.is-on {
+  background: var(--sheen), var(--glass-3);
+  color: var(--fg);
+  transition: background 150ms steps(2, end);
+}
+
+#pip.is-on .glyph { color: var(--ion); }
+
+/* Lit already: hovering must not read as a second, brighter state. */
+#pip.is-on:hover .glyph { color: var(--ion); }
+
+#pip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- reduced motion --------------------------------------------
+   The stepped transitions already hold still between frames; with
+   motion reduced they stop moving altogether and the states simply
+   swap. */
+@media (prefers-reduced-motion: reduce) {
+  #pip .glyph,
+  #pip.is-on {
+    transition: none;
+  }
+}

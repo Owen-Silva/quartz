@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History</title>
+<!-- Sets data-theme and data-palette on <html> from ?theme= and ?palette=
+     before anything paints, so a light window never flashes dark and a
+     palette never flashes ice-cyan. Shared verbatim with newtab.html and
+     reader.html. Must stay the first script and must stay above the
+     stylesheet. -->
+<script src="newtab-theme.js"></script>
+<!-- Second, and also above the stylesheet: it only wires itself up on
+     DOMContentLoaded, but it has to exist before the chrome can call
+     window.__applyHistory(), which can land at any moment after load. -->
+<script src="historypage.js"></script>
+<link rel="stylesheet" href="historypage.css">
+</head>
+<body>
+
+<!-- One quiet wash behind the list. Fixed, inert, bottom layer, and it does
+     not move: this is a page to read down, not a page to watch. -->
+<div class="backdrop" aria-hidden="true"></div>
+
+<!-- The bar stays put while the list scrolls under it. -->
+<header class="topbar glass">
+  <h1 class="wordmark">History</h1>
+
+  <div class="searchwrap">
+    <input id="q" class="search" type="search" placeholder="Search history"
+           autocomplete="off" autocapitalize="off" spellcheck="false"
+           aria-label="Search history">
+  </div>
+
+  <p id="count" class="count" role="status" aria-live="polite"></p>
+
+  <div class="clearwrap">
+    <button id="clear" class="barbtn" type="button"
+            aria-haspopup="true" aria-expanded="false" aria-controls="clearmenu">Clear&#8230;</button>
+
+    <!-- Three choices, and no dialog: the whole question is how far back. -->
+    <div id="clearmenu" class="clearmenu glass" hidden>
+      <button class="clearopt" type="button" data-range="hour">Last hour</button>
+      <button class="clearopt" type="button" data-range="today">Today</button>
+      <button class="clearopt danger" type="button" data-range="all">Everything</button>
+    </div>
+  </div>
+</header>
+
+<main class="stage">
+  <!-- historypage.js fills this, and only this. Every row is built with
+       createElement: nothing from the store is ever parsed as markup. -->
+  <div id="list" class="list"></div>
+  <p id="empty" class="empty">Nothing here yet</p>
+</main>
+
+</body>
+</html>

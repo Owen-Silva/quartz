@@ -88,6 +88,32 @@ function newTabUrl() {
  * The new-tab background (board / aurora / the user's image) is read from
  * IndexedDB by settings.js, so it travels separately from the plain settings.
  */
+/**
+ * The history page is a guest with no preload: it gets the whole list pushed
+ * in and talks back through console lines that history.js knows how to parse.
+ */
+function isHistoryTab(tab) {
+  const store = window.History;
+  return !!(tab && tab.kind === 'page' && store && typeof store.isHistoryUrl === 'function'
+    && store.isHistoryUrl(tab.url));
+}
+
+function pushHistoryToTab(tab) {
+  const store = window.History;
+  if (!store || typeof store.snapshot !== 'function') return;
+  if (!isViewUsable(tab) || !isHistoryTab(tab)) return;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyHistory && window.__applyHistory(' + JSON.stringify(store.snapshot()) + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away */ }
+}
+
+function pushHistoryToAll() {
+  for (const tab of tabs) pushHistoryToTab(tab);
+}
+
 function pushBackgroundToTab(tab) {
   const settings = window.Settings;
   if (!settings || typeof settings.background !== 'function') return;
@@ -2521,6 +2547,12 @@ function tabMenuItemsForTab(tab) {
         run: () => openClaudeBesideTab(tab)
       });
     }
+    // The same gesture as the page's own context menu, from the chip: a
+    // chamber beside this page with the page already quoted into its input.
+    items.push({
+      label: 'Ask Claude about this page',
+      run: () => askClaudeAboutTab(tab)
+    });
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
     // there: disabled on a tab that is not allowed to sleep right now.
@@ -2963,6 +2995,7 @@ function wireViewEvents(tab) {
     syncTabMutedFromView(tab);
     pushRecentToTab(tab);
     pushBackgroundToTab(tab);
+    pushHistoryToTab(tab);
     // did-navigate can land before the guest exists, so the site's remembered
     // zoom is applied here too. It paints the badge when this tab is in front.
     applyStoredZoom(tab);
@@ -3089,6 +3122,17 @@ function wireViewEvents(tab) {
   });
   viewEl.addEventListener('leave-html-full-screen', () => {
     setPageFullscreen(false);
+  });
+
+  // The history page (a preload-less guest) asks for removals/opens via
+  // console lines; history.js parses them and reports whether it acted.
+  viewEl.addEventListener('console-message', (event) => {
+    if (tab.viewEl !== viewEl || !isHistoryTab(tab)) return;
+    const store = window.History;
+    if (!store || typeof store.handleGuestMessage !== 'function') return;
+    let acted = false;
+    try { acted = !!store.handleGuestMessage(event && event.message); } catch (err) { acted = false; }
+    if (acted) pushHistoryToAll();
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
@@ -3543,6 +3587,146 @@ function toggleClaude() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Ask Claude                                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The gesture the whole browser is built around: one move takes what is on
+ * screen and puts it in front of a Claude Code session standing beside it.
+ *
+ * Three ways in -- the guest's context menu (main.js -> api.onAskClaude), the
+ * page chip's menu, and Ctrl+Shift+K -- all land in askClaude().
+ *
+ * The prompt goes into the chamber's INPUT and stops there. No Enter is sent
+ * from anywhere in this path: the text is an opening, and the user writes the
+ * question and decides when it goes.
+ */
+
+/** A quote, not an attachment: a long selection is cut with a note saying so. */
+const ASK_SELECTION_MAX = 4000;
+
+function askSelectionText(selection) {
+  const body = String(selection == null ? '' : selection).trim();
+  if (body.length <= ASK_SELECTION_MAX) return body;
+  return body.slice(0, ASK_SELECTION_MAX) + '\n… (selection truncated at ' + ASK_SELECTION_MAX + ' characters)';
+}
+
+/**
+ * The text that gets pasted. Both shapes deliberately END where the user's own
+ * typing starts -- with a selection the quote block is the whole message and
+ * the cursor lands under it; without one the sentence is left mid-air after
+ * "and ", so finishing it is the only thing left to do.
+ */
+function askPromptText(url, title, selection) {
+  const quote = askSelectionText(selection);
+  const page = String(url || '').trim();
+  if (quote) return 'From ' + page + '\n\n"""\n' + quote + '\n"""\n\n';
+  const name = String(title == null ? '' : title).trim();
+  return name ? 'Look at ' + page + ' (' + name + ') and ' : 'Look at ' + page + ' and ';
+}
+
+/**
+ * The page the request came from. The context menu fires on a guest that is on
+ * screen but not necessarily the ACTIVE half of a split, so the url decides it
+ * when there is one; the keyboard path passes none and the tab in front wins.
+ */
+function askSourceTab(url) {
+  const want = String(url || '');
+  if (want) {
+    const pages = tabs.filter((t) => t.kind === 'page');
+    const shown = pages.find((t) => isTabOnScreen(t) && readCurrentUrl(t) === want);
+    if (shown) return shown;
+    const anywhere = pages.find((t) => readCurrentUrl(t) === want);
+    if (anywhere) return anywhere;
+  }
+  const active = getActiveTab();
+  if (active && active.kind === 'page') return active;
+  // Asked from inside a chamber: the page it is standing next to is the subject.
+  const partner = splitPartner(active);
+  if (partner && partner.kind === 'page') return partner;
+  return mostRecentTabOfKind('page');
+}
+
+/**
+ * The chamber this page should be talking to. In order: the one it is already
+ * split with, a free chamber stood beside it, a new one beside it, and — if
+ * the page cannot be split at all — whatever chamber exists, else a new one.
+ */
+function claudeChamberFor(page) {
+  const partner = page ? splitPartner(page) : null;
+  if (isClaudeTab(partner)) return partner;
+
+  if (page && page.kind === 'page') {
+    const recent = mostRecentTabOfKind('claude');
+    if (recent && !splitPartner(recent) && splitTabs(page, recent)) return recent;
+    if (openClaudeBesideTab(page)) {
+      const made = splitPartner(page);
+      if (isClaudeTab(made)) return made;
+    }
+  }
+  return mostRecentTabOfKind('claude') || createClaudeTab({ background: true });
+}
+
+/** terminal.js queues this until the PTY is live, so a brand-new chamber works. */
+function pasteIntoChamber(tab, text) {
+  const term = tab && tab.term;
+  if (!term || typeof term.paste !== 'function') return false;
+  try {
+    term.paste(text);
+  } catch (err) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * @param {{url?:string, title?:string, selection?:string}} payload
+ * @returns {boolean} true once the prompt is in (or queued for) a chamber.
+ */
+function askClaude(payload) {
+  const info = payload || {};
+  const url = String(info.url == null ? '' : info.url);
+  const page = askSourceTab(url);
+  const title = String(info.title == null ? '' : info.title) || (page ? page.title : '');
+  const prompt = askPromptText(url || (page ? readCurrentUrl(page) : ''), title, info.selection);
+
+  const claude = claudeChamberFor(page);
+  if (!claude) return false;
+  // The chamber takes the front so the keystrokes that follow land in the
+  // terminal, not in the page; activateTab() focuses xterm on the next frame.
+  activateTab(claude.id);
+  return pasteIntoChamber(claude, prompt);
+}
+
+/** The guest's live selection, which — unlike the menu's — is never truncated. */
+function readGuestSelection(tab) {
+  if (!isViewUsable(tab)) return Promise.resolve('');
+  let pending = null;
+  try {
+    pending = tab.viewEl.executeJavaScript('String(getSelection())');
+  } catch (err) {
+    return Promise.resolve('');
+  }
+  if (!pending || typeof pending.then !== 'function') return Promise.resolve('');
+  return pending.then((text) => String(text == null ? '' : text), () => '');
+}
+
+/** Chip menu and Ctrl+Shift+K: ask about this page, quoting any selection. */
+function askClaudeAboutTab(tab) {
+  if (!tab || tab.kind !== 'page') return false;
+  const url = readCurrentUrl(tab) || tab.url || '';
+  const title = tab.title || '';
+  readGuestSelection(tab).then((selection) => {
+    askClaude({ url: url, title: title, selection: selection });
+  });
+  return true;
+}
+
+function askClaudeAboutActiveTab() {
+  return askClaudeAboutTab(askSourceTab(''));
+}
+
+/* ------------------------------------------------------------------ */
 /* Window controls (frameless titlebar)                                */
 /* ------------------------------------------------------------------ */
 
@@ -3611,6 +3795,12 @@ function wireWindowControls() {
       if (!url) return;
       createTab(url, { background: !!(payload && payload.background) });
     });
+  }
+
+  // "Ask Claude about …" in a page's context menu: main hands over the url,
+  // the title and the selection, and askClaude() does the rest.
+  if (window.api && typeof window.api.onAskClaude === 'function') {
+    window.api.onAskClaude((payload) => { askClaude(payload); });
   }
 
   // A click inside the other half of a split lands in the guest and never
@@ -3736,6 +3926,17 @@ function historyCall(method, url, title) {
   const store = window.History;
   if (!store || typeof store[method] !== 'function') return;
   try { store[method](url, title); } catch (err) { /* storage is best-effort */ }
+  // Every visit shows up on an open history page without a reload.
+  if (method === 'record') scheduleHistoryPush();
+}
+
+let historyPushTimer = null;
+function scheduleHistoryPush() {
+  if (historyPushTimer) return;
+  historyPushTimer = setTimeout(() => {
+    historyPushTimer = null;
+    pushHistoryToAll();
+  }, 800);
 }
 
 // Actions the modules own. Each exposes handleShortcut(action) -> true when it
@@ -3744,7 +3945,7 @@ function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
     window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo,
-    window.Capture, window.Bookmarks
+    window.Capture, window.Bookmarks, window.Pip
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -3809,6 +4010,9 @@ function wireKeyboard() {
       'split': toggleSplit,
       // Replayed by main.js from inside pages as Ctrl+Shift+\ (or Ctrl+|).
       'claude-split': toggleClaudeSplit,
+      // Replayed by main.js from inside pages as Ctrl+Shift+K. It carries no
+      // payload: the selection is read back off the guest here.
+      'ask-claude': askClaudeAboutActiveTab,
       'command-palette': () => moduleShortcut('command-palette'),
       'escape': () => moduleShortcut('escape'),
     };
@@ -3838,6 +4042,8 @@ function wireKeyboard() {
     if (event.altKey && !event.ctrlKey) {
       if (event.key === 'ArrowLeft') { event.preventDefault(); goBack(); }
       if (event.key === 'ArrowRight') { event.preventDefault(); goForward(); }
+      // Alt+P: picture in picture for the page's video.
+      if (typeof event.key === 'string' && event.key.toLowerCase() === 'p') { event.preventDefault(); moduleShortcut('pip'); }
       return;
     }
     if (!event.ctrlKey || event.altKey) return;
@@ -3941,6 +4147,9 @@ function wireKeyboard() {
     }
     // Ctrl+Shift+S saves a screenshot of the page; Ctrl+Shift+B shows the bookmarks bar.
     if (key === 's' && event.shiftKey) { event.preventDefault(); moduleShortcut('capture'); return; }
+    // Ctrl+Shift+K hands the page — and anything selected on it — to a Claude
+    // chamber. Tested BEFORE plain Ctrl+K, which would otherwise swallow it.
+    if (key === 'k' && event.shiftKey) { event.preventDefault(); askClaudeAboutActiveTab(); return; }
     // Ctrl+K: the command palette (tab search in command mode).
     if (key === 'k') { event.preventDefault(); moduleShortcut('command-palette'); return; }
     if (key === 'b' && event.shiftKey) { event.preventDefault(); moduleShortcut('bookmarks-bar'); return; }
@@ -4058,6 +4267,10 @@ window.openClaudeBesideTab = openClaudeBesideTab;
 window.splitPartner = splitPartner;
 window.setSplitRatio = setSplitRatio;
 window.markClaudeNeedsYou = markClaudeNeedsYou;
+window.askClaude = askClaude;
+window.askClaudeAboutTab = askClaudeAboutTab;
+window.askClaudeAboutActiveTab = askClaudeAboutActiveTab;
+window.askPromptText = askPromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 if (document.readyState === 'loading') {

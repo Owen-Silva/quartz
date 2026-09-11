@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('open-url', handler);
     return () => ipcRenderer.removeListener('open-url', handler);
   },
+  // A page's context menu asked for what is on screen to be handed to a Claude
+  // chamber: { url, title, selection }. `selection` is '' for the whole-page
+  // item, and is Chromium's already-truncated selectionText for the other one.
+  // The renderer composes the prompt and pastes it into the session's INPUT --
+  // nothing here ever runs anything.
+  onAskClaude: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on('ask-claude', handler);
+    return () => ipcRenderer.removeListener('ask-claude', handler);
+  },
   // Paths only the main process knows for sure -- never guess at them here.
   app: {
     paths: () => ipcRenderer.invoke('app:paths'),

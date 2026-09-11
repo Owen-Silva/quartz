@@ -1591,6 +1591,12 @@ function shortcutFor(input) {
   // (it is absent from SHORTCUTS): pages use it for their own save.
   if (input.shift && (key === 's' || key === 'S')) return { action: 'capture' };
   if (input.shift && (key === 'b' || key === 'B')) return { action: 'bookmarks-bar' };
+  // Ctrl+Shift+K hands the page -- and whatever is selected on it -- to a Claude
+  // chamber. Caught before the lowercasing lookup, which reads it as Ctrl+K and
+  // would open the command palette instead. No payload: the renderer asks the
+  // guest for its own selection, which is not truncated the way the context
+  // menu's selectionText is.
+  if (input.shift && (key === 'k' || key === 'K')) return { action: 'ask-claude' };
   // Ctrl+Shift+backslash (reads as '|' on US layouts) puts Claude beside the
   // page; plain Ctrl+backslash splits with the next tab.
   if (key === '|' || (input.shift && key === '\\')) return { action: 'claude-split' };
@@ -1645,6 +1651,15 @@ function joinMenuGroups(groups) {
     template.push(...group);
   }
   return template;
+}
+
+/** A destroyed guest throws on every getter; a menu must never take it down. */
+function safeUrlOf(contents) {
+  try { return contents.getURL() || ''; } catch (err) { return ''; }
+}
+
+function safeTitleOf(contents) {
+  try { return contents.getTitle() || ''; } catch (err) { return ''; }
 }
 
 /** Menu labels are one line: collapse the selection and cap it at 30 chars. */
@@ -1704,6 +1719,24 @@ function guestMenuTemplate(contents, params) {
     );
   }
 
+  // The gesture this browser exists for: hand what you are looking at to a
+  // Claude Code session standing next to it. Main only carries the facts --
+  // app.js composes the prompt and pastes it into the chamber's INPUT, where
+  // it waits for the user's own question. Nothing is ever executed from here.
+  const askUrl = params.pageURL || safeUrlOf(contents);
+  const askTitle = safeTitleOf(contents);
+  const ask = [];
+  if (selected) {
+    ask.push({
+      label: 'Ask Claude about "' + selectionLabel(selected) + '"',
+      click: () => send('ask-claude', { url: askUrl, title: askTitle, selection: selected }),
+    });
+  }
+  ask.push({
+    label: 'Ask Claude about this page',
+    click: () => send('ask-claude', { url: askUrl, title: askTitle, selection: '' }),
+  });
+
   const editing = [];
   if (params.isEditable) {
     const flags = params.editFlags || {};
@@ -1732,7 +1765,7 @@ function guestMenuTemplate(contents, params) {
 
   // Selection items sit above editing ones so Copy-the-selection is not buried
   // under the edit block in a textarea.
-  return joinMenuGroups([navigation, link, image, selection, editing, inspect]);
+  return joinMenuGroups([navigation, link, image, selection, ask, editing, inspect]);
 }
 
 app.on('web-contents-created', (_event, contents) => {

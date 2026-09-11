@@ -1,0 +1,691 @@
+/* ============================================================
+   historypage.css — the history page.
+
+   Same world as newtab.css and reader-page.css: frosted glass over a
+   still aurora, near-monochrome, one ion light. The token block below
+   is copied verbatim from newtab.css lines 1-388 rather than @imported,
+   because newtab.css also lays out the new-tab page (body, .column, the
+   field) and those rules would fight this list. Tokens only: if a token
+   changes there, change it here.
+   ============================================================ */
+
+/* --- tokens (mirrored from chrome.css) ----------------------- */
+:root {
+  --ink-0: #05060a;
+  --ink-1: #0c0f18;
+
+  --fg:   #eef1f8;
+  --fg-2: #9aa3b8;
+  --fg-3: #5c6478;
+
+  --glass:   rgba(255,255,255,.08);
+  --glass-2: rgba(255,255,255,.13);
+  --glass-3: rgba(255,255,255,.18);
+
+  --edge:     rgba(255,255,255,.22);
+  --specular: rgba(255,255,255,.55);
+
+  --ion:      #7dd3ff;
+  --ion-soft: rgba(125,211,255,.16);
+  --ion-glow: rgba(125,211,255,.45);
+  --ion-line: rgba(125,211,255,.75);   /* focus border / focus outline */
+
+  /* the drop shadow under the one surface that floats over the page */
+  --panel-shadow: rgba(0,0,0,.45);
+
+  /* the diagonal reflection every glass surface carries */
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.10)  0%,
+    rgba(255,255,255,.03) 38%,
+    rgba(255,255,255,0)   60%);
+
+  /* the three coloured washes of the backdrop, whole gradients so a
+     theme swaps the light itself and not the geometry */
+  --aurora-band: linear-gradient(-35deg,
+    rgba(140,170,255,0)   50%,
+    rgba(140,170,255,.09) 76%,
+    rgba(140,170,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(75,34,168,.48)  0%,
+    rgba(75,34,168,.22) 45%,
+    rgba(75,34,168,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(15,181,201,.28)  0%,
+    rgba(15,181,201,.11) 46%,
+    rgba(15,181,201,0)   78%);
+
+  --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+}
+
+/* --- light theme --------------------------------------------- */
+/* Set by newtab-theme.js before first paint, and re-set by the
+   browser chrome whenever the user flips theme. Tokens only —
+   every rule below is written once and reads through them. */
+:root[data-theme="light"] {
+  --ink-0: #eef1f7;
+  --ink-1: #f7f8fc;
+
+  --fg:   #12162a;
+  --fg-2: #4a526b;
+  --fg-3: #767e94;  /* 4.5:1 on the white capsule; mirrors chrome.css */
+
+  --glass:   rgba(255,255,255,.55);
+  --glass-2: rgba(255,255,255,.72);
+  --glass-3: rgba(255,255,255,.9);
+
+  --edge:     rgba(18,22,42,.12);
+  --specular: rgba(255,255,255,.95);
+
+  --ion:      #0b7fd6;
+  --ion-soft: rgba(11,127,214,.14);
+  --ion-glow: rgba(11,127,214,.35);
+  --ion-line: rgba(11,127,214,.75);
+
+  --panel-shadow: rgba(18,22,42,.16);
+
+  --sheen: linear-gradient(115deg,
+    rgba(255,255,255,.7)  0%,
+    rgba(255,255,255,.25) 38%,
+    rgba(255,255,255,0)   60%);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,160,255,0)   50%,
+    rgba(120,160,255,.13) 76%,
+    rgba(120,160,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(185,167,255,.55)  0%,
+    rgba(185,167,255,.25) 45%,
+    rgba(185,167,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(127,224,216,.45)  0%,
+    rgba(127,224,216,.18) 46%,
+    rgba(127,224,216,0)   78%);
+}
+
+/* --- palette presets ----------------------------------------- */
+/* data-palette on <html>, set by newtab-theme.js from ?palette= and
+   by the chrome later through window.__applyPalette. No attribute is
+   the authored aurora above.
+
+   Same convention as chrome.css: the dark block is the bare attribute
+   selector, the light one pairs it with the theme. Specificity does
+   the rest — [data-palette] (0,1,0) sits after :root (0,1,0) so it
+   wins in dark, and loses to :root[data-theme="light"] (0,2,0) so a
+   light window keeps light ink until its own (0,3,0) block lands.
+
+   Each block moves the light and nothing else: the four --ion tokens,
+   the three aurora washes (identical geometry to the defaults — only
+   the colour inside the gradients changes) and a barely-tinted ink
+   field. Foreground, glass and edge tokens stay neutral in every
+   preset, exactly as they do in chrome.css.
+
+   A user-chosen accent hue still wins over all of it: newtab-theme.js
+   writes --ion* inline on <html>, and inline beats every block here. */
+
+/* ember — rose, magenta and plum, lit coral-pink (never orange) */
+[data-palette="ember"] {
+  --ink-0: #0a0508;
+  --ink-1: #150c14;
+
+  --ion:      hsl(345 100% 72%);
+  --ion-soft: hsl(345 100% 72% / .16);
+  --ion-glow: hsl(345 100% 72% / .45);
+  --ion-line: hsl(345 100% 72% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(255,155,195,0)   50%,
+    rgba(255,155,195,.09) 76%,
+    rgba(255,155,195,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(140,30,90,.48)  0%,
+    rgba(140,30,90,.22) 45%,
+    rgba(140,30,90,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(224,64,118,.28)  0%,
+    rgba(224,64,118,.11) 46%,
+    rgba(224,64,118,0)   78%);
+}
+
+/* forest — deep green and teal, lit mint */
+[data-palette="forest"] {
+  --ink-0: #040907;
+  --ink-1: #0a1410;
+
+  --ion:      hsl(160 84% 68%);
+  --ion-soft: hsl(160 84% 68% / .16);
+  --ion-glow: hsl(160 84% 68% / .45);
+  --ion-line: hsl(160 84% 68% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(150,235,200,0)   50%,
+    rgba(150,235,200,.09) 76%,
+    rgba(150,235,200,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(16,86,64,.48)  0%,
+    rgba(16,86,64,.22) 45%,
+    rgba(16,86,64,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(20,170,150,.28)  0%,
+    rgba(20,170,150,.11) 46%,
+    rgba(20,170,150,0)   78%);
+}
+
+/* ocean — navy and teal, lit cyan */
+[data-palette="ocean"] {
+  --ink-0: #04070c;
+  --ink-1: #0a1119;
+
+  --ion:      hsl(190 100% 70%);
+  --ion-soft: hsl(190 100% 70% / .16);
+  --ion-glow: hsl(190 100% 70% / .45);
+  --ion-line: hsl(190 100% 70% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(130,190,255,0)   50%,
+    rgba(130,190,255,.09) 76%,
+    rgba(130,190,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(18,58,140,.48)  0%,
+    rgba(18,58,140,.22) 45%,
+    rgba(18,58,140,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(15,175,190,.28)  0%,
+    rgba(15,175,190,.11) 46%,
+    rgba(15,175,190,0)   78%);
+}
+
+/* midnight — indigo and violet, lit violet */
+[data-palette="midnight"] {
+  --ink-0: #06050c;
+  --ink-1: #100c1c;
+
+  --ion:      hsl(262 92% 76%);
+  --ion-soft: hsl(262 92% 76% / .16);
+  --ion-glow: hsl(262 92% 76% / .45);
+  --ion-line: hsl(262 92% 76% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(150,150,255,0)   50%,
+    rgba(150,150,255,.09) 76%,
+    rgba(150,150,255,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(58,30,150,.48)  0%,
+    rgba(58,30,150,.22) 45%,
+    rgba(58,30,150,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(120,70,220,.28)  0%,
+    rgba(120,70,220,.11) 46%,
+    rgba(120,70,220,0)   78%);
+}
+
+/* mono — graphite, lit cool off-white. The accent is deliberately
+   low-saturation; newtab-bg.js reads that saturation back off --ion
+   and scales the board's traces with it, so the circuitry goes grey
+   here instead of staying blue. */
+[data-palette="mono"] {
+  --ink-0: #07080a;
+  --ink-1: #101218;
+
+  --ion:      hsl(215 25% 88%);
+  --ion-soft: hsl(215 25% 88% / .16);
+  --ion-glow: hsl(215 25% 88% / .45);
+  --ion-line: hsl(215 25% 88% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(190,200,215,0)   50%,
+    rgba(190,200,215,.09) 76%,
+    rgba(190,200,215,.20) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(60,66,80,.48)  0%,
+    rgba(60,66,80,.22) 45%,
+    rgba(60,66,80,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(120,130,150,.28)  0%,
+    rgba(120,130,150,.11) 46%,
+    rgba(120,130,150,0)   78%);
+}
+
+/* --- palette presets, light theme ---------------------------- */
+/* Pale washes, and an accent dark enough to read on white glass.
+   The authored light accent is hsl(206 90% 44%); each preset holds
+   near that lightness, pulled down only where the hue is luminous
+   enough (green, off-white) that 44% would wash out against the
+   capsule. */
+
+:root[data-theme="light"][data-palette="ember"] {
+  --ink-0: #f7eef3;
+  --ink-1: #fdf7fa;
+
+  --ion:      hsl(345 84% 45%);
+  --ion-soft: hsl(345 84% 45% / .14);
+  --ion-glow: hsl(345 84% 45% / .35);
+  --ion-line: hsl(345 84% 45% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(255,155,195,0)   50%,
+    rgba(255,155,195,.13) 76%,
+    rgba(255,155,195,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(246,175,220,.55)  0%,
+    rgba(246,175,220,.25) 45%,
+    rgba(246,175,220,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(215,165,235,.45)  0%,
+    rgba(215,165,235,.18) 46%,
+    rgba(215,165,235,0)   78%);
+}
+
+:root[data-theme="light"][data-palette="forest"] {
+  --ink-0: #ecf5f0;
+  --ink-1: #f6fbf8;
+
+  --ion:      hsl(160 84% 32%);
+  --ion-soft: hsl(160 84% 32% / .14);
+  --ion-glow: hsl(160 84% 32% / .35);
+  --ion-line: hsl(160 84% 32% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(130,235,190,0)   50%,
+    rgba(130,235,190,.13) 76%,
+    rgba(130,235,190,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(168,240,205,.55)  0%,
+    rgba(168,240,205,.25) 45%,
+    rgba(168,240,205,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(140,225,215,.45)  0%,
+    rgba(140,225,215,.18) 46%,
+    rgba(140,225,215,0)   78%);
+}
+
+:root[data-theme="light"][data-palette="ocean"] {
+  --ink-0: #ecf2f9;
+  --ink-1: #f6fafd;
+
+  --ion:      hsl(190 96% 36%);
+  --ion-soft: hsl(190 96% 36% / .14);
+  --ion-glow: hsl(190 96% 36% / .35);
+  --ion-line: hsl(190 96% 36% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(120,180,255,0)   50%,
+    rgba(120,180,255,.13) 76%,
+    rgba(120,180,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(160,205,255,.55)  0%,
+    rgba(160,205,255,.25) 45%,
+    rgba(160,205,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(127,224,230,.45)  0%,
+    rgba(127,224,230,.18) 46%,
+    rgba(127,224,230,0)   78%);
+}
+
+:root[data-theme="light"][data-palette="midnight"] {
+  --ink-0: #f0eef9;
+  --ink-1: #f9f8fd;
+
+  --ion:      hsl(262 80% 52%);
+  --ion-soft: hsl(262 80% 52% / .14);
+  --ion-glow: hsl(262 80% 52% / .35);
+  --ion-line: hsl(262 80% 52% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(150,155,255,0)   50%,
+    rgba(150,155,255,.13) 76%,
+    rgba(150,155,255,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(190,170,255,.55)  0%,
+    rgba(190,170,255,.25) 45%,
+    rgba(190,170,255,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(170,150,240,.45)  0%,
+    rgba(170,150,240,.18) 46%,
+    rgba(170,150,240,0)   78%);
+}
+
+:root[data-theme="light"][data-palette="mono"] {
+  --ink-0: #f0f1f4;
+  --ink-1: #fafafc;
+
+  --ion:      hsl(215 16% 40%);
+  --ion-soft: hsl(215 16% 40% / .14);
+  --ion-glow: hsl(215 16% 40% / .35);
+  --ion-line: hsl(215 16% 40% / .75);
+
+  --aurora-band: linear-gradient(-35deg,
+    rgba(170,180,200,0)   50%,
+    rgba(170,180,200,.13) 76%,
+    rgba(170,180,200,.28) 100%);
+
+  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
+    rgba(200,206,220,.55)  0%,
+    rgba(200,206,220,.25) 45%,
+    rgba(200,206,220,0)   74%);
+
+  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
+    rgba(185,195,210,.45)  0%,
+    rgba(185,195,210,.18) 46%,
+    rgba(185,195,210,0)   78%);
+}
+
+/* --- page ---------------------------------------------------- */
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ink-0);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- backdrop ------------------------------------------------ */
+/* The same three washes the new tab carries, but fixed and still:
+   this is a page to read down, not a page to watch. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--ink-1);
+  background-image: var(--aurora-band), var(--aurora-pool), var(--aurora-rim);
+  background-repeat: no-repeat;
+}
+
+/* --- the bar ------------------------------------------------- */
+
+.glass {
+  background-color: var(--glass);
+  background-image: var(--sheen);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+.searchwrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 520px;
+}
+
+.search {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: var(--glass-2);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color .12s steps(2), box-shadow .12s steps(2);
+}
+
+.search::placeholder { color: var(--fg-3); }
+
+.search:focus {
+  border-color: var(--ion-line);
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+.search::-webkit-search-cancel-button { display: none; }
+
+.count {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+
+/* --- buttons and the clear menu ------------------------------ */
+
+.barbtn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--edge);
+  background: var(--glass-2);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background-color .1s steps(2), color .1s steps(2);
+}
+
+.barbtn:hover { background: var(--glass-3); color: var(--fg); }
+
+.clearwrap { position: relative; flex: 0 0 auto; }
+
+.clearmenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 6;
+  display: grid;
+  gap: 2px;
+  min-width: 156px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background-color: var(--glass-3);
+  box-shadow: 0 18px 40px var(--panel-shadow);
+}
+
+/* display:grid above would otherwise beat the UA's [hidden] rule. */
+.clearmenu[hidden] { display: none; }
+
+.clearopt {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .1s steps(2);
+}
+
+.clearopt:hover { background: var(--ion-soft); }
+
+.clearopt.danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--edge);
+  border-radius: 0 0 8px 8px;
+  color: var(--fg-2);
+}
+
+.clearopt.danger:hover { color: var(--fg); }
+
+/* --- the list ------------------------------------------------ */
+
+.stage {
+  position: relative;
+  z-index: 1;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 14px 16px 72px;
+}
+
+.daybar {
+  margin: 22px 0 6px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.daybar:first-child { margin-top: 2px; }
+
+.row {
+  display: grid;
+  /* The title takes what it needs and the host follows it, so the pair
+     reads as one line instead of drifting to opposite margins. */
+  grid-template-columns: 16px 44px minmax(0, auto) minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color .1s steps(2);
+}
+
+.row:hover { background: var(--glass); }
+
+.row.hi {
+  background: var(--glass-2);
+  box-shadow: inset 0 0 0 1px var(--ion-line);
+}
+
+.favbox {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.fav {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+
+.time {
+  font-family: Consolas, 'Cascadia Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+
+.title {
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host {
+  min-width: 0;
+  justify-self: start;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rm {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity .1s steps(2), background-color .1s steps(2), color .1s steps(2);
+}
+
+.row:hover .rm,
+.row.hi .rm,
+.rm:focus-visible { opacity: 1; }
+
+.rm:hover { background: var(--glass-3); color: var(--fg); }
+
+mark {
+  background: var(--ion-soft);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.empty {
+  margin: 0;
+  padding: 72px 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--fg-3);
+}
+
+/* --- focus --------------------------------------------------- */
+
+:focus-visible {
+  outline: 2px solid var(--ion-line);
+  outline-offset: 2px;
+}
+
+/* --- narrow windows ------------------------------------------ */
+
+@media (max-width: 620px) {
+  .wordmark { display: none; }
+  .count { display: none; }
+  .row { grid-template-columns: 16px 40px minmax(0, 1fr) 22px; }
+  .host { display: none; }
+}
+
+@media (max-width: 380px) {
+  .topbar { padding: 8px 10px; gap: 8px; }
+  .stage { padding: 12px 10px 56px; }
+  .row { gap: 8px; }
+}
+
+/* --- reduced motion ------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

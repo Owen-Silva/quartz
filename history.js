@@ -18,6 +18,11 @@
       into #omnibox and hands the Enter key to app.js, so tab and
       Claude handling stay in exactly one place.
 
+   3. THE PAGE (historypage.html). Ctrl+H opens the full list in a tab
+      of its own. The guest has no preload, so the chrome pushes it a
+      snapshot() and reads its intentions back off the console through
+      handleGuestMessage(); pageUrl() carries theme and palette.
+
    Style: classic script, no modules, every colour a chrome.css token.
    ============================================================ */
 
@@ -314,6 +319,178 @@
   }
 
   /* ============================================================
+     The page: historypage.html
+
+     A guest page on file://, with no node and no preload. The chrome
+     pushes the whole list into it once per load with __applyHistory()
+     and listens to its console for '__history:' lines; everything
+     below is the chrome's half of that contract.
+     ============================================================ */
+
+  var PAGE_FILE = 'historypage.html';
+  var GUEST_PREFIX = '__history:';
+  var pageBase = null;
+
+  /** file:///…/historypage.html, resolved once. Headless it is the bare name. */
+  function pageBaseUrl() {
+    if (pageBase !== null) return pageBase;
+    pageBase = PAGE_FILE;
+    try {
+      if (typeof window !== 'undefined' && window.location && window.location.href) {
+        pageBase = new URL(PAGE_FILE, window.location.href).href;
+      }
+    } catch (err) { pageBase = PAGE_FILE; }
+    return pageBase;
+  }
+
+  /** An attribute off the chrome's own <html>, or null if there is no DOM. */
+  function rootAttr(name) {
+    try {
+      var el = typeof document !== 'undefined' && document.documentElement;
+      if (el && typeof el.getAttribute === 'function') return el.getAttribute(name);
+    } catch (err) { /* no DOM */ }
+    return null;
+  }
+
+  /**
+   * The page's URL, carrying the chrome's theme and palette so the guest
+   * is painted correctly on its very first frame (same trick as the new
+   * tab and the reader). No palette attribute = the authored aurora.
+   */
+  function pageUrl() {
+    var url = pageBaseUrl() + '?theme=' + (rootAttr('data-theme') === 'light' ? 'light' : 'dark');
+    var palette = rootAttr('data-palette');
+    if (palette) url += '&palette=' + encodeURIComponent(palette);
+    return url;
+  }
+
+  /** True for the bundled history page, query string and hash included. */
+  function isHistoryUrl(url) {
+    return typeof url === 'string' && url.indexOf(pageBaseUrl()) === 0;
+  }
+
+  /** Everything the page draws: newest first, plus the true total. */
+  function snapshot() {
+    ready();
+    var list = items.slice().sort(function (a, b) {
+      return (b.last - a.last) || (b.visits - a.visits);
+    });
+    return { items: list.slice(0, MAX_ITEMS).map(copy), total: list.length };
+  }
+
+  /**
+   * Forget everything visited inside the last `ms` — "last hour" is
+   * clearSince(3.6e6), not the other way round. Returns how many went.
+   */
+  function clearSince(ms) {
+    ready();
+    var span = Number(ms);
+    if (!isFinite(span) || span <= 0) return 0;
+    var cutoff = Date.now() - span;
+    var kept = [];
+    var dropped = 0;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].last >= cutoff) { dropped++; continue; }
+      kept.push(items[i]);
+    }
+    if (!dropped) return 0;
+    items = kept;
+    reindex();
+    fieldCache.clear();
+    writeNow();
+    return dropped;
+  }
+
+  /* --- app.js, reached defensively ------------------------------ */
+
+  /** app.js's top-level function declarations land on window; a const does not. */
+  function globalFn(name) {
+    try {
+      if (typeof window !== 'undefined' && typeof window[name] === 'function') return window[name];
+    } catch (err) { /* fall through */ }
+    return null;
+  }
+
+  /** The tab list is a top-level `const` in app.js: shared scope, never window. */
+  function allTabs() {
+    try {
+      /* global tabs */
+      if (typeof tabs !== 'undefined' && tabs && typeof tabs.length === 'number') return tabs;
+    } catch (err) { /* not in scope */ }
+    var w = typeof window !== 'undefined' ? window.tabs : null;
+    return w && typeof w.length === 'number' ? w : null;
+  }
+
+  function findPageTab() {
+    var all = allTabs();
+    if (!all) return null;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] && isHistoryUrl(all[i].url)) return all[i];
+    }
+    return null;
+  }
+
+  /** Ctrl+H: one history tab, reused if it is already open. */
+  function openPage() {
+    var create = globalFn('createTab');
+    if (!create) return false;
+    var existing = findPageTab();
+    if (existing) {
+      var activate = globalFn('activateTab');
+      if (activate) {
+        try { activate(existing.id); return true; } catch (err) { /* fall through to a new tab */ }
+      }
+    }
+    try { create(pageUrl()); } catch (err) { return false; }
+    return true;
+  }
+
+  /**
+   * One console line from the history guest. A preload-less page can only
+   * talk this way, so the chrome forwards every console-message here.
+   *
+   *   __history:{"op":"remove","url":"…"}
+   *   __history:{"op":"clear"}
+   *   __history:{"op":"clearRange","olderThanMs":3600000}
+   *   __history:{"op":"open","url":"…","background":true}
+   *
+   * Returns true only when an action actually ran: anything else — a
+   * normal console line, a broken payload, an unknown op — is false, so
+   * the caller can tell "the guest asked for something" from noise.
+   */
+  function handleGuestMessage(text) {
+    if (typeof text !== 'string') return false;
+    var line = text.trim();
+    if (line.indexOf(GUEST_PREFIX) !== 0) return false;
+
+    var msg = null;
+    try { msg = JSON.parse(line.slice(GUEST_PREFIX.length)); } catch (err) { return false; }
+    if (!msg || typeof msg !== 'object') return false;
+
+    var url = typeof msg.url === 'string' ? msg.url : '';
+
+    if (msg.op === 'remove') return url ? remove(url) : false;
+    if (msg.op === 'clear') { clear(); return true; }
+    if (msg.op === 'clearRange' || msg.op === 'clearSince') {
+      return clearSince(msg.olderThanMs) > 0;
+    }
+    if (msg.op === 'open') {
+      if (!url) return false;
+      if (msg.background) {
+        var create = globalFn('createTab');
+        if (!create) return false;
+        try { create(url, { background: true }); } catch (err) { return false; }
+        return true;
+      }
+      var go = globalFn('navigateActiveTab');
+      if (!go) return false;
+      try { go(url); } catch (err) { return false; }
+      return true;
+    }
+    return false;
+  }
+
+  /* ============================================================
      The lens: #omni-suggest
      ============================================================ */
 
@@ -326,7 +503,6 @@
   var hi = -1;               // -1 = nothing highlighted; Enter does what it always did
   var typedValue = '';       // what the user actually typed, before any highlight
   var openState = false;
-  var forceRecent = false;   // Ctrl+H parks the panel in "Recent" mode
   var inputTimer = null;
   var blurTimer = null;
 
@@ -466,7 +642,7 @@
     clearRows();
     var query = String(omniboxEl.value || '').trim();
 
-    if (forceRecent || !query) {
+    if (!query) {
       var history = recent(MAX_ROWS);
       capEl.hidden = history.length === 0;
       for (var i = 0; i < history.length; i++) {
@@ -584,7 +760,6 @@
     if (!panel) return;
     panel.hidden = true;
     openState = false;
-    forceRecent = false;
     clearRows();
     paintHighlight();
   }
@@ -611,7 +786,6 @@
   }
 
   function onInput() {
-    forceRecent = false;
     typedValue = String(omniboxEl.value || '');
     if (inputTimer !== null) clearTimeout(inputTimer);
     inputTimer = setTimeout(function () {
@@ -698,17 +872,13 @@
   /**
    * Ctrl+H and Escape, routed from app.js's keyboard wiring.
    * Returns true when the action was consumed.
+   *
+   * Ctrl+H opens the full history page now, not the recent dropdown: the
+   * dropdown is still exactly what an empty omnibox focus shows, it just
+   * is not what the shortcut is for any more.
    */
   function handleShortcut(action) {
-    if (action === 'history') {
-      if (!attach()) return false;
-      forceRecent = true;
-      if (typeof focusOmnibox === 'function') focusOmnibox();
-      else { omniboxEl.focus(); omniboxEl.select(); }
-      typedValue = String(omniboxEl.value || '');
-      open();
-      return true;
-    }
+    if (action === 'history') return openPage();
     if (action === 'escape') {
       if (!openState) return false;
       restoreTyped();
@@ -744,6 +914,13 @@
     handleShortcut: handleShortcut,
     close: close,
     isOpen: function () { return openState; },
+
+    // the history page
+    pageUrl: pageUrl,
+    isHistoryUrl: isHistoryUrl,
+    snapshot: snapshot,
+    clearSince: clearSince,
+    handleGuestMessage: handleGuestMessage,
 
     // test seams
     _score: score,
