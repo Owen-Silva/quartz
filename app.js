@@ -98,6 +98,45 @@ function isHistoryTab(tab) {
     && store.isHistoryUrl(tab.url));
 }
 
+/*
+ * Every push in this section is an executeJavaScript round trip into one guest,
+ * and the chrome fires several of them at moments when nothing they carry has
+ * moved: 'tabchange' hands the readout to every open new-tab page on every
+ * single tab switch, carrying the same counts it carried a moment ago, and a
+ * settings write hands every tab the same settings object again.
+ *
+ * The memo below drops a push whose payload is byte-for-byte what this guest
+ * was last given — one IPC per guest per real change, instead of one per event.
+ * Keyed on the ELEMENT like navCache, and cleared by dom-ready: a guest that
+ * reloaded has forgotten everything and is pushed to again from scratch. A
+ * push that fails to reach its guest un-records itself, so nothing is ever
+ * skipped on the strength of a message that never landed.
+ */
+const pushMemo = new WeakMap();
+
+/** True when this exact payload has already reached this guest. */
+function pushUnchanged(tab, key, payload) {
+  if (!tab || !tab.viewEl) return false;
+  let seen = pushMemo.get(tab.viewEl);
+  if (!seen) {
+    seen = Object.create(null);
+    pushMemo.set(tab.viewEl, seen);
+  }
+  if (seen[key] === payload) return true;
+  seen[key] = payload;
+  return false;
+}
+
+/** Undo the record above when the push it was taken for did not get through. */
+function pushFailed(tab, key) {
+  const seen = (tab && tab.viewEl) ? pushMemo.get(tab.viewEl) : null;
+  if (seen) delete seen[key];
+}
+
+function dropPushMemo(tab) {
+  if (tab && tab.viewEl) pushMemo.delete(tab.viewEl);
+}
+
 function pushHistoryToTab(tab) {
   const store = window.History;
   if (!store || typeof store.snapshot !== 'function') return;
@@ -140,12 +179,16 @@ function pushSettingsToTab(tab) {
     accentHue: all.accentHue, searchEngine: all.searchEngine, chips: all.chips,
     palette: all.palette || null
   });
+  // The store emits on every write, including ones this page cannot see.
+  if (pushUnchanged(tab, 'settings', payload)) return;
   try {
     const pending = tab.viewEl.executeJavaScript(
       'window.__applySettings && window.__applySettings(' + payload + ')'
     );
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch (err) { /* guest went away mid-call */ }
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'settings'));
+    }
+  } catch (err) { pushFailed(tab, 'settings'); /* guest went away mid-call */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,12 +229,16 @@ function readoutSnapshot() {
 function pushReadoutToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   const payload = JSON.stringify(readoutSnapshot());
+  // Same three numbers as last time: the page is already showing them.
+  if (pushUnchanged(tab, 'readout', payload)) return;
   try {
     const pending = tab.viewEl.executeJavaScript(
       'window.__applyReadout && window.__applyReadout(' + payload + ')'
     );
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch (err) { /* guest went away mid-call */ }
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'readout'));
+    }
+  } catch (err) { pushFailed(tab, 'readout'); /* guest went away mid-call */ }
 }
 
 function pushReadoutToAll() {
@@ -252,12 +299,16 @@ function recentSites(limit) {
 function pushRecentToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   const payload = JSON.stringify(recentSites(RECENT_SITES));
+  // Nothing new has been visited since this page was last given the list.
+  if (pushUnchanged(tab, 'recent', payload)) return;
   try {
     const pending = tab.viewEl.executeJavaScript(
       'window.__applyRecent && window.__applyRecent(' + payload + ')'
     );
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch (err) { /* guest went away mid-call */ }
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'recent'));
+    }
+  } catch (err) { pushFailed(tab, 'recent'); /* guest went away mid-call */ }
 }
 
 // Panes with a backdrop-filter over the new-tab page make its animated board
@@ -501,12 +552,15 @@ function getTheme() {
  */
 function pushThemeToTab(tab, theme) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(
       "document.documentElement.setAttribute('data-theme','" + theme + "')"
     );
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch (err) { /* guest went away mid-call */ }
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'theme'));
+    }
+  } catch (err) { pushFailed(tab, 'theme'); /* guest went away mid-call */ }
 }
 
 /**
@@ -580,13 +634,55 @@ function historyTarget(viewEl) {
   return viewEl;
 }
 
+/*
+ * <webview>.getURL(), canGoBack(), canGoForward() and getZoomLevel() are not
+ * property reads: each one is a SYNCHRONOUS IPC round trip to the main process
+ * (Electron's invokeSync). One tab switch made six of them — 5.9 ms a switch on
+ * the CPU profile, the single largest piece of JS in activateTab(), and 13 ms a
+ * cycle on tab open/close — because the chrome, the reader, siteinfo, shield
+ * and tabsearch all ask again for the same answer within the same task.
+ *
+ * None of those four answers can change without a navigation, and EVERY
+ * navigation fires one of the view events wired in wireViewEvents(). So each
+ * guest caches its four answers and every one of those events drops the cache
+ * (dropNavCache below). The answers handed back are identical, in the same
+ * order, at the same moment; only the round trip is gone.
+ *
+ * Keyed on the ELEMENT, not the tab: sleeping a tab replaces tab.viewEl with a
+ * placeholder and waking it builds a fresh <webview>, so a stale entry can
+ * never survive into a new guest, and a closed tab's entry is collected with
+ * its element.
+ */
+const navCache = new WeakMap();
+
+/** The cache record for this tab's live guest, or null when there is none. */
+function navCacheFor(tab) {
+  if (!tab || !tab.viewEl) return null;
+  let entry = navCache.get(tab.viewEl);
+  if (!entry) {
+    entry = {};
+    navCache.set(tab.viewEl, entry);
+  }
+  return entry;
+}
+
+/** Forget everything remembered about one guest: the next read asks it again. */
+function dropNavCache(tab) {
+  if (tab && tab.viewEl) navCache.delete(tab.viewEl);
+}
+
 function readCurrentUrl(tab) {
   if (!isViewUsable(tab)) return tab ? tab.url : '';
+  const entry = navCacheFor(tab);
+  if (entry && entry.url !== undefined) return entry.url;
+  let url = null;
   try {
-    return tab.viewEl.getURL() || tab.url;
+    url = tab.viewEl.getURL() || tab.url;
   } catch (err) {
     return tab.url;
   }
+  if (entry) entry.url = url;
+  return url;
 }
 
 /** Focus the guest a frame late, after the display swap has landed. */
@@ -640,13 +736,26 @@ function updateNavState() {
   let canForward = false;
 
   if (isViewUsable(tab)) {
-    const history = historyTarget(tab.viewEl);
-    try {
-      canBack = !!history.canGoBack();
-      canForward = !!history.canGoForward();
-    } catch (err) {
-      canBack = false;
-      canForward = false;
+    // Two more synchronous IPC round trips, cached per guest exactly like the
+    // url above: the history stack only moves across a navigation, and every
+    // navigation drops the record.
+    const entry = navCacheFor(tab);
+    if (entry && entry.back !== undefined) {
+      canBack = entry.back;
+      canForward = entry.fwd;
+    } else {
+      const history = historyTarget(tab.viewEl);
+      try {
+        canBack = !!history.canGoBack();
+        canForward = !!history.canGoForward();
+      } catch (err) {
+        canBack = false;
+        canForward = false;
+      }
+      if (entry) {
+        entry.back = canBack;
+        entry.fwd = canForward;
+      }
     }
   }
 
@@ -3516,6 +3625,9 @@ function sessionSnapshot() {
 }
 
 function writeSession() {
+  // Clear as well as forget: writing early (a restart, a close) must not leave
+  // an armed timer behind to write the same snapshot a second time.
+  if (sessionSaveTimer !== null) window.clearTimeout(sessionSaveTimer);
   sessionSaveTimer = null;
   if (restoring) return;
   const snapshot = sessionSnapshot();
@@ -3542,6 +3654,17 @@ function saveSession() {
   if (restoring) return;
   if (sessionSaveTimer !== null) window.clearTimeout(sessionSaveTimer);
   sessionSaveTimer = window.setTimeout(writeSession, SESSION_SAVE_DELAY);
+}
+
+/**
+ * The debounce's one weak spot: a window closed inside SESSION_SAVE_DELAY of
+ * the last change loses it. 'beforeunload' is synchronous and runs before the
+ * document goes, so the pending write lands there. restartBrowser() already
+ * flushes the same way for the same reason; this covers the ordinary close.
+ */
+function flushSession() {
+  if (sessionSaveTimer === null) return; // nothing outstanding
+  try { writeSession(); } catch (err) { /* a lost snapshot must not block the close */ }
 }
 
 /**
@@ -3832,8 +3955,22 @@ function wireViewEvents(tab) {
   // so those land here and are dropped.
   const stale = () => tab.viewEl !== viewEl;
 
+  // Everything navCache remembers about a guest — its url, whether it can go
+  // back or forward, and its zoom level — is only allowed to change across a
+  // navigation, and these are the events a navigation fires. Dropping the
+  // record here is what makes the cached reads exact rather than merely fast.
+  // load-commit is in the list on purpose: it is the one event that fires for
+  // EVERY commit, main frame or not, so nothing can slip past the others.
+  const freshGuest = () => {
+    if (stale()) return;
+    dropNavCache(tab);
+  };
+  viewEl.addEventListener('load-commit', freshGuest);
+
   viewEl.addEventListener('dom-ready', () => {
     if (stale()) return;
+    dropNavCache(tab);  // a new document: everything remembered about the old one is gone
+    dropPushMemo(tab);  // ...and it has none of the state the chrome pushed it
     tab.ready = true;
     // The guest only exists from here: a restored mute is re-applied to it, and
     // the new-tab page gets the recent list it cannot read for itself.
@@ -3900,6 +4037,7 @@ function wireViewEvents(tab) {
 
   const onNavigate = (event) => {
     if (stale()) return;
+    dropNavCache(tab); // the url and the history stack both just moved
     if (event && event.url) tab.url = event.url;
     // did-fail-load can land either side of the error page's own did-navigate,
     // so a navigation only clears the card when THIS load did not fail.
@@ -3924,6 +4062,7 @@ function wireViewEvents(tab) {
 
   viewEl.addEventListener('did-start-loading', () => {
     if (stale()) return;
+    dropNavCache(tab); // a navigation has begun
     setTabLoading(tab, true);
     clearTabIcon(tab); // the incoming page reports its own, or stays blank
     tab.failedThisLoad = false;
@@ -3932,6 +4071,7 @@ function wireViewEvents(tab) {
 
   viewEl.addEventListener('did-stop-loading', () => {
     if (stale()) return;
+    dropNavCache(tab); // the settled url and history stack are the authority now
     setTabLoading(tab, false);
     if (tab.id === activeTabId) updateNavState();
     emitTabEvent('tabloaded', tab);
@@ -3939,6 +4079,7 @@ function wireViewEvents(tab) {
 
   viewEl.addEventListener('did-fail-load', (event) => {
     if (stale()) return;
+    dropNavCache(tab); // an error page is a document like any other
     // Aborted and failed loads both end here; the spinner must not stick.
     setTabLoading(tab, false);
     if (!event) return;
@@ -4310,13 +4451,27 @@ function rememberZoom(host, level) {
  */
 function withZoomLevel(tab, fn) {
   if (!isViewUsable(tab)) return;
+  // The fourth cached synchronous call (see navCache). We are the only writer
+  // of a guest's zoom — setZoomLevel() below records what it set — so between
+  // navigations the remembered level IS the level.
+  const entry = navCacheFor(tab);
+  if (entry && typeof entry.zoom === 'number') {
+    fn(entry.zoom);
+    return;
+  }
   try {
     const current = tab.viewEl.getZoomLevel();
     if (current && typeof current.then === 'function') {
-      current.then((level) => fn(typeof level === 'number' ? level : 0)).catch(() => {});
+      current.then((level) => {
+        const n = (typeof level === 'number') ? level : 0;
+        if (entry) entry.zoom = n;
+        fn(n);
+      }).catch(() => {});
       return;
     }
-    fn(typeof current === 'number' ? current : 0);
+    const n = (typeof current === 'number') ? current : 0;
+    if (entry) entry.zoom = n;
+    fn(n);
   } catch (err) { /* view went away mid-call */ }
 }
 
@@ -4329,6 +4484,8 @@ function applyZoomLevel(tab, level) {
   } catch (err) {
     return; // view went away mid-call: nothing to remember
   }
+  const zoomEntry = navCacheFor(tab);
+  if (zoomEntry) zoomEntry.zoom = next; // we just set it: no need to ask back
   rememberZoom(zoomHostFor(readCurrentUrl(tab)), next);
   if (tab.id === activeTabId) renderZoomBadge(next);
 }
@@ -4360,6 +4517,8 @@ function applyStoredZoom(tab) {
   const stored = host && Object.prototype.hasOwnProperty.call(map, host) ? Number(map[host]) : 0;
   const level = clampZoom(isFinite(stored) ? stored : 0);
   try { tab.viewEl.setZoomLevel(level); } catch (err) { /* view went away mid-call */ }
+  const zoomEntry = navCacheFor(tab);
+  if (zoomEntry) zoomEntry.zoom = level; // we just set it: no need to ask back
   if (tab.id === activeTabId) renderZoomBadge(level);
 }
 
@@ -5485,6 +5644,9 @@ function init() {
   // The split focus mark and a split crash card are parked over measured rects,
   // so they are re-measured whenever the well changes size.
   window.addEventListener('resize', refreshSplit);
+
+  // A pending debounced session write must not be lost to the window closing.
+  window.addEventListener('beforeunload', flushSession);
 
   // Tab sleeping: one sweep a minute for the life of the window. Deliberately
   // never cleared — the chrome outlives every tab in it, and the setting is
