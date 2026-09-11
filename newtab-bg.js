@@ -150,8 +150,8 @@
         violetPkt: { dh: 52.192, s: 94.74, l: 85.10 }
       },
       fixed: {
-        under: 'rgba(5,6,10,.9)',
-        viaFill: '#05060a',
+        under: 'rgba(26,28,32,.9)',
+        viaFill: '#1a1c20',
         /* authored at ~1/COMPONENT_ALPHA of the old chip inks, so the 30%
            multiplier lands them back on the measured .12/.14/.20 */
         compLine: 'rgba(255,255,255,.40)',
@@ -159,24 +159,24 @@
         compMark: 'rgba(255,255,255,.66)'
       },
       tint: {
-        dot:         ['cool', 0.045],
-        trace:       ['cool', 0.15],
-        traceViolet: ['violet', 0.14],
-        socket:      ['cool', 0.18],
-        pad:         ['cool', 0.35],
-        via:         ['cool', 0.38]
+        dot:         ['cool', 0.035],
+        trace:       ['cool', 0.085],
+        traceViolet: ['violet', 0.075],
+        socket:      ['cool', 0.10],
+        pad:         ['cool', 0.18],
+        via:         ['cool', 0.20]
       },
       liveFixed: {},
       liveTint: {
         '--pkt':        ['cool', 1],
         '--pkt-core':   ['cool', 1],
-        '--pkt-glow':   ['cool', 0.55],
-        '--pkt-tail':   ['cool', 0.7],
+        '--pkt-glow':   ['cool', 0],
+        '--pkt-tail':   ['cool', 0],
         '--pkt-v':      ['violetPkt', 1],
         '--pkt-core-v': ['violetPkt', 1],
-        '--pkt-glow-v': ['violetPkt', 0.55],
-        '--pkt-tail-v': ['violetPkt', 0.7],
-        '--bloom':      ['cool', 0.9]
+        '--pkt-glow-v': ['violetPkt', 0],
+        '--pkt-tail-v': ['violetPkt', 0],
+        '--bloom':      ['cool', 0.22]
       }
     },
     light: {

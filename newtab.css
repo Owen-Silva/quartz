@@ -7,49 +7,49 @@
 
 /* --- tokens (mirrored from chrome.css) ----------------------- */
 :root {
-  --ink-0: #05060a;
-  --ink-1: #0c0f18;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
   --fg:   #eef1f8;
-  --fg-2: #9aa3b8;
-  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
+  --fg-2: #b0b5bf;
+  --fg-3: #a6abb5;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
-  --glass:   rgba(255,255,255,.08);
-  --glass-2: rgba(255,255,255,.13);
-  --glass-3: rgba(255,255,255,.18);
+  --glass:   rgba(255,255,255,.055);
+  --glass-2: rgba(255,255,255,.09);
+  --glass-3: rgba(255,255,255,.14);
 
-  --edge:     rgba(255,255,255,.22);
-  --specular: rgba(255,255,255,.55);
+  --edge:     rgba(255,255,255,.11);
+  --specular: rgba(255,255,255,.14);
 
-  --ion:      #7dd3ff;
-  --ion-soft: rgba(125,211,255,.16);
-  --ion-glow: rgba(125,211,255,.45);
-  --ion-line: rgba(125,211,255,.75);   /* focus border / focus outline */
+  --ion:      #72adca;
+  --ion-soft: rgba(114,173,202,.14);
+  --ion-glow: rgba(114,173,202,.22);
+  --ion-line: rgba(114,173,202,.65);   /* focus border / focus outline */
 
   /* the drop shadow under the one surface that floats over the page */
-  --panel-shadow: rgba(0,0,0,.45);
+  --panel-shadow: rgba(0,0,0,.50);
 
   /* the diagonal reflection every glass surface carries */
   --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.10)  0%,
-    rgba(255,255,255,.03) 38%,
-    rgba(255,255,255,0)   60%);
+    rgba(255,255,255,.035)  0%,
+    rgba(255,255,255,.035) 38%,
+    rgba(255,255,255,.035) 60%);
 
   /* the three coloured washes of the backdrop, whole gradients so a
      theme swaps the light itself and not the geometry */
   --aurora-band: linear-gradient(-35deg,
     rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.09) 76%,
-    rgba(140,170,255,.20) 100%);
+    rgba(140,170,255,.03) 76%,
+    rgba(140,170,255,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.48)  0%,
-    rgba(75,34,168,.22) 45%,
+    rgba(75,34,168,.13)  0%,
+    rgba(75,34,168,.055) 45%,
     rgba(75,34,168,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.28)  0%,
-    rgba(15,181,201,.11) 46%,
+    rgba(15,181,201,.085)  0%,
+    rgba(15,181,201,.035) 46%,
     rgba(15,181,201,0)   78%);
 
   --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
@@ -67,9 +67,9 @@
   /* the lit rim: specular at the top-left, powered at the bottom-right */
   --rim: linear-gradient(135deg,
     var(--specular)   0%,
-    var(--edge)      28%,
+    var(--edge)      30%,
     var(--edge)      62%,
-    var(--ion-glow) 100%);
+    var(--edge)     100%);
 
   /* the same rim with the accent at full strength */
   --rim-focus: linear-gradient(135deg,
@@ -80,7 +80,7 @@
   /* quiet tiles at rest: one lit corner, fading out before the other */
   --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
 
-  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
+  --pip-glow: none;
 
   /* Bahnschrift semi-condensed: labels, the search slot, chips */
   --readout-stretch: 87.5%;
@@ -155,105 +155,105 @@
 
 /* ember — rose, magenta and plum, lit coral-pink (never orange) */
 [data-palette="ember"] {
-  --ink-0: #0a0508;
-  --ink-1: #150c14;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
-  --ion:      hsl(345 100% 72%);
-  --ion-soft: hsl(345 100% 72% / .16);
-  --ion-glow: hsl(345 100% 72% / .45);
-  --ion-line: hsl(345 100% 72% / .75);
+  --ion:      hsl(345 45% 63%);
+  --ion-soft: hsl(345 45% 63% / .14);
+  --ion-glow: hsl(345 45% 63% / .22);
+  --ion-line: hsl(345 45% 63% / .65);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(255,155,195,0)   50%,
-    rgba(255,155,195,.09) 76%,
-    rgba(255,155,195,.20) 100%);
+    rgba(255,155,195,.03) 76%,
+    rgba(255,155,195,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(140,30,90,.48)  0%,
-    rgba(140,30,90,.22) 45%,
+    rgba(140,30,90,.13)  0%,
+    rgba(140,30,90,.055) 45%,
     rgba(140,30,90,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(224,64,118,.28)  0%,
-    rgba(224,64,118,.11) 46%,
+    rgba(224,64,118,.085)  0%,
+    rgba(224,64,118,.035) 46%,
     rgba(224,64,118,0)   78%);
 }
 
 /* forest — deep green and teal, lit mint */
 [data-palette="forest"] {
-  --ink-0: #040907;
-  --ink-1: #0a1410;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
-  --ion:      hsl(160 84% 68%);
-  --ion-soft: hsl(160 84% 68% / .16);
-  --ion-glow: hsl(160 84% 68% / .45);
-  --ion-line: hsl(160 84% 68% / .75);
+  --ion:      hsl(160 40% 62%);
+  --ion-soft: hsl(160 40% 62% / .14);
+  --ion-glow: hsl(160 40% 62% / .22);
+  --ion-line: hsl(160 40% 62% / .65);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(150,235,200,0)   50%,
-    rgba(150,235,200,.09) 76%,
-    rgba(150,235,200,.20) 100%);
+    rgba(150,235,200,.03) 76%,
+    rgba(150,235,200,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,86,64,.48)  0%,
-    rgba(16,86,64,.22) 45%,
+    rgba(16,86,64,.13)  0%,
+    rgba(16,86,64,.055) 45%,
     rgba(16,86,64,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(20,170,150,.28)  0%,
-    rgba(20,170,150,.11) 46%,
+    rgba(20,170,150,.085)  0%,
+    rgba(20,170,150,.035) 46%,
     rgba(20,170,150,0)   78%);
 }
 
 /* ocean — navy and teal, lit cyan */
 [data-palette="ocean"] {
-  --ink-0: #04070c;
-  --ink-1: #0a1119;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
-  --ion:      hsl(190 100% 70%);
-  --ion-soft: hsl(190 100% 70% / .16);
-  --ion-glow: hsl(190 100% 70% / .45);
-  --ion-line: hsl(190 100% 70% / .75);
+  --ion:      hsl(190 42% 62%);
+  --ion-soft: hsl(190 42% 62% / .14);
+  --ion-glow: hsl(190 42% 62% / .22);
+  --ion-line: hsl(190 42% 62% / .65);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.09) 76%,
-    rgba(130,190,255,.20) 100%);
+    rgba(130,190,255,.03) 76%,
+    rgba(130,190,255,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(18,58,140,.48)  0%,
-    rgba(18,58,140,.22) 45%,
+    rgba(18,58,140,.13)  0%,
+    rgba(18,58,140,.055) 45%,
     rgba(18,58,140,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,175,190,.28)  0%,
-    rgba(15,175,190,.11) 46%,
+    rgba(15,175,190,.085)  0%,
+    rgba(15,175,190,.035) 46%,
     rgba(15,175,190,0)   78%);
 }
 
 /* midnight — indigo and violet, lit violet */
 [data-palette="midnight"] {
-  --ink-0: #06050c;
-  --ink-1: #100c1c;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
-  --ion:      hsl(262 92% 76%);
-  --ion-soft: hsl(262 92% 76% / .16);
-  --ion-glow: hsl(262 92% 76% / .45);
-  --ion-line: hsl(262 92% 76% / .75);
+  --ion:      hsl(262 40% 66%);
+  --ion-soft: hsl(262 40% 66% / .14);
+  --ion-glow: hsl(262 40% 66% / .22);
+  --ion-line: hsl(262 40% 66% / .65);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(150,150,255,0)   50%,
-    rgba(150,150,255,.09) 76%,
-    rgba(150,150,255,.20) 100%);
+    rgba(150,150,255,.03) 76%,
+    rgba(150,150,255,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(58,30,150,.48)  0%,
-    rgba(58,30,150,.22) 45%,
+    rgba(58,30,150,.13)  0%,
+    rgba(58,30,150,.055) 45%,
     rgba(58,30,150,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,70,220,.28)  0%,
-    rgba(120,70,220,.11) 46%,
+    rgba(120,70,220,.085)  0%,
+    rgba(120,70,220,.035) 46%,
     rgba(120,70,220,0)   78%);
 }
 
@@ -262,27 +262,27 @@
    and scales the board's traces with it, so the circuitry goes grey
    here instead of staying blue. */
 [data-palette="mono"] {
-  --ink-0: #07080a;
-  --ink-1: #101218;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
-  --ion:      hsl(215 25% 88%);
-  --ion-soft: hsl(215 25% 88% / .16);
-  --ion-glow: hsl(215 25% 88% / .45);
-  --ion-line: hsl(215 25% 88% / .75);
+  --ion:      hsl(215 12% 72%);
+  --ion-soft: hsl(215 12% 72% / .14);
+  --ion-glow: hsl(215 12% 72% / .22);
+  --ion-line: hsl(215 12% 72% / .65);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(190,200,215,0)   50%,
-    rgba(190,200,215,.09) 76%,
-    rgba(190,200,215,.20) 100%);
+    rgba(190,200,215,.03) 76%,
+    rgba(190,200,215,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(60,66,80,.48)  0%,
-    rgba(60,66,80,.22) 45%,
+    rgba(60,66,80,.13)  0%,
+    rgba(60,66,80,.055) 45%,
     rgba(60,66,80,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,130,150,.28)  0%,
-    rgba(120,130,150,.11) 46%,
+    rgba(120,130,150,.085)  0%,
+    rgba(120,130,150,.035) 46%,
     rgba(120,130,150,0)   78%);
 }
 
@@ -601,7 +601,9 @@ body {
   border: 1px solid transparent;
   border-radius: var(--bevel-lg);
   background: var(--sheen), var(--glass);
-  box-shadow: inset 0 1px 0 var(--specular);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 8px 20px -12px var(--panel-shadow);
   color: var(--fg);
   text-align: left;
   pointer-events: none;            /* a click anywhere still lands in the field */
@@ -743,7 +745,9 @@ body {
   background: var(--sheen), var(--glass);
   backdrop-filter: blur(22px) saturate(160%);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
-  box-shadow: inset 0 1px 0 var(--specular);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 10px 26px -14px var(--panel-shadow);
   color: var(--fg);
   font-family: inherit;
   font-size: 17px;
@@ -790,11 +794,11 @@ body {
 
 .field:focus,
 .field:focus-visible {
-  outline: none;                   /* the ring and the glow are the focus */
+  outline: none;                   /* the ring is the focus */
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 0 0 3px var(--ion-soft),
-    0 0 28px var(--ion-glow);
+    0 10px 26px -14px var(--panel-shadow),
+    0 0 0 3px var(--ion-soft);
 }
 
 /* --- shortcut chips ------------------------------------------ */
@@ -1066,9 +1070,7 @@ body {
 /* the keyboard highlight: a lit rail, not a border, so nothing shifts */
 .sug.is-active {
   background-color: var(--glass-2);
-  box-shadow:
-    inset 2px 0 0 var(--ion),
-    inset 0 0 12px -6px var(--ion-glow);
+  box-shadow: inset 2px 0 0 var(--ion);
 }
 
 /* --- launch motion: one rise, and that is all ---------------- */

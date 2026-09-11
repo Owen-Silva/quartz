@@ -13,51 +13,51 @@
 
 /* --- tokens: dark (default) ---------------------------------- */
 :root {
-  --ink-0: #05060a;
-  --ink-1: #0c0f18;
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
 
   --fg:   #eef1f8;
-  --fg-2: #9aa3b8;
-  --fg-3: #838b9f;                        /* 4.5:1 on --panel-bg; #5c6478 was 3.1:1 */
+  --fg-2: #b0b5bf;
+  --fg-3: #a6abb5;                        /* 4.5:1 on --panel-bg; #5c6478 was 3.1:1 */
 
-  --glass:   rgba(255,255,255,.08);
-  --glass-2: rgba(255,255,255,.13);
-  --glass-3: rgba(255,255,255,.18);
+  --glass:   rgba(255,255,255,.055);
+  --glass-2: rgba(255,255,255,.09);
+  --glass-3: rgba(255,255,255,.14);
 
-  --edge:     rgba(255,255,255,.22);
-  --specular: rgba(255,255,255,.55);
+  --edge:     rgba(255,255,255,.11);
+  --specular: rgba(255,255,255,.14);
 
-  --ion:      #7dd3ff;
-  --ion-soft: rgba(125,211,255,.16);
-  --ion-glow: rgba(125,211,255,.45);
+  --ion:      #72adca;
+  --ion-soft: rgba(114,173,202,.14);
+  --ion-glow: rgba(114,173,202,.22);
 
-  --amber:      #ffab4c;
-  --amber-glow: rgba(255,171,76,.45);
+  --amber:      #e0a059;
+  --amber-glow: rgba(224,160,89,.26);
 
   /* the diagonal reflection every glass surface carries */
   --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.10)  0%,
-    rgba(255,255,255,.03) 38%,
-    rgba(255,255,255,0)   60%);
+    rgba(255,255,255,.035)  0%,
+    rgba(255,255,255,.035) 38%,
+    rgba(255,255,255,.035) 60%);
 
   /* --- surfaces and details that are not a plain fill --------- */
-  --glass-thin:  rgba(255,255,255,.06);   /* titlebar: the lightest pane */
-  --shade-in:    rgba(0,0,0,.28);         /* the shaded lower lip of a pane */
-  --shade-drop:  rgba(0,0,0,.35);         /* the 1px shadow a pane casts */
+  --glass-thin:  rgba(255,255,255,.04);   /* titlebar: the lightest pane */
+  --shade-in:    rgba(0,0,0,.20);         /* the shaded lower lip of a pane */
+  --shade-drop:  rgba(0,0,0,.45);         /* the 1px shadow a pane casts */
   --focus-ring:  rgba(255,255,255,.55);
-  --placeholder: rgba(154,163,184,.62);   /* --fg-3 vanished against the glass */
+  --placeholder: rgba(190,195,205,.80);   /* --fg-3 vanished against the glass */
   --scroll-thumb:       rgba(255,255,255,.18);
   --scroll-thumb-hover: rgba(255,255,255,.28);
-  --tab-shimmer: rgba(255,255,255,.9);    /* the travelling highlight on a loading tab */
+  --tab-shimmer: rgba(255,255,255,.5);    /* the travelling highlight on a loading tab */
 
-  --ion-line:     rgba(125,211,255,.75);  /* omnibox border, focused */
-  --ion-select:   rgba(125,211,255,.25);
-  --seam-color:   rgba(125,211,255,.45);  /* the lit seam under the chrome */
-  --chamber-seam: rgba(125,211,255,.5);   /* the lit top edge of the chamber */
+  --ion-line:     rgba(114,173,202,.65);  /* omnibox border, focused */
+  --ion-select:   rgba(114,173,202,.30);
+  --seam-color:   rgba(114,173,202,.14);  /* the lit seam under the chrome */
+  --chamber-seam: rgba(114,173,202,.16);   /* the lit top edge of the chamber */
 
-  --acrylic-bg: rgba(5,6,10,.72);         /* body when DWM acrylic is on */
-  --chamber-bg: rgba(5,6,10,.55);         /* the Claude chamber's own glass */
-  --panel-bg:   rgba(12,15,24,.94);       /* panes floating over a page: nothing behind them to blur */
+  --acrylic-bg: rgba(26,28,32,.80);         /* body when DWM acrylic is on */
+  --chamber-bg: rgba(26,28,32,.62);         /* the Claude chamber's own glass */
+  --panel-bg:   rgba(34,37,42,.96);       /* panes floating over a page: nothing behind them to blur */
 
   /* a lit seam: 1px of ion light, brightest at the centre */
   --seam: linear-gradient(90deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
@@ -65,17 +65,17 @@
   /* the three aurora layers, tokenised whole so a theme relights them */
   --aurora-band: linear-gradient(-35deg,
     rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.09) 76%,
-    rgba(140,170,255,.20) 100%);
+    rgba(140,170,255,.03) 76%,
+    rgba(140,170,255,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.48)  0%,
-    rgba(75,34,168,.22) 45%,
+    rgba(75,34,168,.13)  0%,
+    rgba(75,34,168,.055) 45%,
     rgba(75,34,168,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.28)  0%,
-    rgba(15,181,201,.11) 46%,
+    rgba(15,181,201,.085)  0%,
+    rgba(15,181,201,.035) 46%,
     rgba(15,181,201,0)   78%);
 
   /* type + metrics */
@@ -110,9 +110,9 @@
      gradient edge on translucent glass. */
   --rim: linear-gradient(135deg,
     var(--specular)  0%,
-    var(--edge)     28%,
+    var(--edge)     30%,
     var(--edge)     62%,
-    var(--ion-glow) 100%);
+    var(--edge)    100%);
 
   /* the same rim with the accent at full strength: the focused slot */
   --rim-focus: linear-gradient(135deg,
@@ -129,9 +129,9 @@
      --ion, and it alone means "a Claude session". The two amber
      strengths preserve the distinction the chamber already draws:
      live breathes, needs-you flashes brighter. */
-  --pip-glow:         0 0 6px var(--ion-glow), 0 0 1px var(--ion);
-  --pip-amber:        0 0 8px 1px var(--amber-glow), 0 0 1px var(--amber);
-  --pip-amber-strong: 0 0 10px 2px var(--amber-glow), 0 0 2px var(--amber);
+  --pip-glow:         none;
+  --pip-amber:        0 0 3px var(--amber-glow);
+  --pip-amber-strong: 0 0 4px var(--amber-glow);
 
   /* the lit seam stood on end, for the split divider */
   --seam-v: linear-gradient(180deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
@@ -243,7 +243,7 @@
 /* the default world, named, so an "aurora" swatch can paint itself */
 :root,
 [data-palette="aurora"] {
-  --palette-preview: linear-gradient(135deg, #05060a 0%, #4b22a8 40%, #0fb5c9 72%, #7dd3ff 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #38236f 40%, #17737f 72%, #72adca 100%);
 }
 
 :root[data-theme="light"],
@@ -255,35 +255,35 @@
 /* Rose band, deep plum pool, magenta rim; the accent a coral-pink at
    hue 345, kept off orange so it can never be read as the amber. */
 [data-palette="ember"] {
-  --ink-0: #0a0509;
-  --ink-1: #150c13;
-  --acrylic-bg: rgba(10,5,9,.72);
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
+  --acrylic-bg: rgba(26,28,32,.80);
 
-  --ion:      #ff7d9e;
-  --ion-soft: rgba(255,125,158,.16);
-  --ion-glow: rgba(255,125,158,.45);
+  --ion:      #cb768b;
+  --ion-soft: rgba(203,118,139,.14);
+  --ion-glow: rgba(203,118,139,.22);
 
-  --ion-line:     rgba(255,125,158,.75);
-  --ion-select:   rgba(255,125,158,.25);
-  --seam-color:   rgba(255,125,158,.45);
-  --chamber-seam: rgba(255,125,158,.5);
+  --ion-line:     rgba(203,118,139,.65);
+  --ion-select:   rgba(203,118,139,.30);
+  --seam-color:   rgba(203,118,139,.14);
+  --chamber-seam: rgba(203,118,139,.16);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(255,160,190,0)   50%,
-    rgba(255,160,190,.09) 76%,
-    rgba(255,160,190,.20) 100%);
+    rgba(255,160,190,.03) 76%,
+    rgba(255,160,190,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(112,26,96,.48)  0%,
-    rgba(112,26,96,.22) 45%,
+    rgba(112,26,96,.13)  0%,
+    rgba(112,26,96,.055) 45%,
     rgba(112,26,96,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(201,35,118,.28)  0%,
-    rgba(201,35,118,.11) 46%,
+    rgba(201,35,118,.085)  0%,
+    rgba(201,35,118,.035) 46%,
     rgba(201,35,118,0)   78%);
 
-  --palette-preview: linear-gradient(135deg, #0a0509 0%, #701a60 40%, #c92376 72%, #ff7d9e 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #4c1e47 40%, #7d2353 72%, #cb768b 100%);
 }
 
 :root[data-theme="light"][data-palette="ember"],
@@ -324,35 +324,35 @@
    hint of gold — a wash, well off the amber's saturation, and never
    the accent. The accent is mint at hue 160. */
 [data-palette="forest"] {
-  --ink-0: #040806;
-  --ink-1: #0a1310;
-  --acrylic-bg: rgba(4,8,6,.72);
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
+  --acrylic-bg: rgba(26,28,32,.80);
 
-  --ion:      #89f5d1;
-  --ion-soft: rgba(137,245,209,.16);
-  --ion-glow: rgba(137,245,209,.45);
+  --ion:      #72caad;
+  --ion-soft: rgba(114,202,173,.14);
+  --ion-glow: rgba(114,202,173,.22);
 
-  --ion-line:     rgba(137,245,209,.75);
-  --ion-select:   rgba(137,245,209,.25);
-  --seam-color:   rgba(137,245,209,.45);
-  --chamber-seam: rgba(137,245,209,.5);
+  --ion-line:     rgba(114,202,173,.65);
+  --ion-select:   rgba(114,202,173,.30);
+  --seam-color:   rgba(114,202,173,.14);
+  --chamber-seam: rgba(114,202,173,.16);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(120,225,200,0)   50%,
-    rgba(120,225,200,.09) 76%,
-    rgba(120,225,200,.20) 100%);
+    rgba(120,225,200,.03) 76%,
+    rgba(120,225,200,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,84,60,.48)  0%,
-    rgba(16,84,60,.22) 45%,
+    rgba(16,84,60,.13)  0%,
+    rgba(16,84,60,.055) 45%,
     rgba(16,84,60,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(178,166,104,.28)  0%,
-    rgba(178,166,104,.11) 46%,
+    rgba(178,166,104,.085)  0%,
+    rgba(178,166,104,.035) 46%,
     rgba(178,166,104,0)   78%);
 
-  --palette-preview: linear-gradient(135deg, #040806 0%, #10543c 40%, #b2a668 72%, #89f5d1 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #183e33 40%, #716c4c 72%, #72caad 100%);
 }
 
 :root[data-theme="light"][data-palette="forest"],
@@ -393,35 +393,35 @@
    Accent cyan at hue 190 — the default ion's neighbourhood, pushed
    greener and hung in a much colder room. */
 [data-palette="ocean"] {
-  --ink-0: #030810;
-  --ink-1: #081422;
-  --acrylic-bg: rgba(3,8,16,.72);
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
+  --acrylic-bg: rgba(26,28,32,.80);
 
-  --ion:      #7de8ff;
-  --ion-soft: rgba(125,232,255,.16);
-  --ion-glow: rgba(125,232,255,.45);
+  --ion:      #72bdca;
+  --ion-soft: rgba(114,189,202,.14);
+  --ion-glow: rgba(114,189,202,.22);
 
-  --ion-line:     rgba(125,232,255,.75);
-  --ion-select:   rgba(125,232,255,.25);
-  --seam-color:   rgba(125,232,255,.45);
-  --chamber-seam: rgba(125,232,255,.5);
+  --ion-line:     rgba(114,189,202,.65);
+  --ion-select:   rgba(114,189,202,.30);
+  --seam-color:   rgba(114,189,202,.14);
+  --chamber-seam: rgba(114,189,202,.16);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.09) 76%,
-    rgba(130,190,255,.20) 100%);
+    rgba(130,190,255,.03) 76%,
+    rgba(130,190,255,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,44,120,.48)  0%,
-    rgba(16,44,120,.22) 45%,
+    rgba(16,44,120,.13)  0%,
+    rgba(16,44,120,.055) 45%,
     rgba(16,44,120,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(24,190,214,.28)  0%,
-    rgba(24,190,214,.11) 46%,
+    rgba(24,190,214,.085)  0%,
+    rgba(24,190,214,.035) 46%,
     rgba(24,190,214,0)   78%);
 
-  --palette-preview: linear-gradient(135deg, #030810 0%, #102c78 40%, #18bed6 72%, #7de8ff 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #182854 40%, #1c7988 72%, #72bdca 100%);
 }
 
 :root[data-theme="light"][data-palette="ocean"],
@@ -461,35 +461,35 @@
 /* The darkest room here: near-black indigo ink, a violet pool, a
    periwinkle rim. Accent violet at hue 262. */
 [data-palette="midnight"] {
-  --ink-0: #04040c;
-  --ink-1: #0c0a1c;
-  --acrylic-bg: rgba(4,4,12,.72);
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
+  --acrylic-bg: rgba(26,28,32,.80);
 
-  --ion:      #b68cff;
-  --ion-soft: rgba(182,140,255,.16);
-  --ion-glow: rgba(182,140,255,.45);
+  --ion:      #a281cf;
+  --ion-soft: rgba(162,129,207,.14);
+  --ion-glow: rgba(162,129,207,.22);
 
-  --ion-line:     rgba(182,140,255,.75);
-  --ion-select:   rgba(182,140,255,.25);
-  --seam-color:   rgba(182,140,255,.45);
-  --chamber-seam: rgba(182,140,255,.5);
+  --ion-line:     rgba(162,129,207,.65);
+  --ion-select:   rgba(162,129,207,.30);
+  --seam-color:   rgba(162,129,207,.14);
+  --chamber-seam: rgba(162,129,207,.16);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(120,130,235,0)   50%,
-    rgba(120,130,235,.09) 76%,
-    rgba(120,130,235,.20) 100%);
+    rgba(120,130,235,.03) 76%,
+    rgba(120,130,235,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(84,34,178,.48)  0%,
-    rgba(84,34,178,.22) 45%,
+    rgba(84,34,178,.13)  0%,
+    rgba(84,34,178,.055) 45%,
     rgba(84,34,178,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(138,104,245,.28)  0%,
-    rgba(138,104,245,.11) 46%,
+    rgba(138,104,245,.085)  0%,
+    rgba(138,104,245,.035) 46%,
     rgba(138,104,245,0)   78%);
 
-  --palette-preview: linear-gradient(135deg, #04040c 0%, #5422b2 40%, #8a68f5 72%, #b68cff 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #3d2374 40%, #5b4999 72%, #a281cf 100%);
 }
 
 :root[data-theme="light"][data-palette="midnight"],
@@ -531,35 +531,35 @@
    accent carries the only colour, and barely: a cool off-white at hue
    215 in the dark, graphite blue-grey in daylight. */
 [data-palette="mono"] {
-  --ink-0: #07070a;
-  --ink-1: #101116;
-  --acrylic-bg: rgba(7,7,10,.72);
+  --ink-0: #1a1c20;
+  --ink-1: #212429;
+  --acrylic-bg: rgba(26,28,32,.80);
 
-  --ion:      #dbdfe6;
-  --ion-soft: rgba(219,223,230,.16);
-  --ion-glow: rgba(219,223,230,.45);
+  --ion:      #aab0ba;
+  --ion-soft: rgba(170,176,186,.14);
+  --ion-glow: rgba(170,176,186,.22);
 
-  --ion-line:     rgba(219,223,230,.75);
-  --ion-select:   rgba(219,223,230,.25);
-  --seam-color:   rgba(219,223,230,.45);
-  --chamber-seam: rgba(219,223,230,.5);
+  --ion-line:     rgba(170,176,186,.65);
+  --ion-select:   rgba(170,176,186,.30);
+  --seam-color:   rgba(170,176,186,.14);
+  --chamber-seam: rgba(170,176,186,.16);
 
   --aurora-band: linear-gradient(-35deg,
     rgba(214,214,214,0)   50%,
-    rgba(214,214,214,.09) 76%,
-    rgba(214,214,214,.20) 100%);
+    rgba(214,214,214,.03) 76%,
+    rgba(214,214,214,.06) 100%);
 
   --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(128,128,128,.48)  0%,
-    rgba(128,128,128,.22) 45%,
+    rgba(128,128,128,.13)  0%,
+    rgba(128,128,128,.055) 45%,
     rgba(128,128,128,0)   74%);
 
   --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(186,186,186,.28)  0%,
-    rgba(186,186,186,.11) 46%,
+    rgba(186,186,186,.085)  0%,
+    rgba(186,186,186,.035) 46%,
     rgba(186,186,186,0)   78%);
 
-  --palette-preview: linear-gradient(135deg, #07070a 0%, #3a3a3e 40%, #8a8a8e 72%, #dbdfe6 100%);
+  --palette-preview: linear-gradient(135deg, #212429 0%, #2f3035 40%, #5b5c61 72%, #aab0ba 100%);
 }
 
 :root[data-theme="light"][data-palette="mono"],
@@ -859,7 +859,7 @@ button.glass:focus-visible {
   box-shadow:
     inset 0 1px 0 var(--specular),
     inset 0 -1px 0 var(--shade-in),
-    0 6px 14px -8px var(--ion-glow);
+    0 6px 14px -8px var(--shade-drop);
 }
 
 /* the ion line under the active chip */
@@ -1051,8 +1051,8 @@ img.tab-icon[src=""],
 .tab-audio:hover { background: var(--glass-3); color: var(--fg); }
 
 /* It is a control, but it is also a status: sound coming out of the tab
-   is shown as light on the glyph, and the light goes out when it is
-   muted. No colour change, nothing that moves — the pip's own glow. */
+   is shown by the glyph itself (E767 speaker vs E74F muted); the pip token
+   now resolves to none, so nothing here glows at rest. */
 .tab-audio:not(.is-muted) { text-shadow: var(--pip-glow); }
 
 /* muted is the quiet state in every sense: --fg-3, like the broken glyph */
@@ -1271,8 +1271,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 0 0 4px var(--ion-soft),
-    0 0 28px var(--ion-glow);
+    0 0 0 3px var(--ion-soft);
 }
 
 #omnibox::selection { background: var(--ion-select); color: var(--fg); }
@@ -1388,7 +1387,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   height: 7px;
   border-radius: 50%;
   background: var(--fg-3);
-  box-shadow: 0 0 4px var(--ion-soft);
+  box-shadow: none;
   transition: background 140ms steps(3, end), box-shadow 140ms steps(3, end);
 }
 
@@ -1431,8 +1430,6 @@ body.claude-live #newclaude.attn .dot {
 .tab-attn {
   flex: 0 0 auto;
   color: var(--amber);
-  /* the same light the pip is throwing, at glyph scale */
-  text-shadow: 0 0 6px var(--amber-glow);
   font-size: 8px;
   line-height: 1;
 }

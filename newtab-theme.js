@@ -79,15 +79,15 @@
      hue lands identically on both surfaces. */
   var ION_TOKENS = [
     ['--ion',      null],
-    ['--ion-soft', 0.16],
-    ['--ion-glow', 0.45],
-    ['--ion-line', 0.75]
+    ['--ion-soft', 0.14],
+    ['--ion-glow', 0.22],
+    ['--ion-line', 0.65]
   ];
 
-  // Dark wants a bright, saturated light; light wants a darker one that
-  // still reads against white glass.
+  // Dark wants a muted light that reads as an instrument rather than a
+  // neon tube; light wants a darker one that still reads against white glass.
   function baseFor(themeName) {
-    return themeName === 'light' ? { s: 90, l: 44 } : { s: 100, l: 75 };
+    return themeName === 'light' ? { s: 90, l: 44 } : { s: 45, l: 62 };
   }
 
   // Kept so a data-theme flip can re-derive the same hue on the new base.
