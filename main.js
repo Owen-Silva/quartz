@@ -19,6 +19,7 @@ const {
   shell,
   clipboard,
   Menu,
+  nativeTheme,
 } = require('electron');
 const { createSession, killAll } = require('./pty');
 
@@ -409,6 +410,18 @@ ipcMain.handle('app:paths', () => ({
   downloads: app.getPath('downloads'),
 }));
 
+/**
+ * The theme guest PAGES see -- what a site reads from prefers-color-scheme.
+ * It is a process-wide switch, so only main can set it; the renderer owns the
+ * stored preference (localStorage) and replays it here at load and on change.
+ * Anything but the three known modes is ignored rather than guessed at.
+ */
+ipcMain.on('app:site-theme', (_event, payload) => {
+  const mode = payload && payload.mode;
+  if (mode !== 'system' && mode !== 'light' && mode !== 'dark') return;
+  nativeTheme.themeSource = mode;
+});
+
 // ---------------------------------------------------------------------------
 // Downloads
 //
@@ -781,6 +794,7 @@ const SHORTCUTS = {
   j: 'downloads',
   h: 'history',
   d: 'bookmark',
+  ',': 'settings',
 };
 
 /**

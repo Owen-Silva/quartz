@@ -4,14 +4,26 @@
    This page runs inside a <webview> guest as a plain file:// page:
    no Electron, no preload, no window.api, no require. Everything
    it does, it does by navigating itself.
+
+   The browser's settings reach it two ways:
+
+     1. query params, for the first paint —
+        ?theme=dark&hue=300&engine=duckduckgo&chips=<JSON>
+        (every param optional; theme and hue are handled earlier,
+        in newtab-theme.js, so colour never flashes)
+
+     2. window.__applySettings({ accentHue, searchEngine, chips })
+        pushed later with executeJavaScript. A null or missing
+        field means "back to this page's own default".
    ============================================================ */
 
 'use strict';
 
-/* Google's plain web-results mode (&udm=14). Flip to true to use it. */
+/* Google's plain web-results mode (&udm=14). Flip to true to use it.
+   Google-only: no other engine understands the parameter. */
 const WEB_RESULTS_ONLY = false;
 
-/* The shortcut row. Editing this array is the only step to change it. */
+/* The shortcut row, used whenever the browser sends no chips of its own. */
 const LINKS = [
   { label: 'Wiki',      url: 'https://www.wikipedia.org' },
   { label: 'GitHub',    url: 'https://github.com' },
@@ -20,7 +32,19 @@ const LINKS = [
   { label: 'Claude',    url: 'https://claude.ai' },
 ];
 
-const SEARCH_URL = 'https://www.google.com/search?q=';
+/* The engines the capsule can submit through. Key = what the chrome sends. */
+const ENGINES = {
+  google:     { name: 'Google',     url: 'https://www.google.com/search?q=' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
+  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=' },
+  brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=' },
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/do/search?q=' },
+};
+
+const DEFAULT_ENGINE = 'google';
+
+/* One shared favicon service; the chip falls back to its label if it 404s. */
+const FAVICON_URL = 'https://www.google.com/s2/favicons?domain=';
 
 /* ------------------------------------------------------------------ */
 /* URL handling — the same rules as the browser's address bar          */
@@ -44,10 +68,94 @@ function parseUrlOrNull(text) {
   }
 }
 
-/** The Google URL for a query, honouring WEB_RESULTS_ONLY. */
-function searchUrlFor(text) {
-  return SEARCH_URL + encodeURIComponent(text) + (WEB_RESULTS_ONLY ? '&udm=14' : '');
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Current engine key, and the chip list the chrome sent (null = LINKS). */
+let engineKey = DEFAULT_ENGINE;
+let chipList = null;
+
+/** The chosen engine's record, always a real one. */
+function engine() {
+  return ENGINES[engineKey] || ENGINES[DEFAULT_ENGINE];
 }
+
+/** The search URL for a query. udm=14 is Google's, so only Google gets it. */
+function searchUrlFor(text) {
+  const extra = (WEB_RESULTS_ONLY && engineKey === 'google') ? '&udm=14' : '';
+  return engine().url + encodeURIComponent(text) + extra;
+}
+
+/**
+ * Validate one chip list from the chrome. Keeps only entries with an
+ * http(s) url; a missing label becomes the bare hostname. Anything that
+ * is not an array yields null, meaning "use LINKS".
+ */
+function normalizeChips(list) {
+  if (!Array.isArray(list)) return null;
+
+  const out = [];
+
+  for (const item of list) {
+    if (!item || typeof item.url !== 'string') continue;
+
+    const parsed = parseUrlOrNull(item.url.trim());
+    if (!parsed) continue;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const label = (typeof item.label === 'string' && item.label.trim())
+      ? item.label.trim()
+      : host;
+
+    out.push({ label: label, url: parsed.href, host: parsed.hostname });
+  }
+
+  return out;
+}
+
+/* LINKS goes through the same validator, so every rendered chip has a host. */
+const DEFAULT_CHIPS = normalizeChips(LINKS) || [];
+
+/** Whatever should be on screen right now. */
+function currentChips() {
+  return chipList || DEFAULT_CHIPS;
+}
+
+/** ?chips=<encodeURIComponent(JSON)>. Malformed JSON is ignored, not fatal. */
+function parseChipsParam(raw) {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) ? value : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function setEngine(key) {
+  const name = String(key == null ? '' : key).toLowerCase();
+  engineKey = Object.prototype.hasOwnProperty.call(ENGINES, name) ? name : DEFAULT_ENGINE;
+  applyPlaceholder();
+}
+
+function setChips(list) {
+  chipList = normalizeChips(list);
+  renderLinks();
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                              */
+/* ------------------------------------------------------------------ */
+
+const form = document.getElementById('search');
+const input = document.getElementById('q');
+const linkRow = document.getElementById('links');
+
+/* What the nav currently shows, so a settings push that changes nothing
+   does not rebuild the row (and re-request every favicon). */
+let renderedKey = null;
 
 /**
  * Turn whatever was typed into something navigable.
@@ -71,39 +179,70 @@ function toNavigationUrl(rawInput) {
   return searchUrlFor(text);
 }
 
-/* ------------------------------------------------------------------ */
-/* Wiring                                                              */
-/* ------------------------------------------------------------------ */
-
-const form = document.getElementById('search');
-const input = document.getElementById('q');
-const linkRow = document.getElementById('links');
-
 /**
  * Navigate this page (same tab).
  *
- * Theme note: the chrome may load us as newtab.html?theme=light. That query
- * must never ride along to a destination, and it cannot: every URL passed
- * here is absolute — built from SEARCH_URL, from a LINKS entry, or from what
- * was typed — and nothing on this page reads location.search or resolves a
- * relative href. Keep it that way; if a relative navigation is ever added,
- * strip the query first.
+ * Query note: the chrome loads us as newtab.html?theme=…&hue=…&engine=…&chips=…
+ * None of that must ride along to a destination, and it cannot: every URL
+ * passed here is absolute — built from an ENGINES entry, from a chip, or from
+ * what was typed — and nothing resolves a relative href. Keep it that way; if
+ * a relative navigation is ever added, strip the query first.
  */
 function go(url) {
   if (url) window.location.assign(url);
 }
 
-/** Build the shortcut chips from LINKS. */
+/** The engine's name belongs in the field's own prompt. */
+function applyPlaceholder() {
+  if (!input) return;
+  const text = 'Search ' + engine().name + ' or type a URL';
+  input.placeholder = text;
+  input.setAttribute('aria-label', text);
+}
+
+function faviconUrl(host) {
+  return FAVICON_URL + encodeURIComponent(host) + '&sz=32';
+}
+
+/** Identity of a chip list, cheap enough to compare on every push. */
+function chipsKey(list) {
+  return list.map(function (item) { return item.url + ' ' + item.label; }).join('\n');
+}
+
+/** Build the shortcut chips from the current list. */
 function renderLinks() {
   if (!linkRow) return;
+
+  const list = currentChips();
+  const key = chipsKey(list);
+  if (key === renderedKey) return;      // nothing moved: leave the DOM alone
+  renderedKey = key;
+
   const frag = document.createDocumentFragment();
 
-  for (const item of LINKS) {
-    if (!item || !item.url) continue;
+  for (const item of list) {
     const chip = document.createElement('a');
     chip.className = 'chip';
     chip.href = item.url;
-    chip.textContent = item.label || item.url;
+
+    if (item.host) {
+      const icon = document.createElement('img');
+      icon.className = 'chip-icon';
+      icon.src = faviconUrl(item.host);
+      icon.width = 16;
+      icon.height = 16;
+      icon.alt = '';
+      icon.loading = 'lazy';
+      icon.setAttribute('aria-hidden', 'true');
+      // A blocked or missing favicon must not leave a hole: drop the image,
+      // keep the label, chip unchanged otherwise.
+      icon.onerror = function () {
+        if (icon.parentNode) icon.parentNode.removeChild(icon);
+      };
+      chip.appendChild(icon);
+    }
+
+    chip.appendChild(document.createTextNode(item.label));
     frag.appendChild(chip);
   }
 
@@ -138,8 +277,48 @@ function onPageClick(event) {
   focusField();
 }
 
+/* The accent's base colour differs per theme, so re-derive the same hue
+   whenever the chrome flips data-theme on <html>. */
+function watchTheme() {
+  if (typeof MutationObserver !== 'function') return;
+
+  const observer = new MutationObserver(function () {
+    if (typeof window.__applyAccent === 'function') {
+      window.__applyAccent(window.__accentHue ? window.__accentHue() : null);
+    }
+  });
+
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+
+/** The chrome pushes settings here with executeJavaScript. */
+window.__applySettings = function (settings) {
+  const next = settings || {};
+  setEngine(next.searchEngine);
+  setChips(next.chips);
+  if (typeof window.__applyAccent === 'function') window.__applyAccent(next.accentHue);
+};
+
+/** The chips actually on screen, for tests. */
+window.__chips = function () {
+  return currentChips().map(function (item) {
+    return { label: item.label, url: item.url };
+  });
+};
+
+function readParams() {
+  try {
+    return new URLSearchParams(window.location.search);
+  } catch (err) {
+    return null;
+  }
+}
+
 function init() {
-  renderLinks();
+  const params = readParams();
+  setEngine(params ? params.get('engine') : null);
+  setChips(params ? parseChipsParam(params.get('chips')) : null);
+  watchTheme();
 
   if (form) form.addEventListener('submit', onSubmit);
   document.addEventListener('keydown', onKeydown);

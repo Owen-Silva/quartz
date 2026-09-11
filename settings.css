@@ -1,0 +1,521 @@
+/* ============================================================
+   settings.css — the settings instrument, its popover and the toast.
+
+   Loaded after chrome.css, and scoped entirely to #settings,
+   #settings-panel and #settings-toast: nothing here reaches
+   another element.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own at the bottom of this file —
+   :root[data-theme="light"] relights all of it for free. The one
+   literal is the hue slider's rainbow, which is the value being
+   chosen rather than a colour of the interface.
+
+   MOTION. The panel sits on a backdrop-filter, so an animated frame
+   re-blurs everything behind it. Nothing here animates continuously:
+   hover and focus transitions are stepped, and the toast steps in
+   and out over four frames and then holds still.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden]. */
+#settings[hidden],
+#settings-panel[hidden],
+#settings-toast[hidden],
+#settings-panel [hidden] { display: none; }
+
+/* ============================================================
+   The nav-row instrument
+   Shape, hover and radius come from `.iconbtn` in chrome.css; this
+   file adds only the open state.
+   ============================================================ */
+
+#settings .glyph { font-family: var(--icon-font); }
+
+#settings.is-open {
+  background: var(--sheen), var(--glass-3);
+  color: var(--fg);
+}
+
+/* ============================================================
+   The popover
+   ============================================================ */
+
+#settings-panel {
+  position: fixed;
+  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
+  right: 10px;
+  z-index: 20;
+  width: 440px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - var(--titlebar-h) - var(--nav-h) - 28px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  /* The chamber's ground, not the nav row's: this pane floats over
+     guest pages, and --glass alone would leave a site legible
+     through it. Same recipe the downloads popover uses. */
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+#settings-panel .set-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--edge);
+}
+
+#settings-panel .set-title {
+  flex: 1 1 auto;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+
+#settings-panel .set-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 14px 14px;
+}
+
+/* ============================================================
+   Sections
+   ============================================================ */
+
+#settings-panel .set-section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+#settings-panel .set-section:last-child { border-bottom: 0; padding-bottom: 4px; }
+
+#settings-panel .set-h {
+  margin: 0 0 9px;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+
+#settings-panel .set-hint {
+  margin: 7px 0 0;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+#settings-panel .set-field + .set-field { margin-top: 10px; }
+
+/* ============================================================
+   Controls
+   ============================================================ */
+
+/* the two-option segmented instrument (dark / light) */
+#settings-panel .set-seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  background: var(--glass);
+  box-shadow: inset 0 1px 0 var(--specular);
+}
+
+#settings-panel .set-seg-opt {
+  min-width: 76px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-seg-opt:hover { background: var(--glass-2); color: var(--fg); }
+
+#settings-panel .set-seg-opt.is-on {
+  background: var(--ion-soft);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--ion-line);
+}
+
+/* a vertical list of options, each with its own lit bead */
+#settings-panel .set-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#settings-panel .set-opt {
+  justify-content: flex-start;
+  gap: 9px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-opt:hover { background: var(--glass); color: var(--fg); }
+#settings-panel .set-opt.is-on { color: var(--fg); }
+
+#settings-panel .set-dot {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid var(--edge);
+  background: var(--glass);
+}
+
+#settings-panel .set-opt.is-on .set-dot {
+  border-color: var(--ion-line);
+  background: var(--ion);
+  box-shadow: 0 0 0 3px var(--ion-soft), 0 0 10px var(--ion-glow);
+}
+
+/* --- the accent slider ---------------------------------------
+   The track is the value itself: a full turn of hue. It is the one
+   thing in this file that is not a token, because it is not a
+   colour of the interface — it is what is being picked. */
+#settings-panel .set-accent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#settings-panel .set-hue {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: default;
+}
+
+#settings-panel .set-hue::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: linear-gradient(to right,
+    hsl(0 85% 58%), hsl(60 85% 58%), hsl(120 85% 58%),
+    hsl(180 85% 58%), hsl(240 85% 58%), hsl(300 85% 58%), hsl(360 85% 58%));
+  box-shadow: inset 0 1px 0 var(--shade-in);
+}
+
+/* A glass ring around a bead of the accent itself: --ion is repainted on
+   every slider frame, so the thumb is the colour being chosen. */
+#settings-panel .set-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--glass-3);
+  background: var(--ion);
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 0 10px var(--ion-glow),
+    0 1px 4px var(--shade-drop);
+}
+
+#settings-panel .set-hue:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 0 0 3px var(--focus-ring);
+}
+
+/* --- plain buttons -------------------------------------------- */
+#settings-panel .set-text {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-text:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-text:disabled { color: var(--fg-3); background: none; }
+
+/* the privacy actions sit side by side and wrap in a narrow window */
+#settings-panel .set-field[data-field="privacy"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#settings-panel .set-field[data-field="privacy"] .set-btn { margin-top: 0; }
+
+#settings-panel .set-btn {
+  display: inline-flex;
+  height: 28px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-btn:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-btn:active { background: var(--glass-3); }
+#settings-panel .set-btn:disabled { color: var(--fg-3); background: var(--glass); }
+
+/* the small icon buttons: close, move, remove, add */
+#settings-panel .set-act {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#settings-panel .set-act:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-act:active { background: var(--glass-3); }
+#settings-panel .set-act:disabled { color: var(--fg-3); background: none; }
+
+#settings-panel .set-act .glyph {
+  font-family: var(--icon-font);
+  font-size: 11px;
+}
+
+/* ============================================================
+   New tab shortcuts
+   ============================================================ */
+
+#settings-panel .set-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#settings-panel .set-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 6px;
+  border-radius: 8px;
+  transition: background-color 120ms steps(2);
+}
+
+#settings-panel .set-chip:hover,
+#settings-panel .set-chip:focus-within { background: var(--glass); }
+
+#settings-panel .set-chip-texts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A cell that reads as text until you click into it. */
+#settings-panel .set-chip-text {
+  width: 100%;
+  min-width: 0;
+  height: 21px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  text-overflow: ellipsis;
+  transition: border-color 120ms steps(2), background-color 120ms steps(2);
+}
+
+#settings-panel .set-chip-text.is-url {
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+#settings-panel .set-chip-text::placeholder { color: var(--placeholder); }
+
+#settings-panel .set-chip-text:hover {
+  border-color: var(--edge);
+}
+
+#settings-panel .set-chip-text:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass);
+  color: var(--fg);
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+#settings-panel .set-chip-text::selection { background: var(--ion-select); color: var(--fg); }
+
+#settings-panel .set-chip-acts {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1px;
+}
+
+#settings-panel .set-chip-add {
+  margin-top: 6px;
+  border: 1px dashed var(--edge);
+}
+
+#settings-panel .set-empty {
+  margin: 0 0 2px;
+  padding: 8px 6px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+/* ============================================================
+   Shortcuts table
+   ============================================================ */
+
+#settings-panel .set-keys {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 12px;
+}
+
+#settings-panel .set-keycell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+#settings-panel .set-key {
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: var(--sheen), var(--glass);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+}
+
+#settings-panel .set-keyplus,
+#settings-panel .set-keysep {
+  color: var(--fg-3);
+  font-size: 10.5px;
+}
+
+#settings-panel .set-keysep { padding: 0 2px; }
+
+#settings-panel .set-keydesc {
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* ============================================================
+   About
+   ============================================================ */
+
+#settings-panel .set-about {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+/* ============================================================
+   Toast
+   A glass pill that steps up over the page, holds, and steps out.
+   ============================================================ */
+
+#settings-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  z-index: 30;
+  max-width: calc(100vw - 40px);
+  padding: 8px 16px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 10px 26px var(--shade-drop);
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  /* four frames in, four out: enough to read as arriving, and the
+     backdrop behind it is re-blurred four times rather than sixty. */
+  transition: opacity 160ms steps(4), transform 160ms steps(4);
+}
+
+#settings-toast.is-up {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ============================================================
+   Focus
+   chrome.css already rings every button; these repeat it so the
+   panel keeps its keyboard outline even if that rule moves.
+   ============================================================ */
+#settings:focus-visible,
+#settings-panel button:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ============================================================
+   Reduced motion
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  #settings-panel .set-seg-opt,
+  #settings-panel .set-opt,
+  #settings-panel .set-text,
+  #settings-panel .set-btn,
+  #settings-panel .set-act,
+  #settings-panel .set-chip,
+  #settings-panel .set-chip-text { transition: none; }
+
+  #settings-toast { transition: none; }
+}

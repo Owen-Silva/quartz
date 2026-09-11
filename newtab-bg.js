@@ -75,67 +75,205 @@
   /* data-theme="light" on <html> swaps the whole palette: the canvas is */
   /* repainted from the board it already has, and the live layer picks   */
   /* the new colours up through its custom properties.                   */
+  /*                                                                     */
+  /* The accent hue arrives the same way. newtab-theme.js writes the     */
+  /* --ion* tokens as inline hsl() custom properties on <html>, so every */
+  /* cool colour on the board is authored here as an OFFSET from its     */
+  /* theme's base hue rather than as a fixed rgba literal: move the base */
+  /* and the traces, pads, vias, packets and blooms all move with it and */
+  /* keep the relationships they were drawn with. Neutrals do not move — */
+  /* the near-black ground, the white chip lines, the light theme's ink. */
+  /*                                                                     */
+  /* With no accent set (hue null) the base IS the authored hue, so the  */
+  /* board paints the exact colours it always has.                       */
   /* ------------------------------------------------------------------ */
 
-  const THEMES = {
+  /* Measured off the authored art, so the default round-trips:
+       dark    #7dd3ff  h 200.308  s 100     l 74.51    the base
+               #a78bfa  h 255.135  s 91.74   l 76.27    base + 54.83  traces
+               #c4b5fd  h 252.500  s 94.74   l 85.10    base + 52.19  packets
+       light   #0b7fd6  h 205.714  s 90.22   l 44.12    the base
+               #7c3aed  h 262.123  s 83.26   l 57.84    base + 56.41   */
+  const PALETTE = {
     dark: {
-      dot: 'rgba(125,211,255,.045)',
-      trace: 'rgba(125,211,255,.15)',
-      traceViolet: 'rgba(167,139,250,.14)',
-      under: 'rgba(5,6,10,.9)',
-      socket: 'rgba(125,211,255,.18)',
-      pad: 'rgba(125,211,255,.35)',
-      via: 'rgba(125,211,255,.38)',
-      viaFill: '#05060a',
-      chipFill: 'rgba(255,255,255,.03)',
-      chipLine: 'rgba(255,255,255,.12)',
-      chipPin: 'rgba(255,255,255,.14)',
-      chipNotch: 'rgba(255,255,255,.20)',
-      live: {
-        '--pkt': '#7dd3ff',
-        '--pkt-core': '#7dd3ff',
-        '--pkt-glow': 'rgba(125,211,255,.55)',
-        '--pkt-tail': 'rgba(125,211,255,.7)',
-        '--pkt-v': '#c4b5fd',
-        '--pkt-core-v': '#c4b5fd',
-        '--pkt-glow-v': 'rgba(196,181,253,.55)',
-        '--pkt-tail-v': 'rgba(196,181,253,.7)',
-        '--bloom': 'rgba(125,211,255,.9)'
+      base: 200.308,
+      ink: {
+        cool:      { dh: 0,      s: 100,   l: 74.51 },
+        violet:    { dh: 54.827, s: 91.74, l: 76.27 },
+        violetPkt: { dh: 52.192, s: 94.74, l: 85.10 }
+      },
+      fixed: {
+        under: 'rgba(5,6,10,.9)',
+        viaFill: '#05060a',
+        chipFill: 'rgba(255,255,255,.03)',
+        chipLine: 'rgba(255,255,255,.12)',
+        chipPin: 'rgba(255,255,255,.14)',
+        chipNotch: 'rgba(255,255,255,.20)'
+      },
+      tint: {
+        dot:         ['cool', 0.045],
+        trace:       ['cool', 0.15],
+        traceViolet: ['violet', 0.14],
+        socket:      ['cool', 0.18],
+        pad:         ['cool', 0.35],
+        via:         ['cool', 0.38]
+      },
+      liveFixed: {},
+      liveTint: {
+        '--pkt':        ['cool', 1],
+        '--pkt-core':   ['cool', 1],
+        '--pkt-glow':   ['cool', 0.55],
+        '--pkt-tail':   ['cool', 0.7],
+        '--pkt-v':      ['violetPkt', 1],
+        '--pkt-core-v': ['violetPkt', 1],
+        '--pkt-glow-v': ['violetPkt', 0.55],
+        '--pkt-tail-v': ['violetPkt', 0.7],
+        '--bloom':      ['cool', 0.9]
       }
     },
     light: {
-      dot: 'rgba(18,22,42,.08)',
-      trace: 'rgba(11,127,214,.22)',
-      traceViolet: 'rgba(124,58,237,.18)',
-      under: 'rgba(247,248,252,.9)',
-      socket: 'rgba(11,127,214,.28)',
-      pad: 'rgba(11,127,214,.5)',
-      via: 'rgba(11,127,214,.5)',
-      viaFill: '#f7f8fc',
-      chipFill: 'rgba(18,22,42,.04)',
-      chipLine: 'rgba(18,22,42,.14)',
-      chipPin: 'rgba(18,22,42,.16)',
-      chipNotch: 'rgba(18,22,42,.22)',
-      live: {
-        '--pkt': '#0b7fd6',
+      base: 205.714,
+      ink: {
+        cool:   { dh: 0,      s: 90.22, l: 44.12 },
+        violet: { dh: 56.409, s: 83.26, l: 57.84 }
+      },
+      fixed: {
+        dot: 'rgba(18,22,42,.08)',
+        under: 'rgba(247,248,252,.9)',
+        viaFill: '#f7f8fc',
+        chipFill: 'rgba(18,22,42,.04)',
+        chipLine: 'rgba(18,22,42,.14)',
+        chipPin: 'rgba(18,22,42,.16)',
+        chipNotch: 'rgba(18,22,42,.22)'
+      },
+      tint: {
+        trace:       ['cool', 0.22],
+        traceViolet: ['violet', 0.18],
+        socket:      ['cool', 0.28],
+        pad:         ['cool', 0.5],
+        via:         ['cool', 0.5]
+      },
+      liveFixed: {
         '--pkt-core': '#ffffff',
-        '--pkt-glow': 'rgba(11,127,214,.55)',
-        '--pkt-tail': 'rgba(11,127,214,.7)',
-        '--pkt-v': '#7c3aed',
-        '--pkt-core-v': '#ffffff',
-        '--pkt-glow-v': 'rgba(124,58,237,.55)',
-        '--pkt-tail-v': 'rgba(124,58,237,.7)',
-        '--bloom': 'rgba(11,127,214,.9)'
+        '--pkt-core-v': '#ffffff'
+      },
+      liveTint: {
+        '--pkt':        ['cool', 1],
+        '--pkt-glow':   ['cool', 0.55],
+        '--pkt-tail':   ['cool', 0.7],
+        '--pkt-v':      ['violet', 1],
+        '--pkt-glow-v': ['violet', 0.55],
+        '--pkt-tail-v': ['violet', 0.7],
+        '--bloom':      ['cool', 0.9]
       }
     }
   };
+
+  function hsla(h, s, l, a) {
+    const hue = ((h % 360) + 360) % 360;
+    return 'hsla(' + (Math.round(hue * 1000) / 1000) + ', ' + s + '%, ' + l + '%, ' + a + ')';
+  }
+
+  /* hue === null means "no accent": every ink sits on its authored base. */
+  function buildTheme(name, hueValue) {
+    const spec = PALETTE[name] || PALETTE.dark;
+    const base = (typeof hueValue === 'number' && isFinite(hueValue)) ? hueValue : spec.base;
+    const out = {};
+    let key;
+
+    function tinted(entry) {
+      const ink = spec.ink[entry[0]];
+      return hsla(base + ink.dh, ink.s, ink.l, entry[1]);
+    }
+
+    for (key in spec.fixed) out[key] = spec.fixed[key];
+    for (key in spec.tint) out[key] = tinted(spec.tint[key]);
+
+    const live = {};
+    for (key in spec.liveFixed) live[key] = spec.liveFixed[key];
+    for (key in spec.liveTint) live[key] = tinted(spec.liveTint[key]);
+    out.live = live;
+
+    return out;
+  }
 
   function currentThemeName() {
     return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   }
 
+  function normalizeHue(value) {
+    if (typeof value !== 'number' || !isFinite(value)) return null;
+    return ((value % 360) + 360) % 360;
+  }
+
+  /* The hue the accent is currently set to, or null for the authored one.
+     newtab-theme.js hands it over directly; reading --ion back off <html>
+     is the fallback for a page that somehow loaded without that helper. */
+  function currentHue() {
+    if (typeof window.__accentHue === 'function') {
+      return normalizeHue(window.__accentHue());
+    }
+    return hueFromIonToken();
+  }
+
+  function hueFromIonToken() {
+    if (!window.getComputedStyle) return null;
+    let value;
+    try {
+      value = window.getComputedStyle(document.documentElement).getPropertyValue('--ion');
+    } catch (err) {
+      return null;
+    }
+    return hueOfColor(value);
+  }
+
+  /* Just enough colour parsing for what can land in --ion: an hsl() in
+     either syntax, a hex, or an rgb(). Anything else has no hue. */
+  function hueOfColor(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (!text) return null;
+
+    const hsl = /^hsla?\(\s*([+-]?\d*\.?\d+)(deg|grad|rad|turn)?\s*[\s,]/i.exec(text);
+    if (hsl) {
+      let h = parseFloat(hsl[1]);
+      const unit = (hsl[2] || 'deg').toLowerCase();
+      if (unit === 'grad') h *= 0.9;
+      else if (unit === 'rad') h *= 180 / Math.PI;
+      else if (unit === 'turn') h *= 360;
+      return normalizeHue(h);
+    }
+
+    let rgb = null;
+    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+    if (hex) {
+      const d = hex[1];
+      rgb = d.length === 3
+        ? [parseInt(d[0] + d[0], 16), parseInt(d[1] + d[1], 16), parseInt(d[2] + d[2], 16)]
+        : [parseInt(d.slice(0, 2), 16), parseInt(d.slice(2, 4), 16), parseInt(d.slice(4, 6), 16)];
+    } else {
+      const fn = /^rgba?\(\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)\s*[\s,]\s*([+-]?\d*\.?\d+)/i.exec(text);
+      if (fn) rgb = [parseFloat(fn[1]), parseFloat(fn[2]), parseFloat(fn[3])];
+    }
+    if (!rgb) return null;
+    return hueOfRgb(rgb[0], rgb[1], rgb[2]);
+  }
+
+  function hueOfRgb(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    if (!(d > 0)) return null;             // a grey has no hue to follow
+    let h;
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    return normalizeHue(h * 60);
+  }
+
   let themeName = currentThemeName();
-  let theme = THEMES[themeName];
+  let hue = currentHue();
+  let theme = buildTheme(themeName, hue);
 
   /* ------------------------------------------------------------------ */
   /* Small helpers                                                       */
@@ -803,11 +941,27 @@
     scheduleSpawn();
   }
 
-  function onThemeChange() {
-    const next = currentThemeName();
-    if (next === themeName) return;
-    themeName = next;
-    theme = THEMES[themeName];
+  /* data-theme and the accent both land as attributes on <html>, and a
+     hue drag fires a burst of them. Coalesce to one check per frame: the
+     static canvas is still painted once per CHANGE, never per frame, and
+     an unchanged palette costs nothing but the compare. */
+  let paletteFrame = 0;
+
+  function onRootAttrChange() {
+    if (paletteFrame) return;
+    paletteFrame = requestAnimationFrame(function () {
+      paletteFrame = 0;
+      applyPalette();
+    });
+  }
+
+  function applyPalette() {
+    const nextName = currentThemeName();
+    const nextHue = currentHue();
+    if (nextName === themeName && nextHue === hue) return;
+    themeName = nextName;
+    hue = nextHue;
+    theme = buildTheme(themeName, hue);
     repaintBoard();
     applyThemeVars();                // running packets pick the colours up
   }
@@ -824,16 +978,17 @@
     if (!reducedMotion) document.addEventListener('visibilitychange', onVisibility);
 
     if (window.MutationObserver) {
-      const themeWatch = new window.MutationObserver(onThemeChange);
+      const themeWatch = new window.MutationObserver(onRootAttrChange);
       themeWatch.observe(document.documentElement,
-        { attributes: true, attributeFilter: ['data-theme'] });
+        { attributes: true, attributeFilter: ['data-theme', 'style'] });
     }
 
     // Settle passes: newtab.js fills the shortcut row in its own
     // DOMContentLoaded handler, which moves the capsule. Measuring a
     // frame later — and again at load — catches it. Both no-op when the
-    // capsule has not moved. This is the only requestAnimationFrame in
-    // the file; nothing here draws per frame.
+    // capsule has not moved. Apart from the palette coalescer above, this
+    // is the only requestAnimationFrame in the file; nothing draws per
+    // frame.
     window.addEventListener('load', function () { layout(); });
     requestAnimationFrame(start);
   }

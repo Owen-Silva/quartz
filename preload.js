@@ -22,7 +22,17 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Paths only the main process knows for sure -- never guess at them here.
   app: {
-    paths: () => ipcRenderer.invoke('app:paths')
+    paths: () => ipcRenderer.invoke('app:paths'),
+    // The theme GUEST PAGES see (prefers-color-scheme), not the chrome's own:
+    // 'system' | 'light' | 'dark'. Main has no access to localStorage, so the
+    // renderer replays the stored choice at load and on every change.
+    setSiteTheme: (mode) => ipcRenderer.send('app:site-theme', { mode }),
+    // Sync: these are already in this process, so nothing has to be awaited.
+    versions: () => ({
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node
+    })
   },
   // The window is frameless: the chrome draws its own caption buttons and
   // drives the real window through these.

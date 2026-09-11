@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>New tab</title>
-<!-- Sets data-theme on <html>. Must stay the first script, and must stay
-     above the stylesheet, or a light window flashes dark on load. -->
+<!-- Sets data-theme on <html> and paints ?hue= over the --ion* tokens.
+     Must stay the first script, and must stay above the stylesheet, or a
+     light window flashes dark (and a custom accent flashes cyan) on load. -->
 <script src="newtab-theme.js"></script>
 <link rel="stylesheet" href="newtab.css">
 </head>
@@ -26,6 +27,8 @@
   <div class="column">
     <p class="wordmark">Search</p>
 
+    <!-- The placeholder below is the pre-script default; newtab.js rewrites
+         it for the chosen engine ("Search DuckDuckGo or type a URL"). -->
     <form id="search" class="searchform" autocomplete="off" novalidate>
       <input id="q"
              class="field"

@@ -275,6 +275,18 @@ body {
     box-shadow       180ms ease;
 }
 
+/* the chip's favicon. Sits before the label and touches nothing else:
+   the glass recipe above is unchanged. newtab.js drops the <img> when it
+   fails to load, so a chip without an icon keeps its normal padding. */
+.chip-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
 .chip:hover {
   background-color: var(--glass-2);
   border-color: var(--glass-3);

@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="find.css">
   <link rel="stylesheet" href="downloads.css">
   <link rel="stylesheet" href="history.css">
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body>
 
@@ -78,12 +79,17 @@
        overflow here. -->
   <div id="views"></div>
 
+  <!-- Tab context menu. Rows are written by app.js on right-click and cleared
+       when it closes; position:fixed, so it also hangs over a guest page. -->
+  <div id="tabmenu" role="menu" tabindex="-1" hidden></div>
+
   <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="app.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
   <script src="history.js"></script>
+  <script src="settings.js"></script>
   <script src="terminal.js"></script>
 </body>
 </html>

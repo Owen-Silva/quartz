@@ -450,6 +450,45 @@ img.tab-icon[src=""],
   to   { background-position: 130% 0, 0 0; }
 }
 
+/* broken: the page crashed or never loaded. The chip trades its favicon for a
+   warning glyph in --fg-3 — never amber, which means a live Claude session. */
+.tab .tab-warn { display: none; }
+
+.tab.broken .tab-warn {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 14px;
+  margin-right: 8px;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+.tab.broken img.tab-icon { display: none; }
+
+/* --- drag to reorder (app.js sets the classes and the transforms) ---
+   The lifted chip tracks the pointer exactly, so it carries NO transform
+   transition; the chips stepping aside carry a stepped one, because the
+   strip sits on a backdrop-filter and a smooth slide re-blurs every frame. */
+.tab.dragging {
+  z-index: 4;
+  background: var(--sheen), var(--glass-3);
+  border-color: var(--edge);
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 10px 20px -10px var(--shade-drop),
+    0 0 0 1px var(--ion-soft);
+  transition: none;
+}
+
+.tab.drag-shift { transition: transform 140ms steps(4, end); }
+
+/* No close buttons anywhere in the strip while a chip is in the air. Three
+   classes deep and after it, so it beats the .tab:hover rule above. */
+body.tab-dragging .tab .tab-close { opacity: 0; }
+
 /* --- window controls (monochrome) ----------------------------- */
 .wincontrols {
   display: flex;
@@ -681,6 +720,114 @@ body.claude-live #newclaude .dot {
   background-clip: padding-box;
 }
 
+/* --- tab context menu (#tabmenu, rows written by app.js) ------- */
+/* Same recipe as the omnibox lens in history.css: a --panel-bg pane
+   (it can hang over a <webview>, where there is nothing to blur), rows
+   whose 2px rail only changes colour so lighting one shifts no text. */
+#tabmenu {
+  position: fixed;
+  z-index: 45;                 /* above #omni-suggest (40), .chrome-layer (3), #views (1) */
+  box-sizing: border-box;
+  min-width: 212px;
+  padding: 4px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: var(--sheen), var(--panel-bg);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  outline: none;               /* it is focused on open; the pane is the ring */
+  overflow: hidden;            /* the rows' corners never poke the radius */
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 12px 34px var(--shade-drop);
+}
+
+/* There is no CSS reset in this app, so [hidden] is spelled out. */
+#tabmenu[hidden] { display: none; }
+
+#tabmenu .menu-item {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color 120ms steps(3, end);
+}
+
+#tabmenu .menu-item.is-hi {
+  background: var(--glass-2);
+  border-left-color: var(--ion);
+  color: var(--fg);
+}
+
+/* dimmed and inert: nothing to click on an item that cannot run */
+#tabmenu .menu-item.is-off {
+  color: var(--fg-3);
+  pointer-events: none;
+}
+
+#tabmenu .menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--edge);
+}
+
+/* --- crash + load-failure cards (.tab-card, built by app.js) --- */
+/* A dead guest paints nothing, so the chrome covers the well rather
+   than replacing the tab. app.js shows the card for the active tab
+   alone, in the same loop that shows its view. */
+.tab-card {
+  position: absolute;
+  inset: 0;
+  z-index: 2;                  /* over the <webview> sharing this well */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  text-align: center;
+}
+
+.tab-card .card-glyph {
+  font-size: 30px;
+  line-height: 1;
+  color: var(--fg-3);
+}
+
+.tab-card .card-head {
+  font-size: 16px;
+  color: var(--fg);
+}
+
+.tab-card .card-line {
+  max-width: 440px;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;     /* a long host must not widen the card */
+}
+
+.tab-card .card-btn {
+  margin-top: 6px;
+  height: 30px;
+  padding: 0 16px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.tab-card .card-btn:hover { background: var(--sheen), var(--glass-2); }
+.tab-card .card-btn:active { background: var(--sheen), var(--glass-3); }
+
 /* --- scrollbars (chrome only) --------------------------------- */
 #tabstrip::-webkit-scrollbar { height: 0; width: 0; }
 
@@ -726,6 +873,8 @@ body,
   body.claude-live #newclaude .dot { animation: none; }
   .tab.loading::after { animation: none; }
   .tab::after, .tab-close, #omnibox { transition: none; }
+  /* the drop slot still opens, it just arrives all at once */
+  .tab.drag-shift, #tabmenu .menu-item { transition: none; }
   /* the theme still switches, it just arrives all at once */
   html, body, .chrome-layer, #titlebar, .navrow, .tab, .claude-view { transition: none; }
 }
