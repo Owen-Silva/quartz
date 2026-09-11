@@ -186,17 +186,18 @@
   ];
 
   /* The accent formula, shared verbatim with the new tab page:
-     dark  -> hsl(H 100% 75%)   light -> hsl(H 90% 44%)
-     and the derived tokens are the same hue at these alphas. */
+     dark  -> hsl(H 45% 62%)    light -> hsl(H 90% 44%)
+     and the derived tokens are the same hue at the alphas chrome.css
+     authors for that theme (the dark ones were calmed in 8229844). */
   var ACCENT_TOKENS = [
     ['--ion', null],
-    ['--ion-soft', 0.16],
-    ['--ion-glow', 0.45],
-    ['--ion-line', 0.75],
-    ['--ion-select', 0.25],      /* .2 in light — patched below */
-    ['--seam-color', 0.45],
-    ['--chamber-seam', 0.5]
-  ];
+    ['--ion-soft', 0.14, 0.14],
+    ['--ion-glow', 0.22, 0.35],
+    ['--ion-line', 0.65, 0.75],
+    ['--ion-select', 0.30, 0.2],
+    ['--seam-color', 0.14, 0.45],
+    ['--chamber-seam', 0.16, 0.5]
+  ];                            /* [token, dark alpha, light alpha] */
 
   /* --- state ---------------------------------------------------- */
   var state = null;            // the stored object, defaults NOT merged
@@ -682,12 +683,11 @@
     }
     var h = ((n % 360) + 360) % 360;
     var light = isLight();
-    var s = light ? 90 : 100;
-    var l = light ? 44 : 75;
+    var s = light ? 90 : 45;
+    var l = light ? 44 : 62;
     for (i = 0; i < ACCENT_TOKENS.length; i++) {
       var name = ACCENT_TOKENS[i][0];
-      var alpha = ACCENT_TOKENS[i][1];
-      if (name === '--ion-select') alpha = light ? 0.2 : 0.25;
+      var alpha = ACCENT_TOKENS[i][1] === null ? null : ACCENT_TOKENS[i][light ? 2 : 1];
       var value = alpha === null
         ? 'hsl(' + h + ' ' + s + '% ' + l + '%)'
         : 'hsl(' + h + ' ' + s + '% ' + l + '% / ' + alpha + ')';
