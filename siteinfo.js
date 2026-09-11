@@ -119,6 +119,47 @@
   /** name -> the <select> for that permission, so rows are reused not rebuilt. */
   var permRows = new Map();
 
+  /**
+   * Where the button sits inside .navrow. place() runs on every repaint — so
+   * on every tab switch — and the two rects it reads cost a synchronous
+   * layout each time. The seat only moves when the row's geometry does, so
+   * each answer is filed under the geometry it was measured at (the sizes the
+   * ResizeObservers report, which are free) and re-used while that holds.
+   * The capsule's own has-siteinfo padding is part of that geometry, so
+   * hiding and showing the button costs one measurement, not one per switch.
+   */
+  var placeAt = Object.create(null);   // geometry key -> { left, top }
+  var placeKey = '';                   // the row's geometry right now
+
+  /** Forget every seat on file: the row itself moved, not just its size. */
+  function invalidatePlace() { placeAt = Object.create(null); }
+
+  /** Set while a re-measure is already booked for the next frame. */
+  var placeBooked = false;
+
+  /**
+   * Re-measure once, on the next frame, however many things moved. The
+   * instruments beside the capsule (reader, pip, the zoom badge, the shield's
+   * count) appear and disappear as the active tab changes, and each of them
+   * lands in its own turn; one booking covers the lot, and reading in a frame
+   * callback keeps the read out of the middle of everyone else's writes.
+   */
+  function bookPlace() {
+    if (placeBooked) return;
+    placeBooked = true;
+    raf(function () {
+      // ...and the frame after that one has been laid out: reading the two
+      // rects in the task that follows a frame is free, where the same read
+      // in the middle of everyone's writes costs a full synchronous layout.
+      setTimeout(function () {
+        placeBooked = false;
+        invalidatePlace();
+        place();
+        if (open_) position();
+      }, 0);
+    });
+  }
+
   /* ============================================================
      Pure helpers (exported on window.SiteInfo._helpers for tests)
      ============================================================ */
@@ -507,6 +548,8 @@
     var show = !!(active.ok && info);
     buttonEl.hidden = !show;
     if (omniboxEl && omniboxEl.classList) {
+      // The class changes the capsule's padding; the ResizeObserver below sees
+      // that as a new geometry, and each geometry keeps its own seat on file.
       if (show) omniboxEl.classList.add('has-siteinfo');
       else omniboxEl.classList.remove('has-siteinfo');
     }
@@ -736,10 +779,13 @@
    * once on the next frame and once after the badge's own transition.
    */
   function afterZoom() {
+    // The zoom badge appears and disappears beside the capsule, so the seat is
+    // re-measured on each of the three passes rather than taken from file.
     pullZoom();
+    invalidatePlace();
     render();
-    raf(function () { pullZoom(); render(); });
-    setTimeout(function () { pullZoom(); render(); }, 180);
+    raf(function () { pullZoom(); invalidatePlace(); render(); });
+    setTimeout(function () { pullZoom(); invalidatePlace(); render(); }, 180);
   }
 
   function raf(fn) {
@@ -756,9 +802,20 @@
      Open / close
      ============================================================ */
 
+  /** Write the offsets on file. Writing the same string back is skipped. */
+  function applyPlace(at) {
+    var left = at.left + 'px';
+    var top = at.top + 'px';
+    if (buttonEl.style.left !== left) buttonEl.style.left = left;
+    if (buttonEl.style.top !== top) buttonEl.style.top = top;
+  }
+
   /** The button rides inside the capsule's left padding; .navrow is relative. */
   function place() {
     if (!buttonEl || !omniboxEl) return;
+    // The seat measured at this geometry still holds: nothing has moved.
+    var hit = placeAt[placeKey];
+    if (hit) { applyPlace(hit); return; }
     if (typeof omniboxEl.getBoundingClientRect !== 'function') return;
     var box = omniboxEl.getBoundingClientRect();
     if (!box || !box.width) return;
@@ -768,8 +825,15 @@
       var r = parent.getBoundingClientRect();
       if (r) base = r;
     }
-    buttonEl.style.left = Math.round(box.left - base.left + BTN_INSET) + 'px';
-    buttonEl.style.top = Math.round(box.top - base.top + (box.height - BTN_SIZE) / 2) + 'px';
+    var at = {
+      left: Math.round(box.left - base.left + BTN_INSET),
+      top: Math.round(box.top - base.top + (box.height - BTN_SIZE) / 2)
+    };
+    // A window dragged between displays can walk through many geometries;
+    // the file is small on purpose and starts over rather than growing.
+    if (Object.keys(placeAt).length > 24) placeAt = Object.create(null);
+    placeAt[placeKey] = at;
+    applyPlace(at);
   }
 
   /** The panel hangs under the button's left edge, inside the window. */
@@ -875,20 +939,91 @@
     }, true);
 
     window.addEventListener('resize', function () {
+      invalidatePlace();
       place();
       if (open_) position();
     });
 
     // The omnibox narrows whenever another instrument joins the row (the zoom
     // badge above all), which moves the capsule's left edge under the button.
+    // The row itself is watched too: that is the other way the seat can move.
+    // The sizes these report are the geometry key place() files its answer
+    // under, and they arrive without anyone reading the layout back.
     try {
       if (typeof window.ResizeObserver === 'function' && omniboxEl) {
-        new window.ResizeObserver(function () {
-          place();
-          if (open_) position();
-        }).observe(omniboxEl);
+        var dims = { box: '', row: '' };
+        var onResize = function (which) {
+          return function (entries) {
+            var e = entries && entries.length ? entries[entries.length - 1] : null;
+            var r = e && e.contentRect;
+            dims[which] = r ? (Math.round(r.width) + 'x' + Math.round(r.height)) : '';
+            placeKey = dims.box + '|' + dims.row;
+            place();
+            if (open_) position();
+          };
+        };
+        new window.ResizeObserver(onResize('box')).observe(omniboxEl);
+        var row = buttonEl && buttonEl.parentNode;
+        if (row && row.nodeType === 1 && row !== omniboxEl) {
+          new window.ResizeObserver(onResize('row')).observe(row);
+        }
       }
     } catch (err) { /* the resize listener alone is close enough */ }
+
+    // The capsule is capped at a width and centred by auto margins, so an
+    // instrument appearing beside it (the zoom badge, reader, pip, downloads)
+    // slides it sideways WITHOUT resizing it — which no ResizeObserver above
+    // would see. Watching the row's own children for the attributes that can
+    // move a flex line catches that, and costs nothing while nothing moves.
+    try {
+      var kids = buttonEl && buttonEl.parentNode;
+      if (typeof window.MutationObserver === 'function' && kids && kids.nodeType === 1) {
+        // Our own has-siteinfo class only changes the capsule's padding, not
+        // its outer box, so a flip of just that class is not a move.
+        var otherClasses = function () {
+          return String((omniboxEl && omniboxEl.className) || '')
+            .replace(/has-siteinfo/g, '').replace(/\s+/g, ' ').trim();
+        };
+        var lastClasses = otherClasses();
+        new window.MutationObserver(function (list) {
+          for (var i = 0; i < list.length; i++) {
+            var m = list[i];
+            if (m.type === 'attributes') {
+              // our own paint: the button is absolute, it moves nothing
+              if (m.target === buttonEl) continue;
+              if (buttonEl && buttonEl.contains && buttonEl.contains(m.target)) continue;
+              if (m.target === omniboxEl && m.attributeName === 'class') {
+                var now = otherClasses();
+                if (now === lastClasses) continue;
+                lastClasses = now;
+              }
+            }
+            bookPlace();
+            return;
+          }
+        }).observe(kids, {
+          childList: true,
+          attributes: true,
+          attributeFilter: ['hidden', 'class', 'style'],
+          subtree: true
+        });
+      }
+    } catch (err) { /* the observers above still cover a resize */ }
+
+    // Two more ways the row can settle into a different shape without any of
+    // the above firing: the icon font arriving after first paint, and a theme
+    // swap changing the row's own metrics. Both are one-off and rare.
+    try {
+      window.addEventListener('load', bookPlace);
+      if (document.fonts && typeof document.fonts.ready === 'object') {
+        document.fonts.ready.then(bookPlace, function () { /* no font hook */ });
+      }
+      if (typeof window.MutationObserver === 'function') {
+        new window.MutationObserver(bookPlace).observe(document.documentElement, {
+          attributes: true, attributeFilter: ['data-theme']
+        });
+      }
+    } catch (err) { /* the seat measured at boot is the right one anyway */ }
   }
 
   function boot() {
