@@ -1,7 +1,8 @@
 # Changelog
 
 This is the record of what changed in the browser, written so you can catch up without reading
-diffs. Everything below landed overnight in 20 commits on the local `master` branch — there is no
+diffs. Everything below landed overnight, commit by commit, on the local `master` branch (the table
+at the end lists them; `git log --oneline` is always current) — there is no
 remote, so the repo in `C:\Users\you\browser` is the only copy. Run it with `npm start` or the
 taskbar pin; a copy that is already open keeps running the old code, so close it and launch again
 to pick any of this up.
