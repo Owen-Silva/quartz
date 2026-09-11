@@ -465,26 +465,17 @@ body {
   /* steps(): nudge twice a second, not every frame. Every move re-blurs the
      frosted capsule and chips above it; continuous drift cost real CPU for a
      sway nobody can see happen. Mirrors chrome.css. */
-  animation: pool-drift 60s steps(120) infinite alternate;
-  will-change: transform;
+  /* Still. It drifted in 120 steps a minute once; each step re-blurred every
+     frosted surface above it, which read as a faint flicker in the panes and
+     cost real GPU time whenever a Claude tab was open. */
 }
 
 /* (d) teal-cyan rim at the bottom-right, drifting the other way */
 .aurora-rim {
   background: var(--aurora-rim);
-  animation: rim-drift 80s steps(160) infinite alternate;
-  will-change: transform;
 }
 
-@keyframes pool-drift {
-  from { transform: translate3d(-3%, 0, 0); }
-  to   { transform: translate3d(3%, 1.5%, 0); }
-}
 
-@keyframes rim-drift {
-  from { transform: translate3d(3%, 1%, 0); }
-  to   { transform: translate3d(-3%, -2%, 0); }
-}
 
 /* --- the user's own picture ----------------------------------- */
 /* newtabBackground.kind === 'image'. Two fixed layers between the aurora
