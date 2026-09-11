@@ -1,0 +1,267 @@
+/* ============================================================
+   shield.css — the ad/tracker instrument and its popover.
+
+   Loaded after chrome.css, and scoped entirely to #shield and
+   #shield-panel: nothing here reaches another element.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own at the bottom of this file —
+   :root[data-theme="light"] relights all of it for free.
+
+   MOTION. Both panes sit on a backdrop-filter, so an animated frame
+   re-blurs everything behind it. Nothing animates continuously here:
+   every transition is stepped and none runs longer than 150ms.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   These rules put the attribute back in charge. */
+#shield[hidden],
+#shield .shield-count[hidden],
+#shield-panel[hidden],
+#shield-panel [hidden] { display: none; }
+
+/* ============================================================
+   The nav-row instrument
+   Shape, hover and radius come from `.iconbtn` in chrome.css; this
+   file adds only the badge and the two lit/unlit states.
+   ============================================================ */
+
+#shield {
+  position: relative;                 /* the badge is placed against it */
+}
+
+#shield .glyph { font-family: var(--icon-font); }
+
+/* the panel is open: the instrument stays lit while it is */
+#shield.is-open {
+  background: var(--sheen), var(--glass-3);
+  color: var(--fg);
+}
+
+/* Blocking is off globally, this site is allowlisted, or there is
+   nothing to block here: the shield goes quiet rather than away. */
+#shield.is-off .glyph { color: var(--fg-3); }
+
+/* --- the count badge ------------------------------------------
+   A pill tucked into the button's lower-right corner. It sits on
+   --panel-bg so a page scrolling behind the chrome never shows
+   through the digits, and it is the one ion-coloured thing on the
+   nav row besides the omnibox's focused border. */
+#shield .shield-count {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  min-width: 15px;
+  height: 13px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--panel-bg);
+  color: var(--ion);
+  font-family: var(--ui-font);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: .01em;
+  pointer-events: none;
+}
+
+/* ============================================================
+   The popover
+   Same ground and lip as the downloads panel, so the two read as
+   siblings. Anchored in JS to the button's right edge; the values
+   here are the fallback for the frame before that lands.
+   ============================================================ */
+
+#shield-panel {
+  position: fixed;
+  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
+  right: 10px;
+  z-index: 20;
+  width: 320px;
+  max-width: calc(100vw - 20px);
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  /* The chamber's ground, not the nav row's: this pane floats over
+     guest pages, and --glass alone would leave a site legible
+     through it. Same recipe the downloads panel uses. */
+  background: var(--sheen), var(--panel-bg);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+#shield-panel .sh-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 12px 11px;
+}
+
+/* --- the number ------------------------------------------------
+   The reading on the instrument: large, --fg, tabular so the digits
+   do not shift the line as a page loads. */
+#shield-panel .sh-big {
+  color: var(--fg);
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+#shield-panel .sh-sub {
+  color: var(--fg-2);
+  font-size: 12.5px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   The switch rows
+   The whole row is the control, so the hit target is the same shape
+   as the ion rail that lights along its left edge while it is on.
+   ============================================================ */
+
+#shield-panel .sh-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px 0 11px;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#shield-panel .sh-row:hover { background: var(--glass); color: var(--fg); }
+#shield-panel .sh-row.is-on { color: var(--fg); }
+#shield-panel .sh-row:disabled { color: var(--fg-3); background: none; }
+
+/* the 2px rail: the row is on */
+#shield-panel .sh-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ion);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms steps(2);
+}
+
+#shield-panel .sh-row.is-on::before { opacity: 1; }
+#shield-panel .sh-row:disabled::before { opacity: 0; }
+
+#shield-panel .sh-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* --- the switch itself ----------------------------------------
+   A glass track with a knob that steps across it. There is no
+   switch anywhere else in the app yet, so this is the pattern:
+   --edge track, --ion when on, --specular knob. */
+#shield-panel .sh-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--glass);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#shield-panel .sh-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  /* steps(3), not a slide: a smooth translate would re-blur the pane
+     behind this pane on every frame of the throw. */
+  transition: transform 150ms steps(3), background-color 120ms steps(2);
+}
+
+#shield-panel .sh-row.is-on .sh-switch {
+  background: var(--ion-soft);
+  border-color: var(--ion-line);
+}
+
+#shield-panel .sh-row.is-on .sh-knob {
+  background: var(--ion);
+  box-shadow: 0 0 8px var(--ion-glow);
+  transform: translateX(14px);
+}
+
+#shield-panel .sh-row:disabled .sh-switch {
+  background: var(--glass);
+  border-color: var(--edge);
+}
+
+#shield-panel .sh-row:disabled .sh-knob {
+  background: var(--fg-3);
+  box-shadow: none;
+}
+
+/* --- the status line ------------------------------------------- */
+#shield-panel .sh-status {
+  margin-top: 9px;
+  padding: 0 2px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+/* --- nothing to block ------------------------------------------ */
+#shield-panel .sh-empty {
+  padding: 22px 14px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* --- focus ----------------------------------------------------
+   chrome.css already rings every button; these repeat it so the
+   panel keeps its keyboard outline even if that rule moves. */
+#shield:focus-visible,
+#shield-panel .sh-row:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- reduced motion --------------------------------------------
+   The stepped transitions already hold still between frames; with
+   motion reduced they stop moving altogether and the states simply
+   swap. */
+@media (prefers-reduced-motion: reduce) {
+  #shield-panel .sh-row,
+  #shield-panel .sh-row::before,
+  #shield-panel .sh-switch,
+  #shield-panel .sh-knob {
+    transition: none;
+  }
+}

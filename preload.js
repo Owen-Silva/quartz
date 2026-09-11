@@ -71,6 +71,32 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('dl:update', handler);
     }
   },
+  // Ad / tracker blocking. The engine lives in main and covers every guest at
+  // once, so everything here is either a preference or a per-tab counter.
+  // `wcId` is a <webview>'s webContents id (webview.getWebContentsId()).
+  adblock: {
+    // { enabled, ready, allow: string[] } -- `ready` is "engine built AND
+    // hooked into the session", so it is false both when the lists failed to
+    // load and when blocking is switched off.
+    state: () => ipcRenderer.invoke('adblock:state'),
+    // { blocked, host, allowed } for one tab, right now.
+    count: (wcId) => ipcRenderer.invoke('adblock:count', { wcId }),
+    setEnabled: (on) => ipcRenderer.send('adblock:set-enabled', { on }),
+    // host is normalised in main: lowercased, `www.` stripped.
+    allowHost: (host, on) => ipcRenderer.send('adblock:allow-host', { host, on }),
+    // { wcId, blocked, host, allowed }, throttled to <= 4/sec per tab.
+    onUpdate: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('adblock:update', handler);
+      return () => ipcRenderer.removeListener('adblock:update', handler);
+    },
+    // Same shape as state(), pushed whenever the engine or prefs change.
+    onStateChanged: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('adblock:state-changed', handler);
+      return () => ipcRenderer.removeListener('adblock:state-changed', handler);
+    }
+  },
   pty: {
     start: (opts) => ipcRenderer.invoke('pty:start', opts),
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),

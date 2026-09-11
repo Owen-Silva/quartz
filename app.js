@@ -19,11 +19,12 @@
  * own search field.
  *
  * Owned ids (agent D writes index.html):
- *   #tabstrip #newtab #newclaude #back #forward #reload #omnibox #views
- *   #win-min #win-max #win-close #theme #titlebar #tabmenu
+ *   #tabstrip #newtab #newclaude #back #forward #reload #omnibox #zoom-badge
+ *   #views #win-min #win-max #win-close #theme #titlebar #tabmenu
  * Body classes owned here: booted, maximized, acrylic, claude-live, tab-dragging.
  * Chip classes owned here: active, claude, live, loading, dragging, drag-shift,
- * broken. Runtime panes owned here: #tabmenu rows, .tab-card over a dead guest.
+ * broken, pinned, has-icon. Runtime panes owned here: #tabmenu rows, .tab-card
+ * over a dead guest.
  * <html data-theme> is set before first paint by theme-boot.js and from here on.
  */
 
@@ -93,6 +94,40 @@ function pushSettingsToTab(tab) {
   } catch (err) { /* guest went away mid-call */ }
 }
 
+// How many recent sites the new-tab page is given. Its own layout decides how
+// many of them it shows.
+const RECENT_SITES = 8;
+
+/**
+ * The new-tab page cannot read the history store (it is a guest, on file://),
+ * so the chrome hands it the list. history.js is optional, and a missing store
+ * pushes an empty list rather than nothing: the page still clears its section.
+ */
+function recentSites(limit) {
+  const store = window.History;
+  if (!store || typeof store.recent !== 'function') return [];
+  let rows = null;
+  try { rows = store.recent(limit); } catch (err) { return []; }
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => ({
+    url: (row && row.url) || '',
+    title: (row && row.title) || '',
+    last: (row && row.last) || 0
+  }));
+}
+
+/** Hand the recent list to one open new-tab guest (no-op for anything else). */
+function pushRecentToTab(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const payload = JSON.stringify(recentSites(RECENT_SITES));
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyRecent && window.__applyRecent(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
 // Called from init(): settings.js loads after this file, so the hook is late-bound.
 function wireSettings() {
   const settings = window.Settings;
@@ -113,7 +148,8 @@ const CLAUDE_DEFAULT_TITLE = 'Claude';
  *   lastActive:number, loading?:boolean, iconEl?:Element|null,
  *   term?:Object|null, live?:boolean, termOff?:Function[],
  *   cardEl?:Element|null, warnEl?:Element|null, broken?:boolean,
- *   failedThisLoad?:boolean
+ *   failedThisLoad?:boolean, audible?:boolean, muted?:boolean,
+ *   audioEl?:Element|null, pinned?:boolean, globeEl?:Element|null
  * }>}
  */
 const tabs = [];
@@ -129,6 +165,7 @@ let backBtn = null;
 let forwardBtn = null;
 let reloadBtn = null;
 let omniboxEl = null;
+let zoomBadgeEl = null;
 let viewsEl = null;
 // Glass-redesign chrome (index.html owns the markup; every lookup is null-guarded
 // so the browser still boots against an older index.html).
@@ -401,6 +438,11 @@ function setTabLoading(tab, loading) {
 /* Tab chips                                                           */
 /* ------------------------------------------------------------------ */
 
+// Segoe Fluent Icons, the same family the nav buttons use.
+//   E767 = speaker (the tab is making a sound), E74F = speaker muted,
+//   E774 = globe (a pinned chip with no favicon of its own).
+const TAB_GLYPH = { audible: '\uE767', muted: '\uE74F', globe: '\uE774' };
+
 function buildChip(tab) {
   const chip = document.createElement('div');
   chip.className = isClaudeTab(tab) ? 'tab claude' : 'tab';
@@ -416,11 +458,20 @@ function buildChip(tab) {
     chip.appendChild(dot);
   }
 
+  // The globe stands in for a favicon on a pinned chip, which has no title to
+  // read. chrome.css hides it everywhere else and whenever a real icon landed.
+  if (!isClaudeTab(tab)) {
+    const globe = document.createElement('span');
+    globe.className = 'glyph tab-globe';
+    globe.textContent = TAB_GLYPH.globe;
+    globe.setAttribute('aria-hidden', 'true');
+    chip.appendChild(globe);
+    tab.globeEl = globe;
+  }
+
   const title = document.createElement('span');
   title.className = 'tab-title';
   title.textContent = tab.title;
-  // Truncation is chrome.css's job; the full string stays here for the tooltip.
-  chip.title = tab.title;
 
   const close = document.createElement('button');
   close.className = 'tab-close';
@@ -430,6 +481,10 @@ function buildChip(tab) {
 
   chip.appendChild(title);
   chip.appendChild(close);
+  tab.titleEl = title;
+  // Truncation is chrome.css's job; the full string stays here for the tooltip.
+  chip.title = chipTooltip(tab);
+  if (tab.pinned) chip.classList.add('pinned');
 
   chip.addEventListener('click', () => {
     // A drag ends in a click on release. Swallowing that one keeps the plain
@@ -437,11 +492,13 @@ function buildChip(tab) {
     if (Date.now() - dragEndedAt < CLICK_AFTER_DRAG_MS) return;
     activateTab(tab.id);
   });
-  // Middle-click closes the tab, the same as every other browser.
+  // Middle-click closes the tab, the same as every other browser — except on a
+  // pinned tab, which Chrome deliberately makes unclosable by accident.
   chip.addEventListener('auxclick', (event) => {
     if (!event || event.button !== 1) return;
     event.preventDefault();
     event.stopPropagation();
+    if (tab.pinned) return;
     closeTab(tab.id);
   });
   close.addEventListener('click', (event) => {
@@ -449,9 +506,94 @@ function buildChip(tab) {
     closeTab(tab.id);
   });
 
-  tab.titleEl = title;
   wireChipDrag(tab, chip);
   return chip;
+}
+
+/** The chip's hover text: the page title, and the host it is showing. */
+function chipTooltip(tab) {
+  if (!tab) return '';
+  // A Claude chamber has no url worth reading; its title is the whole story.
+  if (isClaudeTab(tab)) return tab.title;
+  const short = shortLabelFor(readCurrentUrl(tab) || tab.url);
+  if (!short || short === tab.title) return tab.title;
+  return tab.title + ' — ' + short;
+}
+
+/**
+ * The speaker button on a chip, created on the first sound the page makes and
+ * reused after. It sits left of the title, and never activates the tab: the
+ * whole point is muting a background tab without leaving the one you are on.
+ */
+function tabAudioEl(tab) {
+  if (!tab || isClaudeTab(tab) || !tab.chipEl) return null;
+  if (tab.audioEl && tab.audioEl.isConnected) return tab.audioEl;
+
+  const button = document.createElement('button');
+  button.className = 'glyph tab-audio';
+  button.type = 'button';
+  button.hidden = true;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation(); // never raise the tab: this is a background control
+    event.preventDefault();
+    setTabMuted(tab, !tab.muted);
+  });
+
+  try {
+    tab.chipEl.insertBefore(button, tab.titleEl || tab.chipEl.firstChild);
+  } catch (err) {
+    return null;
+  }
+  tab.audioEl = button;
+  return button;
+}
+
+/** Chip and button follow tab.audible / tab.muted; nothing else reads them. */
+function syncTabAudio(tab) {
+  if (!tab || isClaudeTab(tab)) return;
+  const show = !!(tab.audible || tab.muted);
+  // Nothing has ever made a sound: do not put a button on the chip at all.
+  if (!show && !(tab.audioEl && tab.audioEl.isConnected)) return;
+  const button = tabAudioEl(tab);
+  if (!button) return;
+  button.hidden = !show;
+  button.textContent = tab.muted ? TAB_GLYPH.muted : TAB_GLYPH.audible;
+  button.classList.toggle('is-muted', !!tab.muted);
+  const label = tab.muted ? 'Unmute tab' : 'Mute tab';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+}
+
+/** media-started-playing / media-paused. Only the chip cares. */
+function setTabAudible(tab, on) {
+  if (!tab || isClaudeTab(tab)) return;
+  tab.audible = !!on;
+  syncTabAudio(tab);
+}
+
+/** Mute or unmute one tab. An unattached guest throws; the flag still holds. */
+function setTabMuted(tab, on) {
+  if (!tab || isClaudeTab(tab)) return;
+  const muted = !!on;
+  tab.muted = muted;
+  if (isViewUsable(tab)) {
+    try { tab.viewEl.setAudioMuted(muted); } catch (err) { /* guest went away mid-call */ }
+  }
+  syncTabAudio(tab);
+  saveSession(); // the mute rides along in the session entry
+}
+
+/**
+ * dom-ready: a fresh guest is born unmuted, so a remembered mute is re-applied
+ * rather than read. Otherwise the view is the source of truth.
+ */
+function syncTabMutedFromView(tab) {
+  if (!isViewUsable(tab)) return;
+  try {
+    if (tab.muted) tab.viewEl.setAudioMuted(true);
+    else tab.muted = !!tab.viewEl.isAudioMuted();
+  } catch (err) { /* guest not attached yet */ }
+  syncTabAudio(tab);
 }
 
 /**
@@ -468,10 +610,17 @@ function tabIconEl(tab) {
   // A dead icon URL must never leave a broken-image box in the strip.
   img.addEventListener('error', () => {
     try { img.removeAttribute('src'); } catch (err) { /* already detached */ }
+    // A pinned chip shows nothing but this icon: hand it back the globe.
+    if (tab.chipEl) tab.chipEl.classList.remove('has-icon');
   });
 
   try {
-    tab.chipEl.insertBefore(img, tab.titleEl || tab.chipEl.firstChild);
+    // Left to right: icon, speaker, title. The speaker is only there once the
+    // page has made a sound, so it is the anchor when it exists.
+    const anchor = (tab.audioEl && tab.audioEl.isConnected)
+      ? tab.audioEl
+      : (tab.titleEl || tab.chipEl.firstChild);
+    tab.chipEl.insertBefore(img, anchor);
   } catch (err) {
     return null;
   }
@@ -484,12 +633,15 @@ function setTabIcon(tab, url) {
   try {
     const img = tabIconEl(tab);
     if (img) img.setAttribute('src', url);
+    // .has-icon is what a pinned chip reads to drop its globe fallback.
+    if (img && tab.chipEl) tab.chipEl.classList.add('has-icon');
   } catch (err) { /* chip went away mid-load */ }
 }
 
 function clearTabIcon(tab) {
   try {
     if (tab && tab.iconEl) tab.iconEl.removeAttribute('src');
+    if (tab && tab.chipEl) tab.chipEl.classList.remove('has-icon');
   } catch (err) { /* chip went away mid-load */ }
 }
 
@@ -498,7 +650,8 @@ function setTabTitle(tab, title) {
   const text = (title && String(title).trim()) || fallback;
   tab.title = text;
   if (tab.titleEl) tab.titleEl.textContent = text;
-  if (tab.chipEl) tab.chipEl.title = text;
+  // A pinned chip has no title on it, so the tooltip is all the hover gives.
+  if (tab.chipEl) tab.chipEl.title = chipTooltip(tab);
 }
 
 /* ------------------------------------------------------------------ */
@@ -527,8 +680,31 @@ function syncChipOrder() {
   }
 }
 
+/** Pinned tabs other than this one. The strip keeps them all at the left. */
+function pinnedCountExcept(tab) {
+  let n = 0;
+  for (const other of tabs) {
+    if (other === tab) continue;
+    if (other.pinned) n++;
+  }
+  return n;
+}
+
 /**
- * Move a tab to a position in the strip. Clamped, never wrapping.
+ * The slots one tab is allowed to occupy. Pinned and unpinned are two groups
+ * with a hard seam between them: neither drag nor menu may cross it.
+ */
+function dropRangeFor(tab) {
+  const others = tabs.length - 1;
+  const pinned = pinnedCountExcept(tab);
+  return tab && tab.pinned
+    ? { min: 0, max: pinned }
+    : { min: pinned, max: Math.max(pinned, others) };
+}
+
+/**
+ * Move a tab to a position in the strip. Clamped into its own group (pinned or
+ * unpinned), never wrapping.
  * @returns {boolean} true when the order actually changed.
  */
 function moveTabToIndex(id, toIndex) {
@@ -536,7 +712,8 @@ function moveTabToIndex(id, toIndex) {
   if (from === -1) return false;
   const wanted = Number(toIndex);
   if (!isFinite(wanted)) return false;
-  const to = Math.max(0, Math.min(wanted, tabs.length - 1));
+  const range = dropRangeFor(tabs[from]);
+  const to = Math.max(range.min, Math.min(wanted, range.max));
   if (to === from) return false;
 
   const [tab] = tabs.splice(from, 1);
@@ -559,6 +736,25 @@ function moveActiveTab(step) {
   try {
     if (tab.chipEl) tab.chipEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } catch (err) { /* older engines: the strip just does not scroll */ }
+}
+
+/**
+ * Pin or unpin a page tab. The flag and the move are one operation: a pinned
+ * chip is icon-only and always sits with the other pinned tabs at the left, so
+ * there is no state where the class is on and the position is wrong.
+ *
+ * Both directions land on the same index — the number of pinned tabs that are
+ * not this one: pinning slots in behind the last pinned tab, unpinning steps
+ * out to just past it.
+ */
+function setTabPinned(tab, on) {
+  if (!tab || tab.kind !== 'page') return;
+  const pinned = !!on;
+  if (!!tab.pinned === pinned) return;
+  tab.pinned = pinned;
+  if (tab.chipEl) tab.chipEl.classList.toggle('pinned', pinned);
+  moveTabToIndex(tab.id, pinnedCountExcept(tab));
+  saveSession(); // pinned rides along in the session entry
 }
 
 /** Measure every chip once, at drag start: the drag itself reads no layout. */
@@ -588,12 +784,20 @@ function startTabDrag() {
   if (drag.home === -1) return false;
   drag.target = drag.home;
 
+  // Pinned and unpinned are two groups: a chip may be hauled anywhere inside
+  // its own, and nowhere outside it. Read once, here, not per pointer move.
+  const range = dropRangeFor(tabs.find((t) => t.id === drag.id));
+  drag.lowIndex = range.min;
+  drag.highIndex = range.max;
+
   const me = drag.rows[drag.home];
   const strip = tabstripEl.getBoundingClientRect();
-  // The chip stays inside the strip: dragged past the edge there is no slot
-  // left to read off the pointer.
-  drag.min = strip.left - me.left;
-  drag.max = strip.right - (me.left + me.width);
+  const first = drag.rows[drag.lowIndex] || me;
+  const last = drag.rows[drag.highIndex] || me;
+  // The chip stays inside the strip AND inside its own group: dragged past
+  // either edge there is no slot left to read off the pointer.
+  drag.min = Math.max(strip.left, first.left) - me.left;
+  drag.max = Math.min(strip.right, last.left + last.width) - (me.left + me.width);
   // The strip's flex gap, read off the measurements rather than hardcoded.
   drag.gap = drag.rows.length > 1
     ? Math.max(0, drag.rows[1].left - (drag.rows[0].left + drag.rows[0].width))
@@ -632,6 +836,8 @@ function dragTabTo(dx) {
       if (centre >= drag.rows[i].center) { target = i; break; }
     }
   }
+  // Never across the pinned/unpinned seam, whatever the pointer says.
+  target = Math.max(drag.lowIndex, Math.min(target, drag.highIndex));
   if (target === drag.target) return; // the slot has not moved
 
   drag.target = target;
@@ -665,15 +871,20 @@ function endTabDrag() {
   }
 
   dragEndedAt = Date.now(); // the release fires a click; the chip ignores it
-  if (drag.target !== drag.home) moveTabToIndex(drag.id, drag.target);
+  // The clamp is repeated here because the strip can change under a drag
+  // (a background tab closing), and moveTabToIndex clamps to the group again.
+  const target = Math.max(drag.lowIndex, Math.min(drag.target, drag.highIndex));
+  if (target !== drag.home) moveTabToIndex(drag.id, target);
 }
 
 /** Pointer wiring for one chip. Pointer capture keeps the drag on this chip. */
 function wireChipDrag(tab, chip) {
   chip.addEventListener('pointerdown', (event) => {
     if (!event || event.button !== 0 || event.isPrimary === false) return;
-    // The close button owns its own click; a press there is never a drag.
-    if (event.target && event.target.closest && event.target.closest('.tab-close')) return;
+    // The close and speaker buttons own their own clicks; a press on either is
+    // never a drag.
+    if (event.target && event.target.closest
+        && event.target.closest('.tab-close, .tab-audio')) return;
     if (tabDrag) return;
 
     closeTabMenu();
@@ -686,6 +897,8 @@ function wireChipDrag(tab, chip) {
       rows: null,
       home: -1,
       target: -1,
+      lowIndex: 0,
+      highIndex: 0,
       min: 0,
       max: 0,
       gap: 0
@@ -728,8 +941,10 @@ function wireChipDrag(tab, chip) {
 
 /**
  * @param {string} [url]
- * @param {{background?:boolean}} [options] background:true opens the tab behind
- *        the current one (Ctrl+click, target="_blank" with a background hint).
+ * @param {{background?:boolean, pinned?:boolean, muted?:boolean}} [options]
+ *        background:true opens the tab behind the current one (Ctrl+click,
+ *        target="_blank" with a background hint). pinned/muted are only used by
+ *        restoreSession(), which rebuilds both from the stored entry.
  */
 function createTab(url, options) {
   if (!viewsEl || !tabstripEl) return null;
@@ -766,6 +981,12 @@ function createTab(url, options) {
     warnEl: null,
     broken: false,
     failedThisLoad: false,
+    audible: false,
+    // The guest is born unmuted; dom-ready re-applies a restored mute to it.
+    muted: !!opts.muted,
+    audioEl: null,
+    pinned: false,
+    globeEl: null,
     lastActive: 0
   };
 
@@ -775,6 +996,10 @@ function createTab(url, options) {
   tabs.push(tab);
   viewsEl.appendChild(viewEl);
   tabstripEl.appendChild(tab.chipEl);
+  // After the push: pinning is a move inside the strip, so the tab has to be
+  // in it first. A restored pinned tab is already in place, so this is a no-op.
+  if (opts.pinned) setTabPinned(tab, true);
+  if (tab.muted) syncTabAudio(tab);
   saveSession(); // debounced: activateTab() below folds into the same write
 
   // Never leave the window with nothing on screen: the very first tab is opened
@@ -989,8 +1214,19 @@ function closeTab(id) {
   }
 }
 
+/**
+ * Ctrl+W and the window action. Chrome-like: this never closes a pinned tab —
+ * it steps to the next one instead, so the shortcut still feels like it did
+ * something. The menu's own Close goes straight to closeTab() and does close it.
+ */
 function closeActiveTab() {
-  if (activeTabId !== null) closeTab(activeTabId);
+  if (activeTabId === null) return;
+  const tab = getActiveTab();
+  if (tab && tab.pinned) {
+    cycleTab(1);
+    return;
+  }
+  closeTab(activeTabId);
 }
 
 /** Open a tab and slot it straight into a position instead of at the end. */
@@ -1005,16 +1241,18 @@ function reloadTab(tab) {
   try { tab.viewEl.reload(); } catch (err) { /* view went away mid-call */ }
 }
 
+// Both sweeps leave pinned tabs alone: pinning a tab is the user saying it
+// outlives the browsing around it.
 function closeOtherTabs(id) {
   // Snapshot the ids first: closeTab() splices the array as it goes.
-  const doomed = tabs.filter((t) => t.id !== id).map((t) => t.id);
+  const doomed = tabs.filter((t) => t.id !== id && !t.pinned).map((t) => t.id);
   for (const other of doomed) closeTab(other);
 }
 
 function closeTabsToRight(id) {
   const index = tabs.findIndex((t) => t.id === id);
   if (index === -1) return;
-  const doomed = tabs.slice(index + 1).map((t) => t.id);
+  const doomed = tabs.slice(index + 1).filter((t) => !t.pinned).map((t) => t.id);
   for (const other of doomed) closeTab(other);
 }
 
@@ -1130,19 +1368,29 @@ function tabMenuItemsForTab(tab) {
       label: 'Duplicate',
       run: () => openTabAt(readCurrentUrl(tab) || tab.url, tabs.indexOf(tab) + 1)
     });
+    items.push({
+      label: tab.pinned ? 'Unpin tab' : 'Pin tab',
+      run: () => setTabPinned(tab, !tab.pinned)
+    });
+    items.push({
+      label: tab.muted ? 'Unmute tab' : 'Mute tab',
+      run: () => setTabMuted(tab, !tab.muted)
+    });
   }
 
   items.push(null);
+  // Close is the one route that still closes a pinned tab: the user asked for
+  // this tab by name, so it is not the accident the middle-click guard is for.
   items.push({ label: 'Close', run: () => closeTab(tab.id) });
   items.push({
     label: 'Close other tabs',
     run: () => closeOtherTabs(tab.id),
-    disabled: tabs.length < 2
+    disabled: !tabs.some((t) => t.id !== tab.id && !t.pinned)
   });
   items.push({
     label: 'Close tabs to the right',
     run: () => closeTabsToRight(tab.id),
-    disabled: tabs.indexOf(tab) >= tabs.length - 1
+    disabled: !tabs.slice(tabs.indexOf(tab) + 1).some((t) => !t.pinned)
   });
   items.push(null);
   items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
@@ -1254,6 +1502,10 @@ function sessionUrlFor(tab) {
   return parsed.href;
 }
 
+/**
+ * One stored tab is { url } plus the flags that are worth carrying across a
+ * restart. Both are written only when true, so an old session reads the same.
+ */
 function sessionSnapshot() {
   const entries = [];
   let active = -1;
@@ -1261,7 +1513,10 @@ function sessionSnapshot() {
     const url = sessionUrlFor(tab);
     if (!url) continue; // Claude tabs and unpersistable pages shift nothing
     if (tab.id === activeTabId) active = entries.length;
-    entries.push({ url: url });
+    const entry = { url: url };
+    if (tab.pinned) entry.pinned = true;
+    if (tab.muted) entry.muted = true;
+    entries.push(entry);
   }
   const capped = entries.slice(0, SESSION_MAX_TABS);
   return { tabs: capped, active: active < capped.length ? active : -1 };
@@ -1288,8 +1543,10 @@ function saveSession() {
 
 /**
  * Read and sanitise the stored session. Returns null when there is nothing
- * usable — missing, malformed, or every entry dropped.
- * @returns {{urls:string[], active:number}|null}
+ * usable — missing, malformed, or every entry dropped. `urls` is kept beside
+ * the entries because it is what this has always returned.
+ * @returns {{entries:Array<{url:string,pinned:boolean,muted:boolean}>,
+ *            urls:string[], active:number}|null}
  */
 function readSession() {
   let raw = null;
@@ -1308,25 +1565,31 @@ function readSession() {
   }
   if (!parsed || !Array.isArray(parsed.tabs)) return null;
 
-  const urls = [];
+  const entries = [];
   for (const entry of parsed.tabs) {
     const url = (entry && typeof entry.url === 'string') ? entry.url : '';
     if (!url) continue;
+    let href = '';
     if (url === SESSION_NEWTAB) {
-      urls.push(SESSION_NEWTAB);
+      href = SESSION_NEWTAB;
     } else {
       const target = parseUrlOrNull(url);
       // Anything that is not plain web goes on the floor, whoever wrote it.
       if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) continue;
-      urls.push(target.href);
+      href = target.href;
     }
-    if (urls.length >= SESSION_MAX_TABS) break;
+    entries.push({ url: href, pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted) });
+    if (entries.length >= SESSION_MAX_TABS) break;
   }
-  if (!urls.length) return null;
+  if (!entries.length) return null;
 
   const active = Number(parsed.active);
-  const inRange = isFinite(active) && active >= 0 && active < urls.length;
-  return { urls: urls, active: inRange ? active : urls.length - 1 };
+  const inRange = isFinite(active) && active >= 0 && active < entries.length;
+  return {
+    entries: entries,
+    urls: entries.map((e) => e.url),
+    active: inRange ? active : entries.length - 1
+  };
 }
 
 /**
@@ -1337,13 +1600,27 @@ function restoreSession() {
   const session = readSession();
   if (!session) return false;
 
+  // Pinned tabs live at the left of the strip, so they are rebuilt first. The
+  // partition is stable, so each group keeps the order it was stored in, and
+  // the stored active index is followed through the shuffle by identity.
+  const rows = session.entries.map((entry, index) => ({ entry: entry, index: index }));
+  const ordered = rows.filter((r) => r.entry.pinned).concat(rows.filter((r) => !r.entry.pinned));
+
   restoring = true;
   const created = [];
+  let wanted = null;
   try {
     // All background: the strip is built in order, then the saved tab is raised.
-    for (const url of session.urls) {
-      const tab = createTab(url === SESSION_NEWTAB ? HOME_URL : url, { background: true });
-      if (tab) created.push(tab);
+    for (const row of ordered) {
+      const entry = row.entry;
+      const tab = createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
+        background: true,
+        pinned: entry.pinned,
+        muted: entry.muted
+      });
+      if (!tab) continue;
+      created.push(tab);
+      if (row.index === session.active) wanted = tab;
     }
   } finally {
     // A throw mid-build must not strand the flag and mute every later save.
@@ -1352,8 +1629,7 @@ function restoreSession() {
 
   if (!created.length) return false;
 
-  const target = created[Math.min(session.active, created.length - 1)]
-    || created[created.length - 1];
+  const target = wanted || created[created.length - 1];
   activateTab(target.id);
   saveSession(); // one write, now that the strip is settled
   return true;
@@ -1385,6 +1661,13 @@ function wireViewEvents(tab) {
 
   viewEl.addEventListener('dom-ready', () => {
     tab.ready = true;
+    // The guest only exists from here: a restored mute is re-applied to it, and
+    // the new-tab page gets the recent list it cannot read for itself.
+    syncTabMutedFromView(tab);
+    pushRecentToTab(tab);
+    // did-navigate can land before the guest exists, so the site's remembered
+    // zoom is applied here too. It paints the badge when this tab is in front.
+    applyStoredZoom(tab);
     if (tab.id === activeTabId) {
       syncOmniboxFromActive(false);
       updateNavState();
@@ -1393,6 +1676,11 @@ function wireViewEvents(tab) {
       if (isNewTabUrl(readCurrentUrl(tab))) focusViewSoon(tab);
     }
   });
+
+  // The page started or stopped making a sound. Chromium fires these per media
+  // element, so they are a level, not an event: the chip just follows.
+  viewEl.addEventListener('media-started-playing', () => setTabAudible(tab, true));
+  viewEl.addEventListener('media-paused', () => setTabAudible(tab, false));
 
   viewEl.addEventListener('destroyed', () => {
     tab.ready = false;
@@ -1409,6 +1697,9 @@ function wireViewEvents(tab) {
     // so a navigation only clears the card when THIS load did not fail.
     if (!tab.failedThisLoad) clearTabCard(tab);
     setTabTitle(tab, tab.title);
+    // Zoom is remembered per site, so it is re-applied per navigation — a host
+    // with nothing stored is explicitly put back to 100%.
+    applyStoredZoom(tab);
     if (tab.id === activeTabId) {
       setOmniboxValue(tab.url, false); // guarded: never clobber live typing
       updateNavState();
@@ -1736,35 +2027,141 @@ function clampZoom(level) {
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, n));
 }
 
+// Zoom is remembered per hostname, the way every browser does it: { host: level }.
+const ZOOM_STORAGE_KEY = 'zoom';
+
+function readZoomMap() {
+  let raw = null;
+  try {
+    raw = window.localStorage.getItem(ZOOM_STORAGE_KEY);
+  } catch (err) {
+    return {}; // storage blocked: zoom is just not remembered this run
+  }
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch (err) {
+    return {}; // malformed
+  }
+}
+
+function writeZoomMap(map) {
+  try {
+    window.localStorage.setItem(ZOOM_STORAGE_KEY, JSON.stringify(map));
+  } catch (err) { /* storage blocked or full */ }
+}
+
+/** The key one url is remembered under, or '' for anything not worth keeping. */
+function zoomHostFor(url) {
+  const parsed = parseUrlOrNull(url);
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return '';
+  return parsed.hostname || '';
+}
+
+/** 100% is the absence of a preference, so it deletes the entry, never stores 0. */
+function rememberZoom(host, level) {
+  if (!host) return;
+  const map = readZoomMap();
+  if (!level) {
+    if (!Object.prototype.hasOwnProperty.call(map, host)) return;
+    delete map[host];
+  } else {
+    if (map[host] === level) return;
+    map[host] = level;
+  }
+  writeZoomMap(map);
+}
+
+/**
+ * getZoomLevel() is synchronous on current Electron and a promise on older
+ * builds, so every read goes through here and hands the level to a callback.
+ */
+function withZoomLevel(tab, fn) {
+  if (!isViewUsable(tab)) return;
+  try {
+    const current = tab.viewEl.getZoomLevel();
+    if (current && typeof current.then === 'function') {
+      current.then((level) => fn(typeof level === 'number' ? level : 0)).catch(() => {});
+      return;
+    }
+    fn(typeof current === 'number' ? current : 0);
+  } catch (err) { /* view went away mid-call */ }
+}
+
+/** The one place zoom is set: the view, the memory and the badge in step. */
+function applyZoomLevel(tab, level) {
+  if (!isViewUsable(tab)) return;
+  const next = clampZoom(level);
+  try {
+    tab.viewEl.setZoomLevel(next);
+  } catch (err) {
+    return; // view went away mid-call: nothing to remember
+  }
+  rememberZoom(zoomHostFor(readCurrentUrl(tab)), next);
+  if (tab.id === activeTabId) renderZoomBadge(next);
+}
+
 /**
  * Page tabs only — a Claude chamber scales with its own font size, not the
- * webview zoom. getZoomLevel() is synchronous on current Electron and a promise
- * on older builds, so both shapes are handled.
+ * webview zoom.
  */
 function zoomActiveTab(delta) {
   const tab = getActiveTab();
   if (!isViewUsable(tab)) return;
-
-  const apply = (level) => {
-    try {
-      tab.viewEl.setZoomLevel(clampZoom(level + delta));
-    } catch (err) { /* view went away mid-call */ }
-  };
-
-  try {
-    const current = tab.viewEl.getZoomLevel();
-    if (current && typeof current.then === 'function') {
-      current.then((level) => apply(typeof level === 'number' ? level : 0)).catch(() => {});
-      return;
-    }
-    apply(typeof current === 'number' ? current : 0);
-  } catch (err) { /* view went away mid-call */ }
+  withZoomLevel(tab, (level) => applyZoomLevel(tab, level + delta));
 }
 
 function resetZoom() {
   const tab = getActiveTab();
   if (!isViewUsable(tab)) return;
-  try { tab.viewEl.setZoomLevel(0); } catch (err) { /* view went away mid-call */ }
+  applyZoomLevel(tab, 0); // 0 also drops this host from the zoom memory
+}
+
+/**
+ * Re-apply this host's remembered zoom after a navigation. A host with nothing
+ * stored is put back to 100%: the zoom belongs to the site, not to the tab.
+ */
+function applyStoredZoom(tab) {
+  if (!isViewUsable(tab)) return;
+  const host = zoomHostFor(readCurrentUrl(tab) || tab.url);
+  const map = readZoomMap();
+  const stored = host && Object.prototype.hasOwnProperty.call(map, host) ? Number(map[host]) : 0;
+  const level = clampZoom(isFinite(stored) ? stored : 0);
+  try { tab.viewEl.setZoomLevel(level); } catch (err) { /* view went away mid-call */ }
+  if (tab.id === activeTabId) renderZoomBadge(level);
+}
+
+/**
+ * The badge over the omnibox. Chromium's zoom factor is 1.2^level, and 100% is
+ * no badge at all — the chrome only shows the setting while it is unusual.
+ */
+function renderZoomBadge(level) {
+  if (!zoomBadgeEl) return;
+  const n = (typeof level === 'number' && isFinite(level)) ? level : 0;
+  if (!n) {
+    zoomBadgeEl.hidden = true;
+    return;
+  }
+  const percent = Math.round(100 * Math.pow(1.2, n));
+  zoomBadgeEl.textContent = percent + '%';
+  zoomBadgeEl.title = 'Zoom ' + percent + '% — click to reset';
+  zoomBadgeEl.setAttribute('aria-label', 'Reset zoom, currently ' + percent + '%');
+  zoomBadgeEl.hidden = false;
+}
+
+/** Read the active tab's zoom and paint the badge from it. */
+function updateZoomBadge() {
+  const tab = getActiveTab();
+  if (!isViewUsable(tab)) {
+    renderZoomBadge(0); // a Claude chamber or a tab with no guest yet
+    return;
+  }
+  withZoomLevel(tab, (level) => {
+    // The read can land a tab switch late; the badge belongs to the active tab.
+    if (tab.id !== activeTabId) return;
+    renderZoomBadge(level);
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1919,6 +2316,8 @@ function wireChrome() {
 
   if (backBtn) backBtn.addEventListener('click', goBack);
   if (forwardBtn) forwardBtn.addEventListener('click', goForward);
+  // The zoom badge is a button that only ever does one thing.
+  if (zoomBadgeEl) zoomBadgeEl.addEventListener('click', resetZoom);
   // Same handler for both modes: reloadActiveTab() stops a load in progress.
   if (reloadBtn) reloadBtn.addEventListener('click', reloadActiveTab);
   if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
@@ -1977,7 +2376,7 @@ function historyCall(method, url, title) {
 // Actions the modules own. Each exposes handleShortcut(action) -> true when it
 // consumed the action; 'escape' is offered to all of them until one takes it.
 function moduleShortcut(action) {
-  const modules = [window.FindBar, window.Downloads, window.History, window.Settings];
+  const modules = [window.FindBar, window.Downloads, window.History, window.Settings, window.Shield];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
     let took = false;
@@ -2158,6 +2557,7 @@ function init() {
   forwardBtn = document.getElementById('forward');
   reloadBtn = document.getElementById('reload');
   omniboxEl = document.getElementById('omnibox');
+  zoomBadgeEl = document.getElementById('zoom-badge');
   viewsEl = document.getElementById('views');
   winMinBtn = document.getElementById('win-min');
   winMaxBtn = document.getElementById('win-max');
@@ -2170,6 +2570,14 @@ function init() {
   wireWindowControls();
   wireKeyboard();
   wireSettings();
+
+  // The chrome follows its own tabchange event, exactly like find.js and the
+  // other modules do: the badge belongs to the tab you are looking at, and a
+  // new-tab page gets a fresh recent list every time you come back to it.
+  document.addEventListener('tabchange', () => {
+    updateZoomBadge();
+    pushRecentToTab(getActiveTab());
+  });
 
   // Re-apply the theme theme-boot.js already stamped on <html>: this is what
   // paints the toggle glyph and hands the theme to terminal.js. Runs before the

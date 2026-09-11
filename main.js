@@ -321,6 +321,9 @@ function createWindow() {
 app.whenReady().then(() => {
   attachSessionHandlers();
   createWindow();
+  // Deliberately not awaited: a cold start fetches filter lists over the
+  // network and the window must not wait on that.
+  initAdblock();
 
   // macOS: re-open a window when the dock icon is clicked with none open.
   app.on('activate', () => {
@@ -773,6 +776,302 @@ function attachSessionHandlers() {
 }
 
 // ---------------------------------------------------------------------------
+// Ad blocking
+//
+// Ghostery's engine owns session.defaultSession's webRequest hooks, so every
+// <webview> guest is filtered by the one engine -- there is nothing per-tab to
+// wire up. Two things are ours: the persisted preferences (on/off + a per-site
+// allowlist) and the per-tab "blocked" counters the chrome shows.
+//
+// Cosmetic filtering (hiding the container an ad would have filled) needs a
+// preload inside every guest frame. We do NOT reach for will-attach-webview for
+// that -- that hook deliberately strips any preload a PAGE asks for, and must
+// keep doing so. enableBlockingInSession() registers the library's own preload
+// at the SESSION level instead, which is a separate mechanism and reaches every
+// frame including guests.
+// ---------------------------------------------------------------------------
+
+const { ElectronBlocker, NetworkFilter } = require('@ghostery/adblocker-electron');
+
+/** Serialized engine. First run fetches the lists; later runs load this. */
+function adblockCachePath() {
+  return path.join(app.getPath('userData'), 'adblock-engine.bin');
+}
+
+/** { enabled, allow } -- same lazy-path, best-effort style as window-state. */
+function adblockPrefsPath() {
+  return path.join(app.getPath('userData'), 'adblock.json');
+}
+
+/** @type {import('@ghostery/adblocker-electron').ElectronBlocker | null} */
+let blocker = null;
+
+/** True only while the engine is actually hooked into the session. */
+let blockingOn = false;
+
+let adblockPrefs = { enabled: true, allow: [] };
+
+/** host -> the ids of the exception filters we pushed into the engine for it. */
+const allowFilterIds = new Map();
+
+/** webContents id -> { blocked, host } for the page currently loaded there. */
+const adblockCounts = new Map();
+
+/**
+ * A hostname the allowlist can be keyed on: lowercase, no scheme, no port or
+ * path, and no leading `www.` so example.com and www.example.com are one site.
+ */
+function normaliseHost(value) {
+  if (typeof value !== 'string') return '';
+  let host = value.trim().toLowerCase();
+  if (!host) return '';
+  if (host.includes('://')) {
+    try {
+      host = new URL(host).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+  host = host.split('/')[0].split('@').pop().split(':')[0];
+  return host.replace(/^www\./, '');
+}
+
+function isAllowedHost(host) {
+  return !!host && adblockPrefs.allow.includes(host);
+}
+
+function readAdblockPrefs() {
+  const fallback = { enabled: true, allow: [] };
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(adblockPrefsPath(), 'utf8'));
+  } catch {
+    return fallback; // no file yet, unreadable, or not JSON -- blocking is on
+  }
+  if (!parsed || typeof parsed !== 'object') return fallback;
+  const allow = Array.isArray(parsed.allow)
+    ? [...new Set(parsed.allow.map(normaliseHost).filter(Boolean))]
+    : [];
+  return { enabled: parsed.enabled !== false, allow };
+}
+
+function saveAdblockPrefs() {
+  try {
+    fs.writeFileSync(adblockPrefsPath(), JSON.stringify(adblockPrefs, null, 2));
+  } catch {
+    // A disk error must never take down an IPC handler.
+  }
+}
+
+/**
+ * Two exception rules per allowlisted host, because one does not cover both
+ * halves of the blocker:
+ *   @@*$domain=host   -- lets every SUBRESOURCE the page requests through.
+ *                        (@@||host^$document does NOT: this engine matches one
+ *                        request at a time and keeps no page state, so a
+ *                        $document exception only ever matches the main
+ *                        document, which is never blocked in the first place.)
+ *   @@||host^$elemhide -- stops the cosmetic rules from hiding anything.
+ */
+function allowRulesFor(host) {
+  return [`@@*$domain=${host}`, `@@||${host}^$elemhide`];
+}
+
+function applyAllowRule(host) {
+  if (!blocker || allowFilterIds.has(host)) return;
+  const filters = allowRulesFor(host)
+    .map((raw) => NetworkFilter.parse(raw))
+    .filter(Boolean);
+  if (!filters.length) return;
+  blocker.update({ newNetworkFilters: filters });
+  allowFilterIds.set(host, filters.map((filter) => filter.getId()));
+}
+
+function removeAllowRule(host) {
+  const ids = allowFilterIds.get(host);
+  if (!blocker || !ids) return;
+  allowFilterIds.delete(host);
+  blocker.update({ removedNetworkFilters: ids });
+}
+
+function adblockState() {
+  return {
+    enabled: adblockPrefs.enabled,
+    ready: !!blocker && blockingOn,
+    allow: [...adblockPrefs.allow],
+  };
+}
+
+/**
+ * The library's cosmetic-filter IPC handler answers any frame in the session --
+ * including our own chrome, which is a file:// page and would get the generic
+ * "hide anything that looks like an ad" stylesheet injected into the UI. Wrap
+ * it so only real web pages are served. disable() removes the channel again.
+ */
+function guardCosmeticInjection() {
+  ipcMain.removeHandler('@ghostery/adblocker/inject-cosmetic-filters');
+  ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
+    let scheme = '';
+    try {
+      scheme = new URL(url).protocol;
+    } catch {
+      return undefined;
+    }
+    if (scheme !== 'http:' && scheme !== 'https:') return undefined;
+    if (!blocker) return undefined;
+    return blocker.onInjectCosmeticFilters(event, url, msg);
+  });
+}
+
+function setBlockingEnabled(on) {
+  const sess = session.defaultSession;
+  if (!blocker || !sess) {
+    blockingOn = false;
+    return;
+  }
+  if (on && !blockingOn) {
+    blocker.enableBlockingInSession(sess);
+    guardCosmeticInjection();
+    blockingOn = true;
+  } else if (!on && blockingOn) {
+    try {
+      blocker.disableBlockingInSession(sess);
+    } catch {
+      // Already gone; the flag below is what the rest of the app reads.
+    }
+    blockingOn = false;
+  }
+}
+
+/**
+ * Built once at startup and never awaited by window creation: a first run has
+ * to fetch ~3 MB of filter lists, and the browser must be usable meanwhile.
+ * Offline with no cache simply leaves the engine null -- everything else here
+ * degrades to "blocking unavailable" rather than failing.
+ */
+async function initAdblock() {
+  adblockPrefs = readAdblockPrefs();
+  try {
+    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+      path: adblockCachePath(),
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile,
+    });
+  } catch (err) {
+    console.error('[adblock] engine unavailable:', (err && err.message) || err);
+    blocker = null;
+    send('adblock:state-changed', adblockState());
+    return;
+  }
+
+  blocker.on('request-blocked', (request) => {
+    // request.tabId is the webContents id of the frame that made the request.
+    countBlocked(request && request.tabId);
+  });
+
+  for (const host of adblockPrefs.allow) applyAllowRule(host);
+  setBlockingEnabled(adblockPrefs.enabled);
+  send('adblock:state-changed', adblockState());
+}
+
+function hostOfUrl(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function countBlocked(wcId) {
+  if (!Number.isInteger(wcId)) return;
+  const entry = adblockCounts.get(wcId) || { blocked: 0, host: '' };
+  entry.blocked += 1;
+  adblockCounts.set(wcId, entry);
+  queueAdblockUpdate(wcId);
+}
+
+/** A page load blocks in bursts; the chrome only needs a few repaints a second. */
+const ADBLOCK_MIN_INTERVAL = 250;
+
+/** webContents id -> { last, timer } */
+const adblockSendState = new Map();
+
+function sendAdblockUpdate(wcId) {
+  const entry = adblockCounts.get(wcId);
+  if (!entry) return;
+  send('adblock:update', {
+    wcId,
+    blocked: entry.blocked,
+    host: entry.host,
+    allowed: isAllowedHost(entry.host),
+  });
+}
+
+/**
+ * At most one immediate send plus one trailing send per 250 ms window, so <= 4
+ * messages/sec per tab. The trailing send reads the counter at fire time, so
+ * the last value always arrives even though the ones in between are dropped.
+ */
+function queueAdblockUpdate(wcId) {
+  let st = adblockSendState.get(wcId);
+  if (!st) {
+    st = { last: 0, timer: null };
+    adblockSendState.set(wcId, st);
+  }
+  if (st.timer) return;
+  const wait = ADBLOCK_MIN_INTERVAL - (Date.now() - st.last);
+  if (wait <= 0) {
+    st.last = Date.now();
+    sendAdblockUpdate(wcId);
+    return;
+  }
+  st.timer = setTimeout(() => {
+    st.timer = null;
+    st.last = Date.now();
+    sendAdblockUpdate(wcId);
+  }, wait);
+}
+
+function forgetAdblockTab(wcId) {
+  adblockCounts.delete(wcId);
+  const st = adblockSendState.get(wcId);
+  if (st && st.timer) clearTimeout(st.timer);
+  adblockSendState.delete(wcId);
+}
+
+ipcMain.handle('adblock:state', () => adblockState());
+
+ipcMain.handle('adblock:count', (_event, payload) => {
+  const wcId = payload && payload.wcId;
+  const entry = adblockCounts.get(wcId) || { blocked: 0, host: '' };
+  return { blocked: entry.blocked, host: entry.host, allowed: isAllowedHost(entry.host) };
+});
+
+ipcMain.on('adblock:set-enabled', (_event, payload) => {
+  const on = !!(payload && payload.on);
+  adblockPrefs.enabled = on;
+  saveAdblockPrefs();
+  setBlockingEnabled(on);
+  send('adblock:state-changed', adblockState());
+});
+
+ipcMain.on('adblock:allow-host', (_event, payload) => {
+  const host = normaliseHost(payload && payload.host);
+  if (!host) return;
+  const on = !!(payload && payload.on);
+  const index = adblockPrefs.allow.indexOf(host);
+  if (on && index === -1) {
+    adblockPrefs.allow.push(host);
+    applyAllowRule(host);
+  } else if (!on && index !== -1) {
+    adblockPrefs.allow.splice(index, 1);
+    removeAllowRule(host);
+  }
+  saveAdblockPrefs();
+  send('adblock:state-changed', adblockState());
+});
+
+// ---------------------------------------------------------------------------
 // Shortcuts that must survive page focus
 //
 // A key pressed while focus sits inside a <webview> never reaches our renderer:
@@ -1000,6 +1299,16 @@ app.on('web-contents-created', (_event, contents) => {
     const w = liveWin();
     menu.popup(w ? { window: w } : {});
   });
+
+  // The blocked counter belongs to the PAGE, not the tab: a new main-frame
+  // document starts from zero, and carries the host the chrome shows next to
+  // it. 'did-navigate' is main-frame only, so an iframe cannot reset anything.
+  contents.on('did-navigate', (_e, url) => {
+    adblockCounts.set(contents.id, { blocked: 0, host: hostOfUrl(url) });
+    queueAdblockUpdate(contents.id);
+  });
+
+  contents.on('destroyed', () => forgetAdblockTab(contents.id));
 });
 
 // ---------------------------------------------------------------------------

@@ -2,3 +2,5 @@ node_modules/
 *.log
 --keep.png
 --keep.txt
+smoke.png
+smoke.txt

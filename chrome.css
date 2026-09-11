@@ -467,6 +467,70 @@ img.tab-icon[src=""],
 
 .tab.broken img.tab-icon { display: none; }
 
+/* audible / muted: a speaker button left of the title, which app.js only
+   hangs on a chip that has actually made a sound. Clicking it mutes the tab
+   without raising it, so it must read as a control, not as a status dot. */
+.tab-audio {
+  /* .glyph would otherwise make this inline-block and leave the glyph off
+     centre; said again here, after it, so the button re-centres its own icon */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: var(--icon-font);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg-2);
+}
+
+.tab-audio:hover { background: var(--glass-3); color: var(--fg); }
+
+/* muted is the quiet state in every sense: --fg-3, like the broken glyph */
+.tab-audio.is-muted { color: var(--fg-3); }
+
+/* .glyph sets display:inline-block, so hidden has to be said louder */
+.tab-audio[hidden] { display: none; }
+
+/* pinned: the chip is nothing but its icon. Fixed width, no title and no close
+   button — app.js keeps every pinned chip at the left of the strip, and the
+   hover tooltip carries the title the chip no longer has room for. */
+.tab.pinned {
+  flex: 0 0 auto;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 0;
+  gap: 2px;
+  justify-content: center;
+}
+
+.tab.pinned .tab-title,
+.tab.pinned .tab-close { display: none; }
+
+.tab.pinned img.tab-icon { margin-right: 0; }
+
+/* the globe stands in for a favicon the page never reported: only a pinned
+   chip shows it, and only until app.js marks the chip .has-icon */
+.tab .tab-globe { display: none; }
+
+.tab.pinned .tab-globe {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 14px;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  color: var(--fg-2);
+}
+
+.tab.pinned.has-icon .tab-globe { display: none; }
+
+/* broken beats both: the warning glyph is the only icon on the chip */
+.tab.broken .tab-globe { display: none; }
+
 /* --- drag to reorder (app.js sets the classes and the transforms) ---
    The lifted chip tracks the pointer exactly, so it carries NO transform
    transition; the chips stepping aside carry a stepped one, because the
@@ -594,6 +658,28 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
 }
 
 #omnibox::selection { background: var(--ion-select); color: var(--fg); }
+
+/* the zoom readout, riding at the right-hand end of the lens. app.js hides it
+   at 100%, so the nav row only grows an instrument while the setting is
+   unusual — and [hidden] has to beat the button display:inline-flex reset. */
+#zoom-badge {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
+  transition: color 200ms ease-out, background-color 180ms ease;
+}
+
+#zoom-badge:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+#zoom-badge:active { background: var(--sheen), var(--glass-3); }
+#zoom-badge[hidden] { display: none; }
 
 /* the pill that opens a new Claude tab */
 #newclaude {
@@ -872,7 +958,7 @@ body,
   .tab.live .dot,
   body.claude-live #newclaude .dot { animation: none; }
   .tab.loading::after { animation: none; }
-  .tab::after, .tab-close, #omnibox { transition: none; }
+  .tab::after, .tab-close, #omnibox, #zoom-badge { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item { transition: none; }
   /* the theme still switches, it just arrives all at once */

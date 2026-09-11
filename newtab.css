@@ -26,6 +26,9 @@
   --ion-glow: rgba(125,211,255,.45);
   --ion-line: rgba(125,211,255,.75);   /* focus border / focus outline */
 
+  /* the drop shadow under the one surface that floats over the page */
+  --panel-shadow: rgba(0,0,0,.45);
+
   /* the diagonal reflection every glass surface carries */
   --sheen: linear-gradient(115deg,
     rgba(255,255,255,.10)  0%,
@@ -75,6 +78,8 @@
   --ion-soft: rgba(11,127,214,.14);
   --ion-glow: rgba(11,127,214,.35);
   --ion-line: rgba(11,127,214,.75);
+
+  --panel-shadow: rgba(18,22,42,.16);
 
   --sheen: linear-gradient(115deg,
     rgba(255,255,255,.7)  0%,
@@ -206,7 +211,13 @@ body {
 }
 
 /* --- the field: the one memorable thing ---------------------- */
-.searchform { margin: 0; }
+/* position: the dropdown below hangs off this box, so it lines up with
+   the capsule without adding a pixel to the column's own height (the
+   circuit socket in newtab-bg.js is measured from that height). */
+.searchform {
+  margin: 0;
+  position: relative;
+}
 
 .field {
   display: block;
@@ -301,6 +312,154 @@ body {
   color: var(--fg);
 }
 
+/* --- recent sites -------------------------------------------- */
+/* The chip recipe one step quieter: shorter, smaller type, and no
+   backdrop blur — six more blurred surfaces over a drifting aurora is
+   real CPU for a difference nobody can see against a smooth gradient. */
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+/* display above would otherwise beat the UA's [hidden] rule */
+.recent[hidden] { display: none; }
+
+.recent-caption {
+  flex: 0 0 100%;               /* own line, above the tiles */
+  margin: 0 0 2px;
+  color: var(--fg-3);
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+.rtile {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--sheen), var(--glass);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  transition:
+    background-color 180ms ease,
+    color            180ms ease,
+    border-color     180ms ease;
+}
+
+.rtile-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 7px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.rtile-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rtile:hover {
+  background-color: var(--glass-2);
+  border-color: var(--glass-3);
+  color: var(--fg);
+}
+
+.rtile:active { background-color: var(--glass-3); }
+
+.rtile:focus-visible {
+  outline: 2px solid var(--ion-line);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
+/* --- typed-match dropdown ------------------------------------ */
+/* Glass, but over an opaque ground: it covers page content, so nothing
+   underneath may read through it. --ink-1 is that ground, the same one
+   the aurora's base fades to. */
+.suggest {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: 5px;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background:
+    var(--sheen),
+    linear-gradient(var(--glass), var(--glass)),
+    var(--ink-1);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 16px 38px var(--panel-shadow);
+  text-align: left;
+}
+
+.suggest[hidden] { display: none; }
+
+.sug {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: var(--fg);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background-color 120ms ease;
+}
+
+.sug-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 9px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.sug-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sug-host {
+  flex: 0 0 auto;
+  max-width: 45%;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--fg-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sug:hover { background-color: var(--glass-2); }
+
+/* the keyboard highlight: a rail, not a border, so nothing shifts */
+.sug.is-active {
+  background-color: var(--glass-2);
+  box-shadow: inset 2px 0 0 var(--ion);
+}
+
 /* --- launch motion: one rise, and that is all ---------------- */
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
@@ -309,11 +468,14 @@ body {
 
 .searchform { animation: rise 500ms ease-out both; }
 .links      { animation: rise 500ms ease-out 80ms both; }
+.recent     { animation: rise 500ms ease-out 140ms both; }
 
 /* --- narrow windows ------------------------------------------ */
 @media (max-width: 460px) {
   .stage { padding: 28px 24px 12vh; }
   .field { font-size: 16px; padding: 0 18px; }
+  .rtile { max-width: 132px; }
+  .sug-host { display: none; }        /* the title is the scarce thing here */
 }
 
 /* --- reduced motion ------------------------------------------ */
@@ -321,10 +483,13 @@ body {
   .aurora-pool,
   .aurora-rim,
   .searchform,
-  .links { animation: none; }
+  .links,
+  .recent { animation: none; }
 
   /* a theme flip lands instantly instead of crossfading */
   body,
   .field,
-  .chip { transition: none; }
+  .chip,
+  .rtile,
+  .sug { transition: none; }
 }

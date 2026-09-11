@@ -39,10 +39,23 @@
              autofocus
              spellcheck="false"
              autocapitalize="off"
-             autocorrect="off">
+             autocorrect="off"
+             role="combobox"
+             aria-autocomplete="list"
+             aria-controls="q-suggest"
+             aria-expanded="false">
+
+      <!-- Typed-match dropdown, built by newtab.js out of the recent list.
+           Absolutely positioned over the page, so it never changes the
+           column's box (the circuit socket is measured from that box). -->
+      <div id="q-suggest" class="suggest" role="listbox" aria-label="Recent matches" hidden></div>
     </form>
 
     <nav id="links" class="links" aria-label="Shortcuts"></nav>
+
+    <!-- Recent sites pushed in with window.__applyRecent(); stays hidden
+         until there is something left after the shortcut hosts are removed. -->
+    <nav id="recent" class="recent" aria-label="Recent sites" hidden></nav>
   </div>
 </main>
 
