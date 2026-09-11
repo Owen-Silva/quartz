@@ -63,6 +63,7 @@
   var GLYPH_DOWN = '\uE70D';
   var GLYPH_CLOSE = '\uE711';
   var GLYPH_CHECK = '\uE73E';
+  var GLYPH_SEARCH = '\uE721';
 
   var STORAGE_KEY = 'settings';
   /* theme-boot.js reads this one, before anything else runs. */
@@ -2297,6 +2298,284 @@
     }
   }
 
+  /* ============================================================
+     Find a setting — the filter under the panel's title
+
+     The panel is one long scroll of twelve sections, so the fastest way
+     to a control is to name it. Typing narrows the scroll to the fields
+     that carry every word; the rest of the panel folds away, headings
+     and all, and the matched words are lit where they are read.
+     ============================================================ */
+
+  var filterEl = null;          // the input in the head
+  var noneEl = null;            // the "No settings match" line
+  var filterTimer = 0;
+
+  /* Only where a setting is NAMED. A hint or a keycap still matches the
+     query — it is part of the index — but lighting words inside a
+     paragraph turns the panel into a page of highlighter. */
+  var MARK_IN = ['.set-label', '.set-row-label', '.set-shortcut-label', '.set-opt'];
+
+  var FOCUSABLE = ['button', 'input', 'select', 'textarea', 'a'];
+
+  function searchText(s) {
+    return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  /** Every word, in any order, somewhere in the haystack. */
+  function hasWords(hay, words) {
+    for (var i = 0; i < words.length; i++) if (hay.indexOf(words[i]) < 0) return false;
+    return true;
+  }
+
+  /**
+   * textContent, but with a space wherever one element ends and the next
+   * begins. Two buttons reading "Dark" and "Light" are one string to
+   * textContent — "darklight" — and no query would ever spell that.
+   */
+  function deepText(node) {
+    var kids = node.childNodes || [];
+    var out = '';
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.nodeType === 3) out += n.nodeValue;
+      else if (n.nodeType === 1) out += ' ' + deepText(n) + ' ';
+    }
+    return out;
+  }
+
+  /**
+   * The index, one lowercased string per .set-field, read off the rendered
+   * text: labels, hints, option names, keycaps — plus the section's own
+   * heading and any hint that sits outside the fields, so "address bar"
+   * finds the search engine list. Rebuilt by renderAll(), because a
+   * re-render replaces the very nodes this reads.
+   */
+  function indexFields() {
+    if (!bodyEl) return;
+    var sections = bodyEl.querySelectorAll('.set-section');
+    for (var i = 0; i < sections.length; i++) {
+      var s = sections[i];
+      var fields = s.querySelectorAll('.set-field');
+      var chrome = '';                     // the section's text outside its fields
+      var kids = s.children;
+      for (var k = 0; k < kids.length; k++) {
+        var kid = kids[k];
+        if (kid.classList && kid.classList.contains('set-field')) continue;
+        chrome += ' ' + deepText(kid) + ' ';
+      }
+      /* About has no fields at all: the section is then its own unit. */
+      s.setAttribute('data-search', searchText(deepText(s)));
+      for (var j = 0; j < fields.length; j++) {
+        fields[j].setAttribute('data-search', searchText(chrome + ' ' + deepText(fields[j])));
+      }
+    }
+  }
+
+  /** Text nodes under `root`, skipping the marks a previous pass left. */
+  function textNodes(root, out) {
+    out = out || [];
+    var kids = root.childNodes || [];
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.nodeType === 3) out.push(n);
+      else if (n.nodeType === 1 && n.tagName !== 'MARK') textNodes(n, out);
+    }
+    return out;
+  }
+
+  /**
+   * Light every hit in one text node. A host name, a chip label and a
+   * shortcut name are all user data, so nothing here goes near innerHTML:
+   * the only nodes made are text nodes and <mark>.
+   */
+  function markTextNode(node, words) {
+    var text = node.nodeValue || '';
+    var low = text.toLowerCase();
+    var spans = [];
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (!w) continue;
+      var at = low.indexOf(w);
+      while (at >= 0) { spans.push([at, at + w.length]); at = low.indexOf(w, at + w.length); }
+    }
+    if (!spans.length) return;
+    spans.sort(function (a, b) { return a[0] - b[0]; });
+
+    var merged = [];                       // two words can overlap: light one run
+    for (var k = 0; k < spans.length; k++) {
+      var last = merged[merged.length - 1];
+      if (last && spans[k][0] <= last[1]) last[1] = Math.max(last[1], spans[k][1]);
+      else merged.push([spans[k][0], spans[k][1]]);
+    }
+
+    var parent = node.parentNode;
+    if (!parent) return;
+    var cut = 0;
+    for (var m = 0; m < merged.length; m++) {
+      if (merged[m][0] > cut) {
+        parent.insertBefore(document.createTextNode(text.slice(cut, merged[m][0])), node);
+      }
+      var mk = document.createElement('mark');
+      mk.textContent = text.slice(merged[m][0], merged[m][1]);
+      parent.insertBefore(mk, node);
+      cut = merged[m][1];
+    }
+    if (cut < text.length) parent.insertBefore(document.createTextNode(text.slice(cut)), node);
+    parent.removeChild(node);
+  }
+
+  function markField(field, words) {
+    for (var i = 0; i < MARK_IN.length; i++) {
+      var hits = field.querySelectorAll(MARK_IN[i]);
+      for (var j = 0; j < hits.length; j++) {
+        var texts = textNodes(hits[j]);
+        for (var t = 0; t < texts.length; t++) markTextNode(texts[t], words);
+      }
+    }
+  }
+
+  /** normalize(), kept local, so the next split never straddles two nodes. */
+  function mergeTextNodes(parent) {
+    var kids = [];
+    for (var i = 0; i < parent.childNodes.length; i++) kids.push(parent.childNodes[i]);
+    var prev = null;
+    for (var j = 0; j < kids.length; j++) {
+      var n = kids[j];
+      if (n.nodeType !== 3) { prev = null; continue; }
+      if (prev) { prev.nodeValue = (prev.nodeValue || '') + (n.nodeValue || ''); parent.removeChild(n); }
+      else prev = n;
+    }
+  }
+
+  function unmarkAll() {
+    if (!bodyEl) return;
+    var marks = bodyEl.querySelectorAll('mark');
+    var parents = [];
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      var p = m.parentNode;
+      if (!p) continue;
+      p.insertBefore(document.createTextNode(m.textContent), m);
+      p.removeChild(m);
+      if (parents.indexOf(p) < 0) parents.push(p);
+    }
+    for (var j = 0; j < parents.length; j++) mergeTextNodes(parents[j]);
+  }
+
+  /**
+   * Hide every field the query misses, then every section left with nothing
+   * showing. A field with no index yet — a render that landed between two
+   * passes — counts as a match: the filter narrows the panel, it never
+   * swallows a control it has not read.
+   */
+  function applyFilter() {
+    filterTimer = 0;
+    if (!bodyEl) return;
+    var words = searchText(filterEl ? filterEl.value : '');
+    words = words ? words.split(' ') : [];
+    unmarkAll();
+
+    var sections = bodyEl.querySelectorAll('.set-section');
+    var anyShown = false;
+    for (var i = 0; i < sections.length; i++) {
+      var s = sections[i];
+      var fields = s.querySelectorAll('.set-field');
+      var shown = 0;
+      for (var j = 0; j < fields.length; j++) {
+        var idx = fields[j].getAttribute('data-search');
+        var hit = !words.length || idx === null || hasWords(idx, words);
+        fields[j].hidden = !hit;
+        if (!hit) continue;
+        shown++;
+        if (words.length) markField(fields[j], words);
+      }
+      var on = fields.length
+        ? shown > 0
+        : (!words.length || hasWords(s.getAttribute('data-search') || '', words));
+      s.hidden = !on;
+      if (on) anyShown = true;
+    }
+
+    if (noneEl) noneEl.hidden = !words.length || anyShown;
+    if (panelEl) panelEl.classList.toggle('is-filtering', words.length > 0);
+  }
+
+  /** Index and filter in one breath — what a re-render owes the filter. */
+  function refreshFilter() {
+    indexFields();
+    applyFilter();
+  }
+
+  /* 40ms: long enough that a fast typist filters once per word rather than
+     once per keystroke, short enough that the panel still feels live. */
+  function scheduleFilter() {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(applyFilter, 40);
+  }
+
+  function clearFilter() {
+    window.clearTimeout(filterTimer);
+    filterTimer = 0;
+    if (filterEl) filterEl.value = '';
+    applyFilter();
+  }
+
+  /** The first control still on screen, in reading order. */
+  function firstControl(node) {
+    var kids = node.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.hidden) continue;
+      var tag = String(n.tagName || '').toLowerCase();
+      if (FOCUSABLE.indexOf(tag) >= 0 && !n.disabled) return n;
+      var deeper = firstControl(n);
+      if (deeper) return deeper;
+    }
+    return null;
+  }
+
+  function focusFirstResult() {
+    var hit = bodyEl ? firstControl(bodyEl) : null;
+    if (hit && typeof hit.focus === 'function') hit.focus();
+    return hit;
+  }
+
+  function filterKeys(event) {
+    if (event.key === 'Escape') {
+      /* The first Escape empties the field; only a second one, on a field
+         already empty, is allowed through to close the panel. */
+      if (filterEl && filterEl.value) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearFilter();
+      }
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      focusFirstResult();
+    }
+  }
+
+  function buildFilter() {
+    var row = el('div', 'set-filter-row');
+    row.appendChild(el('span', 'set-filter-glyph glyph', GLYPH_SEARCH));
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'set-filter';
+    input.className = 'set-filter';
+    input.placeholder = 'Find a setting';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-label', 'Find a setting');
+    input.addEventListener('input', scheduleFilter);
+    input.addEventListener('keydown', filterKeys);
+    row.appendChild(input);
+    filterEl = input;
+    return row;
+  }
+
   /**
    * The popover lives on <body>, not inside .chrome-layer: the chrome layer
    * carries a blur filter before boot, and a fixed element there would be
@@ -2317,8 +2596,11 @@
     panelEl.hidden = true;
 
     var head = el('div', 'set-head');
-    head.appendChild(el('span', 'set-title', 'Settings'));
-    head.appendChild(iconButton(GLYPH_CLOSE, 'Close', 'set-act set-x', function () { closePanel(); }));
+    var headTop = el('div', 'set-head-top');
+    headTop.appendChild(el('span', 'set-title', 'Settings'));
+    headTop.appendChild(iconButton(GLYPH_CLOSE, 'Close', 'set-act set-x', function () { closePanel(); }));
+    head.appendChild(headTop);
+    head.appendChild(buildFilter());
     panelEl.appendChild(head);
 
     bodyEl = el('div', 'set-body');
@@ -2334,6 +2616,11 @@
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
+
+    noneEl = el('p', 'set-none', 'No settings match');
+    noneEl.hidden = true;
+    bodyEl.appendChild(noneEl);
+
     panelEl.appendChild(bodyEl);
 
     document.body.appendChild(panelEl);
@@ -2353,6 +2640,7 @@
     renderChips();
     renderPrivacy();
     renderShortcuts();
+    refreshFilter();          // the text just changed under the index
   }
 
   /** Anchor under the gear, like the downloads popover does. */
@@ -2374,6 +2662,15 @@
     if (buttonEl) {
       buttonEl.classList.add('is-open');
       buttonEl.setAttribute('aria-expanded', 'true');
+    }
+    /* Opened from the gear or the shortcut, the keyboard starts in the
+       filter. Opened with somewhere in the panel already focused — a
+       re-render, a control handing focus back — that focus is left alone. */
+    if (filterEl) {
+      var active = document.activeElement;
+      if (!active || !panelEl.contains(active)) {
+        try { filterEl.focus(); } catch (err) { /* not focusable yet */ }
+      }
     }
   }
 
@@ -2479,12 +2776,13 @@
       if (keys.indexOf('chips') >= 0) renderChips();
       if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
       if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
+      refreshFilter();            // those renders replaced indexed text
     });
 
     // The shortcut map has its own store; the section mirrors it the same way.
     var keysApi = shortcutsApi();
     if (keysApi && typeof keysApi.on === 'function') {
-      try { keysApi.on(function () { renderShortcuts(); }); } catch (err) { /* module's problem */ }
+      try { keysApi.on(function () { renderShortcuts(); refreshFilter(); }); } catch (err) { /* module's problem */ }
     }
   }
 
@@ -2560,6 +2858,9 @@
     _sleepTimes: SLEEP_TIMES,
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
-    _backgrounds: NEWTAB_BACKGROUNDS
+    _backgrounds: NEWTAB_BACKGROUNDS,
+    _applyFilter: applyFilter,
+    _clearFilter: clearFilter,
+    _focusFirstResult: focusFirstResult
   };
 })();
