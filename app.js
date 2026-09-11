@@ -273,6 +273,124 @@ function wireAutopauseReadout() {
     .catch(() => { /* nothing running: 'unknown' is the honest answer */ });
 }
 
+/* ------------------------------------------------------------------ */
+/* The new-tab stats strip                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Main samples the machine (CPU, memory, disk, network, GPU) only while
+ * somebody is listening, so the chrome's whole job here is to hold that
+ * subscription open for exactly as long as a new-tab page is IN FRONT of a
+ * focused window, and to hand each sample to that one guest.
+ *
+ * Background new-tab pages get nothing: they are not on screen, and the
+ * sampler — a long-lived typeperf child in main — is the expensive half. A
+ * quick switch away and back costs nothing either: main keeps the child alive
+ * for a few seconds after the count hits zero, so the pair of calls below is
+ * cheap even when it happens twice in a second.
+ *
+ * Every call into the preload is feature-detected: an older preload with no
+ * api.stats leaves the page showing dashes rather than throwing.
+ */
+
+// True while our subscribe() is outstanding. Every transition goes through
+// syncStatsSubscription(), so main is never told the same thing twice.
+let statsSubscribed = false;
+
+/** The preload's stats group, or null when this build has none. */
+function statsApi() {
+  const api = (window.api && window.api.stats) ? window.api.stats : null;
+  if (!api) return null;
+  if (typeof api.subscribe !== 'function' || typeof api.unsubscribe !== 'function') return null;
+  return api;
+}
+
+/**
+ * Hand one sample to one open new-tab guest (no-op for anything else).
+ *
+ * Same two guards as every other push in this file, and deliberately NO memo:
+ * consecutive samples differ by definition, and a dropped one is a gap in the
+ * page's graph rather than a saved round trip.
+ */
+function pushStatsToTab(tab, sample) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (!sample || typeof sample !== 'object') return;
+  let payload = '';
+  try { payload = JSON.stringify(sample); } catch (err) { return; }
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyStats && window.__applyStats(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+/** True when this tab is a new-tab page that is willing to show stats. */
+function statsTabEligible(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  // Only a page that said so OUT LOUD opts out; an older guest, or one whose
+  // answer has not come back yet, is treated as wanting them.
+  return tab.statsWanted !== false;
+}
+
+/**
+ * The one rule: subscribed exactly while a usable new-tab guest is the active
+ * tab and the window is focused. Called from every edge that can move either
+ * half — activation, dom-ready, close, window focus — and idempotent, so a
+ * caller never has to work out whether anything actually changed.
+ */
+function syncStatsSubscription() {
+  const api = statsApi();
+  if (!api) return;
+  const want = !windowBlurred && statsTabEligible(getActiveTab());
+  if (want === statsSubscribed) return;
+  statsSubscribed = want;
+  try {
+    if (want) api.subscribe();
+    else api.unsubscribe();
+  } catch (err) { /* main went away: the next edge tries again */ }
+}
+
+/**
+ * Ask a freshly loaded new-tab guest whether it wants stats at all, once per
+ * document, and cache the answer on the tab. A page that never defines
+ * `window.__statsWanted` is answering "yes".
+ */
+function queryStatsWanted(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const viewEl = tab.viewEl;
+  let pending = null;
+  try {
+    pending = viewEl.executeJavaScript(
+      'typeof window.__statsWanted === "boolean" ? window.__statsWanted : true'
+    );
+  } catch (err) { return; }
+  if (!pending || typeof pending.then !== 'function') return;
+  pending.then((wanted) => {
+    if (tab.viewEl !== viewEl) return; // the guest was replaced mid-flight
+    tab.statsWanted = wanted !== false;
+    syncStatsSubscription();
+  }, () => { /* guest went away: it keeps the default */ });
+}
+
+/**
+ * Called once from init(): one listener for the life of the window, forwarding
+ * each sample to whichever new-tab page is in front. Samples that land while a
+ * web page is active are dropped here — the unsubscribe is already on its way,
+ * and main's grace period means a few can still arrive after it.
+ */
+function wireStats() {
+  const api = statsApi();
+  if (!api || typeof api.onSample !== 'function') return;
+  try {
+    api.onSample((sample) => {
+      const tab = getActiveTab();
+      if (!tab || !isNewTabUrl(tab.url)) return;
+      pushStatsToTab(tab, sample);
+    });
+  } catch (err) { /* older preload: the page keeps its dashes */ }
+}
+
 // How many recent sites the new-tab page is given. Its own layout decides how
 // many of them it shows.
 const RECENT_SITES = 8;
@@ -364,10 +482,13 @@ function wireOverlayWatch() {
     win.onFocus((payload) => {
       windowBlurred = !(payload && payload.focused);
       syncBoardPause();
+      // The stats sampler follows the same signal: nothing is measured for a
+      // window the user is not looking at.
+      syncStatsSubscription();
     });
   } else {
-    window.addEventListener('blur', () => { windowBlurred = true; syncBoardPause(); });
-    window.addEventListener('focus', () => { windowBlurred = false; syncBoardPause(); });
+    window.addEventListener('blur', () => { windowBlurred = true; syncBoardPause(); syncStatsSubscription(); });
+    window.addEventListener('focus', () => { windowBlurred = false; syncBoardPause(); syncStatsSubscription(); });
   }
   // A freshly loaded new-tab guest has to learn the current state too.
   document.addEventListener('tabready', (event) => {
@@ -3094,6 +3215,8 @@ function activateTab(id) {
   document.dispatchEvent(new CustomEvent('tabchange', {
     detail: { id: target.id, kind: target.kind }
   }));
+  // The machine sampler runs only while a new-tab page is the one in front.
+  syncStatsSubscription();
   if (workspaceMoved) emitWorkspaceChange();
 }
 
@@ -3142,6 +3265,9 @@ function closeTab(id) {
   recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
   emitWorkspaceChange(); // a tab count moved
   pushReadoutToAll();    // ...so every open new-tab page says so
+  // The tab that just went may have been the new-tab page holding the sampler
+  // open; activateTab() below takes it straight back if its seat-mate is one.
+  syncStatsSubscription();
   saveSession();
 
   if (tabs.length === 0) {
@@ -4006,6 +4132,11 @@ function wireViewEvents(tab) {
     pushBackgroundToTab(tab);
     pushHistoryToTab(tab);
     pushReadoutToTab(tab);
+    // A new document has not opted out of anything yet; ask it once, and take
+    // the subscription now rather than waiting for that answer to come back.
+    tab.statsWanted = true;
+    queryStatsWanted(tab);
+    syncStatsSubscription();
     // did-navigate can land before the guest exists, so the site's remembered
     // zoom is applied here too. It paints the badge when this tab is in front.
     applyStoredZoom(tab);
@@ -5650,6 +5781,7 @@ function init() {
   wireSettings();
   wireOverlayWatch();
   wireAutopauseReadout();
+  wireStats();
 
   // The chrome follows its own tabchange event, exactly like find.js and the
   // other modules do: the badge belongs to the tab you are looking at, and a
@@ -5660,6 +5792,9 @@ function init() {
     // Cheap: the counts are already in hand and the autopause word is cached,
     // so coming back to a new tab never costs a round trip to main.
     pushReadoutToAll();
+    // activateTab() already did this for its own dispatch; the call is
+    // idempotent, and this is what covers a module dispatching 'tabchange'.
+    syncStatsSubscription();
   });
 
   // The split focus mark and a split crash card are parked over measured rects,
@@ -5732,6 +5867,11 @@ window.askArticlePromptText = askArticlePromptText;
 window.askClaudeAboutFile = askClaudeAboutFile;
 window.filePromptText = filePromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
+
+// The stats sampler's one entry point, said out loud for the harness: calling
+// it is always safe and always a no-op when nothing about the active tab, the
+// guest's wishes or the window's focus has moved.
+window.syncStatsSubscription = syncStatsSubscription;
 
 // Close and reopen with the tabs restored. settings.js (About) and the command
 // palette both go through this rather than api.app.restart(), so the session
