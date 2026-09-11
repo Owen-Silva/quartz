@@ -83,6 +83,62 @@
   --icon-font:  'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
   --titlebar-h: 40px;
   --nav-h:      44px;
+
+  /* --- instrument glass -----------------------------------------
+     The glass starts behaving like a pane of an instrument: a cut
+     edge that catches light, a lit rim, status as light, type as a
+     readout. Every token below is built out of the theme tokens
+     above with var(), so the ONE definition here covers dark, light
+     and all six palettes — a palette that relights --ion / --edge /
+     --specular relights these with it. Never copy them per palette.
+
+     A container (the omnibox slot, the active chip, a popover, a
+     pane) carries --bevel with corner-shape: round bevel round
+     bevel — TL round, TR cut, BR round, BL cut. Two cuts on the
+     diagonal, echoing the 115deg sheen; four would read as a kit.
+     CONTROLS keep ordinary round corners at --radius-ctl, so the
+     bevel stays a container signature, and nothing under ~28px
+     tall is ever bevelled. */
+  --bevel:      10px;
+  --bevel-lg:   14px;                     /* full panes, the new-tab search slot */
+  --radius-ctl:  6px;                     /* buttons, chips, menu rows */
+
+  /* the 1px lit edge: specular at the top-left falling to the accent
+     at the bottom-right, so a container looks lit from above and
+     powered from below. Painted as a border-box background layer
+     under a transparent border, which is the only way to put a
+     gradient edge on translucent glass. */
+  --rim: linear-gradient(135deg,
+    var(--specular)  0%,
+    var(--edge)     28%,
+    var(--edge)     62%,
+    var(--ion-glow) 100%);
+
+  /* the same rim with the accent at full strength: the focused slot */
+  --rim-focus: linear-gradient(135deg,
+    var(--specular) 0%,
+    var(--ion-line) 45%,
+    var(--ion) 100%);
+
+  /* a quiet row, or a tile at rest */
+  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
+
+  /* status as light. A pip is a dot that glows rather than a dot that
+     is painted. --pip-glow is the cool instrument light; the amber
+     pair is kept separate because amber resolves through --amber, not
+     --ion, and it alone means "a Claude session". The two amber
+     strengths preserve the distinction the chamber already draws:
+     live breathes, needs-you flashes brighter. */
+  --pip-glow:         0 0 6px var(--ion-glow), 0 0 1px var(--ion);
+  --pip-amber:        0 0 8px 1px var(--amber-glow), 0 0 1px var(--amber);
+  --pip-amber-strong: 0 0 10px 2px var(--amber-glow), 0 0 2px var(--amber);
+
+  /* the lit seam stood on end, for the split divider */
+  --seam-v: linear-gradient(180deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
+
+  /* Bahnschrift's wdth axis one notch in (75–100): labels, tab
+     titles, the omnibox, badges — type set as a readout */
+  --readout-stretch: 87.5%;
 }
 
 /* --- tokens: light ------------------------------------------- */
@@ -685,10 +741,24 @@ button {
 
 button:disabled { color: var(--fg-3); }
 
+/* Focus is light, not paint: a 1px accent ring with the pip's halo
+   sized up behind it, never a thick white outline. */
 button:focus-visible,
 .tab:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* A glass control keeps its lit lip and its shaded underside while it
+   is focused; the halo is simply added to them. Said after, and one
+   class heavier, so it beats the rule above rather than erasing it. */
+button.glass:focus-visible {
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 1px 0 var(--shade-drop),
+    0 0 0 3px var(--ion-soft);
 }
 
 /* --- titlebar: the thinnest, lightest pane -------------------- */
@@ -720,7 +790,7 @@ button:focus-visible,
 #newtab {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
 }
 
 #newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
@@ -743,11 +813,16 @@ button:focus-visible,
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--bevel);
   background: transparent;
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  /* the title is a readout: Bahnschrift a notch narrower, opened up a
+     hair, and figures in a host or a count line up column to column */
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: default;
 }
@@ -758,9 +833,28 @@ button:focus-visible,
   color: var(--fg);
 }
 
+/* The active chip is the one segment of the strip that is a container:
+   it takes the cut corners (in the @supports block near the end) and
+   the lit rim, so it reads as a pane seated in the strip rather than a
+   chip tinted a shade lighter. Inactive chips stay quiet — hover is
+   still nothing but a lighter glass and a hairline.
+
+   The rim is a border-box layer under a transparent border, and the
+   interior above it has to be OPAQUE or the gradient shows through the
+   whole chip instead of sitting on its edge — that bleed is what turned
+   the chip into a grey blob. A chip cannot take the ring-on-a-pseudo
+   treatment: ::after is the ion line (and the loading shimmer) and
+   ::before is the workspace bar, so both are spoken for. So this is the
+   addendum's opaque-interior variant — --panel-bg under the glass tint,
+   which keeps the chip reading lighter than its neighbours while the
+   rim stops at the border. */
 .tab.active {
-  background: var(--sheen), var(--glass-3);
-  border-color: var(--edge);
+  border-color: transparent;
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
@@ -778,7 +872,7 @@ button:focus-visible,
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--ion), transparent);
   opacity: 0;
-  transition: opacity 150ms ease-out;
+  transition: opacity 140ms steps(3, end);
   pointer-events: none;
 }
 
@@ -830,7 +924,7 @@ button:focus-visible,
   border-radius: 2px;
   background: var(--ws-colour);
   opacity: .45;
-  transition: opacity 150ms ease-out;
+  transition: opacity 140ms steps(3, end);
   pointer-events: none;
 }
 
@@ -867,7 +961,7 @@ button:focus-visible,
   font-size: 10px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity 120ms steps(3, end);
 }
 
 .tab:hover .tab-close,
@@ -956,6 +1050,11 @@ img.tab-icon[src=""],
 
 .tab-audio:hover { background: var(--glass-3); color: var(--fg); }
 
+/* It is a control, but it is also a status: sound coming out of the tab
+   is shown as light on the glyph, and the light goes out when it is
+   muted. No colour change, nothing that moves — the pip's own glow. */
+.tab-audio:not(.is-muted) { text-shadow: var(--pip-glow); }
+
 /* muted is the quiet state in every sense: --fg-3, like the broken glyph */
 .tab-audio.is-muted { color: var(--fg-3); }
 
@@ -1023,8 +1122,16 @@ img.tab-icon[src=""],
    strip sits on a backdrop-filter and a smooth slide re-blurs every frame. */
 .tab.dragging {
   z-index: 4;
-  background: var(--sheen), var(--glass-3);
-  border-color: var(--edge);
+  border-color: transparent;
+  /* opaque interior under the tint, for the same reason .tab.active
+     carries one: both of a chip's pseudo-elements are already in use, so
+     the rim stays a border-box layer and --panel-bg is what stops it
+     bleeding across the chip. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
@@ -1072,8 +1179,12 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   border-bottom: 1px solid var(--edge);
 }
 
-/* the lit seam under the chrome */
-.navrow::after {
+/* The lit seam under the chrome. It rides ::before rather than ::after so
+   that ::after is free for the omnibox's rim ring further down: an anchored
+   element has to come AFTER its anchor in tree order, and ::before is
+   generated ahead of #omnibox. Nothing else about the seam changes — it is
+   pinned by its own left/right/bottom and never needed an anchor. */
+.navrow::before {
   content: '';
   position: absolute;
   left: 0;
@@ -1086,10 +1197,13 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
 
 /* .iconbtn is the same instrument shape, for nav buttons added later
    (#theme carries it, and .glass, so it reads as a chip when idle). */
+/* Controls, not containers: round corners at --radius-ctl, no bevel.
+   What they gain is the light focus — the ring is in the shared
+   :focus-visible rule, so nothing is repeated here. */
 #back, #forward, #reload, .iconbtn {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
 }
 
 #back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--glass-2); color: var(--fg); }
@@ -1103,7 +1217,18 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
    to &#xE711; and adds this class; the instrument itself does not change. */
 #reload.stop { /* documented state — no visual override by design */ }
 
-/* the omnibox sits in the middle of the row like a lens */
+/* The omnibox sits in the middle of the row as the lit instrument
+   slot: the one bevelled container in the nav row, wearing the rim
+   (specular top-left, accent bottom-right) so it looks seated and
+   powered even before it is touched. The pill went with the round
+   corners — a slot is cut, not moulded. Its text is the readout.
+
+   The background here is nothing but the ordinary glass recipe. Running
+   the rim as a border-box layer under it washed the whole slot in a
+   grey-to-cyan gradient and took the placeholder with it, because the
+   glass above it is translucent. The rim is a RING now, anchored to this
+   input from .navrow::after (see below); the 1px border stays
+   transparent so the ring has its own lane to sit in. */
 #omnibox {
   flex: 1 1 auto;
   min-width: 0;
@@ -1111,31 +1236,38 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   margin: 0 auto;
   height: 34px;
   padding: 0 16px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  background: var(--sheen), var(--glass);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 13.5px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
-  /* focus keeps its own 200ms ease-out; background-color joins at the
-     180ms theme tempo so a theme switch re-lights the lens in step */
-  transition: box-shadow 200ms ease-out, border-color 200ms ease-out,
-              color 200ms ease-out, background-color 180ms ease;
+  /* stepped and short, like every other state change in the chrome —
+     a smooth fade here re-blurs the whole frosted row every frame.
+     background-color stays on the 180ms theme tempo so a theme switch
+     re-lights the lens in step with the row around it. */
+  transition: box-shadow 140ms steps(3, end), border-color 140ms steps(3, end),
+              color 140ms steps(3, end), background-color 180ms ease;
 }
 
 #omnibox::placeholder { color: var(--placeholder); }
 
+/* hover lifts the glass a shade; the ring is unchanged */
 #omnibox:hover { background: var(--sheen), var(--glass-2); }
 
-/* the one place the chrome lights up */
+/* the one place the chrome lights up: the glass lifts and the ring goes
+   to full accent (the ring itself is switched on .navrow::after, below) */
 #omnibox:focus {
   outline: none;
   background: var(--sheen), var(--glass-2);
-  border-color: var(--ion-line);
+  border-color: transparent;
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
@@ -1145,6 +1277,63 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
 
 #omnibox::selection { background: var(--ion-select); color: var(--fg); }
 
+/* --- the omnibox rim, as a ring -------------------------------------
+   An <input> cannot carry a pseudo-element, so the rim is anchored to the
+   omnibox from the row around it: anchor(top/right/bottom/left) resolves
+   to the omnibox's border box, 1px of padding plus the xor mask leaves
+   nothing but that 1px edge, and pointer-events: none keeps the whole
+   slot clickable. The ring takes .navrow::after and the lit seam has moved
+   to ::before, because an anchored element must come after its anchor in
+   tree order. Chromium 152 has anchor positioning; the @supports below is
+   what everything else lands on. */
+@supports (anchor-name: --a) {
+  #omnibox { anchor-name: --omni; }
+
+  .navrow::after {
+    content: '';
+    position: absolute;
+    position-anchor: --omni;
+    inset: anchor(top) anchor(right) anchor(bottom) anchor(left);
+    pointer-events: none;
+    padding: 1px;
+    border-radius: var(--bevel);
+    background: var(--rim);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+  }
+
+  .navrow:has(#omnibox:focus)::after { background: var(--rim-focus); }
+}
+
+/* No anchor positioning: back to the two-layer trick, over an OPAQUE
+   interior — the one form of it that cannot bleed through the glass. */
+@supports not (anchor-name: --a) {
+  #omnibox {
+    background:
+      var(--sheen) padding-box,
+      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+      var(--rim) border-box;
+  }
+
+  #omnibox:hover {
+    background:
+      var(--sheen) padding-box,
+      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
+      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+      var(--rim) border-box;
+  }
+
+  #omnibox:focus {
+    background:
+      var(--sheen) padding-box,
+      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
+      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+      var(--rim-focus) border-box;
+  }
+}
+
 /* the zoom readout, riding at the right-hand end of the lens. app.js hides it
    at 100%, so the nav row only grows an instrument while the setting is
    unusual — and [hidden] has to beat the button display:inline-flex reset. */
@@ -1153,14 +1342,15 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   height: 26px;
   padding: 0 10px;
   border: 1px solid var(--edge);
-  border-radius: 999px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 11.5px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   font-variant-numeric: tabular-nums;
-  transition: color 200ms ease-out, background-color 180ms ease;
+  transition: color 140ms steps(3, end), background-color 180ms ease;
 }
 
 #zoom-badge:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
@@ -1173,10 +1363,11 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   height: 30px;
   padding: 0 13px 0 11px;
   border: 1px solid var(--edge);
-  border-radius: 999px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -1184,6 +1375,11 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
 #newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
 
 /* --- session light (the only warm colour) --------------------- */
+/* Every status mark in the chrome is a pip: a lamp, not a painted
+   dot. At rest it carries the faintest wash of the room's own light
+   (--ion-soft, alpha .16) so it reads as an instrument that is
+   powered and idle; the moment a session is live it goes amber, and
+   amber is the only thing in the window that does. */
 .tab .dot,
 #newclaude .dot {
   flex: 0 0 auto;
@@ -1192,8 +1388,8 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
   height: 7px;
   border-radius: 50%;
   background: var(--fg-3);
-  box-shadow: none;
-  transition: background .2s, box-shadow .2s;
+  box-shadow: 0 0 4px var(--ion-soft);
+  transition: background 140ms steps(3, end), box-shadow 140ms steps(3, end);
 }
 
 .tab .dot { margin-right: 8px; }
@@ -1201,7 +1397,7 @@ body.tab-dragging .tab .tab-close { opacity: 0; }
 .tab.live .dot,
 body.claude-live #newclaude .dot {
   background: var(--amber);
-  box-shadow: 0 0 8px 1px var(--amber-glow);
+  box-shadow: var(--pip-amber);
   /* steps(): the dot lives inside a frosted row, so every frame it changes
      re-blurs the whole row. A few updates a second reads as the same breathe. */
   animation: live-pulse 2.4s steps(8) infinite;
@@ -1221,7 +1417,7 @@ body.claude-live #newclaude .dot {
 #newclaude.attn .dot,
 body.claude-live #newclaude.attn .dot {
   background: var(--amber);
-  box-shadow: 0 0 10px 2px var(--amber-glow);
+  box-shadow: var(--pip-amber-strong);
   animation: attn-pulse 1.2s steps(3) infinite;
 }
 
@@ -1235,6 +1431,8 @@ body.claude-live #newclaude.attn .dot {
 .tab-attn {
   flex: 0 0 auto;
   color: var(--amber);
+  /* the same light the pip is throwing, at glyph scale */
+  text-shadow: 0 0 6px var(--amber-glow);
   font-size: 8px;
   line-height: 1;
 }
@@ -1320,14 +1518,30 @@ body.claude-live #newclaude.attn .dot {
   cursor: col-resize;
 }
 
-#views > .split-divider:hover { background: var(--glass-3); }
+/* Touched, the handle becomes the lit seam stood on end — the same
+   line that runs under the chrome, --seam-v, brightest at the middle
+   and fading out at both ends. It is the one moment the divider is an
+   instrument rather than a gap. The seam itself is one token in both
+   themes; only the glass behind it is re-lit below, the same swap the
+   handle's resting state already makes.
+   body:has(> .split-scrim) is the drag: app.js lays that scrim over
+   the window for exactly as long as the pointer is down, so the seam
+   stays lit through a drag that has left the handle behind. No class
+   was added anywhere to make this work. */
+#views > .split-divider:hover,
+body:has(> .split-scrim) #views > .split-divider {
+  background: var(--seam-v), var(--glass-3);
+}
 
 /* The glass tokens are white overlays: they lift a strip off a dark page and
    vanish on a light one, so in light the handle between two white halves read
    as a gap rather than something to grab. --edge is the hairline that reads on
    either ground, and the accent's soft wash is the hover. */
 :root[data-theme="light"] #views > .split-divider { background: var(--edge); }
-:root[data-theme="light"] #views > .split-divider:hover { background: var(--ion-soft); }
+:root[data-theme="light"] #views > .split-divider:hover,
+:root[data-theme="light"] body:has(> .split-scrim) #views > .split-divider {
+  background: var(--seam-v), var(--ion-soft);
+}
 
 /* A press that lands on a guest page belongs to the guest, which would
    swallow the rest of the drag — so app.js lays this over the whole
@@ -1407,9 +1621,16 @@ body.claude-live #newclaude.attn .dot {
   box-sizing: border-box;
   min-width: 212px;
   padding: 4px;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
-  background: var(--sheen), var(--panel-bg);
+  /* a container, so: the cut corners (in the @supports block below)
+     and the lit rim. --panel-bg replaces --glass in the padding-box
+     layer because this pane hangs over a <webview> and paints its own
+     ground rather than borrowing one. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   /* --panel-bg keeps 4% of the page, and every other pane over a page blurs
      that 4% away. This menu was the one that did not, so in light the page's
      headline and links read straight through it. Same recipe as
@@ -1419,6 +1640,8 @@ body.claude-live #newclaude.attn .dot {
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   outline: none;               /* it is focused on open; the pane is the ring */
   overflow: hidden;            /* the rows' corners never poke the radius */
   box-shadow:
@@ -1436,7 +1659,7 @@ body.claude-live #newclaude.attn .dot {
   height: 32px;
   padding: 0 12px;
   border-left: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);   /* a menu row is a control, never bevelled */
   white-space: nowrap;
   cursor: default;
   transition: background-color 120ms steps(3, end);
@@ -1454,10 +1677,13 @@ body.claude-live #newclaude.attn .dot {
   pointer-events: none;
 }
 
+/* A rule that fades out to the right instead of ruling all the way
+   across: the seam motif at the scale of a list. Every divider in the
+   skin is this, never a solid --edge line. */
 #tabmenu .menu-sep {
   height: 1px;
   margin: 4px 8px;
-  background: var(--edge);
+  background: linear-gradient(90deg, var(--edge), transparent);
 }
 
 /* --- crash + load-failure cards (.tab-card, built by app.js) --- */
@@ -1477,8 +1703,17 @@ body.claude-live #newclaude.attn .dot {
   background: var(--panel-bg);
   color: var(--fg);
   font-family: var(--ui-font);
+  /* the card is read like a panel readout, dead host and all */
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-align: center;
 }
+
+/* No bevel and no rim on the card itself: it is inset 0 over the whole
+   well, so it is the well's ground for as long as the guest is dead,
+   not a container floating in it — cut corners there would open two
+   triangles onto the blank guest behind. The treatment lands on what
+   is inside instead. */
 
 .tab-card .card-glyph {
   font-size: 30px;
@@ -1495,21 +1730,75 @@ body.claude-live #newclaude.attn .dot {
   max-width: 440px;
   color: var(--fg-2);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;   /* hosts, ports, error codes */
   overflow-wrap: anywhere;     /* a long host must not widen the card */
 }
 
+/* the one control on the card: round corners, and the lit rim, so the
+   thing you are meant to press is the thing carrying light. Its hover and
+   press states tint the glass, so the rim cannot be a background layer
+   under them — it is a ring on the button's own ::before (both of its
+   pseudo-elements were free), sitting on the transparent 1px border. */
 .tab-card .card-btn {
+  position: relative;
   margin-top: 6px;
   height: 30px;
   padding: 0 16px;
-  border: 1px solid var(--edge);
-  border-radius: 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: var(--panel-bg);
   color: var(--fg);
   font-size: 12.5px;
+  transition: background-color 140ms steps(3, end);
+}
+
+.tab-card .card-btn::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  corner-shape: inherit;
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
 }
 
 .tab-card .card-btn:hover { background: var(--sheen), var(--glass-2); }
 .tab-card .card-btn:active { background: var(--sheen), var(--glass-3); }
+
+.tab-card .card-btn:hover::before,
+.tab-card .card-btn:active::before { background: var(--rim-focus); }
+
+/* --- the bevel ------------------------------------------------- */
+/* The one memorable thing, kept in one place so it can be read at a
+   glance: which corners in the chrome are cut, and nothing else.
+   round bevel round bevel = TL round, TR cut, BR round, BL cut — two
+   cuts on the diagonal, along the same axis as the sheen. The whole
+   section is behind @supports, so anywhere corner-shape is missing
+   every one of these simply keeps the plain round radius it already
+   declares. No clip-path: it would take the borders and the shadows
+   with it, and the rim IS a border.
+   Controls are deliberately absent — buttons, badges, menu rows and
+   the pills keep --radius-ctl, which is what makes a cut corner mean
+   "this is a container". */
+@supports (corner-shape: bevel) {
+  /* the lit instrument slot, and the ring anchored over it: the ring is
+     a separate box, so it is cut here too or it would square off the
+     slot's two cut corners. */
+  #omnibox,
+  .navrow::after { corner-shape: round bevel round bevel; }
+
+  /* the active chip, and the chip while it is in the air */
+  .tab.active,
+  .tab.dragging { corner-shape: round bevel round bevel; }
+
+  /* the popover that hangs over a page */
+  #tabmenu { corner-shape: round bevel round bevel; }
+}
 
 /* --- scrollbars (chrome only) --------------------------------- */
 #tabstrip::-webkit-scrollbar { height: 0; width: 0; }
@@ -1559,7 +1848,8 @@ body,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; }
   .tab.loading::after { animation: none; }
-  .tab::after, .tab::before, .tab-close, #omnibox, #zoom-badge { transition: none; }
+  .tab::after, .tab::before, .tab-close, #omnibox, #zoom-badge,
+  .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item { transition: none; }
   /* the theme still switches, it just arrives all at once */

@@ -52,15 +52,23 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
+  /* A machined pane: bevelled on the diagonal (see the @supports below)
+     and edged with the rim gradient rather than a painted border —
+     specular at the top-left, accent at the bottom-right, so the pane
+     reads as lit from above and powered from below. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
-     through it. Same recipe the downloads popover uses. */
-  background: var(--sheen), var(--panel-bg);
+     through it. Same recipe the downloads popover uses; the ground
+     clips to the padding box so the rim keeps the border strip. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow:
@@ -69,14 +77,26 @@
     0 14px 34px var(--shade-drop);
 }
 
-/* Title row and filter, stacked: the head is a column now. */
+/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
+   the sheen's angle. Guarded, so a build without corner-shape keeps the
+   plain radius above. */
+@supports (corner-shape: bevel) {
+  #settings-panel { corner-shape: round bevel round bevel; }
+}
+
+/* Title row and filter, stacked: the head is a column now. The rule
+   under it is the seam motif rather than a border — a hairline fading
+   out to the right. The border stays, transparent, so the box model is
+   what it was and the gradient has a strip to paint in. */
 #settings-panel .set-head {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
   padding: 0 14px 10px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid transparent;
+  background: linear-gradient(90deg, var(--edge), transparent)
+              left bottom / 100% 1px no-repeat border-box;
 }
 
 #settings-panel .set-head-top {
@@ -112,11 +132,14 @@
   width: 100%;
   padding: 6px 9px 6px 28px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  /* a control: round corners, so the bevel stays a container signature */
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.4;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), border-color 120ms steps(2);
@@ -153,6 +176,7 @@
   color: var(--fg);
   font-size: 13px;
   font-weight: 500;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -168,21 +192,68 @@
    Sections
    ============================================================ */
 
+/* A section is the pane's natural container, so it is the thing that
+   gets bevelled: a quiet card on the panel's ground, edged with the
+   soft rim rather than separated by a rule. The negative inline margin
+   cancels the card's own gutter, so every heading and control stays on
+   exactly the column it was on before. */
+/* The card's ground is its own glass again, plus one quiet wash from the
+   top-left so it still reads as lit from above. The rim is NOT painted with
+   the two-layer background trick here: over a translucent padding box the
+   border-box gradient shows through the whole card and washes it grey. It
+   is a ring on ::before instead — inset -1px with a 1px padding band,
+   masked so only that band paints, which lands it exactly on the
+   transparent border. Nothing in a section is absolutely positioned
+   against anything further out, so `position: relative` costs nothing. */
 #settings-panel .set-section {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--edge);
+  position: relative;
+  margin: 0 -12px 6px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  background:
+    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
+    var(--glass);
+}
+
+#settings-panel .set-section::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim-soft);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@supports (corner-shape: bevel) {
+  #settings-panel .set-section { corner-shape: round bevel round bevel; }
+  #settings-panel .set-section::before { corner-shape: inherit; }
 }
 
 /* last-of-type, not last-child: the "No settings match" line is the body's
-   last child now, and About must keep its open bottom edge. */
-#settings-panel .set-section:last-of-type { border-bottom: 0; padding-bottom: 4px; }
+   last child now, and About closes the stack. The border stays (now the
+   card's bottom edge) and only the margin under it goes. */
+#settings-panel .set-section:last-of-type { margin-bottom: 0; }
 
+/* A readout, not a heading: sentence case, semi-condensed, quiet, and
+   closed by a hairline that fades out to the right — the seam motif at
+   section scale, used instead of a solid rule. The padding it needs for
+   that line comes back out of the margin, so nothing below moves. */
 #settings-panel .set-h {
-  margin: 0 0 9px;
-  color: var(--fg);
-  font-size: 12.5px;
-  font-weight: 500;
+  margin: 0 0 4px;
+  padding-bottom: 5px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
+  background: linear-gradient(90deg, var(--edge), transparent)
+              left bottom / 100% 1px no-repeat;
 }
 
 #settings-panel .set-hint {
@@ -203,7 +274,9 @@
   display: inline-flex;
   padding: 2px;
   border: 1px solid var(--edge);
-  border-radius: 9px;
+  /* a control housing a control: round, one step outside the inner
+     radius, so the bevel stays the container signature */
+  border-radius: calc(var(--radius-ctl) + 3px);
   background: var(--glass);
   box-shadow: inset 0 1px 0 var(--specular);
 }
@@ -212,10 +285,12 @@
   min-width: 76px;
   height: 26px;
   padding: 0 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
 
@@ -239,10 +314,12 @@
   gap: 9px;
   height: 28px;
   padding: 0 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-align: left;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -259,10 +336,12 @@
   background: var(--glass);
 }
 
+/* The chosen bead is a pip: light rather than paint, so it reads the
+   same as every other live indicator in the chrome. */
 #settings-panel .set-opt.is-on .set-dot {
   border-color: var(--ion-line);
   background: var(--ion);
-  box-shadow: 0 0 0 3px var(--ion-soft), 0 0 10px var(--ion-glow);
+  box-shadow: 0 0 0 3px var(--ion-soft), var(--pip-glow);
 }
 
 /* --- the palette swatches ------------------------------------
@@ -325,6 +404,7 @@
 #settings-panel .set-swatch-name {
   color: var(--fg-3);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
   line-height: 1.25;
   text-align: center;
   letter-spacing: .01em;
@@ -381,20 +461,24 @@
     0 1px 4px var(--shade-drop);
 }
 
+/* Focus is light: a hairline ion ring and the pip's halo, not a white
+   band around the bead. */
 #settings-panel .set-hue:focus-visible::-webkit-slider-thumb {
   box-shadow:
-    0 0 0 1px var(--edge),
-    0 0 0 3px var(--focus-ring);
+    0 0 0 1px var(--ion-line),
+    0 0 0 3px var(--ion-soft);
 }
 
 /* --- plain buttons -------------------------------------------- */
 #settings-panel .set-text {
   height: 24px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
 
@@ -416,11 +500,13 @@
   margin-top: 8px;
   padding: 0 12px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -433,7 +519,7 @@
 #settings-panel .set-act {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -457,6 +543,8 @@
   margin: 0 0 6px;
   color: var(--fg-2);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.35;
 }
 
@@ -475,11 +563,13 @@
   height: 28px;
   padding: 0 9px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-overflow: ellipsis;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), border-color 120ms steps(2);
@@ -514,6 +604,8 @@
   min-width: 0;
   color: var(--fg-2);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.35;
 }
 
@@ -546,11 +638,13 @@
   height: 28px;
   padding: 0 26px 0 9px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   cursor: pointer;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), border-color 120ms steps(2);
@@ -593,10 +687,12 @@
   width: calc(100% + 16px);
   margin-inline: -8px;
   padding: 6px 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-align: left;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -604,11 +700,34 @@
 #settings-panel .set-row:hover { background: var(--glass); color: var(--fg); }
 #settings-panel .set-row.is-on { color: var(--fg); }
 
+/* a row whose control is not there to throw */
+#settings-panel .set-row:disabled { color: var(--fg-3); }
+#settings-panel .set-row:disabled:hover { background: none; color: var(--fg-3); }
+
+/* The label names its own colour rather than inheriting the row's.
+   .set-row transitions `color`, and --fg is one of the tokens the theme
+   switch itself rewrites — so an inherited label sits on the OLD theme's
+   --fg for the first step of that transition, which in daylight is
+   #eef1f8: near-white type on the white pane, which is exactly what the
+   switched-on Claude rows showed. (Only the rows a theme change does not
+   re-render were caught by it; the Look section rebuilds itself and so
+   always looked right.) Declared here, on an element with no transition
+   of its own, the label is --fg in both themes and on every frame. The
+   three states below are the row's own, repeated one level down so that
+   hover and "on" read exactly as they did. */
 #settings-panel .set-row-label {
   flex: 1 1 auto;
   min-width: 0;
+  color: var(--fg-2);
   line-height: 1.35;
 }
+
+#settings-panel .set-row:hover .set-row-label { color: var(--fg); }
+#settings-panel .set-row.is-on .set-row-label { color: var(--fg); }
+
+/* last, so an "on" row that cannot be thrown still reads as unavailable */
+#settings-panel .set-row:disabled .set-row-label,
+#settings-panel .set-row:disabled:hover .set-row-label { color: var(--fg-3); }
 
 #settings-panel .set-switch {
   position: relative;
@@ -639,11 +758,12 @@
   background: var(--ion-soft);
 }
 
-/* lit, like every other active thing in the chrome */
+/* lit, like every other active thing in the chrome: the knob is a pip,
+   so "on" is light rather than a second colour of paint */
 #settings-panel .set-row.is-on .set-switch-knob {
   transform: translateX(16px);
   background: var(--ion);
-  box-shadow: 0 0 8px var(--ion-glow);
+  box-shadow: var(--pip-glow);
 }
 
 /* a command, keycapped the way the shortcuts table caps a key */
@@ -655,6 +775,7 @@
   color: var(--fg-2);
   font-family: 'Cascadia Mono', Consolas, 'Segoe UI', monospace;
   font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
 }
@@ -679,7 +800,7 @@
 }
 
 #settings-panel .set-site {
-  border-radius: 9px;
+  border-radius: var(--radius-ctl);
   transition: background-color 120ms steps(2);
 }
 
@@ -698,6 +819,8 @@
   min-width: 0;
   color: var(--fg);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -726,7 +849,7 @@
   min-height: 120px;
   padding: 8px 9px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: Consolas, 'Cascadia Mono', monospace;
@@ -797,9 +920,11 @@
   align-items: center;
   height: 22px;
   padding: 0 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   list-style: none;
   cursor: default;
   user-select: none;
@@ -815,21 +940,47 @@
 #settings-panel .set-tokens[open] .set-tokens-sum::before { content: '\2212'; }
 #settings-panel .set-tokens-sum:hover { background: var(--glass-2); color: var(--fg); }
 #settings-panel .set-tokens-sum:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--ion-soft);
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* name and meaning on one line each, the names in the code type the
    field above uses so they read as the things you would type. */
 #settings-panel .set-tokens-list {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 3px 10px;
   margin: 7px 0 0;
   padding: 8px 9px;
-  border: 1px solid var(--edge);
-  border-radius: 8px;
-  background: var(--glass);
+  /* a container, not a control: the bevel and the soft rim. The rim is a
+     ring on ::before for the same reason the section's is — the two-layer
+     trick bleeds through translucent glass. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  background:
+    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
+    var(--glass);
+}
+
+#settings-panel .set-tokens-list::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim-soft);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@supports (corner-shape: bevel) {
+  #settings-panel .set-tokens-list { corner-shape: round bevel round bevel; }
+  #settings-panel .set-tokens-list::before { corner-shape: inherit; }
 }
 
 #settings-panel .set-token-name {
@@ -865,15 +1016,21 @@
 
 /* 96x54 — the window's own proportion, so the crop the new tab will make is
    the crop shown here. */
+/* A tile, so it takes the container's bevel — the picture is clipped to
+   the same machined edge the panes wear. */
 #settings-panel .set-bg-preview {
   flex: 0 0 auto;
   width: 96px;
   height: 54px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--bevel);
   background: var(--glass);
   object-fit: cover;
   box-shadow: inset 0 1px 0 var(--specular);
+}
+
+@supports (corner-shape: bevel) {
+  #settings-panel .set-bg-preview { corner-shape: round bevel round bevel; }
 }
 
 /* Nothing stored yet: the same box, empty, so the row never jumps. */
@@ -901,7 +1058,9 @@
   min-width: 30px;
   color: var(--fg-3);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
   text-align: right;
 }
 
@@ -942,10 +1101,11 @@
     0 1px 4px var(--shade-drop);
 }
 
+/* the same light ring the hue slider takes */
 #settings-panel .set-range:focus-visible::-webkit-slider-thumb {
   box-shadow:
-    0 0 0 1px var(--edge),
-    0 0 0 3px var(--focus-ring);
+    0 0 0 1px var(--ion-line),
+    0 0 0 3px var(--ion-soft);
 }
 
 #settings-panel .set-chips {
@@ -959,7 +1119,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   transition: background-color 120ms steps(2);
 }
 
@@ -981,11 +1141,13 @@
   height: 21px;
   padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: none;
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
@@ -1033,6 +1195,146 @@
 }
 
 /* ============================================================
+   Spotify — the auto-pause helper
+
+   One switch for the whole computer, one for this browser's own
+   tabs, the site list under them, and a health check. Every value
+   here is read back from main, so the section says what is true
+   rather than what was chosen: a lit pip and a sentence.
+   ============================================================ */
+
+/* The readout under the main switch. flex-start rather than a baseline,
+   with the pip dropped onto the first line's optical centre, so a sentence
+   that wraps keeps its light at the top instead of floating to the middle. */
+#settings-panel .set-readout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 7px 0 0;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 1.45;
+}
+
+#settings-panel .set-readout-text { min-width: 0; }
+
+/* Status as light: 6px, glowing when it is live, amber while it is holding
+   Spotify down, and an unlit bead when nothing is running. */
+#settings-panel .set-pip {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  opacity: .55;
+}
+
+#settings-panel .set-pip.is-live {
+  background: var(--ion);
+  box-shadow: var(--pip-glow);
+  opacity: 1;
+}
+
+#settings-panel .set-pip.is-hold {
+  background: var(--amber);
+  box-shadow: var(--pip-amber);
+  opacity: 1;
+}
+
+/* the count of playing tabs: a number, so tabular */
+#settings-panel .set-count {
+  margin: 7px 0 0;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 1.45;
+}
+
+/* The site list: a field, not a code block. These are host names, and the
+   terminal is the only thing in this browser set in monospace. */
+#settings-panel .set-hosts {
+  display: block;
+  width: 100%;
+  min-height: 86px;
+  margin-top: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 1.6;
+  resize: vertical;
+  box-shadow: inset 0 1px 0 var(--specular);
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#settings-panel .set-hosts::placeholder { color: var(--placeholder); }
+#settings-panel .set-hosts:hover { background: var(--glass-2); }
+
+#settings-panel .set-hosts:focus {
+  outline: none;
+  border-color: var(--ion-line);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+#settings-panel .set-hosts::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-hosts:disabled { color: var(--fg-3); }
+
+/* the check sits at the top of its field, like the privacy actions do */
+#settings-panel .set-field[data-field="autopausehealth"] .set-btn { margin-top: 0; }
+
+/* The health report: the token sheet's collapsible, with the answer set as
+   a readout — pre-wrapped so the check's own line breaks survive, tabular
+   so its numbers line up, and never taller than the pane can carry. */
+#settings-panel .set-health { margin-top: 8px; }
+
+/* Something is wrong: the words say so, and an amber pip marks the row.
+   Amber as type would be 2.2:1 on the light pane, so it stays light. */
+#settings-panel .set-tokens-sum.is-wrong { color: var(--fg); }
+
+#settings-panel .set-tokens-sum.is-wrong::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: var(--pip-amber);
+}
+
+#settings-panel .set-health-text {
+  max-height: 210px;
+  margin: 7px 0 0;
+  padding: 8px 9px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: var(--glass);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ============================================================
    Shortcuts table
    ============================================================ */
 
@@ -1050,6 +1352,8 @@
   gap: 3px;
 }
 
+/* A key cap is a readout: semi-condensed, and the digits are tabular so
+   a column of Ctrl+1 … Ctrl+9 caps all measure the same. */
 #settings-panel .set-key {
   min-width: 18px;
   padding: 1px 5px;
@@ -1059,6 +1363,9 @@
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
   line-height: 15px;
   text-align: center;
   box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
@@ -1076,6 +1383,8 @@
   min-width: 0;
   color: var(--fg-2);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.35;
 }
 
@@ -1086,6 +1395,8 @@
   margin: 12px 0 4px;
   color: var(--fg-3);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.3;
 }
 
@@ -1105,6 +1416,8 @@
   min-width: 0;
   color: var(--fg);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.35;
 }
 
@@ -1129,20 +1442,23 @@
 
 #settings-panel .set-keynote { margin-left: 2px; }
 
-/* The live pill: the accent rail says the next keystroke is being read. */
+/* The live pill: the accent rail says the next keystroke is being read,
+   and it glows like a pip while it is listening — status as light. */
 #settings-panel .set-rec {
   display: inline-flex;
   align-items: center;
   height: 19px;
   padding: 0 8px;
   border: 1px solid var(--ion-line);
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: var(--ion-soft);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 17px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  box-shadow: 0 0 0 3px var(--ion-soft), var(--pip-glow);
   transition: background-color 150ms steps(2), border-color 150ms steps(2);
 }
 
@@ -1157,10 +1473,15 @@
    About
    ============================================================ */
 
+/* Version and build numbers: tabular, so they sit as a readout rather
+   than as prose. */
 #settings-panel .set-about {
   margin: 0;
   color: var(--fg-3);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
 }
 
 /* ============================================================
@@ -1175,16 +1496,24 @@
   z-index: 30;
   max-width: calc(100vw - 40px);
   padding: 8px 16px;
-  border: 1px solid var(--edge);
+  /* The one pill in the pass: a bevel at a 999px radius would cut the
+     thing in half, so the shape stays round and only the edge changes —
+     the rim gradient instead of a painted border. */
+  border: 1px solid transparent;
   border-radius: 999px;
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  background: var(--sheen), var(--panel-bg);
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow:
@@ -1210,8 +1539,15 @@
    ============================================================ */
 #settings:focus-visible,
 #settings-panel button:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+}
+
+/* The halo behind the ring — focus is light, not a thick white outline.
+   Kept off the nav instrument, which wears .glass's inset shadows, and
+   off the palette chips, whose own ring says which one is worn. */
+#settings-panel button:focus-visible:not(.set-swatch) {
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
 }
 
 /* ============================================================
@@ -1231,6 +1567,7 @@
   #settings-panel .set-sel,
   #settings-panel .set-css,
   #settings-panel .set-js,
+  #settings-panel .set-hosts,
   #settings-panel .set-filter,
   #settings-panel .set-tokens-sum,
   #settings-panel .set-site,

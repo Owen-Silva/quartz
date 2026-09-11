@@ -30,18 +30,29 @@
   gap: 6px;
   padding: 0 6px 0 12px;
 
-  border: 1px solid var(--edge);
-  border-radius: 10px;
+  /* A cut edge that catches light: two corners on the diagonal are
+     bevelled (see the @supports below), and the 1px border is left
+     transparent for the rim ring below to sit in — specular at the
+     top-left, accent at the bottom-right — so the panel reads as lit
+     from above and powered from below. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
   font-family: var(--ui-font);
 
   /* Unlike every other pane, this one hangs over a <webview>, which is a
      separate compositing surface: the host's backdrop-filter cannot be
      relied on to blur the guest's pixels. So the glass keeps its sheen and
      tint but gets the acrylic ground under it — the same token body uses —
-     and the query stays legible over any page. Longhands, so .glass's
-     `background` shorthand cannot put the tint back on its own. */
-  background-color: var(--panel-bg);
-  background-image: var(--sheen), linear-gradient(var(--glass), var(--glass));
+     and the query stays legible over any page. The ID outranks .glass, so
+     its `background` shorthand cannot put the tint back on its own.
+
+     No rim layer here: --panel-bg is .94 alpha, not paint, so a border-box
+     gradient underneath it still washed up through the pane. The rim is a
+     ring on ::before instead. */
+  background:
+    var(--sheen),
+    linear-gradient(var(--glass), var(--glass)),
+    linear-gradient(var(--panel-bg), var(--panel-bg));
 
   /* the .glass recipe, with real elevation: this one floats over a page */
   box-shadow:
@@ -58,6 +69,32 @@
               color 180ms ease,
               border-color 180ms ease,
               box-shadow 180ms ease;
+}
+
+/* The lit rim, as a ring laid into the transparent border rather than as a
+   background layer under the pane's own ground. inset:-1px reaches from
+   the padding box back out over that 1px border, and the xor mask keeps
+   the frame and discards the middle, so the gradient touches the edge and
+   nothing else. pointer-events:none — the buttons sit under it. */
+#findbar::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
+   the 115deg sheen. Guarded, so a Chromium without corner-shape simply
+   keeps the plain radius above. */
+@supports (corner-shape: bevel) {
+  #findbar,
+  #findbar::before { corner-shape: round bevel round bevel; }
 }
 
 /* The reset in this app does not carry [hidden]{display:none}, and a
@@ -97,12 +134,15 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
   margin: 0;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  /* A control, not a container: round corners, so the bevel stays the
+     panel's signature. */
+  border-radius: var(--radius-ctl);
   background: none;
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 13px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   -webkit-user-select: text;
   user-select: text;
@@ -119,21 +159,27 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
   color: var(--fg);
 }
 
-/* The app's one focus idiom: a hairline ring, keyboard focus only. */
+/* The app's one focus idiom: a hairline ion ring with the pip's halo
+   behind it, keyboard focus only. Light, never a thick white outline. */
 #find-input:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 #find-input::selection { background: var(--ion-select); color: var(--fg); }
 
 /* --- the count read-out --------------------------------------- */
+/* A readout: semi-condensed, and the digits are tabular so "3 of 12"
+   does not shuffle its own width as you walk the matches. */
 #find-count {
   flex: 0 0 auto;
   color: var(--fg-2);
   font-size: 12px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
   white-space: nowrap;
 }
 
@@ -141,12 +187,14 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
 #find-count.none { color: var(--fg-3); }
 
 /* --- separator ------------------------------------------------ */
+/* The seam motif at instrument scale: a lit hairline that fades out at
+   both ends rather than a solid rule butting into the panel's lips. */
 #findbar .find-sep {
   flex: 0 0 auto;
   width: 1px;
   height: 18px;
   margin: 0 2px;
-  background: var(--edge);
+  background: linear-gradient(180deg, transparent, var(--edge) 50%, transparent);
 }
 
 /* --- the three buttons ---------------------------------------- */
@@ -155,7 +203,7 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
 #findbar .iconbtn {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
 }
 
 /* --- reduced motion ------------------------------------------- */

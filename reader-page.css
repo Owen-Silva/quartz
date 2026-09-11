@@ -61,6 +61,48 @@
   --reading-font: Georgia, 'Cambria', 'Times New Roman', serif;
   --mono-font:    Consolas, 'Cascadia Mono', 'Courier New', monospace;
 
+  /* --- instrument glass (mirrored from chrome.css) ------------
+     Built out of the tokens above through var(), so this one block
+     covers dark and light: the light block moves --edge, --specular
+     and the --ion family, and these re-read whatever won there. It
+     needs nothing added. */
+  --bevel:      10px;   /* containers: cards, code blocks */
+  --bevel-lg:   14px;   /* full panels */
+  --radius-ctl: 6px;    /* controls keep ordinary round corners */
+
+  /* the lit rim: specular at the top-left, powered at the bottom-right */
+  --rim: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--edge)      28%,
+    var(--edge)      62%,
+    var(--ion-glow) 100%);
+
+  /* the same rim with the accent at full strength */
+  --rim-focus: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--ion-line)  45%,
+    var(--ion)      100%);
+
+  /* quiet containers at rest */
+  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
+
+  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
+
+  /* Bahnschrift semi-condensed: the bar's labels and readouts */
+  --readout-stretch: 87.5%;
+
+  /* The lit seam under the bar. chrome.css owns --seam for the window
+     chrome; this page is inside a <webview> and cannot see it, so the
+     same line is named here out of the tokens above. */
+  --seam: linear-gradient(90deg,
+    transparent      0%,
+    var(--ion-glow) 18%,
+    var(--ion-glow) 82%,
+    transparent    100%);
+
+  /* the title rule: a hairline that fades out to the right */
+  --title-rule: linear-gradient(90deg, var(--rule), transparent);
+
   --body-size: 19px;    /* reader-page.js overwrites this from storage */
   /* The measure: 68 characters, with the narrow and wide settings at 62 and
      84. It is written in em of the reading font rather than in ch because
@@ -129,8 +171,9 @@ body {
   line-height: 1.4;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
-  /* a theme flip is a crossfade, not a cut */
-  transition: background-color 180ms ease, color 180ms ease;
+  /* a theme flip is a crossfade, not a cut — stepped, like everything
+     else that moves in this world */
+  transition: background-color 160ms steps(4, end), color 160ms steps(4, end);
 }
 
 /* One fixed, inert wash. It does not move, ever. */
@@ -154,7 +197,12 @@ body {
   gap: 14px;
   height: var(--bar-h);
   padding: 0 14px;
-  background: var(--sheen), var(--glass);
+  /* the lit seam runs along the bottom of the bar, just above its
+     hairline: the signature line, at reading brightness */
+  background:
+    var(--seam) 0 100% / 100% 1px no-repeat,
+    var(--sheen),
+    var(--glass);
   border-bottom: 1px solid var(--edge);
   box-shadow: 0 1px 0 var(--bar-shadow);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
@@ -168,7 +216,8 @@ body {
   text-align: center;
   color: var(--fg-2);
   font-size: 12px;
-  letter-spacing: .02em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -190,15 +239,21 @@ body {
   height: 26px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 13px;
+  border-radius: var(--radius-ctl);   /* a control, so no cut corner */
   background: transparent;
   color: var(--fg-2);
   font: inherit;
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition:
+    background-color 150ms steps(3, end),
+    color            150ms steps(3, end),
+    border-color     150ms steps(3, end);
 }
 
 .barbtn:hover {
@@ -209,9 +264,11 @@ body {
 
 .barbtn:active { background: var(--glass-3); }
 
+/* Focus is light: a hairline of ion and a soft halo, never a slab. */
 .barbtn:focus-visible {
-  outline: 2px solid var(--ion-line);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 .barbtn[hidden] { display: none; }
@@ -219,10 +276,12 @@ body {
 .back { flex: 0 0 auto; }
 .back .arrow { color: var(--ion); font-size: 13px; }
 
-/* The width toggle carries its state, so it stays lit while it is wide. */
+/* The width toggle carries its state, so it stays lit while it is wide —
+   held state is shown as light, the same way a pip is. */
 .wide-toggle[aria-pressed="true"] {
   background: var(--ion-soft);
   border-color: var(--ion-line);
+  box-shadow: inset 0 0 10px -6px var(--ion-glow);
   color: var(--fg);
 }
 
@@ -250,7 +309,8 @@ body {
   font-family: var(--ui-font);
   color: var(--fg-3);
   font-size: 13px;
-  letter-spacing: .04em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
 }
 
 .placeholder[hidden] { display: none; }
@@ -267,12 +327,20 @@ body {
 
 .title[hidden], .meta[hidden] { display: none; }
 
+/* The rule under the byline fades out to the right instead of running
+   solid across: the seam motif at article scale. It is painted into the
+   same box the hairline used, so nothing below it moves. */
 .meta {
   margin: 0 0 28px;
   padding-bottom: 20px;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid transparent;
+  background-image: var(--title-rule);
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 100%;
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;   /* dates and reading times */
   color: var(--fg-2);
 }
 
@@ -325,8 +393,9 @@ body {
 .content-root a:hover { border-bottom-color: var(--ion-line); }
 
 .content-root a:focus-visible {
-  outline: 2px solid var(--ion-line);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 .content-root strong, .content-root b { font-weight: 700; }
@@ -372,16 +441,24 @@ body {
   padding: .12em .35em;
 }
 
+/* The one container inside the article: a card, so it takes the bevel and
+   the light rim. Its type is untouched — this is still something to read. */
 .content-root pre {
   margin: 1.5em 0;
   padding: 14px 16px;
-  background: var(--code-bg);
-  border: 1px solid var(--edge);
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  background:
+    linear-gradient(var(--code-bg), var(--code-bg)) padding-box,
+    var(--rim-soft) border-box;
   overflow-x: auto;
   font-family: var(--mono-font);
   font-size: .86em;
   line-height: 1.5;
+}
+
+@supports (corner-shape: bevel) {
+  .content-root pre { corner-shape: round bevel round bevel; }
 }
 
 .content-root pre code {

@@ -21,9 +21,16 @@
   z-index: 40;                 /* above #views (1) and .chrome-layer (3) */
   box-sizing: border-box;
   padding: 4px;
-  border: 1px solid var(--edge);
-  border-radius: 14px;
-  background: var(--sheen), var(--panel-bg);
+  /* The pane is bevelled on the diagonal (see the @supports below) and
+     its 1px border is the rim gradient rather than paint: specular at
+     the top-left, accent at the bottom-right. The ground clips to the
+     padding box so the rim keeps the border strip to itself. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   font-family: var(--ui-font);
   color: var(--fg);
   overflow: hidden;            /* the rows' corners never poke the radius */
@@ -33,19 +40,32 @@
     0 12px 34px var(--shade-drop);
 }
 
+/* TL round, TR cut, BR round, BL cut — two cuts on the diagonal, the
+   same machined edge every floating container in the chrome wears.
+   Guarded, so a build without corner-shape keeps the plain radius. */
+@supports (corner-shape: bevel) {
+  #omni-suggest { corner-shape: round bevel round bevel; }
+}
+
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #omni-suggest[hidden] { display: none; }
 
 /* --- the "Recent" caption -------------------------------------- */
+/* A readout, not an eyebrow: sentence case, semi-condensed, barely
+   tracked, and closed by a hairline that fades out to the right — the
+   seam motif at pane scale, used instead of a solid border rule. */
 #omni-suggest .omni-cap {
   padding: 7px 10px 5px 12px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: .04em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   /* Sentence case, like every other caption in the app. The old tracked
      ALL-CAPS read as a different product. */
   text-transform: none;
+  background: linear-gradient(90deg, var(--edge), transparent)
+              left bottom / 100% 1px no-repeat;
 }
 
 #omni-suggest .omni-cap[hidden] { display: none; }
@@ -60,7 +80,9 @@
   height: 40px;
   padding: 0 10px;
   border-left: 2px solid transparent;
-  border-radius: 8px;
+  /* A menu row is a control: round corners, so the bevel stays the
+     pane's signature. */
+  border-radius: var(--radius-ctl);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
@@ -81,7 +103,12 @@
   color: var(--fg-3);
 }
 
-#omni-suggest .omni-row.is-hi .omni-ico { color: var(--ion); }
+/* The lit row's glyph carries the pip's halo: the highlight is light,
+   not a second kind of paint. */
+#omni-suggest .omni-row.is-hi .omni-ico {
+  color: var(--ion);
+  text-shadow: var(--pip-glow);
+}
 
 /* --- the two text lines ----------------------------------------- */
 #omni-suggest .omni-body {
@@ -105,13 +132,18 @@
   color: var(--fg);
   font-size: 12.5px;
   font-weight: 400;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
+/* The second line carries hosts, dates and counts: tabular digits keep
+   a list of them from shuffling column to column. */
 #omni-suggest .omni-secondary {
   color: var(--fg-2);
   font-size: 11px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
   letter-spacing: .01em;
 }
 

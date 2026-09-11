@@ -45,6 +45,8 @@
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
+  /* a label you can press, set as a readout */
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   white-space: nowrap;
   transition: background-color 120ms steps(3, end), color 120ms steps(3, end),
@@ -67,9 +69,11 @@
   color: var(--fg);
 }
 
+/* focus is light: a 1px ion line and a soft halo, never a white slab */
 #workspace-pill:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 #workspace-pill .ws-pill-name {
@@ -103,16 +107,33 @@
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: var(--fg-3);
+  /* The mark and the light it throws are one hue, held in a pair of local
+     properties so a workspace colour can glow in its own colour rather than
+     borrowing the ion one. "No colour" throws no light. */
+  --ws-mark: var(--fg-3);
+  --ws-mark-glow: transparent;
+  background: var(--ws-mark);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
   transition: background-color 120ms steps(2);
 }
 
-.ws-dot[data-colour="ion"]      { background: var(--ion); }
-.ws-dot[data-colour="ember"]    { background: hsl(345 100% 72%); }
-.ws-dot[data-colour="forest"]   { background: hsl(160 84% 68%); }
-.ws-dot[data-colour="ocean"]    { background: hsl(190 100% 70%); }
-.ws-dot[data-colour="midnight"] { background: hsl(262 92% 76%); }
+.ws-dot[data-colour="ion"]      { --ws-mark: var(--ion);        --ws-mark-glow: var(--ion-glow); }
+.ws-dot[data-colour="ember"]    { --ws-mark: hsl(345 100% 72%); --ws-mark-glow: hsl(345 100% 72% / .5); }
+.ws-dot[data-colour="forest"]   { --ws-mark: hsl(160 84% 68%);  --ws-mark-glow: hsl(160 84% 68% / .5); }
+.ws-dot[data-colour="ocean"]    { --ws-mark: hsl(190 100% 70%); --ws-mark-glow: hsl(190 100% 70% / .5); }
+.ws-dot[data-colour="midnight"] { --ws-mark: hsl(262 92% 76%);  --ws-mark-glow: hsl(262 92% 76% / .5); }
+
+/* The workspace you are in states itself as light: the pill's mark and the
+   current row's mark are pips, lit in their own hue. Every other dot — the
+   swatches, the other rows — stays unlit, so only one thing in the pane
+   glows at a time. */
+#workspace-pill .ws-pill-dot,
+#workspaces-panel .ws-row.is-current .ws-row-dot {
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, .12),
+    0 0 6px var(--ws-mark-glow),
+    0 0 1px var(--ws-mark);
+}
 
 /* ============================================================
    The popover
@@ -130,14 +151,20 @@
   width: 300px;
   max-width: calc(100vw - 20px);
   padding: 6px 6px 0;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
+  /* The light rim: 1px of gradient in the border box, specular at the
+     top-left and ion at the bottom-right. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
   /* The chamber's ground, not the titlebar's: this pane floats over guest
-     pages, and --glass alone would leave a site legible through it. */
-  background: var(--sheen), var(--panel-bg);
+     pages, and --glass alone would leave a site legible through it. Opaque,
+     so the rim only shows where it should. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow:
@@ -146,14 +173,23 @@
     0 14px 34px var(--shade-drop);
 }
 
+/* two cut corners on the diagonal: the container signature, where supported */
+@supports (corner-shape: bevel) {
+  #workspaces-panel { corner-shape: round bevel round bevel; }
+}
+
 #workspaces-panel:focus { outline: none; }
 
-/* the header, in move mode only */
+/* The header, in move mode only: a section title, so the readout setting —
+   12px, 600, --fg-3, sentence case, never tracked out. */
 #workspaces-panel .ws-head {
   padding: 5px 8px 7px;
   color: var(--fg-3);
-  font-size: 11px;
-  letter-spacing: .02em;
+  font-size: 12px;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  text-transform: none;
 }
 
 #workspaces-panel .ws-list {
@@ -186,8 +222,10 @@
   align-items: center;
   min-height: 34px;
   padding: 0 6px 0 11px;
-  border-radius: 8px;
+  /* a row is a control: round, so the bevel stays the pane's signature */
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
+  font-stretch: var(--readout-stretch);
   cursor: default;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -197,8 +235,9 @@
 
 #workspaces-panel .ws-row:focus { outline: none; }
 #workspaces-panel .ws-row:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 #workspaces-panel .ws-row::before {
@@ -210,6 +249,8 @@
   width: 2px;
   border-radius: 2px;
   background: var(--ion);
+  /* the rail is light, not paint: the same halo the pips carry */
+  box-shadow: 0 0 6px var(--ion-glow);
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms steps(2);
@@ -234,10 +275,12 @@
   white-space: nowrap;
 }
 
+/* a count: tabular, so the column holds still as tabs open and close */
 #workspaces-panel .ws-count {
   flex: 0 0 auto;
   color: var(--fg-3);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
 }
 
@@ -247,6 +290,7 @@
   padding-left: 6px;
   font-size: 11px;
   color: var(--ion);
+  text-shadow: var(--pip-glow);
 }
 
 /* --- the per-row buttons ---------------------------------------
@@ -271,7 +315,7 @@
 #workspaces-panel .ws-act {
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-3);
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -281,8 +325,9 @@
 #workspaces-panel .ws-act:active { background: var(--glass-3); }
 
 #workspaces-panel .ws-act:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* the second press of the two-step delete */
@@ -294,6 +339,7 @@
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 11px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -307,11 +353,12 @@
   margin: 0;
   padding: 0 6px;
   border: 1px solid var(--ion-line);
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -350,18 +397,33 @@
 }
 
 #workspaces-panel .ws-swatch:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* ============================================================
    The "New workspace" footer
    ============================================================ */
 
+/* The 1px stays where the solid border held it; the paint moves to ::before
+   so the rule fades out to the right — the seam motif at pane scale. */
 #workspaces-panel .ws-new {
+  position: relative;
   padding: 4px 0 2px;
-  border-top: 1px solid var(--edge);
+  border-top: 1px solid transparent;
   margin-top: 5px;
+}
+
+#workspaces-panel .ws-new::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 #workspaces-panel .ws-newbtn {
@@ -372,10 +434,11 @@
   width: 100%;
   min-height: 32px;
   padding: 0 11px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   text-align: left;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -384,8 +447,9 @@
 #workspaces-panel .ws-newbtn:hover { background: var(--glass); color: var(--fg); }
 
 #workspaces-panel .ws-newbtn:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 #workspaces-panel .ws-newform { padding: 2px 6px 2px 11px; }
@@ -404,11 +468,12 @@
   margin: 0;
   padding: 0 6px;
   border: 1px solid var(--ion-line);
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -423,11 +488,12 @@
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--edge);
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   background: var(--glass-2);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
   transition: background-color 120ms steps(2);
 }
 
@@ -435,8 +501,9 @@
 #workspaces-panel .ws-create:hover { background: var(--glass-3); }
 
 #workspaces-panel .ws-create:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* the new form's colour strip sits under the field, flush with the dot */
@@ -449,11 +516,25 @@
    ============================================================ */
 
 #workspaces-panel .ws-hint {
+  position: relative;
   padding: 7px 11px 9px;
-  border-top: 1px solid var(--edge);
+  border-top: 1px solid transparent;
   color: var(--fg-3);
   font-size: 10.5px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
+}
+
+/* the same fading rule, in the pixel the solid border used to own */
+#workspaces-panel .ws-hint::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 /* ============================================================
@@ -463,13 +544,22 @@
    recognisable while staying legible against --panel-bg.
    ============================================================ */
 
-:root[data-theme="light"] .ws-dot[data-colour="ember"]    { background: hsl(345 100% 44%); }
-:root[data-theme="light"] .ws-dot[data-colour="forest"]   { background: hsl(160 84% 44%); }
-:root[data-theme="light"] .ws-dot[data-colour="ocean"]    { background: hsl(190 100% 44%); }
-:root[data-theme="light"] .ws-dot[data-colour="midnight"] { background: hsl(262 92% 44%); }
+:root[data-theme="light"] .ws-dot[data-colour="ember"]    { --ws-mark: hsl(345 100% 44%); --ws-mark-glow: hsl(345 100% 44% / .45); }
+:root[data-theme="light"] .ws-dot[data-colour="forest"]   { --ws-mark: hsl(160 84% 44%);  --ws-mark-glow: hsl(160 84% 44% / .45); }
+:root[data-theme="light"] .ws-dot[data-colour="ocean"]    { --ws-mark: hsl(190 100% 44%); --ws-mark-glow: hsl(190 100% 44% / .45); }
+:root[data-theme="light"] .ws-dot[data-colour="midnight"] { --ws-mark: hsl(262 92% 44%);  --ws-mark-glow: hsl(262 92% 44% / .45); }
 
 /* the inset ring reads as grime on a light dot; ink it instead */
 :root[data-theme="light"] .ws-dot { box-shadow: inset 0 0 0 1px rgba(18, 22, 42, .10); }
+
+/* the lit pips take the inked ring too, and keep their halo */
+:root[data-theme="light"] #workspace-pill .ws-pill-dot,
+:root[data-theme="light"] #workspaces-panel .ws-row.is-current .ws-row-dot {
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 22, 42, .10),
+    0 0 6px var(--ws-mark-glow),
+    0 0 1px var(--ws-mark);
+}
 
 /* ============================================================
    Reduced motion

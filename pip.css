@@ -28,12 +28,17 @@
   font-family: var(--icon-font);
   font-size: 15px;
   line-height: 1;
-  transition: color 120ms steps(3, end);
+  transition: color 120ms steps(3, end), text-shadow 120ms steps(3, end);
 }
 
 /* The glyph is the only thing that lights on hover: the button keeps
-   the same glass as every other instrument in the row. */
-#pip:hover .glyph { color: var(--ion); }
+   the same glass as every other instrument in the row. Lighting is the
+   pip's halo, so this state reads the same as every other live
+   indicator in the chrome. */
+#pip:hover .glyph {
+  color: var(--ion);
+  text-shadow: var(--pip-glow);
+}
 
 /* --- floating right now ----------------------------------------
    A video is out of the page and over the desktop, and the page it
@@ -45,13 +50,23 @@
   transition: background 150ms steps(2, end);
 }
 
-#pip.is-on .glyph { color: var(--ion); }
+#pip.is-on .glyph {
+  color: var(--ion);
+  text-shadow: var(--pip-glow);
+}
 
 /* Lit already: hovering must not read as a second, brighter state. */
-#pip.is-on:hover .glyph { color: var(--ion); }
+#pip.is-on:hover .glyph {
+  color: var(--ion);
+  text-shadow: var(--pip-glow);
+}
 
+/* Focus is light: a hairline ion ring instead of a thick white outline.
+   The halo stays an outline-offset rather than a box-shadow — this
+   button wears .glass, whose inset shadows a box-shadow here would
+   replace for as long as it held focus. */
 #pip:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
 }
 

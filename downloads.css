@@ -108,15 +108,22 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
+  /* A machined pane: bevelled on the diagonal (see the @supports below)
+     and edged with the rim gradient rather than a painted border —
+     specular at the top-left, accent at the bottom-right. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
-     through it. Same recipe the Claude chamber uses. */
-  background: var(--sheen), var(--panel-bg);
+     through it. Same recipe the Claude chamber uses; the ground clips
+     to the padding box so the rim keeps the border strip to itself. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow:
@@ -125,7 +132,18 @@
     0 14px 34px var(--shade-drop);
 }
 
+/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
+   the sheen's angle. Guarded, so a build without corner-shape keeps the
+   plain radius above. */
+@supports (corner-shape: bevel) {
+  #downloads-panel { corner-shape: round bevel round bevel; }
+}
+
 /* --- header --------------------------------------------------- */
+/* The rule under the head is the seam motif, not a border: a hairline
+   that fades out to the right. The border stays, transparent, so the
+   box model is exactly what it was and the gradient has a strip to
+   paint in. */
 #downloads-panel .dl-head {
   flex: 0 0 auto;
   display: flex;
@@ -133,7 +151,9 @@
   justify-content: space-between;
   gap: 8px;
   padding: 9px 10px 9px 12px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid transparent;
+  background: linear-gradient(90deg, var(--edge), transparent)
+              left bottom / 100% 1px no-repeat border-box;
 }
 
 #downloads-panel .dl-title {
@@ -142,6 +162,7 @@
   margin-right: auto;
   color: var(--fg);
   font-size: 13px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -149,10 +170,12 @@
 #downloads-panel .dl-text {
   height: 22px;
   padding: 0 8px;
-  border-radius: 6px;
+  /* a control: round corners, so the bevel stays the pane's signature */
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -193,7 +216,7 @@
   align-items: center;
   gap: 8px;
   padding: 7px 6px 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   transition: background-color 120ms steps(2);
 }
 
@@ -217,12 +240,15 @@
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
 /* a finished file's name is the shortcut that opens it */
 #downloads-panel .dl-name.is-open:hover { color: var(--ion); }
 
+/* Sizes, percentages and times: a readout, so semi-condensed with
+   tabular digits — the numbers hold their columns as they count up. */
 #downloads-panel .dl-meta {
   margin-top: 2px;
   overflow: hidden;
@@ -230,6 +256,9 @@
   text-overflow: ellipsis;
   color: var(--fg-2);
   font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
 }
 
 /* cancelled and failed: present, but the dimmest type in the app */
@@ -251,13 +280,15 @@
   overflow: hidden;
 }
 
+/* Progress is light, not paint: the filled run carries the same halo a
+   status pip does, so a running download reads as something lit. */
 #downloads-panel .dl-fill {
   display: block;
   width: 0;
   height: 100%;
   border-radius: 2px;
   background: var(--ion);
-  box-shadow: 0 0 8px var(--ion-glow);
+  box-shadow: var(--pip-glow);
 }
 
 /* total unknown: a short bead stepped across the track, same 10fps
@@ -294,7 +325,7 @@
 #downloads-panel .dl-act {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-2);
   transition: background-color 120ms steps(2), color 120ms steps(2);
 }
@@ -317,11 +348,19 @@
 
 /* --- focus ----------------------------------------------------
    chrome.css already rings every button; these repeat it so the
-   panel keeps its keyboard outline even if that rule moves. */
+   panel keeps its keyboard outline even if that rule moves. Focus is
+   light: a hairline ion ring with the pip's halo behind it. */
 #downloads:focus-visible,
 #downloads-panel button:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+}
+
+/* The halo behind the ring. Only inside the panel: the nav instrument
+   carries .glass's own inset shadows, and a box-shadow here would
+   replace them for as long as it held focus. */
+#downloads-panel button:focus-visible {
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* --- reduced motion -------------------------------------------

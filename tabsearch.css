@@ -15,12 +15,13 @@
    ============================================================ */
 
 /* --- the titlebar instrument ---------------------------------- */
-/* #newtab's shape exactly — 28px, 8px corners — one slot to its right,
-   so the pair reads as one control group rather than two sizes. */
+/* #newtab's shape exactly — 28px, the control radius — one slot to its right,
+   so the pair reads as one control group rather than two sizes. A control is
+   round; the bevel is the container's signature, not a button's. */
 #tabsearch-btn {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   transition: background-color 120ms steps(3, end), color 120ms steps(3, end);
 }
 
@@ -34,9 +35,11 @@
   color: var(--ion);
 }
 
+/* focus is light, not a thick white outline: a 1px ion line and a soft halo */
 #tabsearch-btn:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* --- the pane -------------------------------------------------- */
@@ -52,9 +55,15 @@
   width: 560px;
   max-width: calc(100vw - 32px);
   padding: 0;
-  border: 1px solid var(--edge);
-  border-radius: 14px;
-  background: var(--sheen), var(--panel-bg);
+  /* The light rim: one pixel of gradient in the border box — specular at the
+     top-left, ion at the bottom-right — under an opaque --panel-bg padding
+     layer, so the rim reads as a cut edge catching light rather than a wash. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   font-family: var(--ui-font);
   color: var(--fg);
   overflow: hidden;            /* the rows' corners never poke the radius */
@@ -64,17 +73,37 @@
     0 18px 46px var(--shade-drop);
 }
 
+/* Two cut corners on the diagonal — top-right and bottom-left — so the pane
+   reads as machined stock. Round everywhere the property is missing. */
+@supports (corner-shape: bevel) {
+  #tabsearch { corner-shape: round bevel round bevel; }
+}
+
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #tabsearch[hidden] { display: none; }
 
 /* --- the query field ------------------------------------------- */
 #tabsearch .ts-field {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   height: 46px;
   padding: 0 14px;
-  border-bottom: 1px solid var(--edge);
+  /* the pixel stays, the paint moves to ::after: a rule that fades out to the
+     right instead of a solid line across the pane */
+  border-bottom: 1px solid transparent;
+}
+
+#tabsearch .ts-field::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 #tabsearch .ts-field-ico {
@@ -96,6 +125,7 @@
   font-family: var(--ui-font);
   font-size: 13.5px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   -webkit-user-select: text;
   user-select: text;
@@ -105,14 +135,15 @@
 #tabsearch-input:focus { outline: none; }
 
 #tabsearch-input:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* The outline follows the element's radius, and this input had none — so the
-   app's hairline ring came out as a hard-cornered rectangle inside a pane
-   where nothing else has a square corner. Same 7px as #find-input. */
-#tabsearch-input { border-radius: 7px; }
+   ring came out as a hard-cornered rectangle inside a pane where nothing else
+   has a square corner. A field is a control: the control radius. */
+#tabsearch-input { border-radius: var(--radius-ctl); }
 
 /* --- the list -------------------------------------------------- */
 #tabsearch .ts-list {
@@ -134,14 +165,29 @@
 #tabsearch .ts-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* --- the "Recently closed" caption ------------------------------ */
+/* A section title in this system is a readout: 12px, 600, --fg-3, sentence
+   case, never tracked out, and followed by a rule that fades to the right. */
 #tabsearch .ts-cap {
+  position: relative;
   padding: 10px 10px 5px 12px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: .04em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   /* Sentence case, matching the history page's .daybar. */
   text-transform: none;
+}
+
+#tabsearch .ts-cap::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 10px;
+  bottom: 1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 /* --- a row ------------------------------------------------------ */
@@ -155,16 +201,22 @@
   height: 46px;
   padding: 0 8px 0 10px;
   border-left: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
   transition: background-color 120ms steps(3, end);
 }
 
+/* The selected row is an edge that has been lit, not a block of paint: the
+   2px rail carries --rim-focus in the border box, and the interior is the
+   pane's own ground under one step of ion light. */
 #tabsearch .ts-row.is-hi {
-  background: var(--glass-2);
-  border-left-color: var(--ion);
+  border-left-color: transparent;
+  background:
+    linear-gradient(var(--ion-soft), var(--ion-soft)) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim-focus) border-box;
 }
 
 /* --- the icon column -------------------------------------------- */
@@ -187,14 +239,15 @@
   opacity: .9;
 }
 
-/* the session light: the one warm colour, exactly as the chip wears it */
+/* the session light: a pip, and the one warm colour — an amber pip keeps its
+   own glow rather than borrowing the ion one */
 #tabsearch .ts-dot {
   display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--amber);
-  box-shadow: 0 0 8px 1px var(--amber-glow);
+  box-shadow: var(--pip-amber);
 }
 
 /* --- the two text lines ----------------------------------------- */
@@ -216,10 +269,12 @@
   text-overflow: ellipsis;
 }
 
+/* a tab title is a readout: the semi-condensed width, set once here */
 #tabsearch .ts-primary {
   color: var(--fg);
   font-size: 12.5px;
   font-weight: 400;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -227,6 +282,7 @@
   color: var(--fg-2);
   font-size: 11px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
@@ -244,7 +300,8 @@
   color: var(--fg-3);
   font-size: 10.5px;
   font-weight: 350;
-  letter-spacing: .02em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
 }
 
 #tabsearch .ts-tag-ico { font-size: 10px; }
@@ -256,7 +313,7 @@
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   color: var(--fg-3);
   opacity: 0;
   pointer-events: none;
@@ -276,8 +333,9 @@
 #tabsearch .ts-close:focus-visible {
   opacity: 1;
   pointer-events: auto;
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* --- the overflow count and the empty note ---------------------- */
@@ -286,7 +344,10 @@
   color: var(--fg-3);
   font-size: 11px;
   font-weight: 350;
-  letter-spacing: .02em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  /* a count, so the digits hold their column as the list changes */
+  font-variant-numeric: tabular-nums;
 }
 
 #tabsearch .ts-empty {
@@ -294,6 +355,7 @@
   color: var(--fg-2);
   font-size: 12.5px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
 }
 
 /* ============================================================
@@ -332,7 +394,7 @@
   min-width: 17px;
   padding: 1px 5px;
   border: 1px solid var(--edge);
-  border-radius: 5px;
+  border-radius: var(--radius-ctl);
   background: var(--sheen), var(--glass);
   /* The cap carries its own lighter ground, so --fg-3 landed at 4.4:1 on it.
      One step up clears 4.5:1 on the cap in both themes. */
@@ -340,6 +402,9 @@
   font-family: var(--ui-font);
   font-size: 10.5px;
   font-weight: 400;
+  font-stretch: var(--readout-stretch);
+  /* a cap is a legend: digits hold one column width */
+  font-variant-numeric: tabular-nums;
   line-height: 14px;
   text-align: center;
   box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
@@ -349,10 +414,11 @@
 /* The lit row lifts its own ground, so the caps go a step brighter with it. */
 #tabsearch .ts-row.is-hi .ts-key { color: var(--fg); }
 
-/* the palette being worn: the one ion mark in the list */
+/* the palette being worn: the one ion mark in the list, lit like a pip */
 #tabsearch .ts-check {
   font-size: 12px;
   color: var(--ion);
+  text-shadow: var(--pip-glow);
 }
 
 /* --- narrow windows --------------------------------------------- */

@@ -53,6 +53,37 @@
     rgba(15,181,201,0)   78%);
 
   --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+
+  /* --- instrument glass (mirrored from chrome.css) ------------
+     Every one of these is built out of the tokens above through
+     var(), so this single block covers dark, light and all five
+     palettes: those blocks move --edge, --specular and the --ion
+     family, and these re-read whatever won there. No per-palette
+     copies, and the light block needs nothing added. */
+  --bevel:      10px;   /* containers: popovers, tiles, cards */
+  --bevel-lg:   14px;   /* the search slot and full panels */
+  --radius-ctl: 6px;    /* controls keep ordinary round corners */
+
+  /* the lit rim: specular at the top-left, powered at the bottom-right */
+  --rim: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--edge)      28%,
+    var(--edge)      62%,
+    var(--ion-glow) 100%);
+
+  /* the same rim with the accent at full strength */
+  --rim-focus: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--ion-line)  45%,
+    var(--ion)      100%);
+
+  /* quiet tiles at rest: one lit corner, fading out before the other */
+  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
+
+  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
+
+  /* Bahnschrift semi-condensed: labels, the search slot, chips */
+  --readout-stretch: 87.5%;
 }
 
 /* --- light theme --------------------------------------------- */
@@ -401,12 +432,13 @@ body {
   line-height: 1.4;
   overflow-x: hidden;              /* the page never scrolls sideways */
   -webkit-font-smoothing: antialiased;
-  /* a theme flip is a crossfade, not a cut */
+  /* a theme flip is a crossfade, not a cut — stepped, like every
+     other transition in this world */
   transition:
-    background-color 180ms ease,
-    color            180ms ease,
-    border-color     180ms ease,
-    box-shadow       180ms ease;
+    background-color 160ms steps(4, end),
+    color            160ms steps(4, end),
+    border-color     160ms steps(4, end),
+    box-shadow       160ms steps(4, end);
 }
 
 /* --- backdrop ------------------------------------------------ */
@@ -547,7 +579,8 @@ body {
   margin: 0 0 14px;
   color: var(--fg-2);
   font-size: 13px;
-  letter-spacing: .04em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
 }
 
 /* --- the field: the one memorable thing ---------------------- */
@@ -559,13 +592,19 @@ body {
   position: relative;
 }
 
+/* The lit instrument slot. Quiet glass at rest; the rim is painted as a
+   ring on .searchform::after rather than into this element's background,
+   because a border-box gradient under a TRANSLUCENT padding-box layer
+   shows through the whole box — the slot came out a solid cyan wash with
+   the typed line sitting on a gradient. The border stays transparent so
+   the ring has a 1px strip of its own to sit in. */
 .field {
   display: block;
   width: 100%;
   height: 56px;
   padding: 0 22px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
   background: var(--sheen), var(--glass);
   backdrop-filter: blur(22px) saturate(160%);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
@@ -573,25 +612,54 @@ body {
   color: var(--fg);
   font-family: inherit;
   font-size: 17px;
+  font-stretch: var(--readout-stretch);   /* the typed line is a readout */
+  letter-spacing: .01em;
   line-height: 1.2;
   text-align: center;
   transition:
-    background-color 180ms ease,
-    color            180ms ease,
-    border-color     180ms ease,
-    box-shadow       180ms ease;
+    background-color 160ms steps(4, end),
+    color            160ms steps(4, end),
+    box-shadow       160ms steps(4, end);
+}
+
+/* The rim itself. An <input> cannot carry a pseudo-element, so the ring
+   hangs off the form: .field is the only thing in flow inside it (the
+   dropdown is absolute), so the form's content box IS the slot's border
+   box and inset:0 lands the 1px ring exactly on the transparent border.
+   padding:1px + the xor mask hollows out everything but that strip. */
+.searchform::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--bevel-lg);
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+/* In use, the ring goes to full accent and the slot lights the glass
+   around it. The light is the focus state; there is no outline. */
+.searchform:focus-within::after { background: var(--rim-focus); }
+
+/* Two cut corners on the diagonal — the same axis as the sheen. Where
+   corner-shape is missing the slot stays plainly round. */
+@supports (corner-shape: bevel) {
+  .field,
+  .searchform::after { corner-shape: round bevel round bevel; }
 }
 
 .field::placeholder { color: var(--fg-3); }
 
 .field:focus,
 .field:focus-visible {
-  outline: none;                   /* the glow below is the focus ring */
-  border-color: var(--ion-line);
+  outline: none;                   /* the ring and the glow are the focus */
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 0 0 4px var(--ion-soft),
-    0 0 32px var(--ion-glow);
+    0 0 0 3px var(--ion-soft),
+    0 0 28px var(--ion-glow);
 }
 
 /* --- shortcut chips ------------------------------------------ */
@@ -604,26 +672,30 @@ body {
   margin-top: 18px;
 }
 
+/* Chips are controls, not containers: they keep ordinary round corners
+   so the bevel stays the signature of the slot and the dropdown. */
 .chip {
   display: inline-flex;
   align-items: center;
   height: 34px;
   padding: 0 14px;
   border: 1px solid var(--edge);
-  border-radius: 10px;
+  border-radius: var(--radius-ctl);
   background: var(--sheen), var(--glass);
   backdrop-filter: blur(22px) saturate(160%);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
   color: var(--fg-2);
   font-family: inherit;
   font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-decoration: none;
   white-space: nowrap;
   transition:
-    background-color 180ms ease,
-    color            180ms ease,
-    border-color     180ms ease,
-    box-shadow       180ms ease;
+    background-color 160ms steps(4, end),
+    color            160ms steps(4, end),
+    border-color     160ms steps(4, end),
+    box-shadow       160ms steps(4, end);
 }
 
 /* the chip's favicon. Sits before the label and touches nothing else:
@@ -646,9 +718,11 @@ body {
 
 .chip:active { background-color: var(--glass-3); }
 
+/* Focus is light: a hairline of ion and a soft halo, never a slab. */
 .chip:focus-visible {
-  outline: 2px solid var(--ion-line);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
   color: var(--fg);
 }
 
@@ -668,33 +742,61 @@ body {
 /* display above would otherwise beat the UA's [hidden] rule */
 .recent[hidden] { display: none; }
 
+/* A section title in the readout voice: sentence case, semi-condensed,
+   quiet. No rule under it — the column's own height is what newtab-bg.js
+   measures the circuit socket from, so nothing here may grow. */
 .recent-caption {
   flex: 0 0 100%;               /* own line, above the tiles */
   margin: 0 0 2px;
   color: var(--fg-3);
   font-size: 11px;
-  letter-spacing: .02em;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
 }
 
+/* A tile at rest carries the soft rim — one lit corner that fades out
+   before it reaches the other. It is 26px tall, under the bevel floor,
+   so it stays round: the light is what marks it, not the cut. */
 .rtile {
+  position: relative;              /* the ring below hangs off this box */
   display: inline-flex;
   align-items: center;
   max-width: 180px;
   height: 26px;
   padding: 0 9px;
-  border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--sheen), var(--glass);
   color: var(--fg-2);
   font-family: inherit;
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
   transition:
-    background-color 180ms ease,
-    color            180ms ease,
-    border-color     180ms ease;
+    background-color 140ms steps(3, end),
+    color            140ms steps(3, end),
+    box-shadow       140ms steps(3, end);
+}
+
+/* The rim as a ring, not as a background layer under the glass: painted
+   into the background it bled through all six tiles. The tile clips its
+   own overflow (the label ellipses), so the ring sits at inset:0 on the
+   outer edge and the 1px transparent border is gone — the box-sizing is
+   border-box either way, so the tile is the same 26px it always was. */
+.rtile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim-soft);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
 }
 
 .rtile-icon {
@@ -712,17 +814,22 @@ body {
   white-space: nowrap;
 }
 
+/* Pointed at, the whole rim lights: the soft gradient becomes the full
+   one, so the tile reads as powered rather than merely brighter. */
 .rtile:hover {
   background-color: var(--glass-2);
-  border-color: var(--glass-3);
   color: var(--fg);
 }
+
+.rtile:hover::before,
+.rtile:active::before { background: var(--rim); }
 
 .rtile:active { background-color: var(--glass-3); }
 
 .rtile:focus-visible {
-  outline: 2px solid var(--ion-line);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
   color: var(--fg);
 }
 
@@ -737,32 +844,40 @@ body {
   right: 0;
   z-index: 5;
   padding: 5px;
-  border: 1px solid var(--edge);
-  border-radius: 14px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel-lg);
+  /* the opaque ground stays in the padding box; the rim takes the border */
   background:
-    var(--sheen),
-    linear-gradient(var(--glass), var(--glass)),
-    var(--ink-1);
+    var(--sheen) padding-box,
+    linear-gradient(var(--glass), var(--glass)) padding-box,
+    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
+    var(--rim) border-box;
   box-shadow:
     inset 0 1px 0 var(--specular),
     0 16px 38px var(--panel-shadow);
   text-align: left;
 }
 
+/* The panel is cut on the same diagonal as the slot it hangs from. */
+@supports (corner-shape: bevel) {
+  .suggest { corner-shape: round bevel round bevel; }
+}
+
 .suggest[hidden] { display: none; }
 
+/* Menu rows are controls: round, quiet, no cut. */
 .sug {
   display: flex;
   align-items: center;
   height: 34px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-ctl);
   color: var(--fg);
   font-size: 13px;
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
-  transition: background-color 120ms ease;
+  transition: background-color 120ms steps(3, end);
 }
 
 .sug-icon {
@@ -794,10 +909,12 @@ body {
 
 .sug:hover { background-color: var(--glass-2); }
 
-/* the keyboard highlight: a rail, not a border, so nothing shifts */
+/* the keyboard highlight: a lit rail, not a border, so nothing shifts */
 .sug.is-active {
   background-color: var(--glass-2);
-  box-shadow: inset 2px 0 0 var(--ion);
+  box-shadow:
+    inset 2px 0 0 var(--ion),
+    inset 0 0 12px -6px var(--ion-glow);
 }
 
 /* --- launch motion: one rise, and that is all ---------------- */

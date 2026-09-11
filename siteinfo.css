@@ -42,7 +42,7 @@
   width: 24px;
   height: 24px;
   z-index: 2;                       /* over the capsule, under nothing else */
-  border-radius: 6px;
+  border-radius: var(--radius-ctl); /* a control, so it stays round */
   background: none;
   color: var(--fg-2);
   cursor: default;
@@ -55,8 +55,11 @@
   line-height: 1;
 }
 
-/* secure is the quiet state: the lock is furniture, not an alarm */
+/* Secure is the quiet state: the lock is furniture, not an alarm. It states
+   itself as light rather than colour — the glyph keeps --fg-2 and carries the
+   pip's halo, so "connection secure" reads as a lit mark, not a badge. */
 #siteinfo.is-secure { color: var(--fg-2); }
+#siteinfo.is-secure .glyph { text-shadow: 0 0 6px var(--ion-glow); }
 
 /* http, a bad certificate, anything else: quieter still, never red.
    Colour in this chrome means "active", and a warning is not that. */
@@ -65,9 +68,11 @@
 #siteinfo:hover { background: var(--glass-2); color: var(--fg); }
 #siteinfo:active { background: var(--glass-3); }
 
+/* focus is light: a 1px ion line and a soft halo, never a thick white ring */
 #siteinfo:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* the panel is open: the instrument stays lit while it is */
@@ -104,21 +109,31 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
+  /* The light rim: 1px of gradient painted into the border box, specular at
+     the top-left and ion at the bottom-right. */
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
   /* The chamber's ground, not the nav row's: this pane floats over
      guest pages, and --glass alone would leave a site legible
-     through it. Same recipe the shield panel uses. */
-  background: var(--sheen), var(--panel-bg);
+     through it. Opaque, so the rim only shows where it should. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow:
     inset 0 1px 0 var(--specular),
     inset 0 -1px 0 var(--shade-in),
     0 14px 34px var(--shade-drop);
+}
+
+/* two cut corners on the diagonal: the container signature, where supported */
+@supports (corner-shape: bevel) {
+  #siteinfo-panel { corner-shape: round bevel round bevel; }
 }
 
 #siteinfo-panel .si-body {
@@ -131,19 +146,34 @@
   padding: 14px 14px 12px;
 }
 
-/* --- the header: which site, and what the connection is -------- */
+/* --- the header: which site, and what the connection is --------
+   The 1px stays where the solid border held it; the paint moves to ::after
+   so the rule fades out to the right — the seam motif at pane scale. */
 #siteinfo-panel .si-head {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid transparent;
+}
+
+#siteinfo-panel .si-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 #siteinfo-panel .si-host {
   color: var(--fg);
   font-size: 14px;
   font-weight: 350;
+  font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -153,16 +183,30 @@
 #siteinfo-panel .si-note {
   color: var(--fg-2);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
   line-height: 1.35;
 }
 
 /* --- a section: a quiet caption and its rows ------------------- */
 #siteinfo-panel .si-sec {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid transparent;
+}
+
+/* the same fading rule, in the pixel the solid border used to own */
+#siteinfo-panel .si-sec::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+  pointer-events: none;
 }
 
 #siteinfo-panel .si-sec:last-child {
@@ -170,10 +214,16 @@
   border-bottom: none;
 }
 
+#siteinfo-panel .si-sec:last-child::after { display: none; }
+
+/* a section title is a readout: 12px, 600, --fg-3, sentence case, no tracking */
 #siteinfo-panel .si-cap {
-  color: var(--fg-2);
+  color: var(--fg-3);
   font-size: 12px;
   font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  text-transform: none;
 }
 
 #siteinfo-panel .si-perms {
@@ -195,6 +245,8 @@
   min-width: 0;
   color: var(--fg-2);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -204,6 +256,7 @@
 #siteinfo-panel .si-empty {
   color: var(--fg-3);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
 }
 
 /* --- the select ------------------------------------------------
@@ -236,11 +289,12 @@
   height: 28px;
   padding: 0 26px 0 9px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
   cursor: pointer;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), border-color 120ms steps(2);
@@ -269,11 +323,12 @@
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
   cursor: pointer;
   box-shadow: inset 0 1px 0 var(--specular);
   transition: background-color 120ms steps(2), color 120ms steps(2);
@@ -283,10 +338,16 @@
 #siteinfo-panel .si-btn:active { background: var(--glass-3); }
 
 #siteinfo-panel .si-btn:focus-visible,
-#siteinfo-panel .si-link:focus-visible,
 #siteinfo-panel .si-step:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 1px solid var(--ion-line);
   outline-offset: 1px;
+  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+}
+
+#siteinfo-panel .si-link:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 #siteinfo-panel .si-btn--thin { padding: 0 10px; }
@@ -315,6 +376,7 @@
   color: var(--fg-3);
   font-family: var(--ui-font);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
   cursor: pointer;
   transition: color 120ms steps(2);
 }
@@ -340,6 +402,7 @@
   min-width: 0;
   color: var(--fg);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -349,12 +412,17 @@
 #siteinfo-panel .si-msg {
   color: var(--fg-3);
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
 }
 
 /* --- zoom ------------------------------------------------------- */
+/* the one number in the pane: set as a readout, tabular so 100% and 90%
+   occupy the same width and the row never twitches as you step it */
 #siteinfo-panel .si-zoom-val {
   color: var(--fg);
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -368,11 +436,12 @@
   width: 28px;
   height: 28px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: var(--glass);
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 13px;
+  font-stretch: var(--readout-stretch);
   line-height: 1;
   cursor: pointer;
   box-shadow: inset 0 1px 0 var(--specular);

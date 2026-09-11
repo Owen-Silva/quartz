@@ -57,6 +57,49 @@
     rgba(15,181,201,0)   78%);
 
   --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+
+  /* --- instrument glass (mirrored from chrome.css) ------------
+     Every one of these is built out of the tokens above through
+     var(), so this single block covers dark, light and all five
+     palettes: those blocks move --edge, --specular and the --ion
+     family, and these re-read whatever won there. No per-palette
+     copies, and the light block needs nothing added. */
+  --bevel:      10px;   /* containers: popovers, tiles, cards */
+  --bevel-lg:   14px;   /* full panels */
+  --radius-ctl: 6px;    /* controls keep ordinary round corners */
+
+  /* the lit rim: specular at the top-left, powered at the bottom-right */
+  --rim: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--edge)      28%,
+    var(--edge)      62%,
+    var(--ion-glow) 100%);
+
+  /* the same rim with the accent at full strength */
+  --rim-focus: linear-gradient(135deg,
+    var(--specular)   0%,
+    var(--ion-line)  45%,
+    var(--ion)      100%);
+
+  /* quiet rows and tiles at rest */
+  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
+
+  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
+
+  /* Bahnschrift semi-condensed: labels, readouts, counts */
+  --readout-stretch: 87.5%;
+
+  /* The lit seam under the bar. chrome.css owns --seam for the window
+     chrome; this page is inside a <webview> and cannot see it, so the
+     same line is named here out of the tokens above. */
+  --seam: linear-gradient(90deg,
+    transparent      0%,
+    var(--ion-glow) 18%,
+    var(--ion-glow) 82%,
+    transparent    100%);
+
+  /* the section-title rule: a hairline that fades out to the right */
+  --title-rule: linear-gradient(90deg, var(--edge), transparent);
 }
 
 /* --- light theme --------------------------------------------- */
@@ -427,6 +470,9 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
+/* The bar is edge to edge, so it is not a floating container and takes no
+   bevel. What it gets is the signature line: the lit seam, laid along the
+   bottom of the padding box just above the hairline border. */
 .topbar {
   position: sticky;
   top: 0;
@@ -436,13 +482,18 @@ body {
   gap: 12px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--edge);
+  background-image: var(--seam), var(--sheen);
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 1px, auto;
+  background-position: 0 100%, 0 0;
 }
 
 .wordmark {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: .14em;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   text-transform: none;
   color: var(--fg-2);
   white-space: nowrap;
@@ -454,24 +505,39 @@ body {
   max-width: 520px;
 }
 
+/* The filter is this page's instrument slot: a control, so round, but
+   rimmed with light and lit at full accent while it is focused.
+
+   A bare <input> cannot carry a pseudo-element to hang the ring off, so
+   this one keeps the two-layer trick and takes the opaque-interior
+   fallback instead: --ink-1, the page's own ground, sits under the glass
+   tint and stops the border-box gradient washing through the slot. */
 .search {
   width: 100%;
   height: 34px;
   padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--edge);
-  background: var(--glass-2);
+  border-radius: var(--radius-ctl);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
+    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
+    var(--rim) border-box;
   color: var(--fg);
   font-family: inherit;
   font-size: 13.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   outline: none;
-  transition: border-color .12s steps(2), box-shadow .12s steps(2);
+  transition: box-shadow .12s steps(2, end);
 }
 
 .search::placeholder { color: var(--fg-3); }
 
 .search:focus {
-  border-color: var(--ion-line);
+  background:
+    linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
+    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
+    var(--rim-focus) border-box;
   box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
@@ -481,6 +547,9 @@ body {
   margin: 0;
   flex: 0 0 auto;
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;   /* a count that does not jitter */
+  letter-spacing: .01em;
   color: var(--fg-3);
   white-space: nowrap;
 }
@@ -490,20 +559,25 @@ body {
 .barbtn {
   height: 30px;
   padding: 0 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-ctl);
   border: 1px solid var(--edge);
   background: var(--glass-2);
   color: var(--fg-2);
   font-family: inherit;
   font-size: 12.5px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
   cursor: pointer;
-  transition: background-color .1s steps(2), color .1s steps(2);
+  transition: background-color .1s steps(2, end), color .1s steps(2, end);
 }
 
 .barbtn:hover { background: var(--glass-3); color: var(--fg); }
 
 .clearwrap { position: relative; flex: 0 0 auto; }
 
+/* A popover is a container: bevelled on the diagonal, rimmed with light.
+   The sheen comes from .glass in the markup, so it is named again here —
+   the shorthand below would otherwise reset it. */
 .clearmenu {
   position: absolute;
   right: 0;
@@ -513,34 +587,64 @@ body {
   gap: 2px;
   min-width: 156px;
   padding: 6px;
-  border-radius: 12px;
-  border: 1px solid var(--edge);
-  background-color: var(--glass-3);
+  border-radius: var(--bevel);
+  border: 1px solid transparent;
+  background: var(--sheen), var(--glass-3);
   box-shadow: 0 18px 40px var(--panel-shadow);
+}
+
+/* The rim as a ring on the border strip. Painted as a background layer it
+   sat UNDER the translucent glass and tinted the whole popover, so the
+   three choices read off a gradient instead of off glass. inset:-1px
+   reaches back out over the transparent border; the xor mask keeps the
+   1px frame and throws the middle away. */
+.clearmenu::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+@supports (corner-shape: bevel) {
+  .clearmenu,
+  .clearmenu::before { corner-shape: round bevel round bevel; }
 }
 
 /* display:grid above would otherwise beat the UA's [hidden] rule. */
 .clearmenu[hidden] { display: none; }
 
+/* Menu rows are controls: round, no cut. */
 .clearopt {
   padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-ctl);
   background: transparent;
   color: var(--fg);
   font-family: inherit;
   font-size: 13px;
   text-align: left;
   cursor: pointer;
-  transition: background-color .1s steps(2);
+  transition: background-color .1s steps(2, end);
 }
 
 .clearopt:hover { background: var(--ion-soft); }
 
+/* The separator is the fading rule, not a solid hairline. It is painted
+   as a background layer so the hover colour still lands underneath it. */
 .clearopt.danger {
   margin-top: 4px;
-  border-top: 1px solid var(--edge);
-  border-radius: 0 0 8px 8px;
+  border-top: 1px solid transparent;
+  border-radius: 0 0 var(--radius-ctl) var(--radius-ctl);
+  background-image: var(--title-rule);
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 0;
   color: var(--fg-2);
 }
 
@@ -556,14 +660,23 @@ body {
   padding: 14px 16px 72px;
 }
 
+/* A section title in the readout voice, followed by the fading rule —
+   the seam motif at list scale. The rule is painted into the title's own
+   box at its bottom edge, so no row moves by a pixel. */
 .daybar {
   margin: 22px 0 6px;
   padding: 0 10px;
   font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: .1em;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;   /* the dated headings */
+  letter-spacing: .01em;
   text-transform: none;
   color: var(--fg-3);
+  background-image: var(--title-rule);
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 100%;
 }
 
 .daybar:first-child { margin-top: 2px; }
@@ -576,16 +689,19 @@ body {
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-ctl);
   cursor: pointer;
-  transition: background-color .1s steps(2);
+  transition: background-color .1s steps(2, end);
 }
 
 .row:hover { background: var(--glass); }
 
+/* the keyboard mark: a lit outline, not a painted one */
 .row.hi {
   background: var(--glass-2);
-  box-shadow: inset 0 0 0 1px var(--ion-line);
+  box-shadow:
+    inset 0 0 0 1px var(--ion-line),
+    inset 0 0 18px -10px var(--ion-glow);
 }
 
 .favbox {
@@ -600,9 +716,15 @@ body {
   border-radius: 3px;
 }
 
+/* A clock is a readout, not code: the UI face on tabular figures, which
+   line up as evenly as the monospace did and stay in the same voice as
+   the rest of the page. */
 .time {
-  font-family: Consolas, 'Cascadia Mono', ui-monospace, monospace;
+  font-family: inherit;
   font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
   color: var(--fg-3);
 }
 
@@ -630,7 +752,7 @@ body {
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: transparent;
   color: var(--fg-2);
   font-family: inherit;
@@ -638,7 +760,7 @@ body {
   line-height: 1;
   opacity: 0;
   cursor: pointer;
-  transition: opacity .1s steps(2), background-color .1s steps(2), color .1s steps(2);
+  transition: opacity .1s steps(2, end), background-color .1s steps(2, end), color .1s steps(2, end);
 }
 
 .row:hover .rm,
@@ -663,10 +785,12 @@ mark {
 }
 
 /* --- focus --------------------------------------------------- */
+/* Light, not paint: a hairline of ion with a soft halo around it. */
 
 :focus-visible {
-  outline: 2px solid var(--ion-line);
+  outline: 1px solid var(--ion-line);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
 /* --- narrow windows ------------------------------------------ */
