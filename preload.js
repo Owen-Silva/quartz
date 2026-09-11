@@ -245,6 +245,24 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('autopause:changed', handler);
     }
   },
+  // System stats for the new tab page (CPU, memory, disk, network, GPU).
+  // Ref-counted in main: every subscribe() needs its own unsubscribe(), and
+  // main samples nothing at all while the count is zero -- so the chrome
+  // subscribes only while a new-tab page is actually in front of the user.
+  // Samples land every 2000 ms; the first one arrives within 2 s.
+  stats: {
+    subscribe: () => ipcRenderer.send('stats:subscribe'),
+    unsubscribe: () => ipcRenderer.send('stats:unsubscribe'),
+    // fn({ t, cpu, mem, disk, net, gpu, uptimeSec }); a null field means the
+    // counter is not available on this machine and the page draws a dash.
+    // Returns an unsubscribe function for the LISTENER -- it does not touch
+    // the sampler's ref count, which is subscribe()/unsubscribe()'s job.
+    onSample: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('stats:sample', handler);
+      return () => ipcRenderer.removeListener('stats:sample', handler);
+    }
+  },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     // Called by terminal.js for the first spawn AND for the Enter-to-restart

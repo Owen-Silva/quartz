@@ -25,6 +25,7 @@ const {
 } = require('electron');
 const { createSession, killAll } = require('./pty');
 const autopauseModule = require('./autopause');
+const statsModule = require('./stats');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -75,6 +76,17 @@ const autoPause = autopauseModule.create({
   app,
   onChange: (status) => send('autopause:changed', status),
 });
+
+/**
+ * The new tab page's system stats. Ref-counted per webContents inside the
+ * module: it runs nothing at all until the chrome subscribes, and kills its
+ * typeperf child five seconds after the last unsubscribe. Main only wires the
+ * IPC to it -- everything else, including the child's lifetime, is its own.
+ */
+const stats = statsModule.create({});
+
+/** webContents ids we have already put a 'destroyed' listener on. */
+const statsWatched = new Set();
 
 // ---------------------------------------------------------------------------
 // Window state
@@ -2247,6 +2259,35 @@ ipcMain.handle('autopause:set-config', (_event, patch = {}) => autoPause.setConf
 
 ipcMain.handle('autopause:doctor', () => autoPause.doctor());
 
+// ---------------------------------------------------------------------------
+// New tab system stats
+//
+// Ref-counted, so a renderer that subscribes twice has to unsubscribe twice.
+// A renderer that goes away without balancing its subscribes (a reload, a
+// crash, the window closing) would otherwise pin the sampler on forever, so
+// its whole count is dropped the moment its webContents is destroyed.
+// ---------------------------------------------------------------------------
+
+ipcMain.on('stats:subscribe', (event) => {
+  const contents = event.sender;
+  if (!contents || contents.isDestroyed()) return;
+  if (!statsWatched.has(contents.id)) {
+    statsWatched.add(contents.id);
+    const id = contents.id;
+    contents.once('destroyed', () => {
+      statsWatched.delete(id);
+      stats.drop(id);
+    });
+  }
+  stats.subscribe(contents);
+});
+
+ipcMain.on('stats:unsubscribe', (event) => {
+  const contents = event.sender;
+  if (!contents) return;
+  stats.unsubscribe(contents);
+});
+
 /** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
 
@@ -2403,6 +2444,9 @@ app.on('before-quit', (event) => {
   killAll();
   handles.clear();
   for (const id of Array.from(ptyOut.keys())) ptyFlushFinal(id);
+  // The stats sampler's typeperf child is not ours to leave behind: it is a
+  // separate process that would outlive the quit.
+  stats.stop();
   // Hands our Spotify hold back. That is an HTTP round trip, so it may defer
   // the quit by up to ~1.5 s -- once, and only when a hold is actually out.
   // Skipping it would leave Spotify paused until the bridge's 180 s hold TTL
