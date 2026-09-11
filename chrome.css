@@ -824,14 +824,10 @@ button.glass:focus-visible {
   -webkit-app-region: drag;
 }
 
-/* Segments, not chips: the tabs sit flush against each other and are
-   told apart by a hairline, so the strip reads as one instrument
-   divided rather than as a row of pills. app.js reads the flex gap off
-   the measurements rather than hardcoding it, so 0 is safe. */
 #tabstrip {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
   height: 100%;
@@ -839,29 +835,22 @@ button.glass:focus-visible {
   overflow-y: hidden;
 }
 
-/* the "+" and the strip menu next to it are plain glyphs: no box at
-   rest, a film of glass under the pointer, nothing else */
 #newtab {
   width: 28px;
   height: 28px;
-  margin-left: 4px;
   border-radius: var(--radius-ctl);
 }
 
-#newtab:hover { background: var(--glass); color: var(--fg); }
-#newtab:active { background: var(--glass-2); }
+#newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+#newtab:active { background: var(--sheen), var(--glass-3); }
 
-/* --- tabs (segments injected at runtime) ----------------------
-   A tab is a segment of the band, full height and flush with its
-   neighbours, not a rounded chip floating in it. At rest it carries no
-   fill at all: a title, and a 1px --edge hairline against the tab
-   before it. The light is spent on exactly one of them. */
+/* --- tabs (chips injected at runtime) ------------------------- */
 .tab {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 100%;
+  height: 30px;
   max-width: 220px;
   /* A floor, not 0. #tabstrip already hides its scrollbar and app.js already
      scrolls the active chip into view, so the strip is built to scroll once the
@@ -872,14 +861,11 @@ button.glass:focus-visible {
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
-  /* a segment is cut at the top and flush at the bottom, where the
-     lamp runs; the bevel lands on the two corners that are left */
-  border-radius: var(--bevel) var(--bevel) 0 0;
+  border-radius: var(--bevel);
   background: transparent;
   color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 12.5px;
-  font-weight: 500;
   /* the title is a readout: Bahnschrift a notch narrower, opened up a
      hair, and figures in a host or a count line up column to column */
   font-stretch: var(--readout-stretch);
@@ -889,47 +875,50 @@ button.glass:focus-visible {
   cursor: default;
 }
 
-/* The separator. Every tab but the first carries a hairline on its
-   left; the active segment and the one that follows it drop theirs, so
-   the lit segment is never boxed in by a line it does not need.
-   :not([hidden]) rather than "+": a tab belonging to another workspace
-   is display:none, and the first tab you can actually see must not
-   inherit a divider from one you cannot. */
-.tab:not([hidden]) ~ .tab:not([hidden]):not(.active) { border-left-color: var(--edge); }
-
-.tab.active:not([hidden]) + .tab:not([hidden]) { border-left-color: transparent; }
-
-.tab:hover { background: var(--glass); color: var(--fg); }
-
-/* The active tab is a lit segment: a film of glass, the cut top edge
-   catching the specular, and the lamp along its bottom. No opaque
-   interior any more — the band behind it is deep now, so a --panel-bg
-   fill read as the light-grey blob it was, and --glass-2 over ink is
-   both lighter than its neighbours and still glass. The rim went with
-   it: on a segment, the light IS the lamp. */
-.tab.active {
-  border-color: transparent;
+.tab:hover {
   background: var(--sheen), var(--glass-2);
+  border-color: var(--edge);
   color: var(--fg);
-  font-weight: 600;
-  box-shadow: inset 0 1px 0 var(--specular);
 }
 
-/* The lamp. 2px of accent along the bottom edge — the edge that meets
-   the nav row — with the glow it throws, so the active segment reads as
-   wired to the address bar under it rather than merely tinted. */
+/* The active chip is the one segment of the strip that is a container:
+   it takes the cut corners (in the @supports block near the end) and
+   the lit rim, so it reads as a pane seated in the strip rather than a
+   chip tinted a shade lighter. Inactive chips stay quiet — hover is
+   still nothing but a lighter glass and a hairline.
+
+   The rim is a border-box layer under a transparent border, and the
+   interior above it has to be OPAQUE or the gradient shows through the
+   whole chip instead of sitting on its edge — that bleed is what turned
+   the chip into a grey blob. A chip cannot take the ring-on-a-pseudo
+   treatment: ::after is the ion line (and the loading shimmer) and
+   ::before is the workspace bar, so both are spoken for. So this is the
+   addendum's opaque-interior variant — --panel-bg under the glass tint,
+   which keeps the chip reading lighter than its neighbours while the
+   rim stops at the border. */
+.tab.active {
+  border-color: transparent;
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 6px 14px -8px var(--ion-glow);
+}
+
+/* the ion line under the active chip */
 .tab::after {
   content: '';
   position: absolute;
-  /* -1px on three sides: an abspos child is placed against the PADDING
-     box, and the segment's own 1px transparent border would otherwise
-     hold the lamp a pixel clear of the edge it is meant to sit on. */
-  left: -1px;
-  right: -1px;
-  bottom: -1px;
-  height: 2px;
-  background: var(--ion);
-  box-shadow: 0 0 8px var(--ion-glow);
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ion), transparent);
   opacity: 0;
   transition: opacity 140ms steps(3, end);
   pointer-events: none;
@@ -976,10 +965,11 @@ button.glass:focus-visible {
 .tab[data-ws-colour]::before {
   content: '';
   position: absolute;
-  left: -1px;
-  right: -1px;
-  bottom: -1px;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
   height: 2px;
+  border-radius: 2px;
   background: var(--ws-colour);
   opacity: .45;
   transition: opacity 140ms steps(3, end);
@@ -989,63 +979,19 @@ button.glass:focus-visible {
 .tab[data-ws-colour]:hover::before { opacity: .7; }
 .tab[data-ws-colour].active::before { opacity: .9; }
 
-/* out of the workspace bar's way: the lamp stacks on top of it rather
-   than mixing with it */
-.tab[data-ws-colour]::after { bottom: 1px; }
+/* out of the workspace bar's way */
+.tab[data-ws-colour]::after { bottom: 2px; }
 
 /* The switcher UI's slot, left of the strip. app.js inserts it empty and
-   workspaces.css styles whatever goes in; zero-width until it does.
-   The slot closes with a vertical hairline, so the readout is told
-   apart from the first tab the same way the tabs are told apart from
-   each other. Vertical: the three-line rule governs the band's
-   HORIZONTAL structure and this crosses it. */
+   workspaces.css styles whatever goes in; zero-width until it does. */
 #workspace-slot {
-  position: relative;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
   height: 100%;
-  margin-right: 4px;
-  padding-right: 8px;
 }
 
 #workspace-slot:empty { display: none; }
-
-#workspace-slot::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  right: 0;
-  width: 1px;
-  background: var(--edge);
-  pointer-events: none;
-}
-
-/* The pill stops being a pill: a readout, the same way the zoom badge
-   and the tab titles are. Its pip, its name and its chevron, nothing
-   drawn around them until the pointer is on it. Written here rather
-   than in workspaces.css — which owns every .ws-* class — so the two
-   ids are what carry it over that file's own single-id rules. */
-#workspace-slot #workspace-pill {
-  height: 28px;
-  border-radius: var(--radius-ctl);
-  background: none;
-  border-color: transparent;
-}
-
-#workspace-slot #workspace-pill:hover {
-  background: var(--glass);
-  border-color: transparent;
-  color: var(--fg);
-}
-
-#workspace-slot #workspace-pill:active,
-#workspace-slot #workspace-pill.is-open {
-  background: var(--glass-2);
-  border-color: transparent;
-  color: var(--fg);
-}
 
 .tab-title {
   flex: 1 1 auto;
@@ -1093,7 +1039,7 @@ img.tab-icon[src=""],
 .tab.loading::after {
   background:
     linear-gradient(90deg, transparent 0%, var(--tab-shimmer) 50%, transparent 100%),
-    linear-gradient(var(--ion), var(--ion));
+    linear-gradient(90deg, transparent, var(--ion), transparent);
   background-size: 40% 100%, 100% 100%;
   background-repeat: no-repeat, no-repeat;
   animation: tab-shimmer 1.2s steps(24) infinite;  /* same reason as live-pulse */
@@ -1225,10 +1171,15 @@ img.tab-icon[src=""],
 .tab.dragging {
   z-index: 4;
   border-color: transparent;
-  /* A segment in the air is the same glass, one step brighter, lifted
-     off the strip by its shadow — the deep band behind it is dark
-     enough now that no opaque interior is needed to tell the two apart. */
-  background: var(--sheen), var(--glass-3);
+  /* opaque interior under the tint, for the same reason .tab.active
+     carries one: both of a chip's pseudo-elements are already in use, so
+     the rim stays a border-box layer and --panel-bg is what stops it
+     bleeding across the chip. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    var(--rim) border-box;
   color: var(--fg);
   box-shadow:
     inset 0 1px 0 var(--specular),
