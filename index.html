@@ -108,9 +108,10 @@
   <script src="siteinfo.js"></script>
   <script src="tabsearch.js"></script>
   <script src="workspaces.js"></script>
-  <!-- Classic script: leaves a global `Readability` behind. Must stay above
-       reader.js, which is the only thing that uses it. -->
-  <script src="node_modules/@mozilla/readability/Readability.js"></script>
+  <!-- node_modules/@mozilla/readability/Readability.js is deliberately NOT
+       here: reader.js is the only thing that uses it and injects it itself the
+       first time a reading page is opened, so boot does not pay for ~100KB
+       most sessions never touch. -->
   <script src="reader.js"></script>
   <script src="pip.js"></script>
   <script src="history.js"></script>

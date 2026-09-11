@@ -2445,15 +2445,30 @@ function claudeDefaultTitle(tab) {
 }
 
 /**
+ * The one place a `resume` option becomes claude.exe flags.
+ *
+ * 'pick' -> `--resume` with no id, which is the CLI's own picker of past
+ * conversations in that folder; true -> `--continue`, the latest one without
+ * asking. pty.js allows exactly these two, bare, and drops the rest.
+ */
+function claudeStartArgs(resume) {
+  if (resume === 'pick') return ['--resume'];
+  if (resume) return ['--continue'];
+  return [];
+}
+
+/**
  * Order matters: the view is appended and activated BEFORE the session starts,
  * so the host element already has a size when ClaudeTerminal.create() measures
  * it. terminal.js is loaded after this file, hence the typeof guard.
  *
- * @param {{cwd?:string, resume?:boolean, background?:boolean, workspace?:string}} [options]
+ * @param {{cwd?:string, resume?:boolean|'pick', background?:boolean, workspace?:string}} [options]
  *        cwd: the folder to run in, defaulting to settings / home.
  *        workspace: restoreSession() only; otherwise the one on screen.
- *        resume: ask the CLI to continue that folder's last conversation
- *        (restoreSession() only — a tab the user opens starts clean).
+ *        resume: true continues that folder's last conversation outright
+ *        (restoreSession() only — a tab the user opens starts clean);
+ *        'pick' hands the user Claude Code's own list of past conversations
+ *        in that folder. Anything else starts clean. See claudeStartArgs().
  *        background: build it behind the current tab. The host is hidden while
  *        the session starts, so activateTab() fits it on first raise.
  */
@@ -2528,7 +2543,7 @@ function createClaudeTab(options) {
     // terminal.js ignores the key entirely, which just means no resume.
     tab.term = factory.create(viewEl, {
       cwd: cwd || undefined,
-      args: opts.resume ? ['--continue'] : []
+      args: claudeStartArgs(opts.resume)
     });
   } catch (err) {
     tab.term = null;
@@ -2556,6 +2571,30 @@ function newClaudeTabInFolder() {
   pending.then((dir) => {
     if (typeof dir === 'string' && dir) createClaudeTab({ cwd: dir });
   }, () => { /* dialog failed: same as a cancel */ });
+}
+
+/**
+ * Ctrl+click on the Claude pill, the strip menu and the palette: a chamber in
+ * the default folder that opens on Claude Code's own list of past
+ * conversations there. The picking happens inside the CLI, not in the chrome,
+ * so there is nothing to cancel on this side — Escape in the picker just
+ * leaves the session sitting at a fresh prompt.
+ */
+function resumeClaudeConversation() {
+  return createClaudeTab({ resume: 'pick' });
+}
+
+/**
+ * The Claude chip menu's resume row. Same folder as the chamber it was asked
+ * from, and seated immediately after that chip rather than at the end of the
+ * strip: the two sessions on one folder belong next to each other.
+ */
+function resumeClaudeBesideTab(tab) {
+  if (!tab) return null;
+  const seat = stripSeat(tab);
+  const made = createClaudeTab({ cwd: tab.cwd, resume: 'pick' });
+  if (made && seat !== -1) moveTabToIndex(made.id, seat + 1);
+  return made;
 }
 
 function wireTermEvents(tab) {
@@ -2593,9 +2632,11 @@ function wireTermEvents(tab) {
   listen('title', (text) => {
     if (isNoiseTitle(text)) return;
     let clean = String(text == null ? '' : text).trim();
-    // The CLI reports a bare lowercase "claude" as its title; that says less
-    // than the folder does, so it falls back to the chip's own default.
-    if (/^claude$/i.test(clean)) clean = '';
+    // The CLI reports a bare lowercase "claude" as its title -- and "claude ·
+    // resume" / "claude · continue" when it was launched with one of those
+    // flags. Both say less than the folder does, so a picker session is
+    // titled by its folder exactly like every other chamber.
+    if (/^claude(\s*[·:\-|]\s*(resume|continue))?$/i.test(clean)) clean = '';
     setTabTitle(tab, clean ? clean.slice(0, 60) : '');
   });
 }
@@ -2966,6 +3007,12 @@ function tabMenuItemsForTab(tab) {
       label: 'Open folder in new Claude tab',
       run: () => createClaudeTab({ cwd: tab.cwd })
     });
+    // ...and the same folder's history: the CLI's picker, in a tab seated
+    // right after this one.
+    items.push({
+      label: 'Resume another conversation here',
+      run: () => resumeClaudeBesideTab(tab)
+    });
     // A chamber splits like anything else now: broken from either chip, and
     // paired with whichever page the user was reading before they came here.
     if (splitPartner(tab)) {
@@ -3009,11 +3056,13 @@ function tabMenuItemsForTab(tab) {
   return items;
 }
 
-/** Right-click on bare strip: there is no tab to act on, so only these four. */
+/** Right-click on bare strip: there is no tab to act on, so only these five. */
 function tabMenuItemsForStrip() {
   return [
     { label: 'New tab', run: () => createTab(HOME_URL) },
     { label: 'New Claude tab in folder…', run: newClaudeTabInFolder },
+    // The default folder, opened straight onto its past conversations.
+    { label: 'Resume a Claude conversation…', run: resumeClaudeConversation },
     // The manual version of the idle sweep: the tab in front is never touched.
     { label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepTab) },
     { label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() }
@@ -4355,11 +4404,18 @@ function wireChrome() {
   }
   if (newClaudeBtn) {
     // Plain click opens the default folder; Shift+click asks which one;
+    // Ctrl+click opens the default folder on its past conversations;
     // Alt+click is the button's spelling of Ctrl+Shift+\ — Claude beside
     // whatever is in front (and a second Alt+click puts it away again).
+    // The tooltip is set here rather than left to index.html so the three
+    // modifiers are documented wherever this handler goes.
+    newClaudeBtn.title =
+      'New Claude tab (Shift+click to pick a folder, '
+      + 'Ctrl+click to resume a conversation, Alt+click to open it beside this page)';
     newClaudeBtn.addEventListener('click', (event) => {
       if (event && event.altKey) toggleClaudeSplit();
       else if (event && event.shiftKey) newClaudeTabInFolder();
+      else if (event && (event.ctrlKey || event.metaKey)) resumeClaudeConversation();
       else createClaudeTab();
     });
   }

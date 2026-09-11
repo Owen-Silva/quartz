@@ -364,8 +364,10 @@
 
     // Launch flags belong to the FIRST spawn only. Consumed here, so the
     // Enter-to-restart path below always starts a plain session: a resumed
-    // conversation that has already ended must not be resumed again, and
-    // `claude --continue` in a folder with no history just errors and exits.
+    // conversation that has already ended must not be resumed again,
+    // `claude --continue` in a folder with no history just errors and exits,
+    // and `--resume` would re-open its picker instead of the fresh session
+    // the user asked for by pressing Enter.
     var startArgs = st.pendingArgs;
     st.pendingArgs = null;
 

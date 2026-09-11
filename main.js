@@ -10,6 +10,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const {
   app,
   BrowserWindow,
@@ -258,7 +259,29 @@ function createWindow() {
     delete webPreferences.preloadURL; // legacy key, still honoured by some builds
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
-    if (params) params.nodeintegration = 'false';
+    // Every other switch a <webview> attribute can flip. buildWebview() sets
+    // none of them, so pinning them here costs nothing and closes the whole
+    // attribute channel rather than the two entries it used to cover:
+    //   disablewebsecurity  -> webSecurity        (same-origin policy off)
+    //   plugins             -> plugins
+    //   enableblinkfeatures -> experimentalFeatures
+    //   webpreferences="…"  -> any of the above, spelled as a string
+    webPreferences.webSecurity = true;
+    webPreferences.allowRunningInsecureContent = false;
+    webPreferences.experimentalFeatures = false;
+    webPreferences.plugins = false;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    // A guest must not host a <webview> of its own: this hook belongs to the
+    // chrome's webContents, so a NESTED attach would never reach it.
+    webPreferences.webviewTag = false;
+    if (params) {
+      params.nodeintegration = 'false';
+      delete params.allowpopups;        // new-window is handled in app.js instead
+      delete params.disablewebsecurity;
+      delete params.plugins;
+      delete params.enableblinkfeatures;
+      delete params.webpreferences;
+    }
   });
 
   win.once('ready-to-show', () => {
@@ -553,13 +576,19 @@ const MAX_DUPLICATE_TRIES = 500;
  * Silently clobbering a file the user already has is the one download
  * behaviour nobody forgives.
  */
-function uniqueDownloadPath(dir, filename) {
+function uniqueDownloadPath(dir, rawFilename) {
+  // basename() first: Chromium already strips separators out of a
+  // Content-Disposition name, but joining an unflattened one onto `dir` is the
+  // only place a '..\..\' could ever walk the write out of Downloads.
+  const filename = path.basename(String(rawFilename || '')) || 'download';
   const ext = path.extname(filename);
   const base = path.basename(filename, ext);
   let candidate = path.join(dir, filename);
   for (let i = 1; i <= MAX_DUPLICATE_TRIES && fs.existsSync(candidate); i++) {
     candidate = path.join(dir, base + ' (' + i + ')' + ext);
   }
+  // Five hundred duplicates is absurd but not impossible; never overwrite.
+  if (fs.existsSync(candidate)) candidate = path.join(dir, base + ' (' + Date.now() + ')' + ext);
   return candidate;
 }
 
@@ -753,9 +782,23 @@ ipcMain.on('dl:clear', () => {
 // Used by the context menu's Save link as / Save image, which have a URL but
 // no DownloadItem yet. Going through the window's webContents means the
 // request carries our normal session, cookies included.
+// Schemes a "Save link as" can ever legitimately name. `file:` is deliberately
+// absent: a page must not be able to talk the chrome into copying something off
+// the local disk into Downloads, and neither javascript: nor a custom protocol
+// handler has any business here.
+const DOWNLOADABLE_SCHEMES = new Set(['http:', 'https:', 'blob:', 'data:']);
+
 ipcMain.on('dl:download-url', (_event, { url } = {}) => {
   const w = liveWin();
-  if (w && typeof url === 'string' && url) w.webContents.downloadURL(url);
+  if (!w || typeof url !== 'string' || !url) return;
+  let scheme = '';
+  try {
+    scheme = new URL(url).protocol;
+  } catch {
+    return; // not a URL at all
+  }
+  if (!DOWNLOADABLE_SCHEMES.has(scheme)) return;
+  w.webContents.downloadURL(url);
 });
 
 // ---------------------------------------------------------------------------
@@ -838,9 +881,32 @@ ipcMain.handle('capture:tab', async (_event, { wcId, full } = {}) => {
   }
 });
 
-/** Reveal a finished screenshot in Explorer. */
+/**
+ * True only for a path that resolves INSIDE the Downloads folder. `..` and a
+ * symlinked name both collapse in path.resolve() before the comparison, and
+ * path.relative() on win32 compares case-insensitively, which is what NTFS
+ * does.
+ */
+function isInsideDownloads(target) {
+  try {
+    const dir = path.resolve(app.getPath('downloads'));
+    const rel = path.relative(dir, path.resolve(String(target)));
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reveal a finished screenshot in Explorer. The path comes from the renderer,
+ * so it is confined to the folder capture:tab writes into -- there is no other
+ * place a screenshot can be, and an arbitrary path would otherwise let a
+ * compromised chrome point Explorer at anything on the disk.
+ */
 ipcMain.on('capture:show', (_event, { path: target } = {}) => {
-  if (typeof target === 'string' && target) shell.showItemInFolder(target);
+  if (typeof target !== 'string' || !target) return;
+  if (!isInsideDownloads(target)) return;
+  shell.showItemInFolder(target);
 });
 
 // ---------------------------------------------------------------------------
@@ -1015,7 +1081,11 @@ function permissionDetail(permission, origin, details) {
  */
 function askPermission(origin, permission, details) {
   const key = origin + '|' + permission;
-  if (permissionDecisions.has(key)) return Promise.resolve(permissionDecisions.get(key));
+  // "Open other apps" is asked every time: one remembered Allow would turn a
+  // site into a permanent launcher for any protocol handler on the machine.
+  if (permission !== 'openExternal' && permissionDecisions.has(key)) {
+    return Promise.resolve(permissionDecisions.get(key));
+  }
   const pending = permissionPending.get(key);
   if (pending) return pending;
 
@@ -1035,7 +1105,7 @@ function askPermission(origin, permission, details) {
     })
     .then((result) => {
       const allowed = result.response === 0;
-      rememberPermission(origin, permission, allowed);
+      if (permission !== 'openExternal') rememberPermission(origin, permission, allowed);
       return allowed;
     })
     .catch(() => false) // a dialog that failed to show is not consent
@@ -1654,7 +1724,7 @@ ipcMain.on('shortcuts:set', (_event, payload) => {
     clean[combo] = action;
     count += 1;
   }
-  if (!count) return;
+  if (!count || count > 200) return; // a real map has a few dozen entries
   keyBindings = clean;
 });
 
@@ -1933,8 +2003,38 @@ function guestMenuTemplate(contents, params) {
   return joinMenuGroups([navigation, link, image, selection, ask, editing, inspect]);
 }
 
+/** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
+const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
+
+/** True for one of OUR file:// pages (the new tab page, reader, history). */
+function isBundledPageUrl(url) {
+  return typeof url === 'string' && url.toLowerCase().startsWith(BUNDLED_PAGE_PREFIX.toLowerCase());
+}
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
+
+  /*
+   * Page-INITIATED navigation to file://. Chromium already refuses this for a
+   * web page, so this is the second lock rather than the first -- but the cost
+   * is one string test and the thing it stops (a page walking the guest onto
+   * file:///C:/Users/... and reading it same-origin) is the worst outcome in
+   * the app.
+   *
+   * will-navigate fires only for navigation the PAGE started: loadURL() and
+   * setAttribute('src', …) -- which is every navigation the chrome itself
+   * drives, omnibox included -- do not emit it. So typing a file:// path stays
+   * exactly as it was.
+   *
+   * The one page-initiated file:// navigation we do want is our own: the new
+   * tab page calls location.assign() for whatever was typed into its field,
+   * and reader.html links back with location.href. Both are bundled pages.
+   */
+  contents.on('will-navigate', (event, url) => {
+    if (typeof url !== 'string' || !/^file:/i.test(url)) return;
+    if (isBundledPageUrl(safeUrl(contents))) return;
+    event.preventDefault();
+  });
 
   // A click inside a guest never reaches the chrome renderer; split view needs
   // to know which pane took focus so the omnibox and chips can follow it.

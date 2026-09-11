@@ -143,8 +143,29 @@
       els.content.innerHTML = String(article.content || '');
       // Belt and braces: innerHTML never runs a <script>, but it does leave it
       // in the tree for anything later to move into a document that would.
-      var scripts = els.content.querySelectorAll('script, iframe, object, embed');
-      for (var i = 0; i < scripts.length; i++) scripts[i].remove();
+      // The chrome already sanitised the string, but serialise-then-reparse is
+      // the classic mXSS trick: sweep the LIVE tree too, with the same rules.
+      var unsafe = els.content.querySelectorAll(
+        'script, iframe, object, embed, noscript, style, link, meta, base, frame, frameset, form'
+      );
+      for (var i = 0; i < unsafe.length; i++) unsafe[i].remove();
+      var all = els.content.querySelectorAll('*');
+      var urlAttrs = ['href', 'src', 'srcset', 'action', 'formaction', 'xlink:href', 'poster', 'data'];
+      for (var j = 0; j < all.length; j++) {
+        var el = all[j];
+        var attrs = Array.prototype.slice.call(el.attributes);
+        for (var k = 0; k < attrs.length; k++) {
+          var name = attrs[k].name.toLowerCase();
+          var value = String(attrs[k].value || '').replace(/[\u0000-\u0020]/g, '').toLowerCase();
+          if (name.indexOf('on') === 0 || name === 'srcdoc' || name === 'style') {
+            el.removeAttribute(attrs[k].name);
+          } else if (urlAttrs.indexOf(name) !== -1 &&
+                     (value.indexOf('javascript:') === 0 || value.indexOf('vbscript:') === 0 ||
+                      value.indexOf('data:text/html') === 0)) {
+            el.removeAttribute(attrs[k].name);
+          }
+        }
+      }
       els.content.classList.add('is-filled');
     }
 

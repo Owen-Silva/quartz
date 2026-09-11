@@ -6,9 +6,10 @@
  *
  * The renderer runs with contextIsolation ON and nodeIntegration OFF, so this
  * is plain browser script: no require(), no import, no bundler. Loaded after
- * app.js (which owns .navrow, #downloads and #theme) and after shield.js, and
- * after node_modules/@mozilla/readability/Readability.js, which is a classic
- * script and therefore leaves a global `Readability` behind.
+ * app.js (which owns .navrow, #downloads and #theme) and after shield.js.
+ * node_modules/@mozilla/readability/Readability.js is NOT in index.html: it is
+ * ~100KB that only extract() ever touches, so loadReadability() injects it on
+ * the first open() and it leaves the same global `Readability` behind.
  *
  * This file only ever ADDS to the nav row: #reader goes immediately before
  * #shield when that instrument is present, else before #downloads, else before
@@ -372,6 +373,53 @@
   }
 
   /* ============================================================
+     The parser, on demand
+     ============================================================ */
+
+  /*
+   * Readability is the single biggest file the chrome used to load at boot,
+   * and nothing outside extract() can use it — the probe that decides whether
+   * the button lights runs in the guest page, not here. So it is fetched the
+   * first time a reading page is actually opened, in parallel with the capture
+   * that open() is already waiting on, and every later open reuses the same
+   * promise. A load that fails resolves false and lands on the same
+   * "Reader view is unavailable" path a missing global always took.
+   */
+  var READABILITY_SRC = 'node_modules/@mozilla/readability/Readability.js';
+  var readabilityPending = null;
+
+  function loadReadability() {
+    if (typeof Readability === 'function') return Promise.resolve(true);
+    if (readabilityPending) return readabilityPending;
+
+    readabilityPending = new Promise(function (resolve) {
+      var el = null;
+      try {
+        el = document.createElement('script');
+      } catch (err) {
+        resolve(false);
+        return;
+      }
+      el.src = READABILITY_SRC;
+      el.async = false;
+      el.addEventListener('load', function () {
+        resolve(typeof Readability === 'function');
+      });
+      el.addEventListener('error', function () {
+        readabilityPending = null;   // a later try may still find the file
+        resolve(false);
+      });
+      try {
+        (document.head || document.documentElement).appendChild(el);
+      } catch (err) {
+        readabilityPending = null;
+        resolve(false);
+      }
+    });
+    return readabilityPending;
+  }
+
+  /* ============================================================
      Opening
      ============================================================ */
 
@@ -457,14 +505,18 @@
       toast('Nothing to read here');
       return;
     }
-    if (typeof Readability !== 'function' || typeof window.createTab !== 'function') {
+    if (typeof window.createTab !== 'function') {
       toast('Reader view is unavailable');
       return;
     }
 
     var sourceId = tab.id;
 
-    runInGuest(tab, CAPTURE_SOURCE).then(function (json) {
+    // The parser and the page capture do not depend on each other, so the
+    // first open pays for whichever of the two is slower, not for both.
+    Promise.all([loadReadability(), runInGuest(tab, CAPTURE_SOURCE)]).then(function (both) {
+      if (!both[0]) { toast('Reader view is unavailable'); return; }
+      var json = both[1];
       var payload = null;
       try { payload = JSON.parse(String(json || '')); } catch (err) { payload = null; }
       if (!payload || !payload.html) { toast('Nothing to read here'); return; }

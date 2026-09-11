@@ -22,7 +22,17 @@ const DEFAULT_CWD = 'C:\\Users\\you';
 // else is dropped silently (logged, never spawned): the renderer is the least
 // trusted side of this bridge and argv is the one place a string it supplies
 // would change how the CLI behaves.
-const ALLOWED_ARGS = new Set(['--continue']);
+//
+// `--continue` resumes that folder's most recent conversation outright.
+// `--resume` is allowed BARE only: with no id after it the CLI draws its own
+// picker of past conversations, which is the whole point here. A session id
+// (or any other token) is not on this list, so it is dropped like anything
+// else -- there is no way to spell `--resume <id>` through this bridge.
+const ALLOWED_ARGS = new Set(['--continue', '--resume']);
+
+// Two ways to say "not a fresh session". Passing both is a CLI error, so the
+// first one asked for wins and the other is dropped.
+const RESUME_ARGS = new Set(['--continue', '--resume']);
 
 /** @type {Map<string, {id: string, pty: any, alive: boolean}>} */
 const sessions = new Map();
@@ -56,7 +66,13 @@ function sanitizeArgs(args) {
     const arg = raw.trim();
     if (!arg) continue;
     if (!ALLOWED_ARGS.has(arg)) {
+      // This is also what swallows a value after `--resume`: an id is just a
+      // token, and no token is on the allowlist.
       console.warn('[pty] dropped arg not on the allowlist:', arg);
+      continue;
+    }
+    if (RESUME_ARGS.has(arg) && out.some((prev) => RESUME_ARGS.has(prev))) {
+      console.warn('[pty] dropped second resume flag:', arg);
       continue;
     }
     if (out.indexOf(arg) === -1) out.push(arg);
@@ -127,7 +143,8 @@ function cleanEnv() {
  * @param {string} [opts.cwd]     working directory for the shell
  * @param {number} [opts.cols]    initial column count
  * @param {number} [opts.rows]    initial row count
- * @param {string[]} [opts.args]  extra claude.exe flags; only `--continue` survives
+ * @param {string[]} [opts.args]  extra claude.exe flags; only a bare
+ *                                `--continue` or `--resume` survives
  * @param {(data: string) => void} [opts.onData]
  * @param {(exitCode: number) => void} [opts.onExit]
  * @returns {{ id: string, cwd: string, args: string[], write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}

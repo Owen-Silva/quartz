@@ -459,6 +459,13 @@
       run: function () { callGlobal(function () { return newClaudeTabInFolder; }); }
     });
     list.push({
+      id: 'claude-resume', glyph: GLYPH.history, label: 'Resume a Claude conversation…',
+      hint: 'Claude Code lists the past sessions in that folder',
+      run: function () {
+        callGlobal(function () { return createClaudeTab; }, { resume: 'pick' });
+      }
+    });
+    list.push({
       id: 'claude-beside', glyph: GLYPH.beside, label: 'Claude beside this page',
       hint: 'A session in the other half', keys: ['Ctrl', 'Shift', '\\'],
       action: 'claude-split',
