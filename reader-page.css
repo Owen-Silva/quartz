@@ -20,12 +20,13 @@
 
 /* --- tokens: dark (default) ---------------------------------- */
 :root {
+  --link: var(--ion);
   --ink-0: #05060a;
   --ink-1: #0c0f18;
 
   --fg:   #eef1f8;
   --fg-2: #9aa3b8;
-  --fg-3: #5c6478;
+  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.08);
   --glass-2: rgba(255,255,255,.13);
@@ -74,12 +75,13 @@
 /* Tokens only — every rule below is written once and reads through
    them, exactly as chrome.css and newtab.css do. */
 :root[data-theme="light"] {
+  --link: #0a5fb0;  /* links are body text here: 5.2:1 on the light ground */
   --ink-0: #eef1f7;
   --ink-1: #f7f8fc;
 
   --fg:   #12162a;
   --fg-2: #4a526b;
-  --fg-3: #767e94;
+  --fg-3: #656d82;  /* mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.55);
   --glass-2: rgba(255,255,255,.72);
@@ -315,7 +317,7 @@ body {
 .content-root h4 { font-size: 1em; letter-spacing: .02em; }
 
 .content-root a {
-  color: var(--ion);
+  color: var(--link);
   text-decoration: none;
   border-bottom: 1px solid var(--ion-soft);
 }
@@ -422,6 +424,18 @@ body {
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--glass-3); background-clip: content-box; }
+
+/* The glass tokens are white overlays: on the light page they painted a white
+   thumb on a white column, so the article looked like it had no scrollbar at
+   all. The ink tokens are what read on that ground. */
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--fg-3);
+  background-clip: content-box;
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-2);
+  background-clip: content-box;
+}
 
 /* --- narrow windows ------------------------------------------ */
 @media (max-width: 620px) {

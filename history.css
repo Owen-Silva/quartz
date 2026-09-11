@@ -40,10 +40,12 @@
 #omni-suggest .omni-cap {
   padding: 7px 10px 5px 12px;
   color: var(--fg-3);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  /* Sentence case, like every other caption in the app. The old tracked
+     ALL-CAPS read as a different product. */
+  text-transform: none;
 }
 
 #omni-suggest .omni-cap[hidden] { display: none; }

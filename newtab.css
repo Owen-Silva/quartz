@@ -12,7 +12,7 @@
 
   --fg:   #eef1f8;
   --fg-2: #9aa3b8;
-  --fg-3: #5c6478;
+  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.08);
   --glass-2: rgba(255,255,255,.13);
@@ -65,7 +65,7 @@
 
   --fg:   #12162a;
   --fg-2: #4a526b;
-  --fg-3: #767e94;  /* 4.5:1 on the white capsule; mirrors chrome.css */
+  --fg-3: #656d82;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.55);
   --glass-2: rgba(255,255,255,.72);

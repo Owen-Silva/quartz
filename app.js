@@ -4633,18 +4633,11 @@ function wireKeyboard() {
         selectTabByIndex(Number(key));
         return;
       }
-      // Ctrl+Alt+Right / Left step through the workspaces (default binding). Chrome-side only:
-      // main.js does not replay arrows, so they do nothing while a page holds
-      // focus. Never taken from a text field, where the same chord is the
-      // select-by-word every Windows box has.
-      if (event.shiftKey && (key === 'ArrowRight' || key === 'ArrowLeft')) {
-        // In a text field the chord is select-by-word and stays the field's;
-        // returning here also keeps the rebindable resolver off it.
-        if (isEditableTarget(event.target)) return;
-        event.preventDefault();
-        cycleWorkspace(key === 'ArrowRight' ? 1 : -1);
-        return;
-      }
+      // Ctrl+Shift+Arrow stays the text field's select-by-word chord: it never
+      // reaches the rebindable resolver from an editable target. Workspace
+      // cycling is bound through shortcuts.js (Ctrl+Alt+Arrow by default).
+      if (event.shiftKey && (key === 'ArrowRight' || key === 'ArrowLeft')
+          && isEditableTarget(event.target)) return;
     }
 
     /* Everything else is rebindable. Only Ctrl, Alt and function keys reach the

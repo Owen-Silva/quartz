@@ -18,7 +18,7 @@
 
   --fg:   #eef1f8;
   --fg-2: #9aa3b8;
-  --fg-3: #5c6478;
+  --fg-3: #838b9f;                        /* 4.5:1 on --panel-bg; #5c6478 was 3.1:1 */
 
   --glass:   rgba(255,255,255,.08);
   --glass-2: rgba(255,255,255,.13);
@@ -97,7 +97,9 @@
 
   --fg:   #12162a;
   --fg-2: #4a526b;                        /* ~7:1 on the glass, ~5:1 at the aurora's deepest */
-  --fg-3: #767e94;                        /* 4.5:1 on white glass; #8a92a8 was 3.1:1 */
+  --fg-3: #656d82;                        /* 4.7:1 on --panel-bg, the ground every
+                                             pane over a page paints on; #767e94
+                                             cleared the glass but was 3.8:1 there */
 
   --glass:   rgba(255,255,255,.55);
   --glass-2: rgba(255,255,255,.72);
@@ -732,7 +734,13 @@ button:focus-visible,
   gap: 6px;
   height: 30px;
   max-width: 220px;
-  min-width: 0;
+  /* A floor, not 0. #tabstrip already hides its scrollbar and app.js already
+     scrolls the active chip into view, so the strip is built to scroll once the
+     chips run out of room — but with min-width: 0 they shrank instead, and at
+     the window's minimum width a full strip collapsed to blank chips and lone
+     close buttons. 104px is an icon, a few characters and the close button.
+     .tab.pinned overrides this back to its icon-only 40px. */
+  min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -1314,6 +1322,13 @@ body.claude-live #newclaude.attn .dot {
 
 #views > .split-divider:hover { background: var(--glass-3); }
 
+/* The glass tokens are white overlays: they lift a strip off a dark page and
+   vanish on a light one, so in light the handle between two white halves read
+   as a gap rather than something to grab. --edge is the hairline that reads on
+   either ground, and the accent's soft wash is the hover. */
+:root[data-theme="light"] #views > .split-divider { background: var(--edge); }
+:root[data-theme="light"] #views > .split-divider:hover { background: var(--ion-soft); }
+
 /* A press that lands on a guest page belongs to the guest, which would
    swallow the rest of the drag — so app.js lays this over the whole
    window for as long as the divider is being dragged. */
@@ -1395,6 +1410,12 @@ body.claude-live #newclaude.attn .dot {
   border: 1px solid var(--edge);
   border-radius: 12px;
   background: var(--sheen), var(--panel-bg);
+  /* --panel-bg keeps 4% of the page, and every other pane over a page blurs
+     that 4% away. This menu was the one that did not, so in light the page's
+     headline and links read straight through it. Same recipe as
+     #omni-suggest, the dropdown it sits next to. */
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
   color: var(--fg);
   font-family: var(--ui-font);
   font-size: 12.5px;

@@ -515,7 +515,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: 100%;
+  /* The row is the hit target, so it keeps its 8px padding — but it is pulled
+     back out of the body's gutter by the same 8px so the sentence lines up
+     with the section heading and the hint underneath it, instead of hanging
+     one step to the right of both. */
+  width: calc(100% + 16px);
+  margin-inline: -8px;
   padding: 6px 8px;
   border-radius: 9px;
   color: var(--fg-2);
@@ -631,6 +636,7 @@
 #settings-panel .set-row.is-inline {
   flex: 0 0 auto;
   width: auto;
+  margin-inline: 0;
   gap: 7px;
   padding: 4px 7px;
   font-size: 11.5px;

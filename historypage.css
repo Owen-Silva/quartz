@@ -16,7 +16,7 @@
 
   --fg:   #eef1f8;
   --fg-2: #9aa3b8;
-  --fg-3: #5c6478;
+  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.08);
   --glass-2: rgba(255,255,255,.13);
@@ -69,7 +69,7 @@
 
   --fg:   #12162a;
   --fg-2: #4a526b;
-  --fg-3: #767e94;  /* 4.5:1 on the white capsule; mirrors chrome.css */
+  --fg-3: #656d82;  /* 4.5:1 on this page's ground; mirrors chrome.css */
 
   --glass:   rgba(255,255,255,.55);
   --glass-2: rgba(255,255,255,.72);
@@ -682,6 +682,30 @@ mark {
   .topbar { padding: 8px 10px; gap: 8px; }
   .stage { padding: 12px 10px 56px; }
   .row { gap: 8px; }
+}
+
+/* --- scrollbar ------------------------------------------------ */
+/* Same treatment reader-page.css gives its own: without it this page fell
+   back to the OS scrollbar, a wide light-grey column with stepper arrows
+   down the side of a dark glass page. The glass tokens only read on the
+   dark ground, so light gets the hairline token instead. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--glass-3);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--specular); background-clip: content-box; }
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--fg-3);
+  background-clip: content-box;
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-2);
+  background-clip: content-box;
 }
 
 /* --- reduced motion ------------------------------------------ */

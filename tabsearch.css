@@ -109,6 +109,11 @@
   outline-offset: 3px;
 }
 
+/* The outline follows the element's radius, and this input had none — so the
+   app's hairline ring came out as a hard-cornered rectangle inside a pane
+   where nothing else has a square corner. Same 7px as #find-input. */
+#tabsearch-input { border-radius: 7px; }
+
 /* --- the list -------------------------------------------------- */
 #tabsearch .ts-list {
   max-height: 52vh;
@@ -132,10 +137,11 @@
 #tabsearch .ts-cap {
   padding: 10px 10px 5px 12px;
   color: var(--fg-3);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  /* Sentence case, matching the history page's .daybar. */
+  text-transform: none;
 }
 
 /* --- a row ------------------------------------------------------ */
@@ -328,7 +334,9 @@
   border: 1px solid var(--edge);
   border-radius: 5px;
   background: var(--sheen), var(--glass);
-  color: var(--fg-3);
+  /* The cap carries its own lighter ground, so --fg-3 landed at 4.4:1 on it.
+     One step up clears 4.5:1 on the cap in both themes. */
+  color: var(--fg-2);
   font-family: var(--ui-font);
   font-size: 10.5px;
   font-weight: 400;
@@ -338,7 +346,8 @@
 }
 
 /* under the highlight the caps lift with the row, not past it */
-#tabsearch .ts-row.is-hi .ts-key { color: var(--fg-2); }
+/* The lit row lifts its own ground, so the caps go a step brighter with it. */
+#tabsearch .ts-row.is-hi .ts-key { color: var(--fg); }
 
 /* the palette being worn: the one ion mark in the list */
 #tabsearch .ts-check {

@@ -402,7 +402,7 @@
 
   /** True only once another lane has actually shipped the workspace globals. */
   function hasWorkspaces() {
-    return typeof globalRef(function () { return switchWorkspaceBy; }) === 'function';
+    return typeof globalRef(function () { return cycleWorkspace; }) === 'function';
   }
 
   /**
@@ -551,15 +551,15 @@
        entirely until the global they call actually exists. */
     list.push({
       id: 'workspace-next', glyph: GLYPH.next, label: 'Next workspace',
-      action: 'workspace-next', keys: ['Ctrl', 'Shift', '→'],
+      action: 'workspace-next', keys: ['Ctrl', 'Alt', '→'],
       when: hasWorkspaces,
-      run: function () { callGlobal(function () { return switchWorkspaceBy; }, 1); }
+      run: function () { callGlobal(function () { return cycleWorkspace; }, 1); }
     });
     list.push({
       id: 'workspace-prev', glyph: GLYPH.prev, label: 'Previous workspace',
-      action: 'workspace-prev', keys: ['Ctrl', 'Shift', '←'],
+      action: 'workspace-prev', keys: ['Ctrl', 'Alt', '←'],
       when: hasWorkspaces,
-      run: function () { callGlobal(function () { return switchWorkspaceBy; }, -1); }
+      run: function () { callGlobal(function () { return cycleWorkspace; }, -1); }
     });
     list.push({
       id: 'zoom-in', glyph: GLYPH.zoomIn, label: 'Zoom in', action: 'zoom-in',
