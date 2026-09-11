@@ -73,6 +73,9 @@
     palette: 'aurora',
     accentHue: null,
     chips: null,
+    /* The bookmarks bar under the nav row: the chips below, on every page.
+       bookmarks.js owns the bar; this is the only place its visibility lives. */
+    bookmarksBar: false,
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
@@ -157,6 +160,7 @@
     ['Ctrl+J', 'Downloads'],
     ['Ctrl+H', 'History'],
     ['Ctrl+D', 'Add this page to your new tab'],
+    ['Ctrl+Shift+B', 'Bookmarks bar'],
     ['Ctrl+,', 'Settings'],
     ['Ctrl+`', 'Claude tab'],
     ['Ctrl+Shift+`', 'Claude tab in a chosen folder'],
@@ -955,6 +959,10 @@
     var accent = el('div', 'set-field set-accent');
     accent.setAttribute('data-field', 'accent');
     s.appendChild(accent);
+
+    var bookmarks = el('div', 'set-field');
+    bookmarks.setAttribute('data-field', 'bookmarksbar');
+    s.appendChild(bookmarks);
     return s;
   }
 
@@ -1030,6 +1038,34 @@
 
     accentField.appendChild(row);
     accentField.appendChild(el('p', 'set-hint', 'One colour marks what is active, everywhere.'));
+
+    renderBookmarksBar();
+  }
+
+  /**
+   * The bookmarks bar switch. The setting is the whole feature's state:
+   * bookmarks.js shows or hides the bar from it, and Ctrl+Shift+B writes the
+   * same key, so the switch is never out of step with what is on screen.
+   */
+  function renderBookmarksBar() {
+    if (!bodyEl) return;
+    var field = bodyEl.querySelector('[data-field="bookmarksbar"]');
+    if (!field) return;
+
+    var on = !!get('bookmarksBar');
+    field.textContent = '';
+    field.appendChild(switchRow('Show the bookmarks bar', on, function (next) {
+      set({ bookmarksBar: !!next });
+    }));
+    field.appendChild(el('p', 'set-hint',
+      'Your new-tab shortcuts, under the address bar. Ctrl+Shift+B toggles it.'));
+  }
+
+  /** Ctrl+Shift+B, and anything else that wants the bar without the panel. */
+  function toggleBookmarksBar() {
+    var next = !get('bookmarksBar');
+    set({ bookmarksBar: next });
+    return next;
   }
 
   /* ============================================================
@@ -1990,6 +2026,7 @@
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0) renderChips();
+      if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
       if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
     });
   }
@@ -2033,6 +2070,7 @@
     reset: reset,
 
     chips: chips,
+    toggleBookmarksBar: toggleBookmarksBar,
     addChip: addChip,
     removeChip: removeChip,
     updateChip: updateChip,

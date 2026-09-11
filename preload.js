@@ -82,6 +82,17 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('dl:update', handler);
     }
   },
+  // Page screenshots. capturePage() belongs to the guest's webContents, so main
+  // does the work and writes the PNG into the Downloads folder itself -- it is
+  // NOT a download item, so nothing about it comes back over dl:update.
+  // `wcId` is a <webview>'s webContents id (webview.getWebContentsId()).
+  capture: {
+    // Resolves to { path, width, height } or { error }; never rejects.
+    // `full` is reserved for a future full-page capture and does nothing yet.
+    tab: (wcId, full) => ipcRenderer.invoke('capture:tab', { wcId, full: !!full }),
+    // Reveal a finished screenshot in Explorer.
+    show: (path) => ipcRenderer.send('capture:show', { path })
+  },
   // Ad / tracker blocking. The engine lives in main and covers every guest at
   // once, so everything here is either a preference or a per-tab counter.
   // `wcId` is a <webview>'s webContents id (webview.getWebContentsId()).

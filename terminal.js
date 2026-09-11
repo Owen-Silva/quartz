@@ -447,6 +447,14 @@
         safeFit(st); // no-op while hidden
       },
 
+      // The grid the PTY is currently running at. The chamber is half of a
+      // split now, so the chrome (and a test) can watch these change as the
+      // divider moves; zeroes mean the terminal has not opened yet.
+      size: function () {
+        if (st.disposed || !st.term) return { cols: 0, rows: 0 };
+        return { cols: st.term.cols || 0, rows: st.term.rows || 0 };
+      },
+
       restart: function () {
         restart(st);
       },

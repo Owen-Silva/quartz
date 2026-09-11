@@ -30,6 +30,15 @@
 
 (function () {
 
+  /* The chrome calls window.__boardPaused() whenever an overlay with a
+     backdrop-filter opens over this page, and it must not have to care
+     whether the board ever started. Stand the API up as a no-op first;
+     the real one replaces it at the bottom of this file. */
+  window.__boardPaused = function () {};
+  window.__boardState = function () {
+    return { running: false, paused: false, hidden: !!document.hidden, mode: 'none' };
+  };
+
   const canvas = document.getElementById('board');
   if (!canvas || !canvas.getContext) return;
 
@@ -956,6 +965,42 @@
   let spawnTimer = 0;
   let resizeTimer = 0;
 
+  /* Set by the chrome through window.__boardPaused(). An overlay with a
+     backdrop-filter (settings, tab search, downloads, shield, site info,
+     omnibox suggestions) has to re-blur everything under it on every frame
+     the page paints, so a board that keeps moving costs the OVERLAY about
+     eleven points of CPU on top of its own. While one is open the board
+     freezes exactly the way a hidden page freezes: in-flight sprites are
+     Animation.pause()d rather than cancelled, so they resume from where
+     they stopped instead of blinking out and respawning. */
+  let chromePaused = false;
+
+  /* A palette repaint that arrived while frozen. One canvas commit is
+     deferred to the resume rather than dropped — the board would otherwise
+     keep the old theme's colours until the next layout. */
+  let pendingRepaint = false;
+
+  /* NOT gated on document.hasFocus(): a new tab sitting in a split pane, or
+     behind a focused panel, is still on screen and still expected to animate.
+     Only the three signals below stop the board. */
+  function motionFrozen() {
+    return chromePaused || !!document.hidden || !boardActive();
+  }
+
+  function pauseAnims() {
+    for (const anim of running) anim.pause();
+  }
+
+  function playAnims() {
+    for (const anim of running) anim.play();
+  }
+
+  function flushRepaint() {
+    if (!pendingRepaint) return;
+    pendingRepaint = false;
+    paintBoardNow();
+  }
+
   /* data-bg on <html> — written by newtab.js from ?bg= and from the chrome's
      __applyBackground() push — decides whether this file has any work at all:
 
@@ -979,7 +1024,7 @@
 
   function scheduleSpawn() {
     if (reducedMotion || document.hidden || spawnTimer || !live) return;
-    if (!boardActive()) return;
+    if (chromePaused || !boardActive()) return;
     const wait = SPAWN_MIN_MS + Math.random() * (SPAWN_MAX_MS - SPAWN_MIN_MS);
     spawnTimer = setTimeout(function () {
       spawnTimer = 0;
@@ -1019,8 +1064,18 @@
     clearLive();
   }
 
+  /* The gate. A repaint asked for while the board is frozen is remembered,
+     not spent: one commit on resume instead of one under a live blur. */
   function repaintBoard() {
     if (!board || !boardActive()) return;
+    if (chromePaused || document.hidden) { pendingRepaint = true; return; }
+    paintBoardNow();
+  }
+
+  /* The commit itself. */
+  function paintBoardNow() {
+    pendingRepaint = false;
+    if (!board) return;
     ctx.clearRect(0, 0, board.w, board.h);
     drawBoard(ctx, board);
   }
@@ -1037,11 +1092,15 @@
   function onVisibility() {
     if (document.hidden) {
       stopSpawn();
-      for (const anim of running) anim.pause();
+      pauseAnims();
       return;
     }
-    for (const anim of running) anim.play();
     layout();                        // covers a page that loaded hidden
+    // An overlay can outlive the tab switch: coming back visible with the
+    // chrome still paused leaves everything frozen until it says otherwise.
+    if (chromePaused) return;
+    playAnims();
+    flushRepaint();
     scheduleSpawn();
   }
 
@@ -1122,6 +1181,43 @@
     window.addEventListener('load', function () { layout(); });
     requestAnimationFrame(start);
   }
+
+  /* ------------------------------------------------------------------ */
+  /* The chrome's handle on the board                                     */
+  /*                                                                      */
+  /* __boardPaused(true) when an overlay with a backdrop-filter opens over */
+  /* the page, false when the last one closes. Idempotent, and it is only  */
+  /* ONE of three reasons the board can be frozen — a hidden page and an   */
+  /* inactive data-bg mode are the others, and any one of them is enough.  */
+  /* Resuming therefore resumes nothing the other two still veto.          */
+  /* ------------------------------------------------------------------ */
+
+  window.__boardPaused = function (flag) {
+    const next = !!flag;
+    if (next === chromePaused) return;   // repeat calls cost nothing
+    chromePaused = next;
+
+    if (next) {
+      stopSpawn();                       // no new packets
+      pauseAnims();                      // the live ones hold their position
+      return;
+    }
+
+    // Still frozen for another reason: onVisibility()/applyBgMode() own it.
+    if (document.hidden || !boardActive()) return;
+    playAnims();
+    flushRepaint();                      // the palette change we sat on
+    scheduleSpawn();
+  };
+
+  window.__boardState = function () {
+    return {
+      running: !reducedMotion && !!live && !motionFrozen(),
+      paused: chromePaused,
+      hidden: !!document.hidden,
+      mode: document.documentElement.getAttribute('data-bg') || 'board'
+    };
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });

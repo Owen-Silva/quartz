@@ -20,6 +20,7 @@ const {
   clipboard,
   Menu,
   nativeTheme,
+  webContents,
 } = require('electron');
 const { createSession, killAll } = require('./pty');
 
@@ -705,6 +706,91 @@ ipcMain.on('dl:clear', () => {
 ipcMain.on('dl:download-url', (_event, { url } = {}) => {
   const w = liveWin();
   if (w && typeof url === 'string' && url) w.webContents.downloadURL(url);
+});
+
+// ---------------------------------------------------------------------------
+// Page screenshots
+//
+// capturePage() lives on the GUEST's webContents, which only this process can
+// reach. The PNG lands in the Downloads folder beside real downloads and
+// borrows their no-overwrite naming -- but it is not a DownloadItem, so it
+// never appears in the downloads panel and nothing streams over dl:update.
+// ---------------------------------------------------------------------------
+
+/** Windows rejects <>:"/\|?* and control chars in a name, plus trailing dots. */
+function safeFilePart(text, fallback) {
+  const cleaned = String(text || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '');
+  return cleaned || fallback;
+}
+
+/** Local time as 'YYYY-MM-DD HH-mm-ss' -- a colon cannot go in a filename. */
+function captureStamp(date) {
+  // Duck-typed rather than `instanceof Date`, which is false for a Date made
+  // in another realm (a test harness, a different context).
+  const d = date && typeof date.getFullYear === 'function' ? date : new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    d.getFullYear() +
+    '-' + pad(d.getMonth() + 1) +
+    '-' + pad(d.getDate()) +
+    ' ' + pad(d.getHours()) +
+    '-' + pad(d.getMinutes()) +
+    '-' + pad(d.getSeconds())
+  );
+}
+
+/**
+ * Screenshot one guest into <Downloads>/Screenshot <host> <stamp>.png.
+ *
+ * `full` is RESERVED for a future full-page capture and deliberately changes
+ * nothing today: stitching one would mean scrolling the guest under the user
+ * and putting it back, so the visible area is what gets written either way.
+ *
+ * @returns {Promise<{ path: string, width: number, height: number } | { error: string }>}
+ */
+ipcMain.handle('capture:tab', async (_event, { wcId, full } = {}) => {
+  void full; // reserved -- see above
+  if (!Number.isInteger(wcId)) return { error: 'No page to capture.' };
+
+  let contents = null;
+  try {
+    contents = webContents.fromId(wcId);
+  } catch {
+    contents = null;
+  }
+  // Only ever a <webview> guest: never the chrome's own renderer, and never a
+  // stale id left behind by a closed tab.
+  if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') {
+    return { error: 'That tab has no page to capture.' };
+  }
+
+  try {
+    const image = await contents.capturePage();
+    if (!image || image.isEmpty()) return { error: 'The page came back blank.' };
+
+    const dir = app.getPath('downloads');
+    fs.mkdirSync(dir, { recursive: true });
+    const host = safeFilePart(hostOfUrl(contents.getURL()), 'page');
+    const name = 'Screenshot ' + host + ' ' + captureStamp() + '.png';
+    // The downloads helper, so a second capture inside the same second lands as
+    // '... (1).png' instead of overwriting the first.
+    const target = uniqueDownloadPath(dir, name);
+    fs.writeFileSync(target, image.toPNG());
+
+    const size = image.getSize();
+    return { path: target, width: size.width, height: size.height };
+  } catch (err) {
+    return { error: (err && err.message) || 'The capture failed.' };
+  }
+});
+
+/** Reveal a finished screenshot in Explorer. */
+ipcMain.on('capture:show', (_event, { path: target } = {}) => {
+  if (typeof target === 'string' && target) shell.showItemInFolder(target);
 });
 
 // ---------------------------------------------------------------------------
@@ -1500,6 +1586,13 @@ function shortcutFor(input) {
   if (key === 'r' || key === 'R') return { action: input.shift ? 'reader' : 'reload' };
   // Ctrl+Shift+A opens tab search; plain Ctrl+A stays the page's select-all.
   if (input.shift && (key === 'a' || key === 'A')) return { action: 'tabsearch' };
+  // Ctrl+Shift+S screenshots the page. Plain Ctrl+S is deliberately NOT mapped
+  // (it is absent from SHORTCUTS): pages use it for their own save.
+  if (input.shift && (key === 's' || key === 'S')) return { action: 'capture' };
+  if (input.shift && (key === 'b' || key === 'B')) return { action: 'bookmarks-bar' };
+  // Ctrl+Shift+backslash (reads as '|' on US layouts) puts Claude beside the
+  // page; plain Ctrl+backslash splits with the next tab.
+  if (key === '|' || (input.shift && key === '\\')) return { action: 'claude-split' };
   if (key === '\\') return { action: 'split' }; // Ctrl+backslash toggles split view
   const action = SHORTCUTS[key.toLowerCase()];
   return action ? { action } : null;

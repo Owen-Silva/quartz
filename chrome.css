@@ -1180,7 +1180,7 @@ body.claude-live #newclaude .dot {
   pointer-events: none;
 }
 
-/* --- split view: two page wells side by side ------------------- */
+/* --- split view: two wells side by side (page and/or Claude) --- */
 /* There is no wrapper: a <webview> is NEVER re-parented (a moved guest
    stops painting), so the two halves are the same direct children of
    #views they always were. app.js seats them with inline `order` and
@@ -1195,8 +1195,13 @@ body.claude-live #newclaude .dot {
   position: absolute;
   height: 2px;
   background: var(--ion-line);
+  /* Never a click target: the mark lies over whichever half is live, and a
+     press there has to reach the page or the terminal underneath it. */
   pointer-events: none;
-  z-index: 3;                  /* over the card (2) sharing this well */
+  /* over the card (2) sharing this well, and over a Claude chamber (0) —
+     xterm's own helpers climb to z-index 11, so the chamber below is given a
+     stacking context of its own to keep them off this line. */
+  z-index: 3;
 }
 
 /* the grab handle between the halves: an --edge line either side of a
@@ -1231,6 +1236,12 @@ body.claude-live #newclaude .dot {
    padding lives here and never on .xterm. */
 #views > .claude-view {
   position: relative;
+  /* A chamber is half of a split as readily as a page is: app.js seats it with
+     the same inline order + flex-basis, so it has to shrink past its content
+     (min-width: 0) and paint inside its own stacking context (z-index: 0) —
+     xterm's helper layers go up to z-index 11 and would otherwise climb over
+     the .split-focus mark and the divider's neighbours in #views. */
+  z-index: 0;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;

@@ -1,0 +1,218 @@
+/* ============================================================
+   bookmarks.css — the bookmarks bar and its overflow popover.
+
+   Loaded after chrome.css, and scoped entirely to #bookmarks-bar
+   and #bm-overflow: nothing here reaches another element.
+
+   THE SHELF. The nav row is an instrument panel; this is the shelf
+   under it. Same glass, one step quieter: --glass-thin instead of
+   --glass, and no sheen, so the row of favicons reads as content
+   sitting on the chrome rather than as another control surface.
+
+   THEMES. Every colour resolves through a chrome.css token, so the
+   light theme needs no block of its own at the bottom of this file —
+   :root[data-theme="light"] relights all of it for free.
+
+   MOTION. Both panes sit on a backdrop-filter, so an animated frame
+   re-blurs everything behind them. Nothing animates continuously
+   here: every transition is stepped and none runs longer than 150ms.
+   ============================================================ */
+
+/* There is no global reset in this app, and chrome.css gives every
+   button `display: inline-flex`, which outranks the UA's [hidden].
+   These rules put the attribute back in charge. */
+#bookmarks-bar[hidden],
+#bookmarks-bar .bm[hidden],
+#bookmarks-bar .bm-more[hidden],
+#bookmarks-bar .bm-icon[hidden],
+#bookmarks-bar .bm-fallback[hidden],
+#bm-overflow[hidden],
+#bm-overflow [hidden] { display: none; }
+
+/* ============================================================
+   The bar
+   A block child of .chrome-layer, directly under .navrow. The
+   layer is `flex: 0 0 auto` in a column-flex body, so these 30px
+   are 30px the page below does not get: the bar pushes #views
+   down instead of floating over it.
+   ============================================================ */
+
+#bookmarks-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--edge);
+
+  /* the .navrow recipe, one step lighter: the thin pane, and no sheen */
+  background: var(--glass-thin);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: inset 0 -1px 0 var(--shade-in);
+
+  /* The drag region is the titlebar's alone; the shelf under it is not
+     something the window should move by. */
+  -webkit-app-region: no-drag;
+
+  /* colour only — the theme swap, stepped */
+  transition: background-color 150ms ease,
+              color 150ms ease,
+              border-color 150ms ease,
+              box-shadow 150ms ease;
+}
+
+/* The strip of bookmarks. It clips: what does not fit is hidden by
+   the script and listed in the popover, so nothing half-draws at
+   the edge. */
+#bookmarks-bar .bm-items {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ============================================================
+   One bookmark
+   ============================================================ */
+
+#bookmarks-bar .bm,
+#bm-overflow .bm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: default;
+  -webkit-app-region: no-drag;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+#bookmarks-bar .bm:hover,
+#bm-overflow .bm:hover { background: var(--glass-2); color: var(--fg); }
+
+#bookmarks-bar .bm:active,
+#bm-overflow .bm:active { background: var(--glass-3); }
+
+#bookmarks-bar .bm:focus-visible,
+#bm-overflow .bm:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* The favicon, and the globe that takes its place when the service is
+   blocked or the icon 404s. One of the two is always hidden. */
+#bookmarks-bar .bm-icon,
+#bm-overflow .bm-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+}
+
+#bookmarks-bar .bm-fallback,
+#bm-overflow .bm-fallback {
+  width: 16px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+#bookmarks-bar .bm-label,
+#bm-overflow .bm-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* No chips yet. Quiet, and it says what to press. */
+#bookmarks-bar .bm-empty {
+  padding: 0 4px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 350;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   The "…" button
+   Shown only when something did not fit.
+   ============================================================ */
+
+#bookmarks-bar .bm-more {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  -webkit-app-region: no-drag;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+#bookmarks-bar .bm-more .glyph { font-family: var(--icon-font); }
+#bookmarks-bar .bm-more:hover { background: var(--glass-2); color: var(--fg); }
+#bookmarks-bar .bm-more:active { background: var(--glass-3); }
+#bookmarks-bar .bm-more[aria-expanded="true"] { background: var(--glass-3); color: var(--fg); }
+
+/* ============================================================
+   The overflow popover
+   A child of <body>, placed by the script under the "…" button, so
+   it hangs over a guest page instead of being clipped by the bar.
+   Nothing blurs usefully behind a pane that floats over a webview,
+   so it takes --panel-bg rather than glass.
+   ============================================================ */
+
+#bm-overflow {
+  position: fixed;
+  z-index: 20;                 /* above #views (1) and .chrome-layer (3) */
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 4px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  box-shadow: 0 10px 30px var(--shade-drop);
+}
+
+/* In the list, an item is a full-width row rather than a chip. */
+#bm-overflow .bm {
+  width: 100%;
+  height: 26px;
+  border-radius: 7px;
+}
+
+#bm-overflow .bm-label { max-width: 220px; }
+
+/* ============================================================
+   Reduced motion
+   The bar still lights and still swaps theme, it just arrives all
+   at once.
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  #bookmarks-bar,
+  #bookmarks-bar .bm,
+  #bookmarks-bar .bm-more,
+  #bm-overflow .bm { transition: none; }
+}

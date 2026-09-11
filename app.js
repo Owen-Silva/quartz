@@ -156,6 +156,51 @@ function pushRecentToTab(tab) {
   } catch (err) { /* guest went away mid-call */ }
 }
 
+// Panes with a backdrop-filter over the new-tab page make its animated board
+// re-blur every frame (+11% CPU measured). While any of them is open, the
+// active new-tab guest is told to freeze; it resumes when the last one closes.
+const OVERLAY_IDS = [
+  'settings-panel', 'tabsearch', 'downloads-panel', 'shield-panel',
+  'siteinfo-panel', 'omni-suggest', 'tabmenu', 'findbar', 'bm-overflow'
+];
+let overlayOpenLast = null;
+
+function anyOverlayOpen() {
+  return OVERLAY_IDS.some((id) => {
+    const el = document.getElementById(id);
+    return !!el && !el.hidden && getComputedStyle(el).display !== 'none';
+  });
+}
+
+function pushBoardPaused(tab, paused) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__boardPaused && window.__boardPaused(' + (paused ? 'true' : 'false') + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away */ }
+}
+
+function syncBoardPause() {
+  const open = anyOverlayOpen();
+  if (open === overlayOpenLast) return;
+  overlayOpenLast = open;
+  for (const tab of tabs) pushBoardPaused(tab, open);
+}
+
+function wireOverlayWatch() {
+  // The panels toggle `hidden`; the menus and suggestions toggle it too, so one
+  // attribute observer on the whole document catches every one of them.
+  const observer = new MutationObserver(() => syncBoardPause());
+  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['hidden'] });
+  // A freshly loaded new-tab guest has to learn the current state too.
+  document.addEventListener('tabready', (event) => {
+    const tab = tabs.find((t) => t.id === (event.detail && event.detail.id));
+    if (tab && overlayOpenLast) pushBoardPaused(tab, true);
+  });
+}
+
 // Called from init(): settings.js loads after this file, so the hook is late-bound.
 function wireSettings() {
   const settings = window.Settings;
@@ -1302,8 +1347,9 @@ function sleepOtherTabs() {
  * guest focus over api.onGuestFocus and onGuestFocused() below turns the
  * webContents id back into a tab.
  *
- * Claude chambers never split (a PTY has no second half), and splits are
- * deliberately not part of the session snapshot.
+ * A Claude chamber splits exactly like a page does — that pairing (a page on
+ * one side, Claude Code on the other) is the point of the window. Splits are
+ * deliberately not part of the session snapshot either way.
  */
 
 const SPLIT_RATIO_MIN = 0.2;
@@ -1317,9 +1363,15 @@ function clampSplitRatio(value) {
   return Math.max(SPLIT_RATIO_MIN, Math.min(SPLIT_RATIO_MAX, n));
 }
 
-/** Only a page tab can be half of a pair. */
+/**
+ * Any well can be half of a pair: a page OR a Claude chamber. A chamber is a
+ * plain div with `min-width: 0`, so it takes the same inline order/flex-basis
+ * seat a <webview> does, and terminal.js's ResizeObserver refits the PTY as
+ * the divider moves. Page + Claude is the pair the whole browser exists for;
+ * two chambers side by side is allowed too, because it costs nothing.
+ */
 function canSplitTab(tab) {
-  return !!(tab && tab.kind === 'page');
+  return !!(tab && (tab.kind === 'page' || tab.kind === 'claude'));
 }
 
 /**
@@ -1652,7 +1704,8 @@ function unsplit(tab) {
 }
 
 /**
- * Show two page tabs side by side. Either tab may already be in another pair,
+ * Show two tabs side by side (page or Claude, in any mix). Either tab may
+ * already be in another pair,
  * and either may be asleep — both are dealt with before the pair is made.
  * @returns {boolean} true when the pair is now on screen.
  */
@@ -1687,8 +1740,8 @@ function splitTabs(a, b) {
   return true;
 }
 
-/** The next page tab after this one in strip order, wrapping. Claude skipped. */
-function nextPageTab(tab) {
+/** The next splittable tab after this one in strip order, wrapping. */
+function nextSplittableTab(tab) {
   const start = tabs.indexOf(tab);
   if (start === -1) return null;
   for (let step = 1; step < tabs.length; step++) {
@@ -1698,20 +1751,20 @@ function nextPageTab(tab) {
   return null;
 }
 
-/** Menu row on a chip: pair that tab with the next page tab along the strip. */
+/** Menu row on a chip: pair that tab with the next splittable tab along. */
 function splitTabWithNext(tab) {
   if (!canSplitTab(tab)) return false;
-  const next = nextPageTab(tab);
+  const next = nextSplittableTab(tab);
   if (!next) return false;
   return splitTabs(tab, next);
 }
 
-/** Command: split the ACTIVE page tab with the next page tab in the strip. */
+/** Command: split the ACTIVE tab with the next splittable tab in the strip. */
 function splitWithNext() {
   return splitTabWithNext(getActiveTab());
 }
 
-/** Command: split the active page tab with one named tab (its chip's menu). */
+/** Command: split the active tab with one named tab (its chip's menu). */
 function splitWithTab(id) {
   const active = getActiveTab();
   const other = tabs.find((t) => t.id === id) || null;
@@ -1725,6 +1778,50 @@ function toggleSplit() {
   if (!active) return false;
   if (splitPartner(active)) return unsplit(active);
   return splitWithNext();
+}
+
+/**
+ * Chip menu on a page: open a NEW chamber in the default folder and stand it
+ * beside this page. The chamber is built in the background and appended to the
+ * end of the strip, so strip order puts the page on the left — which is the
+ * way round the window is meant to be read — and splitTabs() brings the pair
+ * forward on the page.
+ */
+function openClaudeBesideTab(tab) {
+  if (!tab || tab.kind !== 'page') return false;
+  const claude = createClaudeTab({ background: true });
+  if (!claude) return false;
+  return splitTabs(tab, claude);
+}
+
+/** Chip menu on a chamber: stand it beside the page you were last on. */
+function splitClaudeWithRecentPage(tab) {
+  if (!isClaudeTab(tab)) return false;
+  const page = mostRecentTabOfKind('page');
+  if (!page || page === tab) return false;
+  return splitTabs(page, tab);
+}
+
+/**
+ * Ctrl+Shift+\ — "Claude beside". One key for the pairing the whole browser is
+ * for: a page on one side, a Claude Code session on the other.
+ *   - already split (either half): break the pair;
+ *   - on a page: pair it with the chamber you used last, opening one if there
+ *     is none;
+ *   - in a chamber: pair it with the page you were last on.
+ * The halves sit in strip order, exactly as every other split does.
+ */
+function toggleClaudeSplit() {
+  const active = getActiveTab();
+  if (!active) return false;
+  if (splitPartner(active)) return unsplit(active);
+
+  if (isClaudeTab(active)) return splitClaudeWithRecentPage(active);
+  if (active.kind !== 'page') return false;
+
+  const claude = mostRecentTabOfKind('claude');
+  if (claude) return splitTabs(active, claude);
+  return openClaudeBesideTab(active);
 }
 
 /** The page tab whose live guest has this webContents id, or null. */
@@ -1876,6 +1973,19 @@ function createClaudeTab(options) {
   };
 
   tab.chipEl = buildChip(tab);
+
+  // Reaching into the chamber with the mouse is the same as asking for this
+  // tab. A guest page reports its own focus through main (onGuestFocused);
+  // a chamber is right here in this document, so the press is the signal.
+  // Capture, so xterm's own handlers cannot swallow it first, and guarded to
+  // the active tab's partner exactly as the guest path is — a stray press on
+  // a hidden chamber must never move the chrome. activateTab() focuses the
+  // terminal from its Claude branch, so nothing steals focus back.
+  viewEl.addEventListener('mousedown', () => {
+    if (tab.id === activeTabId) return;
+    const other = splitPartner(tab);
+    if (other && other.id === activeTabId) activateTab(tab.id);
+  }, true);
 
   tabs.push(tab);
   viewsEl.appendChild(viewEl);
@@ -2265,11 +2375,16 @@ function tabMenuItemsForTab(tab) {
       items.push({
         label: 'Split with next tab',
         run: () => splitTabWithNext(tab),
-        disabled: !nextPageTab(tab)
+        disabled: !nextSplittableTab(tab)
       });
       if (active && active !== tab && canSplitTab(active)) {
         items.push({ label: 'Split with this tab', run: () => splitWithTab(tab.id) });
       }
+      // The pairing this window is for: a fresh chamber on the right of it.
+      items.push({
+        label: 'Open Claude beside this page',
+        run: () => openClaudeBesideTab(tab)
+      });
     }
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
@@ -2284,6 +2399,18 @@ function tabMenuItemsForTab(tab) {
       label: 'Open folder in new Claude tab',
       run: () => createClaudeTab({ cwd: tab.cwd })
     });
+    // A chamber splits like anything else now: broken from either chip, and
+    // paired with whichever page the user was reading before they came here.
+    if (splitPartner(tab)) {
+      items.push({ label: 'Unsplit', run: () => unsplit(tab) });
+    } else {
+      const recent = mostRecentTabOfKind('page');
+      items.push({
+        label: 'Split with the page I was on',
+        run: () => splitClaudeWithRecentPage(tab),
+        disabled: !recent
+      });
+    }
   }
 
   items.push(null);
@@ -3380,9 +3507,12 @@ function wireChrome() {
     newTabBtn.addEventListener('click', () => createTab(HOME_URL));
   }
   if (newClaudeBtn) {
-    // Plain click opens the default folder; Shift+click asks which one.
+    // Plain click opens the default folder; Shift+click asks which one;
+    // Alt+click is the button's spelling of Ctrl+Shift+\ — Claude beside
+    // whatever is in front (and a second Alt+click puts it away again).
     newClaudeBtn.addEventListener('click', (event) => {
-      if (event && event.shiftKey) newClaudeTabInFolder();
+      if (event && event.altKey) toggleClaudeSplit();
+      else if (event && event.shiftKey) newClaudeTabInFolder();
       else createClaudeTab();
     });
   }
@@ -3473,7 +3603,8 @@ function historyCall(method, url, title) {
 function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
-    window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo
+    window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo,
+    window.Capture, window.Bookmarks
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -3533,7 +3664,13 @@ function wireKeyboard() {
       // 'print' has no replay yet, so Ctrl+P only works while the chrome has focus.
       'reader': () => moduleShortcut('reader'),
       'tabsearch': () => moduleShortcut('tabsearch'),
+      'capture': () => moduleShortcut('capture'),
+      'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
       'split': toggleSplit,
+      // main.js does not replay Ctrl+Shift+\ yet, so "Claude beside" only fires
+      // while the chrome has focus. The entry costs nothing and means the key
+      // starts working from inside a page the day main.js sends it.
+      'claude-split': toggleClaudeSplit,
       'escape': () => moduleShortcut('escape'),
     };
     window.api.onShortcut((payload) => {
@@ -3570,9 +3707,12 @@ function wireKeyboard() {
 
     // Ctrl+\ pairs the tab in front with the next one, or breaks the pair it is
     // already in. The backslash has no case, so it is read off event.key raw.
-    if (event.key === '\\') {
+    // Ctrl+Shift+\ is "Claude beside" instead. Shift over a US layout turns the
+    // key into '|', but not every layout does, so both characters are read.
+    if (event.key === '\\' || event.key === '|') {
       event.preventDefault();
-      toggleSplit();
+      if (event.shiftKey) toggleClaudeSplit();
+      else toggleSplit();
       return;
     }
 
@@ -3660,6 +3800,9 @@ function wireKeyboard() {
       moduleShortcut('tabsearch');
       return;
     }
+    // Ctrl+Shift+S saves a screenshot of the page; Ctrl+Shift+B shows the bookmarks bar.
+    if (key === 's' && event.shiftKey) { event.preventDefault(); moduleShortcut('capture'); return; }
+    if (key === 'b' && event.shiftKey) { event.preventDefault(); moduleShortcut('bookmarks-bar'); return; }
     if (key === 'r') {
       event.preventDefault(); // never let Ctrl+R reload the shell window
       reloadActiveTab(); // no-op on a Claude tab
@@ -3708,6 +3851,7 @@ function init() {
   wireWindowControls();
   wireKeyboard();
   wireSettings();
+  wireOverlayWatch();
 
   // The chrome follows its own tabchange event, exactly like find.js and the
   // other modules do: the badge belongs to the tab you are looking at, and a
@@ -3768,6 +3912,8 @@ window.splitWithTab = splitWithTab;
 window.splitTabs = splitTabs;
 window.unsplit = unsplit;
 window.toggleSplit = toggleSplit;
+window.toggleClaudeSplit = toggleClaudeSplit;
+window.openClaudeBesideTab = openClaudeBesideTab;
 window.splitPartner = splitPartner;
 window.setSplitRatio = setSplitRatio;
 
