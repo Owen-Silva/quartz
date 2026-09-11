@@ -1897,6 +1897,14 @@ function wireChrome() {
   // Right-click in the tab row. Delegated from the titlebar so bare strip space
   // is covered too; main.js only pops a native menu over editable fields, so
   // nothing competes with this one.
+  //
+  // Windows caveat: the empty titlebar is `-webkit-app-region: drag`, which the
+  // OS hit-tests as HTCAPTION, so a real right-click there is answered by the
+  // window system menu and never reaches the DOM. Chips and the other no-drag
+  // areas do get this menu; bare caption space does not. Fixing it means
+  // hooking WM_NCRBUTTONUP in main.js and cancelling the system menu
+  // (WM_INITMENU + a setEnabled toggle) -- a window-message hack for a rare
+  // gesture, so it is left alone deliberately.
   const onStripMenu = (event) => {
     if (!event || !event.target || !event.target.closest) return;
     if (event.target.closest('button')) return; // +, window controls: not ours
