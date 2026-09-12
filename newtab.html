@@ -27,7 +27,7 @@
 <div id="bg-image" aria-hidden="true"></div>
 <div id="bg-dim" aria-hidden="true"></div>
 
-<!-- The board: a circuit around the field, drawn in JS. Inert, above the aurora.
+<!-- The board: a circuit around the column, drawn in JS. Inert, above the aurora.
      Hidden by CSS for data-bg="aurora", and for data-bg="image" unless the
      picture asked for it back (data-bg-board="over"). -->
 <canvas id="board" aria-hidden="true"></canvas>
@@ -65,29 +65,50 @@
 
 <main class="stage">
   <div class="column">
-    <!-- The placeholder below is the pre-script default; newtab.js rewrites
-         it for the chosen engine ("Search DuckDuckGo or type a URL"). -->
-    <form id="search" class="searchform" autocomplete="off" novalidate>
-      <input id="q"
-             class="field"
-             type="text"
-             name="q"
-             placeholder="Search Google or type a URL"
-             aria-label="Search Google or type a URL"
-             autofocus
-             spellcheck="false"
-             autocapitalize="off"
-             autocorrect="off"
-             role="combobox"
-             aria-autocomplete="list"
-             aria-controls="q-suggest"
-             aria-expanded="false">
+    <!-- The instrument strip, where the search field used to be: five
+         readouts the chrome pushes in every 2 s with __applyStats().
+         There is no search box here on purpose — the address bar above
+         is where this window searches.
 
-      <!-- Typed-match dropdown, built by newtab.js out of the recent list.
-           Absolutely positioned over the page, so it never changes the
-           column's box (the circuit socket is measured from that box). -->
-      <div id="q-suggest" class="suggest" role="listbox" aria-label="Recent matches" hidden></div>
-    </form>
+         Every box below is sized by CSS and not by its content, so the
+         strip wears its final height from the first paint: the dashes
+         it shows before the first sample occupy exactly the room the
+         numbers will, and nothing jumps when they land. newtab-bg.js
+         measures this column for its socket, so that matters twice. -->
+    <section id="stats" class="stats" aria-label="System">
+      <div class="stat">
+        <p class="stat-value"><span id="st-cpu">&#8212;</span></p>
+        <p class="stat-label">CPU</p>
+        <canvas id="sg-cpu" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="stat">
+        <p class="stat-value stat-value-sm"><span id="st-mem">&#8212;</span></p>
+        <p class="stat-label">Memory</p>
+        <canvas id="sg-mem" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="stat">
+        <p class="stat-value"><span id="st-disk">&#8212;</span></p>
+        <p class="stat-label">Disk</p>
+        <canvas id="sg-disk" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="stat">
+        <p class="stat-value stat-value-pair">
+          <span id="st-net-down" class="stat-line">&#8212;</span>
+          <span id="st-net-up" class="stat-line">&#8212;</span>
+        </p>
+        <p class="stat-label">Network (bits/s)</p>
+        <canvas id="sg-net" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="stat">
+        <p class="stat-value"><span id="st-gpu">&#8212;</span></p>
+        <p class="stat-label">GPU</p>
+        <canvas id="sg-gpu" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
+      </div>
+    </section>
 
     <nav id="links" class="links" aria-label="Shortcuts"></nav>
 

@@ -1,8 +1,10 @@
 /* ============================================================
-   newtab.css — the browser's own search page.
+   newtab.css — the browser's own new tab page.
    Same world as chrome.css: frosted glass over an aurora,
-   near-monochrome, one ice-cyan light. The field is the only
-   thing that glows, and the only thing worth remembering.
+   near-monochrome. There is no search field here — the address
+   bar above is where this window searches — so the page is a
+   clock, an instrument strip and two rows of links, and the one
+   accent left on it is the line inside the five graphs.
    ============================================================ */
 
 /* --- tokens (mirrored from chrome.css) ----------------------- */
@@ -61,7 +63,7 @@
      family, and these re-read whatever won there. No per-palette
      copies, and the light block needs nothing added. */
   --bevel:      10px;   /* containers: popovers, tiles, cards */
-  --bevel-lg:   14px;   /* the search slot and full panels */
+  --bevel-lg:   14px;   /* the instrument strip and full panels */
   --radius-ctl: 6px;    /* controls keep ordinary round corners */
 
   /* the lit rim: specular at the top-left, powered at the bottom-right */
@@ -82,7 +84,7 @@
 
   --pip-glow: none;
 
-  /* Bahnschrift semi-condensed: labels, the search slot, chips */
+  /* Bahnschrift semi-condensed: labels, readouts, chips */
   --readout-stretch: 87.5%;
 }
 
@@ -600,7 +602,7 @@ body {
     0 8px 20px -12px var(--panel-shadow);
   color: var(--fg);
   text-align: left;
-  pointer-events: none;            /* a click anywhere still lands in the field */
+  pointer-events: none;            /* a click anywhere lands on the page, not a tile */
   transition:
     background-color 160ms steps(4, end),
     color            160ms steps(4, end),
@@ -714,53 +716,38 @@ body {
   text-overflow: ellipsis;
 }
 
-/* --- the field: the one memorable thing ---------------------- */
-/* position: the dropdown below hangs off this box, so it lines up with
-   the capsule without adding a pixel to the column's own height (the
-   circuit socket in newtab-bg.js is measured from that height). */
-.searchform {
-  margin: 0;
-  position: relative;
-}
+/* --- the instrument strip ------------------------------------ */
+/* What the search field used to be: five readouts in one row, read at a
+   glance and nothing else. It is a panel, not a control — no focus ring,
+   no accent rim, nothing that lights. The one accent on this page is the
+   1px line inside the five graphs.
 
-/* The lit instrument slot. Quiet glass at rest; the rim is painted as a
-   ring on .searchform::after rather than into this element's background,
-   because a border-box gradient under a TRANSLUCENT padding-box layer
-   shows through the whole box — the slot came out a solid cyan wash with
-   the typed line sitting on a gradient. The border stays transparent so
-   the ring has a 1px strip of its own to sit in. */
-.field {
-  display: block;
-  width: 100%;
-  height: 56px;
-  padding: 0 22px;
-  border: 1px solid transparent;
+   No backdrop-filter, deliberately, for the reason the module tiles give:
+   a blurred surface over the drifting aurora is real CPU, and this one is
+   on screen full-time and twice the height the field was. The sheen, the
+   glass and the rim ring carry the material instead. */
+.stats {
+  position: relative;              /* the rim ring below hangs off this box */
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0 4px;
+  padding: 16px 20px;
   border-radius: var(--bevel-lg);
   background: var(--sheen), var(--glass);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
   box-shadow:
     inset 0 1px 0 var(--specular),
     0 10px 26px -14px var(--panel-shadow);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 17px;
-  font-stretch: var(--readout-stretch);   /* the typed line is a readout */
-  letter-spacing: .01em;
-  line-height: 1.2;
-  text-align: center;
+  text-align: left;
   transition:
     background-color 160ms steps(4, end),
     color            160ms steps(4, end),
     box-shadow       160ms steps(4, end);
 }
 
-/* The rim itself. An <input> cannot carry a pseudo-element, so the ring
-   hangs off the form: .field is the only thing in flow inside it (the
-   dropdown is absolute), so the form's content box IS the slot's border
-   box and inset:0 lands the 1px ring exactly on the transparent border.
-   padding:1px + the xor mask hollows out everything but that strip. */
-.searchform::after {
+/* The rim as a ring rather than a background layer: painted into the
+   background it would show through the translucent glass over the whole
+   panel. padding:1px + the xor mask hollows out all but that 1px strip. */
+.stats::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -773,26 +760,67 @@ body {
           mask-composite: exclude;
 }
 
-/* In use, the ring goes to full accent and the slot lights the glass
-   around it. The light is the focus state; there is no outline. */
-.searchform:focus-within::after { background: var(--rim-focus); }
-
-/* Two cut corners on the diagonal — the same axis as the sheen. Where
-   corner-shape is missing the slot stays plainly round. */
+/* Two cut corners on the diagonal — the same axis as the sheen. */
 @supports (corner-shape: bevel) {
-  .field,
-  .searchform::after { corner-shape: round bevel round bevel; }
+  .stats,
+  .stats::after { corner-shape: round bevel round bevel; }
 }
 
-.field::placeholder { color: var(--fg-3); }
+/* One readout. Every line in it has a stated height: the strip is
+   28 + 4 + 16 + 8 + 28 = 84px of content in every state, dashes or
+   numbers, so the column the board measures never changes. */
+.stat { min-width: 0; }
 
-.field:focus,
-.field:focus-visible {
-  outline: none;                   /* the ring is the focus */
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 10px 26px -14px var(--panel-shadow),
-    0 0 0 3px var(--ion-soft);
+.stat-value {
+  margin: 0;
+  height: 28px;
+  color: var(--fg);
+  font-size: 20px;
+  font-weight: 500;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* "8.9 / 15.8 GB" is a long readout for a 120px column. */
+.stat-value-sm { font-size: 16px; }
+
+/* Network states two rates, so it spends the same 28px on two lines. */
+.stat-value-pair {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.stat-line {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-label {
+  margin: 4px 0 0;
+  height: 16px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 60 samples, ~2 minutes. Drawn by newtab.js only when a sample lands. */
+.stat-graph {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+  height: 28px;
+  margin-top: 8px;
 }
 
 /* --- shortcut chips ------------------------------------------ */
@@ -985,111 +1013,38 @@ body {
   color: var(--fg);
 }
 
-/* --- typed-match dropdown ------------------------------------ */
-/* Glass, but over an opaque ground: it covers page content, so nothing
-   underneath may read through it. --ink-1 is that ground, the same one
-   the aurora's base fades to. */
-.suggest {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  z-index: 5;
-  padding: 5px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  /* the opaque ground stays in the padding box; the rim takes the border */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass), var(--glass)) padding-box,
-    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
-    var(--rim) border-box;
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 16px 38px var(--panel-shadow);
-  text-align: left;
-}
-
-/* The panel is cut on the same diagonal as the slot it hangs from. */
-@supports (corner-shape: bevel) {
-  .suggest { corner-shape: round bevel round bevel; }
-}
-
-.suggest[hidden] { display: none; }
-
-/* Menu rows are controls: round, quiet, no cut. */
-.sug {
-  display: flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg);
-  font-size: 13px;
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: background-color 120ms steps(3, end);
-}
-
-.sug-icon {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin-right: 9px;
-  border-radius: 3px;
-  object-fit: contain;
-}
-
-.sug-title {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sug-host {
-  flex: 0 0 auto;
-  max-width: 45%;
-  margin-left: auto;
-  padding-left: 12px;
-  color: var(--fg-3);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sug:hover { background-color: var(--glass-2); }
-
-/* the keyboard highlight: a lit rail, not a border, so nothing shifts */
-.sug.is-active {
-  background-color: var(--glass-2);
-  box-shadow: inset 2px 0 0 var(--ion);
-}
-
 /* --- launch motion: one rise, and that is all ---------------- */
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
 }
 
-.searchform { animation: rise 500ms ease-out both; }
-.links      { animation: rise 500ms ease-out 80ms both; }
-.recent     { animation: rise 500ms ease-out 140ms both; }
+.stats  { animation: rise 500ms ease-out both; }
+.links  { animation: rise 500ms ease-out 80ms both; }
+.recent { animation: rise 500ms ease-out 140ms both; }
 
 /* --- narrow windows ------------------------------------------ */
+/* Five columns stop being readable long before the window does, so the
+   strip folds to three and then to two. Each fold is a different height,
+   which is fine: it only ever happens on a resize, and the board re-lays
+   out on resize anyway. Within one width the height never moves. */
+@media (max-width: 620px) {
+  .stats { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
+  .stat-value    { font-size: 18px; }
+  .stat-value-sm { font-size: 15px; }
+}
+
 @media (max-width: 460px) {
   .stage { padding: 28px 24px 12vh; }
-  .field { font-size: 16px; padding: 0 18px; }
+  .stats { grid-template-columns: repeat(2, 1fr); padding: 14px 16px; }
   .rtile { max-width: 132px; }
-  .sug-host { display: none; }        /* the title is the scarce thing here */
 }
 
 /* --- reduced motion ------------------------------------------ */
 @media (prefers-reduced-motion: reduce) {
   .aurora-pool,
   .aurora-rim,
-  .searchform,
+  .stats,
   .links,
   .recent { animation: none; }
 
@@ -1099,8 +1054,7 @@ body {
   #bg-dim,
   #board,
   .module,
-  .field,
+  .stats,
   .chip,
-  .rtile,
-  .sug { transition: none; }
+  .rtile { transition: none; }
 }

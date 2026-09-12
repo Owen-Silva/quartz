@@ -1,5 +1,10 @@
 /* ============================================================
-   newtab.js — the search page's own behaviour.
+   newtab.js — the new tab page's own behaviour.
+
+   There is no search field on this page: the window's address bar
+   is where it searches. What sits in the field's old place is the
+   instrument strip, five readouts the chrome pushes in every two
+   seconds through window.__applyStats().
 
    This page runs inside a <webview> guest as a plain file:// page:
    no Electron, no preload, no window.api, no require. Everything
@@ -8,24 +13,24 @@
    The browser's settings reach it two ways:
 
      1. query params, for the first paint —
-        ?theme=dark&palette=ocean&hue=300&engine=duckduckgo&chips=<JSON>&bg=image
+        ?theme=dark&palette=ocean&hue=300&chips=<JSON>&bg=image
         (every param optional; theme, palette and hue are handled
         earlier, in newtab-theme.js, so colour never flashes)
 
-     2. window.__applySettings({ accentHue, palette, searchEngine, chips })
+     2. window.__applySettings({ accentHue, palette, chips })
         pushed later with executeJavaScript. A null or missing
-        field means "back to this page's own default".
+        field means "back to this page's own default". searchEngine
+        may still arrive and is ignored: nothing here searches.
 
      3. window.__applyBackground({ kind, boardOverImage, dim, dataUrl })
         pushed the same way, because the picture is a data: URL far too
         big to hang off the URL.
+
+     4. window.__applyStats(sample) every 2000 ms while this guest is
+        the one on screen — see "the instrument strip" below.
    ============================================================ */
 
 'use strict';
-
-/* Google's plain web-results mode (&udm=14). Flip to true to use it.
-   Google-only: no other engine understands the parameter. */
-const WEB_RESULTS_ONLY = false;
 
 /* The shortcut row, used whenever the browser sends no chips of its own. */
 const LINKS = [
@@ -36,45 +41,17 @@ const LINKS = [
   { label: 'Claude',    url: 'https://claude.ai' },
 ];
 
-/* The engines the capsule can submit through. Key = what the chrome sends. */
-const ENGINES = {
-  google:     { name: 'Google',     url: 'https://www.google.com/search?q=' },
-  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
-  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=' },
-  brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=' },
-  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/do/search?q=' },
-};
-
-const DEFAULT_ENGINE = 'google';
-
 /* One shared favicon service; the chip falls back to its label if it 404s. */
 const FAVICON_URL = 'https://www.google.com/s2/favicons?domain=';
 
-/* Recent sites. The chrome may hand us more than we show: we keep up to
-   RECENT_ACCEPT for the typed-match dropdown, but only draw RECENT_LIMIT
-   tiles under the shortcuts. */
+/* Recent sites. The chrome may hand us more than we show: we accept up to
+   RECENT_ACCEPT and draw at most RECENT_LIMIT tiles under the shortcuts. */
 const RECENT_ACCEPT = 8;
 const RECENT_LIMIT = 6;
-const SUGGEST_LIMIT = 4;
-
-/* How long a blur waits before closing the dropdown, so a mousedown on a
-   row still lands. The row's own mousedown navigates first anyway; this is
-   the belt to that braces. */
-const SUGGEST_BLUR_MS = 120;
 
 /* ------------------------------------------------------------------ */
-/* URL handling — the same rules as the browser's address bar          */
+/* URL handling — only ever validation, never navigation               */
 /* ------------------------------------------------------------------ */
-
-// Schemes this page is willing to navigate to directly.
-const NAVIGABLE_PROTOCOLS = new Set(['http:', 'https:', 'file:', 'about:']);
-
-// example.com, sub.example.co.uk:8080/path?q=1 — no whitespace, real-looking TLD.
-const BARE_DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d{1,5})?([\/?#]\S*)?$/i;
-// localhost, localhost:3000/foo
-const LOCALHOST_RE = /^localhost(:\d{1,5})?([\/?#]\S*)?$/i;
-// 127.0.0.1, 192.168.1.10:8080/x
-const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?([\/?#]\S*)?$/;
 
 function parseUrlOrNull(text) {
   try {
@@ -88,8 +65,7 @@ function parseUrlOrNull(text) {
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Current engine key, and the chip list the chrome sent (null = LINKS). */
-let engineKey = DEFAULT_ENGINE;
+/* The chip list the chrome sent (null = LINKS). */
 let chipList = null;
 
 /* Validated recents, most recent first, deduped by host. [] until the
@@ -99,17 +75,6 @@ let recentList = [];
 /** One host, compared the way a person would: case- and www-blind. */
 function hostKey(hostname) {
   return String(hostname == null ? '' : hostname).toLowerCase().replace(/^www\./, '');
-}
-
-/** The chosen engine's record, always a real one. */
-function engine() {
-  return ENGINES[engineKey] || ENGINES[DEFAULT_ENGINE];
-}
-
-/** The search URL for a query. udm=14 is Google's, so only Google gets it. */
-function searchUrlFor(text) {
-  const extra = (WEB_RESULTS_ONLY && engineKey === 'google') ? '&udm=14' : '';
-  return engine().url + encodeURIComponent(text) + extra;
 }
 
 /**
@@ -199,28 +164,6 @@ function visibleRecent() {
   return out;
 }
 
-/**
- * Recents matching what is being typed — host or title, case-insensitive.
- * Drawn from the full accepted list, not the visible tiles: a shortcut's
- * host is hidden from the row but is still worth completing.
- */
-function suggestionsFor(query) {
-  const text = String(query == null ? '' : query).trim().toLowerCase();
-  if (!text) return [];
-
-  const out = [];
-
-  for (const item of recentList) {
-    const hit = item.host.toLowerCase().indexOf(text) >= 0
-      || item.label.toLowerCase().indexOf(text) >= 0;
-    if (!hit) continue;
-    out.push(item);
-    if (out.length >= SUGGEST_LIMIT) break;
-  }
-
-  return out;
-}
-
 /** ?chips=<encodeURIComponent(JSON)>. Malformed JSON is ignored, not fatal. */
 function parseChipsParam(raw) {
   if (!raw) return null;
@@ -230,12 +173,6 @@ function parseChipsParam(raw) {
   } catch (err) {
     return null;
   }
-}
-
-function setEngine(key) {
-  const name = String(key == null ? '' : key).toLowerCase();
-  engineKey = Object.prototype.hasOwnProperty.call(ENGINES, name) ? name : DEFAULT_ENGINE;
-  applyPlaceholder();
 }
 
 function setChips(list) {
@@ -248,69 +185,16 @@ function setChips(list) {
 /* Wiring                                                              */
 /* ------------------------------------------------------------------ */
 
-const form = document.getElementById('search');
-const input = document.getElementById('q');
 const linkRow = document.getElementById('links');
 const recentRow = document.getElementById('recent');
-const suggestBox = document.getElementById('q-suggest');
 
 /* What the nav currently shows, so a settings push that changes nothing
    does not rebuild the row (and re-request every favicon). */
 let renderedKey = null;
 
-/* The same trick for the recent row and the dropdown: a repeated push, or
-   a keystroke that does not change the matches, leaves the DOM (and its
-   favicons) exactly where it was. */
+/* The same trick for the recent row: a repeated push leaves the DOM (and
+   its favicons) exactly where it was. */
 let renderedRecentKey = null;
-let renderedSuggestKey = null;
-
-/* The rows currently in the dropdown, and which one is highlighted
-   (-1 = none, so Enter falls through to the normal search/navigate). */
-let suggestItems = [];
-let activeIndex = -1;
-
-/**
- * Turn whatever was typed into something navigable.
- * Returns null for empty input.
- */
-function toNavigationUrl(rawInput) {
-  const text = String(rawInput == null ? '' : rawInput).trim();
-  if (!text) return null;
-
-  // An explicit, recognised scheme wins. Note "localhost:3000" also parses as a
-  // URL (scheme "localhost:"), which is why the protocol allow-list matters.
-  const parsed = parseUrlOrNull(text);
-  if (parsed && NAVIGABLE_PROTOCOLS.has(parsed.protocol)) return parsed.href;
-
-  // Bare hosts get a scheme bolted on. Loopback/LAN dev servers are almost
-  // always plain http, everything else defaults to https.
-  if (LOCALHOST_RE.test(text) || IPV4_RE.test(text)) return 'http://' + text;
-  if (BARE_DOMAIN_RE.test(text)) return 'https://' + text;
-
-  // Anything else is a search.
-  return searchUrlFor(text);
-}
-
-/**
- * Navigate this page (same tab).
- *
- * Query note: the chrome loads us as newtab.html?theme=…&hue=…&engine=…&chips=…
- * None of that must ride along to a destination, and it cannot: every URL
- * passed here is absolute — built from an ENGINES entry, from a chip, or from
- * what was typed — and nothing resolves a relative href. Keep it that way; if
- * a relative navigation is ever added, strip the query first.
- */
-function go(url) {
-  if (url) window.location.assign(url);
-}
-
-/** The engine's name belongs in the field's own prompt. */
-function applyPlaceholder() {
-  if (!input) return;
-  const text = 'Search ' + engine().name + ' or type a URL';
-  input.placeholder = text;
-  input.setAttribute('aria-label', text);
-}
 
 function faviconUrl(host) {
   return FAVICON_URL + encodeURIComponent(host) + '&sz=32';
@@ -577,176 +461,266 @@ window.__readout = function () {
 };
 
 /* ------------------------------------------------------------------ */
-/* Typed-match dropdown                                                */
+/* The instrument strip                                                 */
+/*                                                                      */
+/* Five readouts where the search field used to be. The chrome samples   */
+/* the machine in the main process and pushes one object in every two    */
+/* seconds with window.__applyStats(sample):                             */
+/*                                                                      */
+/*   { t, cpu:{percent,cores}, mem:{usedBytes,totalBytes,percent},       */
+/*     disk:{percent,readBps,writeBps}, net:{downBps,upBps},             */
+/*     gpu:{percent}, uptimeSec }                                       */
+/*                                                                      */
+/* A null field means "this machine cannot say", and shows a dash for    */
+/* good — the strip never guesses and never interpolates.                */
+/*                                                                      */
+/* Cost: there is no timer and no requestAnimationFrame anywhere in      */
+/* here. A sample landing is the only thing that repaints the five       */
+/* canvases, so a page nobody is pushing to costs exactly nothing. The   */
+/* other two repaints are a theme flip and a resize, both one-shot.      */
 /* ------------------------------------------------------------------ */
 
-/** Paint the highlight. Class only — the rows themselves never move. */
-function paintActive() {
-  if (!suggestBox) return;
-  const rows = suggestBox.children;
-  for (let i = 0; i < rows.length; i++) {
-    const on = (i === activeIndex);
-    rows[i].className = on ? 'sug is-active' : 'sug';
-    rows[i].setAttribute('aria-selected', on ? 'true' : 'false');
+/* The chrome asks this before it subscribes: a page that did not want
+   stats would set it false and the sampler would never start. */
+window.__statsWanted = true;
+
+const STAT_SAMPLES = 60;         // ~2 minutes of history at one per 2 s
+const DASH = '—';
+
+/* The floor the network graph is scaled against, so an idle link draws a
+   flat line near the bottom instead of amplifying its own noise to full
+   height. 131072 bytes/s is 1 Mb/s. */
+const NET_FLOOR_BPS = 131072;
+
+const statText = {
+  cpu:     document.getElementById('st-cpu'),
+  mem:     document.getElementById('st-mem'),
+  disk:    document.getElementById('st-disk'),
+  netDown: document.getElementById('st-net-down'),
+  netUp:   document.getElementById('st-net-up'),
+  gpu:     document.getElementById('st-gpu')
+};
+
+const statCanvas = {
+  cpu:  document.getElementById('sg-cpu'),
+  mem:  document.getElementById('sg-mem'),
+  disk: document.getElementById('sg-disk'),
+  net:  document.getElementById('sg-net'),
+  gpu:  document.getElementById('sg-gpu')
+};
+
+/* One array of numbers-or-null per graph, oldest first, capped at
+   STAT_SAMPLES. The net series is down + up: the two rates are stated
+   separately in the text, and the graph is the link's total traffic. */
+const statSeries = { cpu: [], mem: [], disk: [], net: [], gpu: [] };
+
+/** A finite number in [0,100], or null. */
+function pctOrNull(value) {
+  if (value == null || typeof value !== 'number' || !isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+/** A finite number >= 0, or null. */
+function rateOrNull(value) {
+  if (value == null || typeof value !== 'number' || !isFinite(value)) return null;
+  return Math.max(0, value);
+}
+
+function pctText(value) {
+  return value == null ? DASH : Math.round(value) + '%';
+}
+
+/** "8.9 / 15.8 GB", both halves in GiB so they agree with Task Manager. */
+function memText(mem) {
+  const used = mem ? rateOrNull(mem.usedBytes) : null;
+  const total = mem ? rateOrNull(mem.totalBytes) : null;
+  if (used == null || total == null || !total) return DASH;
+  const gb = 1073741824;
+  return (used / gb).toFixed(1) + ' / ' + (total / gb).toFixed(1) + ' GB';
+}
+
+/**
+ * A byte rate as BITS per second — Kb/s, Mb/s, Gb/s — which is the unit a
+ * link is quoted in and the one Task Manager's network graph uses. The
+ * label under the readout says "(bits/s)" so the b is never ambiguous.
+ */
+function bitsText(bytesPerSec, word) {
+  const bytes = rateOrNull(bytesPerSec);
+  if (bytes == null) return DASH;
+
+  const bits = bytes * 8;
+  let n = bits / 1000;
+  let unit = 'Kb/s';
+
+  if (bits >= 1e9) { n = bits / 1e9; unit = 'Gb/s'; }
+  else if (bits >= 1e6) { n = bits / 1e6; unit = 'Mb/s'; }
+
+  const figure = (n >= 100) ? String(Math.round(n)) : n.toFixed(1);
+  return figure + ' ' + unit + ' ' + word;
+}
+
+/** Append one reading, oldest off the front. */
+function pushSample(series, value) {
+  series.push(value);
+  while (series.length > STAT_SAMPLES) series.shift();
+}
+
+/** The largest reading in a series, ignoring the nulls. 0 for none. */
+function seriesPeak(series) {
+  let peak = 0;
+  for (const value of series) {
+    if (value != null && value > peak) peak = value;
+  }
+  return peak;
+}
+
+/**
+ * One history graph. Newest sample at the right edge, so the line grows
+ * in from the right and then scrolls, the way every meter on this machine
+ * draws one. Two strokes and no more: a hairline baseline in --edge, and
+ * the series in --ion over a 10% fill of the same colour.
+ *
+ * The canvas backing store is sized in device pixels, and the baseline is
+ * snapped to the device grid, so the hairline is one real pixel rather
+ * than a two-pixel smear on a 1.5x display.
+ */
+function paintGraph(canvas, series, scaleMax, edge, ion) {
+  if (!canvas || typeof canvas.getContext !== 'function') return;
+
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(canvas.clientWidth || canvas.width || 120));
+  const h = Math.max(1, Math.round(canvas.clientHeight || canvas.height || 28));
+  const pw = Math.max(1, Math.round(w * dpr));
+  const ph = Math.max(1, Math.round(h * dpr));
+
+  if (canvas.width !== pw) canvas.width = pw;
+  if (canvas.height !== ph) canvas.height = ph;
+
+  const c = canvas.getContext('2d');
+  if (!c) return;
+
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+
+  // The baseline sits on the last device row, centred in it.
+  const base = (ph - 0.5) / dpr;
+  const top = 1;                            // the peak never touches the lid
+  const span = Math.max(1, base - top);
+
+  c.lineWidth = 1 / dpr;
+  c.strokeStyle = edge;
+  c.beginPath();
+  c.moveTo(0, base);
+  c.lineTo(w, base);
+  c.stroke();
+
+  const max = scaleMax > 0 ? scaleMax : 1;
+  const step = (w - 2) / (STAT_SAMPLES - 1);
+  const first = w - 1 - (series.length - 1) * step;
+
+  // Every run of consecutive readings is its own shape: a machine that
+  // stopped reporting for a while leaves a gap, not a straight line
+  // across the missing minutes.
+  const runs = [];
+  let run = null;
+
+  for (let i = 0; i < series.length; i++) {
+    const value = series[i];
+    if (value == null) { run = null; continue; }
+    if (!run) { run = []; runs.push(run); }
+    run.push({
+      x: first + i * step,
+      y: base - Math.max(0, Math.min(1, value / max)) * span
+    });
+  }
+
+  if (!runs.length) return;
+
+  c.fillStyle = ion;
+  c.globalAlpha = 0.10;
+
+  for (const points of runs) {
+    if (points.length < 2) continue;        // a single dot has no area
+    c.beginPath();
+    c.moveTo(points[0].x, base);
+    for (const p of points) c.lineTo(p.x, p.y);
+    c.lineTo(points[points.length - 1].x, base);
+    c.closePath();
+    c.fill();
+  }
+
+  c.globalAlpha = 1;
+  c.strokeStyle = ion;
+  c.lineWidth = 1;                          // 1 CSS px: the one accent here
+  c.lineJoin = 'round';
+  c.lineCap = 'round';
+
+  for (const points of runs) {
+    c.beginPath();
+    c.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) c.lineTo(points[i].x, points[i].y);
+    c.stroke();
   }
 }
 
-function suggestOpen() {
-  return !!(suggestBox && !suggestBox.hidden && suggestItems.length);
+/** All five, once. The only caller that runs often is a landing sample. */
+function paintStats() {
+  const style = getComputedStyle(document.documentElement);
+  const edge = style.getPropertyValue('--edge').trim() || 'rgba(255,255,255,.11)';
+  const ion = style.getPropertyValue('--ion').trim() || '#72adca';
+
+  paintGraph(statCanvas.cpu, statSeries.cpu, 100, edge, ion);
+  paintGraph(statCanvas.mem, statSeries.mem, 100, edge, ion);
+  paintGraph(statCanvas.disk, statSeries.disk, 100, edge, ion);
+  paintGraph(statCanvas.net, statSeries.net,
+    Math.max(NET_FLOOR_BPS, seriesPeak(statSeries.net)), edge, ion);
+  paintGraph(statCanvas.gpu, statSeries.gpu, 100, edge, ion);
 }
 
-function closeSuggest() {
-  if (!suggestBox) return;
-  suggestItems = [];
-  activeIndex = -1;
-  renderedSuggestKey = null;
-  suggestBox.hidden = true;
-  suggestBox.replaceChildren(document.createDocumentFragment());
-  if (input) input.setAttribute('aria-expanded', 'false');
-}
+/**
+ * The chrome pushes one sample here. Everything it does is append, write
+ * six strings and repaint five small canvases — no layout changes, because
+ * every box in the strip is sized by CSS.
+ */
+window.__applyStats = function (sample) {
+  const s = sample || {};
 
-/** Recompute the dropdown from the field's current text. */
-function refreshSuggest() {
-  if (!suggestBox || !input) return;
+  const cpu = s.cpu ? pctOrNull(s.cpu.percent) : null;
+  const memPct = s.mem ? pctOrNull(s.mem.percent) : null;
+  const disk = s.disk ? pctOrNull(s.disk.percent) : null;
+  const gpu = s.gpu ? pctOrNull(s.gpu.percent) : null;
+  const down = s.net ? rateOrNull(s.net.downBps) : null;
+  const up = s.net ? rateOrNull(s.net.upBps) : null;
 
-  const list = suggestionsFor(input.value);
-  if (!list.length) {
-    closeSuggest();
-    return;
-  }
+  pushSample(statSeries.cpu, cpu);
+  pushSample(statSeries.mem, memPct);
+  pushSample(statSeries.disk, disk);
+  pushSample(statSeries.gpu, gpu);
+  pushSample(statSeries.net, (down == null && up == null) ? null : (down || 0) + (up || 0));
 
-  suggestItems = list;
-  activeIndex = -1;
+  setText(statText.cpu, pctText(cpu));
+  setText(statText.mem, memText(s.mem));
+  setText(statText.disk, pctText(disk));
+  setText(statText.netDown, bitsText(down, 'down'));
+  setText(statText.netUp, bitsText(up, 'up'));
+  setText(statText.gpu, pctText(gpu));
 
-  const key = list.map(function (item) { return item.url; }).join('\n');
-  if (key !== renderedSuggestKey) {
-    renderedSuggestKey = key;
+  paintStats();
+  return window.__stats();
+};
 
-    const frag = document.createDocumentFragment();
-
-    for (const item of list) {
-      const row = document.createElement('a');
-      row.className = 'sug';
-      row.href = item.url;
-      row.setAttribute('role', 'option');
-      row.setAttribute('aria-selected', 'false');
-
-      row.appendChild(faviconImg(item.host, 'sug-icon'));
-
-      const title = document.createElement('span');
-      title.className = 'sug-title';
-      title.appendChild(document.createTextNode(item.label));
-      row.appendChild(title);
-
-      const host = document.createElement('span');
-      host.className = 'sug-host';
-      host.appendChild(document.createTextNode(item.key));
-      row.appendChild(host);
-
-      // mousedown, not click: the default would blur the field first and the
-      // blur timer would tear the row out from under the pointer.
-      row.addEventListener('mousedown', function (event) {
-        event.preventDefault();
-        closeSuggest();
-        go(item.url);
-      });
-      // the navigation already happened above; don't let the href repeat it.
-      row.addEventListener('click', function (event) { event.preventDefault(); });
-
-      frag.appendChild(row);
-    }
-
-    suggestBox.replaceChildren(frag);
-  }
-
-  suggestBox.hidden = false;
-  input.setAttribute('aria-expanded', 'true');
-  paintActive();
-}
-
-/** Arrow keys, Enter-on-a-row, Escape and Tab — all of it field-local. */
-function onFieldKeydown(event) {
-  const open = suggestOpen();
-
-  if (event.key === 'Escape') {
-    // Only swallow Escape while the dropdown is up; otherwise the page-level
-    // handler still clears the field.
-    if (!open) return;
-    event.preventDefault();
-    event.stopPropagation();
-    closeSuggest();
-    return;
-  }
-
-  if (event.key === 'Tab') {
-    if (open) closeSuggest();
-    return;
-  }
-
-  if (!open) return;
-
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    activeIndex = (activeIndex + 1 >= suggestItems.length) ? -1 : activeIndex + 1;
-    paintActive();
-    return;
-  }
-
-  if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    activeIndex = (activeIndex - 1 < -1) ? suggestItems.length - 1 : activeIndex - 1;
-    paintActive();
-    return;
-  }
-
-  if (event.key === 'Enter' && activeIndex >= 0) {
-    // A highlighted row wins over the form's submit; nothing highlighted
-    // falls through and searches (or navigates) exactly as before.
-    event.preventDefault();
-    const item = suggestItems[activeIndex];
-    closeSuggest();
-    go(item.url);
-  }
-}
-
-function onFieldInput() {
-  refreshSuggest();
-}
-
-function onFieldBlur() {
-  // A click on a row lands on mousedown, before this fires; the delay is
-  // only so the panel does not vanish mid-press.
-  setTimeout(closeSuggest, SUGGEST_BLUR_MS);
-}
-
-/** Put the caret back in the field and select what is there. */
-function focusField() {
-  if (!input) return;
-  input.focus();
-  input.select();
-}
-
-function onSubmit(event) {
-  event.preventDefault();
-  closeSuggest();
-  const url = toNavigationUrl(input ? input.value : '');
-  if (!url) return;               // empty input does nothing
-  go(url);
-}
-
-function onKeydown(event) {
-  if (event.key !== 'Escape') return;
-  if (!input) return;
-  input.value = '';
-  focusField();
-}
-
-/** A click on bare page — not a chip, not the field — returns focus. */
-function onPageClick(event) {
-  const target = event.target;
-  if (target && target.closest && target.closest('a, button, input, textarea, select')) return;
-  focusField();
-}
+/** What the strip actually shows, for tests. */
+window.__stats = function () {
+  return {
+    cpu: statText.cpu ? statText.cpu.textContent : null,
+    mem: statText.mem ? statText.mem.textContent : null,
+    disk: statText.disk ? statText.disk.textContent : null,
+    netDown: statText.netDown ? statText.netDown.textContent : null,
+    netUp: statText.netUp ? statText.netUp.textContent : null,
+    gpu: statText.gpu ? statText.gpu.textContent : null,
+    samples: statSeries.cpu.length
+  };
+};
 
 /* The accent's base colour differs per theme, so re-derive the same hue
    whenever the chrome flips data-theme on <html>. */
@@ -757,6 +731,10 @@ function watchTheme() {
     if (typeof window.__applyAccent === 'function') {
       window.__applyAccent(window.__accentHue ? window.__accentHue() : null);
     }
+    // The graphs hold a painted copy of --ion and --edge: a theme flip
+    // between samples would otherwise leave them in the old colour for
+    // up to two seconds.
+    paintStats();
   });
 
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -845,7 +823,7 @@ window.__background = function () {
 /** The chrome pushes settings here with executeJavaScript. */
 window.__applySettings = function (settings) {
   const next = settings || {};
-  setEngine(next.searchEngine);
+  // next.searchEngine is deliberately ignored: this page has no field.
   setChips(next.chips);
   // Palette first: it authors the accent the hue is then painted over, so
   // a push that clears the hue lands on the new preset's own colour.
@@ -862,8 +840,6 @@ window.__applySettings = function (settings) {
 window.__applyRecent = function (list) {
   recentList = normalizeRecent(list);
   renderRecent();
-  // Only if the dropdown is already up: a push must never make one appear.
-  if (suggestOpen()) refreshSuggest();
 };
 
 /** The chips actually on screen, for tests. */
@@ -880,13 +856,6 @@ window.__recent = function () {
   });
 };
 
-/** What a given query would offer, for tests. */
-window.__suggestions = function (query) {
-  return suggestionsFor(query).map(function (item) {
-    return { label: item.label, url: item.url, host: item.host };
-  });
-};
-
 function readParams() {
   try {
     return new URLSearchParams(window.location.search);
@@ -897,21 +866,22 @@ function readParams() {
 
 function init() {
   const params = readParams();
-  setEngine(params ? params.get('engine') : null);
   setChips(params ? parseChipsParam(params.get('chips')) : null);
   /* Before newtab-bg.js draws anything: its first paint is in a rAF after
      this handler, so ?bg=aurora|image means the board is never drawn. */
   applyBackground({ kind: params ? params.get('bg') : null });
   watchTheme();
 
-  if (form) form.addEventListener('submit', onSubmit);
-  if (input) {
-    input.addEventListener('input', onFieldInput);
-    input.addEventListener('keydown', onFieldKeydown);
-    input.addEventListener('blur', onFieldBlur);
-  }
-  document.addEventListener('keydown', onKeydown);
-  document.addEventListener('click', onPageClick);
+  /* The empty instrument: the baseline hairlines, drawn once so a page
+     nobody has pushed a sample to still reads as an instrument rather
+     than as five blank rectangles. The strip is already at its full
+     height either way — the boxes are sized in CSS — so this changes
+     no geometry and the board's measurement stands. */
+  paintStats();
+
+  /* The canvases are a percentage of the column, so their backing store
+     is wrong after a resize. One repaint, no rAF: nothing here animates. */
+  window.addEventListener('resize', paintStats);
 
   /* The clock, before the board measures the tile it sits in: newtab-bg.js
      seats the tiles in a rAF after this handler, and an empty face would be
@@ -922,10 +892,6 @@ function init() {
   document.addEventListener('visibilitychange', refreshClock);
   window.addEventListener('pageshow', refreshClock);
   window.addEventListener('focus', refreshClock);
-
-  // autofocus covers the normal load; this covers a restored/backgrounded guest.
-  focusField();
-  window.addEventListener('focus', focusField);
 }
 
 if (document.readyState === 'loading') {
