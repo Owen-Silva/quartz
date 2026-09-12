@@ -3075,28 +3075,30 @@ async function embedAppEntry(appId) {
 }
 
 /**
- * How long a pre-existing window waits for a freshly launched copy to appear
- * before it is adopted instead.
+ * How long a window that was there before the launch waits for a freshly
+ * launched copy to appear before it is adopted instead.
  *
- * Two copies of Paint are two windows and the new one is the answer, so the
- * launch happens even when the app is already running. But many apps are
- * single-instance: launching a second copy just raises the window that is
- * already there and nothing new is ever drawn. Waiting the full 20 s for that
- * to not happen would make "open it in a tab" feel broken, so the existing
- * window is adopted after this much silence.
+ * A window the app already had is adopted BEFORE anything is launched, so this
+ * is only the late case: the sweep found nothing hostable (a tray icon, a
+ * window still hidden), the launch went ahead, and the process it started
+ * handed off to a copy that was already running -- nothing new is ever drawn.
+ * Waiting the full 20 s for that to not happen would make "open it in a tab"
+ * feel broken, so the older window is adopted after this much silence.
  */
 const EMBED_OPEN_EXISTING_MS = 4000;
 
 /**
- * Launch an app and host ITS window in a tab. The sequence matters:
- *   1. snapshot the app's existing windows,
- *   2. launch it exactly the way the dock does (apps.launch) -- which now hands
- *      back the pid when it started the process itself,
+ * Host an app's window in a tab, launching it only if it is not already up.
+ * The order matters:
+ *   1. sweep the app's existing hostable windows. If it has one, ATTACH IT and
+ *      stop -- no launch, no second copy, no window raised in the user's face,
+ *   2. otherwise launch it exactly the way the dock does (apps.launch) -- which
+ *      hands back the pid when it started the process itself,
  *   3. watch for a window that is either from that pid (or a descendant of it:
  *      launchers and App Execution Aliases draw from a child), or new since the
  *      snapshot and exe-matched,
- *   4. attach the first one that qualifies. If the app was ALREADY running and
- *      nothing new appears, adopt the window it already had; give up at 20 s.
+ *   4. attach the first one that qualifies. If the launch merely handed off to
+ *      a copy that was already running, adopt that window; give up at 20 s.
  *
  * Why the pid matters: with two copies of an app running -- or a launcher whose
  * real process is a different exe, or two different apps that share an exe name
@@ -3139,12 +3141,44 @@ async function embedOpenInner(tabId, appId, pending) {
 
   const before = embed.findWindows(exe ? { exe } : {});
   const seen = new Set(before.map((w) => w.hwnd));
-  // The window this app ALREADY had, front-most first -- and only when the exe
+  // The windows this app ALREADY has, front-most first -- and only when the exe
   // is known: with no exe filter `before` is every window on the desktop, and
   // adopting the front one would host whatever the user happened to be looking at.
-  const had = exe && before.length ? before[0].hwnd : '';
+  // findWindows already applies the hostable gate, and a window hosted in a tab
+  // is a CHILD of ours by then, so it never comes back from the sweep.
+  const mine = exe ? before : [];
+  const had = mine.length ? mine[0].hwnd : '';
   /** Windows the attach refused, so the loop stops offering them. */
   const refused = new Set();
+
+  // ADOPT FIRST, launch second. Launching always and adopting only after a 4 s
+  // silence gets the common cases wrong: after a browser restart the app that
+  // survived the quit is still running as a normal window, and Start on the
+  // restored tab would launch a SECOND copy and leave the first orphaned on the
+  // desktop -- same for "open it in a tab" on a Discord or Spotify that is
+  // already up. A launch of a single-instance app also RAISES its window, which
+  // must never happen while the user is at the machine. If the app already has a
+  // hostable window, that window IS the answer and nothing is started at all.
+  if (mine.length) {
+    // Belt and braces over the gate above: a window another tab is hosting is
+    // never taken from it.
+    const hosted = new Set(embed.list().map((w) => String(w.hwnd)));
+    for (const w of mine) {
+      if (pending.cancelled) return { ok: false, reason: 'cancelled' };
+      if (hosted.has(w.hwnd)) { refused.add(w.hwnd); continue; }
+      const result = embed.attach({ tabId, hwnd: w.hwnd });
+      if (result.ok) {
+        embedLog('embed:open matched by adopt-existing', {
+          tabId, appId, exe, launchedPid: null,
+          hwnd: w.hwnd, pid: w.pid, winExe: w.exe, reason: result.reason || 'ok'
+        });
+        return result;
+      }
+      // 'already-attached', 'store-app', or it died between the sweep and the
+      // attach: try the next window it has, then fall through to the launch.
+      refused.add(w.hwnd);
+    }
+  }
 
   const launchedAt = Date.now();
   const started = await apps.launch(appId).catch(() => ({ ok: false, reason: 'failed' }));
@@ -3196,11 +3230,13 @@ async function embedOpenInner(tabId, appId, pending) {
       refused.add(pick.hwnd);
       seen.add(pick.hwnd);
     }
-    // Single-instance app: the launch raised the window it already had, and no
-    // new one is ever coming. Host that one rather than time out -- but only
-    // once nothing of this app is still STARTING. A packaged activation takes
-    // seconds to draw its window, and adopting the old one while the new copy
-    // is on its way is the very bug this rule exists to avoid.
+    // Late adopt. The window this app already had was there before the launch
+    // but the attach above could not take it (another tab held it, or it was
+    // mid-death), and the launch turned out to be a hand-off to that same copy:
+    // no new window is ever coming. Take it now rather than time out -- but
+    // only once nothing of this app is still STARTING. A packaged activation
+    // takes seconds to draw its window, and adopting the old one while the new
+    // copy is on its way is the very bug this rule exists to avoid.
     if (adoptAt && Date.now() >= adoptAt
       && !embed.hasNewProcess({ exe, since: launchedAt })
       && embed.findWindows({ exe: exe || undefined }).some((w) => w.hwnd === had)) {
