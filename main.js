@@ -24,7 +24,7 @@ const {
   nativeTheme,
   webContents,
 } = require('electron');
-const { createSession, killAll } = require('./pty');
+const { createSession, killAll, listPrograms, hasProgram } = require('./pty');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
@@ -517,11 +517,31 @@ function ptyFlushFinal(id) {
   ptyOut.delete(id);
 }
 
-// `args` is passed straight through: pty.js owns the allowlist (only
-// `--continue` survives) so there is exactly one place that decides what may
-// reach claude.exe's command line.
-ipcMain.handle('pty:start', (_event, { cwd, cols, rows, args } = {}) => {
+// The terminal programs a tab may run: [{ id, title, available }]. The chrome
+// uses it for tab titles and for what the dock/palette offer.
+ipcMain.handle('pty:programs', (event) => {
+  if (!isChromeSender(event)) return [];
+  try {
+    return listPrograms();
+  } catch (err) {
+    console.error('[pty] listPrograms failed:', err && err.message);
+    return [];
+  }
+});
+
+// `program` and `args` are both passed straight through: pty.js owns the
+// program table AND the per-program arg allowlist, so there is exactly one
+// place that decides what may reach a command line. An id that is not in the
+// table (a renderer-supplied path included) is refused here with a null, which
+// terminal.js already renders as a failed start.
+ipcMain.handle('pty:start', (event, { program, cwd, cols, rows, args } = {}) => {
+  if (!isChromeSender(event)) return null;
+  if (!hasProgram(program)) {
+    console.warn('[pty] refused unknown program:', String(program).slice(0, 60));
+    return null;
+  }
   const session = createSession({
+    program,
     cwd,
     cols,
     rows,

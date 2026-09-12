@@ -2,14 +2,16 @@
 
 // pty.js — tiny PTY session manager.
 //
-// Owns a Map of id -> session record. Each session is one `claude.exe` running
-// under a real Windows pseudo-console (ConPTY) via node-pty, so the CLI sees a
-// proper TTY and renders its full interactive UI.
+// Owns a Map of id -> session record. Each session is one program from the
+// PROGRAMS table below (claude.exe by default) running under a real Windows
+// pseudo-console (ConPTY) via node-pty, so the CLI sees a proper TTY and
+// renders its full interactive UI.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const childProcess = require('child_process');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
 // Absolute path to the Claude CLI.
@@ -39,6 +41,120 @@ const ALLOWED_ARGS = new Set(['--continue', '--resume', '--dangerously-skip-perm
 // first one asked for wins and the other is dropped.
 const RESUME_ARGS = new Set(['--continue', '--resume']);
 
+// ---------------------------------------------------------------------------
+// Programs
+//
+// Every terminal tab runs one of THESE and nothing else. The renderer names a
+// program by `id`; a path it makes up is never spawned, which is why the table
+// is static and lives on this side of the bridge.
+//
+// `args` are ours (fixed, always passed). `allowed` is the set of flags the
+// renderer may ADD on top -- claude keeps today's list, and every shell takes
+// none, because a shell's argv is a way to run an arbitrary command line.
+// ---------------------------------------------------------------------------
+const PROGRAMS = [
+  { id: 'claude', title: 'Claude', bin: CLAUDE_BIN, args: [], allowed: ALLOWED_ARGS },
+  { id: 'powershell', title: 'PowerShell', bin: 'powershell.exe', args: ['-NoLogo'], allowed: null },
+  { id: 'pwsh', title: 'PowerShell 7', bin: 'pwsh.exe', args: ['-NoLogo'], allowed: null },
+  { id: 'cmd', title: 'Command Prompt', bin: 'cmd.exe', args: [], allowed: null },
+  { id: 'python', title: 'Python', bin: 'python.exe', args: [], allowed: null },
+  { id: 'node', title: 'Node', bin: 'node.exe', args: [], allowed: null },
+  { id: 'bash', title: 'Git Bash', bin: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'], allowed: null },
+];
+
+const PROGRAM_BY_ID = new Map(PROGRAMS.map((p) => [p.id, p]));
+
+/** The default program, so an old caller that names none still gets Claude. */
+const DEFAULT_PROGRAM = 'claude';
+
+// System32 by absolute path: `where` itself is resolved off PATH otherwise,
+// and PATH is exactly what we are asking it about.
+const WHERE_EXE = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe');
+
+/** id -> absolute path | null. Resolved at most ONCE per program per process. */
+const binCache = new Map();
+
+/** Ask where.exe for a bare name; first hit wins. Swapped out by the harness. */
+function runWhere(bin) {
+  let res;
+  try {
+    res = childProcess.spawnSync(WHERE_EXE, [bin], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 5000,
+    });
+  } catch (err) {
+    console.warn('[pty] where.exe failed for', bin, err && err.message);
+    return null;
+  }
+  if (!res || res.status !== 0 || typeof res.stdout !== 'string') return null;
+  const first = res.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+  return first || null;
+}
+
+let whereRunner = runWhere;
+
+function isFile(target) {
+  try {
+    return fs.statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A Store "app execution alias" — the 0-byte-looking stub Windows ships for
+ * python.exe when Python is NOT installed. Spawning it opens the Store page
+ * instead of a REPL, so it does not count as available.
+ */
+function isStoreStub(target) {
+  if (!/[\\/]Microsoft[\\/]WindowsApps[\\/]/i.test(target)) return false;
+  let real = target;
+  try {
+    real = fs.realpathSync(target);
+  } catch {
+    return false;
+  }
+  return /Redirector\.exe$/i.test(real);
+}
+
+/**
+ * The absolute path this program will be spawned from, or null when it is not
+ * installed. An absolute entry in the table is checked on disk; a bare name
+ * goes through where.exe. Either way the answer is cached, including `null`:
+ * installing something mid-session is not worth a syscall per tab.
+ */
+function resolveBin(program) {
+  if (binCache.has(program.id)) return binCache.get(program.id);
+  const bin = program.bin;
+  let resolved = null;
+  if (path.isAbsolute(bin) || bin.indexOf('\\') !== -1 || bin.indexOf('/') !== -1) {
+    resolved = isFile(bin) ? bin : null;
+  } else {
+    const found = whereRunner(bin);
+    resolved = found && isFile(found) && !isStoreStub(found) ? found : null;
+  }
+  binCache.set(program.id, resolved);
+  return resolved;
+}
+
+/** The table entry for an id, or null. Anything not a known id is refused. */
+function getProgram(id) {
+  if (id === undefined || id === null || id === '') return PROGRAM_BY_ID.get(DEFAULT_PROGRAM);
+  if (typeof id !== 'string') return null;
+  return PROGRAM_BY_ID.get(id) || null;
+}
+
+/** True when this id names a table entry (or is absent, meaning claude). */
+function hasProgram(id) {
+  return !!getProgram(id);
+}
+
+/** What the chrome lists in the dock/palette: [{ id, title, available }]. */
+function listPrograms() {
+  return PROGRAMS.map((p) => ({ id: p.id, title: p.title, available: !!resolveBin(p) }));
+}
+
 /** @type {Map<string, {id: string, pty: any, alive: boolean}>} */
 const sessions = new Map();
 
@@ -53,13 +169,22 @@ function sanitizeDim(value, fallback) {
 }
 
 /**
- * Keep only allowlisted flags, in the order given, without duplicates.
- * A dropped argument is never an error: the session still starts, plain.
+ * Keep only the flags THIS program allowlists, in the order given, without
+ * duplicates. A dropped argument is never an error: the session still starts,
+ * plain. A program with no allowlist (every shell) takes nothing.
  */
-function sanitizeArgs(args) {
+function sanitizeArgs(args, program) {
+  const allowed = (program && program.allowed) || null;
   if (args === undefined || args === null) return [];
   if (!Array.isArray(args)) {
     console.warn('[pty] args must be an array; ignoring', typeof args);
+    return [];
+  }
+  if (!allowed || allowed.size === 0) {
+    if (args.length) {
+      console.warn('[pty] program takes no renderer args; dropped', args.length,
+        'for', program && program.id);
+    }
     return [];
   }
   const out = [];
@@ -70,7 +195,7 @@ function sanitizeArgs(args) {
     }
     const arg = raw.trim();
     if (!arg) continue;
-    if (!ALLOWED_ARGS.has(arg)) {
+    if (!allowed.has(arg)) {
       // This is also what swallows a value after `--resume`: an id is just a
       // token, and no token is on the allowlist.
       console.warn('[pty] dropped arg not on the allowlist:', arg);
@@ -142,19 +267,27 @@ function cleanEnv() {
 }
 
 /**
- * Spawn a new claude.exe PTY session.
+ * Spawn a new PTY session for one program from the table.
  *
  * @param {object} opts
+ * @param {string} [opts.program] program id; defaults to 'claude'. An id that
+ *                                is not in the table (a path included) throws.
  * @param {string} [opts.cwd]     working directory for the shell
  * @param {number} [opts.cols]    initial column count
  * @param {number} [opts.rows]    initial row count
- * @param {string[]} [opts.args]  extra claude.exe flags; only a bare
- *                                `--continue` or `--resume` survives
+ * @param {string[]} [opts.args]  extra flags; claude keeps a bare `--continue`
+ *                                / `--resume` / skip-permissions, the shells
+ *                                take none
  * @param {(data: string) => void} [opts.onData]
  * @param {(exitCode: number) => void} [opts.onExit]
- * @returns {{ id: string, cwd: string, args: string[], write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}
+ * @returns {{ id: string, program: string, cwd: string, args: string[], write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}
  */
-function createSession({ cwd, cols, rows, args, onData, onExit } = {}) {
+function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) {
+  const prog = getProgram(program);
+  if (!prog) throw new Error(`unknown program: ${String(program).slice(0, 60)}`);
+  const bin = resolveBin(prog);
+  if (!bin) throw new Error(`${prog.title} is not installed (${prog.bin} not found)`);
+
   const id = newId();
   const safeCols = sanitizeDim(cols, 80);
   const safeRows = sanitizeDim(rows, 24);
@@ -162,9 +295,10 @@ function createSession({ cwd, cols, rows, args, onData, onExit } = {}) {
   // A non-string / non-existent cwd makes node-pty throw, so normalize first.
   // (see cleanEnv below for why the environment is scrubbed before spawning)
   const safeCwd = resolveCwd(cwd);
-  const safeArgs = sanitizeArgs(args);
+  // Our fixed flags first, then whatever the renderer was allowed to add.
+  const safeArgs = prog.args.concat(sanitizeArgs(args, prog));
 
-  const p = nodePty.spawn(CLAUDE_BIN, safeArgs, {
+  const p = nodePty.spawn(bin, safeArgs, {
     name: 'xterm-256color',
     cols: safeCols,
     rows: safeRows,
@@ -200,6 +334,7 @@ function createSession({ cwd, cols, rows, args, onData, onExit } = {}) {
 
   return {
     id,
+    program: prog.id,
     // What the process actually got, after validation -- not what was asked for.
     cwd: safeCwd,
     args: safeArgs.slice(),
@@ -256,4 +391,25 @@ function killAll() {
   sessions.clear();
 }
 
-module.exports = { createSession, killAll };
+module.exports = {
+  createSession,
+  killAll,
+  listPrograms,
+  hasProgram,
+  // Test seams only: swap where.exe for a fake and forget what it answered.
+  // Nothing in the app calls these.
+  __test: {
+    PROGRAMS,
+    getProgram,
+    resolveBin,
+    resolveCwd,
+    sanitizeArgs,
+    isStoreStub,
+    setWhereRunner(fn) {
+      whereRunner = typeof fn === 'function' ? fn : runWhere;
+    },
+    clearBinCache() {
+      binCache.clear();
+    },
+  },
+};

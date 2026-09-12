@@ -17,6 +17,9 @@ let ptySkipPermissions = true; // default until the renderer says otherwise
 function withSkipPermissions(opts) {
   const out = (opts && typeof opts === 'object') ? { ...opts } : {};
   if (!ptySkipPermissions) return out;
+  // Claude-only: it is a claude.exe flag, and every other program in the table
+  // takes no renderer args at all (pty.js would drop it, loudly, anyway).
+  if (out.program !== undefined && out.program !== null && out.program !== 'claude') return out;
   const args = Array.isArray(out.args) ? out.args.slice() : [];
   if (args.indexOf(SKIP_PERMISSIONS_ARG) === -1) args.unshift(SKIP_PERMISSIONS_ARG);
   out.args = args;
@@ -391,7 +394,14 @@ contextBridge.exposeInMainWorld('api', {
     copyPath: (target) => ipcRenderer.invoke('files:copy-path', String(target == null ? '' : target))
   },
   pty: {
-    // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
+    // The terminal programs a tab may run: [{ id, title, available }]. The ids
+    // are the only thing start() accepts as `program`.
+    programs: () => ipcRenderer.invoke('pty:programs')
+      .then((list) => (Array.isArray(list) ? list : []))
+      .catch(() => []),
+    // opts: { program, cwd, cols, rows, args } -- `program` is an id from
+    // programs() and defaults to 'claude' (so an old caller is unchanged);
+    // `args` is an allowlist (`--continue`), claude-only.
     // Called by terminal.js for the first spawn AND for the Enter-to-restart
     // one, so this is where the skip-permissions flag is guaranteed.
     start: (opts) => ipcRenderer.invoke('pty:start', withSkipPermissions(opts)),
