@@ -100,6 +100,12 @@
   <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <!-- Key bindings. Must stay above app.js, which reads window.Shortcuts. -->
   <script src="shortcuts.js"></script>
+  <!-- Idle music: the generative engine, then the player that decides when it
+       may sound. Both cost nothing but their parse until the music is turned
+       on — no AudioContext, no <audio> element, no timer — and app.js reads
+       them lazily, so they only need to be here before the first decision. -->
+  <script src="ambient.js"></script>
+  <script src="music.js"></script>
   <script src="app.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>

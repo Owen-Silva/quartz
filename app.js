@@ -351,6 +351,11 @@ function statsTabEligible(tab) {
  * caller never has to work out whether anything actually changed.
  */
 function syncStatsSubscription() {
+  // The idle music player and the now-playing poll follow the same two facts
+  // this subscription does — which tab is in front, and whether the window has
+  // focus — so they are hung off the same edge rather than a second set of
+  // listeners. Both are idempotent and neither touches the stats sampler.
+  syncIdlePresence();
   const api = statsApi();
   if (!api) return;
   const want = !windowBlurred && statsTabEligible(getActiveTab());
@@ -405,6 +410,365 @@ function wireStats() {
       requestProcIcons(sample);
     });
   } catch (err) { /* older preload: the page keeps its dashes */ }
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle music, and what the machine is playing                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Two halves of one idea: quiet music while nothing else is making a sound,
+ * and a readout of whatever IS.
+ *
+ * The player itself is music.js and knows nothing about tabs. This section is
+ * the wiring: it gathers the four facts the condition needs — the window has
+ * focus, no tab is audible, the machine is not playing anything, the tab in
+ * front is a new-tab page — hands them over on every edge that can move one,
+ * and pushes the state that comes back at the new tab page's Idle music tile.
+ *
+ * The now-playing half polls the Spotify auto-pause bridge's /now through main
+ * (api.media) on the gate the stats sampler already uses: every two seconds
+ * while a new-tab page is in front of a focused window, and never otherwise.
+ * It polls in exactly one more case — idle music set to play ANYWHERE, where
+ * that answer is the only thing standing between his music and Spotify — and
+ * even then only while the window has focus. With the music off and no new-tab
+ * page in front, nothing in this section runs at all: no timer, no
+ * AudioContext, no <audio> element.
+ *
+ * Everything here is feature-detected end to end. music.js, Settings.music,
+ * api.media and the guest's window.__applyMusic / __applyMedia are each
+ * optional, and a build missing any of them shows Off rather than throwing.
+ */
+
+/** Every two seconds, and only while somebody is looking. */
+const MEDIA_POLL_MS = 2000;
+
+/** The idle player, made on demand and kept for the life of the window. */
+let musicPlayer = null;
+
+/** The last /now answer, and what we have already pushed about it. */
+let mediaAnswer = null;
+let mediaSeen = { hash: '', artHash: '', art: '' };
+let mediaStatus = 'none';
+let mediaPollTimer = null;
+let mediaInFlight = false;
+
+/** The music group, or null when settings.js predates it. */
+function musicSettings() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.music !== 'function') return null;
+  try { return settings.music(); } catch (err) { return null; }
+}
+
+/** Merge part of the group back. Null when this build cannot store it. */
+function setMusicSettings(patch) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.setMusic !== 'function') return null;
+  try { return settings.setMusic(patch); } catch (err) { return null; }
+}
+
+/** The preload's media group (the SMTC bridge), or null when it has none. */
+function mediaApi() {
+  const api = (window.api && window.api.media) ? window.api.media : null;
+  if (!api || typeof api.now !== 'function') return null;
+  return api;
+}
+
+/**
+ * Some tab is making a sound the user can hear. A MUTED tab is not one of them —
+ * muting the video is how he hands the music back, exactly as it works for
+ * the Spotify auto-pause hold.
+ */
+function anyTabAudible() {
+  for (const tab of tabs) {
+    if (tab.audible && !tab.muted) return true;
+  }
+  return false;
+}
+
+/** The tab in front is one of our new-tab pages. */
+function activeIsNewTab() {
+  const tab = getActiveTab();
+  return !!tab && isNewTabUrl(tab.url);
+}
+
+/**
+ * The player, built the first time it could actually be needed. Building it
+ * costs nothing — no context, no element, no timer, until a decision says
+ * play — but it is still not built while the switch is off, so a browser that
+ * never turns the music on never makes one.
+ */
+function idlePlayer() {
+  if (musicPlayer) return musicPlayer;
+  const lib = window.MusicPlayer;
+  if (!lib || typeof lib.create !== 'function') return null;
+  if (!musicSettings()) return null;   // no music group: the tile stays Off
+  musicPlayer = lib.create({
+    music: musicSettings,
+    ambient: window.Ambient,
+    createAudio: () => document.createElement('audio'),
+    onState: () => pushMusicToAll()
+  });
+  return musicPlayer;
+}
+
+/*
+ * Two of the four facts cannot be produced from outside the app: the real
+ * window's focus arrives from main (api.win.onFocus), not from a document
+ * event, and what the machine is playing is the user's own Spotify. Focusing a
+ * window while he is at the machine is not allowed, and neither is pausing his
+ * music, so a test pins them here instead. Both default to null — "ask the
+ * window", "ask the bridge" — which is what every real session runs as, and
+ * nothing in the app itself ever writes to this.
+ */
+const musicForced = { focused: null, mediaStatus: null };
+
+function musicFocused() {
+  return musicForced.focused === null ? !windowBlurred : musicForced.focused === true;
+}
+
+/** The machine is playing something: the idle music's veto. */
+function machinePlaying() {
+  const status = musicForced.mediaStatus === null ? mediaStatus : musicForced.mediaStatus;
+  return status === 'playing';
+}
+
+/** The four facts, handed over on every edge that can move one of them. */
+function syncMusicPlayback() {
+  const group = musicSettings();
+  const player = musicPlayer || (group && group.enabled ? idlePlayer() : null);
+  if (!player) return;
+  player.setEnvironment({
+    focused: musicFocused(),
+    audibleTab: anyTabAudible(),
+    mediaPlaying: machinePlaying(),
+    newTabActive: activeIsNewTab()
+  });
+}
+
+/** A settings write: the group, then the poll gate ('anywhere' moves it). */
+function applyMusicSettings() {
+  const group = musicSettings();
+  if (!group) return;
+  if (!musicPlayer && !group.enabled) { pushMusicToAll(); return; }
+  const player = idlePlayer();
+  if (!player) return;
+  player.setSettings(group);
+  syncMusicPlayback();
+  syncMediaPolling();
+  pushMusicToAll();
+}
+
+/** What the tile shows before the player exists: the setting, and silence. */
+function musicOffState() {
+  const group = musicSettings();
+  return {
+    enabled: !!(group && group.enabled),
+    playing: false,
+    source: group ? group.source : 'ambient',
+    title: '',
+    where: group ? group.where : 'newtab'
+  };
+}
+
+/** One state object to one new-tab guest, memoised like every other push. */
+function pushMusicToTab(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const state = musicPlayer ? musicPlayer.state() : musicOffState();
+  let payload = '';
+  try { payload = JSON.stringify(state); } catch (err) { return; }
+  if (pushUnchanged(tab, 'music', payload)) return;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyMusic && window.__applyMusic(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'music'));
+    }
+  } catch (err) { pushFailed(tab, 'music'); }
+}
+
+function pushMusicToAll() {
+  for (const tab of tabs) pushMusicToTab(tab);
+}
+
+/**
+ * `newtab:music {"action":"enable"|"toggle"|"next"}` from a new-tab guest.
+ * Honoured only for a new-tab page whose viewEl is still the one the listener
+ * was attached to; any other guest can print the same line and nothing
+ * happens. Returns true when it actually acted, which is what tests check.
+ *
+ * enable/toggle write the STORE when the switch is off, so the settings pane
+ * and the tile always agree about it; a toggle with the switch already on is a
+ * manual pause, which is the player's own state and nothing to save.
+ */
+function handleMusicLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const lib = window.MusicPlayer;
+  if (!lib || typeof lib.parseMusicLine !== 'function') return false;
+  const req = lib.parseMusicLine(text);
+  if (!req) return false;
+
+  if (req.action === 'next') {
+    if (!musicPlayer) return false;
+    musicPlayer.next();
+    pushMusicToAll();
+    return true;
+  }
+
+  const group = musicSettings();
+  if (!group) return false;
+  if (!group.enabled) {
+    if (!setMusicSettings({ enabled: true })) return false;
+    applyMusicSettings();     // the store's own listener does this too; it is idempotent
+    return true;
+  }
+
+  const player = idlePlayer();
+  if (!player) return false;
+  if (req.action === 'enable') player.play();
+  else player.toggle();
+  pushMusicToAll();
+  return true;
+}
+
+/** Called once from init(): the store's second channel, and the first sync. */
+function wireMusic() {
+  // settings.js announces a write twice — through its listener list and as this
+  // event — so a module that never subscribed still hears it. Both land here;
+  // setSettings() is a no-op when nothing actually moved.
+  document.addEventListener('music-changed', () => applyMusicSettings());
+  syncIdlePresence();
+}
+
+/* --- now playing: the poll, the push and the controls -------------- */
+
+/** The gate: a new-tab page in front, or music that may play anywhere. */
+function mediaPollWanted() {
+  if (!mediaApi()) return false;
+  if (!musicFocused()) return false;
+  if (activeIsNewTab()) return true;
+  const group = musicSettings();
+  return !!(group && group.enabled && group.where === 'anywhere');
+}
+
+/** Idempotent, like syncStatsSubscription: every edge may call it. */
+function syncMediaPolling() {
+  const want = mediaPollWanted();
+  if (want === (mediaPollTimer != null)) return;
+  if (want) {
+    mediaPollTimer = window.setInterval(pollMediaOnce, MEDIA_POLL_MS);
+    pollMediaOnce();   // the first answer should not wait two seconds
+  } else {
+    window.clearInterval(mediaPollTimer);
+    mediaPollTimer = null;
+  }
+}
+
+/**
+ * One GET /now through main, carrying the art hash we already hold so the
+ * bridge can leave the image out. A slow bridge never queues polls up: the
+ * one in flight is the only one there is.
+ */
+function pollMediaOnce() {
+  const api = mediaApi();
+  if (!api || mediaInFlight) return;
+  mediaInFlight = true;
+  let pending = null;
+  try { pending = api.now(mediaSeen.artHash || ''); } catch (err) { mediaInFlight = false; return; }
+  if (!pending || typeof pending.then !== 'function') { mediaInFlight = false; return; }
+  pending.then((answer) => {
+    mediaInFlight = false;
+    takeMediaAnswer(answer);
+  }, () => { mediaInFlight = false; /* the next tick tries again */ });
+}
+
+/**
+ * One answer: the idle music's veto first (status 'playing' means the machine
+ * is playing something), then a push to the guest — but only when a field the
+ * page actually draws has moved. positionMs is not one of those fields: the
+ * page interpolates it between pushes, so including it would mean one IPC
+ * every two seconds for ever.
+ */
+function takeMediaAnswer(answer) {
+  const lib = window.MusicPlayer;
+  if (!lib || typeof lib.mediaPush !== 'function') return;
+  mediaAnswer = answer;
+  const built = lib.mediaPush(answer, mediaSeen, false);
+  mediaSeen = { hash: built.hash, artHash: built.artHash, art: built.art };
+  const status = lib.mediaFacts(answer).status;
+  if (status !== mediaStatus) {
+    mediaStatus = status;
+    syncMusicPlayback();   // Spotify starting is what pauses the idle music
+  }
+  if (built.changed) pushMediaToTab(getActiveTab(), built.payload);
+}
+
+/**
+ * The last answer as a guest that knows nothing should see it: the art we are
+ * holding travels with it, because a page that has just loaded has no image.
+ */
+function freshMediaPayload() {
+  const lib = window.MusicPlayer;
+  if (!lib || typeof lib.mediaPush !== 'function' || !mediaAnswer) return null;
+  return lib.mediaPush(mediaAnswer, mediaSeen, true).payload;
+}
+
+/** One now-playing payload to one new-tab guest. Memoised like the rest. */
+function pushMediaToTab(tab, payload) {
+  if (!payload) return;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  let text = '';
+  try { text = JSON.stringify(payload); } catch (err) { return; }
+  if (pushUnchanged(tab, 'media', text)) return;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyMedia && window.__applyMedia(' + text + ')'
+    );
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'media'));
+    }
+  } catch (err) { pushFailed(tab, 'media'); }
+}
+
+/**
+ * `newtab:media {"cmd":"play"|"pause"|"toggle"|"next"|"prev"}`. The same
+ * guards as the music channel, and the same distrust: an unknown verb is
+ * ignored in silence. Nothing guesses the new state — the next /now says what
+ * really happened, so one is asked for as soon as the command comes back.
+ */
+function handleMediaLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const lib = window.MusicPlayer;
+  if (!lib || typeof lib.parseMediaLine !== 'function') return false;
+  const req = lib.parseMediaLine(text);
+  if (!req) return false;
+  const api = mediaApi();
+  if (!api || typeof api.control !== 'function') return false;
+
+  let pending = null;
+  try { pending = api.control(req.cmd); } catch (err) { return false; }
+  const soon = () => window.setTimeout(pollMediaOnce, 250);
+  if (pending && typeof pending.then === 'function') pending.then(soon, soon);
+  else soon();
+  return true;
+}
+
+/**
+ * The two halves of this section on one call, hung off the edge everything
+ * else already follows (syncStatsSubscription): activation, dom-ready, a tab
+ * closing, window focus. Idempotent and cheap — the player settles its own
+ * decision, the poll gate is a boolean, and both pushes are memoised.
+ */
+function syncIdlePresence() {
+  syncMediaPolling();
+  syncMusicPlayback();
+  const tab = getActiveTab();
+  if (!tab || !isNewTabUrl(tab.url)) return;
+  pushMusicToTab(tab);
+  pushMediaToTab(tab, freshMediaPayload());
 }
 
 /* ------------------------------------------------------------------ */
@@ -1612,6 +1976,9 @@ function wireSettings() {
     // The dock is only redrawn when the pins themselves moved; an older
     // settings.js that emits no key list gets the push either way.
     if (!Array.isArray(keys) || keys.indexOf('apps') >= 0) pushAppsToAll();
+    // Idle music applies live: the switch, the source, the volume and where it
+    // may play all take effect on the write, with no restart and no reload.
+    if (!Array.isArray(keys) || keys.indexOf('music') >= 0) applyMusicSettings();
   });
 }
 
@@ -2204,8 +2571,12 @@ function syncTabAudio(tab) {
  * any media, but a speaker on the new tab's chip would be a lie. */
 function setTabAudible(tab, on) {
   if (!tab || isClaudeTab(tab) || isNewTabUrl(tab.url)) return;
+  const before = !!tab.audible;
   tab.audible = !!on;
   syncTabAudio(tab);
+  // A page starting or stopping a sound is the idle music's cue to get out of
+  // the way or come back; the chip is no longer the only thing that cares.
+  if (before !== tab.audible) syncMusicPlayback();
 }
 
 /** Mute or unmute one tab. An unattached guest throws; the flag still holds. */
@@ -2217,6 +2588,9 @@ function setTabMuted(tab, on) {
     try { tab.viewEl.setAudioMuted(muted); } catch (err) { /* guest went away mid-call */ }
   }
   syncTabAudio(tab);
+  // Muting the video is how the idle music gets handed back, so this moves the
+  // condition exactly as media-started-playing does.
+  if (tab.audible) syncMusicPlayback();
   saveSession(); // the mute rides along in the session entry
 }
 
@@ -5272,6 +5646,8 @@ function wireViewEvents(tab) {
     pushHistoryToTab(tab);
     pushFilePlacesToTab(tab, true);  // the folder browser's rail: places and drives
     pushReadoutToTab(tab);
+    pushMusicToTab(tab);             // the Idle music tile: the player's state
+    pushMediaToTab(tab, freshMediaPayload());  // ...and what the machine is playing
     // A new document has not opted out of anything yet; ask it once, and take
     // the subscription now rather than waiting for that answer to come back.
     tab.statsWanted = true;
@@ -5436,6 +5812,18 @@ function wireViewEvents(tab) {
   // answered on window.__applyFiles / __applyFileIcons / __applyFileResult.
   viewEl.addEventListener('console-message', (event) => {
     handleFilesLine(tab, viewEl, event && event.message);
+  });
+
+  // The idle music tile's three controls, `newtab:music {json}`, answered on
+  // window.__applyMusic.
+  viewEl.addEventListener('console-message', (event) => {
+    handleMusicLine(tab, viewEl, event && event.message);
+  });
+
+  // ...and the now-playing tile's transport, `newtab:media {json}`, answered on
+  // window.__applyMedia after the next poll says what really happened.
+  viewEl.addEventListener('console-message', (event) => {
+    handleMediaLine(tab, viewEl, event && event.message);
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
@@ -6954,6 +7342,9 @@ function init() {
   wireOverlayWatch();
   wireAutopauseReadout();
   wireStats();
+  // Idle music and the now-playing readout. Nothing starts here: this only
+  // subscribes to the store's second channel and takes the first reading.
+  wireMusic();
 
   // The chrome follows its own tabchange event, exactly like find.js and the
   // other modules do: the badge belongs to the tab you are looking at, and a
@@ -7044,6 +7435,43 @@ window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 // it is always safe and always a no-op when nothing about the active tab, the
 // guest's wishes or the window's focus has moved.
 window.syncStatsSubscription = syncStatsSubscription;
+
+// Idle music and the now-playing poll, said out loud for the same reason: the
+// live verification has to be able to force one edge at a time (a fake audible
+// tab, a blurred window, a /now answer) and then read what the player decided.
+// `sync` is always safe to call and is a no-op when nothing has moved.
+window.idleMusic = {
+  sync: syncIdlePresence,
+  state: () => (musicPlayer ? musicPlayer.state() : musicOffState()),
+  debug: () => ({
+    player: musicPlayer ? musicPlayer.debug() : null,
+    mediaStatus: mediaStatus,
+    mediaPolling: mediaPollTimer != null,
+    audibleTab: anyTabAudible(),
+    focused: musicFocused(),
+    windowFocused: !windowBlurred,
+    machinePlaying: machinePlaying(),
+    forced: { focused: musicForced.focused, mediaStatus: musicForced.mediaStatus },
+    newTabActive: activeIsNewTab()
+  }),
+  // Pin a fact a test cannot produce for itself — the window's focus, which
+  // comes from main, or the machine's playback status, which is the user's own
+  // Spotify. null on either hands it back to the real signal.
+  force: (patch) => {
+    const p = patch && typeof patch === 'object' ? patch : {};
+    if ('focused' in p) musicForced.focused = p.focused === null ? null : p.focused === true;
+    if ('mediaStatus' in p) {
+      musicForced.mediaStatus = typeof p.mediaStatus === 'string' ? p.mediaStatus : null;
+    }
+    syncIdlePresence();
+    return { focused: musicForced.focused, mediaStatus: musicForced.mediaStatus };
+  },
+  // Apply the pending decision now instead of after the 300 ms settle.
+  flush: () => (musicPlayer ? musicPlayer.flush() : false),
+  // One /now answer as if the bridge had said it: what the poll does with an
+  // answer is the same code either way.
+  takeMedia: (answer) => takeMediaAnswer(answer)
+};
 
 // Close and reopen with the tabs restored. settings.js (About) and the command
 // palette both go through this rather than api.app.restart(), so the session
