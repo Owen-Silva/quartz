@@ -187,6 +187,38 @@ embed.on('gone', (tabId) => {
   syncNativeFocusPoll();
 });
 
+/*
+ * The hung-app watchdog (see embed.js). A hosted app that stops pumping messages
+ * freezes THIS window's input too -- the price of SetParent joining the two
+ * input queues -- but the engine does NOT move the window: the detach cannot
+ * land until the app answers again anyway (measured), and doing it then would
+ * pop a healthy app out of its tab. So this is a report, the window stays
+ * hosted, and nothing about the focus poll changes.
+ */
+embed.on('hung', (payload) => {
+  send('embed:hung', {
+    tabId: String((payload && payload.tabId) == null ? '' : payload.tabId),
+    hwnd: String((payload && payload.hwnd) == null ? '' : payload.hwnd),
+    pid: Number((payload && payload.pid) || 0),
+  });
+});
+
+/** It answers again, in the tab it never left. */
+embed.on('recovered', (payload) => {
+  send('embed:recovered', {
+    tabId: String((payload && payload.tabId) == null ? '' : payload.tabId),
+    hwnd: String((payload && payload.hwnd) == null ? '' : payload.hwnd),
+  });
+});
+
+/** The hosted app renamed its own window ("(3) Discord", a file it opened). */
+embed.on('title', (payload) => {
+  send('embed:title', {
+    tabId: String((payload && payload.tabId) == null ? '' : payload.tabId),
+    title: String((payload && payload.title) == null ? '' : payload.title),
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Window state
 //

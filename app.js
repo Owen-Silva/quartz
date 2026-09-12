@@ -2365,7 +2365,9 @@ function appTabRunning() {
     if (isAppTab(tab)) out[tab.app.id] = { running: true, pids: [], tab: true };
     // An app hosted IN a tab is the realest kind of running there is: the pid
     // is the app's own, and `native` is how the dock tells the two apart.
-    else if (isNativeTab(tab) && tab.native.state === 'running') {
+    // 'hung' counts too: the app is still running, with the same pid, as its own
+    // window — the watchdog moved the window, it did not end the program.
+    else if (isNativeTab(tab) && (tab.native.state === 'running' || tab.native.state === 'hung')) {
       out[tab.native.appId] = {
         running: true,
         pids: tab.native.pid ? [tab.native.pid] : [],
@@ -2400,6 +2402,12 @@ function appTabRunning() {
  *        'running'   the app's window is hosted over the placeholder
  *        'gone'      the app's window died ("<app> closed")
  *        'failed'    open() refused; tab.native.reason says why
+ *        'hung'      the app stopped answering for a couple of seconds. Its
+ *                    window is STILL HOSTED (the engine reports, it never moves
+ *                    it): the chip carries a " (not responding)" suffix and the
+ *                    placeholder — which can only paint once the app pumps
+ *                    again — offers the manual Pop out. 'recovered' takes the
+ *                    tab straight back to 'running'.
  *
  * The placeholder is the only thing ever measured, and the hosted window is a
  * real child HWND that paints above EVERY pixel of this document — so it is
@@ -2425,6 +2433,19 @@ function embedApi() {
 
 function isNativeTab(tab) {
   return !!(tab && tab.kind === 'native' && tab.native);
+}
+
+/**
+ * The native tab one engine push is about, or null. main stringifies the id on
+ * the way out, so the compare is on strings.
+ */
+function nativeTabById(tabId) {
+  const key = String(tabId == null ? '' : tabId);
+  if (!key) return null;
+  for (const tab of tabs) {
+    if (isNativeTab(tab) && String(tab.id) === key) return tab;
+  }
+  return null;
 }
 
 /** The open native tab for one installed app id, or null. */
@@ -2518,6 +2539,10 @@ function buildNativeView(tab) {
 // The same app glyph the dock and the palette use for an installed program.
 const NATIVE_CARD_GLYPH = '';
 
+/** What a chip says while its app is not answering. The window is still hosted
+ *  and painting over the placeholder, so the chip is where a hang is visible. */
+const NATIVE_HUNG_SUFFIX = ' (not responding)';
+
 /** One button on the status card, in the crash card's own clothes. */
 function nativeCardButton(label, run) {
   const btn = document.createElement('button');
@@ -2577,6 +2602,15 @@ function renderNativeCard(tab) {
     line.textContent = 'Its window is gone. The tab is still here.';
     row.appendChild(nativeCardButton('Relaunch', () => startNativeTab(tab)));
     row.appendChild(nativeCardButton('Close', () => closeTab(tab.id)));
+  } else if (state === 'hung') {
+    // The watchdog's card. Its window is still parked over this rect, so these
+    // words are only ever READ once the app pumps again and the chrome gets a
+    // frame in — by which time "for a while" is the honest tense.
+    head.textContent = name + ' stopped responding for a while';
+    line.textContent = 'Its window is still in this tab. Pop it out to deal with it'
+      + ' outside the browser.';
+    row.appendChild(nativeCardButton('Pop out', () => popOutNativeTab(tab)));
+    row.appendChild(nativeCardButton('Close tab', () => closeTab(tab.id)));
   } else if (state === 'failed') {
     head.textContent = name + ' cannot run in a tab';
     line.textContent = nativeReasonText(tab.native.reason);
@@ -2613,17 +2647,35 @@ function launchAppNormally(appId) {
   return true;
 }
 
+/**
+ * What the chip says: the app's own window caption while there IS one, and the
+ * app's name otherwise. A hung app keeps its caption — its window is still
+ * there, just not in this tab — and every other state has nothing to show.
+ */
+function nativeTabLabel(tab) {
+  if (!isNativeTab(tab)) return '';
+  const live = (typeof tab.native.title === 'string') ? tab.native.title.trim() : '';
+  const base = live || tab.native.name;
+  // The whole of what a hang shows while the app's own window is still painting
+  // over the placeholder: the chip is the only surface the chrome still owns.
+  return tab.native.state === 'hung' ? base + NATIVE_HUNG_SUFFIX : base;
+}
+
 /** Move one native tab to a state and redraw everything that follows from it. */
 function setNativeState(tab, state, reason) {
   if (!isNativeTab(tab)) return;
   tab.native.state = state;
   tab.native.reason = (typeof reason === 'string') ? reason : '';
-  if (state !== 'running') {
+  // 'hung' is a hosted state: the window never left, so the rect it was last
+  // sent, its pid and its caption all still stand.
+  if (state !== 'running' && state !== 'hung') {
     tab.native.sent = '';   // the next layout call is a fresh one
     tab.native.pid = 0;
+    tab.native.title = '';  // no window, so no caption of its own to wear
+    tab.native.hungHwnd = '';
   }
   renderNativeCard(tab);
-  setTabTitle(tab, tab.native.name); // the chip's tooltip spells the state out
+  setTabTitle(tab, nativeTabLabel(tab)); // the chip's tooltip spells the state out
   pushAppRunningUpdate();   // the dock's light follows the tab, not the process
   queueNativeLayout(true);
 }
@@ -2725,8 +2777,9 @@ function flushNativeLayout() {
   let calls = 0;
   for (const tab of tabs) {
     if (!isNativeTab(tab)) continue;
-    // Nothing is hosted unless the app is running: there is no window to park.
-    if (tab.native.state !== 'running') continue;
+    // Nothing is hosted unless the app is running -- there is no window to park.
+    // 'hung' still is: the watchdog reports, it never moves the window.
+    if (tab.native.state !== 'running' && tab.native.state !== 'hung') continue;
 
     const measured = nativeRectOf(tab);
     if (measured) tab.native.rect = measured;
@@ -2809,7 +2862,14 @@ function createNativeTab(appId, options) {
       rect: null,
       sent: '',
       cardEl: null,
-      detached: false
+      detached: false,
+      // The app's OWN window caption, pushed by the engine's 1 s poll while the
+      // window is hosted. Empty until it says something, and the chip falls back
+      // to the app's name.
+      title: '',
+      // The watchdog: 'hung' means the app went quiet. The window stays hosted,
+      // so there is nothing to remember but the hwnd the engine named.
+      hungHwnd: ''
     }
   };
 
@@ -2895,6 +2955,10 @@ function startNativeTab(tab) {
     tab.native.pid = (typeof res.pid === 'number' && res.pid > 0) ? res.pid : 0;
     tab.native.hwnd = String(res.hwnd == null ? '' : res.hwnd);
     if (typeof res.exe === 'string' && res.exe && !tab.native.exe) tab.native.exe = res.exe;
+    // The caption the window already has. The engine's poll only pushes CHANGES,
+    // so without this the chip would wear the app's name until the app happened
+    // to rename its own window.
+    tab.native.title = (typeof res.title === 'string') ? res.title : '';
     setNativeState(tab, 'running', '');
     // Forced: the engine holds the window HIDDEN until the first layout call,
     // so nothing appears without this one.
@@ -2938,7 +3002,7 @@ function openNativeTab(appId) {
 function popOutNativeTab(tab) {
   if (!isNativeTab(tab)) return false;
   const embed = embedApi();
-  const hosted = tab.native.state === 'running';
+  const hosted = tab.native.state === 'running' || tab.native.state === 'hung';
   tab.native.detached = true;
   if (embed && typeof embed.detach === 'function' && hosted) {
     try {
@@ -2966,7 +3030,10 @@ function disposeNativeTab(tab) {
     tab.native.cardEl = null;
   }
   if (tab.native.detached) return;
-  if (tab.native.state !== 'running' && tab.native.state !== 'starting') return;
+  // 'hung' is hosted like 'running' -- the window is still in the tab -- so
+  // closing the tab asks that app to close, exactly as it does for a live one.
+  if (tab.native.state !== 'running' && tab.native.state !== 'starting'
+    && tab.native.state !== 'hung') return;
   const embed = embedApi();
   if (!embed || typeof embed.close !== 'function') return;
   try {
@@ -3027,6 +3094,51 @@ function wireNativeTabs() {
       setNativeState(tab, 'gone', '');
     });
   } catch (err) { /* an engine that cannot subscribe simply never reports */ }
+
+  /* The watchdog. Both of these are REPORTS: the window never left the tab, so
+   * nothing here drives Win32 either. A hang shows as a suffix on the chip (the
+   * one surface the chrome still owns while the app's window covers the well)
+   * and, once the app pumps again, on the placeholder behind it. */
+  if (typeof embed.onHung === 'function') {
+    try {
+      embed.onHung((payload) => {
+        const tab = nativeTabById(payload && payload.tabId);
+        if (!tab || tab.native.detached) return;
+        if (tab.native.state !== 'running') return;   // only a hosted tab can hang
+        const hwnd = String((payload && payload.hwnd) == null ? '' : payload.hwnd);
+        tab.native.hungHwnd = hwnd || tab.native.hwnd;
+        if (payload && typeof payload.pid === 'number' && payload.pid > 0) tab.native.pid = payload.pid;
+        setNativeState(tab, 'hung', '');
+      });
+    } catch (err) { /* an older engine simply never reports a hang */ }
+  }
+
+  if (typeof embed.onRecovered === 'function') {
+    try {
+      embed.onRecovered((payload) => {
+        const tab = nativeTabById(payload && payload.tabId);
+        if (!tab || tab.native.state !== 'hung') return;
+        // Straight back to what it was: the suffix comes off the chip and the
+        // placeholder goes back to painting nothing at all.
+        tab.native.hungHwnd = '';
+        setNativeState(tab, 'running', '');
+      });
+    } catch (err) { /* no recovery reports: the suffix stays until it closes */ }
+  }
+
+  // The app's own window caption, while it is hosted.
+  if (typeof embed.onTitle === 'function') {
+    try {
+      embed.onTitle((payload) => {
+        const tab = nativeTabById(payload && payload.tabId);
+        if (!tab) return;
+        const title = String((payload && payload.title) == null ? '' : payload.title);
+        tab.native.title = title;
+        // Verbatim: a "(3) Discord" caption is exactly what the user should see.
+        setTabTitle(tab, nativeTabLabel(tab));
+      });
+    } catch (err) { /* no titles: the chip keeps the app's name */ }
+  }
 
   // Who has the keyboard, from main's Win32 poll. An older preload without it
   // simply never pushes, and everything falls back to the window's own focus.
@@ -4046,6 +4158,7 @@ function chipTooltip(tab) {
     if (state === 'running') return tab.native.name + ' — running in this tab';
     if (state === 'starting') return tab.native.name + ' — starting';
     if (state === 'gone') return tab.native.name + ' — closed';
+    if (state === 'hung') return tab.native.name + ' — not responding, still in this tab';
     if (state === 'failed') return tab.native.name + ' — ' + nativeReasonText(tab.native.reason);
     return tab.native.name + ' — not running';
   }
@@ -6593,15 +6706,19 @@ function tabMenuItemsForTab(tab) {
     items.push({
       label: 'Pop out of the tab',
       run: () => popOutNativeTab(tab),
-      disabled: tab.native.state !== 'running'
+      // A hung app is still hosted, and popping it out is the whole point of
+      // the row while one is wedged.
+      disabled: tab.native.state !== 'running' && tab.native.state !== 'hung'
     });
     // Start is the same row the placeholder's own button is, for a tab whose
     // app has closed or was never started; there is nothing to start while it
-    // is hosted, so the row is dimmed rather than removed.
+    // is hosted, so the row is dimmed rather than removed. A hung app is still
+    // running — starting a SECOND copy of it is never what was meant.
     items.push({
       label: 'Start ' + tab.native.name,
       run: () => startNativeTab(tab),
       disabled: tab.native.state === 'running' || tab.native.state === 'starting'
+        || tab.native.state === 'hung'
     });
     // The ordinary launch, for the app that will not be hosted at all.
     items.push({

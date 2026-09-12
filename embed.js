@@ -159,6 +159,12 @@ function loadWin32() {
       EnumWindows: user32.func('bool __stdcall EnumWindows(EmbedEnumProc *cb, intptr_t lparam)'),
       IsWindow: user32.func('bool __stdcall IsWindow(void *h)'),
       IsWindowVisible: user32.func('bool __stdcall IsWindowVisible(void *h)'),
+      /* THE WATCHDOG'S ONE QUESTION. SetParent joined the app's input queue to
+       * ours, so an app that stops pumping messages freezes the BROWSER's input
+       * too -- this is how the poll notices in time to let go. Like IsWindow it
+       * reads state the window manager already keeps (the last time that thread
+       * pumped), so it cannot itself block on the wedged app. */
+      IsHungAppWindow: user32.func('bool __stdcall IsHungAppWindow(void *h)'),
       IsIconic: user32.func('bool __stdcall IsIconic(void *h)'),
       GetWindowTextW: user32.func('int __stdcall GetWindowTextW(void *h, _Out_ uint8_t *buf, int max)'),
       GetClassNameW: user32.func('int __stdcall GetClassNameW(void *h, _Out_ uint8_t *buf, int max)'),
@@ -375,6 +381,51 @@ function orderWindows(list, prefer, since) {
 }
 
 // ---------------------------------------------------------------------------
+// The hung-app watchdog's decision
+// ---------------------------------------------------------------------------
+
+/**
+ * How many CONSECUTIVE samples decide. One is not enough in either direction:
+ * an app is briefly "hung" every time it opens a modal, loads a huge file or
+ * gets swapped in, and evicting a tab for that would be worse than the freeze.
+ * Two ticks of the 1 s poll is 1-2 s of a genuinely wedged input queue.
+ */
+const HUNG_SAMPLES = 2;
+
+/**
+ * The whole watchdog, as a pure step so the debounce is testable without Win32.
+ *
+ *   state   { watching, hungStreak, okStreak } -- carry it between ticks.
+ *           `watching` false is "hosted in a tab"; true is "already detached
+ *           and being watched for a recovery".
+ *   sample  { hung } -- one IsHungAppWindow read.
+ *   ->      { state, action } where action is:
+ *             'detach'     it has been hung HUNG_SAMPLES ticks running: get the
+ *                          window out of our window (and off our input queue).
+ *             'recovered'  it has answered HUNG_SAMPLES ticks running since:
+ *                          the chrome may offer to host it again.
+ *             ''           nothing to do this tick.
+ *
+ * A streak only counts while it is unbroken: one answering tick zeroes the hung
+ * count, one hung tick zeroes the recovery count.
+ */
+function hungStep(state, sample) {
+  const s = state && typeof state === 'object' ? state : {};
+  const hung = !!(sample && sample.hung);
+  const watching = !!s.watching;
+  const hungStreak = watching ? 0 : (hung ? (Number(s.hungStreak) || 0) + 1 : 0);
+  const okStreak = watching ? (hung ? 0 : (Number(s.okStreak) || 0) + 1) : 0;
+
+  if (!watching && hungStreak >= HUNG_SAMPLES) {
+    return { state: { watching: true, hungStreak: 0, okStreak: 0 }, action: 'detach' };
+  }
+  if (watching && okStreak >= HUNG_SAMPLES) {
+    return { state: { watching: false, hungStreak: 0, okStreak: 0 }, action: 'recovered' };
+  }
+  return { state: { watching, hungStreak, okStreak }, action: '' };
+}
+
+// ---------------------------------------------------------------------------
 // create()
 // ---------------------------------------------------------------------------
 
@@ -409,7 +460,18 @@ function create(opts) {
   /** tabId -> timer, for close()'s "it ignored WM_CLOSE" fallback. */
   const closeTimers = new Map();
 
-  const counters = { attaches: 0, detaches: 0, layouts: 0, layoutSkips: 0, polls: 0, gone: 0, finds: 0, trees: 0 };
+  /**
+   * tabId -> { tabId, key, pid, exe } for a tab whose app has gone quiet. The
+   * window is STILL HOSTED (see reportHung): this is the note that says a hang
+   * has already been reported, so it is reported once and the recovery that
+   * follows it is reported once too.
+   */
+  const hungWatch = new Map();
+
+  const counters = {
+    attaches: 0, detaches: 0, layouts: 0, layoutSkips: 0, polls: 0, gone: 0,
+    finds: 0, trees: 0, hung: 0, recovered: 0, titles: 0
+  };
 
   let shutdownHooked = false;
 
@@ -862,7 +924,17 @@ function create(opts) {
       saved: { style, exstyle, rect, parent: w32.GetParent(handle) },
       last: null,          // last physical rect + visibility we applied
       visible: false,
+      // The watchdog's carried state (see hungStep). A window being hosted is
+      // by definition not one we are watching from the outside.
+      hung: { watching: false, hungStreak: 0, okStreak: 0 },
     };
+
+    /* Hosting it again ends any watch on it: by hwnd as well as by tab, so a
+       recovered window adopted into a DIFFERENT tab is not watched twice. */
+    dropWatch(tabId);
+    for (const entry of Array.from(hungWatch.values())) {
+      if (entry.key === key) dropWatch(entry.tabId);
+    }
 
     try {
       // A minimised window has nothing to show and cannot be sized: restore it
@@ -1001,12 +1073,15 @@ function create(opts) {
     const record = attached.get(key);
     if (!record) return { ok: false, reason: 'not-attached' };
     const restore = !(opts2 && opts2.restore === false);
+    // A tab that was reported hung is still a hosted tab: its hang note goes
+    // when the window does, and no recovery is reported for a tab that is gone.
+    dropWatch(key);
 
     clearCloseTimer(key);
     attached.delete(key);
     byHandle.delete(record.key);
     counters.detaches += 1;
-    if (!attached.size) stopPoll();
+    maybeStopPoll();
 
     if (!win32()) return { ok: true, hwnd: record.key, restored: false };
 
@@ -1121,7 +1196,8 @@ function create(opts) {
     attached.delete(record.tabId);
     byHandle.delete(record.key);
     clearCloseTimer(record.tabId);
-    if (!attached.size) stopPoll();
+    dropWatch(record.tabId);      // a dead window has no hang to report on
+    maybeStopPoll();
     counters.gone += 1;
     log('embed: window ' + reason, record.tabId, record.key);
     emitter.emit('gone', record.tabId);
@@ -1133,7 +1209,76 @@ function create(opts) {
     for (const id of ids) {
       try { detach(id, opts2 || { restore: true }); } catch { /* keep going */ }
     }
+    // Every hang note goes with the windows it was about.
+    hungWatch.clear();
+    maybeStopPoll();
     return { ok: true, detached: ids.length };
+  }
+
+  // -- the hung-app watchdog ------------------------------------------------
+
+  /**
+   * A hosted app has stopped answering. That matters more here than anywhere
+   * else, because SetParent joined its input queue to OURS: while it is a child
+   * of this window, its wedged message loop is also the browser's frozen
+   * keyboard and mouse.
+   *
+   * AND YET NOTHING IS DETACHED HERE. MEASURED, 2026-09-12: the automatic
+   * detach cannot land while the app is actually wedged. SetParent has to be
+   * served by the app's own thread, and that same joined queue starves THIS
+   * process's message loop -- one IPC round trip took 9.7 s, the 1 s poll ran 7
+   * times in 30 s, and the eviction completed 50 ms after the app started
+   * pumping again. So an automatic detach does not free anything during the
+   * freeze; it only pops a HEALTHY app out of its tab a moment after it
+   * recovers, which is the one outcome nobody asked for.
+   *
+   * So the watchdog reports, and the user decides: 'hung' says the app went
+   * quiet (the chrome suffixes the tab title and offers the existing manual Pop
+   * out), 'recovered' says it is answering again, and the window stays hosted
+   * throughout. Freeing the input queue mid-freeze needs a detach from off the
+   * main thread, which is not something this module can do.
+   */
+  function reportHung(record) {
+    hungWatch.set(record.tabId, {
+      tabId: record.tabId,
+      key: record.key,
+      pid: record.pid,
+      exe: record.exe,
+    });
+    counters.hung += 1;
+    log('embed: hung, still hosted', record.tabId, record.key, record.exe);
+    emitter.emit('hung', { tabId: record.tabId, hwnd: record.key, pid: record.pid });
+  }
+
+  /** It answers again. Bookkeeping only: the window never moved. */
+  function reportRecovered(record) {
+    if (!hungWatch.delete(record.tabId)) return;
+    counters.recovered += 1;
+    log('embed: answers again', record.tabId, record.key);
+    emitter.emit('recovered', { tabId: record.tabId, hwnd: record.key });
+  }
+
+  /** Forget one tab's hang, without reporting a recovery it never had. */
+  function dropWatch(tabId) {
+    const key = String(tabId == null ? '' : tabId);
+    if (!hungWatch.has(key)) return false;
+    hungWatch.delete(key);
+    maybeStopPoll();
+    return true;
+  }
+
+  /**
+   * The app's own window caption, pushed whenever it changes — "(3) Discord",
+   * the file a window is editing, a page title. record.title is the cache, so a
+   * title that has not moved costs one GetWindowText and no IPC.
+   */
+  function pushTitle(record) {
+    let text = '';
+    try { text = windowTitle(record.handle); } catch { return; }
+    if (text === record.title) return;
+    record.title = text;
+    counters.titles += 1;
+    emitter.emit('title', { tabId: record.tabId, title: text });
   }
 
   // -- liveness poll --------------------------------------------------------
@@ -1143,10 +1288,19 @@ function create(opts) {
    * from under us. One IsWindow call per attached tab per second is enough to
    * notice, and costs nothing measurable with a handful of tabs.
    *
-   * IsWindow and GetParent ONLY. Our input queue is attached to the app's (see
-   * attach()), so a poll tick that used SendMessage -- or anything else that
-   * waits on the app's message loop -- would freeze the browser's own input
-   * every second a hosted app was wedged.
+   * IsWindow, GetParent, IsHungAppWindow and GetWindowText ONLY. Our input queue
+   * is attached to the app's (see attach()), so a poll tick that used
+   * SendMessage -- or anything else that waits on the app's message loop --
+   * would freeze the browser's own input every second a hosted app was wedged.
+   * All four read state the window manager already holds: GetWindowText is the
+   * subtle one, and it is safe BY DESIGN -- for a window in another process it
+   * returns the caption Windows cached rather than sending WM_GETTEXT, which is
+   * documented precisely so that a caller cannot be hung by the window it asks
+   * about.
+   *
+   * The same tick does three jobs, in this order: liveness, the hung-app
+   * watchdog (see reportHung -- it REPORTS, it never moves the window), and the
+   * live title.
    */
   function startPoll() {
     if (pollTimer || !win32()) return;
@@ -1158,9 +1312,26 @@ function create(opts) {
         try { live = !!w32.IsWindow(record.handle); } catch { live = false; }
         if (!live) { forget(record, 'died'); continue; }
         // Something took it back: let go rather than fighting over it.
+        let ours = true;
         try {
-          if (parent && w32.GetParent(record.handle) !== parent) forget(record, 'was re-parented away');
+          if (parent && w32.GetParent(record.handle) !== parent) {
+            forget(record, 'was re-parented away');
+            ours = false;
+          }
         } catch { /* leave it attached; the next tick tries again */ }
+        if (!ours) continue;
+
+        // The watchdog. Nothing is moved: 'detach' here is the decision's name
+        // for "it has gone quiet", and reportHung only tells the chrome. See
+        // reportHung for why an automatic detach was measured and dropped.
+        let hung = false;
+        try { hung = !!w32.IsHungAppWindow(record.handle); } catch { hung = false; }
+        const step = hungStep(record.hung, { hung });
+        record.hung = step.state;
+        if (step.action === 'detach') reportHung(record);
+        else if (step.action === 'recovered') reportRecovered(record);
+
+        pushTitle(record);
       }
     }, 1000);
     if (typeof pollTimer.unref === 'function') pollTimer.unref();
@@ -1170,6 +1341,16 @@ function create(opts) {
     if (!pollTimer) return;
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+
+  /**
+   * The poll exists for the attached windows: a hang is bookkeeping ON one of
+   * them (the window never leaves its tab), so hungWatch can never be the reason
+   * the poll keeps running.
+   */
+  function maybeStopPoll() {
+    if (attached.size) return;
+    stopPoll();
   }
 
   // -- shutdown -------------------------------------------------------------
@@ -1340,6 +1521,8 @@ function create(opts) {
       ffi: win32() ? 'koffi' : null,
       available: !!win32(),
       attached: attached.size,
+      // Hosted windows whose app has gone quiet and not yet answered.
+      hungReported: hungWatch.size,
       polling: !!pollTimer,
       scale: win32() ? scaleFactor() : 1,
       counters: Object.assign({}, counters),
@@ -1356,6 +1539,9 @@ function create(opts) {
     layout,
     detach,
     close,
+    /** Tabs reported hung and still hosted, as { tabId, hwnd } — read-only, for
+     *  the live verification. */
+    hungTabs: () => Array.from(hungWatch.values()).map((e) => ({ tabId: e.tabId, hwnd: e.key })),
     detachAll,
     handleWindowClose,
     alive,
@@ -1377,6 +1563,8 @@ module.exports = {
   descendantsOf,
   rankWindow,
   orderWindows,
+  hungStep,
+  HUNG_SAMPLES,
   PROC_TREE_TTL_MS,
   PROC_TREE_SCRIPT,
   PROC_TREE_ARGS

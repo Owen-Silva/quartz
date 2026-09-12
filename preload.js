@@ -445,6 +445,29 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('embed:gone', handler);
       return () => ipcRenderer.removeListener('embed:gone', handler);
     },
+    // The app stopped answering (two seconds of IsHungAppWindow). Its window is
+    // STILL HOSTED -- the engine reports, it never moves the window, because a
+    // detach cannot land until the app answers again anyway. { tabId, hwnd, pid }.
+    // Returns an unsubscribe function.
+    onHung: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('embed:hung', handler);
+      return () => ipcRenderer.removeListener('embed:hung', handler);
+    },
+    // A tab reported hung is answering again: { tabId, hwnd }. Nothing to undo --
+    // the window never left the tab -- so this is the cue to drop the warning.
+    onRecovered: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('embed:recovered', handler);
+      return () => ipcRenderer.removeListener('embed:recovered', handler);
+    },
+    // The hosted app renamed its own window: { tabId, title }. Pushed only on a
+    // change, straight from the app's caption ("(3) Discord" arrives as it is).
+    onTitle: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('embed:title', handler);
+      return () => ipcRenderer.removeListener('embed:title', handler);
+    },
     // WHO HAS THE KEYBOARD while an app window is hosted: { ours, hostedTabId }.
     // `ours` true means the foreground window is THIS browser -- even when
     // Electron calls the window blurred, which it does the moment focus moves
