@@ -643,7 +643,12 @@ body {
 .module {
   position: fixed;
   top: 24px;
-  z-index: 2;                      /* with the column, under the packet layer */
+  /* Above .stage, not level with it. The tiles never overlap the column —
+     the board seats them clear of the socket — so this changes no picture;
+     what it changes is hit-testing. .stage is z-index 2 and comes later in
+     the document, so at the same level it wins every point in the window,
+     and the idle-music controls below could not be clicked at all. */
+  z-index: 3;
   width: 208px;
   padding: 16px;
   border: 1px solid transparent;
@@ -766,6 +771,146 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* --- idle music ---------------------------------------------- */
+/* The face of the chrome's idle player, seated under the three counts in
+   the readout tile. It is in that tile rather than in a third one because
+   newtab-bg.js seats exactly two (its MODULE_SPEC is the contract): a
+   third tile would have no seat of its own and would land on this one.
+
+   Every box below has a fixed height and both controls a fixed width, for
+   the reason the tile itself gives: the board draws a seat around the box
+   it measured, so "Off" becoming "Slow tide" — or a long file name, or the
+   Next control appearing for the user's own tracks — must not move a pixel
+   of it. Nothing here animates and nothing here has a timer: a module
+   showing "Off" costs exactly what the rest of the tile costs. */
+.mod-music { margin-top: 10px; }
+
+/* A hairline over the block, the way the dock head separates its row. */
+.mod-music-head {
+  position: relative;
+  margin: 0 0 6px;
+  height: 18px;
+}
+
+.mod-music-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+}
+
+.mod-music-caption {
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 18px;
+}
+
+/* The state line and the controls, one row, one height in every state. */
+.mod-music-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  height: 22px;
+}
+
+.mod-music-state {
+  flex: 1 1 auto;
+  min-width: 0;                    /* so a long track name ellipsises */
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "Off" and "Paused" are states, not values: they read at a label's
+   weight, and only a playing title gets the readout voice. */
+.mod-music[data-music="off"] .mod-music-state,
+.mod-music[data-music="paused"] .mod-music-state {
+  color: var(--fg-2);
+  font-weight: 400;
+}
+
+.mod-music-ctls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* "Turn on", "Play" and "Pause" in one box, so the word changing never
+   moves the state line beside it. pointer-events comes back on here and
+   nowhere else in the tile — .module is click-through on purpose. */
+.mod-music-btn {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: none;
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    color        160ms steps(4, end),
+    border-color 160ms steps(4, end);
+}
+
+.mod-music-next { width: 38px; }
+
+.mod-music-btn:hover { color: var(--fg); border-color: var(--edge); }
+
+.mod-music-btn:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  color: var(--fg);
+}
+
+/* Next only means anything for the user's own tracks. It keeps its box
+   either way — visibility, never display — so the row is the same width
+   and the same height in all four states, and [disabled] keeps it out of
+   the tab order while it is not there. */
+.mod-music-next[disabled] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The one line in this module that never changes with the state, so it is
+   the one line that may wrap: it fits the tile's 176px to the pixel here,
+   and a machine whose fonts run wider gets a second line and a tile 16px
+   taller — measured by the board at layout the same way, and still the
+   same height in all four states, which is the part that matters. */
+.mod-music-hint {
+  margin: 4px 0 0;
+  min-height: 16px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 16px;
+  overflow: hidden;
 }
 
 /* --- the instrument strip ------------------------------------ */
@@ -1957,6 +2102,7 @@ body {
   .stats,
   .chip,
   .rtile,
+  .mod-music-btn,
   .dock-edit,
   .dock-tile,
   .dock-remove { transition: none; }

@@ -64,18 +64,44 @@
 </section>
 
 <section id="mod-session" class="module module-session" aria-label="Session" hidden>
-  <p class="mod-row">
-    <span id="read-tabs" class="mod-value">--</span>
-    <span id="read-tabs-label" class="mod-label">tabs open</span>
-  </p>
-  <p class="mod-row">
-    <span id="read-claude" class="mod-value">--</span>
-    <span id="read-claude-label" class="mod-label">Claude sessions</span>
-  </p>
-  <p class="mod-row">
-    <span id="read-autopause" class="mod-value">--</span>
-    <span class="mod-label">Spotify auto-pause</span>
-  </p>
+  <!-- The three counts stay hidden until __applyReadout, the same way the
+       tile itself used to: an idle-music push can now be the thing that
+       reveals the tile, and three dashes are still worse than no readout. -->
+  <div id="session-rows" hidden>
+    <p class="mod-row">
+      <span id="read-tabs" class="mod-value">--</span>
+      <span id="read-tabs-label" class="mod-label">tabs open</span>
+    </p>
+    <p class="mod-row">
+      <span id="read-claude" class="mod-value">--</span>
+      <span id="read-claude-label" class="mod-label">Claude sessions</span>
+    </p>
+    <p class="mod-row">
+      <span id="read-autopause" class="mod-value">--</span>
+      <span class="mod-label">Spotify auto-pause</span>
+    </p>
+  </div>
+
+  <!-- Idle music. The player itself lives in the chrome so it survives tab
+       switches; this is only its face and its two controls. Every state
+       ("Off", "Paused", a mood name, a file name) is one fixed-height line
+       and both controls are a fixed box, so the tile the board measured
+       does not change size when the music starts, stops or changes track.
+       Content is newtab.js's: __applyMusic() in, `newtab:music` out. -->
+  <div id="mod-music" class="mod-music" data-music="off">
+    <p class="mod-music-head">
+      <span class="mod-music-caption">Idle music</span>
+    </p>
+    <p class="mod-music-row">
+      <span id="music-state" class="mod-music-state">Off</span>
+      <span class="mod-music-ctls">
+        <button id="music-next" type="button" class="mod-music-btn mod-music-next"
+                disabled aria-hidden="true">Next</button>
+        <button id="music-toggle" type="button" class="mod-music-btn">Turn on</button>
+      </span>
+    </p>
+    <p class="mod-music-hint">Plays while nothing else is playing</p>
+  </div>
 </section>
 
 <main class="stage">

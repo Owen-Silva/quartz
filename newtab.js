@@ -48,6 +48,12 @@
         executable's icon for a process group, resolved by the main
         process and pushed whenever an answer comes back. It only
         fills slots the rows already wear; no row is rebuilt for it.
+
+     8. window.__applyMusic({ enabled, playing, source, title, where })
+        — the state of the chrome's idle player, pushed on every change
+        and when this guest loads. Its three controls answer the same
+        way the dock does: `newtab:music {"action":"toggle"|"next"|
+        "enable"}`; see "idle music".
    ============================================================ */
 
 'use strict';
@@ -420,6 +426,10 @@ function refreshClock() {
 /* ------------------------------------------------------------------ */
 
 const sessionModule = document.getElementById('mod-session');
+/* The three counts, so they can stay hidden while the tile is on screen:
+   the idle-music module below shares this tile and can be the thing that
+   reveals it, and three dashes are still worse than no readout. */
+const sessionRows = document.getElementById('session-rows');
 const readTabs = document.getElementById('read-tabs');
 const readTabsLabel = document.getElementById('read-tabs-label');
 const readClaude = document.getElementById('read-claude');
@@ -461,8 +471,9 @@ window.__applyReadout = function (data) {
   };
   paintReadout();
 
-  if (sessionModule && sessionModule.hidden) {
-    sessionModule.hidden = false;
+  const grew = revealSession(sessionRows && sessionRows.hidden);
+  if (sessionRows) sessionRows.hidden = false;
+  if (grew) {
     // It has a box now: the board has to seat it and route around it.
     if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
   }
@@ -470,12 +481,206 @@ window.__applyReadout = function (data) {
   return window.__readout();
 };
 
+/**
+ * Show the tile these two modules share, and say whether its box changed.
+ * Both pushes go through here: whichever lands first is what puts the tile
+ * on screen, and only a real change of size costs a board relayout.
+ */
+function revealSession(alsoGrowing) {
+  let changed = !!alsoGrowing;
+  if (sessionModule && sessionModule.hidden) {
+    sessionModule.hidden = false;
+    changed = true;
+  }
+  return changed;
+}
+
 /** What the readout actually shows, for tests. */
 window.__readout = function () {
   return {
     tabs: readoutState.tabs,
     claude: readoutState.claude,
     autopause: readoutState.autopause,
+    /* The counts, not the tile: idle music can have the tile on screen
+       before a readout has ever landed. */
+    shown: !!(sessionModule && !sessionModule.hidden &&
+              sessionRows && !sessionRows.hidden)
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* Idle music                                                          */
+/*                                                                     */
+/* Quiet music while nothing else on the machine is playing. The player */
+/* itself lives in the CHROME so it survives tab switches; this module  */
+/* is only its face, and it shares the readout tile because the board   */
+/* seats exactly two tiles (newtab-bg.js MODULE_SPEC is the contract).  */
+/*                                                                     */
+/* In, on every state change and when this guest loads:                 */
+/*                                                                     */
+/*   window.__applyMusic({ enabled, playing, source, title, where })    */
+/*     enabled  the feature is on at all                               */
+/*     playing  the chrome is making sound right now                   */
+/*     source   'ambient' (the built-in engine) | 'files' (his own)     */
+/*     title    the mood name, or the track's name for files           */
+/*     where    'newtab' | 'anywhere' — carried through for the chrome  */
+/*              and for tests; the module reads the same either way    */
+/*                                                                     */
+/* Out, one console line the chrome reads off this guest, exactly the   */
+/* way end-task and the dock do:                                       */
+/*                                                                     */
+/*   newtab:music {"action":"toggle"|"next"|"enable"}                   */
+/*                                                                     */
+/* Never hidden while the tile is up, and shown with an "Off" state and */
+/* a control that turns it on — a feature nobody can find is a feature  */
+/* nobody has. Cost: no timer, no animation, nothing sampled. A module  */
+/* saying "Off" costs one repaint of four fixed boxes, once.            */
+/* ------------------------------------------------------------------ */
+
+const musicModule = document.getElementById('mod-music');
+const musicState = document.getElementById('music-state');
+const musicToggle = document.getElementById('music-toggle');
+const musicNext = document.getElementById('music-next');
+
+/* A track name off the disk can be any length; the state line ellipsises
+   it in CSS, and this keeps a pathological one out of the DOM at all. */
+const MUSIC_TITLE_MAX = 60;
+
+const MUSIC_SOURCES = { ambient: true, files: true };
+const MUSIC_WHERE = { newtab: true, anywhere: true };
+
+let musicData = {
+  enabled: false,
+  playing: false,
+  source: 'ambient',
+  title: '',
+  where: 'newtab'
+};
+
+/** One line of text, trimmed and collapsed. '' for "the chrome did not say". */
+function musicTitleText(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text.length > MUSIC_TITLE_MAX ? text.slice(0, MUSIC_TITLE_MAX - 1) + '…' : text;
+}
+
+/** One of the four words the state line can be in. */
+function musicStateName() {
+  if (!musicData.enabled) return 'off';
+  return musicData.playing ? 'playing' : 'paused';
+}
+
+/**
+ * What the state line says. Playing shows the mood or the track — that is
+ * the whole point of the line — and falls back to "Playing" for a chrome
+ * that has not named it yet. Off and Paused are the states themselves.
+ */
+function musicLine() {
+  if (!musicData.enabled) return 'Off';
+  if (!musicData.playing) return 'Paused';
+  return musicData.title || 'Playing';
+}
+
+/** The word on the control, and the action it sends. */
+function musicAction() {
+  if (!musicData.enabled) return { label: 'Turn on', action: 'enable' };
+  return musicData.playing
+    ? { label: 'Pause', action: 'toggle' }
+    : { label: 'Play', action: 'toggle' };
+}
+
+/** Next is his own tracks only: there is no next chord in a generative pad. */
+function musicHasNext() {
+  return !!musicData.enabled && musicData.source === 'files';
+}
+
+function paintMusic() {
+  const line = musicLine();
+  const act = musicAction();
+
+  setText(musicState, line);
+  if (musicModule) musicModule.setAttribute('data-music', musicStateName());
+
+  if (musicToggle) {
+    setText(musicToggle, act.label);
+    musicToggle.setAttribute('data-action', act.action);
+    /* The word is the label, so the only thing left to say out loud is
+       what it is the word of. */
+    musicToggle.setAttribute('aria-label', act.label + ' idle music');
+  }
+
+  if (musicNext) {
+    const has = musicHasNext();
+    // [disabled] is what hides it (visibility, in CSS) and what keeps it
+    // out of the tab order: the box stays either way, so the row does not
+    // change size when his own tracks come and go.
+    musicNext.disabled = !has;
+    musicNext.setAttribute('aria-hidden', has ? 'false' : 'true');
+  }
+}
+
+/** The channel out. One line, the same shape end-task and the dock use. */
+function musicSend(action) {
+  console.log('newtab:music ' + JSON.stringify({ action: action }));
+}
+
+function wireMusic() {
+  if (musicToggle) {
+    musicToggle.addEventListener('click', function () {
+      musicSend(musicAction().action);
+    });
+  }
+
+  if (musicNext) {
+    musicNext.addEventListener('click', function () {
+      if (!musicHasNext()) return;
+      musicSend('next');
+    });
+  }
+
+  /* The Off state the markup already wears, painted once so the attribute
+     and the control's label come from exactly one place. */
+  paintMusic();
+}
+
+window.__applyMusic = function (data) {
+  const next = (data && typeof data === 'object') ? data : {};
+
+  const source = String(next.source == null ? '' : next.source).toLowerCase();
+  const where = String(next.where == null ? '' : next.where).toLowerCase();
+
+  musicData = {
+    enabled: !!next.enabled,
+    playing: !!next.enabled && !!next.playing,
+    source: MUSIC_SOURCES[source] ? source : 'ambient',
+    title: musicTitleText(next.title),
+    where: MUSIC_WHERE[where] ? where : 'newtab'
+  };
+  paintMusic();
+
+  /* An idle-music push can be the first thing that lands, so it reveals
+     the tile the same way a readout does — with the three counts still
+     hidden until the chrome has actually counted something. */
+  if (revealSession(false)) {
+    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
+  }
+
+  return window.__music();
+};
+
+/** What the module actually shows, for tests. */
+window.__music = function () {
+  return {
+    enabled: musicData.enabled,
+    playing: musicData.playing,
+    source: musicData.source,
+    title: musicData.title,
+    where: musicData.where,
+    state: musicStateName(),
+    line: musicState ? musicState.textContent : '',
+    control: musicToggle ? musicToggle.textContent : '',
+    action: musicAction().action,
+    next: musicHasNext(),
     shown: !!(sessionModule && !sessionModule.hidden)
   };
 };
@@ -2498,6 +2703,12 @@ function init() {
      one tile-row of height before a single pin has arrived, so the capsule
      the board is about to measure is already the height it will wear. */
   wireDock();
+
+  /* The idle-music module, before the board measures the tile it shares
+     with the readout: it is inside a [hidden] tile either way, so this
+     changes no geometry — it only makes the Off state the module's own
+     rather than the markup's, and hangs the two controls. */
+  wireMusic();
 
   /* The canvases are a percentage of the column, so their backing store
      is wrong after a resize. One repaint, no rAF: nothing here animates. */
