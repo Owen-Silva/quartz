@@ -1603,6 +1603,60 @@ function applyUnbreakRules() {
   if (filters.length) blocker.update({ newNetworkFilters: filters });
 }
 
+/*
+ * YouTube's player is built from the JSON its own SPA fetches, and the ads
+ * lists rewrite that JSON inside the page.
+ *
+ * The prebuilt ads+tracking list carries SCRIPTLET rules for youtube.com --
+ * json-prune, replace-fetch-response, prevent-xhr -- which the library injects
+ * into the page with webContents.executeJavaScript to strip the ad fields out
+ * of the player response. On a full document load that lands before the player
+ * exists and YouTube copes. After an IN-PAGE click there is no new document:
+ * the SPA asks for the next video over the fetch the scriptlet has patched,
+ * gets a rewritten body back, and the player never initialises -- ytd-player is
+ * in the DOM, #movie_player is not, and no <video> is ever created. Reloading
+ * the same URL plays it, which is exactly the "it only loads once I reload"
+ * this was reported as. Some of those injections also lose the race against the
+ * navigation and reject ("Script failed to execute"), so how much of the
+ * response got rewritten differs from load to load.
+ *
+ * Measured live (port 9441, in-page clicks from a search results page, 20 s a
+ * round): stock = 0 of 5 rounds played; exceptions for every URL the engine
+ * blocked on the way = 0 of 3; @@||youtube.com^$document = 0 of 3; blocking off
+ * altogether = 3 of 3; scriptlets off for youtube.com = 5 of 5. So the cosmetic
+ * scriptlets are the cause, not the cancelled requests.
+ *
+ * Only the scriptlets go. The cosmetic CSS still hides the ad shelves and every
+ * network rule still blocks, so ad DELIVERY is no less blocked than before --
+ * an in-stream ad can still play, which the reload path already did too.
+ */
+const SCRIPTLET_FREE_HOSTS = ['youtube.com'];
+
+function scriptletsAllowedOn(url) {
+  const host = hostOfUrl(url);
+  if (!host) return true;
+  return !SCRIPTLET_FREE_HOSTS.some((h) => host === h || host.endsWith('.' + h));
+}
+
+/**
+ * Dropped at the lookup, not at the injection: the engine still answers with
+ * its cosmetic CSS for the page and the adapter simply gets an empty script
+ * list, so it never calls executeJavaScript on the guest. Wrapping the lookup
+ * keeps this independent of when the adapter chooses to inject.
+ */
+function dropScriptletsOnBrokenHosts() {
+  if (!blocker) return;
+  const inner = blocker.getCosmeticsFilters.bind(blocker);
+  blocker.getCosmeticsFilters = (args) => {
+    const result = inner(args);
+    if (result && Array.isArray(result.scripts) && result.scripts.length
+        && !scriptletsAllowedOn((args && args.url) || '')) {
+      return { ...result, scripts: [] };
+    }
+    return result;
+  };
+}
+
 function adblockState() {
   return {
     enabled: adblockPrefs.enabled,
@@ -1678,6 +1732,7 @@ async function initAdblock() {
     countBlocked(request && request.tabId);
   });
 
+  dropScriptletsOnBrokenHosts();
   applyUnbreakRules();
   for (const host of adblockPrefs.allow) applyAllowRule(host);
   setBlockingEnabled(adblockPrefs.enabled);
