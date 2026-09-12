@@ -64,11 +64,16 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Right-click a tab for Duplicate, Move to workspace, Close, Close other tabs, Close tabs to the
   right, Reopen closed tab, and Sleep/Wake. The bare strip has its own menu.
 - Pinned tabs: icon-only, held in a left group, drag-clamped, and remembered across restarts.
-- Collapse a tab from its own chip: a small minus button before the close button pins the tab, so
-  the chip becomes that icon-only 40px one at the left of the strip, and a collapsed chip shows a
-  small expand badge at its top-right corner on hover that brings the full chip back. Pinning is
-  still on the right-click menu and in the palette. Page tabs only — Claude and native app chips
-  have neither button.
+- Collapse a tab from its own chip: a small minus button before the close button drops the chip to
+  its icon, 40px wide, in the seat it already had. Every chip has one — web pages, catalogue apps,
+  terminals, Claude chambers and hosted native app windows alike. Collapsing is not pinning: the
+  tab does not move, and pinning is still its own thing on the right-click menu and in the
+  palette. The flag is sticky, but it yields to the tab you are looking at: a collapsed chip is
+  drawn full size, title and buttons and all, while it is the active tab, and goes back to its
+  icon the moment you click off to another tab. On a collapsed chip that same button reads as
+  expand and clears the flag for good; a collapsed chip that is *not* the active tab shows a small
+  expand badge at its top-right corner on hover, which does the same. Collapsed survives a
+  reorder, a drag and a restart.
 - Audio: a playing or muted tab shows a chip glyph you can click to mute.
 - Sleeping: idle background tabs detach their webview and keep a placeholder, waking when you
   activate them. Pinned, audible and new-tab pages never sleep. The delay is in Settings → Tabs.
@@ -165,6 +170,13 @@ or use Restart browser in Settings → About — to pick any of this up.
   chevron and `aria-expanded`; click or Enter/Space opens it, and the choice is remembered in
   `settings.shortcuts.open`. Typing in Find a setting opens the fold so hits are visible, and
   collapsing it stops a recording row. Nothing inside the section changed.
+- Every Settings section starts collapsed, not just Shortcuts (The user: "make it so that all the
+  different sections in settings are auto collapsed"). The pane opens as a list of headings, each a
+  button with a chevron and `aria-expanded`; click or Enter/Space opens one, several can be open at
+  once, and nothing is remembered — every open starts folded, so `settings.shortcuts.open` is gone.
+  About is the one exception and does not fold at all — plain heading, always open. Typing in Find
+  a setting still opens whichever sections hold a hit, and `Settings.open('Spotify')` opens the
+  pane at one named section and scrolls to it.
 - Contrast and copy pass: the muted foreground now clears 4.5:1 on panel grounds in both themes,
   captions are sentence case throughout, and the split divider is visible in light.
 - Instrument glass: a design pass over the chrome, the panes and the bundled pages. A container
@@ -527,6 +539,39 @@ machine.
   with nothing showing under any tile, and live in both themes with a real track and its art, real
   clicks on all three buttons, and no horizontal overflow at 393 or 320px. The chips row is
   unchanged.
+
+### Markets
+
+- Live stock prices are the new tab's fourth module, in the bottom-right corner. It is the one tile
+  the board does not seat: it takes the corner and keeps it. Inside: the session (Pre-market, Open,
+  After hours, Closed), an intraday line chart for the selected symbol with the previous close as a
+  dashed hairline and the day's sign tinting the area under the line, then one row per symbol —
+  name, sparkline, last, day change — with a `+` that takes a ticker and an `×` per row on hover.
+  SPY, QQQ, NVDA, TSLA and AAPL on a first run; eight symbols at most.
+- The prices come from Finnhub, with your own key. Settings → Stocks holds it: the field is masked,
+  has a Show toggle for what you are typing, and there is a switch for the tile and one
+  comma-separated row for the watchlist. **The key never leaves the main process.** It lives in
+  `<userData>/stocks.json` as `stocks.finnhubKey`, and the only thing that comes back out is
+  `hasKey` plus a mask (`••••4f21`) — so neither the settings pane, nor the new tab page, nor a
+  devtools console can read it. With no key the tile is one line: "Add a Finnhub API key in
+  Settings to see live prices", and it makes no network call at all.
+- stocks.js (new) owns all of it: the store, the `wss://ws.finnhub.io` trade stream with a
+  resubscribing backoff reconnect, REST `/quote` snapshots behind a 60-calls-a-minute token bucket,
+  and the history. The chart's history tries Finnhub's `/stock/candle` once and falls through to
+  Yahoo's keyless chart JSON on the 403 that free keys get there — so a free key still draws the
+  day. A key Finnhub refuses shows "Finnhub rejected the key" once and then backs off for a minute
+  rather than retrying in a loop.
+- It costs nothing while you are not looking at it. The page subscribes on `visibilitychange` and
+  unsubscribes when it hides, main ref-counts that per webContents exactly as the system stats do,
+  and with the count at zero there is no socket, no timer and no traffic. On screen it repaints at
+  most twice a second and only when a number moved: no `requestAnimationFrame`, no CSS animation,
+  nothing on the tile that moves on its own.
+- Verified: 36/36 on a node harness over the parsers, the market-session clock, the 60/min budget
+  and the candle-403-to-Yahoo fallback; and live over CDP — the tile renders 24px off both corners,
+  makes zero requests without a key, shows the refusal after exactly one request and none for the
+  next twelve seconds, and draws a real 838-point SPY day off Yahoo. Settings: the Stocks section
+  opens collapsed like the rest, a pasted key reaches the store and takes the tile out of the
+  no-key state, the key appears nowhere in the panel DOM or in any push, and Remove puts it back.
 
 ### Web apps, app tabs and terminal tabs
 
@@ -1008,3 +1053,8 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 1a78430 | 10:31 | Omnibox app rows: Enter hosts the app in a tab, Shift+Enter opens it on the desktop |
 | eb8aac3 | 10:41 | New-tab shortcuts are the five most-visited sites from history |
 | 8d6d923 | 10:54 | Tab chips: a minus button collapses the tab to its icon, an expand badge brings it back |
+| 14d7dbe | 11:32 | Tab chips: the collapse button on every tab kind; a collapsed tab expands while it is active |
+| faec2bb | 11:49 | Settings: every section starts collapsed, except About which never folds |
+| 53dca7a | 11:50 | Tooling: toback.ps1 sends a test instance's windows to the back without activating them |
+| 6a872d6 | 11:59 | New tab: a live Markets tile bottom-right, fed by Finnhub with a key from Settings |
+| cb8cde0 | 12:00 | Tooling: toback.ps1 keeps its pid set whole and skips titleless and IME windows |

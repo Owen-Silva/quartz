@@ -323,12 +323,24 @@ execute" rejections in the main log, which were those injections losing the race
 something; clicking it mutes the tab without raising it, and the mute rides in the session entry
 and is re-applied on `dom-ready`, since a fresh guest is born unmuted. Pinning makes a chip
 icon-only and moves it into the pinned group at the left of the strip — both directions land on
-the same index, so it is reversible — and a pinned chip ignores middle-click close. A page chip
-carries a small minus button before its close button that pins the tab, which is how you collapse
-a tab to its icon without going near the menu; a collapsed chip answers with a small expand badge
-at its top-right corner on hover, and clicking that unpins it. Both buttons swallow the click so
-the tab is not activated, ignore middle-click, and opt out of the chip drag. Claude and native app
-chips have neither.
+the same index, so it is reversible — and a pinned chip ignores middle-click close.
+
+**Collapsing a chip.** Every chip carries a small minus button before its close button —
+`.tab-collapse`, built in `buildChip()` for a page, a catalogue app, a terminal, a Claude chamber
+and a hosted native app window alike, because `setTabCollapsed()` is a chip-size flag and nothing
+else. It is deliberately *not* Pin: `tab.collapsed` never moves the tab, so a collapsed chip keeps
+its seat through a reorder or a drag, and a Claude or native tab (which `setTabPinned()` refuses
+outright) can be collapsed all the same. The flag is sticky and chrome.css reads it against
+`.active`: `.tab.collapsed:not(.active)` is the same icon-only 40px box a pinned chip gets, while a
+collapsed chip that *is* the active tab is drawn full size, title and buttons and all — so pressing
+a collapsed chip gives you the whole tab back, and clicking off to another tab shrinks it again.
+The in-row button is a toggle: on a collapsed chip `syncChipCollapse()` swaps its glyph to the
+Maximize square and its label to "Expand tab", which is the way out of that expanded-while-active
+state. A collapsed chip that is not the active tab has no room for it, so it answers on hover with
+`.tab-expand`, a 12px badge in its top-right corner; that badge clears whichever of pinned and
+collapsed is holding the chip down. Both buttons swallow the click so the tab is not activated,
+ignore middle-click, and opt out of the chip drag. `collapsed` rides in the session entry, written
+only when true, so a session from before it reads back unchanged.
 
 **Tab sleeping.** A background page tab that has sat untouched past the configured idle time
 (default 30 minutes, `0` = never, swept once a minute) gives its renderer back: the `<webview>` is
@@ -569,7 +581,13 @@ as the root so a settings swatch previews the real tokens. "Aurora" is chrome.cs
 and so the one id that must never reach the attribute. The choice is stored in both
 `settings.palette` and `localStorage['palette']`, written together so they cannot drift.
 
-**Settings.** A gear beside the theme toggle opens a popover with fourteen sections, in this order:
+**Settings.** A gear beside the theme toggle opens a popover with fourteen sections, every one of
+them collapsed: the pane opens as a list of headings and you unfold the ones you came for. Each
+heading is a button with a chevron and `aria-expanded`, click or Enter/Space opens it, several can
+be open at once, and nothing is remembered — every open starts folded again, at the top of the
+list. About is the exception and has no fold at all: a plain heading and its three lines, always
+there. `Settings.open('Look')` opens the pane at one named section instead, unfolded and scrolled
+to. The sections, in order:
 Look (dark/light, the six palette swatches as one radiogroup with a roving tabindex, accent hue,
 and the bookmarks-bar switch); Claude — the folder new Claude tabs start in (typed, or through
 the native picker, and only written once main confirms it is a real directory), the switch for
@@ -588,10 +606,8 @@ described above; Privacy
 the auto-pause switches, the ad-quieting switch, the site list and the health check described above;
 Shortcuts,
 the editor described
-above rather than a printed table — it starts collapsed, because it is the longest section in the
-pane: the heading is a button with a chevron and `aria-expanded`, click or Enter/Space opens it, the
-choice is remembered in `settings.shortcuts.open`, typing in Find a setting opens it so hits are
-visible, and collapsing it stops a recording row; and About (Electron and Chromium versions, and the Restart
+above rather than a printed table — it folds like every other section, and folding it away stops a
+recording row; and About (Electron and Chromium versions, and the Restart
 browser button). Everything but the site styles — a view onto sitestyles.js's own store — and the
 key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
@@ -627,7 +643,8 @@ boundary, because a "Dark" button beside a "Light" one is otherwise indexed as "
 query is words: every one has to land somewhere, in any order. Fields that miss are hidden, then
 sections with nothing left showing, then a "No settings match" line; a field rendered between two
 passes counts as a match, since the filter narrows the panel and must never swallow a control it
-has not read. Hits are lit with `<mark>`, but only where a setting is *named* — labels, row
+has not read. A search never hides its own hits: every section still showing is unfolded while the
+box has words, and clearing it puts your own folds back. Hits are lit with `<mark>`, but only where a setting is *named* — labels, row
 labels, shortcut names, option buttons — since lighting words inside paragraphs turns the panel
 into a page of highlighter. Nothing goes near `innerHTML`: text nodes and `<mark>` only,
 overlapping words merged into one run, and unmarking re-merges the text nodes so the next split
@@ -755,6 +772,43 @@ travels the channel the history page already uses: a `newtab:end-task` console l
 honours only from the tab that owns that guest and only for a new-tab URL, forwarded to
 `stats.endTask` and pushed back as `window.__applyEndTask`. Collapsed, the list costs nothing —
 samples are kept and not drawn.
+
+**Markets.** Live stock prices in the new tab's bottom-right corner, and the one module the board
+does not seat — `newtab-bg.js`'s `MODULE_SPEC` names three ids and this is not one of them, so it
+keeps the corner CSS gives it. It shows the session (Pre-market, Open, After hours, Closed), an
+intraday line chart for the selected symbol with the previous close as a dashed hairline and the
+day's sign tinting the area under it, then one row per symbol — name, sparkline, last, day change
+in green or red *text* — with a `+` that takes a ticker and an `×` per row on hover. SPY, QQQ,
+NVDA, TSLA and AAPL on a first run, eight symbols at most, both canvases drawn by hand with no
+library. Settings → Stocks has the switch, the key and the watchlist as one comma-separated row.
+
+**Where the prices come from, and where the key lives.** `stocks.js` in MAIN owns every part of it,
+and the key never comes out of that process. It is stored in `<userData>/stocks.json` as
+`stocks.finnhubKey` (with `stocks.enabled`, `stocks.symbols` and `stocks.selected` beside it) —
+deliberately not in settings.js's `localStorage` object, because a secret in a renderer is a secret
+any devtools console can read. `stocks:describe` answers `hasKey` and a mask (`••••4f21`) and there
+is no channel that returns the key, so the settings field is never pre-filled: the mask is its
+placeholder, typing replaces the key, and Remove is the only way to clear it. The page is told
+`hasKey` and nothing more. Live prices arrive on `wss://ws.finnhub.io` (one subscribe frame per
+symbol, a resubscribing reconnect with a 2→60s backoff, an unsubscribe for a symbol that leaves the
+list); the day's open, high, low and previous close come from REST `/quote`; and the chart's
+history tries `/stock/candle` once and falls through to Yahoo's keyless chart JSON on the 403 that
+free keys get there, so a free key still draws the day. Every REST call goes through a
+60-calls-a-minute token bucket, rounds are 10s apart while the socket is down, 60s while it is
+healthy and 5 minutes while the market is closed, and a key Finnhub refuses shows "Finnhub rejected
+the key" once and then backs off for a minute instead of retrying in a loop. With no key at all the
+tile is one line and makes no request whatsoever.
+
+**And what it costs.** Nothing while you are not looking at it. The page subscribes on
+`visibilitychange` and unsubscribes when it hides; main ref-counts that per webContents exactly as
+the system stats do, and at zero it holds no socket, no timer and no interest in the network. On
+screen the tile repaints at most twice a second and only when a number moved — trades are coalesced
+into one push per 500ms in main and one paint per 500ms in the page. There is no
+`requestAnimationFrame` on it, no CSS animation, and nothing that moves on its own; the only
+transition it has is the 160ms stepped theme flip every `.module` shares. Like the history page and
+the dock, it is a preload-less guest, so its channel is a console line — `newtab:stocks {json}` out,
+`window.__applyStocks(payload)` in — and stocks.js puts that listener on the guest itself rather
+than routing through app.js.
 
 **New tab backgrounds.** Four of them, picked in Settings → New tab. *Circuit board* is the
 page's own default. *Aurora only* hides the canvas and the packet layer and stops newtab-bg.js
@@ -1041,12 +1095,13 @@ one run before and one after.
 | File | What it is |
 | --- | --- |
 | `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, the Spotify auto-pause IPC and the guests handed to that module, the `files:` routes behind the Files tab, the music file picker and the `media:now` / `media:control` / `spotify:set-ad-duck` bridge calls, the `disable-features=HardwareMediaKeyHandling` switch that keeps idle music out of the Windows media session, the `embed:` routes behind native app tabs and the `embed:gone` push, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
-| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty (start / programs / withSkipPermissions), downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `spotify` (setAdDuck), `stats` (subscribe / unsubscribe / onSample / procIcons), `apps` (list / launch / focus / refresh), `files` (list / places / open / reveal / icons / copyPath), `music` (chooseFiles), `media` (now / control), `embed` (find / attach / open / layout / detach / close / list / onGone), `background` (chooseVideo / clearVideo). |
+| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty (start / programs / withSkipPermissions), downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `spotify` (setAdDuck), `stats` (subscribe / unsubscribe / onSample / procIcons), `stocks` (describe / setKey / setEnabled / setSymbols — describe answers a mask, and nothing here ever returns the key), `apps` (list / launch / focus / refresh), `files` (list / places / open / reveal / icons / copyPath), `music` (chooseFiles), `media` (now / control), `embed` (find / attach / open / layout / detach / close / list / onGone), `background` (chooseVideo / clearVideo). |
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the Files tab and its `files:` console channel, `openAppTab()` and `openTerminalTab()` with the app flag they persist and the DRM note bar, the idle-music presence signals and the now-playing poll behind music.js, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
 | `pty.js` | PTY session manager — spawns a program under ConPTY with a scrubbed environment, out of a static PROGRAMS table (claude, powershell, pwsh, cmd, python, node, Git Bash) with fixed arguments, a per-program argument allowlist (only claude takes `--continue`, `--resume`, `--dangerously-skip-permissions`), one-time binary resolution through `where.exe` with Store alias stubs rejected, and `listPrograms()` / `hasProgram()`. |
 | `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
+| `stocks.js` | Live prices, main-process side, and the only place the Finnhub key exists: the `<userData>/stocks.json` store (`stocks.enabled` / `finnhubKey` / `symbols` / `selected`), the `wss://ws.finnhub.io` trade stream with its resubscribing backoff reconnect, REST `/quote` snapshots and `/stock/candle` history with the documented free-tier 403 falling through to Yahoo's keyless chart JSON, a 60-calls-a-minute token bucket in front of every REST call, and the poll spacing that follows the market session. It puts its own `console-message` listener on each `<webview>` guest (`newtab:stocks` in, `window.__applyStocks` out, coalesced to one push per 500ms) and ref-counts subscribers per webContents, so with nothing on screen it holds no socket and no timer. `describe()` answers a mask and a boolean and there is no channel that returns the key. Its parsers, the market-session clock and the budget are pure and exported, so they run under plain node. |
 | `apps.js` | Installed apps, main-process side: the Start Menu shortcut walk (each `.lnk` through `shell.readShortcutLink`, a 32px icon from `app.getFileIcon`), the packaged apps from one `Get-StartApps` run, the merge and dedupe, and the `apps-index.json` cache with its 24-hour life. Answers `apps:list` / `apps:launch` / `apps:focus` / `apps:refresh`: launch goes through the shortcut or `explorer shell:AppsFolder`, focus restores and raises the process's own main window, and `pathForExe` hands the icon resolver a path for an exe it already knows. Its parsing and merging halves are exported, so they run under plain node. |
 | `procicons.js` | Process icons, main-process side: the resolution order (self from `process.execPath`, the app index, zero-spawn guesses under System32 / SysWOW64 / Windows checked with `fs.access`, one debounced `Get-Process` batch keyed by pid, then `app.getFileIcon` at 32px as a data URL), the memory cache and the `proc-icons.json` file behind it (temp name and rename, 300 entries, nulls retried after an hour, paths re-checked after a day), and `getIcons(groups)`, which answers the keys it knows at once and waits at most 3s for the rest. |
 | `files.html` / `files.css` / `files.js` | The Files tab: the places-and-drives rail, the breadcrumb path bar (Ctrl+L), the filter, the listing with its icon slot, size and modified columns and persisted header sort, keyboard navigation, and the Open / Show in Explorer / Copy path menu. `__applyFiles`, `__applyFilePlaces`, `__applyFileIcons` and `__applyFileResult` in; `files:` console lines out. |
@@ -1065,7 +1120,7 @@ one run before and one after.
 | `history.js` / `history.css` | The history store, the omnibox suggestion lens, `openPage()` for Ctrl+H, and `handleGuestMessage()` — the parser for the history page's console lines. |
 | `historypage.html` / `historypage.css` / `historypage.js` | The history page itself: search, day groups, row actions, the Clear… menu. `window.__applyHistory` in, `console.log('__history:…')` out. |
 | `pip.js` / `pip.css` | Picture in picture: the nav-row button, the video probe and the toggle, all through `executeJavaScript` in the guest. |
-| `settings.js` / `settings.css` | Settings button and popover, the "Find a setting" filter over it, and the Browser style view onto userstyle.js; owns `localStorage['settings']` and the IndexedDB asset store holding the new tab's background picture. The Spotify section is live only while the pane is: one `api.autopause` subscription and one 4s poll, started on open and taken down on close, and it never redraws out from under a caret in the site list. |
+| `settings.js` / `settings.css` | Settings button and popover, the "Find a setting" filter over it, and the Browser style view onto userstyle.js; owns `localStorage['settings']` and the IndexedDB asset store holding the new tab's background picture. The Stocks section is the one thing in the pane that is NOT in that object: its state, the Finnhub key included, lives in main behind `window.api.stocks`, and only a mask ever comes back. The Spotify section is live only while the pane is: one `api.autopause` subscription and one 4s poll, started on open and taken down on close, and it never redraws out from under a caret in the site list. |
 | `capture.js` | Ctrl+Shift+S: asks main for a screenshot of the guest on screen, flashes the window once, toasts the result. No button, no panel, no stylesheet. |
 | `bookmarks.js` / `bookmarks.css` | The bookmarks bar under the nav row — the new-tab chips, the fit/overflow measurement and the "…" popover. Reads the chips out of settings.js; owns nothing of its own. |
 | `shield.js` / `shield.css` | The blocking instrument: nav button, blocked count, the two switches. Talks to main over `api.adblock`. |
@@ -1074,7 +1129,7 @@ one run before and one after.
 | `sitestyles.js` | Per-host CSS, per-host scripts and force dark; owns `localStorage['sitestyles']` and injects into each guest. |
 | `userstyle.js` | `window.UserStyle`: your own stylesheet for the chrome — the `localStorage['userstyle']` string, the `<style id="user-chrome">` kept last in `<head>`, the 64 KB cap, and the Ctrl+Alt+Shift+R reset. |
 | `reader.html` / `reader-page.css` / `reader-page.js` | The reading page itself: top bar, text size and width, `window.__applyArticle`, and the second sanitiser sweep over the live tree. Owns `localStorage['reader']`. |
-| `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), the Processes list and its icon slots (`window.__applyProcIcons`), the apps dock and its picker (`window.__applyApps`, `window.__applyAppsRunning`, `window.__applyAppResult`), the Idle music block inside the session tile (`window.__applyMusic`, `newtab:music` out), the now-playing tile (`window.__applyMedia`, `newtab:media` out), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
+| `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), the Processes list and its icon slots (`window.__applyProcIcons`), the apps dock and its picker (`window.__applyApps`, `window.__applyAppsRunning`, `window.__applyAppResult`), the Idle music block inside the session tile (`window.__applyMusic`, `newtab:music` out), the now-playing tile (`window.__applyMedia`, `newtab:media` out), the markets tile in the bottom-right corner with its intraday chart and sparklines (`window.__applyStocks`, `newtab:stocks` out — answered by stocks.js in main, not by the chrome), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
 | `newtab-bg.js` | The circuit board — canvas painted once per layout, packets as DOM on Web Animations. Owns `window.__boardPaused` / `__boardState`, the freeze the chrome drives while an overlay is open. |
 | `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on the CDP port from `SMOKE_PORT`, 9222 by default, and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
