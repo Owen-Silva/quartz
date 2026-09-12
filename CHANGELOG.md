@@ -187,6 +187,23 @@ or use Restart browser in Settings → About — to pick any of this up.
 - The aurora holds still. It used to step 120 times a minute under every `backdrop-filter` surface;
   the pool and rim gradients are static in both the chrome and the new tab now. It costs less (see
   Performance) and it is the calmer look he asked for.
+- Live system stats on the new tab. The search field is gone at the user's request — he searches from
+  the address bar — and in its place, inside the same capsule, is an instrument strip: CPU, memory,
+  disk, network in bits per second (down and up) and GPU, each a tabular value with a sentence-case
+  label and a 60-sample history graph. The numbers are real, not a demo: CPU from `os.cpus()`
+  deltas per core, memory from `process.getSystemMemoryInfo()`, and disk, network and GPU from one
+  long-lived `typeperf` child streaming the same Windows counters Task Manager reads. Sampling runs
+  only while a new-tab page is the active tab and the window is focused, and the counter process is
+  killed 5 seconds after the last subscriber. It costs 0.55% of a core in main plus 0.42% for
+  typeperf while someone is looking, and 0% otherwise.
+- A moving picture can be the new tab's background. Settings → New tab → Moving picture takes an
+  mp4, webm, mov, m4v or gif, copies it into `userData/backgrounds` (512 MB cap) and plays it muted
+  on a loop, full-bleed under the dim overlay, with the board-over switch putting the circuit board
+  over it as a texture if you want it. The clip pauses whenever the page is not in front — a pane
+  open, the window behind, the page hidden, the tab switched away — and plays again on the opposite
+  events. A file Chromium cannot decode falls back to the board silently. Cost: a 1080p clip
+  playing is 26% of a core against the board's 18%, and 1.4% paused. It has no audio, so the tab
+  chip shows no speaker and Spotify auto-pause never holds for it.
 
 ### Shortcuts
 
@@ -351,6 +368,9 @@ Found, and not ours to fix:
 - The Spotify section needs the separate helper installed at `~/spotify-autopause`. Without it the
   switches are drawn but disabled and the readout says "Not installed on this computer", rather
   than claiming something is running.
+- The new tab's stats need Windows' `typeperf` and its English counter names. On a Windows
+  installed in another language the disk, network and GPU figures show a dash; CPU and memory come
+  from Node itself and read the same everywhere.
 
 ## Commits
 
@@ -407,3 +427,8 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 8fcba52 | 15:43 | app.js: note why every webview removal throws Invalid guestInstanceId (Electron, uncatchable, harmless) |
 | ce6916a | 15:55 | Compositing: pips get their own layer; the board vignette is baked into the canvas instead of a full-window mask |
 | a146cfa | 15:56 | The aurora holds still: no more twice-a-second nudge under the frosted surfaces |
+| ea4fd57 | 16:50 | Chrome: subscribe to system stats only while a new-tab page is in front, and push each sample to that guest |
+| 9776f1c | 16:59 | System stats sampler: CPU, memory, disk, network and GPU from the OS and Windows performance counters, only while asked |
+| b9f5ca2 | 17:04 | New tab: live system stats replace the search field |
+| dbc8744 | 17:07 | Settings: a Moving picture background, chosen from a file and copied into the profile |
+| d8572e5 | 17:18 | New tab: a Moving picture plays behind the board, muted, and pauses whenever the page is not in front |

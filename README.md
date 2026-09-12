@@ -4,7 +4,7 @@ My own browser. Electron 44 shell, frosted-glass chrome lit from behind by an au
 dark theme and a light one that are the same instruments in daylight. Claude Code sessions
 are tabs, not a side pane: a tab is either a `<webview>` page or a `.claude-view` chamber
 running one real `claude.exe` under ConPTY, and both live in `#views` side by side. New tabs
-open a bundled circuit-board search page that wraps whichever engine is set in settings.
+open a bundled circuit-board page with shortcut chips, a clock and a live strip of system stats.
 Electron rather than Tauri because Tauri's build wants a C++ toolchain and this machine does
 not have one; Electron ships its own Chromium and needs nothing installed.
 
@@ -436,7 +436,10 @@ above), and `claudeNotify`, behind the Windows notification described above; Tab
 idle time before a tab sleeps, or never); Downloads ("Ask
 where to save each file", off by default); Search (Google, DuckDuckGo, Bing, Brave, Startpage);
 Websites (the site theme guests see through `prefers-color-scheme`); Site styles and scripts;
-Browser style, below; New tab; Privacy (clear browsing history, clear downloads list); Spotify,
+Browser style, below; New tab (the background — circuit board, aurora only, your own image, or
+Moving picture with its file row: the clip's name or "No file chosen", Choose file… and Remove —
+plus the dim slider and the board-over switch, both shared by the image and the clip); Privacy
+(clear browsing history, clear downloads list); Spotify,
 the auto-pause switches, the site list and the health check described above; Shortcuts,
 the editor described
 above rather than a printed table; and About (Electron and Chromium versions, and the Restart
@@ -490,8 +493,8 @@ is derived per theme), which covers F5, a crash reload and a script reload alike
 favicons from
 `google.com/s2/favicons`, falling back to the bare label. The page cannot read the history store,
 so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become tiles under the
-chips, the rest feed the capsule's dropdown. Behind the search field is the circuit
-board — a socket ring around the capsule, 45-degree traces out to vias and peripheral chips.
+chips, the rest feed the capsule's dropdown. Behind the capsule is the circuit
+board — a socket ring around it, 45-degree traces out to vias and peripheral chips.
 
 Two live glass modules sit on that board. A clock, updated once a minute rather than on a
 per-second timer, and a session readout: tabs open, Claude sessions, and Spotify auto-pause as
@@ -500,7 +503,21 @@ page, through `window.__applyReadout({tabs, claude, autopause})`, pushed on tab,
 auto-pause changes. "Holding" means something is holding Spotify through the bridge, and that can
 be another source — the LessonPlayer desktop app, say — not only this browser.
 
-**New tab backgrounds.** Three of them, picked in Settings → New tab. *Circuit board* is the
+**System stats.** Inside the capsule, where the search field used to be, is a strip of live system
+stats — the field is gone because the user searches from the address bar. CPU, memory, disk, network
+(bits per second, down and up) and GPU, each a Bahnschrift tabular value, a sentence-case label and
+a 120x28 graph of the last 60 samples. The strip reserves its height before the first sample and
+shows dashes until then. `window.__applyStats(sample)` appends, writes the text and repaints once;
+there are no timers and no rAF on the page. The numbers come from `stats.js` in main, sampled every
+2s: CPU from `os.cpus()` deltas per core, memory from `process.getSystemMemoryInfo()`, uptime from
+`os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child streaming the same
+Windows performance counters Task Manager reads (PhysicalDisk `_Total`, Network Interface summed,
+GPU Engine `engtype_3D` summed). A counter that fails becomes null and is retried at most once a
+minute. The chrome subscribes only while the active tab is a new-tab page and the window is
+focused, so background new-tab pages get nothing and the `typeperf` child is killed 5s after the
+last unsubscribe.
+
+**New tab backgrounds.** Four of them, picked in Settings → New tab. *Circuit board* is the
 page's own default. *Aurora only* hides the canvas and the packet layer and stops newtab-bg.js
 drawing at all, on the same `data-bg` attribute the CSS reads, so nothing hidden still costs
 anything. *Your image* is a picture of your own, with a dim slider and a switch for showing the
@@ -508,6 +525,18 @@ board over the photo as a texture rather than the subject: decoded with `createI
 drawn down to at most 2560px on its long edge, re-encoded as JPEG at 0.86 — GIF and SVG are
 refused — and stored in IndexedDB. The settings JSON keeps only
 `{ kind, boardOverImage, dim, rev }`, the fresh `rev` telling `set()` the picture behind it moved.
+
+*Moving picture* is a clip of your own, chosen with Choose file… in the same section: mp4, webm,
+mov, m4v or gif, allowlisted by extension and capped at 512 MB, copied by `bgfiles.js` into
+`userData/backgrounds` (older copies removed first) so the profile owns it and the original can
+move. A video plays muted on a loop, full-bleed under the dim overlay and above the aurora, with
+the board off unless the board-over switch puts it over the clip as a texture; a gif takes the
+`<img>` layer beside the `<video>` instead. The clip pauses whenever the page is not in front — a
+pane open, the window behind, the page hidden, the tab switched away — and plays again on the
+opposite events plus `pageshow` and `focus`; a gif in the `<img>` layer keeps animating, since
+there is nothing to pause. A file Chromium cannot decode falls back to the board silently. It costs
+26% of a core for a 1080p clip against the board's 18%, and 1.4% paused. There is no audio, so the
+tab chip shows no speaker and Spotify auto-pause never holds for it.
 
 **Board pause.** A pane with a `backdrop-filter` over the new tab page re-blurs everything under
 it on every painted frame — about eleven points of CPU on top of the overlay's own. So while any
@@ -664,17 +693,23 @@ one run before and one after.
   theme swap.
 - Nothing animates at rest under a `backdrop-filter` surface, and something that must pulse inside
   one gets its own layer.
+- Stats sample only while a new-tab page is in front and the window is focused — 0.55% of a core in
+  main plus 0.42% for the `typeperf` child then, and nothing at all the rest of the time.
+- A video background pauses when it is not in front. A 1080p clip playing costs 26% of a core, all
+  of it in the GPU process, against the board's 18%; paused it is 1.4%.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
 | `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, the Spotify auto-pause IPC and the guests handed to that module, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
-| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus). |
+| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `stats` (subscribe / unsubscribe / onSample), `background` (chooseVideo / clearVideo). |
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
 | `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, `--dangerously-skip-permissions`, bare). |
+| `stats.js` | System stats, main-process side: a 2s sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
+| `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
 | `index.html` / `theme-boot.js` | The shell document — backdrop layers, titlebar, nav row, `#views`, `#tabmenu`, script order — and the first script in its `<head>`, which stamps `data-theme` and `data-palette` on `<html>` before any stylesheet paints. |
@@ -694,7 +729,7 @@ one run before and one after.
 | `sitestyles.js` | Per-host CSS, per-host scripts and force dark; owns `localStorage['sitestyles']` and injects into each guest. |
 | `userstyle.js` | `window.UserStyle`: your own stylesheet for the chrome — the `localStorage['userstyle']` string, the `<style id="user-chrome">` kept last in `<head>`, the 64 KB cap, and the Ctrl+Alt+Shift+R reset. |
 | `reader.html` / `reader-page.css` / `reader-page.js` | The reading page itself: top bar, text size and width, `window.__applyArticle`, and the second sanitiser sweep over the live tree. Owns `localStorage['reader']`. |
-| `newtab.html` / `newtab.css` / `newtab.js` | The search page: chips, engine, favicons, placeholder, and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
+| `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
 | `newtab-bg.js` | The circuit board — canvas painted once per layout, packets as DOM on Web Animations. Owns `window.__boardPaused` / `__boardState`, the freeze the chrome drives while an overlay is open. |
 | `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on CDP port 9222 and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
@@ -789,7 +824,7 @@ The smoke test launches its own instance with `--remote-debugging-port=9222 --te
 node smoketest.js            # launch, assert, tear down
 node smoketest.js --keep     # leave it running so you can poke at it
 node cdp-eval.js "document.title"
-node cdp-eval.js --guest "document.querySelector('#q').placeholder"
+node cdp-eval.js --guest "document.querySelector('#st-cpu').textContent"
 node cdp-profile.js [--guest] [seconds]
 ```
 
