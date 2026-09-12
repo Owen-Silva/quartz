@@ -98,15 +98,20 @@
          { kind: 'board' }                          the circuit board
          { kind: 'aurora' }                         the aurora alone
          { kind: 'image', boardOverImage, dim }     the user's own picture
-       The picture itself is NOT in here — see the asset store below. */
+         { kind: 'video', fileUrl, fileName, boardOverImage, dim }
+                                                    a muted moving loop
+       The picture itself is NOT in here — see the asset store below. The clip
+       is not either: main copies it into <userData>/backgrounds/ and only its
+       file:// URL is stored. */
     newtabBackground: { kind: 'board' }
   };
 
-  /* The three backgrounds, as the select offers them. */
+  /* The backgrounds, as the select offers them. */
   var NEWTAB_BACKGROUNDS = [
     { value: 'board', name: 'Circuit board' },
     { value: 'aurora', name: 'Aurora only' },
-    { value: 'image', name: 'Your image' }
+    { value: 'image', name: 'Your image' },
+    { value: 'video', name: 'Moving picture' }
   ];
 
   /* The picture: never bigger than this on its long edge, always re-encoded
@@ -334,7 +339,12 @@
       ? BG_DIM_DEFAULT : Number(v.dim);
     if (!isFinite(dim)) dim = BG_DIM_DEFAULT;
     dim = Math.min(BG_DIM_MAX, Math.max(0, dim));
-    return { kind: kind, boardOverImage: v.boardOverImage === true, dim: dim };
+    var out = { kind: kind, boardOverImage: v.boardOverImage === true, dim: dim };
+    /* The clip's file:// URL and its original name ride along whatever the
+       kind is, so switching to the board and back does not lose the pick. */
+    if (typeof v.fileUrl === 'string' && v.fileUrl) out.fileUrl = v.fileUrl;
+    if (typeof v.fileName === 'string' && v.fileName) out.fileName = v.fileName;
+    return out;
   }
 
   /**
@@ -351,6 +361,15 @@
       if (patch.kind !== undefined) next.kind = normalizeBackground({ kind: patch.kind }).kind;
       if (patch.boardOverImage !== undefined) next.boardOverImage = patch.boardOverImage === true;
       if (patch.dim !== undefined) next.dim = normalizeBackground({ dim: patch.dim }).dim;
+      /* null (or '') clears the clip; a string replaces it. */
+      if (patch.fileUrl !== undefined) {
+        if (typeof patch.fileUrl === 'string' && patch.fileUrl) next.fileUrl = patch.fileUrl;
+        else delete next.fileUrl;
+      }
+      if (patch.fileName !== undefined) {
+        if (typeof patch.fileName === 'string' && patch.fileName) next.fileName = patch.fileName;
+        else delete next.fileName;
+      }
     }
     var prev = get('newtabBackground');
     var stamp = Date.now();
@@ -517,15 +536,74 @@
       });
   }
 
+  /* --- the moving picture ---------------------------------------
+     A clip cannot live in the settings JSON and should not be re-read into a
+     data URL either, so main copies the chosen file into
+     <userData>/backgrounds/ and hands back a file:// URL. Everything here is
+     guarded: an older preload without api.background must not throw. */
+
+  function bgVideoApi() {
+    var api = (typeof window !== 'undefined') ? window.api : null;
+    return (api && api.background && typeof api.background.chooseVideo === 'function')
+      ? api.background : null;
+  }
+
+  /** True when the running preload can pick a clip at all. */
+  function canChooseVideo() { return !!bgVideoApi(); }
+
+  /**
+   * Open the native picker, copy the clip in, and switch the new tab over.
+   * Resolves { ok: true, fileName } or { ok: false, reason }; never rejects,
+   * and 'cancelled' is not an error the panel should shout about.
+   */
+  function chooseBackgroundVideo() {
+    var api = bgVideoApi();
+    if (!api) return Promise.resolve({ ok: false, reason: 'This window cannot pick a file yet' });
+    return Promise.resolve()
+      .then(function () { return api.chooseVideo(); })
+      .then(function (res) {
+        if (!res || res.ok !== true || typeof res.fileUrl !== 'string' || !res.fileUrl) {
+          return { ok: false, reason: (res && res.reason) || 'cancelled' };
+        }
+        setBackground({ kind: 'video', fileUrl: res.fileUrl, fileName: res.fileName || '' });
+        renderNewtabBg();
+        return { ok: true, fileName: res.fileName || '' };
+      })
+      .catch(function (err) {
+        return { ok: false, reason: (err && err.message) || 'That file could not be used' };
+      });
+  }
+
+  /**
+   * Drop the clip. The kind goes back to the board with it, exactly as
+   * removing the picture does: 'video' with nothing to play is just a dim.
+   */
+  function removeBackgroundVideo() {
+    var api = bgVideoApi();
+    var done = (api && typeof api.clearVideo === 'function')
+      ? Promise.resolve().then(function () { return api.clearVideo(); }).catch(function () { })
+      : Promise.resolve();
+    return done.then(function () {
+      setBackground({ kind: 'board', fileUrl: null, fileName: null });
+      renderNewtabBg();
+    });
+  }
+
   /**
    * What app.js pushes into the new tab guest:
-   *   { kind, boardOverImage, dim, dataUrl? }
+   *   { kind, boardOverImage, dim, dataUrl? }      for kind 'image'
+   *   { kind, boardOverImage, dim, fileUrl?, fileName? }  for kind 'video'
    * dataUrl is only present for kind 'image' with a picture actually stored,
    * and is read out of IndexedDB once and then kept in memory.
    */
   function background() {
     var cfg = normalizeBackground(get('newtabBackground'));
     var out = { kind: cfg.kind, boardOverImage: cfg.boardOverImage, dim: cfg.dim };
+    if (cfg.kind === 'video') {
+      if (cfg.fileUrl) out.fileUrl = cfg.fileUrl;
+      if (cfg.fileName) out.fileName = cfg.fileName;
+      return Promise.resolve(out);
+    }
     if (cfg.kind !== 'image') return Promise.resolve(out);
     if (bgDataUrl) {
       out.dataUrl = bgDataUrl;
@@ -1758,6 +1836,27 @@
     return s;
   }
 
+  /** The black behind the picture or the clip — the same control for both. */
+  function bgDimRow(cfg) {
+    var dim = el('span', 'set-bg-dim');
+    var slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '60';
+    slider.step = '1';
+    slider.className = 'set-range';
+    slider.id = 'set-bg-dim';
+    slider.value = String(Math.round(cfg.dim * 100));
+    slider.setAttribute('aria-label', 'Dim');
+    var readout = el('span', 'set-bg-dim-value', Math.round(cfg.dim * 100) + '%');
+    // input previews the number without writing; change is the one that stores.
+    slider.addEventListener('input', function () { readout.textContent = slider.value + '%'; });
+    slider.addEventListener('change', function () { setBackground({ dim: Number(slider.value) / 100 }); });
+    dim.appendChild(slider);
+    dim.appendChild(readout);
+    return controlRow('Dim', 'set-bg-dim', dim);
+  }
+
   /** The background picker: one select, and the picture's controls under it. */
   function renderNewtabBg() {
     var field = bodyEl && bodyEl.querySelector('[data-field="newtabbg"]');
@@ -1770,6 +1869,40 @@
       glassSelect('set-newtab-bg', NEWTAB_BACKGROUNDS, cfg.kind, function (value) {
         setBackground({ kind: value });
       })));
+
+    if (cfg.kind === 'video') {
+      /* No hidden <input type="file"> here: the renderer could read the clip,
+         but it must keep playing after the original moves, so main copies it
+         in and hands back the file:// URL. */
+      var vrow = el('div', 'set-bg-row');
+      vrow.appendChild(el('span', 'set-hint set-bg-name',
+        cfg.fileUrl ? (cfg.fileName || 'Chosen clip') : 'No file chosen'));
+      vrow.appendChild(textButton('Choose file…', 'set-btn set-bg-pick', function () {
+        chooseBackgroundVideo().then(function (res) {
+          if (res && res.ok) { showToast('New tab background set'); return; }
+          var why = res && res.reason;
+          if (!why || why === 'cancelled') return;     // he changed his mind
+          showToast(why === 'too-large' ? 'That clip is over 512 MB' : why);
+        });
+      }));
+      if (cfg.fileUrl) {
+        vrow.appendChild(textButton('Remove', 'set-text set-bg-drop', function () {
+          removeBackgroundVideo();
+        }));
+      }
+      field.appendChild(vrow);
+
+      field.appendChild(switchRow('Show circuit board over the video', cfg.boardOverImage,
+        function (next) { setBackground({ boardOverImage: next }); }));
+      field.appendChild(bgDimRow(cfg));
+      field.appendChild(el('p', 'set-hint',
+        "A muted loop behind the board's tiles. It pauses whenever the page is not in front."));
+      if (!canChooseVideo()) {
+        field.appendChild(el('p', 'set-hint',
+          'Restart the browser to pick a clip — this window was started before moving pictures existed.'));
+      }
+      return;
+    }
 
     if (cfg.kind !== 'image') {
       field.appendChild(el('p', 'set-hint', cfg.kind === 'aurora'
@@ -1828,23 +1961,7 @@
     field.appendChild(switchRow('Show circuit board over the image', cfg.boardOverImage,
       function (next) { setBackground({ boardOverImage: next }); }));
 
-    var dim = el('span', 'set-bg-dim');
-    var slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '60';
-    slider.step = '1';
-    slider.className = 'set-range';
-    slider.id = 'set-bg-dim';
-    slider.value = String(Math.round(cfg.dim * 100));
-    slider.setAttribute('aria-label', 'Dim');
-    var readout = el('span', 'set-bg-dim-value', Math.round(cfg.dim * 100) + '%');
-    // input previews the number without writing; change is the one that stores.
-    slider.addEventListener('input', function () { readout.textContent = slider.value + '%'; });
-    slider.addEventListener('change', function () { setBackground({ dim: Number(slider.value) / 100 }); });
-    dim.appendChild(slider);
-    dim.appendChild(readout);
-    field.appendChild(controlRow('Dim', 'set-bg-dim', dim));
+    field.appendChild(bgDimRow(cfg));
 
     if (!bgPreviewBlob) {
       field.appendChild(el('p', 'set-hint', 'No picture chosen yet — the new tab dims the aurora until you pick one.'));
@@ -3331,8 +3448,9 @@
     moveChip: moveChip,
 
     /* The new tab's background. background() resolves to
-       { kind, boardOverImage, dim, dataUrl? } — what app.js pushes into the
-       guest with __applyBackground(). */
+       { kind, boardOverImage, dim, dataUrl? } for a picture and
+       { kind, boardOverImage, dim, fileUrl?, fileName? } for a moving one —
+       what app.js pushes into the guest with __applyBackground(). */
     background: background,
     setBackground: setBackground,
 
@@ -3358,6 +3476,8 @@
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
     _backgrounds: NEWTAB_BACKGROUNDS,
+    _chooseBackgroundVideo: chooseBackgroundVideo,
+    _removeBackgroundVideo: removeBackgroundVideo,
     _applyFilter: applyFilter,
     _clearFilter: clearFilter,
     _focusFirstResult: focusFirstResult

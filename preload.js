@@ -142,6 +142,17 @@ contextBridge.exposeInMainWorld('api', {
     // Reveal a finished screenshot in Explorer.
     show: (path) => ipcRenderer.send('capture:show', { path })
   },
+  // The new tab's moving background. A renderer can read a picked picture on
+  // its own, but a clip has to keep playing after the file moves -- so main
+  // runs the dialog and copies the chosen file into <userData>/backgrounds/,
+  // and settings.js stores only the file:// URL it hands back.
+  background: {
+    // Resolves { ok: true, fileUrl, fileName, bytes } or { ok: false, reason }
+    // ('cancelled', 'too-large' past 512 MB, or a message). Never rejects.
+    chooseVideo: () => ipcRenderer.invoke('background:choose-video'),
+    // Deletes the copied clip; resolves { ok: true } either way.
+    clearVideo: () => ipcRenderer.invoke('background:clear-video')
+  },
   // Ad / tracker blocking. The engine lives in main and covers every guest at
   // once, so everything here is either a preference or a per-tab counter.
   // `wcId` is a <webview>'s webContents id (webview.getWebContentsId()).

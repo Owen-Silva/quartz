@@ -75,9 +75,10 @@ function newTabUrl() {
       if (all.searchEngine && all.searchEngine !== 'google') params.set('engine', String(all.searchEngine));
       if (Array.isArray(all.chips)) params.set('chips', JSON.stringify(all.chips));
       if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
-      // Image users should never see the board flash before the picture lands.
+      // Image users should never see the board flash before the picture (or
+      // the clip, which arrives the same way) lands.
       const bgKind = (all.newtabBackground && all.newtabBackground.kind) || 'board';
-      if (bgKind === 'aurora' || bgKind === 'image') params.set('bg', bgKind);
+      if (bgKind === 'aurora' || bgKind === 'image' || bgKind === 'video') params.set('bg', bgKind);
     } catch (err) { /* defaults are fine */ }
   }
   return NEWTAB_URL + '?' + params.toString();
@@ -161,8 +162,18 @@ function pushBackgroundToTab(tab) {
     .then(() => settings.background())
     .then((bg) => {
       if (!bg || !isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+      /* Exactly the fields the guest reads, and nothing else: the picture as a
+         data URL, or the moving picture as the file:// URL of main's copy in
+         <userData>/backgrounds/ (the name only so the page can pick <video>
+         over <img> by extension). Never in the query string -- it is pushed. */
+      const payload = { kind: bg.kind, boardOverImage: bg.boardOverImage, dim: bg.dim };
+      if (typeof bg.dataUrl === 'string' && bg.dataUrl) payload.dataUrl = bg.dataUrl;
+      if (bg.kind === 'video') {
+        if (typeof bg.fileUrl === 'string' && bg.fileUrl) payload.fileUrl = bg.fileUrl;
+        if (typeof bg.fileName === 'string' && bg.fileName) payload.fileName = bg.fileName;
+      }
       const pending = tab.viewEl.executeJavaScript(
-        'window.__applyBackground && window.__applyBackground(' + JSON.stringify(bg) + ')'
+        'window.__applyBackground && window.__applyBackground(' + JSON.stringify(payload) + ')'
       );
       if (pending && typeof pending.catch === 'function') pending.catch(() => {});
     })

@@ -26,6 +26,7 @@ const {
 const { createSession, killAll } = require('./pty');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
+const bgFiles = require('./bgfiles');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -654,6 +655,58 @@ ipcMain.handle('app:dir-exists', (_event, { path: target } = {}) => {
   } catch {
     return false;
   }
+});
+
+// ---------------------------------------------------------------------------
+// The new tab's moving background
+//
+// Settings keeps the descriptor; the clip is copied into
+// <userData>/backgrounds/ so the page keeps playing after the original moves.
+// bgfiles.js holds the whole copy/validate path with no Electron in it --
+// everything here is the dialog and the userData path it cannot know.
+// ---------------------------------------------------------------------------
+
+/** Where the one copied clip lives. Lazy: --test-profile rewrites userData. */
+function backgroundsDir() {
+  return bgFiles.backgroundsDir(app.getPath('userData'));
+}
+
+/**
+ * Pick a clip and copy it in.
+ * Resolves { ok: true, fileUrl, fileName, bytes } or { ok: false, reason },
+ * where reason is 'cancelled', 'too-large' (past 512 MB) or a message.
+ * Never rejects -- the settings panel shows the reason as a toast.
+ */
+ipcMain.handle('background:choose-video', async () => {
+  const options = {
+    properties: ['openFile'],
+    title: 'Choose a moving picture for the new tab',
+    filters: [{ name: 'Moving pictures', extensions: bgFiles.VIDEO_EXTS.slice() }],
+  };
+  let picked = null;
+  try {
+    const w = liveWin();
+    const result = w
+      ? await dialog.showOpenDialog(w, options)
+      : await dialog.showOpenDialog(options);
+    if (!result || result.canceled) return { ok: false, reason: 'cancelled' };
+    picked = Array.isArray(result.filePaths) ? result.filePaths[0] : null;
+  } catch (err) {
+    return { ok: false, reason: (err && err.message) || 'The picker could not open' };
+  }
+  if (typeof picked !== 'string' || !picked) return { ok: false, reason: 'cancelled' };
+
+  const out = bgFiles.installBackgroundVideo(picked, backgroundsDir());
+  if (!out.ok) return { ok: false, reason: out.reason };
+  return { ok: true, fileUrl: out.fileUrl, fileName: out.fileName, bytes: out.bytes };
+});
+
+/** Drop the copied clip. Always { ok: true }: gone is the state we wanted. */
+ipcMain.handle('background:clear-video', () => {
+  try {
+    bgFiles.clearBackgroundFiles(backgroundsDir());
+  } catch { /* nothing there */ }
+  return { ok: true };
 });
 
 // ---------------------------------------------------------------------------
