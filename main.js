@@ -33,6 +33,26 @@ const appsModule = require('./apps');
 /** @type {BrowserWindow | null} */
 let win = null;
 
+/*
+ * Keep the browser out of the Windows media session (SMTC).
+ *
+ * The idle music lives in the CHROME, in one <audio> element, and Chromium
+ * registers that element with Windows as "now playing" for this app. The Spotify
+ * bridge's /now reports whatever Windows calls the current session -- so the
+ * music announced ITSELF as the machine playing something, music.js read its own
+ * sound as the veto, paused, the session went Paused, the veto cleared, it
+ * resumed, and round again every ~4 s. Measured on the live browser: the
+ * auto-generated session titled "Browser" flipped Playing 13.7-15.7s,
+ * Paused 16.2-17.3s, Playing 17.8-19.8s while Spotify sat Paused throughout.
+ *
+ * Turning HardwareMediaKeyHandling off removes this process from SMTC entirely,
+ * which is the whole fix: nothing the browser plays can be mistaken for another
+ * app. The price, deliberately paid: the media keys no longer control browser
+ * tabs (they go to Spotify), and the Windows / new-tab now-playing tile shows
+ * Spotify and other apps but never a browser tab.
+ */
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
+
 /**
  * Windows 11 22H2 (build 22621) is the first release where DWM exposes the
  * acrylic system backdrop to apps. os.release() looks like '10.0.26200'.

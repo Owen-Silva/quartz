@@ -56,6 +56,20 @@
   var VOLUME_MS = 200;      // the slider itself, which is not a start or a stop
   var STEP_MS = 25;         // one <audio>.volume step (40 a second)
 
+  /* --- resume hysteresis: never pause-play-pause-play ----------------------
+     Pausing for something else is instant and always will be. Coming BACK is
+     not: a veto that clears has to stay clear for RESUME_HOLD_MS first, so a
+     signal that flickers (a tab that goes audible and silent, a media status
+     that flaps) costs one fade-out, not a stutter. And if the pair happens
+     over and over anyway, the player sits out FLAP_HOLD_MS rather than keep
+     trying: more than FLAP_MAX pause-and-resumes inside FLAP_WINDOW_MS and it
+     says why, once, and waits. The 300 ms settle is untouched, so the FIRST
+     start is as quick as it ever was.                                      */
+  var RESUME_HOLD_MS = 2500;
+  var FLAP_WINDOW_MS = 60000;
+  var FLAP_MAX = 3;
+  var FLAP_HOLD_MS = 30000;
+
   /* The console channels the new tab page asks over. It has no preload,
      so a printed line is the whole of its reach into the chrome. */
   var MUSIC_PREFIX = 'newtab:music ';
@@ -85,6 +99,21 @@
 
   function pick(list, value, fallback) {
     return list.indexOf(value) >= 0 ? value : fallback;
+  }
+
+  /** A duration a caller may pin, `fallback` when it is not a real number. */
+  function msOr(v, fallback) {
+    var n = Number(v);
+    return (isFinite(n) && n >= 0) ? n : fallback;
+  }
+
+  /** One line, best effort: a chrome without a console is not a reason to die. */
+  function say(text) {
+    try {
+      if (typeof console !== 'undefined' && console && typeof console.info === 'function') {
+        console.info(text);
+      }
+    } catch (err) { /* nothing to do about it */ }
   }
 
   function defaultTimers() {
@@ -630,6 +659,11 @@
     };
     var random = typeof o.random === 'function' ? o.random : Math.random;
     var onState = typeof o.onState === 'function' ? o.onState : noop;
+    /* The hysteresis, as numbers a test can pin (0 = the old instant resume). */
+    var resumeHoldMs = msOr(o.resumeHoldMs, RESUME_HOLD_MS);
+    var flapWindowMs = msOr(o.flapWindowMs, FLAP_WINDOW_MS);
+    var flapHoldMs = msOr(o.flapHoldMs, FLAP_HOLD_MS);
+    var flapMax = msOr(o.flapMax, FLAP_MAX);
 
     var music = normalizeMusic(readSettings ? read() : o.settings);
     var env = { focused: false, audibleTab: false, mediaPlaying: false, newTabActive: false };
@@ -641,6 +675,13 @@
     var wanted = false;          // the decision currently applied
     var settle = null;
     var lastPushed = '';
+    var pausedByVeto = false;    // the last stop was the room, not the user
+    var hold = null;             // the resume timer: the clear state, holding
+    var holdWhy = '';
+    var holdMs = 0;
+    var flaps = 0;               // veto pause-and-resumes inside the window
+    var flapTimers = [];
+    var flapSaid = false;
     /* A sink reports a start or a track change through onChange, and during
        apply() that would push a half-made state (playing, but not decided
        yet). Depth, not a boolean: falling back to the engine applies again
@@ -700,7 +741,7 @@
                and leave the setting alone: his list is still his list. */
             fellBack = true;
             retire();
-            apply();
+            apply({ immediate: true });
           }
         });
       }
@@ -723,12 +764,90 @@
       }
     }
 
+    /* --- the resume hysteresis --------------------------------- */
+
+    /**
+     * The room stopped us, not the user: the switch is on, nothing was pressed
+     * and the source is ready, so the only reason left is focus, an audible
+     * tab, the machine's own playback or the tab in front. Those are the
+     * signals that flicker, and only those earn a hold on the way back.
+     */
+    function vetoedByEnv() {
+      var c = conditions();
+      if (c.enabled !== true || c.manualPaused === true || c.ready === false) return false;
+      return shouldPlay(c) === false;
+    }
+
+    function clearHold() {
+      if (hold != null) { timers.clearTimeout(hold); hold = null; }
+      holdWhy = '';
+      holdMs = 0;
+    }
+
+    /** One pause-and-resume, remembered for a minute and then forgotten. */
+    function noteResume() {
+      flaps += 1;
+      var id = timers.setTimeout(function () {
+        var at = flapTimers.indexOf(id);
+        if (at >= 0) flapTimers.splice(at, 1);
+        flaps = flaps > 0 ? flaps - 1 : 0;
+        if (flaps <= 0) flapSaid = false;
+      }, flapWindowMs);
+      flapTimers.push(id);
+    }
+
+    /**
+     * True when a wanted resume has to wait: the clear state must hold for
+     * resumeHoldMs (flapHoldMs once it has flapped too often) before the music
+     * comes back. A first start — nothing paused us — never waits.
+     */
+    function holdingResume() {
+      if (!pausedByVeto) return false;
+      if (hold != null) return true;
+      var wait = resumeHoldMs;
+      var why = 'hysteresis';
+      if (flaps >= flapMax) {
+        wait = flapHoldMs;
+        why = 'flapping';
+        if (!flapSaid) {
+          flapSaid = true;
+          say('music: paused and resumed ' + flaps + ' times in '
+            + Math.round(flapWindowMs / 1000) + 's, so holding off for '
+            + Math.round(wait / 1000) + 's');
+        }
+      }
+      if (wait <= 0) return false;
+      holdMs = wait;
+      holdWhy = why;
+      hold = timers.setTimeout(function () {
+        hold = null;
+        holdWhy = '';
+        holdMs = 0;
+        apply({ served: true });   // the wait is spent: this one goes through
+      }, wait);
+      return true;
+    }
+
     /* --- the decision ------------------------------------------ */
 
-    function apply() {
+    /**
+     * apply({ immediate: true }) is a user action — a press, a settings write —
+     * and skips the hysteresis; everything else is drift and respects it.
+     */
+    function apply(opts) {
+      var immediate = !!(opts && opts.immediate);
+      var served = !!(opts && opts.served);
       if (settle != null) { timers.clearTimeout(settle); settle = null; }
       sweep();
       var want = shouldPlay(conditions());
+      if (!want || immediate) clearHold();
+      else if (!served && holdingResume()) {
+        /* The sink is already paused (or was never made): the state says so
+           and the hold timer will come back to this. */
+        wanted = false;
+        emit();
+        return false;
+      }
       applying += 1;
       try {
         if (want) {
@@ -740,8 +859,13 @@
             /* The engine refused (no AudioContext) or the list is empty: the
                state says "not playing" rather than lying about it. */
             want = false;
+          } else if (sink && pausedByVeto) {
+            /* Back up after the room quietened. A press is not a flap. */
+            if (!immediate) noteResume();
+            pausedByVeto = false;
           }
         } else if (sink) {
+          if (wanted) pausedByVeto = vetoedByEnv();
           sink.pause(FADE_OUT_MS);
         }
       } finally { applying -= 1; }
@@ -822,7 +946,7 @@
         var structural = wasKey !== isKey
           || before.enabled !== music.enabled
           || before.where !== music.where;
-        if (structural) { apply(); return state(); }
+        if (structural) { apply({ immediate: true }); return state(); }
         if (before.volume !== music.volume && wanted && sink) sink.fadeTo(music.volume, VOLUME_MS);
         return emit();
       },
@@ -837,7 +961,7 @@
       toggle: function () {
         if (!music.enabled) return state();
         manualPaused = !manualPaused;
-        apply();
+        apply({ immediate: true });
         return state();
       },
 
@@ -845,7 +969,7 @@
        *  that also wrote `enabled` to the store; here it just clears a pause. */
       play: function () {
         manualPaused = false;
-        apply();
+        apply({ immediate: true });
         return state();
       },
 
@@ -871,6 +995,11 @@
           fellBack: fellBack,
           sinkKey: sinkKey,
           settlePending: settle != null,
+          pausedByVeto: pausedByVeto,
+          holdPending: hold != null,
+          holdWhy: holdWhy,
+          holdMs: holdMs,
+          flaps: flaps,
           retiring: retiring.length,
           music: music,
           sink: sink ? sink.state() : null
@@ -880,6 +1009,12 @@
       /** Window teardown: no timer, no context, no element left running. */
       destroy: function () {
         if (settle != null) { timers.clearTimeout(settle); settle = null; }
+        clearHold();
+        for (var f = 0; f < flapTimers.length; f += 1) timers.clearTimeout(flapTimers[f]);
+        flapTimers = [];
+        flaps = 0;
+        flapSaid = false;
+        pausedByVeto = false;
         if (sink) { sink.stopNow(); sink = null; sinkKey = ''; }
         for (var i = 0; i < retiring.length; i += 1) retiring[i].stopNow();
         retiring = [];
@@ -894,6 +1029,10 @@
     SETTLE_MS: SETTLE_MS,
     VOLUME_MS: VOLUME_MS,
     STEP_MS: STEP_MS,
+    RESUME_HOLD_MS: RESUME_HOLD_MS,
+    FLAP_WINDOW_MS: FLAP_WINDOW_MS,
+    FLAP_MAX: FLAP_MAX,
+    FLAP_HOLD_MS: FLAP_HOLD_MS,
     MUSIC_PREFIX: MUSIC_PREFIX,
     MEDIA_PREFIX: MEDIA_PREFIX,
     MUSIC_ACTIONS: MUSIC_ACTIONS.slice(),
