@@ -230,21 +230,12 @@ function isFiniteInt(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-/**
- * A window class that belongs to CHROMIUM rather than to a hosted app.
- *
- * Inside our own top-level window there are only two kinds of child: Chromium's
- * own (the widget host, the render widget, the compositor's intermediate
- * window) and an app window we re-parented. So the focus HWND's class is what
- * tells the browser's keyboard apart from the app's -- see focusInfo().
- */
-function isChromiumClass(name) {
-  const text = String(name || '').trim().toLowerCase();
-  if (!text) return false;
-  // Chrome_WidgetWin_0/1, Chrome_RenderWidgetHostHWND, Chrome_MessageWindow…
-  if (text.indexOf('chrome_') === 0) return true;
-  return text === 'intermediate d3d window';
-}
+/* The focus HWND used to be classified by CLASS NAME (`chrome_…` -> "that is
+   our own chrome"). That is wrong for the apps this browser is built to host:
+   Discord, VS Code, Cursor and the Spotify desktop app are Electron/CEF, so
+   their windows are Chrome_WidgetWin_1 with a Chrome_RenderWidgetHostHWND
+   inside them too. focusInfo() asks WHICH PROCESS owns the focus window
+   instead -- see `ownProcess` there. */
 
 /** A pid list from anything a caller might pass: a number, an array, junk. */
 function pidList(value) {
@@ -1218,9 +1209,16 @@ function create(opts) {
    *   foregroundRoot  GetForegroundWindow -> GA_ROOT, as a decimal string.
    *   ours            that root is one of OUR top-level windows: the user is
    *                   working inside this browser, whatever Electron thinks.
-   *   focusHwnd/Class the window that actually holds focus, and its class.
-   *   chromium        the focus is in Chromium's own windows -- the chrome, a
-   *                   guest page, devtools -- so shortcuts already work.
+   *   focusHwnd/Class the window that actually holds focus, and its class
+   *                   (the class is for LOGGING only -- see ownProcess).
+   *   ownProcess      the focus window belongs to THIS process: the chrome, a
+   *                   guest page, devtools -- so shortcuts already work. Asked
+   *                   by pid, never by class name: every app worth hosting in a
+   *                   tab (Discord, VS Code, Cursor, Spotify) is Electron/CEF
+   *                   and has Chrome_WidgetWin_1 / Chrome_RenderWidgetHostHWND
+   *                   windows of its own, which a class test cannot tell from
+   *                   ours. Chromium creates every HWND in the browser process,
+   *                   so "our pid" is exactly "our chrome".
    *   hostedTabId     the native tab whose app window (or a control inside it)
    *                   holds focus, or null. Non-null is the exact state the
    *                   browser's own shortcuts are dead in.
@@ -1238,7 +1236,7 @@ function create(opts) {
       ours: false,
       focusHwnd: '0',
       focusClass: '',
-      chromium: false,
+      ownProcess: false,
       hostedTabId: null,
       hostedVisible: false,
     };
@@ -1266,12 +1264,17 @@ function create(opts) {
     if (!focus) return info;
     info.focusHwnd = handleText(focus);
     info.focusClass = windowClass(focus);
-    info.chromium = isChromiumClass(info.focusClass);
+    /* WHOSE window is it -- the only question the class name cannot answer. A
+       pid we cannot read (0) is not an assertion that it is ours, and it never
+       stands alone: hostedTabId below is what actually gates the shortcuts. */
+    const focusOwner = windowPid(focus);
+    info.ownProcess = focusOwner > 0 && focusOwner === process.pid;
 
-    /* The focused HWND is usually a control INSIDE the app's window (an edit
-       box, a canvas), so walk up to the window we actually host. The depth cap
-       is a loop guard, not a real limit: a hosted window is at most a handful
-       of parents below ours. */
+    /* The focused HWND is usually a control INSIDE the app's window -- an edit
+       box, a canvas, or for an Electron guest a Chrome_RenderWidgetHostHWND
+       inside its Chrome_WidgetWin_1 -- so walk up to the window we actually
+       host. The depth cap is a loop guard, not a real limit: even that nested
+       case is two parents below ours. */
     let node = focus;
     for (let depth = 0; node && depth < 16; depth += 1) {
       const tabId = byHandle.get(handleText(node));
@@ -1369,7 +1372,6 @@ function create(opts) {
 module.exports = {
   create,
   // pure parts, for the harness
-  isChromiumClass,
   pidList,
   parseProcTree,
   descendantsOf,

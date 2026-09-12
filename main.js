@@ -156,7 +156,7 @@ const embed = (() => {
     alive: () => false,
     focusInfo: () => ({
       available: false, foregroundRoot: '0', ours: false, focusHwnd: '0',
-      focusClass: '', chromium: false, hostedTabId: null, hostedVisible: false,
+      focusClass: '', ownProcess: false, hostedTabId: null, hostedVisible: false,
     }),
     focusChrome: () => false,
     list: () => [],
@@ -3448,16 +3448,22 @@ let nativeShortcutsOn = [];
  * the policy: the caller does the Win32 and the registering.
  *
  * @param {{streak:number, registered:boolean}} state
- * @param {{ours:boolean, hostedTabId:string|null, hostedVisible:boolean}} sample
+ * @param {{ours:boolean, ownProcess:boolean, hostedTabId:string|null, hostedVisible:boolean}} sample
  * @returns {{streak:number, registered:boolean, action:('register'|'unregister'|null)}}
  */
 function nativeShortcutStep(state, sample) {
   const prev = (state && typeof state === 'object') ? state : { streak: 0, registered: false };
   const had = prev.registered === true;
   const s = sample && typeof sample === 'object' ? sample : {};
-  // All three, every tick: our window is the foreground one, a hosted app holds
-  // the keyboard inside it, and that app is the tab on screen.
-  const want = s.ours === true && !!s.hostedTabId && s.hostedVisible === true;
+  // All of them, every tick: our window is the foreground one, the focus is NOT
+  // in our own process (the chrome already has its keys then), a hosted app
+  // holds the keyboard inside it, and that app is the tab on screen.
+  //
+  // `ownProcess` is asked of the pid, never of the window class: the apps worth
+  // hosting (Discord, VS Code, Cursor, Spotify) are Electron/CEF, so a class
+  // test called their windows "ours" and this set would never arm for them.
+  const want = s.ours === true && s.ownProcess !== true
+    && !!s.hostedTabId && s.hostedVisible === true;
   if (!want) return { streak: 0, registered: false, action: had ? 'unregister' : null };
   const streak = (Number(prev.streak) || 0) + 1;
   if (had) return { streak, registered: true, action: null };
