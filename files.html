@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Files</title>
+<!-- Sets data-theme and data-palette on <html> from ?theme= and ?palette=
+     before anything paints, so a light window never flashes dark and a
+     palette never flashes ice-cyan. Shared verbatim with newtab.html,
+     historypage.html and reader.html. Must stay the first script and must
+     stay above the stylesheet. -->
+<script src="newtab-theme.js"></script>
+<!-- Second, and also above the stylesheet: it only touches the document on
+     DOMContentLoaded, but window.__applyFiles / __applyFilePlaces /
+     __applyFileIcons / __applyFileResult have to exist before the chrome
+     can call them, and the first push can land the moment the guest
+     reports ready. -->
+<script src="files.js"></script>
+<link rel="stylesheet" href="files.css">
+</head>
+<body>
+
+<!-- One still wash behind everything. Fixed, inert, bottom layer, and it
+     does not move: this is a page to read, not a page to watch. All four
+     aurora layers live on this one element as stacked backgrounds, so the
+     markup carries no decoration of its own. -->
+<div class="backdrop" aria-hidden="true"></div>
+
+<!-- The bar stays put while the listing scrolls under it. -->
+<header class="topbar glass">
+  <button id="up" class="barbtn iconbtn" type="button" title="Go up (Backspace)"
+          aria-label="Go up">&#8593;</button>
+
+  <!-- Breadcrumbs by default; clicking the empty area to their right (or
+       Ctrl+L) swaps in the text field, Enter navigates, Escape puts the
+       crumbs back. One box, two faces, so nothing moves in the swap. -->
+  <div id="pathbar" class="pathbar">
+    <div id="crumbs" class="crumbs" aria-label="Current folder"></div>
+    <input id="pathinput" class="pathinput" type="text" spellcheck="false"
+           autocomplete="off" autocapitalize="off" aria-label="Folder path" hidden>
+  </div>
+
+  <input id="filter" class="filter" type="search" placeholder="Filter"
+         autocomplete="off" autocapitalize="off" spellcheck="false"
+         aria-label="Filter this folder by name">
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+</header>
+
+<main class="stage">
+  <!-- Places, then drives. files.js fills both from __applyFilePlaces. -->
+  <aside class="rail">
+    <h2 class="railhead">Places</h2>
+    <nav id="places" class="railgroup" aria-label="Places"></nav>
+    <h2 class="railhead">Drives</h2>
+    <nav id="drives" class="railgroup" aria-label="Drives"></nav>
+  </aside>
+
+  <section class="listing">
+    <!-- The header does not scroll with the rows, so the two boxes agree on
+         a grid rather than share one; every width is stated once in CSS. -->
+    <div class="cols">
+      <button class="col sortbtn col-name"  type="button" data-sort="name">Name</button>
+      <button class="col sortbtn col-size"  type="button" data-sort="size">Size</button>
+      <button class="col sortbtn col-mtime" type="button" data-sort="mtime">Modified</button>
+    </div>
+
+    <!-- files.js fills this, and only this. Every row is built with
+         createElement: nothing off the filesystem is ever parsed as markup. -->
+    <div id="rows" class="rows" tabindex="0" role="listbox"
+         aria-label="Files and folders"></div>
+
+    <!-- Empty folders and the three errors, with a way back up. -->
+    <div id="blank" class="blank" hidden>
+      <p id="blankmsg" class="blankmsg"></p>
+      <button id="blankup" class="barbtn" type="button" hidden>Go up</button>
+    </div>
+  </section>
+</main>
+
+<!-- Open / Show in Explorer / Copy path. Opaque, not glass: it sits over
+     rows of text. Positioned and opened by files.js. -->
+<div id="menu" class="menu" role="menu" hidden>
+  <button class="menuopt" type="button" role="menuitem" data-act="open">Open</button>
+  <button class="menuopt" type="button" role="menuitem" data-act="reveal">Show in Explorer</button>
+  <button class="menuopt" type="button" role="menuitem" data-act="copy">Copy path</button>
+</div>
+
+</body>
+</html>
