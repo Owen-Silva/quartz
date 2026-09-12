@@ -543,10 +543,47 @@ machine.
   detach restoring the saved rect, re-attach, close ending the app, the gone event, Calculator
   refused as a store app, and a browser quit with an app attached leaving it running as a normal
   window. About 2.3 MB in the main process.
-- This is the engine only. The tab side — an app tab that holds an embedded window, with the strip,
-  the seating and the layout around it — is not committed yet and lands next. koffi is a new runtime
-  dependency, so run `npm install` after pulling this. Windows 11's packaged Notepad destroys its own
-  window after any `SetParent` and is reported as gone; it cannot be hosted.
+- The engine now takes only windows it can actually host, out of the review pass (71f60f8). `find` and
+  `attach` require a top-level root window that is unowned, not a tool window and never one of our own
+  HWNDs — a credential dialog owned by the browser itself used to enumerate as hostable. A minimised
+  app is shown with `SW_SHOWNOACTIVATE` rather than `SW_RESTORE`, so opening one into a tab never
+  steals focus. Attach recovery and detach put every Win32 call under its own try, so a failure can no
+  longer leave a `WS_CHILD` window without a parent, and a failed un-parent keeps the record so the
+  quit path retries it. The restore after `SetParent(null)` compared `GetParent` truthily — that is
+  the desktop HWND, so the style and rect were never put back; it compares the saved parent now. In
+  main.js a pending-open guard answers "open-pending" when a second `embed:open` arrives for the same
+  tab instead of launching a second copy, and a tab closed during the 20s wait cancels it;
+  `render-process-gone` detaches every app; and a malformed layout request no longer collapses to a
+  0x0 hide. Verified live with Paint: style, exstyle and rect identical after a round trip with parent
+  0, a double attach refused, a `Stop-Process` forgotten in 1.2s, the wrong exe answering no-window
+  after the wait while `embed:list` answers in 2ms, a window move followed exactly, 200 finds growing
+  private bytes by 1.75 MB, and both a browser close and a renderer crash handing Paint back clean.
+- The tab side landed (f523390). A tab can be a "native" kind now: its view is a placeholder on the
+  theme ground, and the engine positions the app's real window over it. The layout is synced on
+  activation, on resize (a ResizeObserver plus the window resize, coalesced to one call per frame) and
+  on split changes — and because a re-parented Win32 window sits above the document, the app is hidden
+  while any chrome overlay that covers the content is open (the palette, the panes, tab search, find,
+  downloads) and shown again after. The placeholder says where it is: starting, running, gone with
+  Relaunch and Close, failed with the reason and a "Launch normally" button, and idle with Start for a
+  restored session, because native tabs never auto-start and never sleep. Closing the tab closes the
+  app, and "Pop out" in the tab context menu hands it back as a normal window. The dock's running dots
+  cover native tabs, with their pids.
+- The ways in. The command palette has "Open <app> in a tab" rows, and "Switch to <app>" for one that
+  is already open. In the dock, Edit mode gives each installed pin a quiet three-way chooser — app,
+  web or tab, or app and tab when the app has no web form — with `aria-pressed` on the current choice
+  (90870c4); it sends `pin-web` or `pin-native` and waits for the chrome's next push instead of
+  flipping locally, a native pin wears a small "tab" badge (native wins over web), and pressing that
+  pin opens the app in a tab. Pin options in Settings carry `native` alongside `web`. Web and terminal
+  pins are unchanged.
+- Two bugs caught live on the way in: `clearSplitSeat` stripped the placeholder's size so it measured
+  0 wide (it is width and height 100% like a webview now), and a tab opened before the apps index
+  landed wore the app's hash as its title (`relabelNativeTab`). Verified: N2 harness 213/213, T2a
+  100/100, T2b 110/110, music 180/180, apps 190/190, and the dock 140/140 with the T3 harness still
+  91/91 and the media tile 59/59; live with Character Map on a test profile the app rect equals the
+  placeholder rect, it hides and shows across tab switches and the palette, follows a resize, pops out
+  alive, and closing the tab exits the app, with the pid in the running payload. The chooser was
+  checked in both themes at 1282, 393 and 320px: every button its own hit target, no overlap with tile
+  names or the unpin glyph, no horizontal overflow, and the dock's height unchanged at rest.
 
 ### Shortcuts
 
@@ -696,6 +733,8 @@ Found, and not ours to fix:
 - The project is a git repo now, with the whole night's work committed locally.
 - `node smoketest.js` launches its own instance on `--test-profile`, waits for `body.booted`,
   asserts, and tears down. `--keep` leaves it running. `cdp-eval.js` and `cdp-profile.js` drive it.
+- The smoke test's debugging port comes from `SMOKE_PORT`, 9222 by default (3788d43), so it can run
+  against a test-profile instance on its own port instead of the live browser.
 - The README is current through the last commit: shortcuts, features, security notes, performance
   numbers and a file-by-file map.
 
@@ -741,9 +780,12 @@ Found, and not ours to fix:
   Spotify and other apps but never a tab in here.
 - koffi is a new runtime dependency, for the native app-tab engine. Run `npm install` after pulling
   this, or the embedding calls answer "unavailable"; nothing else is affected.
-- Native app tabs are half landed. The embedding engine is in, the tab that holds an embedded window
-  is not committed yet. Store apps cannot be embedded at all, and Windows 11's packaged Notepad
-  destroys its own window the moment it is re-parented.
+- Not every app can run in a tab. Store apps are refused outright, and Windows 11's packaged Notepad
+  destroys its own window the moment it is re-parented; neither can be hosted, so launch them
+  normally. The tab side is verified against Character Map and Paint.
+- While a hosted app has the focus it owns the keyboard: the browser's own shortcuts do not fire until
+  you click the tab strip. And if the app hangs, the browser's input can hang with it until the tab is
+  popped out.
 - DRM services cannot play inside a tab. Electron ships Chromium without Widevine, so Spotify and
   Netflix are handled as the desktop app plus the now-playing controls here, not as pages. Opening
   one of the five from the catalogue gives you a note bar saying so, with a link that launches the
@@ -847,3 +889,8 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 95f2d24 | 22:59 | New tab dock: web app and terminal pins, grouped picker, web toggle |
 | eafa0fc | 23:14 | Review fixes: app tabs and idle music wiring |
 | 769b1d9 | 23:21 | Native app tabs: the window embedding engine |
+| fc88f3c | 23:28 | Docs: CHANGELOG and README through 769b1d9 |
+| 90870c4 | 23:32 | New tab dock: an app / web / tab chooser on installed pins |
+| 3788d43 | 23:43 | smoketest: the debugging port comes from SMOKE_PORT (default 9222) |
+| 71f60f8 | 23:46 | Review fixes: the window embedding engine |
+| f523390 | 23:51 | Native app tabs: the tab side |

@@ -659,14 +659,17 @@ a console app raises its own console instead of somebody else's window.
 
 A pin does not have to be an installed app. A web app pins as its favicon, drawn through the same
 favicon path as the chips with a letter disc behind it as the fallback, and a terminal program pins as
-a monospace `>_` tile. An installed app that also has a web form wears a small "web" badge, and Edit
-mode gives it a toggle in the tile's top-left corner that sends `pin-web` and then waits for the
-chrome's next push rather than flipping locally, so what you see is always what is stored — a pin is
-either an id or `{ id, web:true }`, and plain strings are still written whenever the web option is off
-so an older settings file round-trips unchanged. The Add app picker is grouped: Installed, Web apps
+a monospace `>_` tile. An installed pin can open three ways — as the desktop app, as its web
+form, or as the app running inside a tab — so Edit mode gives it a quiet three-way chooser in the
+tile's corner: app | web | tab, or app | tab when the app has no web form, with `aria-pressed` on the
+choice that is current. A press sends `pin-web` or `pin-native` and then waits for the chrome's next
+push rather than flipping locally, so what you see is always what is stored. A pin with a web form
+wears a small "web" badge and a native pin a "tab" badge, native winning over web; a pin is an id on
+its own, or the id with the `web` or `native` option set, and plain strings are still written whenever
+neither is on so an older settings file round-trips unchanged. The Add app picker is grouped: Installed, Web apps
 (with the host, and a "desktop" hint when the desktop app is installed) and Terminals (leaving out
 anything not installed), up to eight per group, with one search across all three. The running dots
-cover open app and terminal tabs as well as running processes. webapps.js is loaded on the page as a
+cover open app, terminal and native tabs as well as running processes. webapps.js is loaded on the page as a
 first-paint seed only; the chrome's push is the source of truth.
 
 **System stats.** Inside the capsule, where the search field used to be, is a strip of live system
@@ -804,23 +807,43 @@ command palette has "Open <name> (web)" for every entry and "Switch to <name>" f
 already open.
 
 **Native app tabs.** The answer to "is there a way where I can start the apps in a tab but it's
-running the app so that literally everything is just in a tab?" — and so far only the engine for it.
-embed.js reaches Win32 through koffi (Node-API, so it loads in Electron 44 with no rebuild, required
+running the app so that literally everything is just in a tab?" — a real desktop app running inside a
+tab, engine and tab both. embed.js reaches Win32 through koffi (Node-API, so it loads in Electron 44 with no rebuild, required
 lazily inside a try/catch). It finds windows by pid or exe; `attach` re-parents the app's real
 top-level window into the browser window — hide, `SetParent`, the `WS_CHILD` style, then a
 `SetWindowPos` that moves and sizes nothing, because a zero-size one destroyed app windows on attach;
 `layout` positions it over a CSS-pixel rect with the display scale applied; `detach` puts the saved
 style and rect back as a normal window; `close` posts `WM_CLOSE` with a restore fallback after 3s;
-and a once-a-second liveness poll reports a window that has gone. Store apps and the browser's own
-windows are refused, and `detachAll` runs on before-quit, window close and process exit, so quitting
-the browser never takes an app down with it. main.js answers find, attach, open, layout, detach, close
-and list for the chrome only: opening launches the app the way the dock does, or attaches a window
-that exists already, and waits up to 20s for a new titled window from that exe. Startup never depends
-on the module — a missing koffi answers "unavailable".
+and a once-a-second liveness poll reports a window that has gone. Only a window it can actually host
+is found or attached — a top-level root, unowned, not a tool window, never a store app and never one
+of our own HWNDs, since a credential dialog owned by the browser itself used to enumerate as hostable
+— and a minimised one is shown with `SW_SHOWNOACTIVATE`, so opening an app into a tab never steals
+focus. Every Win32 call in attach recovery and detach sits under its own try, so a failure cannot
+leave a `WS_CHILD` window with no parent, and a failed un-parent keeps the record so the quit path
+retries it. `detachAll` runs on before-quit, window close and process exit, so quitting the browser
+never takes an app down with it. main.js answers find, attach, open, layout, detach, close and list
+for the chrome only: opening launches the app the way the dock does, or attaches a window that exists
+already, and waits up to 20s for a new titled window from that exe, with a pending-open guard so a
+second request for the same tab answers "open-pending" instead of launching a second copy (and a tab
+closed during the wait cancels it). `render-process-gone` detaches every app. Startup never depends on
+the module — a missing koffi answers "unavailable".
 
-The tab side is not written yet: nothing in the strip holds an embedded window, so there is no way to
-open one from the UI. Windows 11's packaged Notepad destroys its own window after any `SetParent` and
-cannot be hosted.
+A tab can be a "native" kind: its view is a placeholder on the theme ground, and the engine keeps the
+app's real window positioned over that rect — synced on activation, on resize and on split changes,
+and hidden whenever a chrome overlay covers the content (the palette, the panes, tab search, find,
+downloads), because a re-parented Win32 window sits above the document. Two ways in: the command
+palette's "Open <app> in a tab" row, with "Switch to <app>" once it is open, or the apps dock, where
+Edit mode gives each installed pin an app | web | tab chooser and a native pin then wears a small
+"tab" badge. The placeholder tells you where it is — starting, running, gone with Relaunch and Close,
+failed with the reason and a "Launch normally" button, or idle with a Start button for a restored
+session, since native tabs never auto-start and never sleep. "Pop out" in the tab context menu gives
+the app back as a normal window; closing the tab closes the app.
+
+Three things to know. Windows 11's packaged Notepad destroys its own window after any `SetParent`, and
+Store apps are refused outright, so neither can be hosted — launch those normally. While the hosted
+app has the focus it owns the keyboard, so the browser's own shortcuts do not fire until you click the
+tab strip. And if the app hangs, the browser's input can hang with it until you pop the tab out. The
+tab side is verified against Character Map and Paint.
 
 **Resuming a conversation.** Four ways in, all the same door: right-click bare strip → "Resume a
 Claude conversation…", a Claude chip's menu → "Resume another conversation here", Ctrl+click the
@@ -973,7 +996,7 @@ one run before and one after.
 | `ambient.js` | The built-in idle-music engine: a generative Web Audio pad — detuned voices under a slow low-pass filter, a chord crossfading every 16-24s along a modal progression, a sparse arpeggio through a feedback delay, a four-delay-line room instead of a convolver, compressor and master gain — with one timer, twelve mood titles, and a `stop()` that suspends the context. |
 | `music.js` | The idle-music player: `shouldPlay()` and every signal behind it (the setting, a manual pause, window focus, an audible tab, the machine's own media session, the "where" setting, a ready source), the 300ms settle, the 800/400ms fades, the resume hold and the flip counter that sits the player out for 30s, and the two sinks behind one contract — the ambient engine and one `<audio>` element on `file://` with shuffle and skip-missing. Also the parsers for the new tab's `music` and `media` console lines and the now-playing change detector (position out of the hash, art re-sent only when its own hash moves). `debug()` and a `resumeHoldMs` option exist for harnesses. |
 | `webapps.js` | The web-app catalogue: 30 entries with `web:<slug>` ids, URL, host, the desktop exe they pair with and a `drm` mark, plus `findWebApp`, `webAppForHost` (exact, then longest subdomain match), `webAppForExe`, `isWebAppId`, `isTerminalId`, `terminalProgram` and `DRM_NOTE`. Loads as a module or a script tag (`window.WEBAPPS` / `window.WebApps`), and is a first-paint seed on the new tab as well as the chrome's own table. |
-| `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` (hide, `SetParent`, `WS_CHILD`, a move-and-size-free `SetWindowPos`), `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s liveness poll and its gone event, the refusal of store apps and our own windows, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. The tab that would hold an embedded window is not written yet. |
+| `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` (hide, `SetParent`, `WS_CHILD`, a move-and-size-free `SetWindowPos`), `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s liveness poll and its gone event, the refusal of store apps, tool windows, owned windows and our own, `SW_SHOWNOACTIVATE` so nothing steals focus, per-call error handling in attach recovery and detach, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push, guards a second open on the same tab, and detaches everything on `render-process-gone`; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. app.js holds the native tab that the window is positioned over. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
@@ -996,7 +1019,7 @@ one run before and one after.
 | `reader.html` / `reader-page.css` / `reader-page.js` | The reading page itself: top bar, text size and width, `window.__applyArticle`, and the second sanitiser sweep over the live tree. Owns `localStorage['reader']`. |
 | `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), the Processes list and its icon slots (`window.__applyProcIcons`), the apps dock and its picker (`window.__applyApps`, `window.__applyAppsRunning`, `window.__applyAppResult`), the Idle music block inside the session tile (`window.__applyMusic`, `newtab:music` out), the now-playing tile (`window.__applyMedia`, `newtab:media` out), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
 | `newtab-bg.js` | The circuit board — canvas painted once per layout, packets as DOM on Web Animations. Owns `window.__boardPaused` / `__boardState`, the freeze the chrome drives while an overlay is open. |
-| `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on CDP port 9222 and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
+| `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on the CDP port from `SMOKE_PORT`, 9222 by default, and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
 | `CHANGELOG.md` | What changed and why, by area, written to be read instead of the diffs. |
 
@@ -1084,11 +1107,14 @@ classic script so it leaves a global `Readability`. `ws` is a devDependency, for
 
 ## Development
 
-The smoke test launches its own instance with `--remote-debugging-port=9222 --test-profile`:
+The smoke test launches its own instance with `--remote-debugging-port=9222 --test-profile`. Set
+`SMOKE_PORT` to move it off 9222 — a test-profile instance on its own port, rather than whatever is
+already listening:
 
 ```
 node smoketest.js            # launch, assert, tear down
 node smoketest.js --keep     # leave it running so you can poke at it
+$env:SMOKE_PORT=9333; node smoketest.js   # the same, on its own port
 node cdp-eval.js "document.title"
 node cdp-eval.js --guest "document.querySelector('#st-cpu').textContent"
 node cdp-profile.js [--guest] [seconds]
