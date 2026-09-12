@@ -55,11 +55,27 @@ const CACHE_NAME = 'apps-index.json';
  * Bump when the entry shape changes so an old cache is rebuilt, not trusted.
  * 2: store entries carry the exe their package manifest names, and an x86 twin
  * carries `variant`.
+ * 3: shortcut entries carry `cwd`, `aumid` and `runas`. This one is NOT
+ * cosmetic: the last two decide whether launch() spawns the exe or hands the
+ * .lnk to the shell, so a v2 cache (which has neither) would spawn apps that
+ * must go through ShellExecute. Old caches are rebuilt, never trusted.
  */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 /** A day. Apps are installed rarely; a stale icon is cheaper than a rebuild. */
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * SLDF_RUNAS_USER, bit 13 of the LinkFlags field at offset 20 of a .lnk header:
+ * the shortcut's "Run as administrator" tick. Nothing in Electron's
+ * readShortcutLink reports it, and it is the one bit that makes a direct spawn
+ * WRONG rather than merely different -- see lnkWantsElevation.
+ */
+const LNK_RUNAS_FLAG = 0x00002000;
+
+/** Offset and minimum length of that header field. */
+const LNK_FLAGS_OFFSET = 20;
+const LNK_HEAD_BYTES = 24;
 
 /** How many icons are fetched before yielding back to the loop. */
 const ICON_BATCH = 20;
@@ -467,6 +483,17 @@ function buildShortcutEntry(lnkPath, link) {
     // The shortcut's "Start in" folder. Only launch() reads it -- some apps
     // resolve their own files relative to it -- and it never leaves over IPC.
     cwd: link && typeof link.cwd === 'string' && link.cwd.trim() ? link.cwd.trim() : null,
+    // The shortcut's explicit AppUserModelID, when it has one. 19 of the 68
+    // Start Menu shortcuts on this machine do (Discord, Cursor, Edge, Opera
+    // GX, Obsidian...). It is the app's TASKBAR IDENTITY: ShellExecute stamps
+    // it on the process it starts, a direct spawn does not, and the app then
+    // gets its own second taskbar button instead of grouping under the pinned
+    // one. launch() sends these through the shell for that reason alone.
+    aumid: link && typeof link.appUserModelId === 'string' && link.appUserModelId.trim()
+      ? link.appUserModelId.trim()
+      : null,
+    // "Run as administrator" -- read from the .lnk header by the caller.
+    runas: !!(link && link.runas),
     exe: exeBaseName(target),
     lnk: file,
     iconDataUrl: null,
@@ -714,6 +741,50 @@ function splitArgs(line) {
   return out;
 }
 
+/**
+ * Does this .lnk say "Run as administrator"?
+ *
+ * The bit lives in the shortcut's own header (LinkFlags, offset 20), not in
+ * anything readShortcutLink returns, so the first 24 bytes of the file are the
+ * only way to see it. It matters because a direct spawn of an elevated
+ * shortcut is not "the same launch without a pid": it either fails outright
+ * (UAC cannot be raised from CreateProcess) or, when the exe has no
+ * requireAdministrator manifest of its own, quietly starts the app UNELEVATED
+ * -- the one thing the shortcut was ticked to prevent. Those go to the shell.
+ *
+ * @param {Buffer|null} head  the first bytes of the .lnk
+ */
+function lnkWantsElevation(head) {
+  if (!head || typeof head.readUInt32LE !== 'function' || head.length < LNK_HEAD_BYTES) return false;
+  let flags = 0;
+  try { flags = head.readUInt32LE(LNK_FLAGS_OFFSET); } catch { return false; }
+  return (flags & LNK_RUNAS_FLAG) !== 0;
+}
+
+/**
+ * '%APPDATA%\Foo' -> 'C:\Users\you\AppData\Roaming\Foo'.
+ *
+ * ShellExecute expands a shortcut's target, arguments and Start-in folder
+ * before it uses them; spawn() does not, so an unexpanded '%...%' would just
+ * be a path that does not exist (ENOENT, then the shell fallback, then no
+ * pid). Names are matched case-insensitively, the way Windows does it, and an
+ * unknown variable is left exactly as written rather than blanked -- an app
+ * whose args mention a literal per-cent still gets them verbatim.
+ */
+function expandEnv(value, env) {
+  const s = typeof value === 'string' ? value : '';
+  if (s.indexOf('%') === -1) return s;
+  const src = env && typeof env === 'object' ? env : {};
+  const lower = new Map();
+  for (const k of Object.keys(src)) {
+    if (typeof src[k] === 'string') lower.set(k.toLowerCase(), src[k]);
+  }
+  return s.replace(/%([^%\r\n]+)%/g, (all, name) => {
+    const hit = lower.get(String(name).toLowerCase());
+    return hit === undefined ? all : hit;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The module
 // ---------------------------------------------------------------------------
@@ -774,6 +845,21 @@ function create(deps = {}) {
     for (const dir of dirs) await collectShortcuts(dir, found, depth + 1);
   }
 
+  /** The first bytes of a .lnk, or null when it cannot be read. */
+  async function readLnkHead(file) {
+    let handle = null;
+    try {
+      handle = await fsp.open(file, 'r');
+      const buf = Buffer.alloc(LNK_HEAD_BYTES);
+      const got = await handle.read(buf, 0, LNK_HEAD_BYTES, 0);
+      return (got && got.bytesRead >= LNK_HEAD_BYTES) ? buf : null;
+    } catch {
+      return null;                                        // locked or truncated
+    } finally {
+      if (handle) { try { await handle.close(); } catch { /* fine */ } }
+    }
+  }
+
   /** Resolve the .lnk files into entries. readShortcutLink is sync but fast. */
   async function readShortcutEntries() {
     const files = [];
@@ -792,8 +878,14 @@ function create(deps = {}) {
         link = null;                                      // broken or dangling .lnk
       }
       if (link) {
+        // 24 bytes of header: the "run as administrator" bit that
+        // readShortcutLink does not report. One tiny read per shortcut.
+        let runas = false;
+        try { runas = lnkWantsElevation(await readLnkHead(file)); } catch { runas = false; }
         let entry = null;
-        try { entry = buildShortcutEntry(file, link); } catch { entry = null; }
+        try {
+          entry = buildShortcutEntry(file, Object.assign({}, link, { runas: runas }));
+        } catch { entry = null; }
         if (entry) out.push(entry);
       }
       // readShortcutLink is a COM call per file; yield on the same cadence as
@@ -969,7 +1061,10 @@ function create(deps = {}) {
       apps: idx.apps.map((a) => ({
         id: a.id, name: a.name, kind: a.kind, path: a.path, args: a.args || '',
         exe: a.exe || null, variant: a.variant || null,
-        lnk: a.lnk || null, cwd: a.cwd || null, iconPath: a.iconPath || null,
+        lnk: a.lnk || null, cwd: a.cwd || null,
+        // Both decide the launch route, so both have to survive the cache.
+        aumid: a.aumid || null, runas: !!a.runas,
+        iconPath: a.iconPath || null,
         iconDataUrl: a.iconDataUrl || null
       }))
     };
@@ -1069,6 +1164,20 @@ function create(deps = {}) {
   }
 
   /**
+   * The folder to start the exe in: the shortcut's "Start in" when it still
+   * exists, else the exe's own folder. A Start-in folder that has been deleted
+   * or renamed is not a detail -- spawn fails outright on it (pid undefined),
+   * which would cost the pid on an app that starts perfectly well.
+   */
+  function spawnCwd(entry, target) {
+    const want = expandEnv(entry && entry.cwd ? String(entry.cwd).trim() : '', env);
+    if (want) {
+      try { if (fs.statSync(want).isDirectory()) return want; } catch { /* gone */ }
+    }
+    return path.win32.dirname(target);
+  }
+
+  /**
    * Start the target exe OURSELVES, so the caller gets a pid.
    *
    * ShellExecute (shell.openPath) is the friendlier launcher -- it honours a
@@ -1085,16 +1194,17 @@ function create(deps = {}) {
    * @returns {{ok:true, reason:'', pid:number}|null}
    */
   function spawnEntry(entry) {
-    const target = entry && typeof entry.path === 'string' ? entry.path.trim() : '';
+    const raw = entry && typeof entry.path === 'string' ? entry.path.trim() : '';
+    const target = expandEnv(raw, env);                    // %ProgramFiles%\...
     // .exe only: a .bat/.cmd/.msc needs a shell, and this is not the place for
     // one. (isLaunchableTarget already keeps the index to .exe targets.)
     if (!target || path.win32.extname(target).toLowerCase() !== '.exe') return null;
     let child = null;
     try {
-      child = spawnFn(target, splitArgs(entry.args), {
+      child = spawnFn(target, splitArgs(expandEnv(entry.args, env)), {
         // The shortcut's "Start in", else the exe's own folder -- never the
         // browser's cwd, which some apps would treat as their data directory.
-        cwd: entry.cwd || path.win32.dirname(target),
+        cwd: spawnCwd(entry, target),
         detached: true,                                    // its life is not ours
         stdio: 'ignore',
         windowsHide: false                                 // we WANT its window
@@ -1134,9 +1244,17 @@ function create(deps = {}) {
     if (!entry) return { ok: false, reason: 'that app is not in the index', pid: null };
 
     if (entry.kind === 'exe') {
-      const direct = spawnEntry(entry);
+      // Two kinds of shortcut MUST keep the shell, pid or no pid:
+      //   * one carrying an AppUserModelID -- ShellExecute stamps that identity
+      //     on the process, a spawn cannot, and the app would open a second
+      //     taskbar button beside its own pinned one;
+      //   * one ticked "run as administrator" -- a spawn either fails or starts
+      //     it unelevated, which is worse than failing.
+      // main.js still finds the window: with pid null it ranks by start time.
+      const viaShell = !!(entry.lnk && (entry.aumid || entry.runas));
+      const direct = viaShell ? null : spawnEntry(entry);
       if (direct) return direct;
-      const target = entry.lnk || entry.path;
+      const target = entry.lnk || expandEnv(entry.path, env);
       if (!electronShell || typeof electronShell.openPath !== 'function') {
         return { ok: false, reason: 'unavailable', pid: null };
       }
@@ -1281,6 +1399,9 @@ module.exports = {
   focusScript,
   encodeCommand,
   splitArgs,
+  lnkWantsElevation,
+  expandEnv,
+  LNK_RUNAS_FLAG,
   SKIP_NAME_RE,
   TARGET_EXTS,
   CACHE_NAME,
