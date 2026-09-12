@@ -110,6 +110,43 @@
   text-shadow: var(--pip-glow);
 }
 
+/* --- an app's own icon ------------------------------------------ */
+/* Same 16px slot as the glyph, so a list that mixes apps and history
+   keeps one straight text column. contain, never cover: a launcher's
+   artwork is not a thumbnail and must not be cropped. */
+#omni-suggest .omni-appicon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+/* --- the "App" badge -------------------------------------------- */
+/* A label on the name, not a second piece of content: the quietest pill
+   that still reads, so the row says "this launches" without shouting.
+   It rides in the primary line, after the name. */
+#omni-suggest .omni-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  /* A wash of the text colour, not of the glass: --glass-2 is what the lit
+     row is painted with, so a pill filled with it would vanish on hover. */
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg-2);
+  font-size: 10.5px;
+  line-height: 1;
+  font-weight: 450;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .02em;
+  vertical-align: middle;
+}
+
+/* The lit row brightens the label with everything else on it. */
+#omni-suggest .omni-row.is-hi .omni-badge { color: var(--fg); }
+
 /* --- the two text lines ----------------------------------------- */
 #omni-suggest .omni-body {
   min-width: 0;                /* the ellipsis needs a shrinkable box */

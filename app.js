@@ -1508,7 +1508,7 @@ function pushAppsToAll() {
  * Exactly the end-task channel, one door down:
  *
  *   newtab:app {"action":"launch","id":"a1b2c3"}
- *   newtab:app {"action":"focus","pid":1234}
+ *   newtab:app {"action":"focus","pid":1234,"pids":[1234,5678],"id":"a1b2c3"}
  *   newtab:app {"action":"pin","id":"a1b2c3"}
  *   newtab:app {"action":"unpin","id":"a1b2c3"}
  *   newtab:app {"action":"refresh"}
@@ -1566,7 +1566,23 @@ function parseAppLine(text) {
     const pid = msg.pid;
     if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return null;
     const id = typeof msg.id === 'string' && msg.id.length <= APP_ID_MAX ? msg.id : '';
-    return { action: action, id: id, pid: pid };
+    // The optional list beside it: every process the dock saw under this app,
+    // because a program that runs as a family (Electron, a launcher, a tray
+    // helper) keeps its window on a pid that is not the first one. Junk inside
+    // the array is DROPPED rather than failing the whole request — `pid` is
+    // still there to fall back on — and the list is capped at the sampler's
+    // own 64. Written out here on purpose: nothing else parses a pid list, and
+    // the harnesses that slice this function out by name learn no new names.
+    const pids = [];
+    if (Array.isArray(msg.pids)) {
+      for (const raw of msg.pids) {
+        if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) continue;
+        if (pids.indexOf(raw) >= 0) continue;
+        pids.push(raw);
+        if (pids.length >= 64) break;
+      }
+    }
+    return { action: action, id: id, pid: pid, pids: pids };
   }
 
   if (typeof msg.id !== 'string') return null;
@@ -1585,7 +1601,11 @@ function pushAppResult(tab, viewEl, result) {
       action: String(result && result.action || ''),
       id: String(result && result.id || ''),
       ok: !!(result && result.ok),
-      reason: (result && typeof result.reason === 'string') ? result.reason : ''
+      reason: (result && typeof result.reason === 'string') ? result.reason : '',
+      // Only ever 'launch': the press asked to raise a window, found none, and
+      // started the app instead. The row reads this so a press that DID open
+      // something is never noted as "No window".
+      fallback: (result && result.fallback === 'launch') ? 'launch' : ''
     });
   } catch (err) { return; }
   try {
@@ -1628,6 +1648,64 @@ function answerAppCall(tab, viewEl, req, pending) {
   }, () => {
     pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
   });
+}
+
+/*
+ * A focus that found nothing to raise is a launch.
+ *
+ * main answers 'that app has no window to show' when every pid in the press is
+ * windowless (a tray-resident app, or one whose window was closed to the tray)
+ * and 'that app is no longer running' when those pids died between the sample
+ * and the press. Both mean the same thing to the person who clicked the tile:
+ * the app is not in front of them. So the press starts it instead — a
+ * single-instance app raises the window it already has, and a tray app shows
+ * the one it was hiding.
+ *
+ * Every other failure ('timed out', 'could not bring it forward') is a focus
+ * that DID find a window and could not raise it; starting a second copy would
+ * be the wrong answer, so those keep the note they always had.
+ */
+const FOCUS_TO_LAUNCH = /no window|no longer running|no-window|no-process|bad pid/i;
+
+/** Did this focus miss in the one way a launch would fix? */
+function focusFellShort(req, answer) {
+  if (!req || !req.id) return false;            // a bare pid names no app to start
+  if (!answer || typeof answer !== 'object' || answer.ok === true) return false;
+  const reason = typeof answer.reason === 'string' ? answer.reason : '';
+  if (!FOCUS_TO_LAUNCH.test(reason)) return false;
+  return !!appById(req.id);                     // and only for an app we know
+}
+
+/** The launch a focus turned into, answered as the launch it now is. */
+function launchAfterFocus(tab, viewEl, req, api) {
+  console.info('apps: focus found no window for', req.id, '— launching');
+  const answer = (result) => {
+    const ok = !!(result && result.ok === true);
+    pushAppResult(tab, viewEl, {
+      action: 'launch', id: req.id, ok: ok,
+      reason: (result && typeof result.reason === 'string' && result.reason) || (ok ? '' : 'failed'),
+      fallback: 'launch'
+    });
+  };
+  if (!api || typeof api.launch !== 'function') { answer(null); return; }
+  let pending = null;
+  try { pending = api.launch(req.id); } catch (err) { answer(null); return; }
+  if (pending && typeof pending.then === 'function') pending.then(answer, () => answer(null));
+  else answer(pending);
+}
+
+/** One focus call: the note it earned, or the launch it becomes. */
+function answerFocusCall(tab, viewEl, req, pending, api) {
+  const settle = (result) => {
+    if (focusFellShort(req, result)) { launchAfterFocus(tab, viewEl, req, api); return; }
+    const ok = appAnswerOk(req, result);
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok,
+      reason: (result && result.reason) || (ok ? '' : 'failed')
+    });
+  };
+  if (pending && typeof pending.then === 'function') pending.then(settle, () => settle(null));
+  else settle(pending);
 }
 
 /**
@@ -1779,19 +1857,29 @@ function handleAppLine(tab, viewEl, text) {
       pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'unavailable' });
       return true;
     }
-    const ids = appPinIds();
-    const at = ids.indexOf(req.id);
-    if (req.action === 'pin') { if (at === -1) ids.push(req.id); }
-    else { if (at >= 0) ids.splice(at, 1); }
+    // The list in the shape it is STORED in, never the flattened ids: a pin
+    // that opens as its web form or in a tab is kept as `{ id, web: true }` /
+    // `{ id, native: true }`, and handing setAppPins() bare ids would rewrite
+    // every one of those as a plain string — one press on any tile quietly
+    // resetting every OTHER pin back to "open the program". Only this pin's
+    // own entry moves. (appPinIds() is the fallback for a settings.js old
+    // enough to offer nothing but the flat list.)
+    const idOf = (pin) => (typeof pin === 'string' ? pin
+      : ((pin && typeof pin === 'object' && typeof pin.id === 'string') ? pin.id : ''));
+    const list = (typeof settings.appPins === 'function') ? appPinsRaw() : appPinIds();
+    const at = list.findIndex((pin) => idOf(pin) === req.id);
+    if (req.action === 'pin') { if (at === -1) list.push(req.id); }
+    else { if (at >= 0) list.splice(at, 1); }
     let ok = true;
     let reason = '';
     // setAppPins() hands back the list as it was really stored: it caps the
     // dock, so a pin past the cap is dropped there and 'ok' would otherwise be
-    // a lie the tile never shows.
+    // a lie the tile never shows. It answers in the stored shape too, so
+    // membership is tested by id and not with indexOf.
     try {
-      const after = settings.setAppPins(ids);
-      const stored = Array.isArray(after) ? after : ids;
-      const pinned = stored.indexOf(req.id) >= 0;
+      const after = settings.setAppPins(list);
+      const stored = Array.isArray(after) ? after : list;
+      const pinned = stored.some((pin) => idOf(pin) === req.id);
       if (req.action === 'pin' && !pinned) { ok = false; reason = 'full'; }
       if (req.action === 'unpin' && pinned) { ok = false; reason = 'failed'; }
     } catch (err) { ok = false; reason = 'failed'; }
@@ -1813,7 +1901,12 @@ function handleAppLine(tab, viewEl, text) {
   let pending = null;
   try {
     if (req.action === 'launch') pending = api.launch(req.id);
-    else if (req.action === 'focus') pending = api.focus(req.pid);
+    else if (req.action === 'focus') {
+      // The whole family when the press named one, the single pid when it did
+      // not: main searches every pid it is given and their children.
+      const pids = Array.isArray(req.pids) ? req.pids : [];
+      pending = api.focus(pids.length ? pids : req.pid);
+    }
     else pending = api.refresh();
   } catch (err) {
     pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
@@ -1837,6 +1930,11 @@ function handleAppLine(tab, viewEl, text) {
     if (pending && typeof pending.then === 'function') pending.then(done, done);
     else done();
   }
+
+  // A focus is the one call that can answer with a different call: no window
+  // to raise means the app is started instead, and the dock is told about the
+  // launch rather than the miss.
+  if (req.action === 'focus') { answerFocusCall(tab, viewEl, req, pending, api); return true; }
 
   answerAppCall(tab, viewEl, req, pending);
   return true;

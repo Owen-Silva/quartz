@@ -3158,12 +3158,29 @@ ipcMain.handle('apps:launch', (event, id) => {
   }
 });
 
+// The cap apps.js applies to the same list, borrowed so a malformed call is
+// cut short before it crosses the boundary at all.
+const APPS_FOCUS_PID_MAX = Number.isInteger(appsModule.FOCUS_PID_MAX) ? appsModule.FOCUS_PID_MAX : 64;
+
 // The one place in this file that is ALLOWED to steal focus: the user clicked
 // a dock tile whose running dot was lit, and "switch to it" is the whole point.
+//
+// One pid or a LIST of them: a dock tile knows its app by exe name, so it
+// sends every pid of that name and apps.js picks the one with the window (an
+// Electron app's lowest pid is usually a helper with none). Anything that is
+// not a positive integer is dropped here; apps.focus answers 'bad pid' if
+// nothing survives.
 ipcMain.handle('apps:focus', (event, pid) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const raw = Array.isArray(pid) ? pid : [pid];
+  const pids = [];
+  for (const item of raw) {
+    const n = Number(item);
+    if (Number.isInteger(n) && n > 0 && pids.length < APPS_FOCUS_PID_MAX) pids.push(n);
+  }
+  if (!pids.length) return { ok: false, reason: 'bad pid' };
   try {
-    return apps.focus(pid).catch(() => ({ ok: false, reason: 'failed' }));
+    return apps.focus(pids).catch(() => ({ ok: false, reason: 'failed' }));
   } catch {
     return { ok: false, reason: 'failed' };
   }

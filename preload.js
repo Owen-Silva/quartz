@@ -358,10 +358,17 @@ contextBridge.exposeInMainWorld('api', {
     // Start an app by entry id -> { ok, reason }. Detached: it resolves as soon
     // as Windows has taken the request, not when the app has drawn.
     launch: (id) => ipcRenderer.invoke('apps:launch', String(id == null ? '' : id)),
-    // Bring a RUNNING app's main window forward by pid -> { ok, reason }.
+    // Bring a RUNNING app's main window forward -> { ok, reason, via? }.
+    // Takes one pid or an ARRAY of them: a dock tile knows its app by exe
+    // name, so it passes every pid of that name and main picks the one that
+    // owns a window (an Electron app's lowest pid usually owns none). `via`
+    // says which rule matched ('own' | 'console' | 'child').
     // This one does steal focus, because it only ever runs off a click on a
     // tile that was already showing a running dot.
-    focus: (pid) => ipcRenderer.invoke('apps:focus', Number(pid)),
+    focus: (pid) => ipcRenderer.invoke(
+      'apps:focus',
+      Array.isArray(pid) ? pid.map((p) => Number(p)) : Number(pid)
+    ),
     // Rebuild the index from source (a newly installed app, a changed icon)
     // and resolve to the same shape as list().
     refresh: () => ipcRenderer.invoke('apps:refresh')

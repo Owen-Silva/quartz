@@ -2609,7 +2609,14 @@ function pressDockTile(id) {
   // it always was — including a pin set to open as its web form or in a
   // tab, which the chrome routes itself.
   if (rec.native && rec.running && rec.tab) dockSend({ action: 'open-native', id: id });
-  else if (rec.running && rec.pids.length) dockSend({ action: 'focus', id: id, pid: rec.pids[0] });
+  // Every pid the sampler saw, not just the first: a program that runs as a
+  // family (an Electron app, a launcher, a tray helper) keeps its window on
+  // one of the others, and the first pid alone answers "no window". `pid`
+  // stays for a chrome that predates the list. Both come off dockPids(), so
+  // they are already positive integers and already capped.
+  else if (rec.running && rec.pids.length) {
+    dockSend({ action: 'focus', id: id, pid: rec.pids[0], pids: rec.pids.slice() });
+  }
   else dockSend({ action: 'launch', id: id });
 }
 
@@ -2896,10 +2903,20 @@ function setPickerOpen(open) {
 
 /* --- what came back ----------------------------------------------- */
 
-/** A failure, in the row's voice. The tile's title carries the whole of it. */
+/**
+ * A failure, in the row's voice. The tile's title carries the whole of it.
+ *
+ * A press that found no window to raise is turned into a launch by the
+ * chrome, and comes back as that launch (`action: 'launch'`, `fallback:
+ * 'launch'`). So the only thing left to say here is whether the LAUNCH
+ * failed — "No window" would be a note about a press that did in fact start
+ * the app. The fallback is checked as well as the action for a chrome that
+ * relabels neither.
+ */
 function dockResultNote(result) {
   const reason = dockText(result.reason);
-  if (!reason) return result.action === 'focus' ? 'No window' : 'Failed';
+  const fell = result.fallback === 'launch';
+  if (!reason) return (result.action === 'focus' && !fell) ? 'No window' : 'Failed';
   if (reason === 'not-found' || reason === 'missing') return 'Not found';
   if (reason === 'no-window') return 'No window';
   if (reason === 'busy') return 'Busy';

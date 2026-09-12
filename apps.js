@@ -569,24 +569,65 @@ const STARTAPPS_ARGS = [
 ];
 
 /**
+ * The pids a single focus request may carry. A dock tile hands over every pid
+ * of its exe name (an Electron app is a dozen), and nothing sane is longer.
+ */
+const FOCUS_PID_MAX = 64;
+
+/** The rules focusScript can match a window with, as reported back in `via`. */
+const FOCUS_VIA = ['own', 'console', 'child'];
+
+/**
+ * One pid, or a list of them, into the clean list the script interpolates:
+ * integers > 0 only, duplicates dropped, order kept (the caller puts its best
+ * guess first), capped at FOCUS_PID_MAX.
+ */
+function normalizePids(pidOrPids) {
+  const raw = Array.isArray(pidOrPids) ? pidOrPids : [pidOrPids];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const n = Number(item);
+    if (!Number.isInteger(n) || n <= 0) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+    if (out.length >= FOCUS_PID_MAX) break;
+  }
+  return out;
+}
+
+/**
  * The focus script, as PowerShell source. Handed over as -EncodedCommand
- * (base64 UTF-16LE) so no amount of quoting can go wrong, and so the pid is
- * the only thing interpolated -- after a Number.isInteger check.
+ * (base64 UTF-16LE) so no amount of quoting can go wrong, and so the pids are
+ * the only thing interpolated -- after a Number.isInteger check each.
+ *
+ * WHY A LIST AND NOT ONE PID: the dock's running dot comes from the stats
+ * sample, which groups processes by EXE BASENAME and sorts each group's pids
+ * ASCENDING (stats.js groupProcesses). pids[0] is therefore the lowest pid of
+ * that name, not the one with the window -- and for anything multi-process
+ * (Electron and Chromium apps, launchers, a tray helper that outlives a
+ * restart) that pid is usually a GPU/utility child or a hidden background
+ * process. Asking about it alone answered 'no-window' while the app sat there
+ * with a perfectly good window under a sibling pid. So the whole group comes
+ * over and the first pid that can answer wins.
  *
  * WHY NOT MainWindowHandle: it is 0 for every console app. powershell.exe,
  * cmd.exe and Git Bash do not own their window -- their console host does
  * (conhost.exe, spawned as a CHILD of the console process), so .NET reports no
- * main window at all. The first version of this script fell back to "another
- * process with the same NAME that does have a window", which raised a
- * DIFFERENT PowerShell than the one that was clicked -- the wrong window is
- * worse than none.
+ * main window at all. An early version fell back to "another process with the
+ * same NAME that does have a window", which raised a DIFFERENT PowerShell than
+ * the one that was clicked -- the wrong window is worse than none. The list
+ * fixes that honestly: every pid in it was in the same name group as the tile
+ * the user pressed, so nothing outside the click is ever raised.
  *
- * So, in order, each rule tied to the target and nothing else:
+ * So, in order, each rule tied to the pids handed over and nothing else:
  *
  *   1. Enumerate every top-level window (EnumWindows +
- *      GetWindowThreadProcessId, visible, non-empty title) and take the first
- *      whose pid IS the target. That is every GUI app.
- *   2. Ask WINDOWS which window shows the target's console: FreeConsole,
+ *      GetWindowThreadProcessId, visible, non-empty title, NOT cloaked) and
+ *      take the first whose pid IS one of the targets, targets in the order
+ *      they arrived. That is every GUI app. -> via 'own'
+ *   2. Ask WINDOWS which window shows a target's console: FreeConsole,
  *      AttachConsole(target), GetConsoleWindow. On Windows 11 the default
  *      terminal is Windows Terminal, so a dock-launched powershell.exe gets a
  *      HIDDEN, TITLE-LESS pseudo console window of its own (rule 1 cannot see
@@ -594,24 +635,40 @@ const STARTAPPS_ARGS = [
  *      this machine: the root owner was the WT window that VANISHED when that
  *      pid was killed -- the right one, and not the WT window of another
  *      session that was also open. The candidate is accepted only when the
- *      console window's pid is the target (or its own console host) and the
- *      frame is a visible terminal window.
- *   3. Failing that, the first visible titled window whose pid is a console
- *      host (conhost/WindowsTerminal/OpenConsole) whose PARENT is the target --
- *      the classic conhost case.
+ *      console window's pid is that target (or its own console host) and the
+ *      frame is a visible terminal window. Then: the first visible titled
+ *      window whose pid is a console host (conhost/WindowsTerminal/
+ *      OpenConsole) whose PARENT is a target -- the classic conhost case.
+ *      -> via 'console'
+ *   3. The first visible titled window owned by a CHILD of a target. That is
+ *      the launcher shape: Update.exe stays alive as the parent of the real
+ *      Discord.exe, and the tile's own name group is only the stub.
+ *      -> via 'child'
  *
- * Never any other pid: if nothing matches, the honest answer is 'no-window'.
+ * Never any other pid: if nothing matches, the honest answer is 'no-window',
+ * and 'no-process' only when NONE of the pids is still alive.
+ *
+ * WHY THE CLOAK TEST: a UWP/packaged app leaves ghost frames that are visible
+ * and titled by every user32 measure but painted nowhere (DWM cloaks them),
+ * and a window hidden by cloak rather than by ShowWindow looks identical to a
+ * real one here. Raising one is a click that does nothing, so they are skipped
+ * and the next candidate gets its turn.
  *
  * Then SW_RESTORE if minimised, SetForegroundWindow, and if Windows refuses it
  * (a background process has no foreground right) the
  * AttachThreadInput/AllowSetForegroundWindow dance and SwitchToThisWindow.
+ *
+ * The last line out is 'ok <via>' / 'ok-partial <via>', or one bare word.
  */
-function focusScript(pid) {
+function focusScript(pidOrPids) {
+  const list = normalizePids(pidOrPids);
+  if (!list.length) return '\'no-process\'';
   return [
     '$ErrorActionPreference = \'SilentlyContinue\'',
-    '$target = ' + pid,
-    '$p = Get-Process -Id $target',
-    'if (-not $p) { \'no-process\'; exit 0 }',
+    '$targets = @(' + list.join(',') + ')',
+    '$alive = @()',
+    'foreach ($t in $targets) { if (Get-Process -Id $t) { $alive += [int]$t } }',
+    'if ($alive.Count -eq 0) { \'no-process\'; exit 0 }',
     'Add-Type -TypeDefinition @\'',
     'using System;',
     'using System.Collections.Generic;',
@@ -621,6 +678,7 @@ function focusScript(pid) {
     '  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lp);',
     '  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);',
     '  [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);',
+    '  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int val, int size);',
     '  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
     '  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
     '  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);',
@@ -635,6 +693,15 @@ function focusScript(pid) {
     '  [DllImport("kernel32.dll")] static extern bool AttachConsole(uint pid);',
     '  [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();',
     '  public static uint PidOf(IntPtr h) { uint p = 0; GetWindowThreadProcessId(h, out p); return p; }',
+    '  // DWMWA_CLOAKED = 14: painted nowhere even though user32 calls it visible.',
+    '  public static bool Cloaked(IntPtr h) {',
+    '    int v = 0;',
+    '    try { if (DwmGetWindowAttribute(h, 14, out v, 4) != 0) return false; } catch { return false; }',
+    '    return v != 0;',
+    '  }',
+    '  public static bool Showable(IntPtr h) {',
+    '    return IsWindowVisible(h) && GetWindowTextLength(h) > 0 && !Cloaked(h);',
+    '  }',
     '  // { the target\'s own console window, the frame that draws it }',
     '  public static IntPtr[] ConsoleOf(uint pid) {',
     '    IntPtr[] none = new IntPtr[] { IntPtr.Zero, IntPtr.Zero };',
@@ -649,7 +716,7 @@ function focusScript(pid) {
     '  public static IntPtr[] Top() {',
     '    List<IntPtr> found = new List<IntPtr>();',
     '    EnumWindows(delegate(IntPtr h, IntPtr lp) {',
-    '      if (IsWindowVisible(h) && GetWindowTextLength(h) > 0) found.Add(h);',
+    '      if (Showable(h)) found.Add(h);',
     '      return true;',
     '    }, IntPtr.Zero);',
     '    return found.ToArray();',
@@ -658,35 +725,80 @@ function focusScript(pid) {
     '\'@',
     'if (-not (\'BrWin\' -as [type])) {',
     '  $sh = New-Object -ComObject WScript.Shell',
-    '  if ($sh.AppActivate($target)) { \'ok-partial\'; exit 0 }',
+    '  foreach ($t in $alive) { if ($sh.AppActivate($t)) { \'ok-partial own\'; exit 0 } }',
     '  \'no-window\'; exit 0',
     '}',
-    '$hosts = @()',
-    'try {',
-    '  $hosts = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$target" |',
-    '    Where-Object { $_.Name -match \'^(conhost|WindowsTerminal|OpenConsole)\\.exe$\' } |',
-    '    ForEach-Object { [int]$_.ProcessId })',
-    '} catch { $hosts = @() }',
     '$wins = [BrWin]::Top()',
     '$h = [IntPtr]::Zero',
-    'foreach ($w in $wins) { if ([int][BrWin]::PidOf($w) -eq $target) { $h = $w; break } }',
+    '$via = \'\'',
+    '# 1. a window of one of the targets itself, targets in the order they came.',
+    'foreach ($t in $alive) {',
+    '  foreach ($w in $wins) { if ([int][BrWin]::PidOf($w) -eq $t) { $h = $w; $via = \'own\'; break } }',
+    '  if ($h -ne [IntPtr]::Zero) { break }',
+    '}',
+    '# The children of every target, read ONCE and only when rule 1 came back',
+    '# empty: console hosts keyed by parent for rule 2, everything for rule 3.',
+    '$hosts = @{}',
+    '$kids = @{}',
     'if ($h -eq [IntPtr]::Zero) {',
-    '  $c = [BrWin]::ConsoleOf([uint32]$target)',
-    '  if ($c[0] -ne [IntPtr]::Zero) {',
-    '    $cwPid = [int][BrWin]::PidOf($c[0])',
-    '    if ($cwPid -eq $target -or $hosts -contains $cwPid) {',
-    '      $cand = $c[0]',
-    '      if ($c[1] -ne [IntPtr]::Zero) { $cand = $c[1] }',
-    '      $candPid = [int][BrWin]::PidOf($cand)',
-    '      $candName = (Get-Process -Id $candPid).ProcessName',
-    '      $isHost = $candPid -eq $target -or $hosts -contains $candPid -or',
-    '        $candName -match \'^(conhost|WindowsTerminal|OpenConsole)$\'',
-    '      if ([BrWin]::IsWindowVisible($cand) -and $isHost) { $h = $cand }',
+    '  try {',
+    '    $filter = ($alive | ForEach-Object { "ParentProcessId=$_" }) -join \' OR \'',
+    '    foreach ($p in @(Get-CimInstance Win32_Process -Filter $filter)) {',
+    '      $par = [int]$p.ParentProcessId',
+    '      $cid = [int]$p.ProcessId',
+    '      if (-not $kids.ContainsKey($par)) { $kids[$par] = @() }',
+    '      $kids[$par] += $cid',
+    '      if ($p.Name -match \'^(conhost|WindowsTerminal|OpenConsole)\\.exe$\') {',
+    '        if (-not $hosts.ContainsKey($par)) { $hosts[$par] = @() }',
+    '        $hosts[$par] += $cid',
+    '      }',
     '    }',
+    '  } catch { $hosts = @{}; $kids = @{} }',
+    '}',
+    '# 2a. the console Windows itself says belongs to a target.',
+    'if ($h -eq [IntPtr]::Zero) {',
+    '  foreach ($t in $alive) {',
+    '    $mine = @()',
+    '    if ($hosts.ContainsKey($t)) { $mine = @($hosts[$t]) }',
+    '    $c = [BrWin]::ConsoleOf([uint32]$t)',
+    '    if ($c[0] -ne [IntPtr]::Zero) {',
+    '      $cwPid = [int][BrWin]::PidOf($c[0])',
+    '      if ($cwPid -eq $t -or $mine -contains $cwPid) {',
+    '        $cand = $c[0]',
+    '        if ($c[1] -ne [IntPtr]::Zero) { $cand = $c[1] }',
+    '        $candPid = [int][BrWin]::PidOf($cand)',
+    '        $candName = (Get-Process -Id $candPid).ProcessName',
+    '        $isHost = $candPid -eq $t -or $mine -contains $candPid -or',
+    '          $candName -match \'^(conhost|WindowsTerminal|OpenConsole)$\'',
+    '        if ([BrWin]::IsWindowVisible($cand) -and -not [BrWin]::Cloaked($cand) -and $isHost) {',
+    '          $h = $cand; $via = \'console\'',
+    '        }',
+    '      }',
+    '    }',
+    '    if ($h -ne [IntPtr]::Zero) { break }',
     '  }',
     '}',
-    'if ($h -eq [IntPtr]::Zero -and $hosts.Count -gt 0) {',
-    '  foreach ($w in $wins) { if ($hosts -contains [int][BrWin]::PidOf($w)) { $h = $w; break } }',
+    '# 2b. the classic conhost case: a console host CHILD that owns a window.',
+    'if ($h -eq [IntPtr]::Zero) {',
+    '  foreach ($t in $alive) {',
+    '    $mine = @()',
+    '    if ($hosts.ContainsKey($t)) { $mine = @($hosts[$t]) }',
+    '    if ($mine.Count -gt 0) {',
+    '      foreach ($w in $wins) { if ($mine -contains [int][BrWin]::PidOf($w)) { $h = $w; $via = \'console\'; break } }',
+    '    }',
+    '    if ($h -ne [IntPtr]::Zero) { break }',
+    '  }',
+    '}',
+    '# 3. a child process draws the window: Update.exe -> Discord.exe.',
+    'if ($h -eq [IntPtr]::Zero) {',
+    '  foreach ($t in $alive) {',
+    '    $mine = @()',
+    '    if ($kids.ContainsKey($t)) { $mine = @($kids[$t]) }',
+    '    if ($mine.Count -gt 0) {',
+    '      foreach ($w in $wins) { if ($mine -contains [int][BrWin]::PidOf($w)) { $h = $w; $via = \'child\'; break } }',
+    '    }',
+    '    if ($h -ne [IntPtr]::Zero) { break }',
+    '  }',
     '}',
     'if ($h -eq [IntPtr]::Zero) { \'no-window\'; exit 0 }',
     'if ([BrWin]::IsIconic($h)) { [BrWin]::ShowWindow($h, 9) | Out-Null }',
@@ -700,7 +812,7 @@ function focusScript(pid) {
     '  [BrWin]::AttachThreadInput($me, $them, $false) | Out-Null',
     '}',
     'if ([BrWin]::GetForegroundWindow() -ne $h) { [BrWin]::SwitchToThisWindow($h, $true) }',
-    'if ([BrWin]::GetForegroundWindow() -eq $h) { \'ok\' } else { \'ok-partial\' }'
+    'if ([BrWin]::GetForegroundWindow() -eq $h) { \'ok \' + $via } else { \'ok-partial \' + $via }'
   ].join('\n');
 }
 
@@ -1286,16 +1398,25 @@ function create(deps = {}) {
   /**
    * Bring a running app's main window forward. This one is ALLOWED to steal
    * focus: it only ever runs because the user clicked a tile whose dot was lit.
+   *
+   * Takes ONE pid or a LIST of them -- a dock tile knows its app by exe name,
+   * so it hands over every pid of that name and the script picks the one that
+   * actually has a window (see focusScript). A list is not "try some other
+   * program": every pid in it is the app whose tile was pressed.
+   *
+   * Answers { ok, reason }, plus `via` ('own' | 'console' | 'child') on
+   * success for the chrome to log. Callers that only read ok/reason are
+   * unaffected.
    */
-  function focus(pid) {
-    const n = Number(pid);
-    if (!Number.isInteger(n) || n <= 0) return Promise.resolve({ ok: false, reason: 'bad pid' });
+  function focus(pidOrPids) {
+    const list = normalizePids(pidOrPids);
+    if (!list.length) return Promise.resolve({ ok: false, reason: 'bad pid' });
     return new Promise((resolve) => {
       let child = null;
       try {
         child = spawn('powershell.exe', [
           '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-          '-EncodedCommand', encodeCommand(focusScript(n))
+          '-EncodedCommand', encodeCommand(focusScript(list))
         ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       } catch (e) {
         resolve({ ok: false, reason: (e && e.message) || 'failed' });
@@ -1322,8 +1443,15 @@ function create(deps = {}) {
       } catch { /* the close handler still answers */ }
       child.on('error', (e) => finish({ ok: false, reason: (e && e.message) || 'failed' }));
       child.on('close', () => {
+        // 'ok <via>' / 'ok-partial <via>', or one bare word. The via is a note
+        // for the log, so an unknown one is dropped rather than passed on.
         const line = out.trim().split(/\r?\n/).pop() || '';
-        if (line === 'ok' || line === 'ok-partial') return finish({ ok: true, reason: line === 'ok' ? '' : 'partial' });
+        const word = line.split(/\s+/);
+        const status = word[0] || '';
+        const via = FOCUS_VIA.indexOf(word[1]) >= 0 ? word[1] : '';
+        if (status === 'ok' || status === 'ok-partial') {
+          return finish({ ok: true, reason: status === 'ok' ? '' : 'partial', via });
+        }
         if (line === 'no-window') return finish({ ok: false, reason: 'that app has no window to show' });
         if (line === 'no-process') return finish({ ok: false, reason: 'that app is no longer running' });
         finish({ ok: false, reason: 'could not bring it forward' });
@@ -1397,6 +1525,7 @@ module.exports = {
   buildShortcutEntry,
   startMenuRoots,
   focusScript,
+  normalizePids,
   encodeCommand,
   splitArgs,
   lnkWantsElevation,
@@ -1417,5 +1546,7 @@ module.exports = {
   APPX_MARKER,
   STARTAPPS_TIMEOUT_MS,
   FOCUS_TIMEOUT_MS,
+  FOCUS_PID_MAX,
+  FOCUS_VIA,
   ICON_BUDGET_BYTES
 };

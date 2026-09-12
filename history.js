@@ -13,10 +13,13 @@
    2. THE LENS (#omni-suggest). A glass panel that hangs directly
       under the omnibox capsule and mirrors its left/width. With text
       typed it leads with the row that mirrors what Enter already
-      does, then the best history matches; on an empty focus it shows
-      what was open recently. It never navigates by itself: it writes
-      into #omnibox and hands the Enter key to app.js, so tab and
-      Claude handling stay in exactly one place.
+      does, then any apps whose name the query hits (badged, borrowed
+      from tabsearch.js), then the best history matches; on an empty
+      focus it shows what was open recently. It never navigates by
+      itself: it writes into #omnibox and hands the Enter key to
+      app.js, so tab and Claude handling stay in exactly one place.
+      An app row is the single exception — it launches the app and
+      then puts the bar back to the page that is really on screen.
 
    3. THE PAGE (historypage.html). Ctrl+H opens the full list in a tab
       of its own. The guest has no preload, so the chrome pushes it a
@@ -38,12 +41,14 @@
   var INPUT_DELAY = 40;      // ms of quiet before the panel re-renders
   var BLUR_DELAY = 120;      // ms grace so a click outside still lands
   var MAX_ROWS = 6;          // history rows; the default row makes 7
+  var MAX_APP_ROWS = 3;      // app rows, between the default row and history
   var PANEL_GAP = 6;         // px between the omnibox capsule and the panel
 
   // Segoe Fluent Icons, same set the rest of the chrome draws from.
   var GLYPH_SEARCH = '\uE721';   // magnifier: a Google search
   var GLYPH_GLOBE  = '\uE774';   // globe: a plain address
   var GLYPH_CLOCK  = '\uE81C';   // clock: something already visited
+  var GLYPH_APP    = '\uECAA';   // tile: an app, when it has no icon of its own
 
   // Schemes that are never worth remembering. file: matters most: the
   // bundled new-tab page is a file:// URL and would otherwise be the
@@ -498,13 +503,15 @@
   var panel = null;
   var listEl = null;
   var capEl = null;
-  var rows = [];             // [{ url, kind }] parallel to the row elements
+  var rows = [];             // [{ url, kind, app }] parallel to the row elements
   var rowEls = [];
   var hi = -1;               // -1 = nothing highlighted; Enter does what it always did
   var typedValue = '';       // what the user actually typed, before any highlight
   var openState = false;
   var inputTimer = null;
   var blurTimer = null;
+  var appsWaiting = false;   // one whenAppsReady registration per open
+  var rendering = false;     // guards render() against a synchronous re-entry
 
   function el(tag, className) {
     var node = document.createElement(tag);
@@ -603,13 +610,29 @@
     row.setAttribute('role', 'option');
     row.dataset.index = String(index);
 
-    var ico = el('span', 'glyph omni-ico');
-    ico.textContent = spec.glyph;
-    row.appendChild(ico);
+    // An app that ships its own icon fills the glyph slot with it; every
+    // other row keeps the icon-font glyph, so the text column never moves.
+    if (spec.iconDataUrl) {
+      var icon = el('img', 'omni-appicon');
+      icon.src = spec.iconDataUrl;
+      icon.alt = '';
+      row.appendChild(icon);
+    } else {
+      var ico = el('span', 'glyph omni-ico');
+      ico.textContent = spec.glyph;
+      row.appendChild(ico);
+    }
 
     var body = el('span', 'omni-body');
     var primary = el('span', 'omni-primary');
     markInto(primary, spec.primary, spec.words);
+    // "App" / "Web app" / "Terminal": a label on the name, so a row that
+    // launches something never reads like one that navigates.
+    if (spec.badge) {
+      var badge = el('span', 'omni-badge');
+      badge.textContent = spec.badge;
+      primary.appendChild(badge);
+    }
     body.appendChild(primary);
     if (spec.secondary) {
       var secondary = el('span', 'omni-secondary');
@@ -622,11 +645,13 @@
     // fires on the row and the input keeps its caret and selection.
     row.addEventListener('mousedown', function (event) { event.preventDefault(); });
     row.addEventListener('mouseenter', function () { setHighlight(index, false); });
-    row.addEventListener('click', function () { commit(index); });
+    row.addEventListener('click', function (event) {
+      commit(index, !!(event && event.shiftKey));
+    });
 
     listEl.appendChild(row);
     rowEls.push(row);
-    rows.push({ url: spec.url, kind: spec.kind });
+    rows.push({ url: spec.url, kind: spec.kind, app: spec.app || null });
   }
 
   function clearRows() {
@@ -636,8 +661,71 @@
     if (listEl) listEl.textContent = '';
   }
 
-  /** Rebuild the rows for the omnibox's current value. */
+  /* --- apps, borrowed from tabsearch.js -------------------------- */
+
+  /**
+   * The app index lives in tabsearch.js. It can be absent entirely (an
+   * older build) or simply not landed yet on the first keystroke — either
+   * way the lens quietly shows no app rows and behaves exactly as before.
+   */
+  function tabSearch() {
+    return (typeof window !== 'undefined' && window.TabSearch) ? window.TabSearch : null;
+  }
+
+  function appMatches(query, limit) {
+    var ts = tabSearch();
+    if (!ts || typeof ts.appMatches !== 'function') return [];
+    try {
+      var out = ts.appMatches(query, limit);
+      return out && typeof out.length === 'number' ? out : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  /**
+   * Ask once per open — never once per keystroke — to be told when the
+   * index lands, so a query typed before it is ready still grows its rows.
+   */
+  function waitForApps() {
+    if (appsWaiting) return;
+    var ts = tabSearch();
+    if (!ts || typeof ts.whenAppsReady !== 'function') return;
+    appsWaiting = true;
+    try {
+      ts.whenAppsReady(onAppsReady);
+    } catch (err) {
+      appsWaiting = false;
+    }
+  }
+
+  /** The index landed late: redraw, keeping the highlight if it still fits. */
+  function onAppsReady() {
+    if (rendering) return;   // it landed synchronously; this render already has it
+    if (!openState || !panel || panel.hidden) return;
+    if (typeof document !== 'undefined' && document.activeElement !== omniboxEl) return;
+    var prev = hi;
+    render();
+    if (!rows.length) { close(); return; }
+    place();
+    hi = (prev >= 0 && prev < rows.length) ? prev : -1;
+    paintHighlight();
+  }
+
+  /**
+   * Rebuild the rows for the omnibox's current value. The re-entry guard
+   * matters: whenAppsReady may answer synchronously from inside render().
+   */
   function render() {
+    rendering = true;
+    try {
+      renderRows();
+    } finally {
+      rendering = false;
+    }
+  }
+
+  function renderRows() {
     if (!panel) return;
     clearRows();
     var query = String(omniboxEl.value || '').trim();
@@ -687,6 +775,37 @@
     }
 
     var words = toWords(query);
+
+    // Then the apps whose name the query hits. These launch instead of
+    // navigating, which is why they carry a badge and never the default
+    // row's place: row one still means exactly what Enter means.
+    var apps = appMatches(query, MAX_APP_ROWS);
+    for (var a = 0; a < apps.length && a < MAX_APP_ROWS; a++) {
+      var app = apps[a];
+      if (!app) continue;
+      var hint = String(app.hint == null ? '' : app.hint);
+      // Only an app with a window to host, and not already hosted, can
+      // take the modifier — so only that row advertises it.
+      if (app.kind === 'app' && typeof app.runInTab === 'function' && !app.open) {
+        hint = hint
+          ? hint + ' · Shift+Enter opens it in a tab'
+          : 'Shift+Enter opens it in a tab';
+      }
+      addRow({
+        kind: 'app',
+        app: app,
+        url: null,
+        glyph: app.glyph || GLYPH_APP,
+        iconDataUrl: app.iconDataUrl || null,
+        primary: app.name,
+        badge: app.badge || 'App',
+        secondary: hint,
+        faint: !!hint,
+        words: words
+      });
+    }
+    waitForApps();
+
     var hits = search(query, MAX_ROWS);
     for (var j = 0; j < hits.length; j++) {
       if (target && hits[j].url === target && rows.length && rows[0].kind === 'default') continue;
@@ -729,7 +848,8 @@
     paintHighlight();
     if (!fromKeyboard) return;
     // The default row IS the typed text, so previewing it would only swap
-    // "cats" for a google.com/search URL. Only history rows preview.
+    // "cats" for a google.com/search URL; an app row has no URL to preview
+    // at all. Only history rows preview.
     if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') omniboxEl.value = rows[hi].url;
     else omniboxEl.value = typedValue;
   }
@@ -760,6 +880,7 @@
     if (!panel) return;
     panel.hidden = true;
     openState = false;
+    appsWaiting = false;     // the next open asks for the index again
     clearRows();
     paintHighlight();
   }
@@ -773,9 +894,26 @@
    * omnibox, then send the same Enter keydown app.js already listens for.
    * Tab creation, Claude tabs and focus handling stay in one place.
    */
-  function commit(index) {
+  function commit(index, withShift) {
     var row = rows[index];
     if (!row) return;
+
+    // An app row never navigates: it launches, and the bar goes back to
+    // showing the page that is actually on screen.
+    if (row.kind === 'app' && row.app) {
+      close();
+      try {
+        if (withShift && typeof row.app.runInTab === 'function') row.app.runInTab();
+        else if (typeof row.app.run === 'function') row.app.run();
+      } catch (err) { /* a dead launcher must not wedge the bar */ }
+      if (omniboxEl) {
+        omniboxEl.blur();
+        if (typeof syncOmniboxFromActive === 'function') syncOmniboxFromActive(true);
+        else omniboxEl.value = typedValue;
+      }
+      return;
+    }
+
     var url = row.url;
     close();
     omniboxEl.value = url;
@@ -817,6 +955,15 @@
 
     if (key === 'Enter') {
       if (!openState) return;
+      // An app row is the one case the lens acts on itself. app.js has its
+      // own bubble-phase Enter handler on this same element, so the event
+      // has to die here or the typed text would navigate as well.
+      if (hi >= 0 && rows[hi] && rows[hi].kind === 'app') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        commit(hi, !!event.shiftKey);
+        return;
+      }
       // A highlighted history row rewrites the bar before app.js reads it.
       // The default row needs nothing: app.js already resolves the typed text.
       if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') {

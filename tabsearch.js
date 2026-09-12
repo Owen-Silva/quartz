@@ -497,14 +497,15 @@
   function ensureApps() {
     if (appsAsked) return;
     var api = appsApiRef();
-    if (!api) { appsAsked = true; appsCache = []; return; }
+    if (!api) { appsAsked = true; appsCache = []; flushAppsReady(); return; }
     appsAsked = true;
     var pending = null;
-    try { pending = api.list(); } catch (err) { appsCache = []; return; }
+    try { pending = api.list(); } catch (err) { appsCache = []; flushAppsReady(); return; }
     if (!pending || typeof pending.then !== 'function') { setApps(pending); return; }
     try {
-      pending.then(function (answer) { setApps(answer); }, function () { appsCache = []; });
-    } catch (err) { appsCache = []; }
+      pending.then(function (answer) { setApps(answer); },
+        function () { appsCache = []; flushAppsReady(); });
+    } catch (err) { appsCache = []; flushAppsReady(); }
   }
 
   /** Park one answer and, if the list is on screen right now, re-render it. */
@@ -526,6 +527,7 @@
     }
     list.sort(function (a, b) { return a.name.localeCompare(b.name); });
     appsCache = list;
+    flushAppsReady();                          // the omnibox lens can ask now
     if (open_) render(hi < 0 ? 0 : hi);        // app rows show in both modes
   }
 
@@ -534,6 +536,10 @@
     appsCache = null;
     appsAsked = false;
     if (open_) { ensureApps(); render(hi < 0 ? 0 : hi); }
+    // The palette is closed but the omnibox lens is waiting on the index: the
+    // refresh just dropped what it was going to read, so fetch it again rather
+    // than leave that callback pending until the palette is next opened.
+    else if (readyWaiters.length) ensureApps();
   }
 
   /** app.js's running map (id -> { running, pids }) for the last sample. */
@@ -543,6 +549,48 @@
     var map = null;
     try { map = fn(); } catch (err) { return {}; }
     return (map && typeof map === 'object') ? map : {};
+  }
+
+  /** A pid list main will accept: whole positive numbers, at most 64 of them. */
+  function focusablePids(pids) {
+    var out = [];
+    if (!Array.isArray(pids)) return out;
+    for (var i = 0; i < pids.length && out.length < 64; i++) {
+      var pid = pids[i];
+      if (typeof pid === 'number' && isFinite(pid) && pid > 0 && Math.floor(pid) === pid) out.push(pid);
+    }
+    return out;
+  }
+
+  /** The reasons that mean "focus found nothing to raise, so start it". */
+  var FOCUS_GONE = /no window|no longer running|no-window|no-process|bad pid/i;
+
+  /** Start one app, swallowing whatever the bridge does about it. */
+  function launchApp(api, id) {
+    try {
+      if (typeof api.launch !== 'function') return;
+      var pending = api.launch(id);
+      if (pending && typeof pending.catch === 'function') pending.catch(function () {});
+    } catch (err) { /* the bridge went away: nothing to open */ }
+  }
+
+  /**
+   * Raise a running app, and start it when there turns out to be nothing to
+   * raise. main searches EVERY pid it is handed plus their children, so the
+   * whole list goes over — a multi-process app's pids[0] is often a helper
+   * with no window of its own, which is what made a press do nothing at all.
+   */
+  function focusOrLaunch(api, id, pids) {
+    var list = focusablePids(pids);
+    if (!list.length || typeof api.focus !== 'function') { launchApp(api, id); return; }
+    var answer = null;
+    try { answer = api.focus(list.length > 1 ? list : list[0]); } catch (err) { launchApp(api, id); return; }
+    if (!answer || typeof answer.then !== 'function') return;
+    try {
+      answer.then(function (res) {
+        if (res && res.ok === false && FOCUS_GONE.test(String(res.reason || ''))) launchApp(api, id);
+      }, function () { /* the call itself failed: leave the desktop alone */ });
+    } catch (err) { /* not a real promise */ }
   }
 
   /** One app as a palette row: switch to it when it is up, start it when not. */
@@ -566,8 +614,8 @@
         try { api = window.api && window.api.apps; } catch (err) { api = null; }
         if (!api) return;
         try {
-          if (running && pids.length && typeof api.focus === 'function') api.focus(pids[0]);
-          else if (typeof api.launch === 'function') api.launch(entry.id);
+          if (running && pids.length) focusOrLaunch(api, entry.id, pids);
+          else launchApp(api, entry.id);
         } catch (err) { /* the bridge went away: nothing to open */ }
       }
     };
@@ -789,19 +837,29 @@
    * otherwise show no terminal rows at all.
    */
   var programsAsked = false;
+  /**
+   * ...and whether that answer (or the news that there will never be one) has
+   * landed, which is half of what whenAppsReady() waits on. Every arm below
+   * sets it: a build with no pty bridge is "landed" too, because nothing is
+   * coming and a lens that waited for it would wait forever.
+   */
+  var programsLanded = false;
   function ensurePrograms() {
     if (programsAsked) return;
     var fn = globalRef(function () { return ensurePtyPrograms; });
-    if (typeof fn !== 'function') return;   // an older app.js: no rows, no retry
+    // an older app.js: no rows, no retry
+    if (typeof fn !== 'function') { programsLanded = true; return; }
     programsAsked = true;
     var pending = null;
-    try { pending = fn(); } catch (err) { return; }
-    if (!pending || typeof pending.then !== 'function') return;
+    try { pending = fn(); } catch (err) { programsLanded = true; return; }
+    if (!pending || typeof pending.then !== 'function') { programsLanded = true; return; }
     try {
       pending.then(function () {
+        programsLanded = true;
+        flushAppsReady();
         if (open_) render(hi < 0 ? 0 : hi);
-      }, function () { /* no table: no rows */ });
-    } catch (err) { /* not a real promise */ }
+      }, function () { programsLanded = true; flushAppsReady(); });
+    } catch (err) { programsLanded = true; /* not a real promise */ }
   }
 
   function termCommand(row) {
@@ -835,6 +893,290 @@
       hits.push(cmd);
     }
     return hits.slice(0, MAX_APPS);
+  }
+
+  /* --- the same apps, for the omnibox lens ------------------------ */
+
+  /*
+   * The omnibox dropdown (history.js) offers apps beside its history hits, and
+   * it has no palette of its own to ask. These two calls are that whole
+   * surface, and neither changes anything up there:
+   *
+   *   appMatches(q, n)     the rows, from the SAME caches and carrying the
+   *                        SAME run() closures the palette rows carry, so a
+   *                        press in the lens and a press in the palette are
+   *                        the identical call.
+   *   whenAppsReady(cb)    "the caches have landed" — a lens that asked while
+   *                        the index was still in flight would show no apps
+   *                        and never know to ask again.
+   *
+   * Nothing here waits and nothing here throws: a source this build does not
+   * have (no api.apps, no window.WEBAPPS, no pty table) simply contributes no
+   * rows. And a lens query is a query for a NAME: the palette's rows match on
+   * their label, which is "Open Notepad", so typing "open" in the address bar
+   * would otherwise light up every app on the machine. Below, only the name is
+   * ever looked at.
+   */
+
+  /** Rows in name order within a rank: an app, then a site, then a terminal. */
+  var LENS_KIND_ORDER = { app: 0, web: 1, term: 2 };
+
+  /** The name, split into words — the unit a query word may prefix. */
+  function lensNameWords(lower) {
+    var parts = String(lower || '').split(/[^a-z0-9]+/);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) if (parts[i]) out.push(parts[i]);
+    return out;
+  }
+
+  /**
+   * How well one app NAME answers one query, or -1 when it does not answer it
+   * at all. Pure, and the whole of the lens's ranking:
+   *   0  the name IS the query          2  every word is a word-prefix
+   *   1  the name starts with the query  3  the query only appears inside it
+   * A query word lands when it starts a word of the name ("dis" → Discord) or
+   * is simply inside the name ("shell" → PowerShell); a word that does neither
+   * rules the name out, however well the others did.
+   */
+  function rankAppName(name, query) {
+    var lower = String(name == null ? '' : name).trim().toLowerCase();
+    var q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q || !lower) return -1;
+    var words = tokenize(q);
+    if (!words.length) return -1;
+    var parts = lensNameWords(lower);
+    var allPrefix = true;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      var prefix = false;
+      for (var j = 0; j < parts.length; j++) {
+        if (parts[j].indexOf(w) === 0) { prefix = true; break; }
+      }
+      if (prefix) continue;
+      allPrefix = false;
+      if (lower.indexOf(w) < 0) return -1;
+    }
+    if (lower === q) return 0;
+    if (lower.indexOf(q) === 0) return 1;
+    return allPrefix ? 2 : 3;
+  }
+
+  /**
+   * What makes two installed entries the SAME app to the person typing: the
+   * name, and only the name. Windows hands out one entry per shortcut, so
+   * Discord arrives twice — once pointing at discord.exe and once at the
+   * Squirrel update.exe that starts it — and a key that read the exe would
+   * call those two different apps and print "Discord" twice. Three rows of one
+   * name is the lens's whole shortlist gone on a single app.
+   * @returns {string} '' when there is no name to collapse on
+   */
+  function lensAppKey(entry) {
+    return String((entry && entry.name) || '').trim().toLowerCase();
+  }
+
+  /**
+   * Of two rows for the same app, the one worth keeping: the one already
+   * hosted in a tab, else the one that is up (main judges running by the exe,
+   * so the entry whose program is actually going is the one whose press will
+   * find it), else — a tie — the one the index listed first.
+   */
+  function lensAppBetter(next, kept) {
+    if (next.open !== kept.open) return next.open;
+    if (next.running !== kept.running) return next.running;
+    return false;                              // same standing: first one wins
+  }
+
+  /** One installed app as a lens row. Its two presses are the palette's two. */
+  function lensAppRow(entry, state) {
+    var running = !!(state && state.running);
+    var inTab = !!openNativeTabFor(entry.id);
+    return {
+      id: 'app:' + entry.id,
+      kind: 'app',
+      name: entry.name,
+      badge: 'App',
+      hint: inTab ? 'In a tab, switch to it' : (running ? 'Running, switch to it' : 'Open'),
+      iconDataUrl: entry.iconDataUrl || undefined,
+      glyph: GLYPH.app,
+      running: running,
+      open: inTab,
+      // The plain press: the tab when it is hosted, the pid when it is up,
+      // a launch when it is not — appCommand()'s own run, not a copy of it.
+      run: appCommand(entry, state).run,
+      // ...and the second press the palette spells "Open X in a tab".
+      runInTab: nativeAppCommand(entry).run
+    };
+  }
+
+  /** One catalogue site as a lens row. */
+  function lensWebRow(entry) {
+    var name = (typeof entry.name === 'string' && entry.name) ? entry.name : entry.id;
+    var openTab = !!openAppTabFor(entry.id);
+    var hint;
+    if (openTab) hint = 'Switch to its tab';
+    else if (entry.drm) hint = 'Protected playback needs the desktop app';
+    else hint = (typeof entry.host === 'string' && entry.host) ? entry.host : 'Open in a tab';
+    return {
+      id: 'web:' + entry.id,
+      kind: 'web',
+      name: name,
+      badge: 'Web app',
+      hint: hint,
+      iconDataUrl: undefined,
+      glyph: GLYPH.globe,
+      running: false,
+      open: openTab,
+      run: webAppCommand(entry).run,
+      // A site has no desktop window to host: one press is all there is.
+      runInTab: undefined
+    };
+  }
+
+  /** One pty program as a lens row. */
+  function lensTermRow(row) {
+    // The dock's ids already read 'term:pwsh': prefixing again would spell it
+    // twice. The id below is unique because the dock's is.
+    var bare = row.id.replace(/^term:/, '');
+    return {
+      id: 'term:' + bare,
+      kind: 'term',
+      name: (typeof row.name === 'string' && row.name) ? row.name : bare,
+      badge: 'Terminal',
+      hint: 'New terminal tab',
+      iconDataUrl: undefined,
+      glyph: GLYPH.claude,
+      running: false,
+      open: false,
+      run: termCommand(row).run,
+      runInTab: undefined
+    };
+  }
+
+  /**
+   * The app rows for one omnibox query: installed apps, catalogue sites and
+   * terminals together, best name first, capped. Synchronous and cache-only —
+   * a list still in flight contributes nothing and whenAppsReady() is how the
+   * lens hears about it.
+   * @param {string} query
+   * @param {number} [limit] at most this many rows; 3 unless it is a count
+   * @returns {Array<Object>} see the block comment above this section
+   */
+  function appMatches(query, limit) {
+    ensureApps();
+    ensurePrograms();
+    var cap = (typeof limit === 'number' && isFinite(limit)
+      && limit > 0 && Math.floor(limit) === limit) ? limit : 3;
+    var q = String(query == null ? '' : query).trim();
+    if (!q) return [];
+
+    var hits = [];
+    var i, rank, entry;
+    try {
+      var installed = (appsCache && appsCache.length) ? appsCache : [];
+      var map = installed.length ? appRunningMap() : {};
+      // One row per PROGRAM, not per shortcut — and collapsed here rather than
+      // after the cap, so the duplicate never costs the catalogue its seat.
+      var seen = Object.create(null);
+      for (i = 0; i < installed.length && hits.length < 400; i++) {
+        entry = installed[i];
+        rank = rankAppName(entry.name, q);
+        if (rank < 0) continue;
+        var appRow = lensAppRow(entry, map[entry.id]);
+        var key = lensAppKey(entry);
+        if (key) {
+          var at = seen[key];
+          if (at !== undefined) {
+            if (lensAppBetter(appRow, hits[at].row)) hits[at] = { rank: rank, row: appRow };
+            continue;
+          }
+          seen[key] = hits.length;
+        }
+        hits.push({ rank: rank, row: appRow });
+      }
+
+      var web = webAppRows();
+      for (i = 0; i < web.length && hits.length < 400; i++) {
+        entry = web[i];
+        if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
+        rank = rankAppName((typeof entry.name === 'string' && entry.name) ? entry.name : entry.id, q);
+        if (rank < 0) continue;
+        hits.push({ rank: rank, row: lensWebRow(entry) });
+      }
+
+      // Exactly what termCommands() lists: the available programs, and never
+      // Claude (a Claude tab is its own verb, with its own keys on it).
+      var progs = programRows();
+      for (i = 0; i < progs.length && hits.length < 400; i++) {
+        entry = progs[i];
+        if (!entry || typeof entry.id !== 'string' || !entry.id || !entry.available) continue;
+        if (entry.id === 'term:claude') continue;
+        rank = rankAppName(entry.name, q);
+        if (rank < 0) continue;
+        hits.push({ rank: rank, row: lensTermRow(entry) });
+      }
+    } catch (err) {
+      // The lens is a dropdown, not a page: a source that blew up costs it
+      // whatever rows it had built, never the history hits beside them.
+      return [];
+    }
+
+    hits.sort(function (a, b) {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.row.open !== b.row.open) return a.row.open ? -1 : 1;
+      if (a.row.running !== b.row.running) return a.row.running ? -1 : 1;
+      var ka = LENS_KIND_ORDER[a.row.kind], kb = LENS_KIND_ORDER[b.row.kind];
+      if (ka !== kb) return ka - kb;
+      var na = String(a.row.name).toLowerCase(), nb = String(b.row.name).toLowerCase();
+      return na < nb ? -1 : (na > nb ? 1 : 0);
+    });
+
+    var out = [];
+    for (i = 0; i < hits.length && out.length < cap; i++) out.push(hits[i].row);
+    return out;
+  }
+
+  /* --- "ask me again when the caches land" ------------------------ */
+
+  /** Registered whenAppsReady() callbacks, each fired once and dropped. */
+  var readyWaiters = [];
+
+  /** The installed index has an answer (even an empty one) parked. */
+  function appsLanded() { return appsCache !== null; }
+
+  /** The program table has one — or app.js's copy is already full. */
+  function programsReady() {
+    if (programsLanded) return true;
+    var list = programRows();
+    return !!(list && list.length);
+  }
+
+  /** Both caches are in: fire every waiter once, and drop them all. */
+  function flushAppsReady() {
+    if (!readyWaiters.length) return;
+    if (!appsLanded() || !programsReady()) return;
+    var waiting = readyWaiters;
+    readyWaiters = [];                         // fired once, never again
+    for (var i = 0; i < waiting.length; i++) {
+      try { waiting[i](); } catch (err) { /* one bad callback is not the rest */ }
+    }
+  }
+
+  /**
+   * Call cb() once the installed index AND the program table have landed —
+   * right now when they already have (or when this build has neither bridge,
+   * so nothing ever will). The registration is dropped the moment it fires, so
+   * a lens that asks on every keystroke does not pile them up.
+   * @param {Function} cb
+   */
+  function whenAppsReady(cb) {
+    if (typeof cb !== 'function') return;
+    ensureApps();
+    ensurePrograms();
+    if (appsLanded() && programsReady()) {
+      try { cb(); } catch (err) { /* the caller's problem, not the palette's */ }
+      return;
+    }
+    readyWaiters.push(cb);
   }
 
   /**
@@ -1830,6 +2172,9 @@
     handleShortcut: handleShortcut,
     // app.js calls this after api.apps.refresh(): the cached list is stale.
     appsChanged: appsChanged,
+    // The omnibox lens (history.js) asks for app rows with these two.
+    appMatches: appMatches,
+    whenAppsReady: whenAppsReady,
     // Pure model, reachable so it can be exercised without a window.
     _helpers: {
       describeTab: describeTab,
@@ -1878,7 +2223,17 @@
       ensurePrograms: ensurePrograms,
       termCommands: termCommands,
       termCommand: termCommand,
-      programRows: programRows
+      programRows: programRows,
+      // the omnibox lens's rows, and the pure ranking under them
+      appMatches: appMatches,
+      rankAppName: rankAppName,
+      lensAppKey: lensAppKey,
+      lensAppRow: lensAppRow,
+      lensWebRow: lensWebRow,
+      lensTermRow: lensTermRow,
+      whenAppsReady: whenAppsReady,
+      appsReady: function () { return appsLanded() && programsReady(); },
+      waitersOf: function () { return readyWaiters.length; }
     }
   };
 })();
