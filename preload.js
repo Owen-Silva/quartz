@@ -375,7 +375,12 @@ contextBridge.exposeInMainWorld('api', {
   // where reason is one of 'unavailable' (this build cannot do it at all),
   // 'refused', 'bad-request', 'unknown-app', 'no-window', 'gone',
   // 'store-app' (a UWP/Store window, which cannot be hosted), 'own-window',
-  // 'already-attached', 'not-attached', or a '*-failed'.
+  // 'not-top-level' (already somebody's child -- including our own render
+  // widgets), 'owned-window' (a dialog or splash belonging to another window),
+  // 'tool-window' (a palette or tray helper), 'already-attached',
+  // 'not-attached', 'open-pending' (that tab already has an open() running),
+  // 'cancelled' (the tab was detached while its app was still starting), or a
+  // '*-failed'.
   embed: {
     // Hostable windows: visible, titled, top-level, never one of ours.
     // { pid } for one process, { exe: 'notepad' | 'notepad.exe' } for every

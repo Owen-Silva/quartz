@@ -461,6 +461,15 @@ function createWindow() {
   win.on('enter-full-screen', () => send('win:fullscreen', { fullscreen: true }));
   win.on('leave-full-screen', () => send('win:fullscreen', { fullscreen: false }));
 
+  // A chrome renderer that died takes every embedded app window with it in
+  // slow motion: nothing is left to call layout() or detach(), and the HWNDs are
+  // still children of a window that is about to be reloaded or destroyed. Hand
+  // them back the moment it happens -- the apps keep running as normal windows.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    try { embed.detachAll(); } catch { /* nothing left to protect */ }
+    console.warn('[embed] chrome renderer gone:', (details && details.reason) || '?');
+  });
+
   // The chrome itself only ever needs an editing menu (address bar, find box).
   // This IS the focused window, so the built-in roles are the right wiring.
   win.webContents.on('context-menu', (_event, params) => {
@@ -3078,8 +3087,31 @@ async function embedAppEntry(appId) {
  * process. That is loose, but it only runs inside the 20 s window right after
  * the user asked for that app.
  */
+/**
+ * tabId -> { cancelled } for an embed:open still inside its 20 s wait.
+ *
+ * Two things need it. A second open for the SAME tab while one is pending would
+ * launch a second copy of the app and then attach it -- and attach() detaches
+ * whatever that tab already had, so the first app would be handed back to the
+ * desktop mid-flight. And a tab CLOSED during the wait must not have a window
+ * attached to it afterwards: the detach marks the pending open cancelled, and
+ * the winner is thrown away instead of being parented into a tab that is gone.
+ */
+const embedPending = new Map();
+
 async function embedOpen(tabId, appId) {
   if (!embed.available) return { ok: false, reason: 'unavailable' };
+  if (embedPending.has(tabId)) return { ok: false, reason: 'open-pending' };
+  const pending = { cancelled: false };
+  embedPending.set(tabId, pending);
+  try {
+    return await embedOpenInner(tabId, appId, pending);
+  } finally {
+    embedPending.delete(tabId);
+  }
+}
+
+async function embedOpenInner(tabId, appId, pending) {
   const entry = await embedAppEntry(appId);
   if (!entry) return { ok: false, reason: 'unknown-app' };
   const exe = typeof entry.exe === 'string' && entry.exe ? entry.exe : '';
@@ -3087,7 +3119,10 @@ async function embedOpen(tabId, appId) {
   const before = embed.findWindows(exe ? { exe } : {});
   const seen = new Set(before.map((w) => w.hwnd));
   // Already running with a window of its own: host that one.
-  if (exe && before.length) return embed.attach({ tabId, hwnd: before[0].hwnd });
+  if (exe && before.length) {
+    if (pending.cancelled) return { ok: false, reason: 'cancelled' };
+    return embed.attach({ tabId, hwnd: before[0].hwnd });
+  }
 
   const started = await apps.launch(appId).catch(() => ({ ok: false, reason: 'failed' }));
   if (!started || started.ok === false) {
@@ -3097,6 +3132,9 @@ async function embedOpen(tabId, appId) {
   const deadline = Date.now() + EMBED_OPEN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await sleep(EMBED_OPEN_POLL_MS);
+    // The wait is awaited, never spun: every other IPC call (embed:list, a
+    // layout, a detach) is answered normally while it runs.
+    if (pending.cancelled) return { ok: false, reason: 'cancelled' };
     const now = embed.findWindows(exe ? { exe } : {});
     const fresh = now.find((w) => !seen.has(w.hwnd));
     if (fresh) {
@@ -3147,7 +3185,11 @@ ipcMain.handle('embed:layout', (event, payload) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
   const req = payload && typeof payload === 'object' ? payload : {};
   try {
-    return embed.layout(req.tabId, req.rect || req, req.visible !== false);
+    // req.rect ONLY: falling back to the payload itself turned a malformed
+    // call into a 0x0 rect, which reads as "hide this app's window".
+    const box = req.rect && typeof req.rect === 'object' ? req.rect : null;
+    if (!box) return { ok: false, reason: 'bad-request' };
+    return embed.layout(req.tabId, box, req.visible !== false);
   } catch {
     return { ok: false, reason: 'failed' };
   }
@@ -3157,6 +3199,10 @@ ipcMain.handle('embed:detach', (event, payload) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
   const req = payload && typeof payload === 'object' ? payload : {};
   try {
+    // A tab closing while its app is still starting: cancel the wait, or the
+    // window would be attached to a tab that no longer exists.
+    const pending = embedPending.get(String(req.tabId == null ? '' : req.tabId));
+    if (pending) pending.cancelled = true;
     return embed.detach(req.tabId, { restore: req.restore !== false });
   } catch {
     return { ok: false, reason: 'failed' };

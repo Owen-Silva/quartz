@@ -37,7 +37,7 @@
  * a string, a number or a BigInt.
  */
 
-const { app, screen } = require('electron');
+const { app, screen, BrowserWindow } = require('electron');
 const EventEmitter = require('events');
 
 // ---------------------------------------------------------------------------
@@ -63,6 +63,9 @@ const DECORATION = WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX
 const GWL_STYLE = -16;
 const GWL_EXSTYLE = -20;
 
+/** A tool window is a palette/tooltip/tray helper, never a document window. */
+const WS_EX_TOOLWINDOW = 0x00000080n;
+
 const SWP_NOSIZE = 0x0001;
 const SWP_NOMOVE = 0x0002;
 const SWP_NOACTIVATE = 0x0010;
@@ -74,12 +77,22 @@ const SWP_HIDEWINDOW = 0x0080;
 const HWND_TOP = 0n;
 
 const SW_HIDE = 0;
-const SW_RESTORE = 9;
+/** Restore/show WITHOUT activating. SW_RESTORE DOES activate a window, and the user
+ *  is at the machine: hosting a minimised app must never take his keyboard. */
+const SW_SHOWNOACTIVATE = 4;
 
 const WM_CLOSE = 0x0010;
 
 const GA_PARENT = 1;
 const GA_ROOT = 2;
+
+/** GetWindow(GW_OWNER): a window's OWNER, which is not its parent. An owned
+ *  window is a dialog, splash or palette belonging to another window; hosting
+ *  one leaves its owner behind on the desktop still driving it, so they are
+ *  refused. (An owned window's GA_ROOT is itself, so the top-level test below
+ *  does NOT catch them -- measured: a credential dialog owned by this very
+ *  browser window enumerated as "hostable".) */
+const GW_OWNER = 4;
 
 /** OpenProcess access that a non-elevated process is allowed to ask for. */
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -140,6 +153,7 @@ function loadWin32() {
       SetWindowLongPtrW: user32.func('intptr_t __stdcall SetWindowLongPtrW(void *h, int idx, intptr_t v)'),
       SetParent: user32.func('void * __stdcall SetParent(void *child, void *parent)'),
       GetParent: user32.func('void * __stdcall GetParent(void *h)'),
+      GetWindow: user32.func('void * __stdcall GetWindow(void *h, uint32_t cmd)'),
       GetAncestor: user32.func('void * __stdcall GetAncestor(void *h, uint32_t flags)'),
       SetWindowPos: user32.func('bool __stdcall SetWindowPos(void *h, void *after, int x, int y, int cx, int cy, uint32_t flags)'),
       ShowWindow: user32.func('bool __stdcall ShowWindow(void *h, int cmd)'),
@@ -297,6 +311,61 @@ function create(opts) {
     }
   }
 
+  /** Our own top-level HWNDs (every BrowserWindow, not just the chrome). */
+  function ourHandles() {
+    const out = new Set();
+    try {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try {
+          if (w.isDestroyed()) continue;
+          const buf = w.getNativeWindowHandle();
+          if (buf && buf.length >= 8) out.add(buf.readBigUInt64LE(0));
+        } catch { /* skip that window */ }
+      }
+    } catch { /* no BrowserWindow in a unit test */ }
+    return out;
+  }
+
+  function windowExStyle(handle) {
+    try { return BigInt(w32.GetWindowLongPtrW(handle, GWL_EXSTYLE)) & 0xffffffffn; }
+    catch { return 0n; }
+  }
+
+  /**
+   * The single gate for "may this window be hosted in a tab", used by BOTH the
+   * sweep and attach(): a caller can hand attach() any HWND at all, so the
+   * checks cannot live only in findWindows().
+   *
+   * Returns null when the window is hostable, or the refusal reason:
+   *   'gone'           IsWindow says no
+   *   'not-top-level'  it is already somebody's child (including OUR OWN
+   *                    Chromium render-widget HWNDs, whose root is our window --
+   *                    re-parenting one of those breaks the browser itself)
+   *   'own-window'     it is one of ours, or lives in this process
+   *   'owned-window'   it has an owner: a dialog/splash/palette, not an app
+   *   'tool-window'    WS_EX_TOOLWINDOW: a palette or tray helper
+   *   'store-app'      a UWP frame or CoreWindow (see attach()'s notes)
+   */
+  function hostable(handle, ours) {
+    try { if (!w32.IsWindow(handle)) return 'gone'; } catch { return 'gone'; }
+    const mine = ours || ourHandles();
+    if (mine.has(handle)) return 'own-window';
+    let root;
+    try { root = w32.GetAncestor(handle, GA_ROOT); } catch { return 'gone'; }
+    if (root !== handle) return 'not-top-level';
+    let parentOf = null;
+    try { parentOf = w32.GetParent(handle); } catch { parentOf = null; }
+    if (parentOf) return 'not-top-level';
+    let owner = null;
+    try { owner = w32.GetWindow(handle, GW_OWNER); } catch { owner = null; }
+    if (owner) return 'owned-window';
+    if (windowExStyle(handle) & WS_EX_TOOLWINDOW) return 'tool-window';
+    const pid = windowPid(handle);
+    if (!pid || pid === process.pid) return 'own-window';
+    if (STORE_CLASSES.has(windowClass(handle).toLowerCase())) return 'store-app';
+    return null;
+  }
+
   function windowPid(handle) {
     try {
       const out = [0];
@@ -371,17 +440,17 @@ function create(opts) {
     const wantExe = normalizeExe(spec.exe);
     const out = [];
     counters.finds += 1;
+    const ours = ourHandles();
 
     try {
       w32.EnumWindows((handle) => {
         try {
           if (!w32.IsWindowVisible(handle)) return true;
-          // EnumWindows is documented as top-level only, but a window whose
-          // root is not itself is a child of something and not ours to host.
-          if (w32.GetAncestor(handle, GA_ROOT) !== handle) return true;
           const pid = windowPid(handle);
-          if (!pid || pid === process.pid) return true;          // never our own
           if (wantPid && pid !== wantPid) return true;
+          // One gate for the sweep and for attach(): top-level, unowned, not a
+          // tool window, not a Store frame, and never one of ours.
+          if (hostable(handle, ours)) return true;
           const title = windowTitle(handle);
           if (!title) return true;                                // untitled = plumbing
           const exe = exeForPid(pid);
@@ -416,6 +485,17 @@ function create(opts) {
    *   'own-window'        it is one of ours
    *   'store-app'         a UWP/Store window (see below)
    *   'already-attached'  that exact window is already in a tab
+   *   'not-top-level' / 'owned-window' / 'tool-window'  see hostable()
+   *
+   * THE COST NOBODY SEES: SetParent across processes ATTACHES THE TWO INPUT
+   * QUEUES (the child's thread and the parent's thread share one), which is how
+   * a hung app becomes a hung browser -- Windows serialises input for both
+   * threads. There is no way around it while hosting a foreign HWND, so the
+   * rule for everything in this module is: NEVER make a call that waits on the
+   * app's message loop. IsWindow / GetParent / GetWindowLongPtr read kernel
+   * state and cannot block; GetWindowText on another process’s window returns
+   * the cached caption (it does not send WM_GETTEXT, by design); closing uses
+   * PostMessage, never SendMessage. Keep it that way.
    *
    * WHY STORE APPS ARE REFUSED: a packaged app's visible window is an
    * ApplicationFrameWindow owned by ApplicationFrameHost.exe, hosting the app's
@@ -436,23 +516,27 @@ function create(opts) {
     const parent = browserHandle();
     if (!parent) return { ok: false, reason: 'no-window' };
 
-    try {
-      if (!w32.IsWindow(handle)) return { ok: false, reason: 'gone' };
-    } catch {
-      return { ok: false, reason: 'gone' };
-    }
-
     if (handle === parent) return { ok: false, reason: 'own-window' };
-    const pid = windowPid(handle);
-    if (!pid || pid === process.pid) return { ok: false, reason: 'own-window' };
 
-    const className = windowClass(handle);
-    if (STORE_CLASSES.has(className.toLowerCase())) return { ok: false, reason: 'store-app' };
-
+    // FIRST, before any window test: a window WE are already hosting is a child
+    // of ours by now, so every check below would call it 'not-top-level' and the
+    // caller would never learn the real answer.
     const key = handleText(handle);
     const holder = byHandle.get(key);
     if (holder && holder !== tabId && attached.has(holder)) return { ok: false, reason: 'already-attached' };
     if (holder === tabId) return { ok: false, reason: 'already-attached' };
+
+    // A caller may hand us ANY handle, so the whole gate runs here too: a
+    // Chromium render-widget HWND (a child of our own window), an owned dialog,
+    // a tool window and an already-parented child are all refused. Attaching
+    // any of them is not a cosmetic mistake -- re-parenting a window that is
+    // already someone's child, or restoring a top-level style onto it later,
+    // leaves a window its owner can no longer drive.
+    const refusal = hostable(handle, ourHandles());
+    if (refusal) return { ok: false, reason: refusal };
+
+    const pid = windowPid(handle);
+    const className = windowClass(handle);
 
     // One tab hosts one window: a second attach on the same tab puts the
     // previous app back where it came from rather than orphaning it.
@@ -476,6 +560,7 @@ function create(opts) {
       title: windowTitle(handle),
       className,
       exe: exeForPid(pid),
+      parentHwnd: parent,
       saved: { style, exstyle, rect, parent: w32.GetParent(handle) },
       last: null,          // last physical rect + visibility we applied
       visible: false,
@@ -483,8 +568,9 @@ function create(opts) {
 
     try {
       // A minimised window has nothing to show and cannot be sized: restore it
-      // first (SW_RESTORE does not activate a window that is not foreground).
-      if (w32.IsIconic(handle)) w32.ShowWindow(handle, SW_RESTORE);
+      // first. SW_SHOWNOACTIVATE, not SW_RESTORE: SW_RESTORE ACTIVATES the
+      // window, which would take the user's keyboard the moment a tab opens.
+      if (w32.IsIconic(handle)) w32.ShowWindow(handle, SW_SHOWNOACTIVATE);
 
       const childStyle = (style & ~DECORATION) | WS_CHILD;
 
@@ -515,12 +601,16 @@ function create(opts) {
       w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
         SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
     } catch (err) {
-      // Half-done is the worst outcome: put back whatever went through.
+      // Half-done is the worst outcome, and the worst half-done state of all is
+      // WS_CHILD with no parent -- an invisible window nothing can reach again.
+      // So every undo step gets its OWN try: a throw in one must not skip the
+      // style restore that follows it.
+      try { w32.SetParent(handle, record.saved.parent || 0n); } catch { /* next */ }
+      try { w32.SetWindowLongPtrW(handle, GWL_STYLE, style); } catch { /* next */ }
+      try { w32.SetWindowLongPtrW(handle, GWL_EXSTYLE, exstyle); } catch { /* next */ }
       try {
-        w32.SetParent(handle, record.saved.parent || 0n);
-        w32.SetWindowLongPtrW(handle, GWL_STYLE, style);
         w32.SetWindowPos(handle, HWND_TOP, rect.left, rect.top,
-          rect.right - rect.left, rect.bottom - rect.top,
+          Math.max(0, rect.right - rect.left), Math.max(0, rect.bottom - rect.top),
           SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
       } catch { /* nothing further to try */ }
       log('embed: attach failed', err && err.message);
@@ -626,10 +716,42 @@ function create(opts) {
     try { alive2 = !!w32.IsWindow(record.handle); } catch { alive2 = false; }
     if (!alive2) return { ok: true, hwnd: record.key, restored: false, reason: 'gone' };
 
+    // STEP AT A TIME. The two states worth avoiding are "WS_CHILD with no
+    // parent" (an unreachable zombie) and "still our child when we are about to
+    // be destroyed" (the app dies with the browser), so the un-parent decides
+    // what follows: if it did not take, the record goes BACK into the map so the
+    // poll, the next detach and the shutdown path all try again, and the styles
+    // are left alone -- a working child window beats a broken top-level one.
+    let unparented = false;
     try {
       w32.SetParent(record.handle, 0n);                         // back to the desktop
-      w32.SetWindowLongPtrW(record.handle, GWL_STYLE, record.saved.style);
-      w32.SetWindowLongPtrW(record.handle, GWL_EXSTYLE, record.saved.exstyle);
+      unparented = true;
+    } catch (err) {
+      log('embed: SetParent(desktop) threw', key, err && err.message);
+    }
+    try {
+      // MEASURED, and it cost a broken Paint window to learn: a window that is
+      // still WS_CHILD after SetParent(null) is a child OF THE DESKTOP, and
+      // GetParent then returns the desktop HWND -- not null. Testing GetParent
+      // for truthiness therefore reads every successful un-parent as a failure,
+      // skips the style restore, and leaves exactly the WS_CHILD-with-no-real-
+      // parent zombie this code exists to prevent. The only question that has a
+      // stable answer is "is it still OUR child".
+      if (unparented && record.parentHwnd
+        && w32.GetParent(record.handle) === record.parentHwnd) unparented = false;
+    } catch { /* trust the call above */ }
+
+    if (!unparented) {
+      attached.set(key, record);
+      byHandle.set(record.key, key);
+      startPoll();
+      log('embed: detach failed, window kept as a child for a retry', key);
+      return { ok: false, reason: 'detach-failed', hwnd: record.key };
+    }
+
+    try { w32.SetWindowLongPtrW(record.handle, GWL_STYLE, record.saved.style); } catch { /* next */ }
+    try { w32.SetWindowLongPtrW(record.handle, GWL_EXSTYLE, record.saved.exstyle); } catch { /* next */ }
+    try {
       const r = record.saved.rect;
       if (restore) {
         w32.SetWindowPos(record.handle, HWND_TOP, r.left, r.top,
@@ -642,8 +764,7 @@ function create(opts) {
           SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW);
       }
     } catch (err) {
-      log('embed: detach failed', key, err && err.message);
-      return { ok: false, reason: 'detach-failed', hwnd: record.key };
+      log('embed: detach reposition failed', key, err && err.message);
     }
 
     log('embed: detached', key, record.key, restore ? 'restored' : 'hidden');
@@ -723,6 +844,11 @@ function create(opts) {
    * Apps close themselves, crash, or (rarely) re-parent their own window out
    * from under us. One IsWindow call per attached tab per second is enough to
    * notice, and costs nothing measurable with a handful of tabs.
+   *
+   * IsWindow and GetParent ONLY. Our input queue is attached to the app's (see
+   * attach()), so a poll tick that used SendMessage -- or anything else that
+   * waits on the app's message loop -- would freeze the browser's own input
+   * every second a hosted app was wedged.
    */
   function startPoll() {
     if (pollTimer || !win32()) return;
