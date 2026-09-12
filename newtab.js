@@ -1757,10 +1757,13 @@ function rebuildDockRow() {
   dockRow.replaceChildren(frag);
 }
 
-/** The add tile is there while the row is being edited, and while it is empty. */
+/** The add tile is there while the row is being edited, and while it is empty.
+    It also stays while its own picker is open: pinning the first app fills the
+    row, and taking the tile away under an open picker would leave the picker
+    with nothing to close it (the only other way out is Escape in the field). */
 function syncDockAdd() {
   if (!dockAddCell) return;
-  dockAddCell.hidden = !(dockEditing || !dockPins.length);
+  dockAddCell.hidden = !(dockEditing || dockPickerOpen || !dockPins.length);
   if (dockAddTile) dockAddTile.setAttribute('aria-expanded', dockPickerOpen ? 'true' : 'false');
 }
 
@@ -1963,6 +1966,10 @@ function setPickerOpen(open) {
     if (dockResults) dockResults.replaceChildren();
   }
 
+  // The add tile's visibility depends on this flag, so it is re-read here
+  // before the box is measured — closing the picker over a filled row is
+  // what takes the tile away again.
+  syncDockAdd();
   settleDockHeight();
 }
 
@@ -2135,6 +2142,10 @@ function wireDock() {
     dockSearch.addEventListener('input', function () {
       dockActive = 0;
       renderDockResults();
+      // Eight rows or one "No matches" is a different capsule height, and the
+      // board routed its traces around the old one. Debounced in relayoutBoard,
+      // so a typed word is one re-seat and not one per letter.
+      settleDockHeight();
     });
 
     dockSearch.addEventListener('keydown', function (event) {
@@ -2150,7 +2161,10 @@ function wireDock() {
         event.preventDefault();
         event.stopPropagation();
         setPickerOpen(false);
-        if (dockAddTile) dockAddTile.focus();
+        // Closing it can also take the add tile away (a filled row, not being
+        // edited): focus has to land on something that is still on screen.
+        if (dockAddTile && dockAddCell && !dockAddCell.hidden) dockAddTile.focus();
+        else if (dockEditBtn) dockEditBtn.focus();
       }
     });
   }
