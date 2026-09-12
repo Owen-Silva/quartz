@@ -2613,6 +2613,138 @@ function webUrlOrNull(url) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Popups
+//
+// Two different things arrive at setWindowOpenHandler and they need opposite
+// answers:
+//
+//   a LINK (target="_blank", middle-click, shift-click) -> disposition
+//   'foreground-tab' / 'background-tab'. The chrome owns the tab strip, so
+//   these stay as they were: deny the window, send 'open-url', get a tab.
+//
+//   window.open(url, name, features) -> disposition 'new-window'. This is
+//   every OAuth "sign in with Google" popup. A tab has no `window.opener`, so
+//   the credential the popup posts back never lands and the first page sits
+//   there white. These get a REAL child BrowserWindow, which is the only
+//   shape that keeps window.opener alive.
+// ---------------------------------------------------------------------------
+
+/** Defaults when window.open named no size. Tall and narrow, like a chooser. */
+const POPUP_DEFAULT_SIZE = { width: 520, height: 640 };
+const POPUP_MIN = { width: 320, height: 400 };
+const POPUP_MAX = { width: 1200, height: 900 };
+
+/** Pull width/height out of window.open's `features` string, clamped. */
+function popupSizeFromFeatures(features) {
+  const read = (name) => {
+    const hit = new RegExp('(?:^|[,\\s])' + name + '\\s*=\\s*(\\d+)', 'i').exec(
+      typeof features === 'string' ? features : ''
+    );
+    return hit ? Number(hit[1]) : NaN;
+  };
+  const pick = (value, fallback, lo, hi) =>
+    Number.isFinite(value) ? Math.min(Math.max(Math.round(value), lo), hi) : fallback;
+  return {
+    width: pick(read('width'), POPUP_DEFAULT_SIZE.width, POPUP_MIN.width, POPUP_MAX.width),
+    height: pick(read('height'), POPUP_DEFAULT_SIZE.height, POPUP_MIN.height, POPUP_MAX.height),
+  };
+}
+
+/**
+ * BrowserWindow options for a page-opened popup. Deliberately NOT modal: the
+ * sign-in window sits above the browser (parent) but the page behind it stays
+ * interactive, which is what every OAuth flow expects. No preload, no node,
+ * no devtools -- and no `partition`, so it lands on session.defaultSession
+ * like every guest does: same cookies, same ad blocker, same permission
+ * handlers (those hang off the session, not the webContents).
+ */
+function popupWindowOptions(features) {
+  const size = popupSizeFromFeatures(features);
+  const owner = win && !win.isDestroyed() ? win : null;
+  const options = {
+    width: size.width,
+    height: size.height,
+    show: true,
+    parent: owner || undefined,
+    modal: false,
+    autoHideMenuBar: true,
+    title: 'Sign in',
+    backgroundColor: '#05060a',
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: false,
+      devTools: false,
+    },
+  };
+  if (owner) {
+    const bounds = owner.getBounds();
+    options.x = Math.round(bounds.x + (bounds.width - size.width) / 2);
+    options.y = Math.round(bounds.y + (bounds.height - size.height) / 2);
+  }
+  return options;
+}
+
+/** The one decision, shared by guests and by popups' own popups. */
+function windowOpenDecision(details) {
+  const raw = (details && details.url) || '';
+  const disposition = (details && details.disposition) || '';
+  // Google opens the popup on about:blank and sets location afterwards.
+  const blank = raw === '' || /^about:blank/i.test(raw);
+  const url = webUrlOrNull(raw);
+
+  if (disposition === 'new-window' || disposition === 'other') {
+    if (!url && !blank) return { action: 'deny' };
+    return {
+      action: 'allow',
+      outlivesOpener: false,
+      overrideBrowserWindowOptions: popupWindowOptions(details && details.features),
+    };
+  }
+
+  // Links, and anything unrecognised: a tab, exactly as before.
+  if (url) send('open-url', { url, background: disposition === 'background-tab' });
+  return { action: 'deny' };
+}
+
+/**
+ * A child window just opened. Give it the same rules its opener had: no menu
+ * bar, its links become tabs in the chrome, its own popups nest, its title
+ * follows the page, and it never outlives the browser window.
+ */
+function adoptPopupWindow(child) {
+  if (!child || child.isDestroyed()) return;
+  try {
+    child.setMenuBarVisibility(false);
+  } catch {}
+
+  const wc = child.webContents;
+  if (wc && !wc.isDestroyed()) {
+    wc.setWindowOpenHandler(windowOpenDecision);
+    wc.on('did-create-window', (grandchild) => adoptPopupWindow(grandchild));
+    wc.on('page-title-updated', (event, title) => {
+      event.preventDefault();
+      if (!child.isDestroyed() && title) child.setTitle(title);
+    });
+  }
+
+  // `parent` already ties them together on Windows, but a popup surviving the
+  // browser with no way back to it would be the worst version of this feature.
+  const owner = win && !win.isDestroyed() ? win : null;
+  if (!owner) return;
+  const closeChild = () => {
+    if (!child.isDestroyed()) child.close();
+  };
+  owner.once('closed', closeChild);
+  child.once('closed', () => {
+    try {
+      owner.removeListener('closed', closeChild);
+    } catch {}
+  });
+}
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
 
@@ -2621,31 +2753,22 @@ app.on('web-contents-created', (_event, contents) => {
    * window -- including a link inside a cross-origin iframe, which is how
    * Google's account popover spells "Add another account".
    *
-   * This browser has no second window: the chrome owns the tab strip, so the
-   * answer is always 'deny' plus an 'open-url' to the renderer, which turns it
-   * into a tab (the same channel a page's "open link in new tab" menu item
-   * uses). Denying here is what keeps a page from ever getting a bare
-   * BrowserWindow with none of our chrome on it.
+   * windowOpenDecision() above splits them: a link becomes a tab in our own
+   * chrome, a window.open() with features becomes a real child window so
+   * `window.opener` survives (sign-in flows post the credential back through
+   * it). Anything that is not http(s) or about:blank is denied outright.
    *
    * This replaces the <webview> 'new-window' DOM event app.js used to listen
    * for: that event was removed from Electron in v22 and never fires on 44, so
    * every popup in the app was silently dying. setWindowOpenHandler is the
    * modern path -- and it only runs at all because will-attach-webview turns
    * `allowpopups` on.
-   *
-   * Known trade-off: a page that opens a popup and then talks to it through
-   * `window.opener` (the OAuth "sign in with Google" flow is the one that
-   * matters) gets a tab with no opener, so the postMessage back to the first
-   * page never arrives. Fixing that means letting a real child window through
-   * with { action: 'allow' }, which is a bigger change than this one.
    */
-  contents.setWindowOpenHandler((details) => {
-    const url = webUrlOrNull(details && details.url);
-    if (url) {
-      send('open-url', { url, background: details.disposition === 'background-tab' });
-    }
-    return { action: 'deny' };
-  });
+  contents.setWindowOpenHandler(windowOpenDecision);
+
+  // The window the decision above allowed. Everything the popup needs that is
+  // not a BrowserWindow option is wired here.
+  contents.on('did-create-window', (child) => adoptPopupWindow(child));
 
   /*
    * Page-INITIATED navigation to file://. Chromium already refuses this for a
