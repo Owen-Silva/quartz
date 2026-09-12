@@ -4443,7 +4443,13 @@ function setTabLoading(tab, loading) {
 // Segoe Fluent Icons, the same family the nav buttons use.
 //   E767 = speaker (the tab is making a sound), E74F = speaker muted,
 //   E774 = globe (a pinned chip with no favicon of its own).
-const TAB_GLYPH = { audible: '\uE767', muted: '\uE74F', globe: '\uE774', split: '\uE89F' };
+// The last two are the titlebar's own window controls, borrowed on purpose: a
+// chip collapses to its icon with the same E921 dash #win-min draws, and comes
+// back with #win-max's E922 square, so "minimize" is one shape in this chrome.
+const TAB_GLYPH = {
+  audible: '\uE767', muted: '\uE74F', globe: '\uE774', split: '\uE89F',
+  collapse: '\uE921', expand: '\uE922'
+};
 
 function buildChip(tab) {
   const chip = document.createElement('div');
@@ -4483,6 +4489,20 @@ function buildChip(tab) {
   title.className = 'tab-title';
   title.textContent = tab.title;
 
+  // Collapse-to-icon, left of the close button: the same thing Pin tab does,
+  // but reachable without the right-click menu. Page chips only — a Claude
+  // chamber and a hosted native window are not pinnable, and setTabPinned
+  // would refuse them anyway.
+  let collapse = null;
+  if (tab.kind === 'page') {
+    collapse = document.createElement('button');
+    collapse.className = 'tab-collapse';
+    collapse.type = 'button';
+    collapse.title = 'Collapse to icon';
+    collapse.setAttribute('aria-label', 'Collapse tab to icon');
+    collapse.textContent = TAB_GLYPH.collapse;
+  }
+
   const close = document.createElement('button');
   close.className = 'tab-close';
   close.type = 'button';
@@ -4490,7 +4510,23 @@ function buildChip(tab) {
   close.textContent = '×';
 
   chip.appendChild(title);
+  if (collapse) chip.appendChild(collapse);
   chip.appendChild(close);
+
+  // The way back out. A collapsed chip is 40px of favicon with no room for a
+  // button in the row, so this one is a badge in the corner: built once, here,
+  // and shown by chrome.css only while a .pinned chip is hovered.
+  let expand = null;
+  if (tab.kind === 'page') {
+    expand = document.createElement('button');
+    expand.className = 'tab-expand';
+    expand.type = 'button';
+    expand.title = 'Expand tab';
+    expand.setAttribute('aria-label', 'Expand tab');
+    expand.textContent = TAB_GLYPH.expand;
+    chip.appendChild(expand);
+  }
+
   tab.titleEl = title;
   // Truncation is chrome.css's job; the full string stays here for the tooltip.
   chip.title = chipTooltip(tab);
@@ -4522,6 +4558,24 @@ function buildChip(tab) {
     event.stopPropagation();
     closeTab(tab.id);
   });
+  // Both of these swallow the click before the chip's own handler sees it: a
+  // press on either changes the chip's size, it never changes which tab is on
+  // screen. The button guard is belt and braces — a middle-click arrives as
+  // auxclick, not click, so this listener should never see one.
+  if (collapse) {
+    collapse.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (event && event.button) return;
+      setTabPinned(tab, true);
+    });
+  }
+  if (expand) {
+    expand.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (event && event.button) return;
+      setTabPinned(tab, false);
+    });
+  }
 
   wireChipDrag(tab, chip);
   return chip;
@@ -5270,10 +5324,10 @@ function endTabDrag() {
 function wireChipDrag(tab, chip) {
   chip.addEventListener('pointerdown', (event) => {
     if (!event || event.button !== 0 || event.isPrimary === false) return;
-    // The close and speaker buttons own their own clicks; a press on either is
-    // never a drag.
+    // The close, speaker, collapse and expand buttons own their own clicks; a
+    // press on any of them is never a drag.
     if (event.target && event.target.closest
-        && event.target.closest('.tab-close, .tab-audio')) return;
+        && event.target.closest('.tab-close, .tab-audio, .tab-collapse, .tab-expand')) return;
     if (tabDrag) return;
 
     closeTabMenu();

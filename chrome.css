@@ -955,10 +955,27 @@ button.glass:focus-visible {
   transition: opacity 120ms steps(3, end);
 }
 
+/* collapse-to-icon: the close button's twin, one slot to its left. Same box,
+   same fade-in — only the glyph is a notch smaller, because E921 is a bare
+   dash and reads heavy at the × 's size. */
+.tab-collapse {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: var(--icon-font);
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms steps(3, end);
+}
+
 .tab:hover .tab-close,
-.tab.active .tab-close { opacity: 1; }
+.tab.active .tab-close,
+.tab:hover .tab-collapse,
+.tab.active .tab-collapse { opacity: 1; }
 
 .tab-close:hover { background: var(--glass-3); color: var(--fg); }
+.tab-collapse:hover { background: var(--glass-3); color: var(--fg); }
 
 /* --- tab chip states (classes set by app.js) ------------------ */
 
@@ -1066,9 +1083,34 @@ img.tab-icon[src=""],
 }
 
 .tab.pinned .tab-title,
-.tab.pinned .tab-close { display: none; }
+.tab.pinned .tab-close,
+.tab.pinned .tab-collapse { display: none; }
 
 .tab.pinned img.tab-icon { margin-right: 0; }
+
+/* the way back out of pinned. Out of flow, so the 40px row stays exactly the
+   icon it was, and invisible until the chip is hovered — at rest nothing sits
+   over the favicon. Non-pinned chips never build it into the layout at all. */
+.tab .tab-expand { display: none; }
+
+.tab.pinned .tab-expand {
+  display: inline-flex;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--glass-3);
+  color: var(--fg);
+  font-family: var(--icon-font);
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms steps(3, end);
+}
+
+.tab.pinned:hover .tab-expand { opacity: 1; }
 
 /* the globe stands in for a favicon the page never reported: only a pinned
    chip shows it, and only until app.js marks the chip .has-icon */
@@ -1135,7 +1177,9 @@ img.tab-icon[src=""],
 
 /* No close buttons anywhere in the strip while a chip is in the air. Three
    classes deep and after it, so it beats the .tab:hover rule above. */
-body.tab-dragging .tab .tab-close { opacity: 0; }
+body.tab-dragging .tab .tab-close,
+body.tab-dragging .tab .tab-collapse,
+body.tab-dragging .tab.pinned .tab-expand { opacity: 0; }
 
 /* --- window controls (monochrome) ----------------------------- */
 .wincontrols {
@@ -1843,7 +1887,8 @@ body,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; will-change: auto; }
   .tab.loading::after { animation: none; }
-  .tab::after, .tab::before, .tab-close, #omnibox, #zoom-badge,
+  .tab::after, .tab::before, .tab-close, .tab-collapse, .tab.pinned .tab-expand,
+  #omnibox, #zoom-badge,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item { transition: none; }
