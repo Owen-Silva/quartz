@@ -77,9 +77,10 @@
   const PIN_PX = 4;             // how far a pin stands off its component
 
   /* --- live module seats --------------------------------------
-     The clock and the session readout are DOM tiles, and the board seats
-     them: a ring 10px off the glass, pads along one edge, and the cells
-     underneath marked so nothing routes below a tile. */
+     The clock, the session readout and the media tile are DOM tiles, and
+     the board seats all three: a ring 10px off the glass, pads along one
+     edge, and the cells underneath marked so nothing routes below a
+     tile. */
   const MODULE_INFLATE = 10;    // the seat ring stands this far off the tile
   const MODULE_TIGHT = 4;       // and this far, when the capsule is tall
   const MODULE_CLEAR = 2 * CELL;   // and the tile this far off the socket
@@ -87,10 +88,16 @@
   const MODULE_GAP = CELL;      // between the two tiles, and above the socket
 
   /* Which end of the column each tile belongs to. Ids, and nothing else,
-     are the contract with newtab.html. */
+     are the contract with newtab.html.
+
+     'flank' is the third seat, and it is deliberately not a third end of
+     the row: it takes the window's left margin UNDER the left-end tile,
+     so the row and the corners are measured exactly as they were and the
+     clock and the readout never move because a third tile exists. */
   const MODULE_SPEC = [
     { id: 'mod-clock', end: 'left' },
-    { id: 'mod-session', end: 'right' }
+    { id: 'mod-session', end: 'right' },
+    { id: 'mod-media', end: 'flank' }
   ];
 
   /* --- packets and blooms ------------------------------------- */
@@ -526,6 +533,13 @@
   /*           where the biggest chips used to land anyway. Pads go       */
   /*           underneath, into the open middle.                          */
   /*                                                                     */
+  /* The media tile is seated on its own, by neither of those: it takes   */
+  /* the window's left margin under the left-end tile (flank), pads       */
+  /* facing DOWN the open strip beside the socket, which is the one place */
+  /* that stays open whether the column is short or the process list has  */
+  /* unfolded it. It is kept out of the row and corner arithmetic         */
+  /* entirely, so seating it can never move the other two.                */
+  /*                                                                     */
   /* Neither fits (a narrow window, a short one): the tile is marked      */
   /* .is-unplaced and goes invisible rather than landing on the capsule.  */
   /* It keeps its box, so the next resize can measure and seat it again.  */
@@ -560,7 +574,10 @@
 
     let widest = 0, tallest = 0, span = 0, count = 0;
     for (const it of items) {
-      if (!it.live) continue;
+      // The flank tile has its own seat: it must not widen the span the row
+      // is tested against, and above all must not raise `tallest` and move
+      // the other two tiles up.
+      if (!it.live || it.end === 'flank') continue;
       count++;
       widest = Math.max(widest, it.w);
       tallest = Math.max(tallest, it.h);
@@ -583,13 +600,34 @@
     const corners = count > 0 && w >= MODULE_MARGIN * 2 + cornerSpan;
 
     const out = [];
+    /* The left-end tile's seat, so the flank tile can sit under it. The
+       spec order puts the flank last, which is why one pass is enough. */
+    let leftSeat = null;
 
     for (const it of items) {
       let x = null;
       let y = null;
       let side = null;
 
-      if (it.live && row) {
+      if (it.live && it.end === 'flank') {
+        /* The bottom of the same margin the left tile's corner sits in, pads
+           facing UP the strip between the two. Seated under the left tile
+           instead, it would sit ON that tile's pads and the clock would lose
+           every trace it had; from down here both fan into the same open
+           strip from opposite ends and neither starves the other. */
+        x = MODULE_MARGIN;
+        y = h - MODULE_MARGIN - it.h;
+        side = 'top';
+        const seat = { x: x, y: y, w: it.w, h: it.h };
+        /* A cell of air between the two seat rings, and off the socket: the
+           strip narrows with the window, and the socket grows downward when
+           the process list unfolds. */
+        const ceiling = leftSeat
+          ? leftSeat.y + leftSeat.h + MODULE_INFLATE * 2 + MODULE_GAP
+          : MODULE_MARGIN;
+        if (y < ceiling) x = null;
+        else if (rectsOverlap(inflateRect(seat, MODULE_TIGHT), socket)) x = null;
+      } else if (it.live && row) {
         y = rowTop + (tallest - it.h);                   // bottoms on one line
         x = it.end === 'left' ? cap.x : cap.x + cap.w - it.w;
         side = it.end;                                   // pads face open board
@@ -619,7 +657,9 @@
       }
 
       seatModule(it.el, x, y);
-      out.push({ x: Math.round(x), y: Math.round(y), w: it.w, h: it.h, side: side });
+      const seated = { x: Math.round(x), y: Math.round(y), w: it.w, h: it.h, side: side };
+      if (it.end === 'left') leftSeat = seated;
+      out.push(seated);
     }
 
     return out;
@@ -691,13 +731,19 @@
       }
 
       const pins = [];
-      if (mod.side === 'bottom') {
+      if (mod.side === 'bottom' || mod.side === 'top') {
+        const down = mod.side === 'bottom';
         const cFrom = Math.ceil(colAt(box.x + CELL));
         const cTo = Math.floor(colAt(box.x + box.w - CELL));
-        const rOut = Math.floor(rowAt(box.y + box.h)) + 1;
-        for (let c = cFrom; c <= cTo; c += PAD_STEP) {
-          if (c < 0 || c >= cols) continue;
-          pins.push({ x: gx(c), y: box.y + box.h, dir: 4, c: c, r: rOut });
+        const rOut = down
+          ? Math.floor(rowAt(box.y + box.h)) + 1
+          : Math.ceil(rowAt(box.y)) - 1;
+        const edge = down ? box.y + box.h : box.y;
+        if (rOut >= 0 && rOut < rows) {
+          for (let c = cFrom; c <= cTo; c += PAD_STEP) {
+            if (c < 0 || c >= cols) continue;
+            pins.push({ x: gx(c), y: edge, dir: down ? 4 : 0, c: c, r: rOut });
+          }
         }
       } else {
         const outLeft = mod.side === 'left';
@@ -1580,7 +1626,7 @@
   /* newtab.js calls this when a live module appears or disappears — the
      session readout is [hidden] until the chrome pushes one, and a tile
      with no box is a tile the board has not routed around. A forced layout
-     re-seats both tiles, rebuilds the routing and repaints once. */
+     re-seats every tile, rebuilds the routing and repaints once. */
   window.__boardRelayout = function () {
     layout(true);
     if (reducedMotion || chromePaused || document.hidden || !boardActive()) return;

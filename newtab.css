@@ -623,15 +623,16 @@ body {
 }
 
 /* --- live modules -------------------------------------------- */
-/* Two glass tiles seated on the board: the clock at the column's top-left,
-   the session readout at its top-right. newtab-bg.js writes left/top and
+/* Three glass tiles seated on the board: the clock at the column's top-left,
+   the session readout at its top-right, and now playing under the clock in
+   the window's margin. newtab-bg.js writes left/top and
    nothing else — it measures the socket, keeps both tiles clear of it, and
    routes traces onto the pads it draws around them. The corner position
    below is the default they wear until it has (and the fallback for a
    window too short for the row above the capsule); .is-unplaced is the
    third case, a window with no room for them at all.
 
-   Both are 208px wide by authorship rather than by content, and every line
+   All three are 208px wide by authorship rather than by content, and every line
    in them has a fixed height: the board draws a seat around the box it
    measured, so 9 tabs becoming 10 — or 9:59 becoming 10:00 — must not move
    a pixel of it.
@@ -773,11 +774,202 @@ body {
   text-overflow: ellipsis;
 }
 
+/* --- now playing --------------------------------------------- */
+/* The machine's media session, in its own tile: 48px of art, the title and
+   the artist, the position as a hairline, and the transport. The board gives
+   it the third seat (newtab-bg.js MODULE_SPEC 'flank' — the window's left
+   margin, under the clock), so unlike idle music it is a tile of its own.
+
+   Fixed heights everywhere, the same rule the other two tiles keep: the seat
+   is drawn around the box the board measured, so nothing here may grow when a
+   track starts, when the art arrives or when a long title lands. */
+/* The default seat, worn until the board has measured: under the clock in the
+   window's left margin, which is where 'flank' puts it. */
+.module-media {
+  left: 24px;
+  top: 190px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.mod-media-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+}
+
+/* The art well. It keeps its box with no art at all — the note glyph sits in
+   it — so the tile is the same height in every state. */
+.mod-media-art {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  /* A hairline plate, exactly what the dock uses where an app has no icon:
+     no fill of its own, so it reads the same over both themes' glass. */
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  overflow: hidden;
+}
+
+.mod-media-art-img {
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  display: block;
+}
+
+/* An author `display` beats the UA sheet's [hidden] rule, so the well would
+   otherwise wear a broken-image glyph in every state with no art. */
+.mod-media-art-img[hidden] { display: none; }
+
+/* Two beamed notes, at a label's weight: a placeholder, not a picture. */
+.mod-media-note {
+  width: 20px;
+  height: 20px;
+  fill: var(--fg-3);
+}
+
+.mod-media-art-img:not([hidden]) ~ .mod-media-note { display: none; }
+
+.mod-media-meta {
+  flex: 1 1 auto;
+  min-width: 0;                    /* so both lines ellipsise */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.mod-media-title {
+  height: 18px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "Nothing playing" is a state, not a title: it reads at a label's weight,
+   the same way idle music's Off and Paused do. */
+.module-media[data-media="none"] .mod-media-title {
+  color: var(--fg-2);
+  font-weight: 400;
+}
+
+.mod-media-artist {
+  height: 16px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The position: a hairline track with the accent as the fill. The fill is
+   scaled rather than resized — a transform is the one way to move it that
+   costs no layout — and newtab.js steps it only while something is playing. */
+.mod-media-bar {
+  position: relative;
+  height: 2px;
+  margin: 10px 0 0;
+  border-radius: 1px;
+  background: var(--edge);
+  overflow: hidden;
+}
+
+.mod-media-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  border-radius: 1px;
+  background: var(--ion);
+}
+
+/* Nothing playing: the track stays (it is part of the height) and the fill
+   goes, rather than a bright zero-length cap sitting at the left edge. */
+.module-media[data-media="none"] .mod-media-fill { opacity: 0; }
+
+/* The transport. Glyphs only, quiet at rest: the tile is a readout and these
+   are not meant to pull the eye off it. pointer-events comes back on here and
+   nowhere else in the tile — .module is click-through on purpose. */
+.mod-media-ctls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 22px;
+  margin: 8px 0 0;
+}
+
+.mod-media-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    color        160ms steps(4, end),
+    border-color 160ms steps(4, end);
+}
+
+.mod-media-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.mod-media-play svg { width: 15px; height: 15px; }
+
+.mod-media-btn:hover { color: var(--fg); border-color: var(--edge); }
+
+.mod-media-btn:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  color: var(--fg);
+}
+
+/* A control the session does not offer keeps its box — visibility, never
+   display — so the row is the same in all four states and [disabled] keeps
+   it out of the tab order while it is not there. */
+.mod-media-btn[disabled] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* One button, two glyphs: the word the control is in never moves the row. */
+.mod-media-glyph-pause { display: none; }
+
+.module-media[data-media="playing"] .mod-media-glyph-play { display: none; }
+.module-media[data-media="playing"] .mod-media-glyph-pause { display: block; }
+
 /* --- idle music ---------------------------------------------- */
 /* The face of the chrome's idle player, seated under the three counts in
-   the readout tile. It is in that tile rather than in a third one because
-   newtab-bg.js seats exactly two (its MODULE_SPEC is the contract): a
-   third tile would have no seat of its own and would land on this one.
+   the readout tile. It shares that tile rather than taking one of its own
+   because it is the chrome's own player and belongs with the session it is
+   part of; the board's seats are named in newtab-bg.js MODULE_SPEC, which
+   is the contract, and the third one there is the media tile above.
 
    Every box below has a fixed height and both controls a fixed width, for
    the reason the tile itself gives: the board draws a seat around the box

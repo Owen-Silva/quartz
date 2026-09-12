@@ -54,6 +54,12 @@
         and when this guest loads. Its three controls answer the same
         way the dock does: `newtab:music {"action":"toggle"|"next"|
         "enable"}`; see "idle music".
+
+     9. window.__applyMedia({ ok, source, title, artist, album, status,
+        positionMs, durationMs, art, canNext, canPrev }) — what the
+        MACHINE is playing, off the media session the chrome polls. Its
+        transport answers the same way: `newtab:media {"cmd":"toggle"|
+        "next"|"prev"}`; see "now playing".
    ============================================================ */
 
 'use strict';
@@ -682,6 +688,268 @@ window.__music = function () {
     action: musicAction().action,
     next: musicHasNext(),
     shown: !!(sessionModule && !sessionModule.hidden)
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* Now playing                                                         */
+/*                                                                     */
+/* What the MACHINE is playing, and its transport. Nothing plays in     */
+/* this page: the chrome polls the user's Spotify auto-pause bridge, which  */
+/* already holds a Windows media session, and pushes the state in       */
+/* while a new tab is in front.                                        */
+/*                                                                     */
+/*   window.__applyMedia({ ok, source, title, artist, album, status,    */
+/*                         positionMs, durationMs, art,                 */
+/*                         canNext, canPrev })                          */
+/*     ok          the bridge answered at all                           */
+/*     status      'playing' | 'paused' | 'stopped' | 'none'            */
+/*     art         base64 JPEG (or a data: URL), or null                */
+/*     canNext     the session offers that control                      */
+/*                                                                     */
+/* Out, one console line the chrome reads off this guest, exactly the   */
+/* way idle music and the dock do:                                     */
+/*                                                                     */
+/*   newtab:media {"cmd":"toggle"|"next"|"prev"}                        */
+/*                                                                     */
+/* Cost: the only thing running in here is the hairline, stepped four   */
+/* times a second while something is PLAYING and stopped dead the       */
+/* moment it is not — a transform on one element, so no layout and no   */
+/* paint of anything else. The position is interpolated from the last   */
+/* push rather than polled for, which is what lets the chrome poll the  */
+/* bridge as slowly as it does; paused, the fill keeps the width it     */
+/* had and nothing ticks at all. The art is decoded once per distinct   */
+/* image, not once per push.                                           */
+/* ------------------------------------------------------------------ */
+
+const mediaModule = document.getElementById('mod-media');
+const mediaArt = document.getElementById('media-art');
+const mediaTitle = document.getElementById('media-title');
+const mediaArtist = document.getElementById('media-artist');
+const mediaFill = document.getElementById('media-fill');
+const mediaPrev = document.getElementById('media-prev');
+const mediaToggle = document.getElementById('media-toggle');
+const mediaNext = document.getElementById('media-next');
+
+/* A title off a media session can be any length; both lines ellipsise in
+   CSS, and this keeps a pathological one out of the DOM at all. */
+const MEDIA_TEXT_MAX = 80;
+
+/* How often the hairline is stepped while playing. 250ms is a third of a
+   pixel on a three-minute track — smooth at this width, and four style
+   writes a second on a composited transform. */
+const MEDIA_TICK_MS = 250;
+
+/* The two states the tile has a face for; everything else is "nothing". */
+const MEDIA_LIVE = { playing: true, paused: true };
+
+let mediaData = {
+  ok: false,
+  source: '',
+  title: '',
+  artist: '',
+  album: '',
+  status: 'none',
+  positionMs: 0,
+  durationMs: 0,
+  art: null,
+  canNext: false,
+  canPrev: false
+};
+
+/* When positionMs was true, so the fill can be interpolated from it. */
+let mediaAt = 0;
+/* The art string the <img> is currently showing: the stand-in for the
+   bridge's artHash on this side, and what keeps one decode per image. */
+let mediaArtKey = null;
+let mediaTimer = 0;
+
+/** One line of text, trimmed and collapsed. '' for "the session did not say". */
+function mediaText(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text.length > MEDIA_TEXT_MAX ? text.slice(0, MEDIA_TEXT_MAX - 1) + '…' : text;
+}
+
+/** Milliseconds, never negative and never a guess. */
+function mediaMs(value) {
+  const n = Number(value);
+  if (!isFinite(n) || n <= 0) return 0;
+  return Math.round(n);
+}
+
+/**
+ * 'playing' | 'paused' | 'none'. A session with no title is nothing
+ * playing however healthy it says it is: a tile with an empty first line
+ * is worse than one that says so.
+ */
+function mediaState() {
+  if (!mediaData.ok) return 'none';
+  if (!MEDIA_LIVE[mediaData.status]) return 'none';
+  if (!mediaData.title) return 'none';
+  return mediaData.status;
+}
+
+/** How far through, 0..1. Interpolated only while it is playing. */
+function mediaFraction(now) {
+  const dur = mediaData.durationMs;
+  if (!(dur > 0)) return 0;
+  let pos = mediaData.positionMs;
+  if (mediaState() === 'playing') pos += Math.max(0, now - mediaAt);
+  if (pos < 0) pos = 0;
+  if (pos > dur) pos = dur;
+  return pos / dur;
+}
+
+/* scaleX on a positioned fill: the one way to move it that costs no
+   layout. Written only when it actually changed. */
+function paintMediaFill() {
+  if (!mediaFill) return;
+  const next = 'scaleX(' + mediaFraction(performance.now()).toFixed(4) + ')';
+  if (mediaFill.style.transform !== next) mediaFill.style.transform = next;
+}
+
+/** One decode per distinct image, and none at all with no art. */
+function paintMediaArt() {
+  if (!mediaArt) return;
+  const art = mediaState() === 'none' ? null : mediaData.art;
+
+  if (!art) {
+    if (mediaArtKey !== null) {
+      // removeAttribute, never src='': an empty src is a request for this
+      // page's own URL.
+      mediaArt.removeAttribute('src');
+      mediaArtKey = null;
+    }
+    mediaArt.hidden = true;
+    return;
+  }
+
+  if (art !== mediaArtKey) {
+    mediaArtKey = art;
+    mediaArt.src = art.slice(0, 5) === 'data:' ? art : 'data:image/jpeg;base64,' + art;
+  }
+  mediaArt.hidden = false;
+}
+
+function paintMedia() {
+  const state = mediaState();
+  const live = state !== 'none';
+
+  if (mediaModule) mediaModule.setAttribute('data-media', state);
+  setText(mediaTitle, live ? mediaData.title : 'Nothing playing');
+  setText(mediaArtist, live ? mediaData.artist : '');
+  paintMediaArt();
+
+  if (mediaToggle) {
+    // [disabled] is what hides a control (visibility, in CSS) and what keeps
+    // it out of the tab order: the box stays either way, so the transport is
+    // the same size with nothing playing as with a full session.
+    mediaToggle.disabled = !live;
+    mediaToggle.setAttribute('aria-label', state === 'playing' ? 'Pause' : 'Play');
+  }
+  if (mediaPrev) mediaPrev.disabled = !(live && mediaData.canPrev);
+  if (mediaNext) mediaNext.disabled = !(live && mediaData.canNext);
+
+  paintMediaFill();
+}
+
+/** The hairline runs while something plays, and nowhere else. */
+function scheduleMediaTick() {
+  const want = mediaState() === 'playing' && mediaData.durationMs > 0 &&
+               !document.hidden;
+  if (want && !mediaTimer) mediaTimer = setInterval(paintMediaFill, MEDIA_TICK_MS);
+  else if (!want && mediaTimer) { clearInterval(mediaTimer); mediaTimer = 0; }
+}
+
+/** Back on screen, or gone: the tick follows the page. */
+function refreshMedia() {
+  if (!document.hidden) paintMediaFill();
+  scheduleMediaTick();
+}
+
+/** The channel out. One line, the same shape idle music and the dock use. */
+function mediaSend(cmd) {
+  console.log('newtab:media ' + JSON.stringify({ cmd: cmd }));
+}
+
+function wireMedia() {
+  const hit = function (el, cmd) {
+    if (!el) return;
+    el.addEventListener('click', function () {
+      // A hidden control is not a control: [disabled] already stops the
+      // click, and this is the same guard idle music's Next keeps.
+      if (el.disabled) return;
+      mediaSend(cmd);
+    });
+  };
+
+  hit(mediaPrev, 'prev');
+  hit(mediaToggle, 'toggle');
+  hit(mediaNext, 'next');
+
+  /* The "nothing playing" state the markup already wears, painted once so
+     the attribute, the two lines and the three controls come from exactly
+     one place. */
+  paintMedia();
+}
+
+window.__applyMedia = function (data) {
+  const next = (data && typeof data === 'object') ? data : {};
+  const status = String(next.status == null ? '' : next.status).toLowerCase();
+  const art = (typeof next.art === 'string' && next.art) ? next.art : null;
+
+  mediaData = {
+    /* A push with no `ok` at all is a push from something that answered:
+       only an explicit false is the bridge saying it could not. */
+    ok: (next.ok === undefined || next.ok === null) ? true : !!next.ok,
+    source: mediaText(next.source),
+    title: mediaText(next.title),
+    artist: mediaText(next.artist),
+    album: mediaText(next.album),
+    status: MEDIA_LIVE[status] ? status : 'none',
+    positionMs: mediaMs(next.positionMs),
+    durationMs: mediaMs(next.durationMs),
+    art: art,
+    canNext: !!next.canNext,
+    canPrev: !!next.canPrev
+  };
+  mediaAt = performance.now();
+
+  paintMedia();
+  scheduleMediaTick();
+
+  /* The tile is [hidden] until the chrome pushes for the first time: a
+     machine with no bridge never gets a tile at all. Showing it gives it a
+     box, which is the one thing the board has to know. */
+  if (mediaModule && mediaModule.hidden) {
+    mediaModule.hidden = false;
+    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
+  }
+
+  return window.__media();
+};
+
+/** What the module actually shows, for tests. */
+window.__media = function () {
+  return {
+    state: mediaState(),
+    title: mediaTitle ? mediaTitle.textContent : '',
+    artist: mediaArtist ? mediaArtist.textContent : '',
+    source: mediaData.source,
+    album: mediaData.album,
+    art: !!(mediaArt && !mediaArt.hidden && mediaArt.getAttribute('src')),
+    artBytes: mediaArtKey ? mediaArtKey.length : 0,
+    fill: mediaFill ? mediaFill.style.transform : '',
+    fraction: Number(mediaFraction(performance.now()).toFixed(4)),
+    ticking: !!mediaTimer,
+    controls: {
+      prev: !!(mediaPrev && !mediaPrev.disabled),
+      toggle: !!(mediaToggle && !mediaToggle.disabled),
+      next: !!(mediaNext && !mediaNext.disabled)
+    },
+    glyph: mediaState() === 'playing' ? 'pause' : 'play',
+    shown: !!(mediaModule && !mediaModule.hidden)
   };
 };
 
@@ -2710,6 +2978,12 @@ function init() {
      rather than the markup's, and hangs the two controls. */
   wireMusic();
 
+  /* Now playing, in the same state and for the same reason: the tile is
+     [hidden] until the chrome pushes, so this changes no geometry — it only
+     makes the "nothing playing" face the module's own rather than the
+     markup's, and hangs the three controls. */
+  wireMedia();
+
   /* The canvases are a percentage of the column, so their backing store
      is wrong after a resize. One repaint, no rAF: nothing here animates. */
   window.addEventListener('resize', paintStats);
@@ -2723,6 +2997,14 @@ function init() {
   document.addEventListener('visibilitychange', refreshClock);
   window.addEventListener('pageshow', refreshClock);
   window.addEventListener('focus', refreshClock);
+
+  /* The now-playing hairline stops and starts on the same signals, for the
+     same reason the clip does: a fill nobody can see is four style writes a
+     second for nothing. refreshMedia() checks the state itself, so none of
+     these starts a tick a paused session does not want. */
+  document.addEventListener('visibilitychange', refreshMedia);
+  window.addEventListener('pageshow', refreshMedia);
+  window.addEventListener('focus', refreshMedia);
 
   /* The moving picture stops and starts on the same three signals, for the
      stronger reason: a clip nobody can see is a decoder nobody is watching.
