@@ -27,6 +27,7 @@ const { createSession, killAll } = require('./pty');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
+const appsModule = require('./apps');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -88,6 +89,15 @@ const stats = statsModule.create({});
 
 /** webContents ids we have already put a 'destroyed' listener on. */
 const statsWatched = new Set();
+
+/**
+ * The installed-app index behind the new tab's dock and the palette's
+ * "Open <app>" rows. It builds nothing until something asks, caches for a day
+ * in userData, and keeps the two things a page must never do for itself --
+ * starting a process and taking the foreground -- inside one module with one
+ * IPC gate in front of it.
+ */
+const apps = appsModule.create({ app, shell });
 
 // ---------------------------------------------------------------------------
 // Window state
@@ -2386,6 +2396,79 @@ ipcMain.handle('stats:end-task', (event, pids) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Installed apps (the new tab's dock, the palette's "Open <app>" rows)
+//
+// Same gate as stats:end-task, and for the same reason: starting a process and
+// taking the foreground are the two things a PAGE must never be able to ask
+// for. Only the chrome's own webContents is answered -- the new tab page is a
+// <webview> guest with no preload, so it reaches these through app.js, which
+// has already decided the click was real.
+//
+// Nothing here can throw at the renderer: every answer is a value, and a
+// failure is a { ok: false, reason } the page can show.
+// ---------------------------------------------------------------------------
+
+/** True when this IPC call came from the chrome document itself. */
+function isChromeSender(event) {
+  const contents = event && event.sender;
+  return !!contents && canSend() && contents === win.webContents;
+}
+
+/** An empty index, for a refused or failed call. */
+function emptyAppList() {
+  return { builtAt: 0, buildMs: 0, fromCache: false, iconsOmitted: false, counts: { total: 0 }, apps: [] };
+}
+
+ipcMain.handle('apps:list', (event) => {
+  if (!isChromeSender(event)) return emptyAppList();
+  try {
+    return apps.list().catch(() => emptyAppList());
+  } catch {
+    return emptyAppList();
+  }
+});
+
+ipcMain.handle('apps:refresh', (event) => {
+  if (!isChromeSender(event)) return emptyAppList();
+  try {
+    return apps.refresh().catch(() => emptyAppList());
+  } catch {
+    return emptyAppList();
+  }
+});
+
+// Icons travel with apps:list unless the whole set is over the budget; this is
+// the per-entry fallback for that case (and for an icon that arrived late).
+ipcMain.handle('apps:icon', (event, id) => {
+  if (!isChromeSender(event)) return null;
+  try {
+    return apps.icon(typeof id === 'string' ? id : '').catch(() => null);
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('apps:launch', (event, id) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  try {
+    return apps.launch(typeof id === 'string' ? id : '').catch(() => ({ ok: false, reason: 'failed' }));
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+// The one place in this file that is ALLOWED to steal focus: the user clicked
+// a dock tile whose running dot was lit, and "switch to it" is the whole point.
+ipcMain.handle('apps:focus', (event, pid) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  try {
+    return apps.focus(pid).catch(() => ({ ok: false, reason: 'failed' }));
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
 /** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
 
@@ -2545,6 +2628,9 @@ app.on('before-quit', (event) => {
   // The stats sampler's typeperf child is not ours to leave behind: it is a
   // separate process that would outlive the quit.
   stats.stop();
+  // Same idea for the app index: a Get-StartApps or a focus PowerShell caught
+  // mid-flight is a child of ours, and it is not going to be missed.
+  apps.stop();
   // Hands our Spotify hold back. That is an HTTP round trip, so it may defer
   // the quit by up to ~1.5 s -- once, and only when a hold is actually out.
   // Skipping it would leave Spotify paused until the bridge's 180 s hold TTL

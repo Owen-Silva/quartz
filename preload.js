@@ -280,6 +280,34 @@ contextBridge.exposeInMainWorld('api', {
     // the page can say why instead of just failing.
     endTask: (pids) => ipcRenderer.invoke('stats:end-task', Array.isArray(pids) ? pids : [])
   },
+  // Installed native apps: the new tab page's dock and the palette's
+  // "Open <app>" rows. Main builds the index from Start Menu shortcuts plus
+  // Get-StartApps, caches it for a day, and is the only one that ever starts a
+  // process -- nothing here carries a command line.
+  apps: {
+    // { builtAt, buildMs, fromCache, iconsOmitted, counts, apps: [...] } where
+    // each entry is { id, name, kind: 'exe'|'store', path, args, exe,
+    // iconDataUrl }. `exe` is the lowercased basename ('spotify.exe') or null,
+    // and it is what the caller matches against a stats sample's process
+    // groups to know whether the app is running. `iconDataUrl` is a 32px PNG,
+    // or null when the whole set was too big for one message -- then
+    // iconsOmitted is true and icon(id) fetches them one at a time.
+    // The first call of a session may take a second or two (the build); every
+    // later one is served from memory.
+    list: () => ipcRenderer.invoke('apps:list'),
+    // One 32px PNG data URL by entry id, or null.
+    icon: (id) => ipcRenderer.invoke('apps:icon', String(id == null ? '' : id)),
+    // Start an app by entry id -> { ok, reason }. Detached: it resolves as soon
+    // as Windows has taken the request, not when the app has drawn.
+    launch: (id) => ipcRenderer.invoke('apps:launch', String(id == null ? '' : id)),
+    // Bring a RUNNING app's main window forward by pid -> { ok, reason }.
+    // This one does steal focus, because it only ever runs off a click on a
+    // tile that was already showing a running dot.
+    focus: (pid) => ipcRenderer.invoke('apps:focus', Number(pid)),
+    // Rebuild the index from source (a newly installed app, a changed icon)
+    // and resolve to the same shape as list().
+    refresh: () => ipcRenderer.invoke('apps:refresh')
+  },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     // Called by terminal.js for the first spawn AND for the Enter-to-restart
