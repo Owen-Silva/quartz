@@ -6,12 +6,22 @@
  * The user: "for apps is there a way where I can start the apps in a tab but it's
  * running the app so that literally everything is just in a tab?"
  *
- * This is the engine for that. A real program's real top-level window is
- * re-parented INTO the browser window (SetParent) and moved to sit exactly over
- * a tab's content area, so Notepad, Explorer, a game launcher — anything with a
- * plain Win32 window — runs as ITSELF inside a tab. Nothing is screen-scraped
- * or remoted: it is the app's own HWND, drawing its own pixels, one child
- * window deep inside ours.
+ * This is the engine for that. A real program's real top-level window is taken
+ * over by the browser window and moved to sit exactly over a tab's content
+ * area, so Notepad, Explorer, a game launcher — anything with a plain Win32
+ * window — runs as ITSELF inside a tab. Nothing is screen-scraped or remoted:
+ * it is the app's own HWND, drawing its own pixels.
+ *
+ * TWO WAYS TO DO THAT, and the default is the second one (see attach()):
+ *   'child'  SetParent: the app's HWND becomes a child of ours. Perfectly
+ *            clipped, follows the window for free — and it joins the app's
+ *            input queue to the browser's, so a hung app freezes the BROWSER
+ *            (measured: a 9.7 s IPC) and cannot be let go of mid-hang.
+ *   'owner'  the app's window stays top-level and the browser becomes its
+ *            OWNER. Windows keeps it above us and hides it with us, the input
+ *            queues stay separate, and a wedged app is nothing but a frozen
+ *            rectangle. Layout is in screen pixels and has to be re-applied
+ *            whenever the browser moves — which is the entire price.
  *
  * WHY WIN32 AND NOT ELECTRON: there is no Electron API for hosting a foreign
  * HWND. The four calls that make this work (SetParent, GetWindowLongPtr,
@@ -20,9 +30,10 @@
  * Electron's headers. When koffi cannot load, every entry point answers
  * { ok: false, reason: 'unavailable' } and the browser is exactly what it was.
  *
- * THE ONE RULE THAT MATTERS: a child HWND dies with its parent. If the browser
- * window is destroyed while an app is still parented into it, Windows destroys
- * the app's window too — which for most programs means the program exits. So
+ * THE ONE RULE THAT MATTERS, AND IT HOLDS IN BOTH MODES: a child HWND dies with
+ * its parent, and an OWNED window dies with its owner. If the browser window is
+ * destroyed while an app is still hosted in it, Windows destroys the app's
+ * window too — which for most programs means the program exits. So
  * detachAll() runs on 'before-quit', on the main window's 'close', and once
  * more from process.on('exit') as a last resort. That path must never be
  * skipped: skipping it turns a browser quit into "the user's app just vanished".
@@ -61,11 +72,26 @@ const WS_BORDER = 0x00800000n;
 const DECORATION = WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX
   | WS_MAXIMIZEBOX | WS_SYSMENU | WS_DLGFRAME | WS_BORDER;
 
+/**
+ * The frame an OWNED window loses (see the hosting-modes note above attach()).
+ * WS_POPUP is NOT in here: owner mode keeps the window top-level and ADDS
+ * WS_POPUP, where child mode adds WS_CHILD instead.
+ */
+const OWNER_STRIP = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX
+  | WS_MAXIMIZEBOX | WS_SYSMENU | WS_DLGFRAME | WS_BORDER;
+
 const GWL_STYLE = -16;
 const GWL_EXSTYLE = -20;
 
+/** A window's OWNER, as a settable value. GetWindow(GW_OWNER) reads it; this
+ *  index is the only documented way to WRITE it. */
+const GWLP_HWNDPARENT = -8;
+
 /** A tool window is a palette/tooltip/tray helper, never a document window. */
 const WS_EX_TOOLWINDOW = 0x00000080n;
+
+/** WS_EX_APPWINDOW forces a taskbar button even on an owned window. Off. */
+const WS_EX_APPWINDOW = 0x00040000n;
 
 const SWP_NOSIZE = 0x0001;
 const SWP_NOMOVE = 0x0002;
@@ -100,6 +126,91 @@ const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 /** A window of one of these classes is a Store/UWP app: see attach(). */
 const STORE_CLASSES = new Set(['applicationframewindow', 'windows.ui.core.corewindow']);
+
+/**
+ * STORE APPS ARE REFUSED IN OWNER MODE TOO, AND THIS IS THE MEASUREMENT.
+ *
+ * A UWP CoreWindow was never hostable in any mode: SetParent on it is refused by
+ * the system outright. The ApplicationFrameWindow (Calculator, Photos) was worth
+ * re-testing under owner mode, because nothing is re-parented there -- the shell
+ * keeps driving its own frame and we would only own and move it.
+ *
+ * TRIED, 2026-09-12, Calculator: the attach looked perfect for about a second.
+ * It lost its caption, became a tool window, and positioned to the placeholder
+ * rect to the pixel (219,172-1942,1175). Then ApplicationFrameHost RESET THE
+ * OWNER to 0 on its own -- the frame is the shell's window, and the shell
+ * decides what owns it. The next poll tick correctly read "this is not ours any
+ * more" and let go, which left a frameless, owner-less Calculator behind.
+ *
+ * A host that lasts one second and leaves the app disfigured is worse than a
+ * refusal, so the refusal stands for BOTH classes in BOTH modes. (The tick that
+ * let go now also puts the styles back -- see the poll -- so an app that resets
+ * its own owner is returned to a normal window rather than a frameless one.)
+ */
+const STORE_FRAME_CLASS = 'applicationframewindow';
+const STORE_OK_IN_OWNER_MODE = false;
+
+/**
+ * HOW a window is hosted. See the long note above attach().
+ *   'owner'  the window stays TOP-LEVEL and is merely OWNED by the browser
+ *            window: no SetParent, so no shared input queue, so a hung app
+ *            cannot freeze the browser. Laid out in SCREEN pixels.
+ *   'child'  SetParent (WS_CHILD) -- the original path. Pixel-perfect
+ *            clipping to our client area, at the cost of the joined input
+ *            queue that lane N8 measured (a 9.7 s IPC during a hang).
+ */
+const MODES = new Set(['owner', 'child']);
+
+/**
+ * The mode a caller gets when it does not ask for one.
+ *
+ * 'owner', since 2026-09-12: the hang proof is the whole reason this mode
+ * exists. With the guest app wedged for 12 s, embed:list answered in 1 ms and a
+ * Ctrl+T through the real keydown path opened a tab in 27 ms -- the same two
+ * measurements that were 9.7 s and a CDP timeout in child mode.
+ */
+const DEFAULT_MODE = 'owner';
+
+/** Whatever a caller asked for -> a mode this module implements. */
+function normalizeMode(value) {
+  const want = String(value == null ? '' : value).toLowerCase();
+  return MODES.has(want) ? want : DEFAULT_MODE;
+}
+
+/**
+ * How many GW_OWNER links "is this ours" will follow. Owner mode needs one; an
+ * app that puts its own modal dialog over the window we own needs two, and its
+ * dialog's dialog three. Past that it is somebody else's window tree, and an
+ * unbounded walk over a ring of owners would be an infinite loop.
+ */
+const OWNER_HOPS = 4;
+
+/**
+ * THE OWNER-CHAIN TEST, pure so the harness can drive it without Win32.
+ *
+ * `ownerLookup(handle)` is GetWindow(handle, GW_OWNER) -> a handle or 0n.
+ * @param {bigint} root the foreground window's GA_ROOT
+ * @param {Set<bigint>} mine our own top-level HWNDs
+ * @returns {{ours:boolean, viaOwner:boolean, hops:number}}
+ */
+function ownsRootVia(root, mine, ownerLookup, hops) {
+  const limit = Number.isFinite(hops) && hops > 0 ? Math.trunc(hops) : OWNER_HOPS;
+  const own = mine || new Set();
+  if (!root) return { ours: false, viaOwner: false, hops: 0 };
+  if (own.has(root)) return { ours: true, viaOwner: false, hops: 0 };
+  let node = root;
+  const seen = new Set([root]);
+  for (let hop = 1; hop <= limit; hop += 1) {
+    let up = 0n;
+    try { up = ownerLookup(node) || 0n; } catch { up = 0n; }
+    // 0, itself, or a cycle: the chain is over.
+    if (!up || seen.has(up)) break;
+    if (own.has(up)) return { ours: true, viaOwner: true, hops: hop };
+    seen.add(up);
+    node = up;
+  }
+  return { ours: false, viaOwner: false, hops: 0 };
+}
 
 /**
  * Everything user32/kernel32 gives us, or null when koffi would not load.
@@ -137,6 +248,9 @@ function loadWin32() {
     const RECT = koffi.struct('EmbedRect', {
       left: 'int32_t', top: 'int32_t', right: 'int32_t', bottom: 'int32_t',
     });
+    // POINT, for ClientToScreen: owner mode lays out in SCREEN pixels, so the
+    // browser's client origin has to be asked for every time it can move.
+    koffi.struct('EmbedPoint', { x: 'int32_t', y: 'int32_t' });
     koffi.proto('bool __stdcall EmbedEnumProc(void *hwnd, intptr_t lparam)');
 
     // GUITHREADINFO, for "which window actually has the keyboard". cbSize has
@@ -186,7 +300,18 @@ function loadWin32() {
       GetForegroundWindow: user32.func('void * __stdcall GetForegroundWindow()'),
       GetGUIThreadInfo: user32.func('bool __stdcall GetGUIThreadInfo(uint32_t tid, _Inout_ EmbedGuiThreadInfo *gui)'),
       SetFocus: user32.func('void * __stdcall SetFocus(void *h)'),
+      /* Owner mode's layout origin: our client (0,0) in screen pixels. Reads
+       * our OWN window, so it cannot be blocked by a hosted app. */
+      ClientToScreen: user32.func('bool __stdcall ClientToScreen(void *h, _Inout_ EmbedPoint *p)'),
+      /* The keyboard hand-back in owner mode (see focusChrome). SetFocus alone
+       * cannot move focus into a DIFFERENT top-level window's input queue, and
+       * SetForegroundWindow is never used here -- it steals, and it flashes the
+       * taskbar when it is refused. Attaching our thread to the app's queue for
+       * the two calls in between does exactly as much as is needed. */
+      AttachThreadInput: user32.func('bool __stdcall AttachThreadInput(uint32_t attach, uint32_t to, bool join)'),
+      SetActiveWindow: user32.func('void * __stdcall SetActiveWindow(void *h)'),
       GUI_SIZE: koffi.sizeof('EmbedGuiThreadInfo'),
+      GetCurrentThreadId: kernel32.func('uint32_t __stdcall GetCurrentThreadId()'),
       OpenProcess: kernel32.func('void * __stdcall OpenProcess(uint32_t access, bool inherit, uint32_t pid)'),
       CloseHandle: kernel32.func('bool __stdcall CloseHandle(void *h)'),
       QueryFullProcessImageNameW: kernel32.func('bool __stdcall QueryFullProcessImageNameW(void *h, uint32_t flags, _Out_ uint8_t *buf, _Inout_ uint32_t *size)'),
@@ -470,7 +595,9 @@ function create(opts) {
 
   const counters = {
     attaches: 0, detaches: 0, layouts: 0, layoutSkips: 0, polls: 0, gone: 0,
-    finds: 0, trees: 0, hung: 0, recovered: 0, titles: 0
+    finds: 0, trees: 0, hung: 0, recovered: 0, titles: 0,
+    // Owner mode only: a browser move/resize that really moved an app window.
+    relayouts: 0, handbacks: 0
   };
 
   let shutdownHooked = false;
@@ -519,6 +646,33 @@ function create(opts) {
     return 1;
   }
 
+  /**
+   * OWNER MODE'S ORIGIN: the browser's client (0,0) in SCREEN pixels.
+   *
+   * A child HWND's coordinates are already relative to our client area, so
+   * child mode needs nothing but the scale factor. An owned window is still a
+   * top-level window, and SetWindowPos on a top-level window speaks screen
+   * pixels — so every layout has to add this, and re-read it on every move of
+   * the browser (hence the coalesced relayout in main.js).
+   *
+   * Returns null when there is no window or the call fails; a layout with no
+   * origin is skipped rather than applied at the wrong place.
+   */
+  function clientOrigin() {
+    const parent = browserHandle();
+    if (!parent || !w32) return null;
+    try {
+      const p = { x: 0, y: 0 };
+      if (!w32.ClientToScreen(parent, p)) return null;
+      const x = Number(p.x);
+      const y = Number(p.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x: Math.round(x), y: Math.round(y) };
+    } catch {
+      return null;
+    }
+  }
+
   // -- window facts ---------------------------------------------------------
 
   function windowTitle(handle) {
@@ -559,6 +713,37 @@ function create(opts) {
     catch { return 0n; }
   }
 
+  /** A window's owner as a BigInt, 0n when it has none. */
+  function ownerOf(handle) {
+    try { return w32.GetWindow(handle, GW_OWNER) || 0n; } catch { return 0n; }
+  }
+
+  /** The thread that owns a window, 0 when it cannot be read. */
+  function windowThread(handle) {
+    try {
+      const out = [0];
+      const tid = Number(w32.GetWindowThreadProcessId(handle, out));
+      return Number.isInteger(tid) && tid > 0 ? tid : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Is `root` us, or owned (however indirectly) by us? Owner mode's whole focus
+   * story: when the user clicks into the hosted app, the FOREGROUND window becomes
+   * the app's own top-level window, whose owner is this browser window. Windows
+   * paints the owner active throughout, and that is exactly the state "the user is
+   * working inside this browser" — so the owner chain counts as ours.
+   *
+   * Four hops, because an app may put its own owned dialog on top of the window
+   * we own; past that it is somebody else's window tree.
+   * @returns {{ours:boolean, viaOwner:boolean}}
+   */
+  function ownsRoot(root, mine) {
+    return ownsRootVia(root, mine || ourHandles(), ownerOf, OWNER_HOPS);
+  }
+
   /**
    * The single gate for "may this window be hosted in a tab", used by BOTH the
    * sweep and attach(): a caller can hand attach() any HWND at all, so the
@@ -572,9 +757,14 @@ function create(opts) {
    *   'own-window'     it is one of ours, or lives in this process
    *   'owned-window'   it has an owner: a dialog/splash/palette, not an app
    *   'tool-window'    WS_EX_TOOLWINDOW: a palette or tray helper
-   *   'store-app'      a UWP frame or CoreWindow (see attach()'s notes)
+   *   'store-app'      a UWP CoreWindow in any mode, and in CHILD mode an
+   *                    ApplicationFrameWindow too (see STORE_OK_IN_OWNER_MODE)
+   *
+   * @param {bigint} handle
+   * @param {Set<bigint>} [ours]
+   * @param {string} [mode] the hosting mode the caller intends to use.
    */
-  function hostable(handle, ours) {
+  function hostable(handle, ours, mode) {
     try { if (!w32.IsWindow(handle)) return 'gone'; } catch { return 'gone'; }
     const mine = ours || ourHandles();
     if (mine.has(handle)) return 'own-window';
@@ -590,7 +780,12 @@ function create(opts) {
     if (windowExStyle(handle) & WS_EX_TOOLWINDOW) return 'tool-window';
     const pid = windowPid(handle);
     if (!pid || pid === process.pid) return 'own-window';
-    if (STORE_CLASSES.has(windowClass(handle).toLowerCase())) return 'store-app';
+    const cls = windowClass(handle).toLowerCase();
+    if (STORE_CLASSES.has(cls)) {
+      const frameOk = normalizeMode(mode) === 'owner' && STORE_OK_IN_OWNER_MODE
+        && cls === STORE_FRAME_CLASS;
+      if (!frameOk) return 'store-app';
+    }
     return null;
   }
 
@@ -791,6 +986,7 @@ function create(opts) {
     const wantExe = normalizeExe(spec.exe);
     const seeds = pidList(spec.preferPids);
     const since = Number(spec.since) > 0 ? Math.trunc(Number(spec.since)) : 0;
+    const mode = normalizeMode(spec.mode);
     // One snapshot per sweep, and only when something actually asks for it.
     const snap = (seeds.length || since) ? processTree() : null;
     const prefer = seeds.length ? descendantsOf(seeds, snap && snap.parents) : null;
@@ -805,8 +1001,10 @@ function create(opts) {
           const pid = windowPid(handle);
           if (wantPid && pid !== wantPid) return true;
           // One gate for the sweep and for attach(): top-level, unowned, not a
-          // tool window, not a Store frame, and never one of ours.
-          if (hostable(handle, ours)) return true;
+          // tool window, not a Store frame, and never one of ours. The mode
+          // matters: owner mode can host a Store frame, child mode cannot, and
+          // a sweep must not offer a window the following attach would refuse.
+          if (hostable(handle, ours, mode)) return true;
           const title = windowTitle(handle);
           if (!title) return true;                                // untitled = plumbing
           const exe = exeForPid(pid);
@@ -834,9 +1032,33 @@ function create(opts) {
   // -- attach ---------------------------------------------------------------
 
   /**
-   * Re-parent a top-level window into the browser window and leave it HIDDEN
-   * until the chrome sends the first layout(). Everything needed to put the
-   * window back exactly as it was is saved first.
+   * Host a top-level window in a tab and leave it HIDDEN until the chrome sends
+   * the first layout(). Everything needed to put the window back exactly as it
+   * was is saved first.
+   *
+   * TWO MODES, AND WHY THERE ARE TWO (mode: 'owner' | 'child', default
+   * DEFAULT_MODE = 'owner').
+   *
+   *   'child'  the original: SetParent puts the app's HWND inside ours. It
+   *            looks perfect -- the window is clipped to our client area by the
+   *            window manager itself and follows us for free. The cost, which
+   *            lane N8 measured, is that SetParent ATTACHES THE TWO INPUT
+   *            QUEUES: while the app is wedged, the browser's own main process
+   *            is wedged with it. One IPC took 9.7 s, CDP timed out, the 1 s
+   *            poll ran 7 times in 30 s, and NOTHING could detach it mid-hang
+   *            (SetParent itself needs the app's thread to answer). Windows 11's
+   *            packaged Notepad also destroys its own window on any SetParent.
+   *
+   *   'owner'  no SetParent at all. The app's window stays a TOP-LEVEL window
+   *            and we merely become its OWNER (GWLP_HWNDPARENT). Windows keeps
+   *            an owned window above its owner and hides it with its owner, so
+   *            it still behaves like part of the tab -- but it keeps its own
+   *            input queue, so a hung app is just a frozen rectangle and the
+   *            browser stays at full speed. The price: layout is in SCREEN
+   *            pixels (clientOrigin() + the CSS rect x scale, re-applied on
+   *            every move/resize), and there is no clipping -- an owned window
+   *            sized past our client area would draw over the chrome, which is
+   *            why the chrome's rect is the only thing we ever apply.
    *
    * Refusals (all as values, never throws):
    *   'unavailable'       koffi did not load
@@ -857,12 +1079,16 @@ function create(opts) {
    * the cached caption (it does not send WM_GETTEXT, by design); closing uses
    * PostMessage, never SendMessage. Keep it that way.
    *
-   * WHY STORE APPS ARE REFUSED: a packaged app's visible window is an
-   * ApplicationFrameWindow owned by ApplicationFrameHost.exe, hosting the app's
-   * real CoreWindow from a different process. Re-parenting the frame moves a
-   * shell-owned window that the shell keeps re-positioning, and re-parenting
+   * WHY STORE APPS ARE REFUSED IN CHILD MODE: a packaged app's visible window
+   * is an ApplicationFrameWindow owned by ApplicationFrameHost.exe, hosting the
+   * app's real CoreWindow from a different process. Re-parenting the frame moves
+   * a shell-owned window that the shell keeps re-positioning, and re-parenting
    * the CoreWindow is refused outright by the system. Both end in a black or
    * frozen rectangle, so the honest answer is "not this one".
+   *
+   * OWNER MODE CHANGES THAT for the frame (see STORE_OK_IN_OWNER_MODE): nothing
+   * is re-parented, the shell keeps its own frame, and Calculator positioned,
+   * hid, showed and closed cleanly. The CoreWindow stays refused in both modes.
    */
   function attach(spec) {
     if (!win32()) return { ok: false, reason: 'unavailable' };
@@ -873,6 +1099,7 @@ function create(opts) {
     const handle = toHandle(req.hwnd);
     if (!handle) return { ok: false, reason: 'bad-hwnd' };
 
+    const mode = normalizeMode(req.mode);
     const parent = browserHandle();
     if (!parent) return { ok: false, reason: 'no-window' };
 
@@ -892,7 +1119,7 @@ function create(opts) {
     // any of them is not a cosmetic mistake -- re-parenting a window that is
     // already someone's child, or restoring a top-level style onto it later,
     // leaves a window its owner can no longer drive.
-    const refusal = hostable(handle, ourHandles());
+    const refusal = hostable(handle, ourHandles(), mode);
     if (refusal) return { ok: false, reason: refusal };
 
     const pid = windowPid(handle);
@@ -917,12 +1144,19 @@ function create(opts) {
       handle,
       key,
       pid,
+      mode,
       title: windowTitle(handle),
       className,
       exe: exeForPid(pid),
       parentHwnd: parent,
-      saved: { style, exstyle, rect, parent: w32.GetParent(handle) },
+      // `owner` is saved for BOTH modes: hostable() refuses an owned window, so
+      // it is 0n in practice, but restoring what was really there beats
+      // restoring a zero we assumed.
+      saved: { style, exstyle, rect, parent: w32.GetParent(handle), owner: ownerOf(handle) },
       last: null,          // last physical rect + visibility we applied
+      // The last rect the CHROME asked for, in ITS css pixels. Owner mode has to
+      // re-apply it whenever the browser window moves, and nothing else knows it.
+      css: null,
       visible: false,
       // The watchdog's carried state (see hungStep). A window being hosted is
       // by definition not one we are watching from the outside.
@@ -942,39 +1176,75 @@ function create(opts) {
       // window, which would take the user's keyboard the moment a tab opens.
       if (w32.IsIconic(handle)) w32.ShowWindow(handle, SW_SHOWNOACTIVATE);
 
-      const childStyle = (style & ~DECORATION) | WS_CHILD;
+      if (mode === 'owner') {
+        /*
+         * OWNER MODE. Four calls, no SetParent, and the window never stops
+         * being top-level:
+         *
+         * 1. Hide first, same as child mode: the frame change and the first
+         *    layout land while nothing is on screen, so there is no flash of a
+         *    captioned window at its old size.
+         * 2. The OWNER. SetWindowLongPtrW(GWLP_HWNDPARENT) is the only
+         *    documented way to write it. From here Windows keeps the window
+         *    above the browser and hides it when the browser minimises, and --
+         *    the whole point -- the two threads' input queues stay separate.
+         * 3. The style: strip the frame, add WS_POPUP. WS_POPUP (not WS_CHILD)
+         *    is what keeps the coordinate space in SCREEN pixels and stops
+         *    Windows treating a frameless owned window as a dialog.
+         * 4. The exstyle: WS_EX_TOOLWINDOW on, WS_EX_APPWINDOW off. An owned
+         *    window has no taskbar button anyway; the tool-window bit is what
+         *    takes it out of Alt+Tab, so the app appears exactly once -- as the
+         *    browser tab it now lives in.
+         *
+         * SWP_NOMOVE | SWP_NOSIZE for the same measured reason as child mode:
+         * sizing a window to 0x0 destroyed every app it was tried on. The
+         * chrome's first layout() gives it its real rect.
+         */
+        const ownerStyle = (style & ~OWNER_STRIP) | WS_POPUP;
+        const ownerEx = (exstyle | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
+        w32.ShowWindow(handle, SW_HIDE);
+        w32.SetWindowLongPtrW(handle, GWLP_HWNDPARENT, parent);
+        w32.SetWindowLongPtrW(handle, GWL_STYLE, ownerStyle);
+        w32.SetWindowLongPtrW(handle, GWL_EXSTYLE, ownerEx);
+        w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
+          SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+      } else {
+        const childStyle = (style & ~DECORATION) | WS_CHILD;
 
-      /*
-       * THE ORDER HERE WAS MEASURED, NOT GUESSED (2026-09-11).
-       *
-       * 1. Hide FIRST. Re-parenting a visible window makes it jump to the
-       *    parent's client origin at its old size for a frame or two -- a
-       *    1152x592 Notepad flashing across the chrome before the first layout.
-       * 2. SetParent, THEN the style. Doing the style first leaves a WS_CHILD
-       *    window whose parent is still the desktop, which is a state Windows
-       *    has no real answer for.
-       * 3. NEVER size it to 0x0. The first version of this ended with
-       *    SetWindowPos(0,0,0,0 | HIDEWINDOW), and that call DESTROYED the
-       *    window of every app it was tried on -- Notepad's window went away
-       *    and the process exited a moment later, every time. A zero-area
-       *    client rect is not something a real app is built to survive. So the
-       *    window keeps its own size until the chrome's first layout() and this
-       *    last call only applies the frame change and hides it again
-       *    (SWP_NOMOVE | SWP_NOSIZE).
-       *
-       * SWP_NOACTIVATE throughout: the user is at the machine, and a tab opening
-       * must never take his keyboard.
-       */
-      w32.ShowWindow(handle, SW_HIDE);
-      w32.SetParent(handle, parent);
-      w32.SetWindowLongPtrW(handle, GWL_STYLE, childStyle);
-      w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
-        SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+        /*
+         * THE ORDER HERE WAS MEASURED, NOT GUESSED (2026-09-11).
+         *
+         * 1. Hide FIRST. Re-parenting a visible window makes it jump to the
+         *    parent's client origin at its old size for a frame or two -- a
+         *    1152x592 Notepad flashing across the chrome before the first layout.
+         * 2. SetParent, THEN the style. Doing the style first leaves a WS_CHILD
+         *    window whose parent is still the desktop, which is a state Windows
+         *    has no real answer for.
+         * 3. NEVER size it to 0x0. The first version of this ended with
+         *    SetWindowPos(0,0,0,0 | HIDEWINDOW), and that call DESTROYED the
+         *    window of every app it was tried on -- Notepad's window went away
+         *    and the process exited a moment later, every time. A zero-area
+         *    client rect is not something a real app is built to survive. So the
+         *    window keeps its own size until the chrome's first layout() and this
+         *    last call only applies the frame change and hides it again
+         *    (SWP_NOMOVE | SWP_NOSIZE).
+         *
+         * SWP_NOACTIVATE throughout: the user is at the machine, and a tab opening
+         * must never take his keyboard.
+         */
+        w32.ShowWindow(handle, SW_HIDE);
+        w32.SetParent(handle, parent);
+        w32.SetWindowLongPtrW(handle, GWL_STYLE, childStyle);
+        w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
+          SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+      }
     } catch (err) {
       // Half-done is the worst outcome, and the worst half-done state of all is
       // WS_CHILD with no parent -- an invisible window nothing can reach again.
-      // So every undo step gets its OWN try: a throw in one must not skip the
-      // style restore that follows it.
+      // An owned window whose owner dies is destroyed WITH it, which is just as
+      // bad, so owner mode's undo gives the owner back too. Every undo step gets
+      // its OWN try: a throw in one must not skip the style restore after it.
+      try { w32.SetWindowLongPtrW(handle, GWLP_HWNDPARENT, record.saved.owner || 0n); } catch { /* next */ }
       try { w32.SetParent(handle, record.saved.parent || 0n); } catch { /* next */ }
       try { w32.SetWindowLongPtrW(handle, GWL_STYLE, style); } catch { /* next */ }
       try { w32.SetWindowLongPtrW(handle, GWL_EXSTYLE, exstyle); } catch { /* next */ }
@@ -992,11 +1262,12 @@ function create(opts) {
     counters.attaches += 1;
     startPoll();
     ensureShutdownHooks();
-    log('embed: attached', tabId, key, record.exe, record.title);
+    log('embed: attached', mode, tabId, key, record.exe, record.title);
 
     return {
       ok: true,
       hwnd: key,
+      mode,
       title: record.title,
       className: record.className,
       pid: record.pid,
@@ -1006,15 +1277,29 @@ function create(opts) {
 
   // -- layout ---------------------------------------------------------------
 
+  /** The browser window is off the screen entirely: nothing it owns may show. */
+  function browserMinimized() {
+    const w = liveWin();
+    if (!w || typeof w.isMinimized !== 'function') return false;
+    try { return !!w.isMinimized(); } catch { return false; }
+  }
+
   /**
    * Put the attached window over the tab's content area. `rect` is in the
-   * chrome page's CSS pixels, relative to the browser window's client area —
-   * which is the same origin a child HWND's coordinates use, so the conversion
-   * is nothing but the display scale factor.
+   * chrome page's CSS pixels, relative to the browser window's client area.
    *
-   * Idempotent and cheap: the last applied physical rect is remembered and an
-   * identical call does no Win32 work at all. The chrome will call this on
-   * every resize frame, so that matters.
+   * CHILD MODE: that is already a child HWND's own coordinate space, so the
+   * conversion is nothing but the display scale factor.
+   *
+   * OWNER MODE: the window is still top-level, so SetWindowPos wants SCREEN
+   * pixels and clientOrigin() is added on top. That origin moves whenever the
+   * browser does, which is why the rect the chrome asked for is REMEMBERED here
+   * (record.css) and re-applied by relayout() from main.js's move/resize hooks
+   * and from the 1 s poll as a safety net.
+   *
+   * Idempotent and cheap either way: the last applied physical rect is
+   * remembered and an identical call does no Win32 work at all. The chrome calls
+   * this on every resize frame, so that matters.
    */
   function layout(tabId, rect, visible) {
     if (!win32()) return { ok: false, reason: 'unavailable' };
@@ -1022,13 +1307,46 @@ function create(opts) {
     if (!record) return { ok: false, reason: 'not-attached' };
 
     const box = rect || {};
+    record.css = {
+      x: Number(box.x) || 0,
+      y: Number(box.y) || 0,
+      w: Math.max(0, Number(box.w) || 0),
+      h: Math.max(0, Number(box.h) || 0),
+      show: !!visible,
+    };
+    return applyLayout(record);
+  }
+
+  /**
+   * One record's last-requested rect, converted and applied. The only writer of
+   * record.last / record.visible, and the only place SetWindowPos is called for
+   * a layout — layout() and relayout() are both thin wrappers over it.
+   */
+  function applyLayout(record) {
+    const css = record.css;
+    if (!css) return { ok: false, reason: 'never-laid-out' };
+    const owner = record.mode === 'owner';
     const sf = scaleFactor();
-    const x = Math.round((Number(box.x) || 0) * sf);
-    const y = Math.round((Number(box.y) || 0) * sf);
-    const w = Math.max(0, Math.round((Number(box.w) || 0) * sf));
-    const h = Math.max(0, Math.round((Number(box.h) || 0) * sf));
-    // A zero-area tab is a hidden tab whatever the caller asked for.
-    const show = !!visible && w > 0 && h > 0;
+    let ox = 0;
+    let oy = 0;
+    if (owner) {
+      const origin = clientOrigin();
+      // No origin means no idea where our client area is: leaving the window
+      // where it is beats moving it somewhere wrong.
+      if (!origin) return { ok: false, reason: 'no-origin' };
+      ox = origin.x;
+      oy = origin.y;
+    }
+    const x = ox + Math.round(css.x * sf);
+    const y = oy + Math.round(css.y * sf);
+    const w = Math.max(0, Math.round(css.w * sf));
+    const h = Math.max(0, Math.round(css.h * sf));
+    /* A zero-area tab is a hidden tab whatever the caller asked for. And in
+       owner mode a minimised browser is one too: Windows does hide owned windows
+       with their owner, but doing it here as well means the state is ours to
+       restore and an app is never left floating over a desktop whose browser is
+       in the taskbar. */
+    const show = css.show && w > 0 && h > 0 && !(owner && browserMinimized());
 
     const last = record.last;
     if (last && last.x === x && last.y === y && last.w === w && last.h === h && last.show === show) {
@@ -1047,7 +1365,7 @@ function create(opts) {
         | (show ? 0 : SWP_NOMOVE | SWP_NOSIZE);
       w32.SetWindowPos(record.handle, HWND_TOP, x, y, w, h, flags);
     } catch (err) {
-      log('embed: layout failed', tabId, err && err.message);
+      log('embed: layout failed', record.tabId, err && err.message);
       return { ok: false, reason: 'layout-failed' };
     }
 
@@ -1055,6 +1373,58 @@ function create(opts) {
     record.visible = show;
     counters.layouts += 1;
     return { ok: true, changed: true, rect: { x, y, w, h }, visible: show, scale: sf };
+  }
+
+  /**
+   * Re-apply what the chrome last asked for, because the SCREEN answer changed
+   * without the CSS one moving: the browser was dragged, resized, maximised,
+   * minimised, restored, or went full screen.
+   *
+   * Owner-mode records only — a child HWND follows its parent for free, which is
+   * the one thing that mode is better at. Nothing here asks the chrome for a
+   * fresh measurement: the rect inside the window has not moved, only the window
+   * has, so this is safe to call from a move handler at frame rate (it is
+   * coalesced in main.js anyway) and from the 1 s poll as a backstop.
+   *
+   * @returns {{ok:boolean, moved:number, considered:number, reason?:string}}
+   */
+  function relayout(reason) {
+    if (!win32()) return { ok: false, reason: 'unavailable', moved: 0, considered: 0 };
+    let moved = 0;
+    let considered = 0;
+    for (const record of Array.from(attached.values())) {
+      if (record.mode !== 'owner' || !record.css) continue;
+      considered += 1;
+      let out = null;
+      try { out = applyLayout(record); } catch { out = null; }
+      if (out && out.ok && out.changed) moved += 1;
+    }
+    if (moved) {
+      counters.relayouts += 1;
+      log('embed: relayout', reason || '', moved + '/' + considered);
+    }
+    return { ok: true, moved, considered };
+  }
+
+  /**
+   * The user clicked back onto the browser after using another app. Windows does
+   * bring an owned window up with its owner, but only for the windows it
+   * activated itself — a window raised over ours while we were behind can be
+   * left on top of the app. One SetWindowPos per visible owner-mode window puts
+   * them back over our client area, WITHOUT activating anything.
+   */
+  function raiseHosted() {
+    if (!win32()) return { ok: false, reason: 'unavailable', raised: 0 };
+    let raised = 0;
+    for (const record of Array.from(attached.values())) {
+      if (record.mode !== 'owner' || !record.visible) continue;
+      try {
+        w32.SetWindowPos(record.handle, HWND_TOP, 0, 0, 0, 0,
+          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        raised += 1;
+      } catch { /* the next focus will try again */ }
+    }
+    return { ok: true, raised };
   }
 
   // -- detach / close -------------------------------------------------------
@@ -1096,23 +1466,41 @@ function create(opts) {
     // poll, the next detach and the shutdown path all try again, and the styles
     // are left alone -- a working child window beats a broken top-level one.
     let unparented = false;
-    try {
-      w32.SetParent(record.handle, 0n);                         // back to the desktop
-      unparented = true;
-    } catch (err) {
-      log('embed: SetParent(desktop) threw', key, err && err.message);
+    if (record.mode === 'owner') {
+      /* OWNER MODE'S EQUIVALENT, and it matters just as much: Windows destroys
+         a window's OWNED windows when the owner is destroyed, so an app left
+         owned by a browser that is quitting dies with it exactly as a child
+         would. Clearing GWLP_HWNDPARENT is the whole release; the check after it
+         is the same question in the same shape -- "is it still ours". */
+      try {
+        w32.SetWindowLongPtrW(record.handle, GWLP_HWNDPARENT, record.saved.owner || 0n);
+        unparented = true;
+      } catch (err) {
+        log('embed: clearing the owner threw', key, err && err.message);
+      }
+      try {
+        if (unparented && record.parentHwnd
+          && ownerOf(record.handle) === record.parentHwnd) unparented = false;
+      } catch { /* trust the call above */ }
+    } else {
+      try {
+        w32.SetParent(record.handle, 0n);                         // back to the desktop
+        unparented = true;
+      } catch (err) {
+        log('embed: SetParent(desktop) threw', key, err && err.message);
+      }
+      try {
+        // MEASURED, and it cost a broken Paint window to learn: a window that is
+        // still WS_CHILD after SetParent(null) is a child OF THE DESKTOP, and
+        // GetParent then returns the desktop HWND -- not null. Testing GetParent
+        // for truthiness therefore reads every successful un-parent as a failure,
+        // skips the style restore, and leaves exactly the WS_CHILD-with-no-real-
+        // parent zombie this code exists to prevent. The only question that has a
+        // stable answer is "is it still OUR child".
+        if (unparented && record.parentHwnd
+          && w32.GetParent(record.handle) === record.parentHwnd) unparented = false;
+      } catch { /* trust the call above */ }
     }
-    try {
-      // MEASURED, and it cost a broken Paint window to learn: a window that is
-      // still WS_CHILD after SetParent(null) is a child OF THE DESKTOP, and
-      // GetParent then returns the desktop HWND -- not null. Testing GetParent
-      // for truthiness therefore reads every successful un-parent as a failure,
-      // skips the style restore, and leaves exactly the WS_CHILD-with-no-real-
-      // parent zombie this code exists to prevent. The only question that has a
-      // stable answer is "is it still OUR child".
-      if (unparented && record.parentHwnd
-        && w32.GetParent(record.handle) === record.parentHwnd) unparented = false;
-    } catch { /* trust the call above */ }
 
     if (!unparented) {
       attached.set(key, record);
@@ -1140,8 +1528,8 @@ function create(opts) {
       log('embed: detach reposition failed', key, err && err.message);
     }
 
-    log('embed: detached', key, record.key, restore ? 'restored' : 'hidden');
-    return { ok: true, hwnd: record.key, restored: restore };
+    log('embed: detached', record.mode, key, record.key, restore ? 'restored' : 'hidden');
+    return { ok: true, hwnd: record.key, restored: restore, mode: record.mode };
   }
 
   /**
@@ -1190,6 +1578,26 @@ function create(opts) {
     }
   }
 
+  /**
+   * Put a window's OWN styles back where they were, without moving it and
+   * without activating it. Used when a window leaves our hands by a route that
+   * is not detach() -- an app (or the shell) clearing the owner we set.
+   */
+  function restoreStyles(record) {
+    if (!record || !w32) return false;
+    try {
+      w32.SetWindowLongPtrW(record.handle, GWL_STYLE, record.saved.style);
+    } catch { /* next */ }
+    try {
+      w32.SetWindowLongPtrW(record.handle, GWL_EXSTYLE, record.saved.exstyle);
+    } catch { /* next */ }
+    try {
+      w32.SetWindowPos(record.handle, HWND_TOP, 0, 0, 0, 0,
+        SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+    } catch { return false; }
+    return true;
+  }
+
   /** Drop a record whose window is dead (nothing to restore) and say so. */
   function forget(record, reason) {
     if (!record || !attached.has(record.tabId)) return;
@@ -1218,13 +1626,20 @@ function create(opts) {
   // -- the hung-app watchdog ------------------------------------------------
 
   /**
-   * A hosted app has stopped answering. That matters more here than anywhere
-   * else, because SetParent joined its input queue to OURS: while it is a child
-   * of this window, its wedged message loop is also the browser's frozen
-   * keyboard and mouse.
+   * A hosted app has stopped answering.
    *
-   * AND YET NOTHING IS DETACHED HERE. MEASURED, 2026-09-12: the automatic
-   * detach cannot land while the app is actually wedged. SetParent has to be
+   * IN OWNER MODE (the default) THAT IS NOW ONLY A LABEL. The app keeps its own
+   * input queue, so the browser is untouched: measured 2026-09-12 with the guest
+   * app wedged for 12 s, embed:list answered in 1 ms and Ctrl+T opened a tab in
+   * 27 ms. The tab says "(not responding)", the rectangle is frozen, and the user
+   * can pop it out or close it whenever he likes.
+   *
+   * IN CHILD MODE it is the serious case, because SetParent joined the app's
+   * input queue to OURS: while it is a child of this window, its wedged message
+   * loop is also the browser's frozen keyboard and mouse.
+   *
+   * AND YET NOTHING IS DETACHED HERE, IN EITHER MODE. MEASURED, 2026-09-12: the
+   * automatic detach cannot land while the app is actually wedged. SetParent has to be
    * served by the app's own thread, and that same joined queue starves THIS
    * process's message loop -- one IPC round trip took 9.7 s, the 1 s poll ran 7
    * times in 30 s, and the eviction completed 50 ms after the app started
@@ -1311,10 +1726,26 @@ function create(opts) {
         let live = false;
         try { live = !!w32.IsWindow(record.handle); } catch { live = false; }
         if (!live) { forget(record, 'died'); continue; }
-        // Something took it back: let go rather than fighting over it.
+        // Something took it back: let go rather than fighting over it. The
+        // question is the mode's: a child's PARENT is us, an owned window's
+        // OWNER is us, and an app that resets its own owner (some installers and
+        // splash screens do) has taken its window back either way.
         let ours = true;
         try {
-          if (parent && w32.GetParent(record.handle) !== parent) {
+          if (parent && record.mode === 'owner') {
+            if (ownerOf(record.handle) !== parent) {
+              /* MEASURED with Calculator (see STORE_OK_IN_OWNER_MODE): a window
+                 whose owner someone else cleared is still wearing the frameless
+                 style WE gave it, and dropping the record without undoing that
+                 leaves a captionless window with no way back. It is still a
+                 top-level window, so putting its own styles back is safe and
+                 costs one call; its position is left alone (we do not know what
+                 whoever took it wants) and nothing is activated. */
+              restoreStyles(record);
+              forget(record, 'lost its owner');
+              ours = false;
+            }
+          } else if (parent && w32.GetParent(record.handle) !== parent) {
             forget(record, 'was re-parented away');
             ours = false;
           }
@@ -1333,6 +1764,14 @@ function create(opts) {
 
         pushTitle(record);
       }
+
+      /* THE SAFETY NET, owner mode only. Every event that moves the browser is
+         hooked in main.js, but a snap, a DPI change, a display being unplugged
+         or a monitor arrangement changing can move our client origin without any
+         of them firing. One re-apply per second costs a ClientToScreen and, when
+         nothing moved, not even a SetWindowPos (applyLayout skips an identical
+         rect). */
+      try { relayout('poll'); } catch { /* next tick */ }
     }, 1000);
     if (typeof pollTimer.unref === 'function') pollTimer.unref();
   }
@@ -1388,8 +1827,14 @@ function create(opts) {
    * focus (the idle music, the presence gate) has to ask here instead.
    *
    *   foregroundRoot  GetForegroundWindow -> GA_ROOT, as a decimal string.
-   *   ours            that root is one of OUR top-level windows: the user is
-   *                   working inside this browser, whatever Electron thinks.
+   *   ours            that root is one of OUR top-level windows, OR a window we
+   *                   OWN (owner mode: up to 4 GW_OWNER hops). Either way the user
+   *                   is working inside this browser, whatever Electron thinks.
+   *   viaOwner        `ours` was decided through the owner chain, i.e. the
+   *                   foreground window is an owner-mode app's own top-level
+   *                   window. Logging and verification only — nothing branches
+   *                   on it, because from the chrome's point of view the two
+   *                   cases mean exactly the same thing.
    *   focusHwnd/Class the window that actually holds focus, and its class
    *                   (the class is for LOGGING only -- see ownProcess).
    *   ownProcess      the focus window belongs to THIS process: the chrome, a
@@ -1415,6 +1860,7 @@ function create(opts) {
       available: false,
       foregroundRoot: '0',
       ours: false,
+      viaOwner: false,
       focusHwnd: '0',
       focusClass: '',
       ownProcess: false,
@@ -1430,13 +1876,21 @@ function create(opts) {
     let root = fg;
     try { root = w32.GetAncestor(fg, GA_ROOT) || fg; } catch { root = fg; }
     info.foregroundRoot = handleText(root);
-    info.ours = ourHandles().has(root);
+    /* CHILD MODE: focus inside the child never changes the foreground window, so
+       the root IS our window. OWNER MODE: clicking into the app makes the app's
+       own top-level window the foreground one -- Electron reports blur, the
+       taskbar shows nothing new, and Windows keeps painting our caption active,
+       because we are its OWNER. So the owner chain is the same answer. */
+    const owned = ownsRoot(root, ourHandles());
+    info.ours = owned.ours;
+    info.viaOwner = owned.viaOwner;
     if (!info.ours) return info;                // another app: nothing to say
 
-    /* SetParent attached the app thread's input queue to ours (see attach()),
-       so the FOREGROUND queue's focus window is the true answer for both. Thread
-       id 0 asks about exactly that queue, which is why GetFocus() -- thread
-       local, and always our own -- would lie here. */
+    /* In child mode SetParent attached the app thread's input queue to ours (see
+       attach()); in owner mode the app's own queue IS the foreground queue. Either
+       way the FOREGROUND queue's focus window is the true answer. Thread id 0 asks
+       about exactly that queue, which is why GetFocus() -- thread local, and
+       always our own -- would lie here. */
     let focus = 0n;
     try {
       const gui = { cbSize: w32.GUI_SIZE };
@@ -1474,21 +1928,94 @@ function create(opts) {
   }
 
   /**
-   * Give the keyboard back to the chrome WITHOUT raising or activating
-   * anything: SetFocus moves focus inside the window that is already in the
-   * foreground, so a window behind the user's stays behind it.
+   * Give the keyboard back to the chrome WITHOUT raising or activating anything
+   * the user did not ask for. Called only in answer to a keystroke the user
+   * meant for the browser (a fired native-tab shortcut), never on a timer.
    *
-   * This is the one call in the module that crosses into the app's thread (the
-   * currently focused window gets WM_KILLFOCUS), and it is exactly what a mouse
-   * click on the tab strip already does. It runs only in answer to a keystroke
-   * the user meant for the browser, never on a timer.
+   * CHILD MODE is one call: the app's window is inside ours, its input queue is
+   * ours, and our window is already the foreground one — so SetFocus moves focus
+   * within the foreground queue and a window behind the user's stays behind it.
+   *
+   * OWNER MODE cannot work that way, and neither can webContents.focus(): the
+   * app's window is a DIFFERENT top-level window and it is the foreground one,
+   * so its thread owns the foreground input queue and SetFocus from our thread
+   * would move focus only inside our own (already-unfocused) queue.
+   *
+   * The documented way in is AttachThreadInput: join our thread to the app's
+   * queue, SetActiveWindow + SetFocus on OUR window, detach again. Deliberately
+   * NOT SetForegroundWindow — it steals focus from whatever the user may have
+   * clicked in the meantime, and when the OS refuses it, it flashes the taskbar
+   * button instead, which is worse than doing nothing.
+   *
+   * THE ONE RISK, guarded: while the queues are joined we are as freezable as
+   * the app, which is the very thing owner mode exists to avoid. So the app is
+   * asked IsHungAppWindow FIRST (kernel state, cannot block), the join lasts
+   * exactly three calls, and the detach is in the same try. A hung app simply
+   * does not get the hand-back — the shortcut still ran.
    */
   function focusChrome() {
     if (!win32()) return false;
     const parent = browserHandle();
     if (!parent) return false;
-    try { w32.SetFocus(parent); } catch { return false; }
-    return true;
+
+    // Which of our hosted owner-mode windows, if any, is the foreground one.
+    let fgApp = 0n;
+    try {
+      let fg = w32.GetForegroundWindow() || 0n;
+      if (fg) {
+        let root = fg;
+        try { root = w32.GetAncestor(fg, GA_ROOT) || fg; } catch { root = fg; }
+        const tabId = byHandle.get(handleText(root));
+        const record = tabId ? attached.get(tabId) : null;
+        if (record && record.mode === 'owner') fgApp = record.handle;
+      }
+    } catch { fgApp = 0n; }
+
+    if (!fgApp) {
+      // Child mode, or the chrome already has the foreground: one call.
+      try { w32.SetFocus(parent); } catch { return false; }
+      return true;
+    }
+
+    const started = Date.now();
+    let ok = false;
+    let joined = false;
+    let note = '';
+    try {
+      if (w32.IsHungAppWindow(fgApp)) {
+        note = 'app not responding';
+      } else {
+        const appThread = windowThread(fgApp);
+        const ourThread = Number(w32.GetCurrentThreadId());
+        if (!appThread || !ourThread) {
+          note = 'no thread id';
+        } else if (appThread === ourThread) {
+          w32.SetFocus(parent);
+          ok = true;
+          note = 'same thread';
+        } else if (w32.AttachThreadInput(ourThread, appThread, true)) {
+          joined = true;
+          w32.SetActiveWindow(parent);
+          w32.SetFocus(parent);
+          ok = true;
+          w32.AttachThreadInput(ourThread, appThread, false);
+          joined = false;
+        } else {
+          note = 'AttachThreadInput refused';
+        }
+      }
+    } catch (err) {
+      note = (err && err.message) || 'threw';
+    }
+    // Never leave the queues joined: that IS the child-mode failure mode.
+    if (joined) {
+      try { w32.AttachThreadInput(Number(w32.GetCurrentThreadId()), windowThread(fgApp), false); }
+      catch { /* nothing further to try */ }
+    }
+    counters.handbacks += 1;
+    log('embed: keyboard handback ' + (ok ? 'ok' : 'no') + ' in '
+      + (Date.now() - started) + 'ms' + (note ? ' (' + note + ')' : ''));
+    return ok;
   }
 
   // -- inspection -----------------------------------------------------------
@@ -1506,6 +2033,7 @@ function create(opts) {
         tabId: record.tabId,
         hwnd: record.key,
         pid: record.pid,
+        mode: record.mode,
         title: w32 && alive(record.tabId) ? (windowTitle(record.handle) || record.title) : record.title,
         className: record.className,
         exe: record.exe,
@@ -1521,6 +2049,10 @@ function create(opts) {
       ffi: win32() ? 'koffi' : null,
       available: !!win32(),
       attached: attached.size,
+      mode: DEFAULT_MODE,
+      // The browser's client origin in screen pixels: owner mode's layout
+      // origin, and the one number a live check cannot get anywhere else.
+      origin: win32() ? clientOrigin() : null,
       // Hosted windows whose app has gone quiet and not yet answered.
       hungReported: hungWatch.size,
       polling: !!pollTimer,
@@ -1537,6 +2069,10 @@ function create(opts) {
     hasNewProcess,
     attach,
     layout,
+    /** Owner mode: the browser moved, so the app has to. Coalesced in main.js. */
+    relayout,
+    /** Owner mode: put the hosted windows back over our client area on focus. */
+    raiseHosted,
     detach,
     close,
     /** Tabs reported hung and still hosted, as { tabId, hwnd } — read-only, for
@@ -1557,7 +2093,14 @@ function create(opts) {
 
 module.exports = {
   create,
+  /** The mode attach() uses when the caller does not name one. */
+  DEFAULT_MODE,
+  MODES,
+  STORE_OK_IN_OWNER_MODE,
   // pure parts, for the harness
+  normalizeMode,
+  ownsRootVia,
+  OWNER_HOPS,
   pidList,
   parseProcTree,
   descendantsOf,

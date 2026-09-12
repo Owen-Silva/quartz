@@ -149,14 +149,17 @@ const embed = (() => {
     hasNewProcess: () => false,
     attach: () => ({ ok: false, reason: 'unavailable' }),
     layout: () => ({ ok: false, reason: 'unavailable' }),
+    relayout: () => ({ ok: false, reason: 'unavailable', moved: 0, considered: 0 }),
+    raiseHosted: () => ({ ok: false, reason: 'unavailable', raised: 0 }),
     detach: () => ({ ok: false, reason: 'unavailable' }),
     close: () => ({ ok: false, reason: 'unavailable' }),
     detachAll: () => ({ ok: true, detached: 0 }),
     handleWindowClose: () => ({ ok: true, detached: 0 }),
     alive: () => false,
     focusInfo: () => ({
-      available: false, foregroundRoot: '0', ours: false, focusHwnd: '0',
-      focusClass: '', ownProcess: false, hostedTabId: null, hostedVisible: false,
+      available: false, foregroundRoot: '0', ours: false, viaOwner: false,
+      focusHwnd: '0', focusClass: '', ownProcess: false, hostedTabId: null,
+      hostedVisible: false,
     }),
     focusChrome: () => false,
     list: () => [],
@@ -188,12 +191,15 @@ embed.on('gone', (tabId) => {
 });
 
 /*
- * The hung-app watchdog (see embed.js). A hosted app that stops pumping messages
- * freezes THIS window's input too -- the price of SetParent joining the two
- * input queues -- but the engine does NOT move the window: the detach cannot
- * land until the app answers again anyway (measured), and doing it then would
- * pop a healthy app out of its tab. So this is a report, the window stays
- * hosted, and nothing about the focus poll changes.
+ * The hung-app watchdog (see embed.js). In owner mode -- the default -- a hosted
+ * app that stops pumping messages costs the browser NOTHING: the two input
+ * queues were never joined, so this really is only a label on the tab (measured
+ * during a 12 s wedge: embed:list answered in 1 ms, Ctrl+T opened a tab in
+ * 27 ms). In child mode the same hang freezes THIS window's input too. Either
+ * way the engine does NOT move the window: in child mode the detach cannot land
+ * until the app answers again anyway (measured), and doing it then would pop a
+ * healthy app out of its tab. So this is a report, the window stays hosted, and
+ * nothing about the focus poll changes.
  */
 embed.on('hung', (payload) => {
   send('embed:hung', {
@@ -218,6 +224,32 @@ embed.on('title', (payload) => {
     title: String((payload && payload.title) == null ? '' : payload.title),
   });
 });
+
+/**
+ * The browser moved, so an owner-mode app window has to move with it (see the
+ * window-event block in createWindow and embed.js's applyLayout).
+ *
+ * Coalesced to one relayout per frame: 'move' and 'resize' fire on every mouse
+ * message of a drag, and while the relayout itself is cheap, doing it once per
+ * frame is what keeps the app glued to the window rather than trailing it.
+ * setImmediate, not a timer: it runs at the end of the current turn, so a burst
+ * of ten move events costs one re-apply.
+ */
+let embedRelayoutQueued = false;
+let embedRelayoutWhy = '';
+
+function queueEmbedRelayout(reason) {
+  if (reason) embedRelayoutWhy = String(reason);
+  if (embedRelayoutQueued) return false;
+  embedRelayoutQueued = true;
+  setImmediate(() => {
+    embedRelayoutQueued = false;
+    const why = embedRelayoutWhy;
+    embedRelayoutWhy = '';
+    try { embed.relayout(why); } catch { /* the 1 s poll is the backstop */ }
+  });
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Window state
@@ -487,6 +519,32 @@ function createWindow() {
   // state changes it did not initiate (double-click, Win+Up, snap).
   win.on('maximize', () => send('win:maximized', { maximized: true }));
   win.on('unmaximize', () => send('win:maximized', { maximized: false }));
+
+  /*
+   * OWNER MODE'S LAYOUT, the only part of native app tabs that is not the
+   * chrome's job (see embed.js attach()). An owner-mode app window is still a
+   * TOP-LEVEL window positioned in SCREEN pixels, so every one of these moves
+   * the browser without moving anything inside the page: the chrome has nothing
+   * new to measure and would send no layout at all, yet the app has to follow.
+   *
+   * embed.relayout() re-applies the rect the chrome last asked for against the
+   * new client origin. It is coalesced to one call per frame here because 'move'
+   * and 'resize' fire continuously through a drag, and it does no Win32 work at
+   * all when the origin has not really moved.
+   *
+   * 'minimize'/'restore' are in the list because an owned window is hidden with
+   * its owner by Windows but shown again only by us; 'focus' also re-raises the
+   * app over our client area (see raiseHosted) for the case where another app's
+   * window was left on top of it.
+   */
+  for (const ev of ['move', 'moved', 'resize', 'resized', 'maximize', 'unmaximize',
+    'minimize', 'restore', 'enter-full-screen', 'leave-full-screen']) {
+    win.on(ev, () => queueEmbedRelayout(ev));
+  }
+  win.on('focus', () => {
+    try { embed.raiseHosted(); } catch { /* best effort */ }
+    queueEmbedRelayout('focus');
+  });
 
   // The WINDOW's focus, not the chrome document's. app.js pauses the new-tab
   // board while the window is behind something else, and a click into a
@@ -3326,7 +3384,10 @@ ipcMain.handle('embed:attach', (event, payload) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
   const req = payload && typeof payload === 'object' ? payload : {};
   try {
-    const out = embed.attach({ tabId: req.tabId, hwnd: req.hwnd });
+    // `mode` is optional and normalised by the engine: a chrome that never
+    // mentions it gets embed.js's DEFAULT_MODE, which is the point of having the
+    // decision in exactly one place.
+    const out = embed.attach({ tabId: req.tabId, hwnd: req.hwnd, mode: req.mode });
     syncNativeFocusPoll();
     return out;
   } catch {
@@ -3531,8 +3592,24 @@ function nativeShortcutSet() {
 function fireNativeShortcut(id) {
   const w = liveWin();
   if (!w) return;
+  /*
+   * THE ORDER MATTERS IN OWNER MODE, AND IT IS THIS WAY ROUND BECAUSE THE APP'S
+   * WINDOW IS A DIFFERENT TOP-LEVEL WINDOW.
+   *
+   * embed.focusChrome() FIRST: it is the only one of the two that can move the
+   * keyboard between top-level windows (AttachThreadInput; see embed.js), and it
+   * neither raises nor steals -- it hands OUR window the keyboard that the OS
+   * just routed this hotkey to. Then webContents.focus() puts the focus on the
+   * right widget INSIDE our window, so Ctrl+L lands in an omnibox that can
+   * actually be typed into.
+   *
+   * Doing it the other way round measured as "it works anyway": Electron's own
+   * focus() activated the window, so the Win32 handoff found nothing left to do.
+   * That is luck, not design -- it depends on Chromium choosing to activate --
+   * and it left the one call written for this case never running.
+   */
+  try { embed.focusChrome(); } catch { /* the Electron call below is the backstop */ }
   try { w.webContents.focus(); } catch { /* the renderer will still get it */ }
-  try { embed.focusChrome(); } catch { /* best effort */ }
   send('shortcut:fire', { id: String(id) });
 }
 

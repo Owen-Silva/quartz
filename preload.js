@@ -392,10 +392,16 @@ contextBridge.exposeInMainWorld('api', {
       exe: filter && filter.exe != null ? String(filter.exe) : undefined
     }),
     // Host an existing window in a tab. It stays HIDDEN until the first
-    // layout() call -> { ok, hwnd, title, className, pid, exe }.
-    attach: (tabId, hwnd) => ipcRenderer.invoke('embed:attach', {
+    // layout() call -> { ok, hwnd, mode, title, className, pid, exe }.
+    //
+    // `mode` ('owner' | 'child') is the hosting mechanism and is OPTIONAL: the
+    // engine's DEFAULT_MODE is the answer for every normal caller, and the
+    // chrome never passes one. It is accepted so that a live check can host the
+    // same window both ways and compare.
+    attach: (tabId, hwnd, mode) => ipcRenderer.invoke('embed:attach', {
       tabId: String(tabId == null ? '' : tabId),
-      hwnd: String(hwnd == null ? '' : hwnd)
+      hwnd: String(hwnd == null ? '' : hwnd),
+      mode: mode == null ? undefined : String(mode)
     }),
     // Launch an installed app by its apps.list() id and host the window of
     // the process it started (a copy already running is adopted only when
