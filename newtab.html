@@ -155,7 +155,13 @@
            glass. Nothing in it is ever rebuilt: a sample writes into text
            nodes of rows that already exist and moves the nodes when the
            order changes. While it is closed, samples are kept and not
-           drawn. -->
+           drawn.
+
+           Every row wears a 16px icon slot left of its name, filled by
+           window.__applyProcIcons() with the real executable's icon when
+           the main process has resolved one and by a neutral window
+           outline until then. The slot is the same width empty, so the
+           dashed rows below line up with the real ones. -->
       <div id="procs-wrap" class="procs-wrap">
         <section id="procs" class="procs" aria-label="Processes">
           <div class="procs-inner">

@@ -43,6 +43,11 @@
         once a second, and window.__applyAppResult(r) answers the lines
         the dock logs: `newtab:app {"action":"launch"|"focus"|"pin"|
         "unpin"|"refresh",...}`, read off this guest the same way.
+
+     7. window.__applyProcIcons({ key: dataUrl|null }) — the real
+        executable's icon for a process group, resolved by the main
+        process and pushed whenever an answer comes back. It only
+        fills slots the rows already wear; no row is rebuilt for it.
    ============================================================ */
 
 'use strict';
@@ -881,6 +886,117 @@ function procCompare(a, b) {
   return a.name.localeCompare(b.name);
 }
 
+/* --- the program's own icon ---------------------------------------- */
+/* The chrome resolves the icon of the real executable behind a group and
+   pushes `{ key: dataUrl|null }` here. Every row wears a 16px slot left
+   of its name from the moment it is built — the dashed placeholder rows
+   too — so an icon that lands three seconds late moves nothing. A known
+   dataUrl becomes one <img> whose src is written ONCE per key; anything
+   else keeps the neutral window outline. No row is ever rebuilt for an
+   icon, and a repeated answer for a key already shown touches nothing. */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const PROC_ICON_MAX = 300;       // the same cap the main process keeps
+const procIcons = new Map();     // key -> dataUrl | null
+
+/** The neutral glyph: one window outline, hairline, no fill. */
+function buildProcGlyph() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'proc-icon-glyph');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  const box = document.createElementNS(SVG_NS, 'rect');
+  box.setAttribute('x', '2.5');
+  box.setAttribute('y', '3.5');
+  box.setAttribute('width', '11');
+  box.setAttribute('height', '9');
+  box.setAttribute('rx', '1');
+  box.setAttribute('fill', 'none');
+  box.setAttribute('stroke', 'currentColor');
+  box.setAttribute('stroke-width', '1');
+
+  const bar = document.createElementNS(SVG_NS, 'path');
+  bar.setAttribute('d', 'M2.5 6.5h11');
+  bar.setAttribute('fill', 'none');
+  bar.setAttribute('stroke', 'currentColor');
+  bar.setAttribute('stroke-width', '1');
+
+  svg.appendChild(box);
+  svg.appendChild(bar);
+  return svg;
+}
+
+/** The slot: 16px wide whatever is in it, built with the row, never removed. */
+function buildProcIconSlot() {
+  const slot = document.createElement('span');
+  slot.className = 'proc-icon';
+  slot.setAttribute('aria-hidden', 'true');
+  return slot;
+}
+
+/**
+ * Put whatever is known for this row's key in its slot. Called once when
+ * the row is built and again only for the keys an answer actually names,
+ * so a sample costs nothing here. `rec.iconSrc` is the guard: a key whose
+ * src is already written is left completely alone — no attribute is
+ * touched a second time, and an icon that is up is never taken away.
+ */
+function syncRowIcon(rec) {
+  if (!rec || !rec.icon) return;
+
+  const known = procIcons.get(rec.key);
+  const url = (typeof known === 'string' && known) ? known : '';
+
+  if (url) {
+    if (rec.iconSrc === url) return;            // written once per key
+    if (!rec.iconImg) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.decoding = 'async';
+      img.draggable = false;
+      rec.iconImg = img;
+    }
+    rec.iconSrc = url;
+    rec.iconImg.src = url;
+    if (rec.iconGlyph && rec.iconGlyph.parentNode === rec.icon) {
+      rec.icon.removeChild(rec.iconGlyph);
+      rec.iconGlyph = null;
+    }
+    if (rec.iconImg.parentNode !== rec.icon) rec.icon.appendChild(rec.iconImg);
+    return;
+  }
+
+  if (rec.iconSrc) return;                      // an icon stays where it is
+  if (rec.iconGlyph) return;                    // the glyph is already there
+  rec.iconGlyph = buildProcGlyph();
+  rec.icon.appendChild(rec.iconGlyph);
+}
+
+/** Whatever the chrome has resolved so far, merged and worn in place. */
+window.__applyProcIcons = function (map) {
+  if (map && typeof map === 'object') {
+    Object.keys(map).forEach(function (raw) {
+      const key = String(raw);
+      const value = map[raw];
+      procIcons.set(key, (typeof value === 'string' && value) ? value : null);
+      const rec = procRows.get(key);
+      if (rec) syncRowIcon(rec);
+    });
+
+    // Insertion order is oldest first: drop from the front, never a row's own.
+    while (procIcons.size > PROC_ICON_MAX) {
+      const oldest = procIcons.keys().next();
+      if (oldest.done) break;
+      procIcons.delete(oldest.value);
+    }
+  }
+  return procIcons.size;
+};
+
 function procCell(className) {
   const cell = document.createElement('span');
   cell.className = 'proc-col ' + className;
@@ -899,9 +1015,11 @@ function buildRow(group) {
   row.dataset.key = group.key;
 
   const name = procCell('proc-name');
+  const icon = buildProcIconSlot();
   const label = document.createTextNode('');
   const count = document.createElement('span');
   count.className = 'proc-count';
+  name.appendChild(icon);
   name.appendChild(label);
   name.appendChild(count);
 
@@ -931,6 +1049,10 @@ function buildRow(group) {
     row: row,
     label: label,
     count: count,
+    icon: icon,
+    iconImg: null,
+    iconGlyph: null,
+    iconSrc: '',
     cpu: cpu,
     mem: mem,
     io: io,
@@ -944,6 +1066,7 @@ function buildRow(group) {
   };
 
   end.addEventListener('click', function () { armEnd(rec); });
+  syncRowIcon(rec);              // whatever is already known, worn at once
   return rec;
 }
 
@@ -989,7 +1112,8 @@ function buildBlankRow() {
   row.setAttribute('role', 'row');
 
   const name = procCell('proc-name');
-  name.textContent = DASH;
+  name.appendChild(buildProcIconSlot());   // empty, but the same 24px wide
+  name.appendChild(document.createTextNode(DASH));
   const cpu = procCell('proc-cpu');
   cpu.textContent = DASH;
   const mem = procCell('proc-mem');
@@ -1279,8 +1403,13 @@ window.__procs = function () {
     rows: Array.prototype.map.call(procsBody ? procsBody.children : [], function (row) {
       const end = row.querySelector('.proc-end');
       const note = row.querySelector('.proc-note');
+      const slot = row.querySelector('.proc-icon');
       return {
         key: row.dataset.key || null,
+        icon: slot
+          ? (slot.querySelector('img') ? 'img'
+            : (slot.querySelector('svg') ? 'glyph' : 'empty'))
+          : null,
         name: row.querySelector('.proc-name') ? row.querySelector('.proc-name').textContent : '',
         cpu: row.querySelector('.proc-cpu').textContent,
         mem: row.querySelector('.proc-mem').textContent,
@@ -1293,6 +1422,13 @@ window.__procs = function () {
       };
     })
   };
+};
+
+/** What the page knows about icons, for tests. */
+window.__procIcons = function () {
+  let known = 0;
+  procIcons.forEach(function (value) { if (value) known++; });
+  return { entries: procIcons.size, known: known, rows: procRows.size };
 };
 
 function wireProcs() {

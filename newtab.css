@@ -1120,6 +1120,47 @@ body {
   color: var(--fg-3);
 }
 
+/* --- the program's own icon ----------------------------------- */
+/* A 16px slot left of every name, 8px before the text: 24px on the 4px
+   grid, worn by the dashed placeholder rows too, so nothing shifts when
+   the first sample lands or when a late icon arrives. The slot is an
+   inline-block inside the cell rather than a flex item, which keeps the
+   name's ellipsis exactly as it was. A 16px line-height on the cell makes
+   that box and the line box the same height, so the name and the numbers
+   to its right sit on one line. The app's own artwork is stated flat:
+   no ring, no shadow, no glow. */
+.proc-row .proc-name { line-height: 16px; }
+
+.proc-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: top;
+}
+
+.proc-icon img,
+.proc-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.proc-icon img {
+  object-fit: contain;
+  border: 0;
+  filter: none;
+  box-shadow: none;
+}
+
+/* Nothing resolved yet, or nothing to resolve: one window outline in the
+   quietest foreground, hairline, no fill. Right in both themes because
+   --fg-3 is defined in both. */
+.proc-icon-glyph { color: var(--fg-3); }
+
+/* The header names the column the names are in, not the slot. */
+.procs-head .proc-name { padding-left: 24px; }
+
 /* This browser's own processes: stated, never offered an End task. */
 .proc-row.is-self .proc-name { color: var(--fg-2); }
 
