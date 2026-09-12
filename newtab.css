@@ -35,6 +35,10 @@
   --ion-soft: rgba(114,173,202,.14);
   --ion-glow: rgba(114,173,202,.22);
   --ion-line: rgba(114,173,202,.65);   /* focus border / focus outline */
+  /* The running dot only: on dark it is the accent itself, on light a
+     darkened step of it (see the light block). A 6px disc on near-white glass
+     needs more weight than a focus rim does. */
+  --ion-dot:  var(--ion);
 
   /* the drop shadow under the one surface that floats over the page */
   --panel-shadow: rgba(0,0,0,.50);
@@ -122,6 +126,12 @@
   --ion-soft: rgba(11,127,214,.14);
   --ion-glow: rgba(11,127,214,.35);
   --ion-line: rgba(11,127,214,.75);
+  /* 79% of the accent's channels: the authored blue lands at 5.45:1 on the
+     tile where --ion itself measures 3.70:1, and because it is derived rather
+     than authored it follows a palette (Ocean 3.06 -> 4.62, Forest 3.38 ->
+     5.00) and any accent hue painted inline, instead of stranding a blue dot
+     on a red accent. */
+  --ion-dot:  color-mix(in srgb, var(--ion) 79%, #000);
 
   --panel-shadow: rgba(18,22,42,.16);
 
@@ -1472,7 +1482,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--ion);
+  background: var(--ion-dot);
   box-shadow: 0 0 0 1px var(--ink-1);
 }
 

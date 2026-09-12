@@ -87,6 +87,8 @@
   var MAX_CLOSED = 8;
   /** ...and the same for the installed apps: the query narrows them, not a scroll. */
   var MAX_APPS = 8;
+  /** A plain tab query shows fewer of them: the tabs are what was asked for. */
+  var MAX_APPS_TABS = 5;
 
   /** The one character that turns the pane into a command palette. */
   var CMD_PREFIX = '>';
@@ -524,14 +526,14 @@
     }
     list.sort(function (a, b) { return a.name.localeCompare(b.name); });
     appsCache = list;
-    if (open_ && isCommandMode()) render(hi < 0 ? 0 : hi);
+    if (open_) render(hi < 0 ? 0 : hi);        // app rows show in both modes
   }
 
   /** app.js: the index was rebuilt, so whatever is cached here is stale. */
   function appsChanged() {
     appsCache = null;
     appsAsked = false;
-    if (open_ && isCommandMode()) { ensureApps(); render(hi < 0 ? 0 : hi); }
+    if (open_) { ensureApps(); render(hi < 0 ? 0 : hi); }
   }
 
   /** app.js's running map (id -> { running, pids }) for the last sample. */
@@ -1213,7 +1215,8 @@
 
     if (!rows.length) {
       var empty = el('div', 'ts-empty');
-      empty.textContent = (query !== null) ? 'No matching commands' : 'No matching tabs';
+      empty.textContent = (query !== null) ? 'No matching commands'
+        : (tokenize(value).length ? 'No matching tabs, apps or history' : 'No matching tabs');
       listEl.appendChild(empty);
     }
 
@@ -1271,6 +1274,25 @@
         data.closed[i].el = row;
         rows.push(data.closed[i]);
         listEl.appendChild(row);
+      }
+    }
+
+    // The installed apps come last, and only once something has been typed:
+    // "power" should reach Windows PowerShell without the user knowing about
+    // `>`, while an empty field still opens on the tab strip rather than on the
+    // Start Menu. Fewer rows than the command palette gives them — under a
+    // plain query the tabs are what was asked for.
+    if (tokenize(value).length) {
+      var apps = appCommands(value).slice(0, MAX_APPS_TABS);
+      if (apps.length) {
+        listEl.appendChild(captionEl('Apps'));
+        for (i = 0; i < apps.length; i++) {
+          apps[i].kind = 'command';          // Enter runs it, like the > rows
+          row = buildCommandRow(apps[i], rows.length);
+          apps[i].el = row;
+          rows.push(apps[i]);
+          listEl.appendChild(row);
+        }
       }
     }
   }
@@ -1547,7 +1569,8 @@
       ensureApps: ensureApps,
       setApps: setApps,
       appsOf: function () { return appsCache; },
-      MAX_APPS: MAX_APPS
+      MAX_APPS: MAX_APPS,
+      MAX_APPS_TABS: MAX_APPS_TABS
     }
   };
 })();
