@@ -25,7 +25,8 @@
  *   #views #win-min #win-max #win-close #theme #titlebar #tabmenu
  * Body classes owned here: booted, maximized, acrylic, claude-live, tab-dragging.
  * Chip classes owned here: active, claude, live, loading, dragging, drag-shift,
- * broken, pinned, has-icon, split. Runtime panes owned here: #tabmenu rows,
+ * broken, pinned, collapsed, has-icon, split. Runtime panes owned here:
+ * #tabmenu rows,
  * .tab-card over a dead guest, and split view's .split-divider / .split-focus /
  * .split-scrim (siblings of the views in #views — a <webview> is never moved).
  * <html data-theme> is set before first paint by theme-boot.js and from here on.
@@ -3217,6 +3218,7 @@ function createNativeTab(appId, options) {
     audible: false,
     muted: false,
     pinned: false,
+    collapsed: false, // the chip's own size flag; a native tab cannot be pinned
     asleep: false,
     splitWith: null,
     splitRatio: 0.5,
@@ -4489,19 +4491,16 @@ function buildChip(tab) {
   title.className = 'tab-title';
   title.textContent = tab.title;
 
-  // Collapse-to-icon, left of the close button: the same thing Pin tab does,
-  // but reachable without the right-click menu. Page chips only — a Claude
-  // chamber and a hosted native window are not pinnable, and setTabPinned
-  // would refuse them anyway.
-  let collapse = null;
-  if (tab.kind === 'page') {
-    collapse = document.createElement('button');
-    collapse.className = 'tab-collapse';
-    collapse.type = 'button';
-    collapse.title = 'Collapse to icon';
-    collapse.setAttribute('aria-label', 'Collapse tab to icon');
-    collapse.textContent = TAB_GLYPH.collapse;
-  }
+  // Collapse-to-icon, left of the close button. EVERY chip carries one: a web
+  // page, a catalogue app, a terminal, a Claude chamber and a hosted native
+  // window are all tabs, and the user wants the same minus on all of them.
+  // Collapsing is its own per-tab flag rather than Pin — the chip keeps its
+  // seat in the strip, and neither a Claude chamber nor a native window can be
+  // pinned at all. syncChipCollapse() below sets the glyph and the labels,
+  // because on a collapsed chip this same button is the way back out.
+  const collapse = document.createElement('button');
+  collapse.className = 'tab-collapse';
+  collapse.type = 'button';
 
   const close = document.createElement('button');
   close.className = 'tab-close';
@@ -4510,27 +4509,30 @@ function buildChip(tab) {
   close.textContent = '×';
 
   chip.appendChild(title);
-  if (collapse) chip.appendChild(collapse);
+  chip.appendChild(collapse);
   chip.appendChild(close);
 
-  // The way back out. A collapsed chip is 40px of favicon with no room for a
-  // button in the row, so this one is a badge in the corner: built once, here,
-  // and shown by chrome.css only while a .pinned chip is hovered.
-  let expand = null;
-  if (tab.kind === 'page') {
-    expand = document.createElement('button');
-    expand.className = 'tab-expand';
-    expand.type = 'button';
-    expand.title = 'Expand tab';
-    expand.setAttribute('aria-label', 'Expand tab');
-    expand.textContent = TAB_GLYPH.expand;
-    chip.appendChild(expand);
-  }
+  // The way back out of a collapsed chip that is NOT the active tab: 40px of
+  // favicon with no room for a button in the row, so this one is a badge in
+  // the corner, built once here and shown by chrome.css only on hover.
+  const expand = document.createElement('button');
+  expand.className = 'tab-expand';
+  expand.type = 'button';
+  expand.title = 'Expand tab';
+  expand.setAttribute('aria-label', 'Expand tab');
+  expand.textContent = TAB_GLYPH.expand;
+  chip.appendChild(expand);
 
   tab.titleEl = title;
+  tab.collapseEl = collapse;
+  tab.expandEl = expand;
   // Truncation is chrome.css's job; the full string stays here for the tooltip.
   chip.title = chipTooltip(tab);
   if (tab.pinned) chip.classList.add('pinned');
+  // Collapsed survives a rebuild: restoreSession() and any later re-chip read
+  // the flag off the tab rather than the DOM.
+  if (tab.collapsed) chip.classList.add('collapsed');
+  syncChipCollapse(tab);
 
   // Workspaces: a chip is in the strip only while its tab is in the workspace
   // on screen, and carries that workspace's colour for the underline.
@@ -4562,20 +4564,22 @@ function buildChip(tab) {
   // press on either changes the chip's size, it never changes which tab is on
   // screen. The button guard is belt and braces — a middle-click arrives as
   // auxclick, not click, so this listener should never see one.
-  if (collapse) {
-    collapse.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (event && event.button) return;
-      setTabPinned(tab, true);
-    });
-  }
-  if (expand) {
-    expand.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (event && event.button) return;
-      setTabPinned(tab, false);
-    });
-  }
+  collapse.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event && event.button) return;
+    // One button, both directions: a collapsed chip is drawn full size while it
+    // is the active tab, and this is the only way out of that state.
+    setTabCollapsed(tab, !tab.collapsed);
+  });
+  expand.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event && event.button) return;
+    // The badge clears whichever flag is holding the chip down to its icon. A
+    // pinned chip is icon-only too, and this badge has been its way out since
+    // the collapse button landed.
+    if (tab.pinned) setTabPinned(tab, false);
+    if (tab.collapsed) setTabCollapsed(tab, false);
+  });
 
   wireChipDrag(tab, chip);
   return chip;
@@ -5190,6 +5194,46 @@ function setTabPinned(tab, on) {
   saveSession(); // pinned rides along in the session entry
 }
 
+/**
+ * Collapse a tab to its icon, or bring it back. Every kind of tab can be
+ * collapsed — page, catalogue app, terminal, Claude chamber, hosted native
+ * window — because this is a chip-size flag and nothing else: unlike Pin it
+ * never moves the tab, so the collapsed chip keeps whatever seat in the strip
+ * it had, through a reorder or a drag.
+ *
+ * The user: "when i press the collapsed tab i want the tab to be as big as it was
+ * before, and then when i click off it, back to another tab, it goes back."
+ * So the flag is sticky and chrome.css reads it against .active: a collapsed
+ * chip is 40px of icon while another tab is on screen, and a full chip with
+ * its title and buttons the moment it is the active tab. Only the button
+ * clears the flag, never a plain click on the chip.
+ */
+function setTabCollapsed(tab, on) {
+  if (!tab) return;
+  const collapsed = !!on;
+  if (!!tab.collapsed === collapsed) return;
+  tab.collapsed = collapsed;
+  if (tab.chipEl) tab.chipEl.classList.toggle('collapsed', collapsed);
+  syncChipCollapse(tab);
+  saveSession(); // collapsed rides along in the session entry
+}
+
+/**
+ * The in-row button is a toggle, so its glyph and its labels follow the flag:
+ * the titlebar's own Minimize dash to collapse, its Maximize square to come
+ * back. On a collapsed INACTIVE chip chrome.css hides this button and shows
+ * the corner badge instead; the glyph still has to be right for the moment
+ * that chip is raised.
+ */
+function syncChipCollapse(tab) {
+  const btn = tab && tab.collapseEl;
+  if (!btn) return;
+  const out = !!tab.collapsed;
+  btn.textContent = out ? TAB_GLYPH.expand : TAB_GLYPH.collapse;
+  btn.title = out ? 'Expand tab' : 'Collapse to icon';
+  btn.setAttribute('aria-label', out ? 'Expand tab' : 'Collapse tab to icon');
+}
+
 /** Measure every chip once, at drag start: the drag itself reads no layout. */
 function chipMetrics() {
   const rows = [];
@@ -5459,6 +5503,9 @@ function createTab(url, options) {
     muted: !!opts.muted,
     audioEl: null,
     pinned: false,
+    // Collapsed to its icon in the strip. Sticky and independent of pinned:
+    // the chip still expands while this tab is the active one.
+    collapsed: false,
     globeEl: null,
     asleep: false,
     // Split view: the partner's id while this tab is half of a pair, and that
@@ -6625,6 +6672,7 @@ function createClaudeTab(options) {
     term: null,
     live: false,
     ready: true,
+    collapsed: false, // the chip's own size flag; a chamber cannot be pinned
     lastActive: 0,
     workspace: validWorkspaceId(opts.workspace || currentWorkspaceId),
     termOff: [],
@@ -7456,6 +7504,9 @@ function sessionSnapshot() {
       // catalogue's to say, and it may have moved between runs.
       if (isAppTab(tab)) entry.app = tab.app.id;
     }
+    // Every kind of tab can be collapsed, so this rides outside the branch
+    // above — and only when true, so an older session reads back the same.
+    if (tab.collapsed) entry.collapsed = true;
     const ws = tabWorkspace(tab);
     if (ws !== DEFAULT_WORKSPACE_ID) entry.ws = ws;
     if (tab.id === activeTabId) active = entries.length;
@@ -7530,7 +7581,7 @@ function flushSession() {
  * beside the entries because it is what this has always returned; Claude
  * entries are not urls and are left out of it.
  * @returns {{entries:Array<{claude:boolean,cwd:string,url:string,
- *            pinned:boolean,muted:boolean,ws:string}>,
+ *            pinned:boolean,muted:boolean,collapsed:boolean,ws:string}>,
  *            urls:string[], active:number,
  *            workspaces:Array<{id:string,name:string,colour:string|null,
  *                              lastActive:number}>,
@@ -7570,7 +7621,10 @@ function sanitiseSession(parsed) {
     if (entry && entry.claude) {
       const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
-      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws, app: '', native: '' });
+      entries.push({
+        claude: true, cwd: cwd, url: '', pinned: false, muted: false,
+        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: ''
+      });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
     }
@@ -7579,7 +7633,7 @@ function sanitiseSession(parsed) {
       if (appId.length > APP_ID_MAX) continue; // not an id anything wrote
       entries.push({
         claude: false, cwd: '', url: '', pinned: false, muted: false,
-        ws: ws, app: '', native: appId
+        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: appId
       });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
@@ -7598,7 +7652,8 @@ function sanitiseSession(parsed) {
     const appId = (entry && typeof entry.app === 'string') ? entry.app.trim() : '';
     entries.push({
       claude: false, cwd: '', url: href,
-      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted), ws: ws,
+      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted),
+      collapsed: !!(entry && entry.collapsed), ws: ws,
       app: (appId && appId.length <= APP_ID_MAX) ? appId : '',
       native: ''
     });
@@ -7742,6 +7797,9 @@ function restoreSession(snapshot) {
             workspace: entry.ws
           }));
       if (!tab) continue;
+      // Collapsed is a chip-size flag on every kind of tab, so it goes back on
+      // here rather than through any one creator's options.
+      if (entry.collapsed) setTabCollapsed(tab, true);
       // The app flag comes back before anything is raised, so the chip is born
       // with the app's name on it and the strip order it was stored in holds.
       if (!entry.claude && !entry.native && entry.app) applyAppFlag(tab, entry.app);

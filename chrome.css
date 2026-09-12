@@ -800,7 +800,7 @@ button.glass:focus-visible {
      chips run out of room — but with min-width: 0 they shrank instead, and at
      the window's minimum width a full strip collapsed to blank chips and lone
      close buttons. 104px is an icon, a few characters and the close button.
-     .tab.pinned overrides this back to its icon-only 40px. */
+     .tab.pinned and a collapsed chip override this back to their 40px. */
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
@@ -1071,8 +1071,21 @@ img.tab-icon[src=""],
 
 /* pinned: the chip is nothing but its icon. Fixed width, no title and no close
    button — app.js keeps every pinned chip at the left of the strip, and the
-   hover tooltip carries the title the chip no longer has room for. */
-.tab.pinned {
+   hover tooltip carries the title the chip no longer has room for.
+
+   collapsed is the same 40px box, reached from the chip's own minus button and
+   held on any kind of tab, but it yields to .active: the tab you are looking at
+   is drawn full size, title and buttons and all, and shrinks again the moment
+   you click off it. Every rule below therefore pairs .tab.pinned with the same
+   collapsed test rather than restating the box twice.
+
+   That test reads "collapsed, and not (active unless it is being dragged)":
+   startTabDrag() raises whatever chip you lift, and a collapsed chip growing to
+   full width the instant the drag began would move the strip out from under the
+   measurements chipMetrics() had already taken. .dragging is added before the
+   raise, so the chip never flashes. */
+.tab.pinned,
+.tab.collapsed:not(.active:not(.dragging)) {
   flex: 0 0 auto;
   width: 40px;
   min-width: 40px;
@@ -1084,16 +1097,27 @@ img.tab-icon[src=""],
 
 .tab.pinned .tab-title,
 .tab.pinned .tab-close,
-.tab.pinned .tab-collapse { display: none; }
+.tab.pinned .tab-collapse,
+.tab.collapsed:not(.active:not(.dragging)) .tab-title,
+.tab.collapsed:not(.active:not(.dragging)) .tab-close,
+.tab.collapsed:not(.active:not(.dragging)) .tab-collapse { display: none; }
 
-.tab.pinned img.tab-icon { margin-right: 0; }
+.tab.pinned img.tab-icon,
+.tab.collapsed:not(.active:not(.dragging)) img.tab-icon { margin-right: 0; }
 
-/* the way back out of pinned. Out of flow, so the 40px row stays exactly the
-   icon it was, and invisible until the chip is hovered — at rest nothing sits
-   over the favicon. Non-pinned chips never build it into the layout at all. */
+/* a Claude chamber and a terminal carry a liveness dot instead of a favicon:
+   that dot IS their icon once the chip is down to 40px */
+.tab.collapsed:not(.active:not(.dragging)) .dot { margin-right: 0; }
+
+/* the way back out. Out of flow, so the 40px row stays exactly the icon it was,
+   and invisible until the chip is hovered — at rest nothing sits over the
+   favicon. A full-size chip never builds it into the layout at all: on a
+   collapsed chip that IS the active tab, the row's own button is the way back
+   and this badge stays out of the way. */
 .tab .tab-expand { display: none; }
 
-.tab.pinned .tab-expand {
+.tab.pinned .tab-expand,
+.tab.collapsed:not(.active:not(.dragging)) .tab-expand {
   display: inline-flex;
   position: absolute;
   top: 2px;
@@ -1110,13 +1134,15 @@ img.tab-icon[src=""],
   transition: opacity 120ms steps(3, end);
 }
 
-.tab.pinned:hover .tab-expand { opacity: 1; }
+.tab.pinned:hover .tab-expand,
+.tab.collapsed:not(.active:not(.dragging)):hover .tab-expand { opacity: 1; }
 
-/* the globe stands in for a favicon the page never reported: only a pinned
+/* the globe stands in for a favicon the page never reported: only an icon-only
    chip shows it, and only until app.js marks the chip .has-icon */
 .tab .tab-globe { display: none; }
 
-.tab.pinned .tab-globe {
+.tab.pinned .tab-globe,
+.tab.collapsed:not(.active:not(.dragging)) .tab-globe {
   flex: 0 0 auto;
   display: inline-block;
   width: 14px;
@@ -1126,7 +1152,8 @@ img.tab-icon[src=""],
   color: var(--fg-2);
 }
 
-.tab.pinned.has-icon .tab-globe { display: none; }
+.tab.pinned.has-icon .tab-globe,
+.tab.collapsed:not(.active:not(.dragging)).has-icon .tab-globe { display: none; }
 
 /* broken beats both: the warning glyph is the only icon on the chip */
 .tab.broken .tab-globe { display: none; }
@@ -1146,8 +1173,9 @@ img.tab-icon[src=""],
   color: var(--fg-3);
 }
 
-/* a pinned chip is icon-only; the mark would crowd out the favicon */
-.tab.pinned .tab-split { display: none; }
+/* an icon-only chip has no room for the mark: it would crowd out the favicon */
+.tab.pinned .tab-split,
+.tab.collapsed:not(.active:not(.dragging)) .tab-split { display: none; }
 
 /* --- drag to reorder (app.js sets the classes and the transforms) ---
    The lifted chip tracks the pointer exactly, so it carries NO transform
@@ -1179,7 +1207,8 @@ img.tab-icon[src=""],
    classes deep and after it, so it beats the .tab:hover rule above. */
 body.tab-dragging .tab .tab-close,
 body.tab-dragging .tab .tab-collapse,
-body.tab-dragging .tab.pinned .tab-expand { opacity: 0; }
+body.tab-dragging .tab.pinned .tab-expand,
+body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 
 /* --- window controls (monochrome) ----------------------------- */
 .wincontrols {
@@ -1887,7 +1916,8 @@ body,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; will-change: auto; }
   .tab.loading::after { animation: none; }
-  .tab::after, .tab::before, .tab-close, .tab-collapse, .tab.pinned .tab-expand,
+  .tab::after, .tab::before, .tab-close, .tab-collapse,
+  .tab.pinned .tab-expand, .tab.collapsed .tab-expand,
   #omnibox, #zoom-badge,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
