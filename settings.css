@@ -260,6 +260,52 @@
               left bottom / 100% 1px no-repeat;
 }
 
+/* --- a folded section ----------------------------------------- */
+/* Only Shortcuts folds (The user: "make the shortcuts thing default collapse and
+   then i can un collapse it if i want to"), and its heading IS the toggle. So
+   the <button> has to read exactly like the <h2> every other section carries:
+   the .set-h rule above still paints it — its colour, weight and fading
+   hairline — and everything here only undoes what a button adds of its own
+   (chrome background, border, padding, centred text, its own font family).
+   No other section has .set-h-toggle or .set-collapse, so nothing else in the
+   panel moves by a pixel. */
+#settings-panel .set-h-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  padding: 0 0 6px;          /* the h2's padding, exactly */
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Folded, the card is the heading alone: the gap the h2 keeps for the body
+   under it would otherwise read as an empty card. */
+#settings-panel .set-foldable:not(.is-open) .set-h { margin-bottom: 0; }
+
+#settings-panel .set-h-chev {
+  margin-left: auto;         /* out at the right edge */
+  color: var(--fg-3);
+  font-size: 15px;
+  line-height: 1;
+  transform: rotate(0deg);   /* '›' points along the fold while closed */
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+#settings-panel .set-foldable.is-open .set-h-chev { transform: rotate(90deg); }
+#settings-panel .set-h-toggle:hover .set-h-chev { color: var(--fg-2); }
+
+/* The body is out of the tree while folded (the attribute is what settings.js
+   sets); this only makes sure no later display rule outvotes it. */
+#settings-panel .set-collapse[hidden] { display: none; }
+
 #settings-panel .set-hint {
   margin: 7px 0 0;
   color: var(--fg-3);
@@ -1578,7 +1624,8 @@
   #settings-panel .set-rec,
   #settings-panel .set-row,
   #settings-panel .set-switch,
-  #settings-panel .set-switch-knob { transition: none; }
+  #settings-panel .set-switch-knob,
+  #settings-panel .set-h-chev { transition: none; }
 
   #settings-toast { transition: none; }
 }

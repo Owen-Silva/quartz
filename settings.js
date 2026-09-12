@@ -107,11 +107,12 @@
        is not either: main copies it into <userData>/backgrounds/ and only its
        file:// URL is stored. */
     newtabBackground: { kind: 'board' },
-    /* The native apps pinned to the new tab page's dock, as apps.js ids —
-       names, icons and running state are NOT stored, they are looked up
-       against the installed index every time. `{ pins: [] }` is the whole of
-       it for now; the object leaves room for the rest of the group later.
-       There is no UI for this in the pane: the page manages its own dock. */
+    /* The apps pinned to the new tab page's dock: apps.js ids, webapps.js
+       'web:<slug>' ids and 'term:<program>' ids — names, icons and running
+       state are NOT stored, they are looked up against the installed index
+       every time. `{ pins: [] }` is the whole of it for now; the object
+       leaves room for the rest of the group later. There is no UI for this
+       in the pane: the page manages its own dock. */
     apps: { pins: [] },
     /* Quiet lobby music while nothing else is making a sound. The tracks are
        referenced, never copied: only a path and the name a row shows. See the
@@ -247,6 +248,14 @@
   var recPending = '';
   var recNote = '';
   var recUnbound = null;
+
+  /* Shortcuts is the one section long enough to bury everything under it, so
+     it ships folded and remembers whether it was opened. That is a view
+     state, not a setting: it lives on its own localStorage key rather than
+     in the store, so nothing subscribes to it and nothing syncs it. */
+  var SHORTCUTS_OPEN_KEY = 'settings.shortcuts.open';
+  var shortcutsSectionEl = null;   // the collapsible <section>
+  var shortcutsForced = false;     // held open by a filter, not by the user
   var resetAllArmed = false;
   var resetAllTimer = 0;
   var focusHint = null;        // [selector] to refocus after a chips re-render
@@ -770,32 +779,78 @@
   /* ============================================================
      Pinned apps
 
-     Ids only. The new tab page's dock is drawn from these ids joined
-     against the installed-app index app.js pushes it, so a pin for an app
-     that has been uninstalled costs nothing and comes back if it is
-     reinstalled. app.js reads them through appPins() and writes them
-     through setAppPins() when the page asks over its console channel.
+     Ids. The new tab page's dock is drawn from these joined against the
+     installed-app index app.js pushes it, so a pin for an app that has been
+     uninstalled costs nothing and comes back if it is reinstalled. app.js
+     reads them through appPins() and writes them through setAppPins() when
+     the page asks over its console channel.
+
+     Three kinds of id live here now:
+
+       '<hash>'          an installed app, as apps.js hashes it
+       'web:<slug>'      a site the browser presents as an app (webapps.js)
+       'term:<program>'  a terminal tab
+
+     and a pin may also be an OBJECT, `{ id, web: true }`, meaning "this
+     installed app, but the primary click opens its web form". That is the
+     only option a pin carries, which is why the plain string stays the
+     stored shape whenever web is off: an old string-only file reads back
+     unchanged, and a session that never touches the option never grows an
+     object. pinOptions()/setPinOption() are the way in and out of it.
      ============================================================ */
 
-  /** Anything stored (or handed in) read as a clean list of ids. */
+  /** Anything stored (or handed in) read as a clean list of pins. */
   function normalizeAppPins(value) {
     var out = [];
+    var seen = [];
     if (!Array.isArray(value)) return out;
     for (var i = 0; i < value.length; i++) {
-      var raw = value[i];
-      if (typeof raw !== 'string' && typeof raw !== 'number') continue;
-      var id = String(raw).trim();
-      if (!id || id.length > APP_ID_MAX) continue;
-      if (out.indexOf(id) >= 0) continue;   // a dock shows an app once
-      out.push(id);
+      var pin = normalizeAppPin(value[i]);
+      if (pin === null) continue;
+      var id = pinIdOf(pin);
+      if (seen.indexOf(id) >= 0) continue;   // a dock shows an app once
+      seen.push(id);
+      out.push(pin);
       if (out.length >= APP_PINS_MAX) break;
     }
     return out;
   }
 
+  /* The two helpers the normaliser leans on. Declarations hoist, so they sit
+     below it on purpose: the whole pin contract then reads as one block from
+     the normaliser down, which is also how the harness slices it. */
+
+  /** The id a stored pin names, '' when it does not name one. */
+  function pinIdOf(pin) {
+    var raw = null;
+    if (typeof pin === 'string' || typeof pin === 'number') raw = pin;
+    else if (pin && typeof pin === 'object' && !Array.isArray(pin)) raw = pin.id;
+    if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+    return String(raw).trim();
+  }
+
+  /**
+   * One pin, in the shape it is stored in: a bare id string, or
+   * `{ id, web: true }` when the web option is on. null when it is junk.
+   */
+  function normalizeAppPin(pin) {
+    var id = pinIdOf(pin);
+    if (!id || id.length > APP_ID_MAX) return null;
+    var web = !!(pin && typeof pin === 'object' && !Array.isArray(pin) && pin.web);
+    return web ? { id: id, web: true } : id;
+  }
+
   function appPins() {
     var group = get('apps');
     return normalizeAppPins(group && typeof group === 'object' ? group.pins : null);
+  }
+
+  /** Just the ids, in dock order — for a caller that only needs the join. */
+  function appPinIds() {
+    var list = appPins();
+    var out = [];
+    for (var i = 0; i < list.length; i++) out.push(pinIdOf(list[i]));
+    return out;
   }
 
   /**
@@ -816,6 +871,52 @@
     patch.pins = next;
     set({ apps: patch });
     return appPins();
+  }
+
+  /**
+   * The options a pin carries. Answers `{ web: false }` for a pin that is a
+   * plain string, for one whose option is off, and for an id that is not
+   * pinned at all — the caller asking about a tile it is about to draw.
+   */
+  function pinOptions(id) {
+    var key = pinIdOf(id);
+    var out = { web: false };
+    if (!key) return out;
+    var list = appPins();
+    for (var i = 0; i < list.length; i++) {
+      if (pinIdOf(list[i]) !== key) continue;
+      out.web = !!(list[i] && typeof list[i] === 'object' && list[i].web);
+      return out;
+    }
+    return out;
+  }
+
+  /**
+   * Turn one pin's option on or off, leaving its place in the dock alone.
+   * Idempotent: set() only announces when the stored value really moved, and
+   * `{ web: false }` writes the plain string back, so a session that toggles
+   * it off leaves a file indistinguishable from one that never touched it.
+   * Does NOT pin anything — an id that is not in the dock is left alone.
+   * @returns {{web:boolean}} the options as they now stand.
+   */
+  function setPinOption(id, opts) {
+    var key = pinIdOf(id);
+    if (!key) return { web: false };
+    var web = !!(opts && opts.web);
+    var list = appPins();
+    var next = [];
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (pinIdOf(list[i]) === key) {
+        found = true;
+        next.push(web ? { id: key, web: true } : key);
+      } else {
+        next.push(list[i]);
+      }
+    }
+    if (!found) return { web: false };
+    setAppPins(next);
+    return pinOptions(key);
   }
 
   /* ============================================================
@@ -3049,11 +3150,104 @@
     return mod;
   }
 
+  /** Was the section left open? Closed is the answer to every doubt. */
+  function shortcutsOpen() {
+    try {
+      return window.localStorage.getItem(SHORTCUTS_OPEN_KEY) === '1';
+    } catch (err) { return false; }        // storage blocked: stay folded
+  }
+
+  function rememberShortcutsOpen(open) {
+    try {
+      window.localStorage.setItem(SHORTCUTS_OPEN_KEY, open ? '1' : '0');
+    } catch (err) { /* the fold still holds for this run */ }
+  }
+
+  /**
+   * Paint the fold. The body carries `hidden`, so it is out of the tab order
+   * and out of the accessibility tree while folded; `is-open` is only for the
+   * chevron. Never touches the store, and never re-renders: a collapsed
+   * section still holds a fully rendered list.
+   */
+  function applyShortcutsFold(open) {
+    var s = shortcutsSectionEl;
+    if (!s) return;
+    var head = s.querySelector('.set-h-toggle');
+    var body = s.querySelector('.set-collapse');
+    if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (body) body.hidden = !open;
+    if (s.classList) {
+      if (open) s.classList.add('is-open');
+      else s.classList.remove('is-open');
+    }
+  }
+
+  /**
+   * The user's own toggle: it remembers, and folding away a row that is
+   * recording cancels the recording rather than leaving a hidden row eating
+   * keystrokes.
+   */
+  function toggleShortcutsFold() {
+    var s = shortcutsSectionEl;
+    if (!s) return;
+    var head = s.querySelector('.set-h-toggle');
+    var open = !(head && head.getAttribute('aria-expanded') === 'true');
+    shortcutsForced = false;
+    rememberShortcutsOpen(open);
+    applyShortcutsFold(open);
+    if (!open && recId !== null) stopRecording();
+  }
+
+  /**
+   * A search must not hide its own hits: while the filter has words the fold
+   * is forced open, and clearing the box puts the user's choice back.
+   */
+  function syncShortcutsFold(filtering) {
+    if (!shortcutsSectionEl) return;
+    if (filtering) {
+      shortcutsForced = true;
+      applyShortcutsFold(true);
+      return;
+    }
+    if (!shortcutsForced) return;
+    shortcutsForced = false;
+    applyShortcutsFold(shortcutsOpen());
+  }
+
   function buildShortcuts() {
-    var s = section('Shortcuts');
+    var s = el('section', 'set-section set-foldable');
+    var head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'set-h set-h-toggle';
+    head.setAttribute('aria-expanded', 'false');
+    head.setAttribute('aria-controls', 'set-shortcuts-body');
+    head.appendChild(el('span', 'set-h-text', 'Shortcuts'));
+    /* Rotated by CSS when the section opens, so the glyph is the state. */
+    var chev = el('span', 'set-h-chev', '›');
+    chev.setAttribute('aria-hidden', 'true');
+    head.appendChild(chev);
+    head.addEventListener('click', function () { toggleShortcutsFold(); });
+    /* A <button> already turns Enter and Space into a click; taking the key
+       ourselves keeps the panel's other key handling out of it, and the
+       preventDefault is what stops the second, native toggle. */
+    head.addEventListener('keydown', function (ev) {
+      var key = ev && ev.key;
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+      if (typeof ev.preventDefault === 'function') ev.preventDefault();
+      toggleShortcutsFold();
+    });
+    s.appendChild(head);
+
+    var body = el('div', 'set-collapse');
+    body.id = 'set-shortcuts-body';
     var field = el('div', 'set-field');
     field.setAttribute('data-field', 'shortcuts');
-    s.appendChild(field);
+    body.appendChild(field);
+    s.appendChild(body);
+
+    shortcutsSectionEl = s;
+    shortcutsForced = false;
+    applyShortcutsFold(shortcutsOpen());
     return s;
   }
 
@@ -3558,6 +3752,7 @@
 
     if (noneEl) noneEl.hidden = !words.length || anyShown;
     if (panelEl) panelEl.classList.toggle('is-filtering', words.length > 0);
+    syncShortcutsFold(words.length > 0);
   }
 
   /** Index and filter in one breath — what a re-render owes the filter. */
@@ -3909,9 +4104,15 @@
     background: background,
     setBackground: setBackground,
 
-    /* The new tab's app dock: ids, in the order the page shows them. */
+    /* The new tab's app dock, in the order the page shows it: an installed
+       app's id, a 'web:<slug>' or a 'term:<program>', each either as a bare
+       string or as { id, web: true } for an app opened in its web form.
+       appPinIds() is the same list flattened to ids for the join. */
     appPins: appPins,
+    appPinIds: appPinIds,
     setAppPins: setAppPins,
+    pinOptions: pinOptions,
+    setPinOption: setPinOption,
 
     /* Idle music. music() always answers a complete group; setMusic() merges
        and announces — 'music' among the listener's keys, and a
@@ -3941,6 +4142,8 @@
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
     _normalizeAppPins: normalizeAppPins,
+    _normalizeAppPin: normalizeAppPin,
+    _pinIdOf: pinIdOf,
     _normalizeMusic: normalizeMusic,
     _normalizeMusicFiles: normalizeMusicFiles,
     _musicSources: MUSIC_SOURCES,
@@ -3951,6 +4154,7 @@
     _backgrounds: NEWTAB_BACKGROUNDS,
     _chooseBackgroundVideo: chooseBackgroundVideo,
     _removeBackgroundVideo: removeBackgroundVideo,
+    _renderShortcuts: renderShortcuts,
     _applyFilter: applyFilter,
     _clearFilter: clearFilter,
     _focusFirstResult: focusFirstResult
