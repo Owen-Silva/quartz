@@ -66,6 +66,14 @@
   var TIER_TITLE = 20;
   var TIER_URL = 10;
 
+  // topSites(): frequency with a two-week half-life, so a site he stopped
+  // opening slides down the new-tab chips on its own instead of sticking.
+  var TOP_DEFAULT = 8;       // chips asked for when no limit is given
+  var TOP_CAP = 50;          // most rows topSites() will ever return
+  var HALF_LIFE_DAYS = 14;   // a visit is worth half as much a fortnight on
+  var DAY_MS = 86400000;
+  var NOTIFY_DELAY = 1500;   // ms of quiet before subscribers hear about a change
+
   /* --- state --------------------------------------------------- */
 
   var items = [];            // the whole list, unsorted
@@ -73,6 +81,8 @@
   var loaded = false;
   var writeTimer = null;
   var fieldCache = new Map();
+  var subscribers = [];      // change listeners, see subscribe()
+  var notifyTimer = null;
 
   /* --- storage ------------------------------------------------- */
 
@@ -255,6 +265,7 @@
       trim();
     }
     scheduleWrite();
+    notify();
     return true;
   }
 
@@ -268,6 +279,7 @@
     if (!item || item.title === name) return false;
     item.title = name;
     scheduleWrite();
+    notify();
     return true;
   }
 
@@ -307,6 +319,7 @@
     }
     delete byUrl[key];
     scheduleWrite();
+    notify();
     return true;
   }
 
@@ -316,11 +329,131 @@
     byUrl = Object.create(null);
     fieldCache.clear();
     writeNow();
+    notify();
   }
 
   function all() {
     ready();
     return items.map(copy);
+  }
+
+  /* --- most-used hosts ------------------------------------------ */
+
+  /** hostname[:port], lowercased with "www." dropped. '' when there is none. */
+  function hostKey(parsed) {
+    if (!parsed || !parsed.hostname) return '';
+    var host = String(parsed.hostname).toLowerCase().replace(/^www\./, '');
+    if (!host) return '';
+    return parsed.port ? host + ':' + parsed.port : host;
+  }
+
+  /**
+   * The hosts he actually uses, hottest first — what the new-tab chips are
+   * made of. Every page folds onto its host (a dev server on :7373 is its
+   * own row), search results and non-web schemes are out, and each visit is
+   * weighted by 0.5^(age / 14 days) so somewhere he stopped going fades.
+   *
+   * Rows are { host, url, title, visits, score, last }: `url` is the origin
+   * of the host's most-visited page, `visits` the plain total. Pure read —
+   * it writes nothing, and a corrupt item is skipped rather than thrown on.
+   */
+  function topSites(limit) {
+    ready();
+    var cap = TOP_DEFAULT;
+    if (typeof limit === 'number' && isFinite(limit) && limit > 0) {
+      cap = Math.min(Math.floor(limit), TOP_CAP);
+    }
+    var now = Date.now();
+    var groups = Object.create(null);
+    var rows = [];
+    for (var i = 0; i < items.length; i++) {
+      try {
+        var item = items[i];
+        if (!item || typeof item.url !== 'string') continue;
+        var parsed = parseUrl(item.url);
+        if (!parsed) continue;
+        var scheme = String(parsed.protocol || '').toLowerCase();
+        if (scheme !== 'http:' && scheme !== 'https:') continue;
+        var host = hostKey(parsed);
+        if (!host) continue;
+        if (isSearchUrl(item.url)) continue;
+        var visits = Number(item.visits);
+        if (!isFinite(visits) || visits <= 0) continue;
+        var last = Number(item.last);
+        if (!isFinite(last)) continue;
+        var age = (now - last) / DAY_MS;
+        if (!(age > 0)) age = 0;          // a clock skew never inflates a row
+        var row = groups[host];
+        if (!row) {
+          row = groups[host] = {
+            host: host, url: '', title: '', visits: 0, score: 0, last: 0,
+            bestVisits: -1, bestLast: -1
+          };
+          rows.push(row);
+        }
+        row.visits += visits;
+        row.score += visits * Math.pow(0.5, age / HALF_LIFE_DAYS);
+        if (last > row.last) row.last = last;
+        if (visits > row.bestVisits || (visits === row.bestVisits && last > row.bestLast)) {
+          row.bestVisits = visits;
+          row.bestLast = last;
+          row.url = parsed.origin + '/';
+          row.title = typeof item.title === 'string' ? item.title : '';
+        }
+      } catch (err) {
+        /* one unreadable item never costs the whole list */
+      }
+    }
+    rows.sort(function (a, b) {
+      return (b.score - a.score) || (b.visits - a.visits) ||
+        (b.last - a.last) || (a.host < b.host ? -1 : a.host > b.host ? 1 : 0);
+    });
+    return rows.slice(0, cap).map(function (r) {
+      return {
+        host: r.host, url: r.url, title: r.title,
+        visits: r.visits, score: r.score, last: r.last
+      };
+    });
+  }
+
+  /* --- change notifications ------------------------------------- */
+
+  /** Coalesce a burst of visits into one call per 1500 ms of quiet. */
+  function notify() {
+    if (!subscribers.length) return;
+    if (notifyTimer !== null) clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(function () {
+      notifyTimer = null;
+      var list = subscribers.slice();
+      for (var i = 0; i < list.length; i++) {
+        try {
+          list[i]();
+        } catch (err) {
+          /* one bad subscriber never takes out the others or the store */
+        }
+      }
+    }, NOTIFY_DELAY);
+  }
+
+  /**
+   * Hear about any change to the list — a visit, a rename, a delete, a
+   * clear — debounced to one call per 1500 ms of quiet. Never fires on
+   * load. Returns the unsubscribe, which is safe to call twice.
+   */
+  function subscribe(cb) {
+    if (typeof cb !== 'function') return function () {};
+    subscribers.push(cb);
+    var live = true;
+    return function () {
+      if (!live) return;
+      live = false;
+      var at = subscribers.indexOf(cb);
+      if (at >= 0) subscribers.splice(at, 1);
+      if (!subscribers.length && notifyTimer !== null) {
+        clearTimeout(notifyTimer);
+        notifyTimer = null;
+      }
+    };
   }
 
   /* ============================================================
@@ -403,6 +536,7 @@
     reindex();
     fieldCache.clear();
     writeNow();
+    notify();
     return dropped;
   }
 
@@ -588,10 +722,17 @@
     panel.style.top = Math.round(box.bottom + PANEL_GAP) + 'px';
   }
 
+  /** A results page rather than a destination: Google, Bing, DDG, Yahoo. */
   function isSearchUrl(url) {
     var parsed = parseUrl(url);
     if (!parsed) return false;
-    return /(^|\.)google\./.test(parsed.hostname) && parsed.pathname.indexOf('/search') === 0;
+    var host = String(parsed.hostname || '').toLowerCase();
+    var path = parsed.pathname || '';
+    if (/(^|\.)google\./.test(host) && path.indexOf('/search') === 0) return true;
+    if (/(^|\.)bing\.com$/.test(host) && path.indexOf('/search') === 0) return true;
+    if (/(^|\.)duckduckgo\.com$/.test(host) && /[?&]q=/.test(parsed.search || '')) return true;
+    if (/(^|\.)search\.yahoo\.com$/.test(host)) return true;
+    return false;
   }
 
   function navUrlFor(text) {
@@ -1064,6 +1205,8 @@
     remove: remove,
     clear: clear,
     all: all,
+    topSites: topSites,
+    subscribe: subscribe,
     handleShortcut: handleShortcut,
     close: close,
     isOpen: function () { return openState; },

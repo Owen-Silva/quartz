@@ -16,6 +16,7 @@
  *     palette:      'aurora'|'ember'|'forest'|'ocean'|'midnight'|'mono',
  *     accentHue:    null | 0..360,
  *     chips:        null | [{ label, url }, ...],
+ *     chipsSource:  'visited' | 'list',      // where the new tab's five come from
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // null means the home folder
  *     claudeResume: true | false,           // --continue on a restored tab
@@ -79,6 +80,13 @@
     palette: 'aurora',
     accentHue: null,
     chips: null,
+    /* Where the new tab's five shortcuts come from. 'visited' — the default —
+       lets the page count your own history and show the sites you actually
+       open; 'list' pins the `chips` list above, in that order. A stored file
+       without the key is a file from before the choice existed, and those
+       shortcuts should start following the history too, so the default is
+       the counted one rather than the list. */
+    chipsSource: 'visited',
     /* The bookmarks bar under the nav row: the chips below, on every page.
        bookmarks.js owns the bar; this is the only place its visibility lives. */
     bookmarksBar: false,
@@ -172,6 +180,18 @@
     { id: 'midnight', name: 'Midnight' },
     { id: 'mono', name: 'Mono' }
   ];
+
+  /* The two ways the new tab can fill its five shortcuts. Ids, not labels:
+     app.js reads the id, the segmented control draws the name. */
+  var CHIP_SOURCES = [
+    { id: 'visited', name: 'Most visited' },
+    { id: 'list', name: 'My list' }
+  ];
+
+  var CHIP_SOURCE_HINTS = {
+    visited: 'The five sites you open most, from your history.',
+    list: 'The sites below, in this order.'
+  };
 
   var SITE_THEMES = [
     { id: 'system', name: 'Follow Windows' },
@@ -703,6 +723,25 @@
     var c = get('chips');
     if (!Array.isArray(c)) return defaultChips();
     return c.map(function (x) { return { label: String(x.label || ''), url: String(x.url || '') }; });
+  }
+
+  /**
+   * Where the new tab's five shortcuts come from: 'visited' (counted out of
+   * the history, the default) or 'list' (the chips above, in order).
+   *
+   * Only 'list' is ever answered as itself. A missing key, an older file, a
+   * typo and anything that is not a string all read as 'visited', so the page
+   * never has to guess what a third value would have meant.
+   */
+  function chipsSource() {
+    return get('chipsSource') === 'list' ? 'list' : 'visited';
+  }
+
+  /** @returns the value actually stored — 'list', or 'visited' for the rest. */
+  function setChipsSource(value) {
+    var next = value === 'list' ? 'list' : 'visited';
+    set({ chipsSource: next });     // announces under 'chipsSource' for app.js
+    return next;
   }
 
   function hostnameOf(url) {
@@ -2404,6 +2443,17 @@
     if (!field) return;
     field.textContent = '';
 
+    /* Where the five come from, above the list they may or may not use. On
+       'visited' the editor stays live — you can still keep a list ready — but
+       it goes quiet, because it is not what the page is reading. */
+    var source = chipsSource();
+    var seg = segmented(CHIP_SOURCES, source, setChipsSource);
+    seg.setAttribute('aria-label', 'Shortcuts');
+    field.appendChild(seg);
+    field.appendChild(el('p', 'set-hint', CHIP_SOURCE_HINTS[source]));
+
+    var editor = el('div', 'set-chips-editor' + (source === 'list' ? '' : ' set-chips--idle'));
+
     var list = chips();
     var rows = el('div', 'set-chips');
 
@@ -2444,7 +2494,7 @@
       rows.appendChild(row);
     });
 
-    field.appendChild(rows);
+    editor.appendChild(rows);
 
     /* The add row: name, address, and the button that does Ctrl+D for you. */
     var add = el('div', 'set-chip set-chip-add');
@@ -2480,11 +2530,12 @@
       if (event.key === 'Enter') { event.preventDefault(); urlIn.focus(); }
     });
     add.appendChild(iconButton(GLYPH_ADD, 'Add shortcut', 'set-act', commitAdd));
-    field.appendChild(add);
+    editor.appendChild(add);
 
-    field.appendChild(textButton('Add current page', 'set-btn', function () {
+    editor.appendChild(textButton('Add current page', 'set-btn', function () {
       bookmarkActivePage();
     }));
+    field.appendChild(editor);
 
     if (focusHint) {
       var target = field.querySelector(focusHint) || bodyEl.querySelector(focusHint);
@@ -4081,7 +4132,7 @@
       if (keys.indexOf('downloadsAskWhere') >= 0) renderDownloads();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
-      if (keys.indexOf('chips') >= 0) renderChips();
+      if (keys.indexOf('chips') >= 0 || keys.indexOf('chipsSource') >= 0) renderChips();
       if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
       if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
       refreshFilter();            // those renders replaced indexed text
@@ -4133,6 +4184,11 @@
     reset: reset,
 
     chips: chips,
+    /* 'visited' (the default: app.js composes the five out of history) or
+       'list' (the chips above, in order). Setting it announces 'chipsSource'
+       to every listener, which is how the new tab hears about the switch. */
+    chipsSource: chipsSource,
+    setChipsSource: setChipsSource,
     toggleBookmarksBar: toggleBookmarksBar,
     addChip: addChip,
     removeChip: removeChip,
@@ -4181,6 +4237,7 @@
     _hostnameOf: hostnameOf,
     _normalizeHost: normalizeHost,
     _sleepTimes: SLEEP_TIMES,
+    _chipSources: CHIP_SOURCES,
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
     _normalizeAppPins: normalizeAppPins,

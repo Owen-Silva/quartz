@@ -1164,6 +1164,13 @@
   gap: 2px;
 }
 
+/* The list editor while the shortcuts are counted out of the history instead.
+   Quiet, not closed: the rows still take edits, they are simply not what the
+   new tab is reading. No pointer-events rule here on purpose. */
+#settings-panel .set-chips--idle { opacity: .55; }
+
+#settings-panel .set-chips-editor { margin-top: 8px; }
+
 #settings-panel .set-chip {
   display: flex;
   align-items: center;

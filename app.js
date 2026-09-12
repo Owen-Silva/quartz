@@ -47,6 +47,281 @@ window.DEFAULT_CHIPS = [
   { label: 'Claude',  url: 'https://claude.ai' },
 ];
 
+/* ------------------------------------------------------------------ */
+/* The new-tab shortcut chips                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The five chips are the sites actually used: History.topSites() in score
+ * order, named, and padded out of DEFAULT_CHIPS while the store is still
+ * thin. Settings.chipsSource() === 'list' hands the row back to the
+ * hand-edited list, and a build whose history.js or settings.js predates
+ * either contract pushes exactly what it pushed before.
+ *
+ * SLICE-START: newtab chips  (the block below is what the lane harness runs)
+ *
+ * Nothing here reaches a guest by itself. The composed list is what the
+ * ?chips= param and pushSettingsToTab() carry, so the chips keep travelling
+ * on the one channel the page already listens on.
+ */
+const NEWTAB_CHIP_COUNT = 5;      // the row is five wide
+const NEWTAB_CHIP_POOL = 12;      // how deep into the top sites to look
+const CHIPS_PUSH_MS = 5000;       // at most one re-push per this, trailing
+
+// 'bbc.co.uk' is Bbc, not Co: the label left of one of these is the name.
+const CHIP_SLD_SUFFIXES = ['co', 'com', 'org', 'net', 'gov', 'edu', 'ac'];
+
+// The names the web-app catalogue and DEFAULT_CHIPS between them miss often
+// enough to be worth spelling out. Everything else falls back to its own
+// capitalised label ('anthropic.com' -> Anthropic), which reads fine.
+const CHIP_HOST_LABELS = {
+  'google.com': 'Google',
+  'docs.google.com': 'Google Docs',
+  'drive.google.com': 'Google Drive',
+  'mail.google.com': 'Gmail',
+  'github.com': 'GitHub',
+  'youtube.com': 'YouTube',
+  'reddit.com': 'Reddit',
+  'x.com': 'X',
+  'twitter.com': 'X',
+  'chatgpt.com': 'ChatGPT',
+  'claude.ai': 'Claude',
+  'stackoverflow.com': 'Stack Overflow',
+  'wikipedia.org': 'Wikipedia',
+  'amazon.com': 'Amazon',
+  'netflix.com': 'Netflix',
+  'twitch.tv': 'Twitch',
+  'discord.com': 'Discord',
+  'spotify.com': 'Spotify',
+  'figma.com': 'Figma',
+  'notion.so': 'Notion',
+  'linkedin.com': 'LinkedIn'
+};
+
+/**
+ * A host in the one spelling everything here compares in: lowercased, no
+ * 'www.', port kept (127.0.0.1:7373 is not 127.0.0.1:5173). Takes a full URL
+ * too, so a chip's own url and a top-sites row go in the same door.
+ */
+function chipBareHost(value) {
+  let raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!raw) return '';
+  const scheme = raw.indexOf('://');
+  if (scheme >= 0) raw = raw.slice(scheme + 3);
+  const slash = raw.indexOf('/');
+  if (slash >= 0) raw = raw.slice(0, slash);
+  const at = raw.indexOf('@');
+  if (at >= 0) raw = raw.slice(at + 1);
+  if (raw.slice(0, 4) === 'www.') raw = raw.slice(4);
+  return raw;
+}
+
+/** { name, port } for a host, leaving an IPv6 literal's own colons alone. */
+function chipSplitPort(host) {
+  const h = typeof host === 'string' ? host : '';
+  const colon = h.lastIndexOf(':');
+  if (colon <= 0) return { name: h, port: '' };
+  // '::1' is an address, not a host and a port; '[::1]:7373' is both.
+  if (h.indexOf(':') !== colon && h.indexOf(']') < 0) return { name: h, port: '' };
+  const port = h.slice(colon + 1);
+  if (!port || !/^[0-9]+$/.test(port)) return { name: h, port: '' };
+  return { name: h.slice(0, colon), port: port };
+}
+
+/** True for the machine itself, whichever way it is spelled. */
+function isLoopbackChipHost(name) {
+  const h = typeof name === 'string' ? name : '';
+  return h === 'localhost' || h === '::1' || h === '[::1]' || h === '0.0.0.0'
+    || /^127\.[0-9.]+$/.test(h);
+}
+
+/** True for a bare address (v4 or a bracketed v6), which has no label to take. */
+function isIpChipHost(name) {
+  const h = typeof name === 'string' ? name : '';
+  return h.charAt(0) === '[' || /^[0-9]+(\.[0-9]+){3}$/.test(h);
+}
+
+/** The web-app catalogue's name for a host (subdomains included), or ''. */
+function chipWebAppName(host) {
+  const h = typeof host === 'string' ? host : '';
+  if (!h) return '';
+  const api = (typeof webAppsApi === 'function') ? webAppsApi() : null;
+  if (api && typeof api.webAppForHost === 'function') {
+    try {
+      const hit = api.webAppForHost(h);
+      if (hit && hit.name) return String(hit.name);
+    } catch (err) { /* fall through to the plain scan */ }
+  }
+  let rows = (typeof webAppsList === 'function') ? webAppsList() : [];
+  if (!rows.length && Array.isArray(window.WEBAPPS)) rows = window.WEBAPPS;
+  let best = null;
+  for (const entry of rows) {
+    const want = (entry && typeof entry.host === 'string') ? entry.host.toLowerCase() : '';
+    if (!want || !entry.name) continue;
+    if (h === want) return String(entry.name);
+    const tail = '.' + want;
+    // The longest catalogue host wins, so music.youtube.com is not YouTube.
+    if (h.length > tail.length && h.slice(-tail.length) === tail) {
+      if (!best || want.length > String(best.host).length) best = entry;
+    }
+  }
+  return best ? String(best.name) : '';
+}
+
+/** The default row, never null. */
+function defaultChipList() {
+  const list = window.DEFAULT_CHIPS;
+  return Array.isArray(list) ? list : [];
+}
+
+/** A default chip's own label when it is this host, or ''. */
+function defaultChipLabel(host) {
+  for (const chip of defaultChipList()) {
+    if (!chip || !chip.url) continue;
+    if (chipBareHost(chip.url) === host) return String(chip.label || '');
+  }
+  return '';
+}
+
+/**
+ * What to call a host. First match wins: the web-app catalogue, the default
+ * row's own label, the hand-written map, then the registrable label
+ * capitalised ('bbc.co.uk' -> Bbc). The machine itself is 'Local :7373', by
+ * port, because that is the only thing that tells two dashboards apart.
+ */
+function chipLabelForHost(host) {
+  const bare = chipBareHost(host);
+  if (!bare) return '';
+  const split = chipSplitPort(bare);
+  const name = split.name;
+  const app = chipWebAppName(name);
+  if (app) return app;
+  const fromDefaults = defaultChipLabel(name);
+  if (fromDefaults) return fromDefaults;
+  if (Object.prototype.hasOwnProperty.call(CHIP_HOST_LABELS, name)) return CHIP_HOST_LABELS[name];
+  const suffix = split.port ? ' :' + split.port : '';
+  if (isLoopbackChipHost(name)) return 'Local' + suffix;
+  if (isIpChipHost(name)) return name + suffix;
+  const labels = name.split('.').filter(Boolean);
+  if (!labels.length) return '';
+  let idx = labels.length >= 2 ? labels.length - 2 : 0;
+  if (labels.length >= 3 && CHIP_SLD_SUFFIXES.indexOf(labels[idx]) >= 0) idx = labels.length - 3;
+  const word = labels[idx] || '';
+  if (!word) return '';
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/** Only a real web page is a chip: the browser's own pages are file:/claude:. */
+function isChippableUrl(url) {
+  const u = typeof url === 'string' ? url.trim().toLowerCase() : '';
+  return u.slice(0, 7) === 'http://' || u.slice(0, 8) === 'https://';
+}
+
+/** 'visited' means the chips are counted, not listed. */
+function chipsSourceIsVisited() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.chipsSource !== 'function') return false;
+  try { return settings.chipsSource() !== 'list'; } catch (err) { return false; }
+}
+
+/** Whatever the settings list is pushing today: an array, or null/undefined. */
+function settingsChipList() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.all !== 'function') return null;
+  let all = null;
+  try { all = settings.all() || {}; } catch (err) { return null; }
+  return all.chips;
+}
+
+/** The top sites as chips, padded out of the defaults, or null with no store. */
+function visitedChips() {
+  const store = window.History;
+  if (!store || typeof store.topSites !== 'function') return null;
+  let rows = null;
+  try { rows = store.topSites(NEWTAB_CHIP_POOL); } catch (err) { return null; }
+  if (!Array.isArray(rows)) return null;
+  const out = [];
+  const seen = Object.create(null);
+  for (const row of rows) {
+    if (out.length >= NEWTAB_CHIP_COUNT) break;
+    if (!row) continue;
+    let url = typeof row.url === 'string' ? row.url.trim() : '';
+    const host = chipBareHost(row.host || url);
+    if (!host || seen[host]) continue;
+    if (!isChippableUrl(url)) {
+      // The chrome's own pages are already left out upstream; anything else
+      // with no web URL still gets one, and localhost stays (his dashboards).
+      if (url) continue;
+      url = (isLoopbackChipHost(chipSplitPort(host).name) ? 'http://' : 'https://') + host + '/';
+    }
+    seen[host] = true;
+    out.push({ label: chipLabelForHost(host), url: url });
+  }
+  for (const chip of defaultChipList()) {
+    if (out.length >= NEWTAB_CHIP_COUNT) break;
+    if (!chip || !chip.url) continue;
+    const host = chipBareHost(chip.url);
+    if (!host || seen[host]) continue;
+    seen[host] = true;
+    out.push({ label: String(chip.label || chipLabelForHost(host)), url: String(chip.url) });
+  }
+  return out;
+}
+
+/**
+ * The chip list the new-tab page should be holding, [{ label, url }] and at
+ * most five. Null or undefined means "your own defaults", which is what a
+ * settings file that has never been touched has always pushed.
+ */
+function newtabChips() {
+  if (chipsSourceIsVisited()) {
+    const visited = visitedChips();
+    if (visited) return visited;
+  }
+  return settingsChipList();
+}
+
+window.__newtabChips = newtabChips;   // test seam, like newtab.js's __chips()
+
+/*
+ * Re-pushing. A visit moves the counts, so the row is recomposed on the
+ * history store's own signal and on a chips / chipsSource write — but only
+ * when the composed row actually reads differently, and never more than once
+ * per CHIPS_PUSH_MS. The push itself is pushSettingsToTab(), whose per-guest
+ * memo drops anything a page has already been told.
+ */
+let chipsPushTimer = null;
+let chipsPushedKey = null;
+
+/** The composed row as one comparable string. */
+function newtabChipsKey() {
+  const list = newtabChips();
+  if (!Array.isArray(list)) return '';
+  return list.map((c) => String((c && c.url) || '') + ' ' + String((c && c.label) || '')).join('\n');
+}
+
+function scheduleChipsPush() {
+  if (chipsPushTimer) return;      // one push per window, taken at the end of it
+  chipsPushTimer = setTimeout(() => {
+    chipsPushTimer = null;
+    const key = newtabChipsKey();
+    if (key === chipsPushedKey) return;   // the same five, in the same order
+    chipsPushedKey = key;
+    for (const tab of tabs) pushSettingsToTab(tab);
+  }, CHIPS_PUSH_MS);
+}
+
+// Called from init(): history.js loads after this file, and an older one with
+// no subscribe() simply never moves the chips until a settings write does.
+function wireNewtabChips() {
+  const store = window.History;
+  if (!store || typeof store.subscribe !== 'function') return;
+  chipsPushedKey = newtabChipsKey();   // what the first paint already carried
+  try { store.subscribe(() => scheduleChipsPush()); } catch (err) { /* no signal */ }
+}
+
+/* SLICE-END: newtab chips */
+
 /** The chosen search engine's results URL for a query; Google when settings are absent. */
 function searchUrlFor(text) {
   const settings = window.Settings;
@@ -73,7 +348,8 @@ function newTabUrl() {
       const all = settings.all() || {};
       if (typeof all.accentHue === 'number' && isFinite(all.accentHue)) params.set('hue', String(all.accentHue));
       if (all.searchEngine && all.searchEngine !== 'google') params.set('engine', String(all.searchEngine));
-      if (Array.isArray(all.chips)) params.set('chips', JSON.stringify(all.chips));
+      const chips = newtabChips();
+      if (Array.isArray(chips)) params.set('chips', JSON.stringify(chips));
       if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
       // Image users should never see the board flash before the picture (or
       // the clip, which arrives the same way) lands.
@@ -187,7 +463,7 @@ function pushSettingsToTab(tab) {
   let all = null;
   try { all = settings.all(); } catch (err) { return; }
   const payload = JSON.stringify({
-    accentHue: all.accentHue, searchEngine: all.searchEngine, chips: all.chips,
+    accentHue: all.accentHue, searchEngine: all.searchEngine, chips: newtabChips(),
     palette: all.palette || null
   });
   // The store emits on every write, including ones this page cannot see.
@@ -3719,6 +3995,11 @@ function wireSettings() {
     // Idle music applies live: the switch, the source, the volume and where it
     // may play all take effect on the write, with no restart and no reload.
     if (!Array.isArray(keys) || keys.indexOf('music') >= 0) applyMusicSettings();
+    // The loop above has already pushed the row this write composed; this is
+    // what re-composes it after the source itself is switched over.
+    if (!Array.isArray(keys) || keys.indexOf('chips') >= 0 || keys.indexOf('chipsSource') >= 0) {
+      scheduleChipsPush();
+    }
   });
 }
 
@@ -9243,6 +9524,9 @@ function init() {
   wireWindowControls();
   wireKeyboard();
   wireSettings();
+  // The chips follow the history store: a visit moves the counts, and the row
+  // is recomposed off its signal (debounced, and only when it really moved).
+  wireNewtabChips();
   wireOverlayWatch();
   wireNativeTabs();
   wireAutopauseReadout();
