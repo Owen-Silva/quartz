@@ -36,7 +36,7 @@ const { spawn } = require('child_process');
 // ---------------------------------------------------------------------------
 
 /** Cadence of the pushed sample, and of typeperf's own -si. Keep them equal. */
-const SAMPLE_MS = 2000;
+const SAMPLE_MS = 1000;   // Task Manager's own cadence; the user wanted it faster than 2 s
 
 /**
  * The first sample must not make the page sit on dashes for two seconds, so

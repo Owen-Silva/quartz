@@ -484,7 +484,7 @@ window.__readout = function () {
    stats would set it false and the sampler would never start. */
 window.__statsWanted = true;
 
-const STAT_SAMPLES = 60;         // ~2 minutes of history at one per 2 s
+const STAT_SAMPLES = 60;         // one minute of history at one per second
 const DASH = '—';
 
 /* The floor the network graph is scaled against, so an idle link draws a
@@ -733,7 +733,7 @@ function watchTheme() {
     }
     // The graphs hold a painted copy of --ion and --edge: a theme flip
     // between samples would otherwise leave them in the old colour for
-    // up to two seconds.
+    // up to a second.
     paintStats();
   });
 

@@ -845,7 +845,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 60 samples, ~2 minutes. Drawn by newtab.js only when a sample lands. */
+/* 60 samples, one minute. Drawn by newtab.js only when a sample lands. */
 .stat-graph {
   display: block;
   width: 100%;
