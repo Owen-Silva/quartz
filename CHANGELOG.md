@@ -114,6 +114,16 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Print the active page through Chromium's own preview (Ctrl+P).
 - Screenshot the page into Downloads (Ctrl+Shift+S).
 - Picture in picture (Alt+P) for any page with a video.
+- The address bar searches your apps (d33e47b). Type a name that matches an installed app, a web
+  app from the catalogue or a terminal program and up to three rows appear under the usual
+  search/address row, each with an "App", "Web app" or "Terminal" pill after the name. Enter does
+  what the palette's row for that app does — open it, or switch to the tab it is already in — and
+  Shift+Enter hosts an installed app's window in a tab. The default row stays first, so typing a
+  URL or a search and pressing Enter is unchanged. Matching is on the name only (exact, then
+  starts-with, then word-prefix, then substring), and two shortcuts with the same name collapse
+  into one row, the running or already-hosted one winning. tabsearch.js exposes
+  `appMatches(query, limit)` and `whenAppsReady(cb)` so the list redraws once the index lands;
+  history.js draws the rows and swallows the Enter, so app.js never navigates for one.
 
 ### Blocking and privacy
 
@@ -381,6 +391,18 @@ machine.
   version 3, so it refreshes once and the cwd, aumid and run-as fields are filled in. Apps harness
   238/238; live on a test profile the index rebuilt in 3.9s, Character Map launched with its real
   pid and Paint (Store) through the shell with none.
+- Fixed: a dock tile saying "<name> has no window" (d33e47b). A tile set to open the desktop app
+  sent only the first pid of the app's process group — the lowest, usually a helper — and the
+  focus script searched that pid alone, which is why Discord, Cursor and the other multi-process
+  apps answered "no window" while sitting right there. `apps.focus` now takes the whole pid list
+  and tries each pid's own window, then console hosts, then child-process windows, skipping the
+  DWM-cloaked ghosts and reporting which rule matched; main.js and preload.js take a number or an
+  array. When the answer is still no window, or the app is no longer running, the chrome launches
+  it instead of giving up, and the result comes back labelled as a launch, so a press that started
+  the app never reads "No window". The palette's "Open <name>" row falls back the same way.
+- Fixed: pinning an app reset every other pin's option (d33e47b). Pinning or unpinning rewrote the
+  dock from bare ids, so each other tile's app / web / tab choice was dropped back to the program.
+  The pin/unpin handler edits the full-shape list now, and the options survive.
 
 ### Files tab
 
@@ -852,7 +874,7 @@ Found, and not ours to fix:
 ## Commits
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
-onward are the small hours after that same 11 September evening.
+through 04:30 are the small hours after that same 11 September evening; 09:53 is 12 September.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -962,3 +984,4 @@ onward are the small hours after that same 11 September evening.
 | 7185f13 | 02:49 | Native app tabs: live tab titles from the app itself, and an honest "(not responding)" state with Pop out and Close tab |
 | ca73bcb | 03:53 | Native app tabs: host by ownership instead of re-parenting, so a hung app can no longer stall the browser |
 | f6ac242 | 04:30 | Review fixes: owner-mode engine, plus recovery after a force-killed browser |
+| d33e47b | 09:53 | Omnibox app rows with badges; dock focus across every pid, launching when there is no window; pin options survive pin/unpin |

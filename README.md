@@ -195,7 +195,9 @@ app, built the first time the `>` list is asked for rather than at boot, with th
 sorted to the top reading "Running, switch to it", so Enter raises that window instead of launching
 a second copy. Apps reach a plain query too: without the `>`, up to five matching apps are listed
 under an "Apps" caption after the tab and recently-closed rows, and the empty note reads "No matching
-tabs, apps or history".
+tabs, apps or history". An "Open <name>" row that finds no window to raise — or whose app has stopped
+since the list was built — launches the app instead of reporting nothing, the same fallback the dock
+takes.
 
 **Split view.** Two tabs side by side in one well — two pages, a page and a Claude chamber, or
 two chambers. Ctrl+\ pairs the active tab with the next splittable tab in the strip or breaks
@@ -356,7 +358,13 @@ gets `http://`; any other bare domain gets `https://`; everything else is a sear
 configured engine. `#omni-suggest` hangs under the capsule and mirrors its geometry: with text
 typed it leads with the row that mirrors what Enter already does, then history matches; on an
 empty focus, what was open recently. It never navigates itself — it writes into `#omnibox` and
-hands Enter back.
+hands Enter back. It searches your apps as well: a name that matches an installed app, a web app
+from the catalogue or a terminal program adds up to three rows under that first row, each with an
+"App", "Web app" or "Terminal" pill after the name. Enter on one opens it, or switches to the tab
+it is already in, and Shift+Enter hosts an installed app's window in a tab. Those rows are the one
+exception to handing Enter back — history.js runs them itself, so app.js never navigates for one —
+and the default row stays first, so typing a URL or a search and pressing Enter is unchanged. Two
+shortcuts with the same name collapse into a single row, the running or already-hosted one winning.
 
 **History page.** Ctrl+H opens the whole store as a page, not the recent dropdown — the dropdown
 is still what an empty omnibox focus shows. One tab, reused if it is already open, on the bundled
@@ -655,7 +663,10 @@ it is reinstalled. The running dot uses its own `--ion-dot` token, the accent da
 light theme, so it clears contrast on the tile in both. Focus goes to the real window: main
 enumerates visible titled top-level windows by pid, then the console window attached to that pid,
 then a conhost / Windows Terminal / OpenConsole child of it, and never falls back to another pid, so
-a console app raises its own console instead of somebody else's window.
+a console app raises its own console instead of somebody else's window. The tile hands over every pid
+the sampler saw rather than the lowest one, because an app that runs as a family keeps its window on
+one of the others, and DWM-cloaked ghost windows are skipped; when there is still no window, or the
+app has stopped since the last sample, the press launches it rather than saying "No window".
 
 A pin does not have to be an installed app. A web app pins as its favicon, drawn through the same
 favicon path as the chips with a letter disc behind it as the fallback, and a terminal program pins as
@@ -666,7 +677,10 @@ choice that is current. A press sends `pin-web` or `pin-native` and then waits f
 push rather than flipping locally, so what you see is always what is stored. A pin with a web form
 wears a small "web" badge and a native pin a "tab" badge, native winning over web; a pin is an id on
 its own, or the id with the `web` or `native` option set, and plain strings are still written whenever
-neither is on so an older settings file round-trips unchanged. The Add app picker is grouped: Installed, Web apps
+neither is on so an older settings file round-trips unchanged. Pinning or unpinning something else
+leaves those choices where they are: the handler edits the full-shape list rather than rewriting the
+dock from bare ids, which used to drop every other tile back to the program.
+The Add app picker is grouped: Installed, Web apps
 (with the host, and a "desktop" hint when the desktop app is installed) and Terminals (leaving out
 anything not installed), up to eight per group, with one search across all three. The running dots
 cover open app, terminal and native tabs as well as running processes. webapps.js is loaded on the page as a
