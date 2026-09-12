@@ -3277,14 +3277,17 @@
       buttonEl.classList.add('is-open');
       buttonEl.setAttribute('aria-expanded', 'true');
     }
-    /* Opened from the gear or the shortcut, the keyboard starts in the
-       filter. Opened with somewhere in the panel already focused — a
-       re-render, a control handing focus back — that focus is left alone. */
-    if (filterEl) {
-      var active = document.activeElement;
-      if (!active || !panelEl.contains(active)) {
-        try { filterEl.focus(); } catch (err) { /* not focusable yet */ }
-      }
+    /* Opened from the gear or the shortcut, focus lands on the PANEL, not
+       in the filter. A focused text field blinks its caret twice a second,
+       and under the acrylic window every one of those repaints re-composes
+       the column above it: the user saw the address bar flicker whenever the
+       pane was open. Tab or Ctrl+F reaches the filter; Escape still closes.
+       Opened with somewhere in the panel already focused — a re-render, a
+       control handing focus back — that focus is left alone. */
+    var active = document.activeElement;
+    if (!active || !panelEl.contains(active)) {
+      if (!panelEl.hasAttribute('tabindex')) panelEl.setAttribute('tabindex', '-1');
+      try { panelEl.focus({ preventScroll: true }); } catch (err) { /* not focusable yet */ }
     }
   }
 
