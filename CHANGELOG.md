@@ -371,6 +371,17 @@ minimised and its own console window raised while a windowless pid raised nothin
 still owed is the process-icon side: the icon IPC round trip and real `getFileIcon` timing on this
 machine.
 
+- Launching an app keeps the shortcut's own semantics (14a076b). A Start Menu shortcut that carries
+  an AppUserModelID — 19 of the 68 indexed here, Discord, Cursor and Edge among them — goes through
+  the shell again so the app keeps its taskbar identity, and answers with no pid; so does a shortcut
+  flagged run as administrator, whose flag is read out of the `.lnk` header now. Direct spawn, which
+  is what gives the engine a pid, stays for plain shortcuts and exes, now with `%VAR%` expanded in
+  the target, the arguments and the Start-in folder, a fallback to the exe's own folder when the
+  Start-in folder is gone, and a shell fallback when the spawn is refused. The index cache moves to
+  version 3, so it refreshes once and the cwd, aumid and run-as fields are filled in. Apps harness
+  238/238; live on a test profile the index rebuilt in 3.9s, Character Map launched with its real
+  pid and Paint (Store) through the shell with none.
+
 ### Files tab
 
 - A file browser as a tab, on Ctrl+Alt+E (91682dc, cf13b3a). It opens as a "Files" tab with a blank
@@ -520,6 +531,14 @@ machine.
   "Switch to" row and its own tab row for the same query. Verified live: a cold restart restored an
   app tab with its seat and note, a stale slug restored as a plain page, closing an app tab pushed
   running:false, and the log had no unhandled rejections.
+- Closing a terminal tab no longer crashes a helper (56fe5dc). node-pty's `kill()` forks its
+  `conpty_console_list_agent`, whose `AttachConsole` fails inside Electron, so every closed tab
+  logged a helper crash and then waited out a 5s timeout before falling back to the shell pid.
+  pty.js replaces the agent's private console-list call right after spawn with node-pty's own
+  fallback answer, the inner pid — feature-detected and guarded, so a future node-pty simply keeps
+  its behaviour. Spawn, resize, write, kill, cwd and the program table are untouched. Live on a test
+  profile, helper crashes per closed terminal tab went from one each to zero, four to zero over the
+  run, with no console processes left behind; harness 31/31.
 
 ### Native app tabs
 
@@ -584,6 +603,22 @@ machine.
   alive, and closing the tab exits the app, with the pid in the running payload. The chooser was
   checked in both themes at 1282, 393 and 320px: every button its own hit target, no overlap with tile
   names or the unpin glyph, no horizontal overflow, and the dock's height unchanged at rest.
+- True focus, and shortcuts that survive it (52c9aa7). Work inside a hosted app counts as focus in
+  the browser now: embed.js reads the foreground window and the focused control and walks the parent
+  chain, answering whether the focus is ours and which native tab holds it, and a 250ms poll while
+  any app is attached pushes that to the chrome on every change. So idle music set to play anywhere
+  keeps playing while you are typing in a hosted app, where Electron's own blur used to stop it; the
+  new-tab board still pauses on a raw blur, because it is invisible under an app anyway and that
+  saves the CPU. And while a native tab is active, its app holds the keyboard and the window is
+  foreground, a small set of shortcuts is registered globally: new tab, the address bar, the
+  palette, tab search, Ctrl+Tab both ways and the Files tab. Never Ctrl+W, F, R, S, P or N — a
+  hosted editor or chat app owns those. A fired shortcut runs the same handler as the keydown path
+  and hands the keyboard back to Chromium without raising the window, and the registration drops the
+  instant any of those conditions stops holding. Verified: N6 harness 69/69, N2 271/271, music
+  190/190, T2b 110/110; live with Character Map holding real focus, the focus read as ours with the
+  caret in one of the app's own controls, the music gate stayed focused while Electron reported
+  blur, a global Ctrl+T opened a tab and returned focus to Chromium, the shortcuts unregistered
+  108ms after a tab switch, and the poll stopped when the tab closed.
 
 ### Shortcuts
 
@@ -735,6 +770,9 @@ Found, and not ours to fix:
   asserts, and tears down. `--keep` leaves it running. `cdp-eval.js` and `cdp-profile.js` drive it.
 - The smoke test's debugging port comes from `SMOKE_PORT`, 9222 by default (3788d43), so it can run
   against a test-profile instance on its own port instead of the live browser.
+- The smoke test ends with a summary line (56fe5dc). It prints `smoke: N ok, M failed` and exits 1
+  when anything failed, so a run can be read at a glance or gated in a script. No step changed; the
+  run behind that commit was smoke: 6 ok, 0 failed.
 - The README is current through the last commit: shortcuts, features, security notes, performance
   numbers and a file-by-file map.
 
@@ -783,9 +821,11 @@ Found, and not ours to fix:
 - Not every app can run in a tab. Store apps are refused outright, and Windows 11's packaged Notepad
   destroys its own window the moment it is re-parented; neither can be hosted, so launch them
   normally. The tab side is verified against Character Map and Paint.
-- While a hosted app has the focus it owns the keyboard: the browser's own shortcuts do not fire until
-  you click the tab strip. And if the app hangs, the browser's input can hang with it until the tab is
-  popped out.
+- A hosted app with the focus owns most of the keyboard, but not all of it. New tab, the address
+  bar, the palette, tab search, Ctrl+Tab both ways and the Files tab still fire while you are
+  working inside the app, and the keyboard comes back to the browser once one of them has. Ctrl+W
+  and the keys a hosted editor or chat app owns — F, R, S, P, N — go to the app, not here. And if
+  the app hangs, the browser's input can hang with it until the tab is popped out.
 - DRM services cannot play inside a tab. Electron ships Chromium without Widevine, so Spotify and
   Netflix are handled as the desktop app plus the now-playing controls here, not as pages. Opening
   one of the five from the catalogue gives you a note bar saying so, with a link that launches the
@@ -898,3 +938,6 @@ onward are the small hours after that same 11 September evening.
 | 6f4415c | 00:08 | Native app tabs: prefer the window of the process we launched |
 | 60c81fc | 00:19 | Review fixes: native app tab chrome side |
 | 30a4bd9 | 00:24 | Native app tabs: adopt a running app before launching another copy |
+| 56fe5dc | 01:15 | Terminal tabs: node-pty's console-list helper stops crashing on close; the smoke test prints a summary |
+| 52c9aa7 | 01:22 | Native app tabs: true focus and a few live shortcuts while a hosted app has the keyboard |
+| 14a076b | 01:26 | Apps: launches keep the shortcut's taskbar identity and run-as flag, with %VAR% expansion and fallbacks |

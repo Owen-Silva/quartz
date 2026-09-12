@@ -844,10 +844,14 @@ restart hosts the app you left open instead of a second one. "Pop out" in the ta
 the app back as a normal window; closing the tab closes the app.
 
 Three things to know. Windows 11's packaged Notepad destroys its own window after any `SetParent`, and
-Store apps are refused outright, so neither can be hosted — launch those normally. While the hosted
-app has the focus it owns the keyboard, so the browser's own shortcuts do not fire until you click the
-tab strip. And if the app hangs, the browser's input can hang with it until you pop the tab out. The
-tab side is verified against Character Map and Paint.
+Store apps are refused outright, so neither can be hosted — launch those normally. The hosted app owns
+most of the keyboard while it has the focus, but not all of it: new tab, the address bar, the palette,
+tab search, Ctrl+Tab both ways and the Files tab still fire from inside the app, and the keyboard comes
+back to the browser once one of them has, while Ctrl+W and the keys a hosted editor or chat app owns —
+F, R, S, P, N — go to the app rather than here. Focus inside the app counts as focus in the browser
+too, so idle music set to play anywhere keeps playing while you work in it. And if the app hangs, the
+browser's input can hang with it until you pop the tab out. The tab side is verified against Character
+Map and Paint.
 
 **Resuming a conversation.** Four ways in, all the same door: right-click bare strip → "Resume a
 Claude conversation…", a Claude chip's menu → "Resume another conversation here", Ctrl+click the
@@ -1113,7 +1117,8 @@ classic script so it leaves a global `Readability`. `ws` is a devDependency, for
 
 The smoke test launches its own instance with `--remote-debugging-port=9222 --test-profile`. Set
 `SMOKE_PORT` to move it off 9222 — a test-profile instance on its own port, rather than whatever is
-already listening:
+already listening. It finishes with a `smoke: N ok, M failed` summary line and exits 1 when anything
+failed, so a run reads at a glance and a script can gate on it:
 
 ```
 node smoketest.js            # launch, assert, tear down
