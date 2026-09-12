@@ -142,6 +142,11 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Settings section names read as headings (0df6795). They were 12px in the dimmed text colour, so
   the pane read as one long list; they are full text colour, 13.5px and bold now, with a little
   more room under each title and between sections. The fading rule under each title stays.
+- Settings → Shortcuts starts collapsed (01cd471), at the user's request — "make the shortcuts thing
+  default collapse and then i can un collapse it if i want to". The heading is a button with a
+  chevron and `aria-expanded`; click or Enter/Space opens it, and the choice is remembered in
+  `settings.shortcuts.open`. Typing in Find a setting opens the fold so hits are visible, and
+  collapsing it stops a recording row. Nothing inside the section changed.
 - Contrast and copy pass: the muted foreground now clears 4.5:1 on panel grounds in both themes,
   captions are sentence case throughout, and the split divider is visible in light.
 - Instrument glass: a design pass over the chrome, the panes and the bundled pages. A container
@@ -423,9 +428,125 @@ machine.
   live with a wav and an mp3. Live against an isolated copy of the helper, now-playing answered in
   92ms with art by hash. The file dialog itself is not exercised, because it is modal and would take
   the foreground.
-- The player itself is not here yet. Everything above is the engine, the settings, the page module
-  and the bridge; the chrome-side player that actually decides when nothing else is playing and
-  starts the sound lands in the next commit.
+- The player itself (1ef5668). music.js decides whether to play at all: the setting on, no manual
+  pause, the window focused, no audible tab, the machine not already playing (Spotify, or any
+  Windows media session), the "Where it plays" setting satisfied, and a source ready. A 300ms settle
+  sits in front of the decision, and the fades are 800ms in, 400ms out. Two sinks behind one
+  contract — the built-in engine, whose master gain ramps and whose `stop()` suspends the context,
+  and one `<audio>` element on `file://` for your own tracks, with shuffle, next, missing files
+  skipped, and a whole-list failure falling back to the engine. app.js drives it: the stats
+  subscription for presence, audible and muted tab edges, `Settings.music` and the `music-changed`
+  event, memoised pushes to the new tab on dom-ready, activation and every state change, and a 2s
+  now-playing poll while a new tab is in front (or anywhere while the window is focused). Harness
+  108/108, and 42/43 live on a test profile at volume 0 — the one miss a stale-profile artifact.
+- The player stopped vetoing its own sound (e135f54). The user: "it keeps pausing and playing and then
+  pausing and playing even though there is nothing else like spotify or anything playing". The
+  cause, confirmed over 59 live samples: Chromium registers the chrome's own `<audio>` element with
+  the Windows media session, so the now-playing route reported the idle music itself as playing, the
+  player paused for it, the session went Paused, and the player resumed — a four-second cycle with
+  Spotify paused the whole time. main.js now starts with
+  `disable-features=HardwareMediaKeyHandling`, which takes the browser process out of the Windows
+  media session altogether. The trade-off is deliberate and worth knowing: media keys no longer
+  control browser tabs — they go to Spotify — and the now-playing tile shows Spotify and other apps,
+  never a tab in here.
+- Resume hysteresis, in the same commit. Pausing for something else is still immediate; resuming
+  needs the clear state to hold 2.5s after the settle, and more than three pause-and-resume flips in
+  a minute sits the player out for 30s and logs why once. Your own presses and settings writes
+  bypass the hold. Harness 148/148; live, a 60s file soak held one playing state with zero media
+  sessions registered, a forced "playing" status paused it inside a second, and it came back 2.9s
+  after the status cleared. Takes effect on the next restart.
+- Fixed: idle music could be silenced for the life of the window (eafa0fc). A guest that died —
+  destroyed, render-process-gone, or slept — never had its `audible` flag cleared, so the player
+  went on believing a tab was making noise. There is a `forgetTabAudio` path for that now, and the
+  250ms follow-up read after a media command is one tracked timer, cleared with the poll.
+
+### Now playing
+
+- A now-playing tile is the new tab's third module (53524f4). It seats on a "flank" placement at the
+  bottom-left margin, outside the row-and-corner arithmetic the other two use, so the clock and the
+  readout never move for it. Inside: a 48px art well with a note glyph when it is empty, the title,
+  the artist, a hairline progress bar filled with the accent as a composited `scaleX`, and three
+  quiet glyph buttons — previous, play/pause, next.
+- It is fed by the Spotify bridge rather than by the browser. `__applyMedia(payload)` goes in and
+  `newtab:media {cmd}` comes back out over the same console channel the rest of the page uses, and
+  the buttons reach `media:control`, so they drive whatever the helper is playing. It ticks four
+  times a second only while something is playing, freezes on pause, and writes `img.src` once per
+  distinct art string. Verified 59/59 on the DOM-shim harness, three seats at three window heights
+  with nothing showing under any tile, and live in both themes with a real track and its art, real
+  clicks on all three buttons, and no horizontal overflow at 393 or 320px. The chips row is
+  unchanged.
+
+### Web apps, app tabs and terminal tabs
+
+- A catalogue of 30 web apps (01cd471). webapps.js names Discord, WhatsApp, Telegram, Slack, Notion,
+  Gmail, Calendar, Drive, Docs, YouTube, YouTube Music, Twitch, Reddit, X, GitHub, ChatGPT, Claude,
+  VS Code, Figma, Canva, Microsoft 365, Outlook, Teams, Steam, Roblox, Spotify, Netflix, Disney+,
+  Apple Music and Prime Video, each with a `web:<slug>` id, its URL and host, the desktop exe it
+  pairs with, and a `drm` mark on the five that cannot play without Widevine. It looks up by id, by
+  host (exact, then the longest subdomain match) and by exe ("spotify", "spotify.exe" or a full
+  path), and loads either as a module or as a plain script tag.
+- Web apps open as app tabs (b0a5af8). Opening one activates the tab if it is already there, or
+  loads the catalogue URL as a page tab seated to the left of the first ordinary tab. The tab
+  carries `{id, name, url, host}`, saved in the session and restored on the next launch; navigating
+  within the same host keeps the app flag, and going to another host clears it, so the tab turns
+  back into a plain page instead of pretending it is still the app.
+- A DRM entry opens with a one-line note bar, and with a "Launch desktop app" link when the desktop
+  app is installed — those five cannot play in a tab, so the tab says so rather than failing quietly.
+- Terminal programs open as tabs as well. Any program pty.js has available — PowerShell, cmd,
+  Python, Node, Git Bash, pwsh — opens as a pty tab titled after the program, and one that is not
+  installed toasts instead. This is the picker the program table in 528558c was the layer under.
+- The command palette carries all of it: "Open <name> (web)" rows for the catalogue, "New <program>
+  tab" rows for available programs, and "Switch to <name>" for an app tab that is already open.
+  Harness 82/82; live on a test profile Discord opened at the left, survived a restart and cleared
+  its flag on a cross-host navigation, a PowerShell tab ran `echo hi`, Spotify web showed the DRM
+  note with a working desktop link, and plain Claude tabs were untouched.
+- The dock pins web apps and terminals, not only installed apps (95f2d24). A web-app pin draws its
+  favicon through the chips' favicon path, with a letter disc as the fallback; a terminal pin is a
+  monospace `>_` tile. An installed app that also has a web form shows a small "web" badge, and Edit
+  mode gives it a toggle that sends `pin-web` and waits for the chrome's next push instead of
+  flipping locally. The Add app picker is grouped now — Installed, Web apps (with the host, and a
+  "desktop" hint when the desktop app is installed) and Terminals (unavailable ones left out) — up to
+  eight per group, with one search across all three. Running dots cover open app and terminal tabs as
+  well as running processes. webapps.js is only a first-paint seed on the page; the chrome's push
+  stays the source of truth. Two live bugs fixed on the way: the edit-mode web switch covered the
+  tile name, and the picker opened scrolled into the middle of the list. Harness 91/91, the
+  now-playing and board harnesses unchanged, and live in both themes with a mixed dock at 1280, 393
+  and 320px with no horizontal overflow.
+- Fixes from the review pass (eafa0fc): a DRM app tab in a split view threw, because
+  `syncSplitOverlays` read a `const` before its declaration; a dock press on a terminal pin raises
+  the chamber that is already open, and only the palette spawns a fresh one; the note bar no longer
+  leaves an orphan behind when the tab closes mid-index; the palette's terminal rows redraw once the
+  program table arrives, so the first open is not blank; and an open app tab no longer offers both a
+  "Switch to" row and its own tab row for the same query. Verified live: a cold restart restored an
+  app tab with its seat and note, a stale slug restored as a plain page, closing an app tab pushed
+  running:false, and the log had no unhandled rejections.
+
+### Native app tabs
+
+- The engine for running a real desktop app inside the browser (769b1d9). The user: "is there a way
+  where I can start the apps in a tab but it's running the app so that literally everything is just
+  in a tab?" embed.js reaches Win32 through koffi — Node-API, so it loads in Electron 44 with no
+  rebuild — required lazily inside a try/catch. It finds windows by pid or exe, and `attach`
+  re-parents the app's own top-level window into the browser window: hide, `SetParent`, the
+  `WS_CHILD` style, then a `SetWindowPos` that moves and sizes nothing, because a zero-size one
+  destroyed app windows on attach. `layout` positions the window over a CSS-pixel rect with the
+  display scale applied, `detach` restores the saved style and rect as a normal window again, `close`
+  posts `WM_CLOSE` with a restore fallback after 3s, and a once-a-second liveness poll reports a
+  window that has gone. Store apps and the browser's own windows are refused, and `detachAll` runs
+  on before-quit, window close and process exit, so quitting the browser never takes the app down
+  with it.
+- main.js answers find, attach, open, layout, detach, close and list for the chrome sender only, and
+  pushes the gone event. Opening launches the app the way the dock already does, or attaches a window
+  that already exists, then waits up to 20s for a new titled window from that exe. Startup never
+  depends on the module: a missing koffi answers "unavailable" and nothing else changes. Verified
+  30/30 live with Paint — attach, the rect inside the browser, the parent handle, hide and show,
+  detach restoring the saved rect, re-attach, close ending the app, the gone event, Calculator
+  refused as a store app, and a browser quit with an app attached leaving it running as a normal
+  window. About 2.3 MB in the main process.
+- This is the engine only. The tab side — an app tab that holds an embedded window, with the strip,
+  the seating and the layout around it — is not committed yet and lands next. koffi is a new runtime
+  dependency, so run `npm install` after pulling this. Windows 11's packaged Notepad destroys its own
+  window after any `SetParent` and is reported as gone; it cannot be hosted.
 
 ### Shortcuts
 
@@ -612,10 +733,21 @@ Found, and not ours to fix:
 - Scriptlets are off for youtube.com, which is what makes the player build after an in-page click.
   Network and cosmetic blocking are untouched there, but an in-stream ad can still play — that was
   already true on the reload path, and this is a player fix, not an ad skipper.
-- The Idle music settings and the new tab's Idle music block are drawn but silent until the
-  chrome-side player lands. Choosing files and flipping the switch persists; nothing plays yet.
+- Idle music plays only while nothing else is audible: no playing tab, no Spotify, nothing in the
+  Windows media session, and the window focused. It fades out for anything that starts, and waits
+  2.5s of quiet before fading back in.
+- Media keys no longer control browser tabs. Taking the browser out of the Windows media session is
+  what stopped idle music pausing itself, so the keys go to Spotify, and the now-playing tile shows
+  Spotify and other apps but never a tab in here.
+- koffi is a new runtime dependency, for the native app-tab engine. Run `npm install` after pulling
+  this, or the embedding calls answer "unavailable"; nothing else is affected.
+- Native app tabs are half landed. The embedding engine is in, the tab that holds an embedded window
+  is not committed yet. Store apps cannot be embedded at all, and Windows 11's packaged Notepad
+  destroys its own window the moment it is re-parented.
 - DRM services cannot play inside a tab. Electron ships Chromium without Widevine, so Spotify and
-  Netflix are handled as the desktop app plus the now-playing controls here, not as pages.
+  Netflix are handled as the desktop app plus the now-playing controls here, not as pages. Opening
+  one of the five from the catalogue gives you a note bar saying so, with a link that launches the
+  desktop app when it is installed.
 - Ctrl+Alt+E opens the Files tab. Ctrl+Shift+E is still Workspaces.
 
 ## Commits
@@ -706,3 +838,12 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 33a77e0 | 22:12 | Settings: the Idle music section and a Quiet Spotify ads switch |
 | bc25347 | 22:16 | Main and preload: music file picker, now-playing and ad-duck bridge calls |
 | 528558c | 22:25 | Terminal tabs: program table for pty sessions (claude, powershell, pwsh, cmd, python, node, bash) |
+| 1ef5668 | 22:33 | Idle music: the player, plus the now-playing feed to the new tab |
+| 7478701 | 22:34 | Docs: CHANGELOG and README through 528558c |
+| 53524f4 | 22:37 | New tab: now-playing tile as a third module |
+| 01cd471 | 22:38 | Web app catalogue, pin options, and a collapsed Shortcuts section in Settings |
+| b0a5af8 | 22:52 | App tabs: web apps and terminal programs open as tabs |
+| e135f54 | 22:58 | Idle music: stop the player vetoing its own sound, add resume hysteresis |
+| 95f2d24 | 22:59 | New tab dock: web app and terminal pins, grouped picker, web toggle |
+| eafa0fc | 23:14 | Review fixes: app tabs and idle music wiring |
+| 769b1d9 | 23:21 | Native app tabs: the window embedding engine |
