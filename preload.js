@@ -272,7 +272,13 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on('stats:sample', handler);
       return () => ipcRenderer.removeListener('stats:sample', handler);
-    }
+    },
+    // End the processes behind one row of the new tab page's process table.
+    // pids is a plain array of numbers (at most 64; main drops the rest).
+    // Resolves to [{ pid, ok, reason }] -- one entry per pid main accepted,
+    // with the refusals ('self', 'protected', 'unavailable') spelled out so
+    // the page can say why instead of just failing.
+    endTask: (pids) => ipcRenderer.invoke('stats:end-task', Array.isArray(pids) ? pids : [])
   },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).

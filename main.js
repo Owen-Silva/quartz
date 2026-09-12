@@ -2341,6 +2341,51 @@ ipcMain.on('stats:unsubscribe', (event) => {
   stats.unsubscribe(contents);
 });
 
+/** How many pids one end-task call may carry. A list, never a sweep. */
+const END_TASK_MAX_PIDS = 64;
+
+/**
+ * End the processes behind one row of the new tab page's process table.
+ *
+ * Killing a process is the one thing in this file a page must never be able to
+ * ask for on its own, so the gate is deliberately narrow:
+ *   - only the chrome's own webContents may call it (a <webview> guest, a
+ *     devtools page or anything else is answered with an empty array),
+ *   - at most END_TASK_MAX_PIDS integers, junk entries dropped,
+ *   - the refusals themselves (self, protected, pid 0/4) live in stats.js.
+ * A build whose stats.js predates endTask() answers 'unavailable' rather than
+ * throwing, so the page can show a reason instead of a dead button.
+ */
+ipcMain.handle('stats:end-task', (event, pids) => {
+  const contents = event.sender;
+  if (!contents || !canSend() || contents !== win.webContents) return [];
+
+  const list = [];
+  if (Array.isArray(pids)) {
+    for (const raw of pids) {
+      const pid = Number(raw);
+      if (!Number.isInteger(pid) || pid < 0) continue;
+      if (list.indexOf(pid) === -1) list.push(pid);
+      if (list.length >= END_TASK_MAX_PIDS) break;
+    }
+  }
+  if (!list.length) return [];
+
+  const end = typeof stats.endTask === 'function'
+    ? stats.endTask.bind(stats)
+    : (typeof statsModule.endTask === 'function' ? statsModule.endTask : null);
+  if (!end) return list.map((pid) => ({ pid, ok: false, reason: 'unavailable' }));
+
+  try {
+    return Promise.resolve(end(list)).then(
+      (results) => (Array.isArray(results) ? results : []),
+      () => list.map((pid) => ({ pid, ok: false, reason: 'failed' }))
+    );
+  } catch (err) {
+    return list.map((pid) => ({ pid, ok: false, reason: 'failed' }));
+  }
+});
+
 /** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
 

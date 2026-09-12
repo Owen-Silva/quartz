@@ -402,6 +402,105 @@ function wireStats() {
   } catch (err) { /* older preload: the page keeps its dashes */ }
 }
 
+/* ------------------------------------------------------------------ */
+/* End task, asked for over the console channel                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The new tab page is a guest with no preload, so it cannot call api.stats
+ * itself. It asks the same way the history page does — one console line the
+ * chrome is listening for:
+ *
+ *   newtab:end-task {"pids":[123,456],"key":"claude"}
+ *
+ * and the answer comes back on window.__applyEndTask({ key, results }) through
+ * the same executeJavaScript push the readout and the samples use. The key is
+ * the page's own row id, echoed untouched, so a slow answer still lands on the
+ * right row. Anything that is not exactly this shape is ignored in silence: a
+ * console line is not a trusted channel, and pids end processes.
+ */
+
+const END_TASK_PREFIX = 'newtab:end-task ';
+
+/** The page may ask about at most this many pids at once; main caps it too. */
+const END_TASK_MAX_PIDS = 64;
+
+/**
+ * Parse one console line into { pids, key }, or null when it is not an
+ * end-task request or not a well-formed one. Pure, and the whole of the
+ * validation: too many pids, a non-integer pid, a missing key and a broken
+ * payload all come back null rather than partly honoured.
+ */
+function parseEndTaskLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(END_TASK_PREFIX) !== 0) return null;
+
+  let msg = null;
+  try { msg = JSON.parse(line.slice(END_TASK_PREFIX.length)); } catch (err) { return null; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
+  if (typeof msg.key !== 'string' || !msg.key) return null;
+  if (!Array.isArray(msg.pids) || !msg.pids.length) return null;
+  if (msg.pids.length > END_TASK_MAX_PIDS) return null;
+
+  const pids = [];
+  for (const raw of msg.pids) {
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) return null;
+    if (pids.indexOf(raw) === -1) pids.push(raw);
+  }
+  if (!pids.length) return null;
+  return { pids: pids, key: msg.key };
+}
+
+/** Hand one end-task answer back to the guest that asked for it. */
+function pushEndTaskToTab(tab, viewEl, key, results) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (tab.viewEl !== viewEl) return; // the guest was replaced mid-flight
+  let payload = '';
+  try {
+    payload = JSON.stringify({ key: key, results: Array.isArray(results) ? results : [] });
+  } catch (err) { return; }
+  try {
+    const pending = viewEl.executeJavaScript(
+      'window.__applyEndTask && window.__applyEndTask(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+/**
+ * One console line from one guest. Honoured only for a new-tab page whose
+ * viewEl is still the one the listener was attached to — any other guest can
+ * print the same line and nothing happens. Returns true when a request was
+ * actually sent, which is what the harness checks.
+ */
+function handleEndTaskLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const req = parseEndTaskLine(text);
+  if (!req) return false;
+
+  const api = (window.api && window.api.stats) ? window.api.stats : null;
+  if (!api || typeof api.endTask !== 'function') {
+    pushEndTaskToTab(tab, viewEl, req.key,
+      req.pids.map((pid) => ({ pid: pid, ok: false, reason: 'unavailable' })));
+    return true;
+  }
+
+  let pending = null;
+  try { pending = api.endTask(req.pids); } catch (err) { return false; }
+  if (!pending || typeof pending.then !== 'function') {
+    pushEndTaskToTab(tab, viewEl, req.key, pending);
+    return true;
+  }
+  pending.then(
+    (results) => pushEndTaskToTab(tab, viewEl, req.key, results),
+    () => pushEndTaskToTab(tab, viewEl, req.key,
+      req.pids.map((pid) => ({ pid: pid, ok: false, reason: 'failed' })))
+  );
+  return true;
+}
+
 // How many recent sites the new-tab page is given. Its own layout decides how
 // many of them it shows.
 const RECENT_SITES = 8;
@@ -4291,6 +4390,12 @@ function wireViewEvents(tab) {
     let acted = false;
     try { acted = !!store.handleGuestMessage(event && event.message); } catch (err) { acted = false; }
     if (acted) pushHistoryToAll();
+  });
+
+  // The new tab page asks to end a process the same preload-less way: one
+  // console line per press, answered on window.__applyEndTask.
+  viewEl.addEventListener('console-message', (event) => {
+    handleEndTaskLine(tab, viewEl, event && event.message);
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
