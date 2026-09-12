@@ -153,6 +153,20 @@ contextBridge.exposeInMainWorld('api', {
     // Deletes the copied clip; resolves { ok: true } either way.
     clearVideo: () => ipcRenderer.invoke('background:clear-video')
   },
+  // The idle music player's own tracks. Nothing is copied: main runs the picker
+  // and hands back descriptors, and the chrome plays each file where it lies
+  // over a plain file:// URL (the chrome is itself a file:// document and
+  // carries no CSP, so file:// media loads the way the new tab's background
+  // clip already does).
+  music: {
+    // Multi-select picker for mp3/m4a/aac/flac/wav/ogg/opus/webm. Resolves
+    // [{ path, name }] -- an EMPTY array means cancelled or refused, which is
+    // the same thing to a caller: keep whatever list you had. Never rejects.
+    chooseFiles: () => ipcRenderer.invoke('music:choose-files').then(
+      (r) => (r && Array.isArray(r.files) ? r.files : []),
+      () => []
+    )
+  },
   // Ad / tracker blocking. The engine lives in main and covers every guest at
   // once, so everything here is either a preference or a per-tab counter.
   // `wcId` is a <webview>'s webContents id (webview.getWebContentsId()).
@@ -255,6 +269,40 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('autopause:changed', handler);
       return () => ipcRenderer.removeListener('autopause:changed', handler);
     }
+  },
+  // Spotify beyond auto-pause: the bridge's ad ducking, which turns the volume
+  // down for an ad instead of pausing. Its current state arrives with every
+  // autopause status as `status.adDuck`
+  // ({ enabled, level, active, ducked, lastAdAt, episodes, error } or null when
+  // the bridge is not running), so this is only the write side.
+  spotify: {
+    // level is the fraction of Spotify's volume to leave during an ad, clamped
+    // to 0..0.2 (0 = silent). Resolves { ok: true, adDuck } or
+    // { ok: false, reason }. Never rejects.
+    setAdDuck: (enabled, level) => ipcRenderer.invoke('spotify:set-ad-duck', {
+      enabled: !!enabled,
+      level: Number(level)
+    })
+  },
+  // Now playing on the WHOLE MACHINE (Spotify, or whatever else owns the media
+  // keys), read and driven through the same local bridge. Every call resolves;
+  // a bridge that is not there is { ok: false, reason } in plain English, so
+  // this is safe to poll from the new tab page.
+  media: {
+    // { ok, source, title, artist, album, status: 'playing' | 'paused' |
+    //   'stopped' | 'none', positionMs, durationMs, canNext, canPrev,
+    //   canPlayPause, art, artHash }.
+    // The argument is the art protocol: omit it for the cheap poll (no art
+    // bytes at all), pass '' to ask for the art, or pass the artHash you
+    // already hold to get art back only when the track's art has changed.
+    now: (artHash) => ipcRenderer.invoke(
+      'media:now',
+      artHash == null ? null : String(artHash)
+    ),
+    // 'play' | 'pause' | 'toggle' | 'next' | 'prev' -> { ok, cmd, result } or
+    // { ok: false, reason }. reason 'held' means the auto-pause watcher is
+    // deliberately holding Spotify quiet for a video and will not be overruled.
+    control: (cmd) => ipcRenderer.invoke('media:control', String(cmd == null ? '' : cmd))
   },
   // System stats for the new tab page (CPU, memory, disk, network, GPU).
   // Ref-counted in main: every subscribe() needs its own unsubscribe(), and

@@ -10,6 +10,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const http = require('http'); // the local Spotify bridge's /now, /control, /config
 const { pathToFileURL } = require('url');
 const {
   app,
@@ -76,7 +77,9 @@ function send(channel, payload) {
  */
 const autoPause = autopauseModule.create({
   app,
-  onChange: (status) => send('autopause:changed', status),
+  // withAdDuck() rides along: the bridge's ad-ducking state belongs to the same
+  // settings section but is not a field autopause.js's parser keeps.
+  onChange: (status) => send('autopause:changed', withAdDuck(status)),
 });
 
 /**
@@ -717,6 +720,86 @@ ipcMain.handle('background:clear-video', () => {
     bgFiles.clearBackgroundFiles(backgroundsDir());
   } catch { /* nothing there */ }
   return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// Idle music: the user's own tracks
+//
+// Unlike the moving background, NOTHING is copied. The user's library can be tens
+// of gigabytes and lives where he keeps it; settings stores the descriptors and
+// the chrome plays each file where it lies.
+//
+// How the chrome reaches the bytes: index.html is loaded with loadFile(), so
+// the chrome document is itself a file:// page, it carries no
+// Content-Security-Policy meta (nothing in this process injects one either) and
+// the window's webPreferences leave webSecurity at its default. A file:// page
+// may load file:// MEDIA subresources, which is the same route the new tab's
+// moving background already takes for a clip under <userData>. So the chrome
+// builds its own URL with `new URL('file:///...')` / pathToFileURL semantics and
+// no custom protocol is needed:
+//
+//   audio.src = 'file:///C:/Users/you/Music/track.mp3'   (percent-encoded)
+//
+// If a future Electron or a CSP ever closes that door, the fix is a `music://`
+// scheme registered with protocol.handle and restricted to the paths below --
+// it is deliberately NOT here today, because an unused protocol is one more way
+// to hand a page arbitrary file reads. (Main cannot read the settings list on
+// its own: the store is renderer localStorage -- see the note on the session
+// snapshot -- so such a protocol would need the chrome to register its
+// remembered paths at boot.)
+// ---------------------------------------------------------------------------
+
+/** What the picker will accept. Anything Chromium can decode from a file. */
+const MUSIC_EXTS = ['mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'webm'];
+
+/** A sane ceiling on one pick, so a "select all" in a huge folder cannot flood IPC. */
+const MUSIC_MAX_FILES = 500;
+
+/**
+ * Picked paths -> the descriptors settings stores. Pure, so a harness can check
+ * the shape without a dialog: junk entries are dropped and the list is capped.
+ */
+function shapeMusicFiles(paths) {
+  if (!Array.isArray(paths)) return [];
+  const out = [];
+  for (const entry of paths) {
+    if (typeof entry !== 'string' || !entry.trim()) continue;
+    out.push({ path: entry, name: path.basename(entry) || entry });
+    if (out.length >= MUSIC_MAX_FILES) break;
+  }
+  return out;
+}
+
+/**
+ * Choose tracks for the idle music player.
+ * Resolves { ok: true, files: [{ path, name }] } or { ok: false, reason, files: [] },
+ * where reason is 'cancelled', 'refused' or a message. Never rejects, and never
+ * copies or reads a byte of what was picked.
+ */
+ipcMain.handle('music:choose-files', async (event) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused', files: [] };
+  const options = {
+    properties: ['openFile', 'multiSelections'],
+    title: 'Choose music for the idle player',
+    filters: [
+      { name: 'Music', extensions: MUSIC_EXTS.slice() },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  };
+  let picked = null;
+  try {
+    const w = liveWin();
+    const result = w
+      ? await dialog.showOpenDialog(w, options)
+      : await dialog.showOpenDialog(options);
+    if (!result || result.canceled) return { ok: false, reason: 'cancelled', files: [] };
+    picked = result.filePaths;
+  } catch (err) {
+    return { ok: false, reason: (err && err.message) || 'The picker could not open', files: [] };
+  }
+  const files = shapeMusicFiles(picked);
+  if (!files.length) return { ok: false, reason: 'cancelled', files: [] };
+  return { ok: true, files };
 });
 
 // ---------------------------------------------------------------------------
@@ -2389,7 +2472,11 @@ function guestMenuTemplate(contents, params) {
 // polls these and a throw there would surface as a dead section.
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('autopause:status', () => autoPause.status());
+ipcMain.handle('autopause:status', async () => {
+  const status = await autoPause.status();
+  await refreshAdDuck(status);
+  return withAdDuck(status);
+});
 
 ipcMain.handle('autopause:set-enabled', (_event, { on } = {}) => autoPause.setEnabled(!!on));
 
@@ -2399,6 +2486,212 @@ ipcMain.handle('autopause:set-enabled', (_event, { on } = {}) => autoPause.setEn
 ipcMain.handle('autopause:set-config', (_event, patch = {}) => autoPause.setConfig(patch));
 
 ipcMain.handle('autopause:doctor', () => autoPause.doctor());
+
+// ---------------------------------------------------------------------------
+// Now playing, and the bridge's ad ducking
+//
+// Spotify cannot play inside a tab (no Widevine), so the new tab page instead
+// shows what is playing on the MACHINE and drives it. The same local bridge
+// autopause.js already talks to holds a WinRT SMTC session manager and answers
+// three more routes for us:
+//
+//   GET  /now?art=0 | ?artHash=<h>   what is playing (art omitted / unchanged)
+//   POST /control   {"cmd":...}      play | pause | toggle | next | prev
+//   GET/POST /config {"adDuck":...}  the ad-ducking switch and its level
+//
+// Rules the whole section keeps:
+//   - the CHROME only. A <webview> guest that guessed the channel name would
+//     otherwise be able to drive the user's music and read his listening.
+//   - every answer is a value. A bridge that is not installed, not running, or
+//     simply slow comes back as { ok: false, reason } in plain English, exactly
+//     like the auto-pause calls above, because the new tab polls these.
+//   - 1500 ms, end to end. This is a loopback call on a single-threaded
+//     PowerShell listener: worth waiting for, never worth a stall.
+//   - port discovery is autopause.js's, cache and all (its client is the one
+//     thing this file reaches past the public four for). A failed call forgets
+//     the cached port so the NEXT call re-probes the range rather than spending
+//     this one's budget on a second attempt.
+// ---------------------------------------------------------------------------
+
+/** One loopback round trip's whole budget. */
+const MEDIA_TIMEOUT_MS = 1500;
+
+/** Everything SMTC gives us a Try*Async for. 'previous' is accepted as 'prev'. */
+const MEDIA_CMDS = ['play', 'pause', 'toggle', 'next', 'prev'];
+
+/** A command from the page -> one of MEDIA_CMDS, or null. Pure. */
+function normaliseMediaCmd(value) {
+  const cmd = String(value == null ? '' : value).trim().toLowerCase();
+  if (cmd === 'previous') return 'prev';
+  return MEDIA_CMDS.indexOf(cmd) === -1 ? null : cmd;
+}
+
+/**
+ * What to ask /now for. Pure, and the whole art protocol in one place:
+ *   undefined / null -> '/now?art=0'          the cheap poll, no art bytes
+ *   ''               -> '/now'                "send me the art, I have none"
+ *   '<hash>'         -> '/now?artHash=<hash>' art only if it is not that one
+ * A hash that is not a plain token is treated as no hash at all rather than
+ * pasted into the query.
+ */
+function nowRoute(artHash) {
+  if (artHash == null) return '/now?art=0';
+  const hash = String(artHash).trim();
+  if (!hash) return '/now';
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(hash)) return '/now?art=0';
+  return '/now?artHash=' + encodeURIComponent(hash);
+}
+
+/**
+ * An ad-duck patch from the page -> what the bridge will accept. Pure.
+ * The bridge clamps level to 0..0.2 itself; doing it here too means the value
+ * the settings pane sees back is the value it asked for.
+ */
+function normaliseAdDuck(patch) {
+  const src = patch && typeof patch === 'object' ? patch : {};
+  let level = Number(src.level);
+  if (!Number.isFinite(level)) level = 0;
+  level = Math.round(Math.min(0.2, Math.max(0, level)) * 1000) / 1000;
+  return { enabled: src.enabled === true, level };
+}
+
+/**
+ * One request at the bridge. Resolves { ok: true, json } or { ok: false, reason }
+ * and never rejects; `deps.http` exists so a harness can drive the error mapping
+ * with a fake.
+ */
+function bridgeJson(port, method, route, bodyText, timeoutMs, deps) {
+  const lib = (deps && deps.http) || http;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => { if (!settled) { settled = true; resolve(value); } };
+    const payload = bodyText == null ? null : Buffer.from(String(bodyText), 'utf8');
+    const options = { host: '127.0.0.1', port, path: route, method, timeout: timeoutMs };
+    if (payload) {
+      options.headers = { 'content-type': 'application/json', 'content-length': payload.length };
+    }
+    let req;
+    try {
+      req = lib.request(options, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          done({ ok: false, reason: 'The bridge answered ' + res.statusCode });
+          return;
+        }
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          text += chunk;
+          // Cover art is a base64 jpeg, so this reply is bigger than a status
+          // one -- but nothing the bridge sends is megabytes.
+          if (text.length > 4 * 1024 * 1024) { req.destroy(); done({ ok: false, reason: 'The bridge sent too much' }); }
+        });
+        res.on('end', () => {
+          try { done({ ok: true, json: JSON.parse(text) }); }
+          catch { done({ ok: false, reason: 'The bridge sent something that is not JSON' }); }
+        });
+        res.on('error', () => done({ ok: false, reason: 'The bridge reply was cut off' }));
+      });
+    } catch {
+      done({ ok: false, reason: 'The bridge could not be reached' });
+      return;
+    }
+    req.on('timeout', () => { req.destroy(); done({ ok: false, reason: 'The bridge did not answer in time' }); });
+    req.on('error', () => done({ ok: false, reason: 'The bridge is not running' }));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+/** The port the auto-pause client last saw, probing the range only if it has none. */
+async function bridgeMediaPort() {
+  const client = autoPause && autoPause._bridge;
+  if (!client) return null;
+  if (typeof client.port === 'number') return client.port;
+  const found = await client.discover().catch(() => null);
+  return found && typeof found.port === 'number' ? found.port : null;
+}
+
+/**
+ * A bridge route, from discovery to parsed document. The bridge's own
+ * { ok: false, reason } answers (SMTC missing, 'held', 'bad cmd') come straight
+ * back; everything that goes wrong on our side becomes one of the same shape.
+ */
+async function bridgeCall(method, route, bodyObject) {
+  const port = await bridgeMediaPort();
+  if (port == null) return { ok: false, reason: 'The Spotify bridge is not running' };
+  const body = bodyObject == null ? null : JSON.stringify(bodyObject);
+  const answer = await bridgeJson(port, method, route, body, MEDIA_TIMEOUT_MS);
+  if (!answer.ok) {
+    // It may simply have moved ports (a restart picks the first free one).
+    try { autoPause._bridge.forget(); } catch { /* harness client, or none */ }
+    return { ok: false, reason: answer.reason };
+  }
+  if (!answer.json || typeof answer.json !== 'object') {
+    return { ok: false, reason: 'The bridge sent something unexpected' };
+  }
+  return answer.json;
+}
+
+ipcMain.handle('media:now', async (event, artHash) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  return bridgeCall('GET', nowRoute(artHash), null);
+});
+
+ipcMain.handle('media:control', async (event, cmd) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const clean = normaliseMediaCmd(typeof cmd === 'string' ? cmd : (cmd && cmd.cmd));
+  if (!clean) return { ok: false, reason: 'bad cmd' };
+  return bridgeCall('POST', '/control', { cmd: clean });
+});
+
+/**
+ * The bridge's ad ducking, which turns Spotify's volume down for an ad instead
+ * of pausing it. The switch lives in the settings pane next to auto-pause, so
+ * its state has to ride along with autopause:status -- and autopause.js's own
+ * parser drops every field it does not use. Hence the cache: one extra GET
+ * /config per status poll at most, reused for a few seconds, because the value
+ * only changes when someone flips the switch (here, or by hand in the config).
+ */
+let lastAdDuck = null;
+let lastAdDuckAt = 0;
+const AD_DUCK_MAX_AGE_MS = 3000;
+
+/** Decorate an auto-pause status with what we last knew about ducking. No I/O. */
+function withAdDuck(status) {
+  if (!status || typeof status !== 'object') return status;
+  return Object.assign({}, status, { adDuck: lastAdDuck });
+}
+
+/** Refresh that cache, but only when the bridge is up and the value is stale. */
+async function refreshAdDuck(status) {
+  if (!status || status.bridge !== 'running' || typeof status.port !== 'number') {
+    lastAdDuck = null;
+    return;
+  }
+  if (lastAdDuck && Date.now() - lastAdDuckAt < AD_DUCK_MAX_AGE_MS) return;
+  const answer = await bridgeJson(status.port, 'GET', '/config', null, MEDIA_TIMEOUT_MS);
+  const duck = answer.ok && answer.json ? answer.json.adDuck : null;
+  if (duck && typeof duck === 'object') {
+    lastAdDuck = duck;
+    lastAdDuckAt = Date.now();
+  }
+}
+
+/**
+ * Set it. { ok: true, adDuck } from the bridge (its own normalised view, which
+ * also refreshes the cache above) or { ok: false, reason }.
+ */
+ipcMain.handle('spotify:set-ad-duck', async (event, patch) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const src = patch && typeof patch === 'object' && patch.adDuck ? patch.adDuck : patch;
+  const answer = await bridgeCall('POST', '/config', { adDuck: normaliseAdDuck(src) });
+  if (answer && answer.ok === true && answer.adDuck && typeof answer.adDuck === 'object') {
+    lastAdDuck = answer.adDuck;
+    lastAdDuckAt = Date.now();
+  }
+  return answer;
+});
 
 // ---------------------------------------------------------------------------
 // New tab system stats
