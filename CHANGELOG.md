@@ -941,3 +941,6 @@ onward are the small hours after that same 11 September evening.
 | 56fe5dc | 01:15 | Terminal tabs: node-pty's console-list helper stops crashing on close; the smoke test prints a summary |
 | 52c9aa7 | 01:22 | Native app tabs: true focus and a few live shortcuts while a hosted app has the keyboard |
 | 14a076b | 01:26 | Apps: launches keep the shortcut's taskbar identity and run-as flag, with %VAR% expansion and fallbacks |
+| 84717e3 | 01:42 | Native app tabs: "app holds the keyboard" is decided by process id, so hosted Electron and CEF apps arm the shortcuts |
+| 7185f13 | 02:49 | Native app tabs: live tab titles from the app itself, and an honest "(not responding)" state with Pop out and Close tab |
+| ca73bcb | 03:53 | Native app tabs: host by ownership instead of re-parenting, so a hung app can no longer stall the browser |

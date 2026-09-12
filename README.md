@@ -809,18 +809,26 @@ already open.
 **Native app tabs.** The answer to "is there a way where I can start the apps in a tab but it's
 running the app so that literally everything is just in a tab?" — a real desktop app running inside a
 tab, engine and tab both. embed.js reaches Win32 through koffi (Node-API, so it loads in Electron 44 with no rebuild, required
-lazily inside a try/catch). It finds windows by pid or exe; `attach` re-parents the app's real
-top-level window into the browser window — hide, `SetParent`, the `WS_CHILD` style, then a
-`SetWindowPos` that moves and sizes nothing, because a zero-size one destroyed app windows on attach;
-`layout` positions it over a CSS-pixel rect with the display scale applied; `detach` puts the saved
-style and rect back as a normal window; `close` posts `WM_CLOSE` with a restore fallback after 3s;
-and a once-a-second liveness poll reports a window that has gone. Only a window it can actually host
-is found or attached — a top-level root, unowned, not a tool window, never a store app and never one
-of our own HWNDs, since a credential dialog owned by the browser itself used to enumerate as hostable
-— and a minimised one is shown with `SW_SHOWNOACTIVATE`, so opening an app into a tab never steals
-focus. Every Win32 call in attach recovery and detach sits under its own try, so a failure cannot
-leave a `WS_CHILD` window with no parent, and a failed un-parent keeps the record so the quit path
-retries it. `detachAll` runs on before-quit, window close and process exit, so quitting the browser
+lazily inside a try/catch). It finds windows by pid or exe; `attach` leaves the app's window
+top-level and **owns** it instead — the browser becomes its owner (`GWLP_HWNDPARENT`), the caption
+and frame come off (`WS_POPUP`), `WS_EX_TOOLWINDOW` keeps it out of Alt+Tab, and the window is
+positioned over the tab's placeholder in screen space, following every browser move, resize,
+maximise and fullscreen change and hiding with a minimise or under an overlay. That is the whole
+reason for ownership: `SetParent` would join the app's input queue to ours, so a hung app used to
+stall the browser, and an owned window cannot. `layout` positions it over a CSS-pixel rect with the
+display scale applied; `detach` puts the saved styles, owner and rect back as a normal window;
+`close` posts `WM_CLOSE` with a restore fallback after 3s; and a once-a-second poll reports a window
+that has gone, reads its title, and samples `IsHungAppWindow` with a two-sample debounce each way.
+Focus is true through the owner chain, and handing the keyboard back after a hosted-app shortcut is a
+momentary `AttachThreadInput` handoff — only while the app is not hung, and never
+`SetForegroundWindow`. Losing the owner (a Store frame resets it) restores the styles before letting
+go, and child mode, the old `SetParent` path, is kept as a per-call fallback. Only a window it can
+actually host is found or attached — a top-level root, unowned, not a tool window, never a store app
+and never one of our own HWNDs, since a credential dialog owned by the browser itself used to
+enumerate as hostable — and a minimised one is shown with `SW_SHOWNOACTIVATE`, so opening an app into
+a tab never steals focus. Every Win32 call in attach recovery and detach sits under its own try, so a
+failure cannot leave a stripped window with nothing holding it, and a failed restore keeps the record
+so the quit path retries it. `detachAll` runs on before-quit, window close and process exit, so quitting the browser
 never takes an app down with it. main.js answers find, attach, open, layout, detach, close and list
 for the chrome only: opening launches the app the way the dock does, or attaches a window that exists
 already, and waits up to 20s for a new titled window from that exe, with a pending-open guard so a
@@ -831,7 +839,7 @@ the module — a missing koffi answers "unavailable".
 A tab can be a "native" kind: its view is a placeholder on the theme ground, and the engine keeps the
 app's real window positioned over that rect — synced on activation, on resize and on split changes,
 and hidden whenever a chrome overlay covers the content (the palette, the panes, tab search, find,
-downloads), because a re-parented Win32 window sits above the document. Two ways in: the command
+downloads), because an owned Win32 window sits above the document. Two ways in: the command
 palette's "Open <app> in a tab" row, with "Switch to <app>" once it is open, or the apps dock, where
 Edit mode gives each installed pin an app | web | tab chooser and a native pin then wears a small
 "tab" badge. Either way, a copy that is already running is adopted into the tab rather than launched
@@ -843,15 +851,22 @@ auto-start and never sleep; Start adopts the running copy the same way, so comin
 restart hosts the app you left open instead of a second one. "Pop out" in the tab context menu gives
 the app back as a normal window; closing the tab closes the app.
 
-Three things to know. Windows 11's packaged Notepad destroys its own window after any `SetParent`, and
-Store apps are refused outright, so neither can be hosted — launch those normally. The hosted app owns
-most of the keyboard while it has the focus, but not all of it: new tab, the address bar, the palette,
-tab search, Ctrl+Tab both ways and the Files tab still fire from inside the app, and the keyboard comes
-back to the browser once one of them has, while Ctrl+W and the keys a hosted editor or chat app owns —
-F, R, S, P, N — go to the app rather than here. Focus inside the app counts as focus in the browser
-too, so idle music set to play anywhere keeps playing while you work in it. And if the app hangs, the
-browser's input can hang with it until you pop the tab out. The tab side is verified against Character
-Map and Paint.
+A few things to know. The tab's title is the app's own, live: Discord-style "(3) Discord" reads as it
+does in the app, with the app name as a fallback. When a hosted app wedges, the tab says so — the
+title picks up " (not responding)" and the placeholder offers Pop out and Close tab — and both clear
+by themselves when the app comes back; nothing is detached behind your back. Store apps are still
+refused: Calculator takes the owner and then ApplicationFrameHost resets it, so launch those
+normally. Windows 11's packaged Notepad, which the old re-parenting path destroyed, hosts fine now.
+The hosted app owns most of the keyboard while it has the focus, but not all of it: new tab, the
+address bar, the palette, tab search, Ctrl+Tab both ways and the Files tab still fire from inside the
+app — a hosted Electron or CEF app like Discord or VS Code included, since who holds the keyboard is
+decided by process id rather than window class — and the keyboard comes back to the browser once one
+of them has, while Ctrl+W and the keys a hosted editor or chat app owns — F, R, S, P, N — go to the
+app rather than here. Focus inside the app counts as focus in the browser too, so idle music set to
+play anywhere keeps playing while you work in it. "Pop out" and a clean quit both hand the window
+back whole; only a force-killed browser leaves the app alive but frameless, which popping the tab out
+or restarting the app puts right. The tab side is verified against Character Map, Notepad, Paint and
+a second Electron app.
 
 **Resuming a conversation.** Four ways in, all the same door: right-click bare strip → "Resume a
 Claude conversation…", a Claude chip's menu → "Resume another conversation here", Ctrl+click the
@@ -1004,7 +1019,7 @@ one run before and one after.
 | `ambient.js` | The built-in idle-music engine: a generative Web Audio pad — detuned voices under a slow low-pass filter, a chord crossfading every 16-24s along a modal progression, a sparse arpeggio through a feedback delay, a four-delay-line room instead of a convolver, compressor and master gain — with one timer, twelve mood titles, and a `stop()` that suspends the context. |
 | `music.js` | The idle-music player: `shouldPlay()` and every signal behind it (the setting, a manual pause, window focus, an audible tab, the machine's own media session, the "where" setting, a ready source), the 300ms settle, the 800/400ms fades, the resume hold and the flip counter that sits the player out for 30s, and the two sinks behind one contract — the ambient engine and one `<audio>` element on `file://` with shuffle and skip-missing. Also the parsers for the new tab's `music` and `media` console lines and the now-playing change detector (position out of the hash, art re-sent only when its own hash moves). `debug()` and a `resumeHoldMs` option exist for harnesses. |
 | `webapps.js` | The web-app catalogue: 30 entries with `web:<slug>` ids, URL, host, the desktop exe they pair with and a `drm` mark, plus `findWebApp`, `webAppForHost` (exact, then longest subdomain match), `webAppForExe`, `isWebAppId`, `isTerminalId`, `terminalProgram` and `DRM_NOTE`. Loads as a module or a script tag (`window.WEBAPPS` / `window.WebApps`), and is a first-paint seed on the new tab as well as the chrome's own table. |
-| `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` (hide, `SetParent`, `WS_CHILD`, a move-and-size-free `SetWindowPos`), `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s liveness poll and its gone event, the refusal of store apps, tool windows, owned windows and our own, `SW_SHOWNOACTIVATE` so nothing steals focus, per-call error handling in attach recovery and detach, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push, guards a second open on the same tab, and detaches everything on `render-process-gone`; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. app.js holds the native tab that the window is positioned over. |
+| `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` in owner mode by default (the browser as `GWLP_HWNDPARENT`, `WS_POPUP`, `WS_EX_TOOLWINDOW`, positioned in screen space, no `SetParent` so the app's input queue is never joined to ours) with child mode kept as a per-call fallback, `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s poll with its gone event, title pushes and the debounced `IsHungAppWindow` hung/recovered events, the owner-chain focus check and the `AttachThreadInput` keyboard handoff, the restore when an owner is lost, the refusal of store apps, tool windows, owned windows and our own, `SW_SHOWNOACTIVATE` so nothing steals focus, per-call error handling in attach recovery and detach, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push, guards a second open on the same tab, and detaches everything on `render-process-gone`; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. app.js holds the native tab that the window is positioned over. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
