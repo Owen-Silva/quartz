@@ -23,7 +23,10 @@
  *     claudeNotify: true | false,           // toast when a tab goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     newtabBackground: { kind: 'board'|'aurora'|'image',
- *                         boardOverImage: bool, dim: 0..0.6, rev } }
+ *                         boardOverImage: bool, dim: 0..0.6, rev },
+ *     music:        { enabled, source: 'ambient'|'files',
+ *                     where: 'newtab'|'anywhere', volume: 0..1,
+ *                     files: [{ path, name }], shuffle } }
  *
  * THE NEW TAB'S PICTURE IS NOT IN THERE. kind 'image' needs a photo, and a
  * 2560px JPEG as base64 is about a megabyte of string that localStorage would
@@ -109,7 +112,18 @@
        against the installed index every time. `{ pins: [] }` is the whole of
        it for now; the object leaves room for the rest of the group later.
        There is no UI for this in the pane: the page manages its own dock. */
-    apps: { pins: [] }
+    apps: { pins: [] },
+    /* Quiet lobby music while nothing else is making a sound. The tracks are
+       referenced, never copied: only a path and the name a row shows. See the
+       Idle music block below for what each key means. */
+    music: {
+      enabled: false,
+      source: 'ambient',
+      where: 'newtab',
+      volume: 0.35,
+      files: [],
+      shuffle: true
+    }
   };
 
   /* A dock is a shortlist. Anything past this is dropped on the way in. */
@@ -325,6 +339,9 @@
     if (keys.indexOf('palette') >= 0) applyPalette(get('palette'));
     if (keys.indexOf('accentHue') >= 0) applyAccent(get('accentHue'));
     if (keys.indexOf('siteTheme') >= 0) pushSiteTheme(get('siteTheme'));
+    /* The player is not in this file: it hears about the group either from
+       the listener list or from this event, whichever it subscribed to. */
+    if (keys.indexOf('music') >= 0) announceMusic();
   }
 
   /* ============================================================
@@ -799,6 +816,188 @@
     patch.pins = next;
     set({ apps: patch });
     return appPins();
+  }
+
+  /* ============================================================
+     Idle music
+
+     Quiet music while nothing else in the browser is making a sound. The
+     player lives in the chrome, not in a guest, so it survives tab
+     switches; this is only where the choice is kept:
+
+       { enabled, source: 'ambient'|'files', where: 'newtab'|'anywhere',
+         volume: 0..1, files: [{ path, name }], shuffle }
+
+     The tracks are referenced, never copied — only the path and the name a
+     row shows are stored, so moving a file just makes that one skip.
+
+     Every change is announced twice: once through the ordinary listener
+     list with 'music' among the keys (which is how the background and the
+     app dock are announced), and once as a 'music-changed' event on
+     `document`, so a module that never subscribed to the store still hears
+     it. Nothing here restarts anything: it all applies live.
+     ============================================================ */
+
+  var MUSIC_SOURCES = [
+    { value: 'ambient', name: 'Built-in ambient' },
+    { value: 'files', name: 'My tracks' }
+  ];
+
+  var MUSIC_WHERE = [
+    { value: 'newtab', name: 'New tab page only' },
+    { value: 'anywhere', name: 'Anywhere in the browser' }
+  ];
+
+  var MUSIC_VOLUME_DEFAULT = 0.35;
+  var MUSIC_FILES_MAX = 500;        // a lobby playlist, not a music library
+  var MUSIC_PATH_MAX = 1024;        // past Windows' long path, and then some
+  var MUSIC_NAME_MAX = 200;
+
+  /** A stored value kept only while the option list still offers it. */
+  function pickValue(options, value, fallback) {
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].value === value) return value;
+    }
+    return fallback;
+  }
+
+  /** The last segment of a path, either slash, as the name a row shows. */
+  function musicBaseName(path) {
+    var parts = String(path).split(/[\\/]+/);
+    var last = parts[parts.length - 1] || '';
+    return last || String(path);
+  }
+
+  /** The chosen tracks, read as a clean list: a path and a name each. */
+  function normalizeMusicFiles(value) {
+    var out = [];
+    var seen = [];
+    if (!Array.isArray(value)) return out;
+    for (var i = 0; i < value.length; i++) {
+      var raw = value[i];
+      var path = '';
+      var name = '';
+      if (typeof raw === 'string') path = raw;
+      else if (raw && typeof raw === 'object') {
+        path = typeof raw.path === 'string' ? raw.path : '';
+        name = typeof raw.name === 'string' ? raw.name : '';
+      }
+      path = path.trim();
+      if (!path || path.length > MUSIC_PATH_MAX) continue;
+      var key = path.toLowerCase();
+      if (seen.indexOf(key) >= 0) continue;       // a playlist plays a file once
+      seen.push(key);
+      name = name.trim() || musicBaseName(path);
+      if (name.length > MUSIC_NAME_MAX) name = name.slice(0, MUSIC_NAME_MAX);
+      out.push({ path: path, name: name });
+      if (out.length >= MUSIC_FILES_MAX) break;
+    }
+    return out;
+  }
+
+  /** Anything stored (or handed in) read as a complete, in-range group. */
+  function normalizeMusic(value) {
+    var v = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
+    /* null, undefined and '' are "never set", not zero — a stored group from
+       an older build must not come back silent. */
+    var volume = (v.volume === null || v.volume === undefined || v.volume === '')
+      ? MUSIC_VOLUME_DEFAULT : Number(v.volume);
+    if (!isFinite(volume)) volume = MUSIC_VOLUME_DEFAULT;
+    return {
+      enabled: v.enabled === true,
+      source: pickValue(MUSIC_SOURCES, v.source, 'ambient'),
+      where: pickValue(MUSIC_WHERE, v.where, 'newtab'),
+      volume: Math.min(1, Math.max(0, volume)),
+      files: normalizeMusicFiles(v.files),
+      shuffle: v.shuffle !== false
+    };
+  }
+
+  function music() {
+    return normalizeMusic(get('music'));
+  }
+
+  /**
+   * Merge part of the group back. Only the keys handed over move, so a
+   * caller may write { enabled: true } without knowing the rest, and a
+   * value that makes no sense leaves that key where it was rather than
+   * dropping it to the default. set() emits with 'music' among its keys
+   * when something really changed, and react() fires 'music-changed'.
+   * @returns {Object} the group as it is now stored.
+   */
+  function setMusic(patch) {
+    var next = music();
+    if (patch && typeof patch === 'object') {
+      if (patch.enabled !== undefined) next.enabled = patch.enabled === true;
+      if (patch.source !== undefined) next.source = pickValue(MUSIC_SOURCES, patch.source, next.source);
+      if (patch.where !== undefined) next.where = pickValue(MUSIC_WHERE, patch.where, next.where);
+      if (patch.volume !== undefined) {
+        var vol = (patch.volume === null || patch.volume === '') ? NaN : Number(patch.volume);
+        if (isFinite(vol)) next.volume = Math.min(1, Math.max(0, vol));
+      }
+      if (patch.files !== undefined) next.files = normalizeMusicFiles(patch.files);
+      if (patch.shuffle !== undefined) next.shuffle = patch.shuffle === true;
+    }
+    set({ music: next });
+    return music();
+  }
+
+  /**
+   * The group as a document event, for a module that never subscribed to
+   * the store. Guarded end to end: a document without dispatchEvent (or a
+   * listener that throws) must not take the write down with it.
+   */
+  function announceMusic() {
+    if (!document || typeof document.dispatchEvent !== 'function') return;
+    var detail = music();
+    try {
+      if (typeof window.CustomEvent === 'function') {
+        document.dispatchEvent(new window.CustomEvent('music-changed', { detail: detail }));
+        return;
+      }
+    } catch (err) { /* fall through to the older constructor */ }
+    try {
+      var ev = document.createEvent('CustomEvent');
+      ev.initCustomEvent('music-changed', false, false, detail);
+      document.dispatchEvent(ev);
+    } catch (err) { /* no event path here: the listener list still fired */ }
+  }
+
+  /** The preload's file picker, or null on a window started before it. */
+  function musicApi() {
+    try {
+      var api = window.api && window.api.music;
+      if (!api || typeof api.chooseFiles !== 'function') return null;
+      return api;
+    } catch (err) { return null; }
+  }
+
+  /**
+   * Ask main for tracks. Nothing is copied: the dialog hands back
+   * [{ path, name }] and those are stored as they are, added to whatever is
+   * already listed. A cancel answers with nothing and changes nothing.
+   * @returns {Promise<{ok:boolean, added?:number, total?:number, reason?:string}>}
+   */
+  function chooseMusicFiles() {
+    var api = musicApi();
+    if (!api) return Promise.resolve({ ok: false, reason: 'unavailable' });
+    var answer;
+    /* autopauseReason() is this file's "a failure as a sentence" helper —
+       hoisted, so reaching it from up here is fine. */
+    try { answer = api.chooseFiles(); }
+    catch (err) { return Promise.resolve({ ok: false, reason: autopauseReason(err) }); }
+    return Promise.resolve(answer).then(function (value) {
+      var picked = Array.isArray(value)
+        ? value
+        : ((value && Array.isArray(value.files)) ? value.files : []);
+      var list = normalizeMusicFiles(picked);
+      if (!list.length) return { ok: false, reason: 'cancelled' };
+      var before = music().files;
+      var stored = setMusic({ files: before.concat(list) }).files;
+      return { ok: true, added: Math.max(0, stored.length - before.length), total: stored.length };
+    }, function (err) {
+      return { ok: false, reason: autopauseReason(err) };
+    });
   }
 
   /* ============================================================
@@ -2151,6 +2350,111 @@
     }
   }
 
+  function buildMusic() {
+    var s = section('Idle music');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'music');
+    s.appendChild(field);
+    return s;
+  }
+
+  /** The tracks line: the count, and the one name worth printing. */
+  function musicFilesLine(files) {
+    var n = files.length;
+    if (!n) return 'No tracks chosen';
+    if (n === 1) return '1 track: ' + files[0].name;
+    return n + ' tracks';
+  }
+
+  /** How loud, as a percentage — the dim slider's shape, for a level. */
+  function musicVolumeRow(cfg) {
+    var wrap = el('span', 'set-bg-dim');
+    var slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.step = '1';
+    slider.className = 'set-range';
+    slider.id = 'set-music-volume';
+    slider.value = String(Math.round(cfg.volume * 100));
+    slider.setAttribute('aria-label', 'Volume');
+    var readout = el('span', 'set-bg-dim-value', Math.round(cfg.volume * 100) + '%');
+    // input previews the number without writing; change is the one that stores.
+    slider.addEventListener('input', function () { readout.textContent = slider.value + '%'; });
+    slider.addEventListener('change', function () { setMusic({ volume: Number(slider.value) / 100 }); });
+    wrap.appendChild(slider);
+    wrap.appendChild(readout);
+    return controlRow('Volume', 'set-music-volume', wrap);
+  }
+
+  /**
+   * The whole section: the switch, where the sound comes from, where it is
+   * allowed to play, and how loud. Every control writes and applies at once
+   * — nothing here asks for a restart except the file picker on a window
+   * started before the picker existed.
+   */
+  function renderMusic() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="music"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var cfg = music();
+    var redraw = function () { renderMusic(); refreshFilter(); };
+
+    field.appendChild(switchRow('Enabled', cfg.enabled, function (next) {
+      setMusic({ enabled: next });
+      redraw();
+    }));
+
+    field.appendChild(controlRow('Source', 'set-music-source',
+      glassSelect('set-music-source', MUSIC_SOURCES, cfg.source, function (value) {
+        setMusic({ source: value });
+        redraw();
+      })));
+
+    if (cfg.source === 'files') {
+      /* No hidden <input type="file">: the player keeps these paths for
+         later, and a renderer's File objects do not survive a restart. */
+      var row = el('div', 'set-bg-row');
+      row.appendChild(el('span', 'set-hint set-bg-name', musicFilesLine(cfg.files)));
+      var pick = textButton('Choose files…', 'set-btn set-bg-pick', function () {
+        chooseMusicFiles().then(function (res) {
+          if (res && res.ok) {
+            redraw();
+            showToast(res.added === 1 ? '1 track added' : res.added + ' tracks added');
+            return;
+          }
+          var why = res && res.reason;
+          if (!why || why === 'cancelled' || why === 'unavailable') return;
+          showToast(why);
+        });
+      });
+      if (!musicApi()) pick.disabled = true;
+      row.appendChild(pick);
+      if (cfg.files.length) {
+        row.appendChild(textButton('Clear', 'set-text set-bg-drop', function () {
+          setMusic({ files: [] });
+          redraw();
+        }));
+      }
+      field.appendChild(row);
+      if (!musicApi()) {
+        field.appendChild(el('p', 'set-hint', 'Restart the browser to pick files'));
+      }
+    }
+
+    field.appendChild(controlRow('Where', 'set-music-where',
+      glassSelect('set-music-where', MUSIC_WHERE, cfg.where, function (value) {
+        setMusic({ where: value });
+      })));
+
+    field.appendChild(musicVolumeRow(cfg));
+
+    field.appendChild(el('p', 'set-hint',
+      'Quiet music while nothing else is playing. ' +
+      'It pauses when a tab or Spotify plays sound.'));
+  }
+
   function buildPrivacy() {
     var s = section('Privacy');
     var field = el('div', 'set-field');
@@ -2302,12 +2606,19 @@
     var sites = autopauseHosts(c.sites);
     var tabs = Number(s.audibleTabs);
     var port = Number(s.port);
+    /* Ad quieting: a helper that cannot do it leaves the field out entirely,
+       and null is what disables the switch rather than guessing it is off.
+       A bare boolean is accepted too, in case the bridge sends it flat. */
+    var duck = null;
+    if (s.adDuck && typeof s.adDuck === 'object') duck = { enabled: s.adDuck.enabled === true };
+    else if (typeof s.adDuck === 'boolean') duck = { enabled: s.adDuck };
     return {
       installed: s.installed === true,
       enabled: s.enabled === true,
       bridge: (s.bridge === 'running' || s.bridge === 'stopped') ? s.bridge : 'unknown',
       port: isFinite(port) && port > 0 ? Math.round(port) : null,
       spotify: s.spotify === true,
+      adDuck: duck,
       wePaused: s.wePaused === true,
       browserHold: s.browserHold === true,
       audibleTabs: isFinite(tabs) && tabs > 0 ? Math.round(tabs) : 0,
@@ -2366,6 +2677,7 @@
     if (!s) return 'none|' + (apError || '') + '|' + (autopauseApi() ? 'api' : 'none');
     return [
       s.installed, s.enabled, s.bridge, s.port, s.spotify, s.wePaused,
+      s.adDuck ? (s.adDuck.enabled ? 'duck-on' : 'duck-off') : 'duck-none',
       s.audibleTabs, s.config.browserHold, s.config.anySite,
       s.config.sites.join(' '), s.error || '', apError || ''
     ].join('|');
@@ -2443,6 +2755,43 @@
     });
   }
 
+  /**
+   * The preload's Spotify controls — the player's own volume, not the
+   * auto-pause bridge's switches. A window started before they existed, or
+   * a build without them, answers null and the switch is disabled.
+   */
+  function spotifyApi() {
+    try {
+      var api = window.api && window.api.spotify;
+      if (!api || typeof api.setAdDuck !== 'function') return null;
+      return api;
+    } catch (err) { return null; }
+  }
+
+  /**
+   * Throw the ad switch. The row moves at once, the way the auto-pause ones
+   * do, and whatever main answers with replaces that guess: a whole Status
+   * is taken, anything else leaves the guess standing until the next poll.
+   */
+  function spotifyWrite(method, arg, guess, failed) {
+    var api = spotifyApi();
+    if (!api) return;
+    if (apStatus && typeof guess === 'function') {
+      guess(apStatus);
+      apDrawn = '';
+      renderSpotify();
+      refreshFilter();
+    }
+    var answer;
+    try { answer = api[method](arg); }
+    catch (err) { showToast(failed); return; }
+    try {
+      Promise.resolve(answer).then(function (value) {
+        autopauseTake((value && typeof value === 'object') ? value : null, null);
+      }, function () { showToast(failed); });
+    } catch (err) { showToast(failed); }
+  }
+
   function autopauseSaveSites(text) {
     var list = autopauseHosts(String(text || '').split(/[\s,]+/));
     autopauseWrite('setConfig', { sites: list }, function (s) {
@@ -2487,6 +2836,10 @@
     browser.setAttribute('data-field', 'autopausebrowser');
     s.appendChild(browser);
 
+    var duck = el('div', 'set-field');
+    duck.setAttribute('data-field', 'adduck');
+    s.appendChild(duck);
+
     var sites = el('div', 'set-field');
     sites.setAttribute('data-field', 'autopausesites');
     s.appendChild(sites);
@@ -2500,8 +2853,43 @@
   function renderSpotify() {
     renderAutopauseMain();
     renderAutopauseBrowser();
+    renderAdDuck();
     renderAutopauseSites();
     renderAutopauseHealth();
+  }
+
+  /**
+   * Quiet the ads instead of pausing them. Spotify will not let anything
+   * skip an ad, and muting it outright is what makes the player think it was
+   * never heard — so the level goes to the bottom and comes back after.
+   * Only a bridge that reports the field can answer, so an older helper (or
+   * an older preload) leaves the row disabled with the reason under it.
+   */
+  function renderAdDuck() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="adduck"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var s = apStatus;
+    var api = spotifyApi();
+    var live = !!(api && s && s.installed && s.adDuck);
+
+    var row = switchRow('Quiet Spotify ads', !!(live && s.adDuck.enabled), function (next) {
+      spotifyWrite('setAdDuck', !!next, function (cur) {
+        if (cur.adDuck) cur.adDuck.enabled = !!next;
+      }, next ? 'Ad quieting could not be turned on' : 'Ad quieting could not be turned off');
+    });
+    if (!live) row.disabled = true;
+    field.appendChild(row);
+
+    if (!live) {
+      field.appendChild(el('p', 'set-note', api
+        ? 'The helper on this computer cannot do this yet'
+        : 'Restart the browser to use this'));
+    }
+
+    field.appendChild(el('p', 'set-hint',
+      'Ads still play, at the lowest volume; your level comes back for the next song.'));
   }
 
   /** The whole-computer switch, and the line that says what is true. */
@@ -3284,6 +3672,7 @@
     bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
+    bodyEl.appendChild(buildMusic());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildSpotify());
     bodyEl.appendChild(buildShortcuts());
@@ -3310,6 +3699,7 @@
     renderUserStyle();
     renderNewtabBg();
     renderChips();
+    renderMusic();
     renderPrivacy();
     renderSpotify();
     renderShortcuts();
@@ -3523,6 +3913,12 @@
     appPins: appPins,
     setAppPins: setAppPins,
 
+    /* Idle music. music() always answers a complete group; setMusic() merges
+       and announces — 'music' among the listener's keys, and a
+       'music-changed' event on document. */
+    music: music,
+    setMusic: setMusic,
+
     engines: engines,
     searchUrl: searchUrl,
     isSearchUrl: isSearchUrl,
@@ -3545,6 +3941,12 @@
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
     _normalizeAppPins: normalizeAppPins,
+    _normalizeMusic: normalizeMusic,
+    _normalizeMusicFiles: normalizeMusicFiles,
+    _musicSources: MUSIC_SOURCES,
+    _musicWhere: MUSIC_WHERE,
+    _musicFilesMax: MUSIC_FILES_MAX,
+    _chooseMusicFiles: chooseMusicFiles,
     _appPinsMax: APP_PINS_MAX,
     _backgrounds: NEWTAB_BACKGROUNDS,
     _chooseBackgroundVideo: chooseBackgroundVideo,
