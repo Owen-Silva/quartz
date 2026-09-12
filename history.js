@@ -784,12 +784,13 @@
       var app = apps[a];
       if (!app) continue;
       var hint = String(app.hint == null ? '' : app.hint);
-      // Only an app with a window to host, and not already hosted, can
-      // take the modifier — so only that row advertises it.
+      // Searching for an app IN the browser opens it IN the browser: the
+      // plain press hosts it in a tab (adopting its window if it is
+      // already up), and the desktop launch moves to the modifier. A row
+      // that is hosted already keeps the source's own hint — there is
+      // nothing left to advertise.
       if (app.kind === 'app' && typeof app.runInTab === 'function' && !app.open) {
-        hint = hint
-          ? hint + ' · Shift+Enter opens it in a tab'
-          : 'Shift+Enter opens it in a tab';
+        hint = 'Open in a tab · Shift+Enter opens it on the desktop';
       }
       addRow({
         kind: 'app',
@@ -903,7 +904,12 @@
     if (row.kind === 'app' && row.app) {
       close();
       try {
-        if (withShift && typeof row.app.runInTab === 'function') row.app.runInTab();
+        // The plain press keeps the app inside the browser; Shift is the
+        // way out to the desktop. An older tabsearch.js with no runInTab
+        // (and every 'web' / 'term' row) just runs.
+        var inTab = !withShift && row.app.kind === 'app' &&
+          typeof row.app.runInTab === 'function';
+        if (inTab) row.app.runInTab();
         else if (typeof row.app.run === 'function') row.app.run();
       } catch (err) { /* a dead launcher must not wedge the bar */ }
       if (omniboxEl) {
