@@ -735,15 +735,20 @@ function ensureAppsIndex() {
     appsIndex = normalizeAppsIndex(pending);
     return Promise.resolve(appsIndex);
   }
-  appsIndexPending = Promise.resolve(pending).then((answer) => {
+  // A refresh drops appsIndexPending while this call is still out, so the
+  // answer has to check that it is still the one being waited for: an index
+  // built BEFORE the rebuild must never land on top of the one built after it.
+  const p = Promise.resolve(pending).then((answer) => {
+    if (appsIndexPending !== p) return appsIndex;   // superseded by a refresh
     appsIndexPending = null;
     appsIndex = normalizeAppsIndex(answer);
     return appsIndex;
   }, () => {
-    appsIndexPending = null;
+    if (appsIndexPending === p) appsIndexPending = null;
     return null;   // main could not build it: the dock stays empty this time
   });
-  return appsIndexPending;
+  appsIndexPending = p;
+  return p;
 }
 
 /** Anything main hands over read as { builtAt, apps: [...] }, or null. */
@@ -1077,10 +1082,23 @@ function pushAppResult(tab, viewEl, result) {
   } catch (err) { /* guest went away mid-call */ }
 }
 
+/**
+ * Did main's answer say the call worked? launch and focus answer { ok, reason };
+ * refresh answers the rebuilt INDEX ({ builtAt, apps: [...] }) and has no ok in
+ * it at all: for that one, a dated index is the success and main's empty stand-in
+ * (builtAt 0, for a refusal or a build that threw) is the failure.
+ */
+function appAnswerOk(req, answer) {
+  if (!answer || typeof answer !== 'object') return false;
+  if (answer.ok === true) return true;
+  return req.action === 'refresh' && Array.isArray(answer.apps)
+    && typeof answer.builtAt === 'number' && answer.builtAt > 0;
+}
+
 /** One api.apps call, whatever it answers with, as one pushed result. */
 function answerAppCall(tab, viewEl, req, pending) {
   if (!pending || typeof pending.then !== 'function') {
-    const ok = !!(pending && pending.ok);
+    const ok = appAnswerOk(req, pending);
     pushAppResult(tab, viewEl, {
       action: req.action, id: req.id, ok: ok,
       reason: (pending && pending.reason) || (ok ? '' : 'failed')
@@ -1088,7 +1106,7 @@ function answerAppCall(tab, viewEl, req, pending) {
     return;
   }
   pending.then((answer) => {
-    const ok = !!(answer && answer.ok);
+    const ok = appAnswerOk(req, answer);
     pushAppResult(tab, viewEl, {
       action: req.action, id: req.id, ok: ok,
       reason: (answer && answer.reason) || (ok ? '' : 'failed')
@@ -1122,10 +1140,20 @@ function handleAppLine(tab, viewEl, text) {
     if (req.action === 'pin') { if (at === -1) ids.push(req.id); }
     else { if (at >= 0) ids.splice(at, 1); }
     let ok = true;
-    try { settings.setAppPins(ids); } catch (err) { ok = false; }
+    let reason = '';
+    // setAppPins() hands back the list as it was really stored: it caps the
+    // dock, so a pin past the cap is dropped there and 'ok' would otherwise be
+    // a lie the tile never shows.
+    try {
+      const after = settings.setAppPins(ids);
+      const stored = Array.isArray(after) ? after : ids;
+      const pinned = stored.indexOf(req.id) >= 0;
+      if (req.action === 'pin' && !pinned) { ok = false; reason = 'full'; }
+      if (req.action === 'unpin' && pinned) { ok = false; reason = 'failed'; }
+    } catch (err) { ok = false; reason = 'failed'; }
     // The settings listener wired in wireSettings() re-pushes every dock.
     pushAppResult(tab, viewEl, {
-      action: req.action, id: req.id, ok: ok, reason: ok ? '' : 'failed'
+      action: req.action, id: req.id, ok: ok, reason: reason
     });
     return true;
   }
