@@ -594,6 +594,125 @@
     return hits.slice(0, MAX_APPS);
   }
 
+  /* --- the web apps, and the terminals --------------------------- */
+
+  /*
+   * Two more families of app row, both of which app.js opens IN THIS WINDOW
+   * rather than handing to Windows:
+   *
+   *   "Open Discord (web)"     one catalogue site as an app tab — and
+   *   "Switch to Discord"      the same row once that tab exists, because a
+   *                            second Discord tab is never what was meant.
+   *   "New PowerShell tab"     one pty.js program as a terminal chamber.
+   *
+   * The catalogue is webapps.js (a plain lookup table on window.WEBAPPS) and
+   * the program table is app.js's cached copy of api.pty.programs(), so neither
+   * costs an IPC here. Both are read behind a guard: a build without them
+   * simply contributes no rows.
+   */
+
+  /** webapps.js's catalogue, or [] when this build does not load it. */
+  function webAppRows() {
+    try {
+      var list = window.WEBAPPS;
+      return Array.isArray(list) ? list : [];
+    } catch (err) { return []; }
+  }
+
+  /** The open tab for one catalogue id, or null. app.js flags them tab.app. */
+  function openAppTabFor(id) {
+    var list = tabList();
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i];
+      if (t && t.app && t.app.id === id) return t;
+    }
+    return null;
+  }
+
+  /** One catalogue row: open it, or switch to the tab it is already in. */
+  function webAppCommand(entry) {
+    var open = !!openAppTabFor(entry.id);
+    var name = (typeof entry.name === 'string' && entry.name) ? entry.name : entry.id;
+    return {
+      id: 'webapp-' + entry.id,
+      glyph: GLYPH.globe,
+      label: open ? 'Switch to ' + name : 'Open ' + name + ' (web)',
+      hint: open ? 'Open in a tab'
+        : (entry.drm ? 'Protected playback needs the desktop app' : (entry.host || '')),
+      // openAppTab() raises the tab that exists and opens one when it does not,
+      // so both spellings of this row run the same call.
+      webOpen: open,
+      webName: name.toLowerCase(),
+      run: function () { callGlobal(function () { return openAppTab; }, entry.id); }
+    };
+  }
+
+  /**
+   * The catalogue rows for one query: the ones already open first (that row is
+   * a switch, and a switch is what the user is most likely reaching for), then
+   * by name, capped the way the installed rows are.
+   */
+  function webAppCommands(query) {
+    var words = tokenize(query);
+    var list = webAppRows();
+    var hits = [];
+    for (var i = 0; i < list.length; i++) {
+      var entry = list[i];
+      if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
+      var cmd = webAppCommand(entry);
+      if (!commandMatches(cmd, words)) continue;
+      hits.push(cmd);
+    }
+    hits.sort(function (a, b) {
+      if (a.webOpen !== b.webOpen) return a.webOpen ? -1 : 1;
+      return a.webName < b.webName ? -1 : (a.webName > b.webName ? 1 : 0);
+    });
+    return hits.slice(0, MAX_APPS);
+  }
+
+  /** app.js's pty table, as dock ids: [{ id:'term:pwsh', name, available }]. */
+  function programRows() {
+    var fn = globalRef(function () { return ptyProgramsPayload; });
+    if (typeof fn !== 'function') return [];
+    var list = null;
+    try { list = fn(); } catch (err) { return []; }
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** Ask app.js for the program table once, on the first open. */
+  function ensurePrograms() {
+    callGlobal(function () { return ensurePtyPrograms; });
+  }
+
+  function termCommand(row) {
+    return {
+      id: 'term-' + row.id,
+      glyph: GLYPH.claude,
+      label: 'New ' + row.name + ' tab',
+      hint: 'A terminal in this window',
+      run: function () { callGlobal(function () { return openTerminalTab; }, row.id); }
+    };
+  }
+
+  /**
+   * One row per AVAILABLE program. Claude is left out on purpose: "New Claude
+   * tab" is already a verb of its own up there, with its keys on it.
+   */
+  function termCommands(query) {
+    var words = tokenize(query);
+    var list = programRows();
+    var hits = [];
+    for (var i = 0; i < list.length; i++) {
+      var row = list[i];
+      if (!row || typeof row.id !== 'string' || !row.id || !row.available) continue;
+      if (row.id === 'term:claude') continue;
+      var cmd = termCommand(row);
+      if (!commandMatches(cmd, words)) continue;
+      hits.push(cmd);
+    }
+    return hits.slice(0, MAX_APPS);
+  }
+
   /**
    * Every verb the palette offers, in the order it offers them. Rebuilt on each
    * render rather than kept, because half of these read the world: the label is
@@ -949,6 +1068,22 @@
       apps[j].rank = commandRank(apps[j], query);
       out.push(apps[j]);
     }
+    // Then the sites this browser presents as apps, and the terminals — both
+    // opened in this window, so they belong on the near side of the Start Menu.
+    var web = webAppCommands(query);
+    for (var w = 0; w < web.length; w++) {
+      web[w].kind = 'command';
+      web[w].order = all.length + apps.length + w;
+      web[w].rank = commandRank(web[w], query);
+      out.push(web[w]);
+    }
+    var terms = termCommands(query);
+    for (var t = 0; t < terms.length; t++) {
+      terms[t].kind = 'command';
+      terms[t].order = all.length + apps.length + web.length + t;
+      terms[t].rank = commandRank(terms[t], query);
+      out.push(terms[t]);
+    }
     return out;
   }
 
@@ -1292,13 +1427,28 @@
     // plain query the tabs are what was asked for.
     if (tokenize(value).length) {
       var apps = appCommands(value).slice(0, MAX_APPS_TABS);
-      if (apps.length) {
+      var web = webAppCommands(value).slice(0, MAX_APPS_TABS);
+      if (apps.length || web.length) {
         listEl.appendChild(captionEl('Apps'));
-        for (i = 0; i < apps.length; i++) {
-          apps[i].kind = 'command';          // Enter runs it, like the > rows
-          row = buildCommandRow(apps[i], rows.length);
-          apps[i].el = row;
-          rows.push(apps[i]);
+        // The installed programs first, then the sites presented as apps: an
+        // app that is really on the machine is the likelier answer to a name.
+        var appRows = apps.concat(web);
+        for (i = 0; i < appRows.length; i++) {
+          appRows[i].kind = 'command';       // Enter runs it, like the > rows
+          row = buildCommandRow(appRows[i], rows.length);
+          appRows[i].el = row;
+          rows.push(appRows[i]);
+          listEl.appendChild(row);
+        }
+      }
+      var terms = termCommands(value).slice(0, MAX_APPS_TABS);
+      if (terms.length) {
+        listEl.appendChild(captionEl('Terminal'));
+        for (i = 0; i < terms.length; i++) {
+          terms[i].kind = 'command';
+          row = buildCommandRow(terms[i], rows.length);
+          terms[i].el = row;
+          rows.push(terms[i]);
           listEl.appendChild(row);
         }
       }
@@ -1410,6 +1560,7 @@
     // The installed apps, on the first open of the window: the answer lands on
     // a promise and re-renders the list if the commands are what is on screen.
     ensureApps();
+    ensurePrograms(); // ...and the terminal table, which app.js caches for us
     render(0);
     if (inputEl && typeof inputEl.focus === 'function') {
       try { inputEl.focus(); } catch (err) { /* not attached yet */ }
@@ -1578,7 +1729,14 @@
       setApps: setApps,
       appsOf: function () { return appsCache; },
       MAX_APPS: MAX_APPS,
-      MAX_APPS_TABS: MAX_APPS_TABS
+      MAX_APPS_TABS: MAX_APPS_TABS,
+      // web apps + terminals
+      webAppCommands: webAppCommands,
+      webAppCommand: webAppCommand,
+      webAppRows: webAppRows,
+      termCommands: termCommands,
+      termCommand: termCommand,
+      programRows: programRows
     }
   };
 })();

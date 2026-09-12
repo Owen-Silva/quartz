@@ -3,6 +3,11 @@
 /*
  * ClaudeTerminal -- one xterm.js terminal + one real PTY per *tab*.
  *
+ * "Claude" is the default program, not the only one: create() takes a pty.js
+ * program id (`program: 'powershell'`), and everything else in here -- the lazy
+ * open, the id dispatch, the fit, Enter-to-restart -- is the same whatever is
+ * running in it.
+ *
  * A Claude session is a browser tab now: app.js creates a div.claude-view for
  * each one and hands it here. Several can be alive at once; only the active
  * tab's host element is visible, the rest are display:none (i.e. 0x0).
@@ -418,6 +423,7 @@
     var startPromise;
     try {
       startPromise = window.api.pty.start({
+        program: st.program,
         cwd: st.cwd,
         cols: cols,
         rows: rows,
@@ -574,6 +580,12 @@
     var st = {
       id: 'claude-' + (++seq) + '-' + Math.random().toString(36).slice(2, 8),
       host: hostEl,
+      // Which of pty.js's programs this terminal runs. Undefined means the
+      // table's default (claude), which is what every caller before the
+      // terminal tabs passed -- and what main falls back to for an id it does
+      // not have, so a made-up name can never reach a spawn from here.
+      program: (typeof options.program === 'string' && options.program)
+        ? options.program : undefined,
       cwd: options.cwd || (window.api && window.api.homeDir) || undefined,
       // Flags for the first spawn only; startPty() clears this as it uses it.
       pendingArgs: Array.isArray(options.args) ? options.args.slice() : null,

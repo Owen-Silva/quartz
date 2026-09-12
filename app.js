@@ -230,7 +230,7 @@ function autopauseWord(status) {
 
 function readoutSnapshot() {
   let claude = 0;
-  for (const tab of tabs) if (isClaudeTab(tab) && tab.live) claude += 1;
+  for (const tab of tabs) if (isClaudeProgramTab(tab) && tab.live) claude += 1;
   // Every open tab, in every workspace: the page is describing the browser,
   // not the strip in front of it.
   return { tabs: tabs.length, claude: claude, autopause: autopauseReadout };
@@ -1066,13 +1066,51 @@ function appsApi() {
   return api;
 }
 
-/** The pinned ids, or [] when settings.js is not loaded yet. */
+/**
+ * The pinned ids, or [] when settings.js is not loaded yet. A pin is stored
+ * either as a bare id or as { id, web: true } (the web option), so the flat
+ * list is asked for by name where settings.js offers it and flattened here
+ * where it does not — everything downstream joins on an id string.
+ */
 function appPinIds() {
   const settings = window.Settings;
+  if (!settings) return [];
+  if (typeof settings.appPinIds === 'function') {
+    try {
+      const flat = settings.appPinIds();
+      if (Array.isArray(flat)) return flat.slice();
+    } catch (err) { /* fall through to appPins() */ }
+  }
+  if (typeof settings.appPins !== 'function') return [];
+  let pins = null;
+  try { pins = settings.appPins(); } catch (err) { return []; }
+  if (!Array.isArray(pins)) return [];
+  const ids = [];
+  for (const pin of pins) {
+    const id = (typeof pin === 'string') ? pin
+      : ((pin && typeof pin === 'object' && typeof pin.id === 'string') ? pin.id : '');
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+/** The pins as they are STORED — strings, or { id, web: true }. */
+function appPinsRaw() {
+  const settings = window.Settings;
   if (!settings || typeof settings.appPins !== 'function') return [];
-  let ids = null;
-  try { ids = settings.appPins(); } catch (err) { return []; }
-  return Array.isArray(ids) ? ids.slice() : [];
+  let pins = null;
+  try { pins = settings.appPins(); } catch (err) { return []; }
+  return Array.isArray(pins) ? pins.slice() : [];
+}
+
+/** True when this pin's primary click should open the app's web form. */
+function pinOpensWeb(id) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.pinOptions !== 'function') return false;
+  try {
+    const opts = settings.pinOptions(id);
+    return !!(opts && opts.web);
+  } catch (err) { return false; }
 }
 
 /*
@@ -1218,6 +1256,11 @@ function computeAppRunning(pins, groups) {
   };
   for (const id of (Array.isArray(pins) ? pins : [])) consider(appById(id) || { id: id, exe: null });
   for (const entry of appsList()) consider(entry);
+  // A catalogue app open as a tab, and a pty program open as a chamber, are
+  // "running" to the dock as well — and they win over the process answer: a
+  // tab is what a click on that tile should raise.
+  const open = appTabRunning();
+  for (const id in open) out[id] = open[id];
   return out;
 }
 
@@ -1229,6 +1272,9 @@ let appRunning = Object.create(null);
 function sameAppRunning(one, two) {
   if (!one || !two) return false;
   if (!one.running !== !two.running) return false;
+  // An app open as a TAB is drawn differently from one running as a process,
+  // so a move between the two is a change even though `running` did not.
+  if (!one.tab !== !two.tab) return false;
   const p1 = Array.isArray(one.pids) ? one.pids : [];
   const p2 = Array.isArray(two.pids) ? two.pids : [];
   if (p1.length !== p2.length) return false;
@@ -1277,6 +1323,16 @@ function appRunningState() {
  */
 function syncAppsRunning(sample) {
   lastStatsSample = (sample && typeof sample === 'object') ? sample : null;
+  return pushAppRunningUpdate();
+}
+
+/**
+ * Recompute the map from what is known right now and push only what moved.
+ * The samples come through syncAppsRunning(); opening or closing an app tab
+ * calls this directly, because a tab appearing is not a process event and the
+ * light must not wait up to a second for the next sample.
+ */
+function pushAppRunningUpdate() {
   const next = computeAppRunning(appPinIds(), lastProcGroups());
   if (!appRunningDiffers(appRunning, next)) return false;
   const diff = appRunningDiff(appRunning, next);
@@ -1313,26 +1369,59 @@ function pushAppsRunning(tab, diff) {
 function appsPayload() {
   const groups = lastProcGroups();
   const pins = [];
-  for (const id of appPinIds()) {
+  for (const pin of appPinsRaw()) {
+    const id = (typeof pin === 'string') ? pin
+      : ((pin && typeof pin === 'object' && typeof pin.id === 'string') ? pin.id : '');
+    if (!id) continue;
+    const web = !!(pin && typeof pin === 'object' && pin.web);
+    const state = appRunning[id] || { running: false, pids: [] };
+    // A catalogue app or a terminal program is pinned by an id the installed
+    // index has never heard of, so its row is drawn from the catalogue instead.
+    if (isWebAppId(id) || isTerminalAppId(id)) {
+      const entry = isWebAppId(id) ? findWebAppEntry(id) : null;
+      const name = entry ? entry.name : (isTerminalAppId(id) ? ptyProgramTitle(id) : '');
+      if (!name) continue; // a slug this build's catalogue does not have
+      pins.push({
+        id: id,
+        name: name,
+        iconDataUrl: null,
+        exe: null,
+        web: isWebAppId(id),
+        term: isTerminalAppId(id),
+        running: !!state.running,
+        tab: !!state.tab,
+        pids: []
+      });
+      continue;
+    }
     const entry = appById(id);
     // A pin whose app is not in the index (uninstalled, or the index has not
     // landed) is left out of the drawing and kept in the settings: it comes
     // back on its own if the app does.
     if (!entry) continue;
-    const state = appRunning[id] || runningForExe(entry.exe, groups);
+    const live = appRunning[id] || runningForExe(entry.exe, groups);
     pins.push({
       id: entry.id,
       name: entry.name,
       iconDataUrl: entry.iconDataUrl || null,
       exe: entry.exe || null,
-      running: !!state.running,
-      pids: (state.pids || []).slice()
+      // The pin's one option: this tile's primary click opens the web form.
+      web: web,
+      running: !!live.running,
+      tab: !!live.tab,
+      pids: (live.pids || []).slice()
     });
   }
   const installed = appsList().map((entry) => ({
     id: entry.id, name: entry.name, kind: entry.kind, exe: entry.exe || null
   }));
-  return { pins: pins, installed: installed };
+  return {
+    pins: pins,
+    installed: installed,
+    // The sites this browser presents as apps, and the terminals it can open.
+    webapps: webAppsPayload(),
+    programs: ptyProgramsPayload()
+  };
 }
 
 /**
@@ -1344,7 +1433,9 @@ function appsPayload() {
 function pushAppsToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   const viewEl = tab.viewEl;
-  ensureAppsIndex().then(() => {
+  // Both lists, so the first push is already complete: a dock that had to wait
+  // for a second push would draw its app rows and then re-draw them.
+  ensureAppsIndex().then(() => ensurePtyPrograms()).then(() => {
     if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
     if (tab.viewEl !== viewEl) return;   // the guest was replaced mid-flight
     // The first push is also what seeds the running map for the palette, on a
@@ -1408,9 +1499,18 @@ function parseAppLine(text) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
   const action = msg.action;
   if (action !== 'launch' && action !== 'focus' && action !== 'pin'
-    && action !== 'unpin' && action !== 'refresh') return null;
+    && action !== 'unpin' && action !== 'refresh'
+    && action !== 'open-web' && action !== 'open-term' && action !== 'pin-web') return null;
 
   if (action === 'refresh') return { action: action, id: '', pid: 0 };
+
+  // The web option on one pin: an id plus the flag it is being set to.
+  if (action === 'pin-web') {
+    if (typeof msg.id !== 'string') return null;
+    const id = msg.id.trim();
+    if (!id || id.length > APP_ID_MAX) return null;
+    return { action: action, id: id, pid: 0, web: !!msg.web };
+  }
 
   if (action === 'focus') {
     const pid = msg.pid;
@@ -1492,6 +1592,83 @@ function handleAppLine(tab, viewEl, text) {
   const req = parseAppLine(text);
   if (!req) return false;
 
+  // A catalogue site and a terminal open in THIS window: no bridge involved.
+  if (req.action === 'open-web') {
+    const made = openAppTab(req.id);
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: !!made, reason: made ? '' : 'failed'
+    });
+    return true;
+  }
+  if (req.action === 'open-term') {
+    Promise.resolve(openTerminalTab(req.id)).then((made) => {
+      pushAppResult(tab, viewEl, {
+        action: req.action, id: req.id, ok: !!made, reason: made ? '' : 'unavailable'
+      });
+    }, () => {
+      pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
+    });
+    return true;
+  }
+
+  // One pin's web option. Same shape as pin/unpin: settings.js owns it, and a
+  // build whose settings.js predates the option answers 'unavailable'.
+  if (req.action === 'pin-web') {
+    const settings = window.Settings;
+    if (!settings || typeof settings.setPinOption !== 'function') {
+      pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'unavailable' });
+      return true;
+    }
+    let ok = false;
+    try {
+      const after = settings.setPinOption(req.id, { web: !!req.web });
+      ok = !!(after && !!after.web === !!req.web);
+    } catch (err) { ok = false; }
+    // setPinOption() writes through set(), which the settings listener in
+    // wireSettings() answers with a re-push; this is belt and braces for a
+    // no-op write (the option was already where it was asked to be).
+    pushAppsToAll();
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok, reason: ok ? '' : 'failed'
+    });
+    return true;
+  }
+
+  // A launch of something this window opens itself: a catalogue app, a
+  // terminal, or an installed app whose pin says "open the web form".
+  if (req.action === 'launch') {
+    if (isWebAppId(req.id)) {
+      const made = openAppTab(req.id);
+      pushAppResult(tab, viewEl, {
+        action: req.action, id: req.id, ok: !!made, reason: made ? '' : 'failed'
+      });
+      return true;
+    }
+    if (isTerminalAppId(req.id)) {
+      Promise.resolve(openTerminalTab(req.id)).then((made) => {
+        pushAppResult(tab, viewEl, {
+          action: req.action, id: req.id, ok: !!made, reason: made ? '' : 'unavailable'
+        });
+      }, () => {
+        pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
+      });
+      return true;
+    }
+    if (pinOpensWeb(req.id)) {
+      const entry = appById(req.id);
+      const site = entry ? webAppForExeName(entry.exe) : null;
+      // No web twin in the catalogue: the option cannot be honoured, so the
+      // desktop app is launched below exactly as it always was.
+      if (site) {
+        const made = openAppTab(site.id);
+        pushAppResult(tab, viewEl, {
+          action: req.action, id: req.id, ok: !!made, reason: made ? '' : 'failed'
+        });
+        return true;
+      }
+    }
+  }
+
   // Pins are the chrome's own state: they work with no bridge at all.
   if (req.action === 'pin' || req.action === 'unpin') {
     const settings = window.Settings;
@@ -1567,6 +1744,515 @@ function notifyAppsChanged() {
   const ts = window.TabSearch;
   if (!ts || typeof ts.appsChanged !== 'function') return;
   try { ts.appsChanged(); } catch (err) { /* the palette can look after itself */ }
+}
+
+/* ------------------------------------------------------------------ */
+/* App tabs: a catalogue site opened the way a program is               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * webapps.js is a lookup table and nothing else — id, name, url, host, exe,
+ * drm. Everything that makes one of its rows behave like an installed app is
+ * here:
+ *
+ *   openAppTab(id)          one tab per catalogue row. Seated at the LEFT of
+ *                           the strip with the other app tabs, carrying
+ *                           tab.app, which is what the strip, the session file
+ *                           and the dock all read to tell it from a page.
+ *   openTerminalTab(prog)   the same for a pty program: the Claude chamber,
+ *                           running PowerShell instead of claude.exe.
+ *
+ * A flag that outlived the site it was set for would be a lie, so a navigation
+ * to another host clears it and the tab is an ordinary page again (a subdomain
+ * is still the app). A `drm: true` row still opens: this build has no
+ * Widevine, so the note bar over the top of that tab's well is what says why
+ * nothing plays, and offers the desktop program when one is installed.
+ *
+ * Everything into webapps.js and api.pty is feature-detected: a build without
+ * either shows no app rows and opens no terminals rather than throwing.
+ */
+
+/** webapps.js's API (window.WebApps), or null when this build has none. */
+function webAppsApi() {
+  const mod = window.WebApps;
+  return (mod && typeof mod === 'object') ? mod : null;
+}
+
+/** The catalogue, never null. */
+function webAppsList() {
+  const api = webAppsApi();
+  const list = api ? api.WEBAPPS : null;
+  return Array.isArray(list) ? list : [];
+}
+
+/** One catalogue row by id, or null — including when there is no catalogue. */
+function findWebAppEntry(id) {
+  const api = webAppsApi();
+  if (api && typeof api.findWebApp === 'function') {
+    try { return api.findWebApp(id) || null; } catch (err) { return null; }
+  }
+  const key = (typeof id === 'string') ? id.trim() : '';
+  if (!key) return null;
+  for (const entry of webAppsList()) if (entry && entry.id === key) return entry;
+  return null;
+}
+
+/** The catalogue row that is the web form of an exe basename, or null. */
+function webAppForExeName(exe) {
+  const api = webAppsApi();
+  if (api && typeof api.webAppForExe === 'function') {
+    try { return api.webAppForExe(exe) || null; } catch (err) { return null; }
+  }
+  const key = procKeyForExe(exe);
+  if (!key) return null;
+  for (const entry of webAppsList()) {
+    if (entry && entry.exe && procKeyForExe(entry.exe) === key) return entry;
+  }
+  return null;
+}
+
+/** True for a 'web:<slug>' id. */
+function isWebAppId(id) {
+  const api = webAppsApi();
+  if (api && typeof api.isWebAppId === 'function') {
+    try { return !!api.isWebAppId(id); } catch (err) { /* fall through */ }
+  }
+  const key = (typeof id === 'string') ? id.trim() : '';
+  return key.length > 4 && key.indexOf('web:') === 0;
+}
+
+/** 'term:pwsh' -> 'pwsh'; a bare program name passes through; '' for junk. */
+function terminalProgramName(id) {
+  const key = (typeof id === 'string') ? id.trim() : '';
+  if (!key) return '';
+  if (key.indexOf('term:') !== 0) return key.indexOf(':') === -1 ? key : '';
+  const api = webAppsApi();
+  if (api && typeof api.terminalProgram === 'function') {
+    try { return api.terminalProgram(key) || ''; } catch (err) { /* fall through */ }
+  }
+  return key.slice(5).trim();
+}
+
+/** True for a 'term:<program>' id — the bare prefix is not one. */
+function isTerminalAppId(id) {
+  const key = (typeof id === 'string') ? id.trim() : '';
+  return key.indexOf('term:') === 0 && !!terminalProgramName(key);
+}
+
+/** The dock/pin id one pty program is known by. */
+function terminalAppId(program) {
+  const name = terminalProgramName(program);
+  return name ? 'term:' + name : '';
+}
+
+/** The one line the note bar shows over a tab whose site needs Widevine. */
+const DRM_NOTE_FALLBACK = 'Protected playback needs the Widevine build; playing through the desktop app';
+
+function drmNoteText() {
+  const api = webAppsApi();
+  const text = (api && typeof api.DRM_NOTE === 'string') ? api.DRM_NOTE.trim() : '';
+  return text || DRM_NOTE_FALLBACK;
+}
+
+/* --- the flag on the tab ------------------------------------------- */
+
+/** True while this page tab is one of the catalogue's apps. */
+function isAppTab(tab) {
+  return !!(tab && tab.kind === 'page' && tab.app
+    && typeof tab.app.id === 'string' && tab.app.id);
+}
+
+/** The open tab for one app id, or null. One tab per app, by design. */
+function tabForAppId(id) {
+  const key = (typeof id === 'string') ? id.trim() : '';
+  if (!key) return null;
+  for (const tab of tabs) if (isAppTab(tab) && tab.app.id === key) return tab;
+  return null;
+}
+
+/**
+ * The seat a new app tab takes in its workspace's strip: in front of the first
+ * chip that is neither an app tab nor pinned, so the app tabs sit together at
+ * the left and a pinned chip keeps its own group. Pure — `list` is the strip
+ * WITHOUT the new tab in it, which is exactly what moveTabToIndex() measures
+ * against.
+ */
+function appTabSeat(list) {
+  const rows = Array.isArray(list) ? list : [];
+  let seat = 0;
+  while (seat < rows.length) {
+    const tab = rows[seat];
+    if (!tab) break;
+    if (tab.pinned || isAppTab(tab)) { seat += 1; continue; }
+    break;
+  }
+  return seat;
+}
+
+/**
+ * Two hosts that count as the same app: the catalogue host itself, or any
+ * subdomain of it. 'www.' is not a difference, and neither is case.
+ */
+function sameAppHost(appHost, host) {
+  const want = (typeof appHost === 'string' ? appHost.trim().toLowerCase() : '')
+    .replace(/^www\./, '').replace(/\.+$/, '');
+  const got = (typeof host === 'string' ? host.trim().toLowerCase() : '')
+    .replace(/^www\./, '').replace(/\.+$/, '');
+  if (!want || !got) return false;
+  if (want === got) return true;
+  const tail = '.' + want;
+  return got.length > tail.length && got.slice(-tail.length) === tail;
+}
+
+/**
+ * Does a tab's app flag survive a navigation to `url`? The app's own host (or
+ * a subdomain) keeps it; another host clears it. A url with no host at all —
+ * about:blank between two documents — changes nothing either way.
+ */
+function appFlagSurvives(app, url) {
+  if (!app || typeof app.host !== 'string' || !app.host) return false;
+  const parsed = parseUrlOrNull(url);
+  const host = parsed ? parsed.hostname : '';
+  if (!host) return true;
+  return sameAppHost(app.host, host);
+}
+
+/** Put the flag on a tab from a catalogue id. Returns true when it landed. */
+function applyAppFlag(tab, id) {
+  const entry = findWebAppEntry(id);
+  if (!tab || tab.kind !== 'page' || !entry) return false;
+  tab.app = { id: entry.id, name: entry.name, url: entry.url, host: entry.host };
+  // The app's name until the site names itself: page-title-updated wins later.
+  setTabTitle(tab, entry.name);
+  syncAppNote(tab);
+  return true;
+}
+
+/** An ordinary page again: the flag, the note bar and the dock light all go. */
+function clearAppFlag(tab) {
+  if (!isAppTab(tab)) return false;
+  tab.app = null;
+  clearAppNote(tab);
+  saveSession();
+  pushAppRunningUpdate(); // the dock's "open in a tab" light goes out
+  return true;
+}
+
+/** Called from every navigation: the flag only holds while the host does. */
+function syncAppFlagOnNavigate(tab) {
+  if (!isAppTab(tab)) return;
+  const url = readCurrentUrl(tab) || tab.url;
+  if (appFlagSurvives(tab.app, url)) { syncAppNote(tab); return; }
+  clearAppFlag(tab);
+}
+
+/* --- the note bar over a DRM tab ---------------------------------- */
+
+/*
+ * One line, over the top of that tab's well and nowhere else: a <webview>
+ * cannot be pushed down the page, and a pane over a guest has to be OPAQUE
+ * (--panel-bg) because there is nothing behind it to blur. It follows the same
+ * display swap as the crash card, which is the other thing in #views that
+ * belongs to one tab.
+ */
+
+function clearAppNote(tab) {
+  if (!tab || !tab.noteEl) return;
+  try { tab.noteEl.remove(); } catch (err) { /* already detached */ }
+  tab.noteEl = null;
+}
+
+/**
+ * @param {Object} tab
+ * @param {string} text the one line
+ * @param {string} desktopId an installed app id to offer, or '' for none
+ */
+function showAppNote(tab, text, desktopId) {
+  if (!tab || tab.kind !== 'page' || !viewsEl) return;
+  clearAppNote(tab); // one note per tab, always the current one
+
+  const bar = document.createElement('div');
+  bar.className = 'app-note';
+  bar.style.cssText = 'position:absolute;left:0;right:0;top:0;z-index:6;'
+    + 'display:flex;align-items:center;gap:10px;padding:7px 14px;'
+    + 'font-size:12px;line-height:1.35;color:var(--fg-2);'
+    + 'background:var(--panel-bg);border-bottom:1px solid rgba(128,128,128,.22);';
+  bar.style.display = isTabOnScreen(tab) ? 'flex' : 'none';
+
+  const glyph = document.createElement('span');
+  glyph.className = 'glyph';
+  glyph.textContent = '\uE946';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.style.cssText = 'font-size:13px;opacity:.8;';
+
+  const line = document.createElement('span');
+  line.textContent = text || '';
+  line.style.cssText = 'flex:1 1 auto;min-width:0;';
+
+  bar.appendChild(glyph);
+  bar.appendChild(line);
+
+  if (desktopId) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.textContent = 'Launch desktop app';
+    open.style.cssText = 'flex:0 0 auto;font:inherit;color:var(--fg);cursor:pointer;'
+      + 'background:var(--glass-2);border:1px solid rgba(128,128,128,.28);'
+      + 'border-radius:6px;padding:3px 10px;';
+    open.addEventListener('click', () => launchDesktopApp(desktopId));
+    bar.appendChild(open);
+  }
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '\uE711';
+  close.className = 'glyph';
+  close.title = 'Dismiss';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.style.cssText = 'flex:0 0 auto;font-size:11px;color:var(--fg-3);cursor:pointer;'
+    + 'background:transparent;border:0;padding:2px 4px;';
+  close.addEventListener('click', () => {
+    tab.noteDismissed = true;
+    clearAppNote(tab);
+  });
+  bar.appendChild(close);
+
+  viewsEl.appendChild(bar);
+  tab.noteEl = bar;
+  syncSplitOverlays(); // a split insets it to its own half, like the card
+}
+
+/** The installed app one exe basename names, or null. */
+function installedAppForExe(exe) {
+  const key = procKeyForExe(exe);
+  if (!key) return null;
+  for (const entry of appsList()) {
+    if (entry.exe && procKeyForExe(entry.exe) === key) return entry;
+  }
+  return null;
+}
+
+/** The dock's "open the real thing instead" button. */
+function launchDesktopApp(id) {
+  const api = appsApi();
+  if (!api || typeof api.launch !== 'function' || !id) return;
+  try {
+    const pending = api.launch(id);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* the bridge went away: nothing to launch */ }
+}
+
+/**
+ * The note bar as this tab should have it right now: shown for a DRM app,
+ * absent for everything else, and never re-shown once it has been dismissed.
+ * The index may still be on its way, so the desktop link is resolved on it.
+ */
+function syncAppNote(tab) {
+  if (!isAppTab(tab)) { clearAppNote(tab); return; }
+  const entry = findWebAppEntry(tab.app.id);
+  if (!entry || !entry.drm || tab.noteDismissed) { clearAppNote(tab); return; }
+  const wanted = tab.app.id;
+  ensureAppsIndex().then(() => {
+    // Everything may have moved while the index was in flight.
+    if (!isAppTab(tab) || tab.app.id !== wanted || tab.noteDismissed) return;
+    const desktop = entry.exe ? installedAppForExe(entry.exe) : null;
+    showAppNote(tab, drmNoteText(), desktop ? desktop.id : '');
+  }, () => {});
+}
+
+/* --- opening one -------------------------------------------------- */
+
+/**
+ * One tab per catalogue row: the tab that is already open is raised (which is
+ * what a dock click means), and a new one is seated with the other app tabs at
+ * the left of the strip.
+ * @returns {Object|null} the tab, or null when the id is not in the catalogue.
+ */
+function openAppTab(id) {
+  const entry = findWebAppEntry(id);
+  if (!entry) return null;
+
+  const open = tabForAppId(entry.id);
+  if (open) {
+    activateTab(open.id); // raises its workspace too
+    return open;
+  }
+
+  const tab = createTab(entry.url);
+  if (!tab) return null;
+  applyAppFlag(tab, entry.id);
+  // The seat is measured against the strip WITHOUT this tab: it is already at
+  // the end of the group by now.
+  const group = workspaceTabs(tabWorkspace(tab)).filter((t) => t.id !== tab.id);
+  moveTabToIndex(tab.id, appTabSeat(group));
+  saveSession();          // the flag and the seat both belong in the snapshot
+  pushAppRunningUpdate(); // the dock lights this app as open in a tab
+  return tab;
+}
+
+/* --- terminal tabs ------------------------------------------------- */
+
+/*
+ * pty.js owns the table of programs it will spawn; the chrome only ever names
+ * one by id. The list is asked for once and kept, because main resolves every
+ * binary with where.exe the first time and nothing in it changes while the
+ * window is open.
+ */
+const CLAUDE_PROGRAM = 'claude';
+
+let ptyPrograms = null;          // [{ id, title, available }] once it lands
+let ptyProgramsPending = null;   // the in-flight promise, if any
+
+/** Anything api.pty.programs() answers read as a clean list. */
+function normalizePtyPrograms(answer) {
+  const list = Array.isArray(answer) ? answer : [];
+  const out = [];
+  for (const row of list) {
+    if (!row || typeof row !== 'object') continue;
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    if (!id) continue;
+    const title = typeof row.title === 'string' && row.title.trim() ? row.title.trim() : id;
+    out.push({ id: id, title: title, available: !!row.available });
+  }
+  return out;
+}
+
+/** The program table, on a promise that always resolves (never rejects). */
+function ensurePtyPrograms() {
+  if (ptyPrograms) return Promise.resolve(ptyPrograms);
+  if (ptyProgramsPending) return ptyProgramsPending;
+  const pty = (window.api && window.api.pty) ? window.api.pty : null;
+  if (!pty || typeof pty.programs !== 'function') return Promise.resolve([]);
+  let pending = null;
+  try { pending = pty.programs(); } catch (err) { return Promise.resolve([]); }
+  if (!pending || typeof pending.then !== 'function') {
+    ptyPrograms = normalizePtyPrograms(pending);
+    return Promise.resolve(ptyPrograms);
+  }
+  const p = Promise.resolve(pending).then((answer) => {
+    if (ptyProgramsPending === p) ptyProgramsPending = null;
+    ptyPrograms = normalizePtyPrograms(answer);
+    return ptyPrograms;
+  }, () => {
+    if (ptyProgramsPending === p) ptyProgramsPending = null;
+    return [];
+  });
+  ptyProgramsPending = p;
+  return p;
+}
+
+/** The table as it stands (never null; empty until the answer lands). */
+function ptyProgramsList() {
+  return ptyPrograms || [];
+}
+
+function ptyProgramEntry(program) {
+  const name = terminalProgramName(program);
+  if (!name) return null;
+  for (const row of ptyProgramsList()) if (row.id === name) return row;
+  return null;
+}
+
+/** A program's title for a chip, falling back to the id itself. */
+function ptyProgramTitle(program) {
+  const entry = ptyProgramEntry(program);
+  if (entry) return entry.title;
+  const name = terminalProgramName(program);
+  if (!name) return '';
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** The program one chamber runs. Every Claude tab is 'claude' unless it says. */
+function tabProgram(tab) {
+  if (!tab || tab.kind !== 'claude') return '';
+  return (typeof tab.program === 'string' && tab.program) ? tab.program : CLAUDE_PROGRAM;
+}
+
+/** True for a chamber running claude.exe — not for a shell tab. */
+function isClaudeProgramTab(tab) {
+  return isClaudeTab(tab) && tabProgram(tab) === CLAUDE_PROGRAM;
+}
+
+/** The open terminal tab for one program, or null. */
+function tabForProgram(program) {
+  const name = terminalProgramName(program);
+  if (!name || name === CLAUDE_PROGRAM) return null;
+  for (const tab of tabs) if (isClaudeTab(tab) && tabProgram(tab) === name) return tab;
+  return null;
+}
+
+/**
+ * A chamber running one of pty.js's other programs. Availability is main's
+ * answer, so this is asynchronous: a program that is not installed says so in
+ * a toast and opens nothing rather than a tab that dies on spawn.
+ * @returns {Promise<Object|null>} the tab, or null when nothing opened.
+ */
+function openTerminalTab(program) {
+  const name = terminalProgramName(program);
+  if (!name) return Promise.resolve(null);
+  return ensurePtyPrograms().then(() => {
+    const entry = ptyProgramEntry(name);
+    // An id pty.js does not have is refused there anyway; refuse it here too,
+    // so nothing opens a chamber that can never spawn.
+    if (!entry) {
+      claudeToast('No terminal called ' + name);
+      return null;
+    }
+    if (!entry.available) {
+      claudeToast(entry.title + ' is not installed');
+      return null;
+    }
+    const tab = createClaudeTab({ program: name });
+    if (tab) pushAppRunningUpdate(); // the dock lights this program as open
+    return tab;
+  });
+}
+
+/* --- what the dock is told ---------------------------------------- */
+
+/** The catalogue, as the new-tab page reads it. */
+function webAppsPayload() {
+  const out = [];
+  for (const entry of webAppsList()) {
+    if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
+    const desktop = entry.exe ? installedAppForExe(entry.exe) : null;
+    out.push({
+      id: entry.id,
+      name: typeof entry.name === 'string' ? entry.name : entry.id,
+      host: typeof entry.host === 'string' ? entry.host : '',
+      drm: !!entry.drm,
+      desktopId: desktop ? desktop.id : null
+    });
+  }
+  return out;
+}
+
+/** The pty table, as the new-tab page reads it: dock ids, not program ids. */
+function ptyProgramsPayload() {
+  const out = [];
+  for (const row of ptyProgramsList()) {
+    out.push({ id: terminalAppId(row.id), name: row.title, available: !!row.available });
+  }
+  return out;
+}
+
+/**
+ * The app ids that are open as TABS right now: a catalogue app in a tab, and a
+ * terminal program in a chamber. The dock draws these exactly as it draws a
+ * running program, which is why they land in the same map.
+ */
+function appTabRunning() {
+  const out = Object.create(null);
+  for (const tab of tabs) {
+    if (isAppTab(tab)) out[tab.app.id] = { running: true, pids: [], tab: true };
+    else if (isClaudeTab(tab)) {
+      const program = tabProgram(tab);
+      if (program && program !== CLAUDE_PROGRAM) {
+        out[terminalAppId(program)] = { running: true, pids: [], tab: true };
+      }
+    }
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3341,6 +4027,13 @@ function createTab(url, options) {
     iconEl: null,
     cardEl: null,   // a crash / load-failure card covering this tab's well
     warnEl: null,
+    // The catalogue app this tab IS, while it is on that app's host:
+    // { id, name, url, host }. Null for an ordinary page. Persisted by id.
+    app: null,
+    // The one-line note bar over this tab's well (a DRM app), and whether the
+    // user has dismissed it for this tab.
+    noteEl: null,
+    noteDismissed: false,
     broken: false,
     failedThisLoad: false,
     audible: false,
@@ -3755,6 +4448,10 @@ function clearSplitSeat(tab) {
     style.flexBasis = '';
   }
   // A card inset to half the well goes back to covering all of it.
+  if (tab && tab.noteEl) {
+    tab.noteEl.style.left = '';
+    tab.noteEl.style.right = '';
+  }
   if (tab && tab.cardEl) {
     tab.cardEl.style.left = '';
     tab.cardEl.style.right = '';
@@ -3808,6 +4505,10 @@ function syncSplitOverlays() {
 
   const box = viewsEl.getBoundingClientRect();
   for (const tab of pair) {
+    if (tab.noteEl) {
+      tab.noteEl.style.left = Math.round(half.left - box.left) + 'px';
+      tab.noteEl.style.right = Math.round(box.right - half.right) + 'px';
+    }
     if (!tab.cardEl) continue;
     const half = tab.viewEl.getBoundingClientRect();
     tab.cardEl.style.left = Math.round(half.left - box.left) + 'px';
@@ -3910,6 +4611,7 @@ function showTabAsWell(tab) {
   const shown = isTabOnScreen(tab);
   if (tab.viewEl) tab.viewEl.style.display = shown ? 'flex' : 'none';
   if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
+  if (tab.noteEl) tab.noteEl.style.display = shown ? 'flex' : 'none';
 }
 
 /**
@@ -4104,7 +4806,7 @@ function onGuestFocused(payload) {
 
 /** body.claude-live is true while ANY Claude tab still has a live session. */
 function recomputeClaudeLive() {
-  const any = tabs.some((t) => isClaudeTab(t) && t.live);
+  const any = tabs.some((t) => isClaudeProgramTab(t) && t.live);
   document.body.classList.toggle('claude-live', any);
   // A session coming up or ending moves the new-tab readout's Claude count;
   // this is the one place every such change already passes through.
@@ -4178,7 +4880,9 @@ function notifyClaudeWaiting(tab) {
 
 /** Mark one Claude chip as waiting on the user: amber glyph, faster dot, toast. */
 function markClaudeNeedsYou(tab) {
-  if (!isClaudeTab(tab)) return;
+  // A shell is quiet whenever nobody is typing in it: only a Claude session
+  // going silent means it is waiting to be answered.
+  if (!isClaudeProgramTab(tab)) return;
   tab.needsYou = true;
   if (tab.chipEl) {
     tab.chipEl.classList.add('needs-you');
@@ -4395,8 +5099,10 @@ function claudeTitleFor(cwd) {
   return folderBaseName(cwd) || CLAUDE_DEFAULT_TITLE;
 }
 
-/** The title one Claude tab falls back to whenever it has nothing better. */
+/** The title one chamber falls back to whenever it has nothing better. */
 function claudeDefaultTitle(tab) {
+  const program = tabProgram(tab);
+  if (program && program !== CLAUDE_PROGRAM) return ptyProgramTitle(program);
   return claudeTitleFor(tab && tab.cwd);
 }
 
@@ -4446,8 +5152,14 @@ function pushClaudeSkipToPreload() {
  * so the host element already has a size when ClaudeTerminal.create() measures
  * it. terminal.js is loaded after this file, hence the typeof guard.
  *
- * @param {{cwd?:string, resume?:boolean|'pick', background?:boolean, workspace?:string}} [options]
+ * @param {{cwd?:string, resume?:boolean|'pick', background?:boolean,
+ *          workspace?:string, program?:string}} [options]
  *        cwd: the folder to run in, defaulting to settings / home.
+ *        program: a pty.js program id — 'claude' (the default) or one of the
+ *        shells. Everything else about the tab is the same; the program only
+ *        decides what is spawned in it, what the chip is called, and that a
+ *        shell is never treated as a Claude session (no "needs you", no live
+ *        count on the pill, and not restored across a restart).
  *        workspace: restoreSession() only; otherwise the one on screen.
  *        resume: true continues that folder's last conversation outright
  *        (restoreSession() only — a tab the user opens starts clean);
@@ -4461,6 +5173,8 @@ function createClaudeTab(options) {
 
   const opts = options || {};
   const cwd = (typeof opts.cwd === 'string' && opts.cwd) ? opts.cwd : defaultClaudeCwd();
+  const program = terminalProgramName(opts.program) || CLAUDE_PROGRAM;
+  const isClaude = program === CLAUDE_PROGRAM;
 
   const viewEl = document.createElement('div');
   viewEl.className = 'claude-view';
@@ -4474,9 +5188,12 @@ function createClaudeTab(options) {
     viewEl: viewEl,
     chipEl: null,
     titleEl: null,
-    title: claudeTitleFor(cwd),
+    title: isClaude ? claudeTitleFor(cwd) : ptyProgramTitle(program),
     url: CLAUDE_URL,
     cwd: cwd,
+    // The pty.js program this chamber runs. 'claude' behaves exactly as it
+    // always has; a shell is the same chamber with a different binary in it.
+    program: program,
     term: null,
     live: false,
     ready: true,
@@ -4526,19 +5243,23 @@ function createClaudeTab(options) {
   try {
     // args is honoured by terminal.js on the FIRST spawn only; an older
     // terminal.js ignores the key entirely, which just means no resume.
+    // A shell takes no renderer args at all (pty.js drops them), so it is
+    // handed none.
     tab.term = factory.create(viewEl, {
       cwd: cwd || undefined,
-      args: claudeStartArgs(opts.resume)
+      program: program,
+      args: isClaude ? claudeStartArgs(opts.resume) : []
     });
   } catch (err) {
     tab.term = null;
-    setTabTitle(tab, 'Claude (unavailable)');
+    setTabTitle(tab, isClaude ? 'Claude (unavailable)' : ptyProgramTitle(program) + ' (unavailable)');
     return tab;
   }
 
   // A folder is only "recent" once a chamber has actually started in it: the
   // two failure paths above return before here, and so never pollute the list.
-  rememberClaudeFolder(cwd);
+  // Only Claude's own folder list — a shell opened in home is not a project.
+  if (isClaude) rememberClaudeFolder(cwd);
 
   wireTermEvents(tab);
   return tab;
@@ -4686,6 +5407,7 @@ function activateTab(id) {
     // A crash / failure card covers one tab's well, so it follows exactly the
     // same display swap as the view it sits over.
     if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
+    if (tab.noteEl) tab.noteEl.style.display = shown ? 'flex' : 'none';
     if (tab.chipEl) {
       tab.chipEl.classList.toggle('active', isActive);
       tab.chipEl.setAttribute('aria-selected', String(isActive));
@@ -4750,6 +5472,7 @@ function closeTab(id) {
   tab.ready = false;
   disposeClaudeTab(tab); // no-op for page tabs
   clearTabCard(tab);     // the card lives in #views, not on the view
+  clearAppNote(tab);     // ...and so does the app note bar
   // On a sleeping tab this drops the placeholder: the guest is long gone.
   //
   // On a page tab this line also raises one UNCATCHABLE "Invalid
@@ -4772,6 +5495,7 @@ function closeTab(id) {
   try { tab.viewEl.remove(); } catch (err) { /* already detached */ }
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
+  pushAppRunningUpdate(); // an app tab or a terminal just stopped being open
   recomputeClaudeLive();
   recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
   emitWorkspaceChange(); // a tab count moved
@@ -5247,6 +5971,9 @@ function sessionSnapshot() {
   for (const tab of tabs) {
     let entry = null;
     if (isClaudeTab(tab)) {
+      // A shell chamber is not restored: coming back up into a dead prompt
+      // says nothing, and the flags a Claude tab is rebuilt with are its own.
+      if (tabProgram(tab) !== CLAUDE_PROGRAM) continue;
       const cwd = (typeof tab.cwd === 'string' && tab.cwd) ? tab.cwd : '';
       if (!cwd) continue; // nothing to respawn into: it would be dropped on read
       entry = { claude: true, cwd: cwd };
@@ -5256,6 +5983,9 @@ function sessionSnapshot() {
       entry = { url: url };
       if (tab.pinned) entry.pinned = true;
       if (tab.muted) entry.muted = true;
+      // Which catalogue app this tab is, by id: the name, url and host are the
+      // catalogue's to say, and it may have moved between runs.
+      if (isAppTab(tab)) entry.app = tab.app.id;
     }
     const ws = tabWorkspace(tab);
     if (ws !== DEFAULT_WORKSPACE_ID) entry.ws = ws;
@@ -5371,7 +6101,7 @@ function sanitiseSession(parsed) {
     if (entry && entry.claude) {
       const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
-      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws });
+      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws, app: '' });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
     }
@@ -5386,9 +6116,11 @@ function sanitiseSession(parsed) {
       if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) continue;
       href = target.href;
     }
+    const appId = (entry && typeof entry.app === 'string') ? entry.app.trim() : '';
     entries.push({
       claude: false, cwd: '', url: href,
-      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted), ws: ws
+      pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted), ws: ws,
+      app: (appId && appId.length <= APP_ID_MAX) ? appId : ''
     });
     if (entries.length >= SESSION_MAX_TABS) break;
   }
@@ -5525,6 +6257,9 @@ function restoreSession(snapshot) {
           workspace: entry.ws
         });
       if (!tab) continue;
+      // The app flag comes back before anything is raised, so the chip is born
+      // with the app's name on it and the strip order it was stored in holds.
+      if (!entry.claude && entry.app) applyAppFlag(tab, entry.app);
       created.push(tab);
       bySeat.set(row.index, tab);
       if (row.index === session.active) wanted = tab;
@@ -5714,6 +6449,8 @@ function wireViewEvents(tab) {
     // Zoom is remembered per site, so it is re-applied per navigation — a host
     // with nothing stored is explicitly put back to 100%.
     applyStoredZoom(tab);
+    // An app tab that has left its app's host is an ordinary page again.
+    syncAppFlagOnNavigate(tab);
     if (tab.id === activeTabId) {
       setOmniboxValue(tab.url, false); // guarded: never clobber live typing
       updateNavState();
