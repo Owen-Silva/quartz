@@ -23,6 +23,10 @@
   --edge:     rgba(255,255,255,.11);
   --specular: rgba(255,255,255,.14);
 
+  /* the inline note the End task control leaves on a row: opaque, because
+     it sits over the row's own numbers for the three seconds it shows */
+  --proc-note: #24272d;
+
   --ion:      #72adca;
   --ion-soft: rgba(114,173,202,.14);
   --ion-glow: rgba(114,173,202,.22);
@@ -106,6 +110,8 @@
 
   --edge:     rgba(18,22,42,.12);
   --specular: rgba(255,255,255,.95);
+
+  --proc-note: #eff1f6;
 
   --ion:      #0b7fd6;
   --ion-soft: rgba(11,127,214,.14);
@@ -759,10 +765,9 @@ body {
    glass and the rim ring carry the material instead. */
 .stats {
   position: relative;              /* the rim ring below hangs off this box */
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 0 4px;
+  display: block;
   padding: 16px 20px;
+  cursor: pointer;                 /* the whole strip opens the process list */
   border-radius: var(--bevel-lg);
   background: var(--sheen), var(--glass);
   box-shadow:
@@ -795,6 +800,14 @@ body {
 @supports (corner-shape: bevel) {
   .stats,
   .stats::after { corner-shape: round bevel round bevel; }
+}
+
+/* The five readouts. The capsule holds the process list under them, so the
+   row of readouts is its own grid rather than the panel itself. */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0 4px;
 }
 
 /* One readout. Every line in it has a stated height: the strip is
@@ -852,6 +865,430 @@ body {
   max-width: 120px;
   height: 28px;
   margin-top: 8px;
+}
+
+/* --- the process list ---------------------------------------- */
+/* Task Manager's Processes tab, grouped by program, in a panel over the
+   page. It is a list, not a control surface — no zebra, no hover glow, no
+   lit rows. One hairline between rows, one fading rule under the header,
+   and the page's single accent on the sort caret alone.
+
+   Every width is stated once, here, and worn by the header and by every
+   row: the header does not scroll with the rows, so the two boxes have to
+   agree on a grid rather than share one. scrollbar-gutter reserves the
+   scrollbar's width in both states so thirty rows line up with ten.
+
+   OPAQUE, unlike everything else on this page. The background behind it
+   is whatever the user chose — a bright picture, a moving clip — and a
+   list of numbers has to be readable over all of them, so this surface
+   takes the ink, a hairline and a real shadow rather than a blur (which
+   would also be the most expensive thing on the page). */
+.procs {
+  --proc-grid: minmax(0, 1fr) 52px 76px 104px 78px;
+  position: fixed;
+  left: 50%;
+  top: 96px;                       /* newtab.js seats it under the strip */
+  z-index: 10;
+  width: min(720px, 100vw - 32px);
+  margin-left: calc(min(720px, 100vw - 32px) / -2);
+  padding: 8px 20px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--bevel-lg);
+  background: var(--ink-1);
+  box-shadow: 0 24px 60px -24px var(--panel-shadow);
+  color: var(--fg);
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 120ms steps(3, end),
+    visibility 0s linear 120ms;
+}
+
+.procs.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 120ms steps(3, end);
+}
+
+.procs:focus-visible { outline: none; }
+
+/* The page's own bevel, the same axis as the capsule's. */
+@supports (corner-shape: bevel) {
+  .procs { corner-shape: round bevel round bevel; }
+}
+
+/* The page behind it, dimmed and nothing more: no blur, because the panel
+   is opaque and a blurred full-screen layer over a playing clip is the
+   most expensive thing this page could possibly do. */
+.procs-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: rgba(0,0,0,.35);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 120ms steps(3, end),
+    visibility 0s linear 120ms;
+}
+
+.procs-scrim.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 120ms steps(3, end);
+}
+
+/* --- the panel's own head ------------------------------------ */
+.procs-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+}
+
+/* The same fading hairline the column header wears, so the panel's two
+   rules read as one family rather than as a border and a line. */
+.procs-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+}
+
+.procs-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+/* Two hairlines crossed, rather than a glyph out of an icon font this
+   page does not load. */
+.procs-close {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: none;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition:
+    color        160ms steps(4, end),
+    border-color 160ms steps(4, end);
+}
+
+.procs-close::before,
+.procs-close::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 13px;
+  width: 11px;
+  height: 1px;
+  background: currentColor;
+}
+
+.procs-close::before { transform: rotate(45deg); }
+.procs-close::after  { transform: rotate(-45deg); }
+
+.procs-close:hover { color: var(--fg); border-color: var(--edge); }
+
+.procs-close:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  color: var(--fg);
+}
+
+/* --- the way in: a word at the strip's right edge ------------- */
+/* Out of flow, so the capsule is the height it always was. The strip
+   itself opens the list too — the whole panel is the target, and this is
+   the part a keyboard can reach. */
+.stats-open {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 160ms steps(4, end);
+}
+
+.stats-open:hover { color: var(--fg); }
+
+.stats-open:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 3px;
+  border-radius: 2px;
+  color: var(--fg);
+}
+
+.procs-head,
+.proc-row {
+  display: grid;
+  grid-template-columns: var(--proc-grid);
+  align-items: center;
+  gap: 0 8px;
+}
+
+.procs-head {
+  position: relative;
+  height: 20px;
+  margin-top: 8px;
+  padding-right: 8px;              /* the body's scrollbar gutter */
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+/* The rule under the header, fading out at both ends: a hairline that
+   stops short of the capsule's edge reads as drawn rather than as a
+   border the box happened to have. */
+.procs-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+}
+
+/* Name is text; CPU and Memory are the two the list can be sorted by, so
+   they are buttons wearing the header's own type. */
+.proc-sort {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: inherit;
+  text-align: right;
+  cursor: pointer;
+  transition: color 160ms steps(4, end);
+}
+
+.proc-sort:hover { color: var(--fg-2); }
+
+.proc-sort:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  border-radius: 2px;
+  color: var(--fg-2);
+}
+
+/* The sorted column, and the page's one accent below the graphs: a 4px
+   caret, nothing lit. */
+.proc-sort.is-active { color: var(--fg-2); }
+
+.proc-sort.is-active::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-left: 4px;
+  vertical-align: middle;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid var(--ion);
+}
+
+/* Ten rows: 10 x 32px. "Show more" opens the box to thirty, and stops at
+   80vh — on a short window the rest scrolls rather than running off it. */
+.procs.is-expanded .procs-body {
+  height: min(960px, calc(80vh - 132px));
+}
+
+.procs-body {
+  height: 320px;
+  margin-top: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.procs-body::-webkit-scrollbar { width: 8px; }
+.procs-body::-webkit-scrollbar-track { background: transparent; }
+
+.procs-body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: var(--edge);
+  background-clip: content-box;
+}
+
+.proc-row {
+  position: relative;
+  height: 32px;
+  box-sizing: border-box;
+  color: var(--fg);
+  font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+/* A hairline between rows and nowhere else. */
+.proc-row + .proc-row { border-top: 1px solid var(--edge); }
+
+.proc-col {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.proc-cpu,
+.proc-mem,
+.proc-io {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.proc-act { text-align: right; }
+
+/* "(3)" after a grouped program's name, the way Task Manager states it. */
+.proc-count {
+  margin-left: 4px;
+  color: var(--fg-3);
+}
+
+/* This browser's own processes: stated, never offered an End task. */
+.proc-row.is-self .proc-name { color: var(--fg-2); }
+
+/* The End task control. Quiet by default and only there on hover or on
+   keyboard focus — a row is something to read first. */
+.proc-end {
+  margin: 0;
+  padding: 0 6px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: none;
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    color        160ms steps(4, end),
+    border-color 160ms steps(4, end),
+    opacity      160ms steps(4, end);
+}
+
+.proc-row:hover .proc-end,
+.proc-end:focus-visible,
+.proc-end.is-confirm {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.proc-end:hover { color: var(--fg); border-color: var(--edge); }
+
+.proc-end:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  color: var(--fg);
+}
+
+/* The armed state. It says what the second press does and nothing more:
+   the border states it, not a colour nobody asked for. */
+.proc-end.is-confirm {
+  border-color: var(--edge);
+  color: var(--fg);
+}
+
+/* What came back: "Ended", "Protected", "That's this browser". Longer than
+   the column, so it is laid over the row's right end on its own opaque
+   ground for the three seconds it lives. */
+.proc-note {
+  position: absolute;
+  right: 0;
+  top: 1px;
+  bottom: 1px;
+  display: none;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: var(--radius-ctl);
+  background: var(--proc-note);
+  color: var(--fg-2);
+  font-size: 12px;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+.proc-row.has-note .proc-note { display: flex; }
+.proc-row.has-note .proc-end { opacity: 0; pointer-events: none; }
+
+/* The ten dashed rows before the first sample, and any row the sample
+   left short. */
+.proc-row.is-blank { color: var(--fg-3); }
+
+/* Ten rows or thirty. The control keeps its space when there is nothing
+   more to show, so the capsule is the same height either way. */
+.procs-more {
+  display: block;
+  height: 24px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: color 160ms steps(4, end);
+}
+
+.procs-more:hover { color: var(--fg); }
+
+.procs-more:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  border-radius: 2px;
+  color: var(--fg);
+}
+
+.procs-more.is-idle { visibility: hidden; }
+
+/* A label for a screen reader over a column that shows none. */
+.proc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* --- shortcut chips ------------------------------------------ */
@@ -1060,14 +1497,29 @@ body {
    which is fine: it only ever happens on a resize, and the board re-lays
    out on resize anyway. Within one width the height never moves. */
 @media (max-width: 620px) {
-  .stats { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
+  .stats-strip { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
   .stat-value    { font-size: 18px; }
   .stat-value-sm { font-size: 15px; }
+
+  /* The I/O column is the first thing a narrow window can do without:
+     the header and the rows lose it together, so the grid still agrees. */
+  .procs { --proc-grid: minmax(0, 1fr) 48px 72px 76px; }
+  .proc-io { display: none; }
+
+  /* Folded, the strip's last grid cell is empty — so the way in stops
+     being out of flow and simply sits in it, and the capsule still ends
+     up the height it was. */
+  .stats-open {
+    position: static;
+    justify-self: end;
+    align-self: center;
+  }
 }
 
 @media (max-width: 460px) {
   .stage { padding: 28px 24px 12vh; }
-  .stats { grid-template-columns: repeat(2, 1fr); padding: 14px 16px; }
+  .stats { padding: 14px 16px; }
+  .stats-strip { grid-template-columns: repeat(2, 1fr); }
   .rtile { max-width: 132px; }
 }
 

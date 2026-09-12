@@ -26,8 +26,16 @@
         pushed the same way, because the picture is a data: URL far too
         big to hang off the URL.
 
-     4. window.__applyStats(sample) every 2000 ms while this guest is
-        the one on screen — see "the instrument strip" below.
+     4. window.__applyStats(sample) every second while this guest is
+        the one on screen — see "the instrument strip" below. The
+        sample carries the process list the lower half of the capsule
+        shows.
+
+     5. window.__applyEndTask({ key, results }) — the answer to the one
+        thing this page asks the browser FOR: a console line,
+        `newtab:end-task {"pids":[...],"key":"..."}`, which the chrome
+        reads off this guest and runs. There is no preload here, so a
+        logged line is the whole channel; see "the process list".
    ============================================================ */
 
 'use strict';
@@ -706,6 +714,7 @@ window.__applyStats = function (sample) {
   setText(statText.gpu, pctText(gpu));
 
   paintStats();
+  applyProcs(s.procs);
   return window.__stats();
 };
 
@@ -721,6 +730,580 @@ window.__stats = function () {
     samples: statSeries.cpu.length
   };
 };
+
+/* ------------------------------------------------------------------ */
+/* The process list                                                     */
+/*                                                                      */
+/* The same sample carries `procs: { top: [group...], total: n }`, one   */
+/* group per program — `{ key, name, count, pids, cpu, memBytes,        */
+/* ioBps, self }` — already summed and already sorted by the sampler.    */
+/*                                                                      */
+/* Three rules hold this together:                                      */
+/*                                                                      */
+/*  - A row is a DOM node with a life of its own, found by `key`. A      */
+/*    sample writes into its text nodes and, if the order changed,       */
+/*    moves the node. Nothing is rebuilt, so a row you are hovering, a   */
+/*    confirm you have armed and a note that is still showing all        */
+/*    survive the second they land in.                                   */
+/*  - The list lives in a panel over the page, not in the capsule: the   */
+/*    capsule is the height it always was, and the board's traces are    */
+/*    seated where they always were. It starts closed and is never       */
+/*    remembered.                                                        */
+/*  - A sample that lands while it is closed is KEPT and not drawn. The  */
+/*    page costs the same as it did before this existed until someone    */
+/*    opens it.                                                          */
+/*  - The page cannot end a task itself. It logs a line and waits: the   */
+/*    chrome is the only thing here holding a kill.                      */
+/* ------------------------------------------------------------------ */
+
+const PROC_ROWS = 10;            // the body's height, in rows
+const PROC_MAX = 30;             // what "Show more" opens it to
+const PROC_PIDS_MAX = 64;        // the chrome refuses a longer list
+const PROC_SORT_STORE = 'newtab.procs.sort';
+const PROC_CONFIRM_MS = 3000;    // an armed End task disarms itself
+const PROC_NOTE_MS = 3000;       // and the answer it got fades
+
+const PROC_PANEL_GAP = 12;       // the panel sits this far under the strip
+const PROC_PANEL_EDGE = 16;      // and never closer than this to the window
+
+const procsPanel = document.getElementById('procs');
+const procsScrim = document.getElementById('procs-scrim');
+const procsBody = document.getElementById('procs-body');
+const procsMore = document.getElementById('procs-more');
+const procsOpenBtn = document.getElementById('procs-open');
+const procsCloseBtn = document.getElementById('procs-close');
+const statsPanel = document.getElementById('stats');
+const procSortBtn = {
+  cpu: document.getElementById('proc-sort-cpu'),
+  mem: document.getElementById('proc-sort-mem')
+};
+
+/* key -> { row, label, count, cpu, mem, io, end, note, pids, ... } */
+const procRows = new Map();
+
+let procGroups = [];             // the last sample's groups, normalised
+let procReady = false;           // a sample has landed at least once
+let procExpanded = false;        // "Show more" is open
+let procOpen = false;            // the panel is up (never remembered)
+let procSort = 'cpu';            // 'cpu' | 'mem', restored below
+
+/** The sort the user last chose. A page with no storage keeps CPU. */
+function readProcSort() {
+  try {
+    return localStorage.getItem(PROC_SORT_STORE) === 'mem' ? 'mem' : 'cpu';
+  } catch (err) {
+    return 'cpu';
+  }
+}
+
+function writeProcSort(value) {
+  try {
+    localStorage.setItem(PROC_SORT_STORE, value);
+  } catch (err) {
+    /* a page denied storage still sorts, it just forgets */
+  }
+}
+
+/** A finite number >= 0, or null — the same rule the strip uses. */
+function procNum(value) {
+  if (value == null || typeof value !== 'number' || !isFinite(value)) return null;
+  return Math.max(0, value);
+}
+
+/** "7.3%" under ten, "12%" above it: one decimal only where it reads. */
+function procCpuText(value) {
+  const n = procNum(value);
+  if (n == null) return DASH;
+  return n < 10 ? n.toFixed(1) + '%' : Math.round(n) + '%';
+}
+
+/** "482.4 MB", "1.4 GB" — Task Manager's units, one decimal. */
+function procMemText(bytes) {
+  const n = procNum(bytes);
+  if (n == null) return DASH;
+  const mb = n / 1048576;
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb.toFixed(1) + ' MB';
+}
+
+/** The group's disk + network bytes a second, as KB/s or MB/s. */
+function procIoText(bps) {
+  const n = procNum(bps);
+  if (n == null) return DASH;
+  return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB/s' : (n / 1024).toFixed(1) + ' KB/s';
+}
+
+/** One group from the sample, with everything this page will trust. */
+function normalizeGroup(group) {
+  if (!group || typeof group !== 'object') return null;
+
+  const key = String(group.key || group.name || '');
+  if (!key) return null;
+
+  const pids = Array.isArray(group.pids)
+    ? group.pids.filter(function (pid) {
+        return typeof pid === 'number' && isFinite(pid) && pid > 0;
+      }).slice(0, PROC_PIDS_MAX)
+    : [];
+
+  const count = (typeof group.count === 'number' && group.count > 1)
+    ? Math.round(group.count)
+    : (pids.length > 1 ? pids.length : 1);
+
+  return {
+    key: key,
+    name: String(group.name || key),
+    count: count,
+    pids: pids,
+    cpu: procNum(group.cpu),
+    memBytes: procNum(group.memBytes),
+    ioBps: procNum(group.ioBps),
+    self: group.self === true
+  };
+}
+
+/** Biggest first, on the chosen column, with the other as the tiebreak. */
+function procCompare(a, b) {
+  const first = procSort === 'mem' ? 'memBytes' : 'cpu';
+  const second = procSort === 'mem' ? 'cpu' : 'memBytes';
+  const fa = a[first] == null ? -1 : a[first];
+  const fb = b[first] == null ? -1 : b[first];
+  if (fb !== fa) return fb - fa;
+  const sa = a[second] == null ? -1 : a[second];
+  const sb = b[second] == null ? -1 : b[second];
+  if (sb !== sa) return sb - sa;
+  return a.name.localeCompare(b.name);
+}
+
+function procCell(className) {
+  const cell = document.createElement('span');
+  cell.className = 'proc-col ' + className;
+  cell.setAttribute('role', 'cell');
+  return cell;
+}
+
+/**
+ * One row, built once. Everything a sample writes later is a text node
+ * already in place, so an update is six string writes and nothing else.
+ */
+function buildRow(group) {
+  const row = document.createElement('div');
+  row.className = 'proc-row';
+  row.setAttribute('role', 'row');
+  row.dataset.key = group.key;
+
+  const name = procCell('proc-name');
+  const label = document.createTextNode('');
+  const count = document.createElement('span');
+  count.className = 'proc-count';
+  name.appendChild(label);
+  name.appendChild(count);
+
+  const cpu = procCell('proc-cpu');
+  const mem = procCell('proc-mem');
+  const io = procCell('proc-io');
+  const act = procCell('proc-act');
+
+  const end = document.createElement('button');
+  end.type = 'button';
+  end.className = 'proc-end';
+  end.textContent = 'End task';
+  act.appendChild(end);
+
+  const note = document.createElement('span');
+  note.className = 'proc-note';
+
+  row.appendChild(name);
+  row.appendChild(cpu);
+  row.appendChild(mem);
+  row.appendChild(io);
+  row.appendChild(act);
+  row.appendChild(note);        // laid over the row's right end, not a column
+
+  const rec = {
+    key: group.key,
+    row: row,
+    label: label,
+    count: count,
+    cpu: cpu,
+    mem: mem,
+    io: io,
+    end: end,
+    note: note,
+    name: '',
+    pids: [],
+    self: false,
+    confirmTimer: 0,
+    noteTimer: 0
+  };
+
+  end.addEventListener('click', function () { armEnd(rec); });
+  return rec;
+}
+
+function procRowFor(group) {
+  let rec = procRows.get(group.key);
+  if (!rec) {
+    rec = buildRow(group);
+    procRows.set(group.key, rec);
+  }
+  return rec;
+}
+
+/** The six writes. setText only touches a node whose text actually moved. */
+function updateRow(rec, group) {
+  rec.pids = group.pids;
+  rec.self = group.self;
+
+  if (rec.name !== group.name) {
+    rec.name = group.name;
+    rec.label.nodeValue = group.name;
+    rec.end.setAttribute('aria-label', 'End task, ' + group.name);
+  }
+
+  setText(rec.count, group.count > 1 ? '(' + group.count + ')' : '');
+  setText(rec.cpu, procCpuText(group.cpu));
+  setText(rec.mem, procMemText(group.memBytes));
+  setText(rec.io, procIoText(group.ioBps));
+
+  rec.row.classList.toggle('is-self', group.self);
+  rec.row.classList.remove('is-blank');
+
+  // This browser is stated like anything else and offered no control:
+  // there is nothing sensible on the other side of that button.
+  const offered = !group.self && rec.pids.length > 0;
+  if (rec.end.hidden === offered) rec.end.hidden = !offered;
+  if (!offered) disarmEnd(rec);
+}
+
+/** A dashed row: what the list is before the first sample lands. */
+function buildBlankRow() {
+  const row = document.createElement('div');
+  row.className = 'proc-row is-blank';
+  row.setAttribute('role', 'row');
+
+  const name = procCell('proc-name');
+  name.textContent = DASH;
+  const cpu = procCell('proc-cpu');
+  cpu.textContent = DASH;
+  const mem = procCell('proc-mem');
+  mem.textContent = DASH;
+  const io = procCell('proc-io');
+  io.textContent = DASH;
+  const act = procCell('proc-act');
+
+  row.appendChild(name);
+  row.appendChild(cpu);
+  row.appendChild(mem);
+  row.appendChild(io);
+  row.appendChild(act);
+  return row;
+}
+
+function renderBlank() {
+  if (!procsBody) return;
+  if (procsBody.childElementCount === PROC_ROWS &&
+      procsBody.firstElementChild &&
+      procsBody.firstElementChild.classList.contains('is-blank')) return;
+
+  procsBody.textContent = '';
+  for (let i = 0; i < PROC_ROWS; i++) procsBody.appendChild(buildBlankRow());
+}
+
+/** The header: which column is sorted, and the caret that says so. */
+function syncProcHead() {
+  ['cpu', 'mem'].forEach(function (which) {
+    const btn = procSortBtn[which];
+    if (!btn) return;
+    const active = procSort === which;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-sort', active ? 'descending' : 'none');
+  });
+}
+
+/** "Show more" keeps its box when there is nothing more: see the note. */
+function syncProcMore() {
+  if (!procsMore) return;
+  const more = procGroups.length > PROC_ROWS;
+  procsMore.classList.toggle('is-idle', !more);
+  procsMore.disabled = !more;
+  setText(procsMore, procExpanded ? 'Show less' : 'Show more');
+  procsMore.setAttribute('aria-expanded', procExpanded ? 'true' : 'false');
+}
+
+/**
+ * Place the visible rows in order. Nodes are MOVED, never remade: a row
+ * that was third and is now first is the same element, so its text does
+ * not flash and a confirm armed on it stays armed.
+ */
+function renderProcs() {
+  if (!procsBody || !procOpen) return;   // closed: the sample is kept, not drawn
+
+  syncProcHead();
+
+  if (!procReady) {
+    renderBlank();
+    syncProcMore();
+    return;
+  }
+
+  const sorted = procGroups.slice().sort(procCompare);
+  const visible = sorted.slice(0, procExpanded ? PROC_MAX : PROC_ROWS);
+
+  for (let i = 0; i < visible.length; i++) {
+    const rec = procRowFor(visible[i]);
+    updateRow(rec, visible[i]);
+    const at = procsBody.children[i];
+    if (at !== rec.row) procsBody.insertBefore(rec.row, at || null);
+  }
+
+  // Whatever is left past the visible list: the blank rows on the first
+  // sample, and any row this sample pushed out of sight.
+  while (procsBody.childElementCount > visible.length) {
+    procsBody.removeChild(procsBody.lastElementChild);
+  }
+
+  // Forget a program the sample no longer lists at all. A row that is
+  // merely below the fold keeps its record, so it comes back as itself.
+  const live = new Set(procGroups.map(function (group) { return group.key; }));
+  procRows.forEach(function (rec, key) {
+    if (live.has(key)) return;
+    if (rec.confirmTimer) clearTimeout(rec.confirmTimer);
+    if (rec.noteTimer) clearTimeout(rec.noteTimer);
+    if (rec.row.parentNode) rec.row.parentNode.removeChild(rec.row);
+    procRows.delete(key);
+  });
+
+  syncProcMore();
+}
+
+function applyProcs(procs) {
+  if (!procs || !Array.isArray(procs.top)) return;
+
+  // Cheap either way: one map over at most thirty small objects. The DOM
+  // work below it only happens while somebody is looking.
+  procGroups = procs.top
+    .map(normalizeGroup)
+    .filter(function (group) { return group !== null; })
+    .slice(0, PROC_MAX);
+
+  procReady = true;
+  renderProcs();
+}
+
+/* --- opening and closing ------------------------------------------ */
+
+/**
+ * Under the strip, or as far up the window as it takes to fit. Measured
+ * on every open (and on a resize while open) because the strip folds and
+ * the window moves; nothing here animates, so this is one write.
+ */
+function seatProcs() {
+  if (!procsPanel || !statsPanel) return;
+
+  const strip = statsPanel.getBoundingClientRect();
+  const panelH = procsPanel.offsetHeight;
+  const room = window.innerHeight - panelH - PROC_PANEL_EDGE;
+
+  let top = strip.bottom + PROC_PANEL_GAP;
+  if (top > room) top = Math.max(PROC_PANEL_EDGE, (window.innerHeight - panelH) / 2);
+
+  const px = Math.round(top) + 'px';
+  if (procsPanel.style.top !== px) procsPanel.style.top = px;
+}
+
+function openProcs() {
+  if (procOpen || !procsPanel) return;
+  procOpen = true;
+
+  procsPanel.classList.add('is-open');
+  if (procsScrim) procsScrim.classList.add('is-open');
+  if (procsOpenBtn) procsOpenBtn.setAttribute('aria-expanded', 'true');
+
+  renderProcs();                 // the rows this page has been keeping
+  seatProcs();
+  procsPanel.focus();
+}
+
+function closeProcs(returnFocus) {
+  if (!procOpen || !procsPanel) return;
+  procOpen = false;
+
+  procsPanel.classList.remove('is-open');
+  if (procsScrim) procsScrim.classList.remove('is-open');
+  if (procsOpenBtn) {
+    procsOpenBtn.setAttribute('aria-expanded', 'false');
+    if (returnFocus !== false) procsOpenBtn.focus();
+  }
+
+  // Whatever was armed or showing on a row does not survive the close.
+  procRows.forEach(function (rec) {
+    disarmEnd(rec);
+    if (rec.noteTimer) {
+      clearTimeout(rec.noteTimer);
+      rec.noteTimer = 0;
+      rec.row.classList.remove('has-note');
+    }
+  });
+}
+
+/* --- End task ----------------------------------------------------- */
+
+function disarmEnd(rec) {
+  if (rec.confirmTimer) {
+    clearTimeout(rec.confirmTimer);
+    rec.confirmTimer = 0;
+  }
+  rec.end.classList.remove('is-confirm');
+  setText(rec.end, 'End task');
+}
+
+/**
+ * Two presses, three seconds apart at most. The first arms the row and
+ * says what the second does; the second logs the line and lets go. The
+ * page never learns whether it worked — __applyEndTask does.
+ */
+function armEnd(rec) {
+  if (rec.self || !rec.pids.length) return;
+
+  if (rec.confirmTimer) {
+    disarmEnd(rec);
+    console.log('newtab:end-task ' + JSON.stringify({
+      pids: rec.pids.slice(0, PROC_PIDS_MAX),
+      key: rec.key
+    }));
+    return;
+  }
+
+  setText(rec.end, 'Confirm');
+  rec.end.classList.add('is-confirm');
+  rec.confirmTimer = setTimeout(function () {
+    rec.confirmTimer = 0;
+    rec.end.classList.remove('is-confirm');
+    setText(rec.end, 'End task');
+  }, PROC_CONFIRM_MS);
+}
+
+/** What a row says after the chrome answered. */
+function endTaskNote(results) {
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) return 'No change';
+
+  const failed = list.filter(function (r) { return !r || r.ok !== true; });
+  if (!failed.length) return 'Ended';
+
+  const reason = String((failed[0] && failed[0].reason) || '');
+  if (reason === 'self') return "That's this browser";
+  if (reason === 'protected') return 'Protected';
+  if (!reason) return 'Not ended';
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
+}
+
+function showNote(rec, text) {
+  rec.note.textContent = text;
+  rec.row.classList.add('has-note');
+  if (rec.noteTimer) clearTimeout(rec.noteTimer);
+  rec.noteTimer = setTimeout(function () {
+    rec.noteTimer = 0;
+    rec.row.classList.remove('has-note');
+    rec.note.textContent = '';
+  }, PROC_NOTE_MS);
+}
+
+/**
+ * The chrome's answer to one logged line: an array of { pid, ok, reason }.
+ * Returns the note it wrote, so a test can read it without racing the
+ * three-second timer.
+ */
+window.__applyEndTask = function (data) {
+  const d = data || {};
+  const text = endTaskNote(d.results);
+  const rec = procRows.get(String(d.key));
+  if (rec) showNote(rec, text);
+  return text;
+};
+
+/** What the list actually shows, for tests. */
+window.__procs = function () {
+  const column = document.querySelector('.column');
+  const panel = procsPanel ? procsPanel.getBoundingClientRect() : null;
+  return {
+    open: procOpen,
+    sort: procSort,
+    expanded: procExpanded,
+    ready: procReady,
+    total: procGroups.length,
+    panel: panel ? { top: panel.top, left: panel.left, width: panel.width, height: panel.height } : null,
+    bodyHeight: procsBody ? procsBody.getBoundingClientRect().height : 0,
+    capsuleHeight: statsPanel ? statsPanel.getBoundingClientRect().height : 0,
+    columnHeight: column ? column.getBoundingClientRect().height : 0,
+    rows: Array.prototype.map.call(procsBody ? procsBody.children : [], function (row) {
+      const end = row.querySelector('.proc-end');
+      const note = row.querySelector('.proc-note');
+      return {
+        key: row.dataset.key || null,
+        name: row.querySelector('.proc-name') ? row.querySelector('.proc-name').textContent : '',
+        cpu: row.querySelector('.proc-cpu').textContent,
+        mem: row.querySelector('.proc-mem').textContent,
+        io: row.querySelector('.proc-io').textContent,
+        self: row.classList.contains('is-self'),
+        blank: row.classList.contains('is-blank'),
+        end: end ? (end.hidden ? null : end.textContent) : null,
+        note: (note && row.classList.contains('has-note')) ? note.textContent : null,
+        height: row.getBoundingClientRect().height
+      };
+    })
+  };
+};
+
+function wireProcs() {
+  procSort = readProcSort();
+  syncProcHead();
+
+  ['cpu', 'mem'].forEach(function (which) {
+    const btn = procSortBtn[which];
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      if (procSort === which) return;
+      procSort = which;
+      writeProcSort(which);
+      renderProcs();
+    });
+  });
+
+  if (procsMore) {
+    procsMore.addEventListener('click', function () {
+      procExpanded = !procExpanded;
+      if (!procExpanded) procsBody.scrollTop = 0;
+      if (procsPanel) procsPanel.classList.toggle('is-expanded', procExpanded);
+      renderProcs();
+      seatProcs();               // thirty rows is a taller panel
+    });
+  }
+
+  // The way in: the word, and the whole strip behind it. A button is what
+  // the keyboard reaches; the strip is what the mouse hits.
+  if (procsOpenBtn) {
+    procsOpenBtn.addEventListener('click', function (event) {
+      event.stopPropagation();
+      openProcs();
+    });
+  }
+  if (statsPanel) statsPanel.addEventListener('click', function () { openProcs(); });
+
+  if (procsCloseBtn) procsCloseBtn.addEventListener('click', function () { closeProcs(); });
+  if (procsScrim) procsScrim.addEventListener('click', function () { closeProcs(); });
+
+  document.addEventListener('keydown', function (event) {
+    if (!procOpen) return;
+    if (event.key === 'Escape' || event.key === 'Esc') {
+      event.preventDefault();
+      closeProcs();
+    }
+  });
+
+  // The panel is seated by measurement, so a resized window re-seats it.
+  window.addEventListener('resize', function () { if (procOpen) seatProcs(); });
+}
 
 /* The accent's base colour differs per theme, so re-derive the same hue
    whenever the chrome flips data-theme on <html>. */
@@ -1040,6 +1623,11 @@ function init() {
      height either way — the boxes are sized in CSS — so this changes
      no geometry and the board's measurement stands. */
   paintStats();
+
+  /* The process list in the same state: ten dashed rows at the height the
+     real ten will wear, the sort the user last chose, and the "Show more"
+     control holding its space. Nothing below this line changes the box. */
+  wireProcs();
 
   /* The canvases are a percentage of the column, so their backing store
      is wrong after a resize. One repaint, no rAF: nothing here animates. */
