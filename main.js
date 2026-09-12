@@ -1581,6 +1581,28 @@ function removeAllowRule(host) {
   blocker.update({ removedNetworkFilters: ids });
 }
 
+/**
+ * Exceptions that are on whatever the user's allowlist says, because blocking
+ * these does not remove an ad -- it stalls the page that asked for them.
+ *
+ * YouTube's SPA waits on its own first-party calls before a click turns into a
+ * playing video: /youtubei/v1/* is the player API (log_event included) and
+ * /api/stats/* is the playback telemetry the ad check rides on. The prebuilt
+ * ads+tracking lists cancel two of them outright
+ * (||youtube.com^/youtubei/v1/log_event and ||youtube.com^/api/stats/ads?), and
+ * a cancelled fetch there is what leaves the player spinning until the document
+ * is reloaded. Ad DELIVERY is untouched: youtube.com/pagead/, doubleclick.net
+ * and the rest still block exactly as before.
+ */
+const UNBREAK_FILTERS = ['@@||youtube.com/youtubei/', '@@||youtube.com/api/stats/'];
+
+/** Applied once when the engine is built; nothing in the UI turns these off. */
+function applyUnbreakRules() {
+  if (!blocker) return;
+  const filters = UNBREAK_FILTERS.map((raw) => NetworkFilter.parse(raw)).filter(Boolean);
+  if (filters.length) blocker.update({ newNetworkFilters: filters });
+}
+
 function adblockState() {
   return {
     enabled: adblockPrefs.enabled,
@@ -1656,6 +1678,7 @@ async function initAdblock() {
     countBlocked(request && request.tabId);
   });
 
+  applyUnbreakRules();
   for (const host of adblockPrefs.allow) applyAllowRule(host);
   setBlockingEnabled(adblockPrefs.enabled);
   send('adblock:state-changed', adblockState());
