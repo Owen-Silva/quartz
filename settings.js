@@ -791,12 +791,17 @@
        'web:<slug>'      a site the browser presents as an app (webapps.js)
        'term:<program>'  a terminal tab
 
-     and a pin may also be an OBJECT, `{ id, web: true }`, meaning "this
-     installed app, but the primary click opens its web form". That is the
-     only option a pin carries, which is why the plain string stays the
-     stored shape whenever web is off: an old string-only file reads back
-     unchanged, and a session that never touches the option never grows an
-     object. pinOptions()/setPinOption() are the way in and out of it.
+     and a pin may also be an OBJECT carrying options:
+
+       { id, web: true }      the primary click opens the app's web form
+       { id, native: true }   ...or opens the app's own window IN a tab
+
+     Those are the only two options a pin carries, which is why the plain
+     string stays the stored shape whenever both are off: an old string-only
+     file reads back unchanged, and a session that never touches either option
+     never grows an object. pinOptions()/setPinOption() are the way in and out
+     of it, and setPinOption() takes either key on its own — a patch with only
+     `web` in it leaves `native` exactly where it was.
      ============================================================ */
 
   /** Anything stored (or handed in) read as a clean list of pins. */
@@ -831,13 +836,21 @@
 
   /**
    * One pin, in the shape it is stored in: a bare id string, or
-   * `{ id, web: true }` when the web option is on. null when it is junk.
+   * `{ id, web: true }` / `{ id, native: true }` when an option is on — both
+   * keys when both are. null when it is junk. Only the options that are ON are
+   * written, so the stored object never carries a `false` nobody set.
    */
   function normalizeAppPin(pin) {
     var id = pinIdOf(pin);
     if (!id || id.length > APP_ID_MAX) return null;
-    var web = !!(pin && typeof pin === 'object' && !Array.isArray(pin) && pin.web);
-    return web ? { id: id, web: true } : id;
+    var obj = (pin && typeof pin === 'object' && !Array.isArray(pin)) ? pin : null;
+    var web = !!(obj && obj.web);
+    var native = !!(obj && obj.native);
+    if (!web && !native) return id;   // the plain string an old file reads as
+    var out = { id: id };
+    if (web) out.web = true;
+    if (native) out.native = true;
+    return out;
   }
 
   function appPins() {
@@ -874,47 +887,62 @@
   }
 
   /**
-   * The options a pin carries. Answers `{ web: false }` for a pin that is a
-   * plain string, for one whose option is off, and for an id that is not
-   * pinned at all — the caller asking about a tile it is about to draw.
+   * The options a pin carries. Answers `{ web: false, native: false }` for a
+   * pin that is a plain string, for one whose options are off, and for an id
+   * that is not pinned at all — the caller asking about a tile it is about to
+   * draw. Both keys are always present, so no caller has to test for one.
    */
   function pinOptions(id) {
     var key = pinIdOf(id);
-    var out = { web: false };
+    var out = { web: false, native: false };
     if (!key) return out;
     var list = appPins();
     for (var i = 0; i < list.length; i++) {
       if (pinIdOf(list[i]) !== key) continue;
-      out.web = !!(list[i] && typeof list[i] === 'object' && list[i].web);
+      var pin = list[i];
+      var obj = (pin && typeof pin === 'object') ? pin : null;
+      out.web = !!(obj && obj.web);
+      out.native = !!(obj && obj.native);
       return out;
     }
     return out;
   }
 
   /**
-   * Turn one pin's option on or off, leaving its place in the dock alone.
+   * Turn one pin's options on or off, leaving its place in the dock alone.
+   * `opts` is a PATCH: a key that is not in it is left exactly as it was, so
+   * `{ native: true }` cannot quietly clear the web option a previous press set.
    * Idempotent: set() only announces when the stored value really moved, and
-   * `{ web: false }` writes the plain string back, so a session that toggles
-   * it off leaves a file indistinguishable from one that never touched it.
+   * both options off writes the plain string back, so a session that toggles
+   * one off leaves a file indistinguishable from one that never touched it.
    * Does NOT pin anything — an id that is not in the dock is left alone.
-   * @returns {{web:boolean}} the options as they now stand.
+   * @returns {{web:boolean, native:boolean}} the options as they now stand.
    */
   function setPinOption(id, opts) {
     var key = pinIdOf(id);
-    if (!key) return { web: false };
-    var web = !!(opts && opts.web);
+    var none = { web: false, native: false };
+    if (!key) return none;
+    var patch = (opts && typeof opts === 'object' && !Array.isArray(opts)) ? opts : {};
     var list = appPins();
     var next = [];
     var found = false;
     for (var i = 0; i < list.length; i++) {
       if (pinIdOf(list[i]) === key) {
         found = true;
-        next.push(web ? { id: key, web: true } : key);
+        var was = list[i];
+        var obj = (was && typeof was === 'object') ? was : null;
+        var web = Object.prototype.hasOwnProperty.call(patch, 'web')
+          ? !!patch.web : !!(obj && obj.web);
+        var native = Object.prototype.hasOwnProperty.call(patch, 'native')
+          ? !!patch.native : !!(obj && obj.native);
+        // normalizeAppPin() is the one place the stored shape is decided, so
+        // this hands it the flags and lets it write the string or the object.
+        next.push(normalizeAppPin({ id: key, web: web, native: native }));
       } else {
         next.push(list[i]);
       }
     }
-    if (!found) return { web: false };
+    if (!found) return none;
     setAppPins(next);
     return pinOptions(key);
   }

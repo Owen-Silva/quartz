@@ -1129,6 +1129,20 @@ function pinOpensWeb(id) {
   } catch (err) { return false; }
 }
 
+/**
+ * The pin's other option: a press opens the app's own window IN a tab rather
+ * than handing it to Windows. Read exactly as pinOpensWeb() is, so a
+ * settings.js that predates the option simply answers no.
+ */
+function pinOpensNative(id) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.pinOptions !== 'function') return false;
+  try {
+    const opts = settings.pinOptions(id);
+    return !!(opts && opts.native);
+  } catch (err) { return false; }
+}
+
 /*
  * The installed index, fetched once and kept: a rebuild is minutes of work in
  * main, and nothing in it changes while the window is open unless the user
@@ -1390,6 +1404,7 @@ function appsPayload() {
       : ((pin && typeof pin === 'object' && typeof pin.id === 'string') ? pin.id : '');
     if (!id) continue;
     const web = !!(pin && typeof pin === 'object' && pin.web);
+    const native = !!(pin && typeof pin === 'object' && pin.native);
     const state = appRunning[id] || { running: false, pids: [] };
     // A catalogue app or a terminal program is pinned by an id the installed
     // index has never heard of, so its row is drawn from the catalogue instead.
@@ -1404,6 +1419,9 @@ function appsPayload() {
         exe: null,
         web: isWebAppId(id),
         term: isTerminalAppId(id),
+        // A catalogue site and a terminal are already tabs: neither can ever be
+        // a hosted window, so the option is always off on those rows.
+        native: false,
         running: !!state.running,
         tab: !!state.tab,
         pids: []
@@ -1421,8 +1439,10 @@ function appsPayload() {
       name: entry.name,
       iconDataUrl: entry.iconDataUrl || null,
       exe: entry.exe || null,
-      // The pin's one option: this tile's primary click opens the web form.
+      // The pin's two options: this tile's primary click opens the web form,
+      // or opens the app's own window in a tab.
       web: web,
+      native: native,
       running: !!live.running,
       tab: !!live.tab,
       pids: (live.pids || []).slice()
@@ -1516,7 +1536,8 @@ function parseAppLine(text) {
   const action = msg.action;
   if (action !== 'launch' && action !== 'focus' && action !== 'pin'
     && action !== 'unpin' && action !== 'refresh'
-    && action !== 'open-web' && action !== 'open-term' && action !== 'pin-web') return null;
+    && action !== 'open-web' && action !== 'open-term' && action !== 'pin-web'
+    && action !== 'open-native' && action !== 'pin-native') return null;
 
   if (action === 'refresh') return { action: action, id: '', pid: 0 };
 
@@ -1526,6 +1547,14 @@ function parseAppLine(text) {
     const id = msg.id.trim();
     if (!id || id.length > APP_ID_MAX) return null;
     return { action: action, id: id, pid: 0, web: !!msg.web };
+  }
+
+  // ...and the same for the native option: "this pin opens the app IN a tab".
+  if (action === 'pin-native') {
+    if (typeof msg.id !== 'string') return null;
+    const id = msg.id.trim();
+    if (!id || id.length > APP_ID_MAX) return null;
+    return { action: action, id: id, pid: 0, native: !!msg.native };
   }
 
   if (action === 'focus') {
@@ -1616,6 +1645,24 @@ function handleAppLine(tab, viewEl, text) {
     });
     return true;
   }
+  // An installed app, opened IN a tab: main re-parents its real window into
+  // this one. Unlike every other row here the answer is not immediate — the app
+  // has to start and draw — so the result is pushed when open() answers, and
+  // the placeholder in the tab is what the user watches meanwhile.
+  if (req.action === 'open-native') {
+    const made = openNativeTab(req.id);
+    if (!made) {
+      pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
+      return true;
+    }
+    const embed = embedApi();
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id,
+      ok: !!embed, reason: embed ? '' : 'unavailable'
+    });
+    return true;
+  }
+
   if (req.action === 'open-term') {
     Promise.resolve(openTerminalTab(req.id)).then((made) => {
       pushAppResult(tab, viewEl, {
@@ -1644,6 +1691,27 @@ function handleAppLine(tab, viewEl, text) {
     // wireSettings() answers with a re-push; this is belt and braces for a
     // no-op write (the option was already where it was asked to be).
     pushAppsToAll();
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok, reason: ok ? '' : 'failed'
+    });
+    return true;
+  }
+
+  // The native option on one pin. Same shape as pin-web, and the same
+  // reasoning: settings.js owns the option and an older settings.js answers
+  // 'unavailable' rather than silently doing nothing.
+  if (req.action === 'pin-native') {
+    const settings = window.Settings;
+    if (!settings || typeof settings.setPinOption !== 'function') {
+      pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'unavailable' });
+      return true;
+    }
+    let ok = false;
+    try {
+      const after = settings.setPinOption(req.id, { native: !!req.native });
+      ok = !!(after && !!after.native === !!req.native);
+    } catch (err) { ok = false; }
+    pushAppsToAll(); // belt and braces for a no-op write, as pin-web is
     pushAppResult(tab, viewEl, {
       action: req.action, id: req.id, ok: ok, reason: ok ? '' : 'failed'
     });
@@ -1682,6 +1750,18 @@ function handleAppLine(tab, viewEl, text) {
         });
         return true;
       }
+    }
+    // ...and the pin whose option says "open this app IN a tab". Checked after
+    // the web option, so a pin carrying both still opens the web form: that is
+    // the option that existed first and the one a press already meant.
+    if (pinOpensNative(req.id)) {
+      const made = openNativeTab(req.id);
+      const embed = embedApi();
+      pushAppResult(tab, viewEl, {
+        action: req.action, id: req.id,
+        ok: !!(made && embed), reason: made ? (embed ? '' : 'unavailable') : 'failed'
+      });
+      return true;
     }
   }
 
@@ -1899,7 +1979,7 @@ function appTabSeat(list) {
   while (seat < rows.length) {
     const tab = rows[seat];
     if (!tab) break;
-    if (tab.pinned || isAppTab(tab)) { seat += 1; continue; }
+    if (tab.pinned || isAppTab(tab) || isNativeTab(tab)) { seat += 1; continue; }
     break;
   }
   return seat;
@@ -2276,7 +2356,16 @@ function appTabRunning() {
   const out = Object.create(null);
   for (const tab of tabs) {
     if (isAppTab(tab)) out[tab.app.id] = { running: true, pids: [], tab: true };
-    else if (isClaudeTab(tab)) {
+    // An app hosted IN a tab is the realest kind of running there is: the pid
+    // is the app's own, and `native` is how the dock tells the two apart.
+    else if (isNativeTab(tab) && tab.native.state === 'running') {
+      out[tab.native.appId] = {
+        running: true,
+        pids: tab.native.pid ? [tab.native.pid] : [],
+        tab: true,
+        native: true
+      };
+    } else if (isClaudeTab(tab)) {
       const program = tabProgram(tab);
       if (program && program !== CLAUDE_PROGRAM) {
         out[terminalAppId(program)] = { running: true, pids: [], tab: true };
@@ -2284,6 +2373,605 @@ function appTabRunning() {
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Native app tabs — the app's own window, hosted in a tab             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * kind 'native' is the third tab kind. There is no guest and no PTY: main
+ * re-parents the app's REAL top-level window into this window (embed.js) and
+ * parks it over the tab's content area, so this side owns nothing but a
+ * placeholder that holds a seat in #views and gets measured.
+ *
+ *   tab.native = { appId, name, exe, state, reason, pid, hwnd, rect, ... }
+ *
+ * state  'idle'      nothing started yet — a restored session, which shows a
+ *                    "Start <app>" button rather than launching on boot
+ *        'starting'  api.embed.open() is in flight
+ *        'running'   the app's window is hosted over the placeholder
+ *        'gone'      the app's window died ("<app> closed")
+ *        'failed'    open() refused; tab.native.reason says why
+ *
+ * The placeholder is the only thing ever measured, and the hosted window is a
+ * real child HWND that paints above EVERY pixel of this document — so it is
+ * hidden whenever its tab is off screen and whenever a chrome panel is open
+ * over the well, or it would cover the panel instead of the other way round.
+ * Every call is guarded: api.embed is absent on a build without the Win32
+ * binding, and open() then answers reason 'unavailable'.
+ */
+
+/** The omnibox line for a native tab. Never navigable, like CLAUDE_URL. */
+function nativeUrlFor(name) {
+  const slug = String(name == null ? '' : name)
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return 'app://' + (slug || 'window');
+}
+
+/** The preload's embed group, or null on a build that has none. */
+function embedApi() {
+  const api = (window.api && window.api.embed) ? window.api.embed : null;
+  if (!api || typeof api !== 'object') return null;
+  return api;
+}
+
+function isNativeTab(tab) {
+  return !!(tab && tab.kind === 'native' && tab.native);
+}
+
+/** The open native tab for one installed app id, or null. */
+function nativeTabForApp(id) {
+  if (typeof id !== 'string' || !id) return null;
+  for (const tab of tabs) {
+    if (isNativeTab(tab) && tab.native.appId === id) return tab;
+  }
+  return null;
+}
+
+/* --- why an app could not be hosted, in words -------------------- */
+
+const NATIVE_REASON_TEXT = {
+  'unavailable': 'App tabs are not available in this build',
+  'store-app': 'Windows will not let a Store app window be hosted in a tab',
+  'no-window': 'It did not open a window that can be hosted',
+  'unknown-app': 'This build does not know that app any more',
+  'own-window': 'That window belongs to this browser',
+  'already-attached': 'That window is already in another tab',
+  'refused': 'Windows refused to hand that window over',
+  'gone': 'Its window went away before it could be hosted',
+  'bad-request': 'That app was asked for the wrong way'
+};
+
+function nativeReasonText(reason) {
+  const key = String(reason == null ? '' : reason).trim();
+  if (NATIVE_REASON_TEXT[key]) return NATIVE_REASON_TEXT[key];
+  if (key && key.slice(-7) === '-failed') return 'Windows would not host its window (' + key + ')';
+  return key ? 'It could not be hosted (' + key + ')' : 'It could not be hosted';
+}
+
+/* --- the placeholder, and the status card on it ------------------- */
+
+// One observer for every native placeholder in the window: the well changes
+// size with the window, with a split, and with the panes above it, and the
+// hosted window has to follow the rect it is parked over.
+let nativeResizeObserver = null;
+
+function observeNativePlaceholder(el) {
+  if (!el || typeof window.ResizeObserver !== 'function') return;
+  if (!nativeResizeObserver) {
+    nativeResizeObserver = new window.ResizeObserver(() => queueNativeLayout());
+  }
+  try { nativeResizeObserver.observe(el); } catch (err) { /* never fatal */ }
+}
+
+/**
+ * The view a native tab holds in #views. A <webview> is styled by chrome.css
+ * and a chamber by .claude-view; this one carries its sizing inline, so the
+ * third kind needs no stylesheet of its own — it takes the same flex seat both
+ * of the others take, and activateTab() drives its display exactly the same way.
+ */
+function buildNativeView(tab) {
+  const el = document.createElement('div');
+  el.className = 'native-view';
+  el.style.position = 'relative';  // the .tab-card inside it is inset 0
+  // width/height rather than flex-grow alone, and for the same reason
+  // buildWebview() sets them: clearSplitSeat() wipes the INLINE flex-grow off
+  // every view that is not half of a pair, and a <webview> and a .claude-view
+  // both have a stylesheet rule to fall back on where this element has none.
+  el.style.width = '100%';
+  el.style.height = '100%';
+  el.style.flex = '1 1 auto';
+  el.style.minWidth = '0';
+  el.style.minHeight = '0';
+  el.style.flexDirection = 'column';
+  el.style.background = 'var(--panel-bg)';
+  el.style.display = 'none';       // activateTab() reveals the active one
+
+  // Reaching into the well with the mouse is asking for this tab, exactly as
+  // it is for a chamber and for a crash card.
+  el.addEventListener('mousedown', () => {
+    if (tab.id === activeTabId) return;
+    const other = splitPartner(tab);
+    if (other && other.id === activeTabId) activateTab(tab.id);
+  }, true);
+
+  tab.viewEl = el;
+  observeNativePlaceholder(el);
+  return el;
+}
+
+// The same app glyph the dock and the palette use for an installed program.
+const NATIVE_CARD_GLYPH = '';
+
+/** One button on the status card, in the crash card's own clothes. */
+function nativeCardButton(label, run) {
+  const btn = document.createElement('button');
+  btn.className = 'glass card-btn';
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.addEventListener('click', run);
+  return btn;
+}
+
+/**
+ * What the placeholder says right now. 'running' paints nothing at all: the
+ * app's own window is over this exact rect, and anything drawn here would be
+ * behind it. Reuses .tab-card / .card-* from the crash card, so the third tab
+ * kind costs no CSS.
+ */
+function renderNativeCard(tab) {
+  if (!isNativeTab(tab) || !tab.viewEl) return null;
+
+  if (tab.native.cardEl) {
+    try { tab.native.cardEl.remove(); } catch (err) { /* already detached */ }
+    tab.native.cardEl = null;
+  }
+  const state = tab.native.state;
+  if (state === 'running') return null;
+
+  const name = tab.native.name;
+  const card = document.createElement('div');
+  card.className = 'tab-card native-card';
+  card.style.display = 'flex';
+
+  const glyph = document.createElement('span');
+  glyph.className = 'glyph card-glyph';
+  glyph.textContent = NATIVE_CARD_GLYPH;
+  glyph.setAttribute('aria-hidden', 'true');
+  card.appendChild(glyph);
+
+  const head = document.createElement('div');
+  head.className = 'card-head';
+  card.appendChild(head);
+
+  const line = document.createElement('div');
+  line.className = 'card-line';
+  card.appendChild(line);
+
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.flexWrap = 'wrap';
+  row.style.justifyContent = 'center';
+
+  if (state === 'starting') {
+    head.textContent = 'Starting ' + name + '…';
+    line.textContent = 'Waiting for its window.';
+  } else if (state === 'gone') {
+    head.textContent = name + ' closed';
+    line.textContent = 'Its window is gone. The tab is still here.';
+    row.appendChild(nativeCardButton('Relaunch', () => startNativeTab(tab)));
+    row.appendChild(nativeCardButton('Close', () => closeTab(tab.id)));
+  } else if (state === 'failed') {
+    head.textContent = name + ' cannot run in a tab';
+    line.textContent = nativeReasonText(tab.native.reason);
+    // The app itself is fine — it just cannot be HOSTED. Offer the ordinary
+    // launch, which is what the dock tile would have done.
+    row.appendChild(nativeCardButton('Launch normally', () => launchAppNormally(tab.native.appId)));
+    row.appendChild(nativeCardButton('Close', () => closeTab(tab.id)));
+  } else {
+    // 'idle': a restored session. An app is never relaunched behind the user's
+    // back at boot, so the tab comes back as this and waits to be asked.
+    head.textContent = name;
+    line.textContent = 'Not running in this tab.';
+    row.appendChild(nativeCardButton('Start ' + name, () => startNativeTab(tab)));
+    row.appendChild(nativeCardButton('Close', () => closeTab(tab.id)));
+  }
+
+  if (row.childNodes.length) card.appendChild(row);
+  tab.viewEl.appendChild(card);
+  tab.native.cardEl = card;
+  return card;
+}
+
+/** The ordinary launch, for an app whose window cannot be hosted. */
+function launchAppNormally(appId) {
+  const api = appsApi();
+  if (!api || typeof api.launch !== 'function') {
+    claudeToast('Apps are not available in this build');
+    return false;
+  }
+  try {
+    const pending = api.launch(appId);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { return false; }
+  return true;
+}
+
+/** Move one native tab to a state and redraw everything that follows from it. */
+function setNativeState(tab, state, reason) {
+  if (!isNativeTab(tab)) return;
+  tab.native.state = state;
+  tab.native.reason = (typeof reason === 'string') ? reason : '';
+  if (state !== 'running') {
+    tab.native.sent = '';   // the next layout call is a fresh one
+    tab.native.pid = 0;
+  }
+  renderNativeCard(tab);
+  setTabTitle(tab, tab.native.name); // the chip's tooltip spells the state out
+  pushAppRunningUpdate();   // the dock's light follows the tab, not the process
+  queueNativeLayout(true);
+}
+
+/* --- layout: the one thing this side really owns ----------------- */
+
+/*
+ * Every trigger funnels into queueNativeLayout(), which coalesces to ONE
+ * api.embed.layout() call per animation frame per tab, and skips a call whose
+ * rect and visibility are exactly what was last sent (the engine is idempotent,
+ * but an overlay mutation must not cost an IPC for nothing). A forced queue is
+ * how open() and detach() get their call through regardless: the engine keeps
+ * the window hidden until the FIRST layout, so that one is not an optimisation.
+ */
+
+let nativeLayoutQueued = false;
+let nativeLayoutForce = false;
+
+function queueNativeLayout(force) {
+  // A session with no native tab in it pays nothing at all — not even a frame.
+  if (!tabs.some(isNativeTab)) return false;
+  if (force) nativeLayoutForce = true;
+  if (nativeLayoutQueued) return false;
+  nativeLayoutQueued = true;
+  const run = () => { flushNativeLayout(); };
+  if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run);
+  else window.setTimeout(run, 16);
+  return true;
+}
+
+/**
+ * The panes that cover the well. A hosted app window paints above every pixel
+ * of this document, so while one of these is open the app is hidden and the
+ * panel is what the user sees. OVERLAY_IDS is the board-pause list (declared
+ * below this block, hence the lazy read); a native tab cares about one more.
+ */
+let nativeCoverIds = null;
+
+function nativeCoverList() {
+  if (nativeCoverIds) return nativeCoverIds;
+  const base = (typeof OVERLAY_IDS !== 'undefined' && Array.isArray(OVERLAY_IDS)) ? OVERLAY_IDS : [];
+  nativeCoverIds = base.concat(['workspaces-panel']);
+  return nativeCoverIds;
+}
+
+/** Is any chrome pane open over the well right now? */
+function nativeCovered() {
+  const ids = nativeCoverList();
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el || el.hidden) continue;
+    try {
+      if (window.getComputedStyle(el).display === 'none') continue;
+    } catch (err) { /* detached mid-read: treat it as open */ }
+    return true;
+  }
+  return false;
+}
+
+/** The placeholder's rect in this page's CSS pixels, or null when it is hidden. */
+function nativeRectOf(tab) {
+  const el = tab && tab.viewEl;
+  if (!el || !el.isConnected) return null;
+  let r = null;
+  try { r = el.getBoundingClientRect(); } catch (err) { return null; }
+  if (!r || r.width <= 0 || r.height <= 0) return null;
+  return {
+    x: Math.round(r.left), y: Math.round(r.top),
+    w: Math.round(r.width), h: Math.round(r.height)
+  };
+}
+
+/**
+ * One frame's worth of layout. Only the active native tab is visible; a
+ * deactivated one keeps its window (switching tabs must not tear the app down)
+ * and is told visible:false against the last rect it was measured at.
+ * @returns {number} how many layout calls were really made — what the harness counts.
+ */
+function flushNativeLayout() {
+  nativeLayoutQueued = false;
+  const force = nativeLayoutForce;
+  nativeLayoutForce = false;
+
+  const embed = embedApi();
+  if (!embed || typeof embed.layout !== 'function') return 0;
+
+  const covered = nativeCovered();
+  let calls = 0;
+  for (const tab of tabs) {
+    if (!isNativeTab(tab)) continue;
+    // Nothing is hosted unless the app is running: there is no window to park.
+    if (tab.native.state !== 'running') continue;
+
+    const measured = nativeRectOf(tab);
+    if (measured) tab.native.rect = measured;
+    const rect = tab.native.rect;
+    if (!rect) continue;   // never once measured: nothing to park over yet
+
+    // Measured means the placeholder is laid out, which means the tab is on
+    // screen. A pane over the well hides the app without giving it up.
+    const visible = !!measured && isTabOnScreen(tab) && !covered;
+    const key = rect.x + ',' + rect.y + ',' + rect.w + ',' + rect.h + ',' + (visible ? 1 : 0);
+    if (!force && tab.native.sent === key) continue;
+    tab.native.sent = key;
+    calls += 1;
+    try {
+      const pending = embed.layout(tab.id, rect, visible);
+      if (pending && typeof pending.catch === 'function') {
+        pending.catch(() => { tab.native.sent = ''; });
+      }
+    } catch (err) {
+      tab.native.sent = '';   // the call never landed: try again next frame
+    }
+  }
+  return calls;
+}
+
+/* --- open, start, pop out, close --------------------------------- */
+
+/**
+ * The one way a native tab is built. Never activated by the caller: this does
+ * it, exactly as createTab() and createClaudeTab() do.
+ * @param {string} appId an installed app id, as apps.js hashes it.
+ * @param {{background?:boolean, workspace?:string, state?:string}} [options]
+ *        state 'idle' is restoreSession()'s: the tab comes back without its app.
+ */
+function createNativeTab(appId, options) {
+  if (!viewsEl || !tabstripEl) return null;
+  const id = (typeof appId === 'string') ? appId.trim() : '';
+  if (!id || id.length > APP_ID_MAX) return null;
+
+  const opts = options || {};
+  const entry = appById(id);
+  const name = (entry && typeof entry.name === 'string' && entry.name) ? entry.name : id;
+
+  const tab = {
+    id: nextTabId++,
+    kind: 'native',
+    viewEl: null,
+    chipEl: null,
+    titleEl: null,
+    title: name,
+    url: nativeUrlFor(name),
+    ready: true,
+    loading: false,
+    iconEl: null,
+    globeEl: null,
+    cardEl: null,
+    app: null,
+    noteEl: null,
+    noteDismissed: false,
+    broken: false,
+    audible: false,
+    muted: false,
+    pinned: false,
+    asleep: false,
+    splitWith: null,
+    splitRatio: 0.5,
+    lastActive: 0,
+    workspace: validWorkspaceId(opts.workspace || currentWorkspaceId),
+    openedAt: Date.now(),
+    // Everything about the hosted window. `detached` is the pop-out's mark: a
+    // window handed back to the desktop must never then be closed.
+    native: {
+      appId: id,
+      name: name,
+      exe: (entry && typeof entry.exe === 'string') ? entry.exe : '',
+      state: 'idle',
+      reason: '',
+      pid: 0,
+      hwnd: '',
+      rect: null,
+      sent: '',
+      cardEl: null,
+      detached: false
+    }
+  };
+
+  buildNativeView(tab);
+  tab.chipEl = buildChip(tab);
+  // The chip wears the app's own icon, from the index the dock is drawn from.
+  if (entry && entry.iconDataUrl) setTabIcon(tab, entry.iconDataUrl);
+
+  tabs.push(tab);
+  viewsEl.appendChild(tab.viewEl);
+  tabstripEl.appendChild(tab.chipEl);
+  renderNativeCard(tab);
+
+  // Seated with the other app tabs, at the left of the strip — the seat is
+  // measured against the strip WITHOUT this tab, which is already at the end.
+  const group = workspaceTabs(tabWorkspace(tab)).filter((t) => t.id !== tab.id);
+  moveTabToIndex(tab.id, appTabSeat(group));
+
+  emitWorkspaceChange(); // a tab count moved
+  pushReadoutToAll();    // ...so every open new-tab page says so
+  pushAppRunningUpdate();// the dock lights this app as open in a tab
+  saveSession();
+
+  if (!opts.background || activeTabId === null) activateTab(tab.id);
+  // The index is built from the Start Menu and takes a while on a cold profile,
+  // so an app opened before it lands would otherwise wear its hash for a name.
+  // Asking for it is idempotent (one IPC however many callers), and the relabel
+  // is skipped for a tab that has since closed.
+  if (!entry) relabelNativeTab(tab);
+  return tab;
+}
+
+/** Put the app's real name, icon and exe on a tab that opened before the index. */
+function relabelNativeTab(tab) {
+  if (!isNativeTab(tab)) return;
+  Promise.resolve(ensureAppsIndex()).then(() => {
+    if (!isNativeTab(tab) || tabs.indexOf(tab) === -1) return;
+    const found = appById(tab.native.appId);
+    if (!found || !found.name) return;
+    tab.native.name = found.name;
+    if (typeof found.exe === 'string' && found.exe) tab.native.exe = found.exe;
+    tab.url = nativeUrlFor(found.name);
+    if (found.iconDataUrl) setTabIcon(tab, found.iconDataUrl);
+    setTabTitle(tab, found.name);
+    renderNativeCard(tab);   // the card names the app in every state but one
+    if (tab.id === activeTabId) syncOmniboxFromActive(true);
+  }, () => { /* no index: the id stays the name, which is what it always was */ });
+}
+
+/**
+ * Launch (or attach) the app behind one native tab. Answers a promise of
+ * whether its window is now hosted; every refusal lands on the placeholder
+ * rather than on a toast, because the tab is where the user is looking.
+ */
+function startNativeTab(tab) {
+  if (!isNativeTab(tab)) return Promise.resolve(false);
+  if (tab.native.state === 'starting') return Promise.resolve(false);
+
+  const embed = embedApi();
+  if (!embed || typeof embed.open !== 'function') {
+    setNativeState(tab, 'failed', 'unavailable');
+    return Promise.resolve(false);
+  }
+
+  tab.native.detached = false;
+  setNativeState(tab, 'starting', '');
+
+  let pending = null;
+  try {
+    pending = embed.open(tab.id, tab.native.appId);
+  } catch (err) {
+    setNativeState(tab, 'failed', 'failed');
+    return Promise.resolve(false);
+  }
+
+  return Promise.resolve(pending).then((res) => {
+    // open() waits up to 20 s for the app to draw; the tab may be long gone.
+    if (tabs.indexOf(tab) === -1) return false;
+    if (!res || res.ok !== true) {
+      setNativeState(tab, 'failed', (res && typeof res.reason === 'string') ? res.reason : 'failed');
+      return false;
+    }
+    tab.native.pid = (typeof res.pid === 'number' && res.pid > 0) ? res.pid : 0;
+    tab.native.hwnd = String(res.hwnd == null ? '' : res.hwnd);
+    if (typeof res.exe === 'string' && res.exe && !tab.native.exe) tab.native.exe = res.exe;
+    setNativeState(tab, 'running', '');
+    // Forced: the engine holds the window HIDDEN until the first layout call,
+    // so nothing appears without this one.
+    queueNativeLayout(true);
+    return true;
+  }, () => {
+    if (tabs.indexOf(tab) !== -1) setNativeState(tab, 'failed', 'failed');
+    return false;
+  });
+}
+
+/**
+ * "Open <app> in a tab", from the palette, the dock and the new-tab page. One
+ * tab per app: asking again raises the one that exists, and starts its app
+ * again when that app is no longer there to raise.
+ */
+function openNativeTab(appId) {
+  const id = (typeof appId === 'string') ? appId.trim() : '';
+  if (!id) return null;
+
+  const open = nativeTabForApp(id);
+  if (open) {
+    activateTab(open.id);   // raises its workspace too
+    const state = open.native.state;
+    // A dead or refused tab the user asks for again means "start it".
+    if (state === 'idle' || state === 'gone' || state === 'failed') startNativeTab(open);
+    return open;
+  }
+
+  const tab = createNativeTab(id);
+  if (!tab) return null;
+  startNativeTab(tab);
+  return tab;
+}
+
+/**
+ * Pop out: the window goes back to the desktop with its own frame, the app
+ * keeps running, and the tab goes away. The detach mark is set FIRST, so the
+ * close that follows cannot ask the app to quit.
+ */
+function popOutNativeTab(tab) {
+  if (!isNativeTab(tab)) return false;
+  const embed = embedApi();
+  const hosted = tab.native.state === 'running';
+  tab.native.detached = true;
+  if (embed && typeof embed.detach === 'function' && hosted) {
+    try {
+      const pending = embed.detach(tab.id, { restore: true });
+      if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+    } catch (err) { /* the window is the desktop's problem either way now */ }
+  }
+  closeTab(tab.id);
+  return hosted;
+}
+
+/**
+ * closeTab()'s hook, beside disposeClaudeTab(). Closing the TAB closes the
+ * app — the same WM_CLOSE its own X button sends, so unsaved work still
+ * prompts — unless the window was just popped out, in which case it is the
+ * desktop's and must be left alone.
+ */
+function disposeNativeTab(tab) {
+  if (!isNativeTab(tab)) return;
+  if (nativeResizeObserver && tab.viewEl) {
+    try { nativeResizeObserver.unobserve(tab.viewEl); } catch (err) { /* already gone */ }
+  }
+  if (tab.native.cardEl) {
+    try { tab.native.cardEl.remove(); } catch (err) { /* already detached */ }
+    tab.native.cardEl = null;
+  }
+  if (tab.native.detached) return;
+  if (tab.native.state !== 'running' && tab.native.state !== 'starting') return;
+  const embed = embedApi();
+  if (!embed || typeof embed.close !== 'function') return;
+  try {
+    const pending = embed.close(tab.id);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* the app is main's problem from here */ }
+}
+
+/**
+ * Called from init(). The resize listener goes on whatever this build can do
+ * (queueNativeLayout() costs nothing with no native tab open); the gone
+ * subscription only exists where the engine does.
+ */
+function wireNativeTabs() {
+  // The well changes size with the window, and the hosted window has to follow.
+  window.addEventListener('resize', () => queueNativeLayout());
+
+  const embed = embedApi();
+  if (!embed || typeof embed.onGone !== 'function') return;
+  try {
+    embed.onGone((payload) => {
+      const key = String((payload && payload.tabId) == null ? '' : payload.tabId);
+      if (!key) return;
+      // main stringifies the id on the way out, so the compare is on strings.
+      const tab = tabs.find((t) => isNativeTab(t) && String(t.id) === key);
+      if (!tab) return;
+      if (tab.native.detached) return;   // our own pop-out, already accounted for
+      setNativeState(tab, 'gone', '');
+    });
+  } catch (err) { /* an engine that cannot subscribe simply never reports */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2651,7 +3339,13 @@ function syncBoardPause() {
 function wireOverlayWatch() {
   // The panels toggle `hidden`; the menus and suggestions toggle it too, so one
   // attribute observer on the whole document catches every one of them.
-  const observer = new MutationObserver(() => syncBoardPause());
+  const observer = new MutationObserver(() => {
+    syncBoardPause();
+    // A hosted app window paints above every pixel of this document, panes
+    // included, so the same signal that pauses the board hides the app: the
+    // panel that just opened would otherwise be behind it.
+    queueNativeLayout();
+  });
   observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['hidden'] });
 
   // The REAL window's focus, from main. This document's own blur/focus is the
@@ -3226,6 +3920,16 @@ function buildChip(tab) {
 /** The chip's hover text: the page title, and the host it is showing. */
 function chipTooltip(tab) {
   if (!tab) return '';
+  // A native tab has no url and no folder: what the hover is for is the state,
+  // because a chip whose app has closed looks exactly like one whose has not.
+  if (isNativeTab(tab)) {
+    const state = tab.native.state;
+    if (state === 'running') return tab.native.name + ' — running in this tab';
+    if (state === 'starting') return tab.native.name + ' — starting';
+    if (state === 'gone') return tab.native.name + ' — closed';
+    if (state === 'failed') return tab.native.name + ' — ' + nativeReasonText(tab.native.reason);
+    return tab.native.name + ' — not running';
+  }
   // A Claude chamber has no url, but it does have a folder — and the chip only
   // ever shows that folder's last segment, so the tooltip carries the full path.
   if (isClaudeTab(tab)) {
@@ -3389,7 +4093,10 @@ function clearTabIcon(tab) {
 }
 
 function setTabTitle(tab, title) {
-  const fallback = isClaudeTab(tab) ? claudeDefaultTitle(tab) : shortLabelFor(tab.url);
+  // A native tab is called after the app it hosts, whatever that app's own
+  // window is titled: the chip is how you find Paint again, not a caption.
+  const fallback = isNativeTab(tab) ? tab.native.name
+    : (isClaudeTab(tab) ? claudeDefaultTitle(tab) : shortLabelFor(tab.url));
   const text = (title && String(title).trim()) || fallback;
   tab.title = text;
   if (tab.titleEl) tab.titleEl.textContent = text;
@@ -4583,6 +5290,10 @@ function syncSplitOverlays() {
 function refreshSplit() {
   applySplitLayout();
   syncSplitOverlays();
+  // Splitting, unsplitting and dragging the divider all resize the well, and a
+  // hosted app window is parked over a measured rect rather than laid out by
+  // the flexbox: it has to be told. Costs nothing with no native tab open.
+  queueNativeLayout();
 }
 
 /**
@@ -5490,6 +6201,12 @@ function activateTab(id) {
   // half the chrome is now describing. A no-op when nothing is split.
   refreshSplit();
 
+  // A hosted app window follows its placeholder, and the display swap above
+  // just moved every one of them: the tab coming forward shows its app, the
+  // one going back hides it without giving it up. Forced, because the incoming
+  // tab's rect may be exactly the rect it was last laid out at.
+  queueNativeLayout(true);
+
   syncOmniboxFromActive(true);
   updateNavState();
   syncReloadButton(); // the incoming tab may be mid-load, the outgoing one not
@@ -5523,6 +6240,10 @@ function closeTab(id) {
 
   tab.ready = false;
   disposeClaudeTab(tab); // no-op for page tabs
+  // Closing a native tab closes the app in it — the same WM_CLOSE its own X
+  // button sends, so unsaved work still prompts. A popped-out window is
+  // already the desktop's and is left alone.
+  disposeNativeTab(tab);
   clearTabCard(tab);     // the card lives in #views, not on the view
   clearAppNote(tab);     // ...and so does the app note bar
   // On a sleeping tab this drops the placeholder: the guest is long gone.
@@ -5747,7 +6468,28 @@ function tabMenuItemsForTab(tab) {
     { label: 'New tab to the right', run: () => openTabAt(HOME_URL, stripSeat(tab) + 1) }
   ];
 
-  if (page) {
+  if (isNativeTab(tab)) {
+    // Pop out is the escape hatch the whole feature needs: the app goes back to
+    // being an ordinary desktop window, still running, and the tab goes away.
+    items.push({
+      label: 'Pop out of the tab',
+      run: () => popOutNativeTab(tab),
+      disabled: tab.native.state !== 'running'
+    });
+    // Start is the same row the placeholder's own button is, for a tab whose
+    // app has closed or was never started; there is nothing to start while it
+    // is hosted, so the row is dimmed rather than removed.
+    items.push({
+      label: 'Start ' + tab.native.name,
+      run: () => startNativeTab(tab),
+      disabled: tab.native.state === 'running' || tab.native.state === 'starting'
+    });
+    // The ordinary launch, for the app that will not be hosted at all.
+    items.push({
+      label: 'Launch ' + tab.native.name + ' normally',
+      run: () => launchAppNormally(tab.native.appId)
+    });
+  } else if (page) {
     items.push({ label: 'Reload', run: () => reloadTab(tab) });
     // The CURRENT url, not the one the tab was opened on.
     items.push({
@@ -6029,6 +6771,12 @@ function sessionSnapshot() {
       const cwd = (typeof tab.cwd === 'string' && tab.cwd) ? tab.cwd : '';
       if (!cwd) continue; // nothing to respawn into: it would be dropped on read
       entry = { claude: true, cwd: cwd };
+    } else if (isNativeTab(tab)) {
+      // The app id alone. The app itself is NOT relaunched on the next boot —
+      // restoreSession() brings the tab back with a "Start <app>" button — so
+      // there is no window state worth carrying, and the name, icon and exe
+      // are the index's to say and may have moved between runs.
+      entry = { native: tab.native.appId };
     } else {
       const url = sessionUrlFor(tab);
       if (!url) continue; // an unpersistable page shifts nothing
@@ -6153,7 +6901,17 @@ function sanitiseSession(parsed) {
     if (entry && entry.claude) {
       const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
-      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws, app: '' });
+      entries.push({ claude: true, cwd: cwd, url: '', pinned: false, muted: false, ws: ws, app: '', native: '' });
+      if (entries.length >= SESSION_MAX_TABS) break;
+      continue;
+    }
+    if (entry && typeof entry.native === 'string' && entry.native.trim()) {
+      const appId = entry.native.trim();
+      if (appId.length > APP_ID_MAX) continue; // not an id anything wrote
+      entries.push({
+        claude: false, cwd: '', url: '', pinned: false, muted: false,
+        ws: ws, app: '', native: appId
+      });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
     }
@@ -6172,7 +6930,8 @@ function sanitiseSession(parsed) {
     entries.push({
       claude: false, cwd: '', url: href,
       pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted), ws: ws,
-      app: (appId && appId.length <= APP_ID_MAX) ? appId : ''
+      app: (appId && appId.length <= APP_ID_MAX) ? appId : '',
+      native: ''
     });
     if (entries.length >= SESSION_MAX_TABS) break;
   }
@@ -6300,18 +7059,23 @@ function restoreSession(snapshot) {
     const resume = settingGet('claudeResume') !== false; // unset means yes
     for (const row of ordered) {
       const entry = row.entry;
-      const tab = entry.claude
-        ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws })
-        : createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
-          background: true,
-          pinned: entry.pinned,
-          muted: entry.muted,
-          workspace: entry.ws
-        });
+      // A native tab comes back as a PLACEHOLDER and nothing else: relaunching
+      // somebody's apps behind their back on every boot is not a restore, it is
+      // a surprise. The card on it offers "Start <app>".
+      const tab = entry.native
+        ? createNativeTab(entry.native, { background: true, workspace: entry.ws })
+        : (entry.claude
+          ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws })
+          : createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
+            background: true,
+            pinned: entry.pinned,
+            muted: entry.muted,
+            workspace: entry.ws
+          }));
       if (!tab) continue;
       // The app flag comes back before anything is raised, so the chip is born
       // with the app's name on it and the strip order it was stored in holds.
-      if (!entry.claude && entry.app) applyAppFlag(tab, entry.app);
+      if (!entry.claude && !entry.native && entry.app) applyAppFlag(tab, entry.app);
       created.push(tab);
       bySeat.set(row.index, tab);
       if (row.index === session.active) wanted = tab;
@@ -6794,8 +7558,10 @@ function navigateActiveTab(input) {
   const url = toNavigationUrl(input);
   if (!url) return;
 
-  // A Claude tab has nowhere to navigate: typing a URL opens a page tab instead.
-  if (isClaudeTab(tab)) {
+  // A Claude tab and a hosted app both have nowhere to navigate: typing a URL
+  // opens a page tab instead. (A native tab's view is a plain <div>, so the
+  // src-attribute fallback below would do nothing at all.)
+  if (isClaudeTab(tab) || isNativeTab(tab)) {
     createTab(url);
     return;
   }
@@ -8131,6 +8897,7 @@ function init() {
   wireKeyboard();
   wireSettings();
   wireOverlayWatch();
+  wireNativeTabs();
   wireAutopauseReadout();
   wireStats();
   // Idle music and the now-playing readout. Nothing starts here: this only

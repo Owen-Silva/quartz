@@ -594,6 +594,70 @@
     return hits.slice(0, MAX_APPS);
   }
 
+  /* --- the same installed apps, opened IN a tab ------------------- */
+
+  /*
+   * "Open Paint in a tab" sits under "Open Paint": the app is the same one and
+   * the list is the same appsCache, but app.js hosts its real window inside a
+   * tab (openNativeTab) instead of handing it to Windows. Once that tab exists
+   * the row is a switch, exactly as a catalogue app's row becomes one — a
+   * second tab of the same app is never what was meant.
+   *
+   * Every one of these rows is offered whatever the build can do: openNativeTab
+   * puts "not available in this build" on the tab's own placeholder, which is a
+   * better place to read it than a row that silently is not there.
+   */
+
+  /** The open native tab for one installed app id, or null. app.js flags them tab.native. */
+  function openNativeTabFor(id) {
+    var list = tabList();
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i];
+      if (t && t.native && t.native.appId === id) return t;
+    }
+    return null;
+  }
+
+  /** One installed app as a row that hosts it in a tab. */
+  function nativeAppCommand(entry) {
+    var openTab = openNativeTabFor(entry.id);
+    return {
+      id: 'native-' + entry.id,
+      glyph: GLYPH.screen,
+      iconDataUrl: entry.iconDataUrl,
+      label: openTab ? 'Switch to ' + entry.name : 'Open ' + entry.name + ' in a tab',
+      hint: openTab ? 'Already in a tab' : 'Its own window, inside a tab',
+      nativeOpen: !!openTab,
+      nativeId: entry.id,
+      nativeName: entry.name.toLowerCase(),
+      // openNativeTab() raises the tab that exists and builds one when it does
+      // not, so both spellings of this row run the same call.
+      run: function () { callGlobal(function () { return openNativeTab; }, entry.id); }
+    };
+  }
+
+  /**
+   * The in-a-tab rows for one query. Same source, same cap and the same
+   * "already open first" sort the installed rows use.
+   */
+  function nativeAppCommands(query) {
+    ensureApps();
+    if (!appsCache || !appsCache.length) return [];
+    var words = tokenize(query);
+    var hits = [];
+    for (var i = 0; i < appsCache.length; i++) {
+      var cmd = nativeAppCommand(appsCache[i]);
+      if (!commandMatches(cmd, words)) continue;
+      hits.push(cmd);
+      if (hits.length > 400) break;   // a pathological index is still one frame
+    }
+    hits.sort(function (a, b) {
+      if (a.nativeOpen !== b.nativeOpen) return a.nativeOpen ? -1 : 1;
+      return a.nativeName < b.nativeName ? -1 : (a.nativeName > b.nativeName ? 1 : 0);
+    });
+    return hits.slice(0, MAX_APPS);
+  }
+
   /* --- the web apps, and the terminals --------------------------- */
 
   /*
@@ -1113,12 +1177,21 @@
       apps[j].rank = commandRank(apps[j], query);
       out.push(apps[j]);
     }
+    // The same apps again, hosted in a tab. Directly after the plain rows: the
+    // two are the same app and reading them as a pair is the point.
+    var native = nativeAppCommands(query);
+    for (var n = 0; n < native.length; n++) {
+      native[n].kind = 'command';
+      native[n].order = all.length + apps.length + n;
+      native[n].rank = commandRank(native[n], query);
+      out.push(native[n]);
+    }
     // Then the sites this browser presents as apps, and the terminals — both
     // opened in this window, so they belong on the near side of the Start Menu.
     var web = webAppCommands(query);
     for (var w = 0; w < web.length; w++) {
       web[w].kind = 'command';
-      web[w].order = all.length + apps.length + w;
+      web[w].order = all.length + apps.length + native.length + w;
       web[w].rank = commandRank(web[w], query);
       out.push(web[w]);
     }
@@ -1472,12 +1545,14 @@
     // plain query the tabs are what was asked for.
     if (tokenize(value).length) {
       var apps = appCommands(value).slice(0, MAX_APPS_TABS);
+      var native = nativeAppCommands(value).slice(0, MAX_APPS_TABS);
       var web = webAppCommandsBesideTabs(value, data.open).slice(0, MAX_APPS_TABS);
-      if (apps.length || web.length) {
+      if (apps.length || native.length || web.length) {
         listEl.appendChild(captionEl('Apps'));
-        // The installed programs first, then the sites presented as apps: an
-        // app that is really on the machine is the likelier answer to a name.
-        var appRows = apps.concat(web);
+        // The installed programs first, then the same programs hosted in a tab,
+        // then the sites presented as apps: an app that is really on the machine
+        // is the likelier answer to a name.
+        var appRows = apps.concat(native, web);
         for (i = 0; i < appRows.length; i++) {
           appRows[i].kind = 'command';       // Enter runs it, like the > rows
           row = buildCommandRow(appRows[i], rows.length);
@@ -1775,6 +1850,10 @@
       appsOf: function () { return appsCache; },
       MAX_APPS: MAX_APPS,
       MAX_APPS_TABS: MAX_APPS_TABS,
+      // the same installed apps, hosted in a tab
+      nativeAppCommands: nativeAppCommands,
+      nativeAppCommand: nativeAppCommand,
+      openNativeTabFor: openNativeTabFor,
       // web apps + terminals
       webAppCommands: webAppCommands,
       webAppCommandsBesideTabs: webAppCommandsBesideTabs,
