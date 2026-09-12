@@ -358,7 +358,10 @@ function syncStatsSubscription() {
   syncIdlePresence();
   const api = statsApi();
   if (!api) return;
-  const want = !windowBlurred && statsTabEligible(getActiveTab());
+  // windowHasFocus(): a hosted app tab is not "the user left". In practice a
+  // native tab in front is never stats-eligible anyway, so this only matters
+  // for the moment either side of a switch.
+  const want = windowHasFocus() && statsTabEligible(getActiveTab());
   if (want === statsSubscribed) return;
   statsSubscribed = want;
   try {
@@ -525,7 +528,9 @@ function idlePlayer() {
 const musicForced = { focused: null, mediaStatus: null };
 
 function musicFocused() {
-  return musicForced.focused === null ? !windowBlurred : musicForced.focused === true;
+  // windowHasFocus(), not !windowBlurred: a hosted app tab holding the keyboard
+  // is the user still being here, and the music must not stop for it.
+  return musicForced.focused === null ? windowHasFocus() : musicForced.focused === true;
 }
 
 /** The machine is playing something: the idle music's veto. */
@@ -3022,6 +3027,24 @@ function wireNativeTabs() {
       setNativeState(tab, 'gone', '');
     });
   } catch (err) { /* an engine that cannot subscribe simply never reports */ }
+
+  // Who has the keyboard, from main's Win32 poll. An older preload without it
+  // simply never pushes, and everything falls back to the window's own focus.
+  if (typeof embed.onFocus === 'function') {
+    try { embed.onFocus((payload) => applyNativeFocus(payload)); }
+    catch (err) { /* no push: windowBlurred stays the only signal */ }
+  }
+
+  // A browser shortcut pressed while the hosted app had the keyboard. main
+  // registered it with the OS for exactly that state, and has already given
+  // keyboard focus back to the chrome; running the action is all that is left.
+  if (typeof embed.onShortcutFire === 'function') {
+    try {
+      embed.onShortcutFire((payload) => {
+        runShortcut(payload && payload.id, payload);
+      });
+    } catch (err) { /* the tab strip is still one click away */ }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -3376,6 +3399,52 @@ function pushBoardPaused(tab, paused) {
 }
 
 let windowBlurred = false;
+
+/*
+ * WINDOW FOCUS, ONCE A NATIVE APP TAB IS HOSTED.
+ *
+ * Electron reports this window as BLURRED the moment focus moves into a hosted
+ * app's window: Chromium's HWND really did lose it. Windows disagrees -- the
+ * foreground window never changed -- and Windows is the one that matches what
+ * The user is doing, which is working inside this browser.
+ *
+ * So main polls Win32 while anything is hosted (embed.focusInfo) and pushes
+ * `embed:focus` { ours, hostedTabId } on every change. `ours` true means the
+ * foreground window is ours whatever `windowBlurred` says, and it is the signal
+ * every focus-dependent feature here reads through windowHasFocus().
+ *
+ * Both fall back to "no" the instant nothing is hosted any more, so a session
+ * without native tabs behaves exactly as it always did.
+ */
+let nativeFocusOurs = false;
+let nativeFocusTabId = null;
+
+/**
+ * Is the user looking at this browser? The window's own focus, OR a hosted app
+ * window inside it holding the keyboard.
+ *
+ * The idle music is the reason this exists: `where: 'anywhere'` music must keep
+ * playing while he works in a hosted app, and the raw blur would stop it.
+ */
+function windowHasFocus() {
+  return !windowBlurred || nativeFocusOurs === true;
+}
+
+/** main's `embed:focus` push: the only writer of the two facts above. */
+function applyNativeFocus(payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const ours = p.ours === true;
+  const tabId = (p.hostedTabId == null || p.hostedTabId === '') ? null : String(p.hostedTabId);
+  if (ours === nativeFocusOurs && tabId === nativeFocusTabId) return false;
+  nativeFocusOurs = ours;
+  nativeFocusTabId = tabId;
+  // The same edge window focus itself runs: the music's gate, the now-playing
+  // poll and the stats subscription all follow from it. The board is NOT in
+  // that list on purpose -- a hosted app paints over every pixel of the well,
+  // so a board nobody can see stays frozen and costs nothing.
+  syncStatsSubscription();
+  return true;
+}
 
 // The board also freezes while the whole window is behind something else:
 // visible-but-unfocused is the common laptop case and the GPU cost is real.
@@ -8645,6 +8714,21 @@ const ACTIONS = {
 };
 
 /**
+ * Run one action by id, whatever asked for it: the chrome's own keydown, main's
+ * replay of a key pressed inside a guest page, or main's globalShortcut replay
+ * of a key pressed inside a HOSTED APP window. One dispatcher means those three
+ * paths can never drift apart.
+ * @returns {boolean} whether an action of that id exists.
+ */
+function runShortcut(id, payload) {
+  const key = typeof id === 'string' ? id : '';
+  const run = key ? ACTIONS[key] : null;
+  if (!run) return false;
+  run(payload || {});
+  return true;
+}
+
+/**
  * main.js matches keys pressed inside a guest page itself, so it needs the same
  * binding map the chrome uses. Sent once at boot and again after every change.
  * main keeps its own built-in defaults if this never arrives.
@@ -8678,8 +8762,7 @@ function wireKeyboard() {
   // same actions work whether the chrome or a page currently has focus.
   if (window.api && typeof window.api.onShortcut === 'function') {
     window.api.onShortcut((payload) => {
-      const run = payload && ACTIONS[payload.action];
-      if (run) run(payload);
+      runShortcut(payload && payload.action, payload);
     });
   }
 
@@ -8747,10 +8830,9 @@ function wireKeyboard() {
     if (window.Shortcuts && typeof window.Shortcuts.actionFor === 'function') {
       let action = null;
       try { action = window.Shortcuts.actionFor(event); } catch (err) { action = null; }
-      const run = action ? ACTIONS[action] : null;
-      if (run) {
+      if (action && ACTIONS[action]) {
         event.preventDefault();
-        run();
+        runShortcut(action);
       }
       return;
     }
@@ -9058,6 +9140,9 @@ window.idleMusic = {
     audibleTab: anyTabAudible(),
     focused: musicFocused(),
     windowFocused: !windowBlurred,
+    // The other half of the focus truth: Electron says blurred while a hosted
+    // app holds the keyboard, and `ours` is what actually decides `focused`.
+    nativeFocus: { ours: nativeFocusOurs, hostedTabId: nativeFocusTabId },
     machinePlaying: machinePlaying(),
     forced: { focused: musicForced.focused, mediaStatus: musicForced.mediaStatus },
     newTabActive: activeIsNewTab()
@@ -9079,6 +9164,30 @@ window.idleMusic = {
   // One /now answer as if the bridge had said it: what the poll does with an
   // answer is the same code either way.
   takeMedia: (answer) => takeMediaAnswer(answer)
+};
+
+// Who has the keyboard while an app window is hosted in a tab, said out loud
+// for the same reason: the live verification cannot produce a real click into a
+// hosted app while the user is at the machine, so it pushes the exact payload main
+// would have pushed and reads back what the chrome decided. `info` is main's
+// own Win32 answer, `state` is what this document is acting on.
+window.nativeFocus = {
+  state: () => ({
+    ours: nativeFocusOurs,
+    hostedTabId: nativeFocusTabId,
+    windowBlurred: windowBlurred,
+    focused: windowHasFocus()
+  }),
+  push: (payload) => {
+    const changed = applyNativeFocus(payload);
+    return { changed, ours: nativeFocusOurs, focused: windowHasFocus() };
+  },
+  info: () => {
+    const embed = embedApi();
+    if (!embed || typeof embed.focusInfo !== 'function') return Promise.resolve(null);
+    return embed.focusInfo();
+  },
+  run: (id) => runShortcut(id)
 };
 
 // Close and reopen with the tabs restored. settings.js (About) and the command

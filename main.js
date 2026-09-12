@@ -23,6 +23,7 @@ const {
   Menu,
   nativeTheme,
   webContents,
+  globalShortcut,
 } = require('electron');
 const { createSession, killAll, listPrograms, hasProgram } = require('./pty');
 const autopauseModule = require('./autopause');
@@ -153,6 +154,11 @@ const embed = (() => {
     detachAll: () => ({ ok: true, detached: 0 }),
     handleWindowClose: () => ({ ok: true, detached: 0 }),
     alive: () => false,
+    focusInfo: () => ({
+      available: false, foregroundRoot: '0', ours: false, focusHwnd: '0',
+      focusClass: '', chromium: false, hostedTabId: null, hostedVisible: false,
+    }),
+    focusChrome: () => false,
     list: () => [],
     stats: () => ({ ffi: null, available: false, attached: 0 }),
     on: () => {},
@@ -174,7 +180,12 @@ const embed = (() => {
 
 // The tab's app closed itself (its X, its own menu, a crash). The chrome owns
 // what a tab does about that, so it just hears the tabId.
-embed.on('gone', (tabId) => send('embed:gone', { tabId: String(tabId) }));
+embed.on('gone', (tabId) => {
+  send('embed:gone', { tabId: String(tabId) });
+  // One app fewer: the focus poll stops when that was the last one, and the
+  // shortcuts go back to the OS immediately if they were ours.
+  syncNativeFocusPoll();
+});
 
 // ---------------------------------------------------------------------------
 // Window state
@@ -469,6 +480,7 @@ function createWindow() {
   // them back the moment it happens -- the apps keep running as normal windows.
   win.webContents.on('render-process-gone', (_event, details) => {
     try { embed.detachAll(); } catch { /* nothing left to protect */ }
+    syncNativeFocusPoll();   // nothing hosted, and no renderer to send to
     console.warn('[embed] chrome renderer gone:', (details && details.reason) || '?');
   });
 
@@ -508,6 +520,8 @@ function createWindow() {
     // which for most programs means the program exits. Hand them all back to
     // the desktop while the window still exists.
     try { embed.handleWindowClose(); } catch { /* nothing left to protect */ }
+    // …and with the apps go the global keys that were only ever borrowed.
+    syncNativeFocusPoll();
   });
 
   win.loadFile('index.html');
@@ -3280,7 +3294,9 @@ ipcMain.handle('embed:attach', (event, payload) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
   const req = payload && typeof payload === 'object' ? payload : {};
   try {
-    return embed.attach({ tabId: req.tabId, hwnd: req.hwnd });
+    const out = embed.attach({ tabId: req.tabId, hwnd: req.hwnd });
+    syncNativeFocusPoll();
+    return out;
   } catch {
     return { ok: false, reason: 'failed' };
   }
@@ -3293,7 +3309,12 @@ ipcMain.handle('embed:open', (event, payload) => {
   const appId = String(req.appId == null ? '' : req.appId);
   if (!tabId || !appId) return { ok: false, reason: 'bad-request' };
   try {
-    return embedOpen(tabId, appId).catch(() => ({ ok: false, reason: 'failed' }));
+    return embedOpen(tabId, appId)
+      .catch(() => ({ ok: false, reason: 'failed' }))
+      // Whether it attached or not, the poll's "is anything hosted" answer may
+      // have moved -- and this is the one attach that does not come through
+      // 'embed:attach'.
+      .then((out) => { syncNativeFocusPoll(); return out; });
   } catch {
     return { ok: false, reason: 'failed' };
   }
@@ -3321,7 +3342,11 @@ ipcMain.handle('embed:detach', (event, payload) => {
     // window would be attached to a tab that no longer exists.
     const pending = embedPending.get(String(req.tabId == null ? '' : req.tabId));
     if (pending) pending.cancelled = true;
-    return embed.detach(req.tabId, { restore: req.restore !== false });
+    const out = embed.detach(req.tabId, { restore: req.restore !== false });
+    // A tab switch is a layout() call, but a tab CLOSING is this: take the
+    // global keys back before the window it was hosting is even gone.
+    syncNativeFocusPoll();
+    return out;
   } catch {
     return { ok: false, reason: 'failed' };
   }
@@ -3331,7 +3356,9 @@ ipcMain.handle('embed:close', (event, payload) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
   const req = payload && typeof payload === 'object' ? payload : {};
   try {
-    return embed.close(req.tabId);
+    const out = embed.close(req.tabId);
+    syncNativeFocusPoll();
+    return out;
   } catch {
     return { ok: false, reason: 'failed' };
   }
@@ -3344,6 +3371,225 @@ ipcMain.handle('embed:list', (event) => {
   } catch {
     return { available: false, windows: [], stats: null };
   }
+});
+
+// ---------------------------------------------------------------------------
+// Focus, and the browser's own keys, while an app window is hosted in a tab
+//
+// Two things break the moment a hosted app takes the keyboard, and both are
+// Windows telling the truth:
+//
+//   1. Electron calls the BrowserWindow BLURRED -- Chromium's HWND really did
+//      lose focus -- so everything in the chrome that follows window focus (the
+//      idle music's gate above all) behaves as if the user had left the browser. He
+//      has not: the window he is typing into is INSIDE it.
+//   2. Keystrokes go to the app, not to Chromium, so the browser's own
+//      shortcuts are dead until the tab strip is clicked.
+//
+// embed.focusInfo() answers (1) from Win32 (see embed.js), and a 250 ms poll --
+// running ONLY while something is actually hosted -- pushes the answer to the
+// chrome as `embed:focus`. (2) is answered by handing a SMALL set of accelerators
+// to the OS with globalShortcut, and only for exactly as long as a hosted app
+// really holds the keyboard.
+// ---------------------------------------------------------------------------
+
+/** How often the focus poll asks Win32. Only while a native tab is attached. */
+const NATIVE_FOCUS_POLL_MS = 250;
+
+/**
+ * How many consecutive samples must agree before the shortcuts are handed to
+ * the OS. Registering is debounced (a 250 ms flap while focus settles must not
+ * thrash the global table); UNREGISTERING never is, so a tab switch takes the
+ * keys back on the very next tick.
+ */
+const NATIVE_SHORTCUT_ARM_SAMPLES = 2;
+
+/**
+ * The keys the browser takes back while a hosted app holds the keyboard.
+ *
+ * The whole set is global for those few seconds -- every other app on the
+ * machine loses them too -- so it is deliberately tiny, and every entry is a
+ * key that BROWSERS own and hosted apps almost never do.
+ *
+ * NOT Ctrl+W: a hosted editor, chat client or terminal closes its own document
+ * with it, and "closed my tab instead of my file" is unrecoverable in a way the
+ * rest of this list is not. Same reasoning keeps out Ctrl+F (find, in every app
+ * there is), Ctrl+R (refresh/run/record), Ctrl+S, Ctrl+P and Ctrl+N. The user
+ * can always click the tab strip, which gives the chrome every shortcut back.
+ *
+ * `accelerator` is a fixed key app.js matches itself (never rebindable);
+ * everything else is looked up in the live binding map the chrome mirrors over
+ * 'shortcuts:set', so a rebound Ctrl+K follows the user's setting.
+ */
+const NATIVE_TAB_SHORTCUTS = [
+  { id: 'new-tab', fallback: 'Ctrl+T' },
+  { id: 'focus-omnibox', fallback: 'Ctrl+L' },
+  { id: 'command-palette', fallback: 'Ctrl+K' },
+  { id: 'tabsearch', fallback: 'Ctrl+Shift+A' },
+  { id: 'next-tab', accelerator: 'Ctrl+Tab' },
+  { id: 'prev-tab', accelerator: 'Ctrl+Shift+Tab' },
+  { id: 'files', accelerator: 'Ctrl+Alt+E' },
+];
+
+/** @type {NodeJS.Timeout|null} the poll; null whenever nothing is hosted. */
+let nativeFocusTimer = null;
+
+/** The last { ours, hostedTabId } the chrome was told, so it hears only edges. */
+let nativeFocusSent = null;
+
+/** The reducer's state: see nativeShortcutStep(). */
+let nativeShortcutState = { streak: 0, registered: false };
+
+/** What is in the OS table right now: [{ id, accelerator }]. */
+let nativeShortcutsOn = [];
+
+/**
+ * The register/unregister decision for ONE focus sample. Pure, and the whole of
+ * the policy: the caller does the Win32 and the registering.
+ *
+ * @param {{streak:number, registered:boolean}} state
+ * @param {{ours:boolean, hostedTabId:string|null, hostedVisible:boolean}} sample
+ * @returns {{streak:number, registered:boolean, action:('register'|'unregister'|null)}}
+ */
+function nativeShortcutStep(state, sample) {
+  const prev = (state && typeof state === 'object') ? state : { streak: 0, registered: false };
+  const had = prev.registered === true;
+  const s = sample && typeof sample === 'object' ? sample : {};
+  // All three, every tick: our window is the foreground one, a hosted app holds
+  // the keyboard inside it, and that app is the tab on screen.
+  const want = s.ours === true && !!s.hostedTabId && s.hostedVisible === true;
+  if (!want) return { streak: 0, registered: false, action: had ? 'unregister' : null };
+  const streak = (Number(prev.streak) || 0) + 1;
+  if (had) return { streak, registered: true, action: null };
+  if (streak >= NATIVE_SHORTCUT_ARM_SAMPLES) return { streak, registered: true, action: 'register' };
+  return { streak, registered: false, action: null };
+}
+
+/** The first combo the live binding map gives this action, or null. */
+function comboForAction(id) {
+  for (const combo of Object.keys(keyBindings)) {
+    if (keyBindings[combo] === id) return combo;
+  }
+  return null;
+}
+
+/** NATIVE_TAB_SHORTCUTS resolved against the bindings -> [{ id, accelerator }]. */
+function nativeShortcutSet() {
+  const out = [];
+  for (const entry of NATIVE_TAB_SHORTCUTS) {
+    const accel = entry.accelerator || comboForAction(entry.id) || entry.fallback || '';
+    if (accel) out.push({ id: entry.id, accelerator: accel });
+  }
+  return out;
+}
+
+/**
+ * A registered key fired. The chrome runs the action, so the keyboard has to go
+ * back to Chromium first -- otherwise Ctrl+L would focus an omnibox that cannot
+ * be typed into. Neither call raises or activates the window: webContents.focus()
+ * is in-process, and embed.focusChrome() is a SetFocus inside the window that is
+ * already in the foreground.
+ */
+function fireNativeShortcut(id) {
+  const w = liveWin();
+  if (!w) return;
+  try { w.webContents.focus(); } catch { /* the renderer will still get it */ }
+  try { embed.focusChrome(); } catch { /* best effort */ }
+  send('shortcut:fire', { id: String(id) });
+}
+
+function registerNativeShortcuts() {
+  const set = nativeShortcutSet();
+  const done = [];
+  const refused = [];
+  for (const item of set) {
+    let ok = false;
+    try { ok = globalShortcut.register(item.accelerator, () => fireNativeShortcut(item.id)); }
+    catch { ok = false; }
+    if (ok) done.push(item);
+    else refused.push(item.accelerator);
+  }
+  nativeShortcutsOn = done;
+  console.warn('[embed] native-tab shortcuts on: '
+    + (done.map((i) => i.accelerator + '=' + i.id).join(' ') || '(none)')
+    + (refused.length ? ' | refused: ' + refused.join(' ') : ''));
+}
+
+function unregisterNativeShortcuts(reason) {
+  if (!nativeShortcutsOn.length) return;
+  for (const item of nativeShortcutsOn) {
+    try { globalShortcut.unregister(item.accelerator); } catch { /* gone already */ }
+  }
+  console.warn('[embed] native-tab shortcuts off (' + (reason || 'condition lost') + '): '
+    + nativeShortcutsOn.map((i) => i.accelerator).join(' '));
+  nativeShortcutsOn = [];
+  nativeShortcutState = { streak: 0, registered: false };
+}
+
+/** One tick: ask Win32, tell the chrome what moved, then re-decide the keys. */
+function pollNativeFocus() {
+  let info = null;
+  try { info = embed.focusInfo(); } catch { info = null; }
+  if (!info) return;
+
+  if (!nativeFocusSent || nativeFocusSent.ours !== info.ours
+      || nativeFocusSent.hostedTabId !== info.hostedTabId) {
+    nativeFocusSent = { ours: !!info.ours, hostedTabId: info.hostedTabId || null };
+    send('embed:focus', nativeFocusSent);
+  }
+
+  const next = nativeShortcutStep(nativeShortcutState, info);
+  nativeShortcutState = { streak: next.streak, registered: next.registered };
+  if (next.action === 'register') registerNativeShortcuts();
+  else if (next.action === 'unregister') unregisterNativeShortcuts('focus left the app');
+}
+
+/**
+ * Start the poll while something is hosted, stop it the moment nothing is.
+ * Called from every edge that can change that -- attach, detach, close, the
+ * app going away by itself, the window closing.
+ */
+function syncNativeFocusPoll() {
+  let hosted = 0;
+  try { hosted = embed.list().length; } catch { hosted = 0; }
+  if (hosted > 0) {
+    if (!nativeFocusTimer) nativeFocusTimer = setInterval(pollNativeFocus, NATIVE_FOCUS_POLL_MS);
+    return;
+  }
+  if (nativeFocusTimer) {
+    clearInterval(nativeFocusTimer);
+    nativeFocusTimer = null;
+  }
+  unregisterNativeShortcuts('nothing hosted');
+  // Nothing is hosted, so the window's own focus is the truth again and the
+  // chrome must not be left holding a stale "he is inside an app".
+  if (nativeFocusSent && (nativeFocusSent.ours || nativeFocusSent.hostedTabId)) {
+    nativeFocusSent = { ours: false, hostedTabId: null };
+    send('embed:focus', nativeFocusSent);
+  }
+}
+
+/**
+ * What focusInfo() says right now, plus which keys are really in the OS table.
+ * Read-only, and the live verification's only way to see either.
+ */
+ipcMain.handle('embed:focus-info', (event) => {
+  if (!isChromeSender(event)) return null;
+  let info = null;
+  try { info = embed.focusInfo(); } catch { info = null; }
+  const registered = nativeShortcutsOn.map((item) => {
+    let live = false;
+    try { live = globalShortcut.isRegistered(item.accelerator); } catch { live = false; }
+    return { id: item.id, accelerator: item.accelerator, isRegistered: live };
+  });
+  return {
+    info,
+    polling: nativeFocusTimer != null,
+    streak: nativeShortcutState.streak,
+    armed: nativeShortcutState.registered,
+    registered,
+    set: nativeShortcutSet(),
+  };
 });
 
 // ---------------------------------------------------------------------------
@@ -3982,6 +4228,10 @@ app.on('before-quit', (event) => {
   // A child HWND dies with its parent, so this is the difference between "the
   // browser quit" and "Notepad quit too, taking the document with it".
   try { embed.detachAll(); } catch { /* best effort, always */ }
+  // Electron drops every accelerator on quit anyway; doing it here means the
+  // log says so, and a quit that is cancelled leaves nothing armed.
+  try { unregisterNativeShortcuts('quit'); } catch { /* nothing registered */ }
+  if (nativeFocusTimer) { clearInterval(nativeFocusTimer); nativeFocusTimer = null; }
   // The one place a synchronous write is still right: there is no event loop
   // left to protect, and a snapshot that never reached disk is a lost session.
   // (app:restart goes through app.quit(), so a restart lands here too.)

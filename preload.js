@@ -444,7 +444,31 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on('embed:gone', handler);
       return () => ipcRenderer.removeListener('embed:gone', handler);
-    }
+    },
+    // WHO HAS THE KEYBOARD while an app window is hosted: { ours, hostedTabId }.
+    // `ours` true means the foreground window is THIS browser -- even when
+    // Electron calls the window blurred, which it does the moment focus moves
+    // into the hosted child. Anything hung off window focus should believe this
+    // instead. Pushed only on a change, and only while something is hosted.
+    // Returns an unsubscribe function.
+    onFocus: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('embed:focus', handler);
+      return () => ipcRenderer.removeListener('embed:focus', handler);
+    },
+    // A browser shortcut pressed while the hosted app had the keyboard: main
+    // registered it with the OS for exactly that state and replays it here as
+    // { id }, the same action id the keydown path resolves. Main has already
+    // given keyboard focus back to the chrome by the time this arrives.
+    onShortcutFire: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('shortcut:fire', handler);
+      return () => ipcRenderer.removeListener('shortcut:fire', handler);
+    },
+    // { info: focusInfo(), polling, streak, armed, registered, set } -- what
+    // Win32 says right now and which accelerators are really in the OS table.
+    // Read-only; the live verification's window onto both.
+    focusInfo: () => ipcRenderer.invoke('embed:focus-info')
   },
   // The Files tab. files.html is a guest with no preload, so app.js reaches
   // these on its behalf once it has decided the console line it parsed was a

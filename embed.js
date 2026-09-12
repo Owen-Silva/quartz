@@ -139,6 +139,20 @@ function loadWin32() {
     });
     koffi.proto('bool __stdcall EmbedEnumProc(void *hwnd, intptr_t lparam)');
 
+    // GUITHREADINFO, for "which window actually has the keyboard". cbSize has
+    // to be filled in by the caller, so the size is bound alongside the call.
+    koffi.struct('EmbedGuiThreadInfo', {
+      cbSize: 'uint32_t',
+      flags: 'uint32_t',
+      hwndActive: 'void *',
+      hwndFocus: 'void *',
+      hwndCapture: 'void *',
+      hwndMenuOwner: 'void *',
+      hwndMoveSize: 'void *',
+      hwndCaret: 'void *',
+      rcCaret: 'EmbedRect',
+    });
+
     return {
       koffi,
       RECT,
@@ -160,6 +174,13 @@ function loadWin32() {
       ShowWindow: user32.func('bool __stdcall ShowWindow(void *h, int cmd)'),
       PostMessageW: user32.func('bool __stdcall PostMessageW(void *h, uint32_t msg, uintptr_t wp, intptr_t lp)'),
       GetDpiForWindow: user32.func('uint32_t __stdcall GetDpiForWindow(void *h)'),
+      // Focus truth (focusInfo below). GetFocus() is deliberately NOT here: it
+      // answers for the CALLING thread's input queue, which is never the one
+      // the hosted app's window belongs to.
+      GetForegroundWindow: user32.func('void * __stdcall GetForegroundWindow()'),
+      GetGUIThreadInfo: user32.func('bool __stdcall GetGUIThreadInfo(uint32_t tid, _Inout_ EmbedGuiThreadInfo *gui)'),
+      SetFocus: user32.func('void * __stdcall SetFocus(void *h)'),
+      GUI_SIZE: koffi.sizeof('EmbedGuiThreadInfo'),
       OpenProcess: kernel32.func('void * __stdcall OpenProcess(uint32_t access, bool inherit, uint32_t pid)'),
       CloseHandle: kernel32.func('bool __stdcall CloseHandle(void *h)'),
       QueryFullProcessImageNameW: kernel32.func('bool __stdcall QueryFullProcessImageNameW(void *h, uint32_t flags, _Out_ uint8_t *buf, _Inout_ uint32_t *size)'),
@@ -207,6 +228,22 @@ function normalizeExe(name) {
 
 function isFiniteInt(value) {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * A window class that belongs to CHROMIUM rather than to a hosted app.
+ *
+ * Inside our own top-level window there are only two kinds of child: Chromium's
+ * own (the widget host, the render widget, the compositor's intermediate
+ * window) and an app window we re-parented. So the focus HWND's class is what
+ * tells the browser's keyboard apart from the app's -- see focusInfo().
+ */
+function isChromiumClass(name) {
+  const text = String(name || '').trim().toLowerCase();
+  if (!text) return false;
+  // Chrome_WidgetWin_0/1, Chrome_RenderWidgetHostHWND, Chrome_MessageWindow…
+  if (text.indexOf('chrome_') === 0) return true;
+  return text === 'intermediate d3d window';
 }
 
 /** A pid list from anything a caller might pass: a number, an array, junk. */
@@ -1167,6 +1204,109 @@ function create(opts) {
     return detachAll();
   }
 
+  // -- focus ----------------------------------------------------------------
+
+  /**
+   * WHO HAS THE KEYBOARD -- the one question Electron cannot answer once an
+   * app window is hosted in a tab.
+   *
+   * Electron calls the BrowserWindow blurred the moment focus moves into the
+   * child, because Chromium's own HWND lost it; from Windows' point of view the
+   * foreground window never changed. So everything the chrome hangs off window
+   * focus (the idle music, the presence gate) has to ask here instead.
+   *
+   *   foregroundRoot  GetForegroundWindow -> GA_ROOT, as a decimal string.
+   *   ours            that root is one of OUR top-level windows: the user is
+   *                   working inside this browser, whatever Electron thinks.
+   *   focusHwnd/Class the window that actually holds focus, and its class.
+   *   chromium        the focus is in Chromium's own windows -- the chrome, a
+   *                   guest page, devtools -- so shortcuts already work.
+   *   hostedTabId     the native tab whose app window (or a control inside it)
+   *                   holds focus, or null. Non-null is the exact state the
+   *                   browser's own shortcuts are dead in.
+   *   hostedVisible   that tab's window is the one on screen (layout's
+   *                   `visible`), i.e. it is the active tab.
+   *
+   * Every call is a kernel-state read: GetForegroundWindow, GetGUIThreadInfo,
+   * GetClassName and GetParent cannot block on the app's message loop, which is
+   * the rule for everything in this module (see attach()).
+   */
+  function focusInfo() {
+    const info = {
+      available: false,
+      foregroundRoot: '0',
+      ours: false,
+      focusHwnd: '0',
+      focusClass: '',
+      chromium: false,
+      hostedTabId: null,
+      hostedVisible: false,
+    };
+    if (!win32()) return info;
+    info.available = true;
+
+    let fg = 0n;
+    try { fg = w32.GetForegroundWindow() || 0n; } catch { return info; }
+    if (!fg) return info;                       // a locked session has none
+    let root = fg;
+    try { root = w32.GetAncestor(fg, GA_ROOT) || fg; } catch { root = fg; }
+    info.foregroundRoot = handleText(root);
+    info.ours = ourHandles().has(root);
+    if (!info.ours) return info;                // another app: nothing to say
+
+    /* SetParent attached the app thread's input queue to ours (see attach()),
+       so the FOREGROUND queue's focus window is the true answer for both. Thread
+       id 0 asks about exactly that queue, which is why GetFocus() -- thread
+       local, and always our own -- would lie here. */
+    let focus = 0n;
+    try {
+      const gui = { cbSize: w32.GUI_SIZE };
+      if (w32.GetGUIThreadInfo(0, gui)) focus = gui.hwndFocus || 0n;
+    } catch { focus = 0n; }
+    if (!focus) return info;
+    info.focusHwnd = handleText(focus);
+    info.focusClass = windowClass(focus);
+    info.chromium = isChromiumClass(info.focusClass);
+
+    /* The focused HWND is usually a control INSIDE the app's window (an edit
+       box, a canvas), so walk up to the window we actually host. The depth cap
+       is a loop guard, not a real limit: a hosted window is at most a handful
+       of parents below ours. */
+    let node = focus;
+    for (let depth = 0; node && depth < 16; depth += 1) {
+      const tabId = byHandle.get(handleText(node));
+      const record = tabId ? attached.get(tabId) : null;
+      if (record) {
+        info.hostedTabId = String(tabId);
+        info.hostedVisible = !!record.visible;
+        break;
+      }
+      let parent = 0n;
+      try { parent = w32.GetParent(node) || 0n; } catch { parent = 0n; }
+      if (!parent || parent === node) break;
+      node = parent;
+    }
+    return info;
+  }
+
+  /**
+   * Give the keyboard back to the chrome WITHOUT raising or activating
+   * anything: SetFocus moves focus inside the window that is already in the
+   * foreground, so a window behind the user's stays behind it.
+   *
+   * This is the one call in the module that crosses into the app's thread (the
+   * currently focused window gets WM_KILLFOCUS), and it is exactly what a mouse
+   * click on the tab strip already does. It runs only in answer to a keystroke
+   * the user meant for the browser, never on a timer.
+   */
+  function focusChrome() {
+    if (!win32()) return false;
+    const parent = browserHandle();
+    if (!parent) return false;
+    try { w32.SetFocus(parent); } catch { return false; }
+    return true;
+  }
+
   // -- inspection -----------------------------------------------------------
 
   function alive(tabId) {
@@ -1216,6 +1356,8 @@ function create(opts) {
     detachAll,
     handleWindowClose,
     alive,
+    focusInfo,
+    focusChrome,
     list,
     stats,
     on: emitter.on.bind(emitter),
@@ -1227,6 +1369,7 @@ function create(opts) {
 module.exports = {
   create,
   // pure parts, for the harness
+  isChromiumClass,
   pidList,
   parseProcTree,
   descendantsOf,
