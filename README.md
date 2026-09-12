@@ -39,8 +39,11 @@ overlaps a connected display by at least 100px on each axis; `session.json` is t
 of the tab strip; `adblock.json` holds the blocking preferences (on/off plus the per-site
 allowlist); `adblock-engine.bin` is the serialised filter engine, fetched on first run;
 `permissions.json` holds the per-origin decisions as `{ origin: { permission: 'allow'|'block' } }`,
-read as "nothing decided yet" when it is missing or corrupt; and `autopause.json` holds the
-Spotify auto-pause preferences (the two switches and the site list).
+read as "nothing decided yet" when it is missing or corrupt; `autopause.json` holds the
+Spotify auto-pause preferences (the two switches and the site list); `apps-index.json` is the
+cached index of installed apps, rebuilt once it is more than 24 hours old; and `proc-icons.json` is
+the icon cache the Processes list draws from, written to a temp name and renamed, capped at 300
+entries, with nulls retried after an hour and paths re-checked after a day.
 
 Renderer state is nine `localStorage` keys: `theme` (`light`/`dark`, stamped on `<html>` by
 theme-boot.js before first paint), `palette` (the colour preset, stamped in the same breath and
@@ -177,7 +180,10 @@ sleep others, reload, close, reopen); workspaces; how it looks; the panels; and 
 A row reads its keycaps out of shortcuts.js as it is built, so they are your bindings and not a
 printed guess, and half the rows read the world too — "Unsplit" or "Split with next tab" depending
 on the tab under the cursor. Clearing history asks twice, the first Enter swapping the two lines
-rather than acting.
+rather than acting. The last family is the machine's own apps: one "Open <name>" row per installed
+app, built the first time the `>` list is asked for rather than at boot, with the running ones
+sorted to the top reading "Running, switch to it", so Enter raises that window instead of launching
+a second copy.
 
 **Split view.** Two tabs side by side in one well — two pages, a page and a Claude chamber, or
 two chambers. Ctrl+\ pairs the active tab with the next splittable tab in the strip or breaks
@@ -279,7 +285,14 @@ serialised engine is cached at `adblock-engine.bin`; a first run fetches a few M
 not awaited by window creation. `adblock.json` holds the on/off switch and the per-site allowlist,
 and the nav-row shield carries the count blocked on the page in front of you over two switches,
 this site and everywhere. Cosmetic filtering rides the library's session-level preload, its IPC
-handler wrapped so only `http:`/`https:` frames are served.
+handler wrapped so only `http:`/`https:` frames are served. Two exception filters are applied when
+the engine is built, `@@||youtube.com/youtubei/` and `@@||youtube.com/api/stats/`: the ads and
+tracking lists cancel `youtube.com/youtubei/v1/log_event` and `youtube.com/api/stats/ads`, and
+because clicking a video on YouTube is a same-document navigation the player is driven by fetches
+like those, so with them cancelled it spun until a reload took the document path instead. They ride
+the same NetworkFilter and `blocker.update` path the per-site allowlist uses, and ad delivery is
+unchanged: `/pagead/`, doubleclick and googlesyndication still block. The Electron user agent is
+left as it is.
 
 **Tab audio and pinning.** A chip grows a speaker button the first time its guest plays
 something; clicking it mutes the tab without raising it, and the mute rides in the session entry
@@ -448,7 +461,8 @@ key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
 (`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `homepage`, `claudeDir`,
 `claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`, `downloadsAskWhere`,
-`newtabBackground`, `bookmarksBar`); missing keys fall back to defaults, so an older stored object
+`newtabBackground`, `bookmarksBar`, and `apps` with its `pins`, the ids of the apps on the new
+tab's dock); missing keys fall back to defaults, so an older stored object
 still reads.
 
 **Browser style.** Site styles paint web pages across an async boundary; this paints the chrome —
@@ -506,6 +520,21 @@ page, through `window.__applyReadout({tabs, claude, autopause})`, pushed on tab,
 auto-pause changes. "Holding" means something is holding Spotify through the bridge, and that can
 be another source — the LessonPlayer desktop app, say — not only this browser.
 
+**Apps dock.** In the same capsule, above the web chips, the apps you have pinned are drawn as 56px
+tiles: a 32px icon, the name under it, and a dot at the icon's corner while the app is running. One
+row is reserved before any of them arrive so the capsule's height never jumps, and the capsule grows
+for a second or third row (two at 393px, three at 320px). A click launches the app, or focuses it if
+it is already running. Edit mode puts a remove glyph on each tile and adds a "+ Add app" tile whose
+inline picker filters the installed list, eight results at a time, arrows and Enter. The page has no
+preload, so this rides the channel the Processes list uses: a `newtab:app` console line for launch,
+focus, pin, unpin and refresh, honoured only from the tab that owns that guest and only for a
+new-tab URL, with `window.__applyApps` (the pins with their icons, and the installed names for the
+picker), `window.__applyAppsRunning` (dots updated in place, pushed only when the running set
+changes) and `window.__applyAppResult` (a 3s note on the dock when something fails) coming back.
+The installed index is main's, out of `apps.js`. The pins are ids only, in the `apps` group of
+`localStorage['settings']` and capped at 32, so a pin for an app that has been uninstalled costs
+nothing and comes back if it is reinstalled.
+
 **System stats.** Inside the capsule, where the search field used to be, is a strip of live system
 stats — the field is gone because the user searches from the address bar. CPU, memory, disk, network
 (bits per second, down and up) and GPU, each a Bahnschrift tabular value, a sentence-case label and
@@ -532,7 +561,19 @@ count and a friendly name where there is one (Claude Code, Electron, Windows Exp
 Window Manager, Service Host), each showing CPU as a share of the whole machine, private memory
 (Working Set — Private) and disk and network bytes. The top 10 are drawn, Show more takes it to 30,
 and the sort — CPU or memory, click a header — is persisted. Rows keep their identity by group key
-between samples and update their text in place. End task is a two-step: the button arms for 3s, and
+between samples and update their text in place. Each row also carries a 16px icon slot in front of
+the name: the real icon of the executable behind the group once the chrome pushes it with
+`window.__applyProcIcons({ key: dataUrl | null })`, and until then, or when there is none, a neutral
+window outline glyph at `--fg-3`. The src for a key is written once, a null answer never clears an
+icon already on screen, and the dashed placeholder rows keep the same slot width, so nothing shifts.
+Main resolves the icons in `procicons.js`, cheapest first: the browser's own groups from
+`process.execPath`, then the installed-app index, then zero-spawn guesses under System32, SysWOW64
+and Windows checked with `fs.access`, then one debounced `Get-Process` batch keyed by pid (500ms
+debounce, one in flight, at most one spawn every 10s), then `app.getFileIcon` at 32px as a data URL,
+all of it cached in memory and in `proc-icons.json`. The chrome asks over `stats:proc-icons` for the
+keys it is missing, one request in flight and one every 3s with nulls retried after 5 minutes, holds
+its own 300-entry cache, and pushes the whole cache to a new-tab page on `dom-ready`. A sample
+itself does no icon work. End task is a two-step: the button arms for 3s, and
 the second press ends every process in the group; the row answers Ended, Protected or That's this
 browser for 3s. Worth knowing: ending a group ends all of its processes, the way Task Manager does,
 and two things are always refused — the browser's own tree, which is greyed out and has no End task,
@@ -733,12 +774,14 @@ one run before and one after.
 | File | What it is |
 | --- | --- |
 | `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, the Spotify auto-pause IPC and the guests handed to that module, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
-| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `stats` (subscribe / unsubscribe / onSample), `background` (chooseVideo / clearVideo). |
+| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty, downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `stats` (subscribe / unsubscribe / onSample / procIcons), `apps` (list / launch / focus / refresh), `background` (chooseVideo / clearVideo). |
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
 | `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, `--dangerously-skip-permissions`, bare). |
 | `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
+| `apps.js` | Installed apps, main-process side: the Start Menu shortcut walk (each `.lnk` through `shell.readShortcutLink`, a 32px icon from `app.getFileIcon`), the packaged apps from one `Get-StartApps` run, the merge and dedupe, and the `apps-index.json` cache with its 24-hour life. Answers `apps:list` / `apps:launch` / `apps:focus` / `apps:refresh`: launch goes through the shortcut or `explorer shell:AppsFolder`, focus restores and raises the process's own main window, and `pathForExe` hands the icon resolver a path for an exe it already knows. Its parsing and merging halves are exported, so they run under plain node. |
+| `procicons.js` | Process icons, main-process side: the resolution order (self from `process.execPath`, the app index, zero-spawn guesses under System32 / SysWOW64 / Windows checked with `fs.access`, one debounced `Get-Process` batch keyed by pid, then `app.getFileIcon` at 32px as a data URL), the memory cache and the `proc-icons.json` file behind it (temp name and rename, 300 entries, nulls retried after an hour, paths re-checked after a day), and `getIcons(groups)`, which answers the keys it knows at once and waits at most 3s for the rest. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
@@ -759,7 +802,7 @@ one run before and one after.
 | `sitestyles.js` | Per-host CSS, per-host scripts and force dark; owns `localStorage['sitestyles']` and injects into each guest. |
 | `userstyle.js` | `window.UserStyle`: your own stylesheet for the chrome — the `localStorage['userstyle']` string, the `<style id="user-chrome">` kept last in `<head>`, the 64 KB cap, and the Ctrl+Alt+Shift+R reset. |
 | `reader.html` / `reader-page.css` / `reader-page.js` | The reading page itself: top bar, text size and width, `window.__applyArticle`, and the second sanitiser sweep over the live tree. Owns `localStorage['reader']`. |
-| `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
+| `newtab.html` / `newtab.css` / `newtab.js` | The new tab page: chips, favicons, the clock and session modules, the system stats strip (`window.__applyStats`), the Processes list and its icon slots (`window.__applyProcIcons`), the apps dock and its picker (`window.__applyApps`, `window.__applyAppsRunning`, `window.__applyAppResult`), and the background layers behind them (`window.__applyBackground`, `data-bg`, `#bg-image` / `#bg-dim`, `#bg-video` / `#bg-video-img` and the pause that keeps a clip still when the page is not in front). `newtab-theme.js` runs first on it, resolving `?theme`, `?palette` and `?hue` before the stylesheet. |
 | `newtab-bg.js` | The circuit board — canvas painted once per layout, packets as DOM on Web Animations. Owns `window.__boardPaused` / `__boardState`, the freeze the chrome drives while an overlay is open. |
 | `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on CDP port 9222 and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |

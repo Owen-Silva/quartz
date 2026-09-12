@@ -238,6 +238,67 @@ or use Restart browser in Settings → About — to pick any of this up.
   playing is 26% of a core against the board's 18%, and 1.4% paused. It has no audio, so the tab
   chip shows no speaker and Spotify auto-pause never holds for it.
 
+### Apps, process icons and YouTube
+
+- Installed apps are indexed once. A new apps.js reads the Start Menu shortcuts (each `.lnk`
+  resolved through `shell.readShortcutLink`, a 32px icon from `app.getFileIcon`) and the packaged
+  apps from one `Get-StartApps` run, then caches the merged list as `apps-index.json` in the
+  profile for 24 hours. On this machine that is 150 apps, 69 executables and 81 store apps, with a
+  cold build of 1.2 seconds and a manual refresh of 3.2. Main exposes list, launch, focus and
+  refresh: launching goes through the shortcut or `explorer shell:AppsFolder`, and focusing
+  restores and raises the process's own main window rather than starting a second copy.
+- A dock of pinned apps on the new tab. In the capsule above the web chips, each pinned app is a
+  56px tile: a 32px icon, the name under it, and a dot at the icon's corner while the app is
+  running. One row is always reserved so the capsule's height never jumps, and it grows for more
+  pins (two rows at 393px wide, three at 320px). A click launches the app, or focuses it if it is
+  already running. Edit mode puts a remove glyph on every tile and adds a "+ Add app" tile that
+  opens an inline picker over the installed list, eight results at a time, arrows and Enter. A
+  failure shows as a short note on the dock rather than nothing happening. Pins are ids only,
+  normalised and capped at 32 in the `apps` group of `localStorage['settings']`, so a pin for an
+  app that has been uninstalled costs nothing and comes back if it is reinstalled. Dock clicks no
+  longer fall through to the Processes fold under them.
+- The command palette opens apps as well. The `>` list grows an "Open <name>" row for every
+  installed app, built the first time it is asked for rather than at boot. Apps that are running
+  sort to the top and read "Running, switch to it", and those rows focus the window instead of
+  launching it again. Running state comes out of the stats samples the Processes list already
+  needs, diffed against the sampler's top-process keys and pushed to the new tab only when it
+  actually changes.
+- Process icons in the Processes list. Every row gains a 16px icon slot to the left of the name,
+  8px in front of it: the real icon of the executable behind that group once the chrome has one,
+  and until then, or when there is none, a neutral window outline glyph at `--fg-3`. A new
+  procicons.js in main resolves them cheapest first: the browser's own groups from
+  `process.execPath`, then the app index, then zero-spawn guesses under System32, SysWOW64 and
+  Windows checked with `fs.access` (34 of 99 real process names answered that way in 19ms), then
+  one debounced `Get-Process` batch keyed by pid (500ms debounce, one in flight, never more than
+  one spawn every 10 seconds), and last `app.getFileIcon` at 32px as a data URL. Answers are kept
+  in memory and in `proc-icons.json` in the profile, written to a temp name and renamed, capped at
+  300 entries, nulls retried after an hour and paths re-checked after a day. The chrome collects
+  the keys it is missing once per sample, asks at most one request at a time and one every 3
+  seconds, holds its own 300-entry cache, and pushes the whole cache to a new tab page on
+  `dom-ready`. Drawing is deliberately dull: samples do no icon work, the src for a key is written
+  once, a null answer never removes an icon already on screen, and the placeholder rows keep the
+  same slot width so nothing shifts. Both themes, no shadow and no glow. The apps dock above it is
+  untouched.
+- Fixed: YouTube's player spinning forever with blocking on. Clicking a video on YouTube is a
+  same-document navigation, so the player is driven by fetches, and the bundled ads and tracking
+  lists were cancelling two of YouTube's own: `youtube.com/youtubei/v1/log_event` and
+  `youtube.com/api/stats/ads`. With those cancelled the player spun until a reload, which takes the
+  document path where the player response arrives inline, which is why reloading always seemed to
+  fix it. Two exception filters, `@@||youtube.com/youtubei/` and `@@||youtube.com/api/stats/`, are
+  applied when the engine is built, on the same NetworkFilter and `blocker.update` path the
+  per-site allowlist already uses. Ad delivery is unchanged: `/pagead/`, doubleclick and
+  googlesyndication still block. The Electron user agent is left exactly as it was; nothing here
+  pretends to be Chrome.
+
+Verified with harnesses only. The user was gaming while this round was written, so none of it has had a
+live pass in the running browser: the evidence is pure-node harnesses (112/112 on the app index,
+78/78 on the pins, push and palette rows, 61/61 on the icon slot through a DOM shim, 33/33 plus 7/7
+against the real filesystem on the resolver, 108/108 on the chrome wiring), the engine on disk for
+the YouTube filters, and a headless renderer with synthetic pushes for the dock. What that leaves
+owed is listed in each commit message: focus raising a real window, a tile drawn by a real push
+into a real webview, the icon IPC round trip and real `getFileIcon` timing on this machine, and the
+YouTube fix on YouTube itself. That pass is still to come.
+
 ### Shortcuts
 
 Every default can be rebound in Settings → Shortcuts except Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+1–9,
@@ -475,3 +536,10 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | bed0643 | 18:41 | New tab: a Processes pop-out opens from the stats strip, with End task |
 | 16d1b09 | 18:57 | System stats: the counter stream survives vanished instances and refreshes them; per-process rows; endTask with refusals |
 | ad2fa18 | 19:00 | New tab: the process list is an expander under the stats strip, remembered open or closed |
+| 2f56e07 | 20:19 | Apps: installed-app index, launch and focus (main process) |
+| 95b5034 | 20:19 | Apps: pins in settings, chrome push to the new tab, palette rows |
+| fdc3c12 | 20:28 | Apps: the new-tab dock (pinned app tiles, running dots, Edit and Add app) |
+| cf86935 | 20:28 | Ad blocker: never cancel YouTube's own player and stats calls |
+| c984889 | 20:35 | New tab: process icons in the Processes list (page side) |
+| c4d0d21 | 20:36 | Process icons: resolver module for the main process |
+| ce31821 | 20:38 | Process icons: chrome wiring (IPC, cache, push to the new tab) |
