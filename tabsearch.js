@@ -800,6 +800,14 @@
       action: 'downloads',
       run: function () { callModule('Downloads', 'open'); }
     });
+    // No `action`: shortcuts.js does not name a 'files' id yet, so keysFor()
+    // would find nothing bound and the row would wear no keycaps at all. The
+    // combo below is the one app.js hardcodes, written out until it does.
+    list.push({
+      id: 'files', glyph: GLYPH.folder, label: 'Files',
+      hint: 'Browse your folders in a tab', keys: ['Ctrl', 'Alt', 'E'],
+      run: function () { callGlobal(function () { return openFilesTab; }); }
+    });
     list.push({
       id: 'downloads-folder', glyph: GLYPH.folder, label: 'Open downloads folder',
       hint: 'The folder itself, in Explorer',

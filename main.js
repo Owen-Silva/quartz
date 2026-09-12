@@ -2587,7 +2587,367 @@ ipcMain.handle('apps:focus', (event, pid) => {
   }
 });
 
-/** file:// prefix of the app's own folder: newtab.html, reader.html, history. */
+// ---------------------------------------------------------------------------
+// The Files tab (files.html — a folder browser, as a page)
+//
+// files.html is a <webview> guest with no node and no preload: it asks over
+// console lines that app.js parses, so every call below arrives from the
+// CHROME, never from the page. Same gate as apps, and for the same reason:
+// opening a file with its default app, raising Explorer and writing the
+// clipboard are three things a PAGE must never be able to ask for.
+//
+// Nothing here throws at the renderer. A listing that failed comes back as a
+// listing with an `error` in it, and every action answers { ok, reason }.
+// ---------------------------------------------------------------------------
+
+/** At most this many entries travel in one listing; the page says so in a row. */
+const FILES_MAX_ENTRIES = 2000;
+
+/** stat() runs in waves this wide: a full folder is 32 waves, not 2,000 calls. */
+const FILES_STAT_BATCH = 64;
+
+/** The contract's per-line cap on an icon request. */
+const FILES_ICON_MAX = 64;
+
+/** A \\?\ path can reach 32,767 chars; nothing real is longer than that. */
+const FILES_PATH_MAX = 32767;
+
+/** Drive letters worth probing. A: and B: are floppies: a probe spins them. */
+const FILES_DRIVE_LETTERS = 'CDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/** Folder-first, then name, the way the page sorts its own listings. */
+const filesCollator = (() => {
+  try { return new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }); } catch { return null; }
+})();
+
+/**
+ * An ABSOLUTE Windows path, normalised, or null. A drive-letter path
+ * ('C:\Users') or a UNC share ('\\box\share') only: a relative path, a bare
+ * name, a URL and a file:// href are all refused rather than resolved against
+ * whatever the working directory happens to be. This is the whole of the
+ * validation — every handler below starts with it.
+ */
+function cleanFilePath(input) {
+  if (typeof input !== 'string') return null;
+  let text = input.trim();
+  if (!text || text.length > FILES_PATH_MAX) return null;
+  if (text.includes('\0')) return null;
+  const drive = /^[A-Za-z]:[\\/]/.test(text);
+  const unc = /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(text);
+  if (!drive && !unc) return null;
+  let full = '';
+  try { full = path.win32.normalize(text); } catch { return null; }
+  if (!full) return null;
+  // 'C:\' keeps its slash (it IS the folder); anything longer loses a trailing one.
+  if (full.length > 3) full = full.replace(/[\\/]+$/, '');
+  return full;
+}
+
+/** The folder above this one, or null at a drive root or a share root. */
+function parentFolderOf(target) {
+  if (typeof target !== 'string' || !target) return null;
+  const up = path.win32.dirname(target);
+  if (!up || up === target) return null;
+  // dirname('\\\\box\\share') is '\\\\box', which is not a folder.
+  if (/^[\\/]{2}[^\\/]+[\\/]?$/.test(up)) return null;
+  return up;
+}
+
+/** An fs error -> one of the three words the page knows, or its message. */
+function fileErrorFor(err) {
+  const code = (err && err.code) || '';
+  if (code === 'ENOENT' || code === 'ENXIO') return 'not-found';
+  if (code === 'EACCES' || code === 'EPERM') return 'access-denied';
+  if (code === 'ENOTDIR') return 'not-a-folder';
+  const message = (err && typeof err.message === 'string') ? err.message.trim() : '';
+  return message || 'failed';
+}
+
+/** An empty answer with a reason in it: the page draws the error, not a crash. */
+function fileListError(target, error) {
+  return {
+    path: target,
+    parent: target ? parentFolderOf(target) : null,
+    entries: [],
+    error: error,
+    truncated: false
+  };
+}
+
+/**
+ * One folder as `{ path, parent, entries, error, truncated }`. readdir is one
+ * call; the per-entry stat (size, mtime, and what a symlink really points at)
+ * runs FILES_STAT_BATCH at a time, and only for the entries that survived the
+ * cap — a 20,000-file folder costs 2,000 stats, not 20,000.
+ */
+async function listFolder(target) {
+  let dirents = null;
+  try {
+    dirents = await fs.promises.readdir(target, { withFileTypes: true });
+  } catch (err) {
+    return fileListError(target, fileErrorFor(err));
+  }
+
+  const rows = [];
+  for (const dirent of dirents) {
+    const name = dirent && typeof dirent.name === 'string' ? dirent.name : '';
+    if (!name) continue;
+    rows.push({
+      name: name,
+      path: path.win32.join(target, name),
+      kind: dirent.isDirectory() ? 'dir' : 'file',
+      link: typeof dirent.isSymbolicLink === 'function' && dirent.isSymbolicLink(),
+      size: null,
+      mtime: null,
+      ext: dirent.isDirectory() ? '' : path.win32.extname(name).toLowerCase()
+    });
+  }
+
+  rows.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+    if (filesCollator) return filesCollator.compare(a.name, b.name);
+    const la = a.name.toLowerCase();
+    const lb = b.name.toLowerCase();
+    return la < lb ? -1 : (la > lb ? 1 : 0);
+  });
+
+  const truncated = rows.length > FILES_MAX_ENTRIES;
+  const kept = truncated ? rows.slice(0, FILES_MAX_ENTRIES) : rows;
+
+  for (let at = 0; at < kept.length; at += FILES_STAT_BATCH) {
+    const wave = kept.slice(at, at + FILES_STAT_BATCH);
+    // stat(), not lstat(): a junction or a shortcut target decides what the row
+    // IS. A stat that fails (a broken link, a file we may not read) leaves the
+    // row as readdir described it, with no size and no date.
+    await Promise.all(wave.map(async (row) => {
+      let stats = null;
+      try { stats = await fs.promises.stat(row.path); } catch { stats = null; }
+      if (!stats) return;
+      if (row.link) row.kind = stats.isDirectory() ? 'dir' : 'file';
+      if (row.kind === 'dir') row.ext = '';
+      else if (typeof stats.size === 'number' && isFinite(stats.size)) row.size = stats.size;
+      if (typeof stats.mtimeMs === 'number' && isFinite(stats.mtimeMs)) row.mtime = Math.round(stats.mtimeMs);
+    }));
+  }
+
+  return {
+    path: target,
+    parent: parentFolderOf(target),
+    entries: kept.map((row) => ({
+      name: row.name,
+      path: row.path,
+      kind: row.kind,
+      size: row.kind === 'dir' ? null : row.size,
+      mtime: row.mtime,
+      ext: row.ext
+    })),
+    error: null,
+    truncated: truncated
+  };
+}
+
+/** Desktop, Downloads, Documents, Pictures, Videos, Music, then the user folder. */
+const FILES_PLACE_IDS = [
+  ['Desktop', 'desktop'],
+  ['Downloads', 'downloads'],
+  ['Documents', 'documents'],
+  ['Pictures', 'pictures'],
+  ['Videos', 'videos'],
+  ['Music', 'music']
+];
+
+function filePlaces() {
+  const out = [];
+  const seen = new Set();
+  const add = (name, target) => {
+    if (typeof target !== 'string' || !target) return;
+    const key = target.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ name: name, path: target });
+  };
+  for (const [name, id] of FILES_PLACE_IDS) {
+    let target = '';
+    try { target = app.getPath(id); } catch { target = ''; }  // a shell folder Windows does not have
+    add(name, target);
+  }
+  let home = '';
+  try { home = app.getPath('home'); } catch { home = ''; }
+  add(path.win32.basename(home) || home, home);
+  return out;
+}
+
+/**
+ * Every fixed and removable drive that answers, with its free and total bytes.
+ * statfs IS the probe: a letter nothing is mounted on rejects, and an empty
+ * card reader rejects too, so a failed call means "not a drive right now".
+ * No volume label: Windows does not expose one to Electron, and the page
+ * treats an empty label as "just show the letter".
+ */
+async function fileDrives() {
+  const letters = FILES_DRIVE_LETTERS.split('');
+  const found = await Promise.all(letters.map(async (letter) => {
+    const root = letter + ':\\';
+    let st = null;
+    try { st = await fs.promises.statfs(root); } catch { return null; }
+    if (!st) return null;
+    const block = Number(st.bsize) || 0;
+    const total = block * (Number(st.blocks) || 0);
+    const free = block * (Number(st.bavail) || 0);
+    return {
+      name: letter + ':',
+      path: root,
+      label: '',
+      freeBytes: isFinite(free) && free >= 0 ? free : null,
+      totalBytes: isFinite(total) && total > 0 ? total : null
+    };
+  }));
+  return found.filter(Boolean);
+}
+
+/*
+ * Icons are shell work, so they are cached for the life of the window. The key
+ * is the EXTENSION for an ordinary file — every .txt in every folder wears the
+ * same icon — and the full path for the kinds that carry their own (.exe, a
+ * shortcut, a folder, anything extensionless).
+ */
+const fileIconCache = new Map();
+const FILES_ICON_CACHE_MAX = 800;
+const FILES_OWN_ICON = new Set(['', '.exe', '.lnk', '.url', '.ico', '.msc', '.cpl', '.dll', '.scr']);
+
+function fileIconKey(target) {
+  const ext = path.win32.extname(target).toLowerCase();
+  return FILES_OWN_ICON.has(ext) ? 'p:' + target.toLowerCase() : 'e:' + ext;
+}
+
+async function fileIconFor(target) {
+  const key = fileIconKey(target);
+  if (fileIconCache.has(key)) return fileIconCache.get(key);
+  let url = null;
+  try {
+    const img = await app.getFileIcon(target, { size: 'small' });
+    if (img && !img.isEmpty()) {
+      const data = img.toDataURL();
+      if (typeof data === 'string' && data.startsWith('data:')) url = data;
+    }
+  } catch { url = null; }
+  // A miss is cached too, but only per extension: a per-path miss is usually
+  // "that file just went away", which is worth asking about again.
+  if (url !== null || key.startsWith('e:')) {
+    if (fileIconCache.size >= FILES_ICON_CACHE_MAX) fileIconCache.clear();
+    fileIconCache.set(key, url);
+  }
+  return url;
+}
+
+ipcMain.handle('files:list', (event, rawPath) => {
+  if (!isChromeSender(event)) return fileListError(null, 'access-denied');
+  // null is the root: the page draws the places and the drives, not a folder.
+  if (rawPath === null || rawPath === undefined || rawPath === '') {
+    return { path: null, parent: null, entries: [], error: null, truncated: false };
+  }
+  const target = cleanFilePath(rawPath);
+  if (!target) return fileListError(null, 'not-found');
+  try {
+    return listFolder(target).catch((err) => fileListError(target, fileErrorFor(err)));
+  } catch (err) {
+    return fileListError(target, fileErrorFor(err));
+  }
+});
+
+ipcMain.handle('files:places', (event) => {
+  if (!isChromeSender(event)) return { places: [], drives: [] };
+  let places = [];
+  try { places = filePlaces(); } catch { places = []; }
+  try {
+    return fileDrives().then(
+      (drives) => ({ places: places, drives: Array.isArray(drives) ? drives : [] }),
+      () => ({ places: places, drives: [] })
+    );
+  } catch {
+    return { places: places, drives: [] };
+  }
+});
+
+// The point of the whole page: hand a file to whatever Windows opens it with.
+// A .lnk is allowed on purpose — a shortcut is a file the user double-clicks.
+ipcMain.handle('files:open', (event, rawPath) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const target = cleanFilePath(rawPath);
+  if (!target) return { ok: false, reason: 'not-found' };
+  try {
+    return fs.promises.stat(target).then(
+      // openPath resolves '' when it worked and a message when it did not.
+      () => shell.openPath(target).then(
+        (message) => (message ? { ok: false, reason: String(message) } : { ok: true, reason: '' }),
+        () => ({ ok: false, reason: 'failed' })
+      ),
+      (err) => ({ ok: false, reason: fileErrorFor(err) })
+    );
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+// This one raises an Explorer window, which is a focus steal — and it only ever
+// runs off a menu item the user picked in the page, which is the same bargain
+// apps:focus makes.
+ipcMain.handle('files:reveal', (event, rawPath) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const target = cleanFilePath(rawPath);
+  if (!target) return { ok: false, reason: 'not-found' };
+  try {
+    return fs.promises.stat(target).then(
+      (_stats) => {
+        try { shell.showItemInFolder(target); } catch { return { ok: false, reason: 'failed' }; }
+        return { ok: true, reason: '' };
+      },
+      (err) => ({ ok: false, reason: fileErrorFor(err) })
+    );
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('files:icons', (event, rawPaths) => {
+  if (!isChromeSender(event)) return {};
+  if (!Array.isArray(rawPaths) || !rawPaths.length) return {};
+  // The map is keyed by the string the PAGE sent, so a normalisation here can
+  // never make an answer unrecognisable to the row that asked for it.
+  const wanted = [];
+  for (const raw of rawPaths.slice(0, FILES_ICON_MAX)) {
+    const target = cleanFilePath(raw);
+    if (!target) continue;
+    wanted.push({ key: String(raw), target: target });
+  }
+  if (!wanted.length) return {};
+  try {
+    return Promise.all(wanted.map((item) => fileIconFor(item.target).catch(() => null))).then(
+      (icons) => {
+        const out = {};
+        for (let i = 0; i < wanted.length; i++) out[wanted[i].key] = icons[i] || null;
+        return out;
+      },
+      () => ({})
+    );
+  } catch {
+    return {};
+  }
+});
+
+ipcMain.handle('files:copy-path', (event, rawPath) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const target = cleanFilePath(rawPath);
+  if (!target) return { ok: false, reason: 'not-found' };
+  try {
+    clipboard.writeText(target);
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+  return { ok: true, reason: '' };
+});
+
+/** file:// prefix of the app's own folder: newtab.html, reader.html, files… */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;
 
 /** True for one of OUR file:// pages (the new tab page, reader, history). */

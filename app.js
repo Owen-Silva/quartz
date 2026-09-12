@@ -1205,6 +1205,293 @@ function notifyAppsChanged() {
   try { ts.appsChanged(); } catch (err) { /* the palette can look after itself */ }
 }
 
+/* ------------------------------------------------------------------ */
+/* The Files tab                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * files.html is our own folder browser, and like the new tab page and the
+ * history page it is a file:// guest with no preload: it asks over console
+ * lines and is answered with executeJavaScript pushes. Its half of the
+ * contract is in files.js; this is the chrome's half.
+ *
+ *   in    files:list      {"path":"C:\\Users\\you"} | {"path":null}
+ *         files:open      {"path":…}
+ *         files:reveal    {"path":…}
+ *         files:icons     {"paths":[…]}          (at most 64 per line)
+ *         files:copy-path {"path":…}
+ *
+ *   out   window.__applyFiles({ path, parent, entries, error, truncated })
+ *         window.__applyFilePlaces({ places, drives })
+ *         window.__applyFileIcons({ [path]: dataUrl | null })
+ *         window.__applyFileResult({ action, path, ok, reason })
+ *
+ * Guarded exactly as the end-task and app channels are: a console line is not
+ * a trusted channel, so only a Files guest that is still the element this
+ * listener was attached to is heard, and anything that is not one of the five
+ * shapes is ignored in silence. Opening a file and writing the clipboard are
+ * main's to do, and main answers only the chrome — so this function is the
+ * single door between a printed line and any of it.
+ */
+
+const FILES_PREFIX = 'files:';
+
+/** The page may ask about at most this many icons per line; main caps it too. */
+const FILES_ICON_MAX = 64;
+
+/** A \\?\ path can reach 32,767 characters. Nothing real is longer. */
+const FILES_PATH_MAX = 32767;
+
+/** What the page says when the bridge is missing: shown as written. */
+const FILES_NO_BRIDGE = 'This build cannot read folders';
+
+/** A path the page sent, or null: a non-empty string of a sane length. */
+function cleanGuestPath(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text || text.length > FILES_PATH_MAX) return null;
+  if (text.indexOf('\0') !== -1) return null;
+  return text;
+}
+
+/**
+ * Parse one console line into { verb, path, paths }, or null when it is not a
+ * files request or not a well-formed one. Pure, and the whole of the
+ * validation: an unknown verb, a missing path, too many icon paths and a
+ * broken payload all come back null rather than partly honoured.
+ */
+function parseFilesLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(FILES_PREFIX) !== 0) return null;
+
+  const rest = line.slice(FILES_PREFIX.length);
+  const space = rest.indexOf(' ');
+  if (space <= 0) return null;
+  const verb = rest.slice(0, space);
+  if (verb !== 'list' && verb !== 'open' && verb !== 'reveal'
+    && verb !== 'icons' && verb !== 'copy-path') return null;
+
+  let msg = null;
+  try { msg = JSON.parse(rest.slice(space + 1)); } catch (err) { return null; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
+
+  if (verb === 'icons') {
+    if (!Array.isArray(msg.paths) || !msg.paths.length) return null;
+    if (msg.paths.length > FILES_ICON_MAX) return null;
+    const paths = [];
+    for (const raw of msg.paths) {
+      const one = cleanGuestPath(raw);
+      if (!one) return null;
+      if (paths.indexOf(one) === -1) paths.push(one);
+    }
+    if (!paths.length) return null;
+    return { verb: verb, path: null, paths: paths };
+  }
+
+  // The root is a deliberate null, so it is the one path that may be absent.
+  if (verb === 'list' && (msg.path === null || msg.path === undefined)) {
+    return { verb: verb, path: null, paths: null };
+  }
+
+  const one = cleanGuestPath(msg.path);
+  if (!one) return null;
+  return { verb: verb, path: one, paths: null };
+}
+
+/** Guests whose rail has already been asked for, keyed on the element. */
+const filePlacesAsked = new WeakSet();
+
+/** api.files, or null in a build whose preload predates it. */
+function filesApi() {
+  return (window.api && window.api.files) ? window.api.files : null;
+}
+
+/** One push into one Files guest, by function name. Never throws. */
+function pushToFilesGuest(tab, viewEl, fnName, payload) {
+  if (!isViewUsable(tab) || !isFilesUrl(tab.url)) return;
+  if (tab.viewEl !== viewEl) return;   // the guest was replaced mid-flight
+  let body = '';
+  try { body = JSON.stringify(payload); } catch (err) { return; }
+  try {
+    const pending = viewEl.executeJavaScript(
+      'window.' + fnName + ' && window.' + fnName + '(' + body + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+/** One listing, as the page's own shape. Everything is re-checked here. */
+function pushFilesListing(tab, viewEl, answer) {
+  const src = (answer && typeof answer === 'object') ? answer : {};
+  const rows = Array.isArray(src.entries) ? src.entries : [];
+  const entries = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || typeof row.path !== 'string' || !row.path) continue;
+    entries.push({
+      name: typeof row.name === 'string' ? row.name : '',
+      path: row.path,
+      kind: row.kind === 'dir' ? 'dir' : 'file',
+      size: (typeof row.size === 'number' && isFinite(row.size)) ? row.size : null,
+      mtime: (typeof row.mtime === 'number' && isFinite(row.mtime)) ? row.mtime : null,
+      ext: typeof row.ext === 'string' ? row.ext : ''
+    });
+  }
+  pushToFilesGuest(tab, viewEl, '__applyFiles', {
+    path: (typeof src.path === 'string' && src.path) ? src.path : null,
+    parent: (typeof src.parent === 'string' && src.parent) ? src.parent : null,
+    entries: entries,
+    error: (typeof src.error === 'string' && src.error) ? src.error : null,
+    truncated: !!src.truncated
+  });
+}
+
+/** One { action, path, ok, reason } for an open / reveal / copy-path. */
+function pushFileResult(tab, viewEl, action, target, answer) {
+  const src = (answer && typeof answer === 'object') ? answer : {};
+  pushToFilesGuest(tab, viewEl, '__applyFileResult', {
+    action: action,
+    path: target,
+    ok: !!src.ok,
+    reason: (typeof src.reason === 'string') ? src.reason : ''
+  });
+}
+
+/** The icon map, cut down to paths the page asked about and real data URLs. */
+function pushFileIcons(tab, viewEl, wanted, answer) {
+  const src = (answer && typeof answer === 'object') ? answer : {};
+  const map = {};
+  for (const target of wanted) {
+    const url = src[target];
+    map[target] = (typeof url === 'string' && url.indexOf('data:') === 0) ? url : null;
+  }
+  pushToFilesGuest(tab, viewEl, '__applyFileIcons', map);
+}
+
+/**
+ * The rail: the user's folders and every drive that answered. Pushed on
+ * dom-ready and alongside the boot listing, and memoised — the second push
+ * carries the same bytes as the first and costs nothing.
+ */
+function pushFilePlacesToTab(tab, fresh) {
+  if (!isViewUsable(tab) || !isFilesUrl(tab.url)) return;
+  const api = filesApi();
+  if (!api || typeof api.places !== 'function') return;
+  const viewEl = tab.viewEl;
+  // Every drive letter is a statfs, so the rail is fetched once per document
+  // and not again per navigation. dom-ready passes `fresh` for a new document,
+  // which is also the only thing that can have changed the drive list.
+  if (fresh) filePlacesAsked.delete(viewEl);
+  else if (filePlacesAsked.has(viewEl)) return;
+  filePlacesAsked.add(viewEl);
+  let pending = null;
+  try { pending = api.places(); } catch (err) { filePlacesAsked.delete(viewEl); return; }
+  if (!pending || typeof pending.then !== 'function') { filePlacesAsked.delete(viewEl); return; }
+  pending.then((answer) => {
+    const src = (answer && typeof answer === 'object') ? answer : {};
+    const payload = {
+      places: Array.isArray(src.places) ? src.places : [],
+      drives: Array.isArray(src.drives) ? src.drives : []
+    };
+    let body = '';
+    try { body = JSON.stringify(payload); } catch (err) { return; }
+    if (pushUnchanged(tab, 'fileplaces', body)) return;
+    if (!isViewUsable(tab) || tab.viewEl !== viewEl) { pushFailed(tab, 'fileplaces'); return; }
+    pushToFilesGuest(tab, viewEl, '__applyFilePlaces', payload);
+  }, () => { filePlacesAsked.delete(viewEl); });  // a failure is worth retrying
+}
+
+/**
+ * One console line from one guest. Honoured only for a Files page whose viewEl
+ * is still the one the listener was attached to — any other guest can print
+ * the same line and nothing happens. Returns true when the request was acted
+ * on (or answered as unavailable), which is what a harness checks.
+ */
+function handleFilesLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isFilesUrl(tab.url)) return false;
+  const req = parseFilesLine(text);
+  if (!req) return false;
+
+  const api = filesApi();
+
+  if (req.verb === 'list') {
+    // The rail is part of the answer to the boot listing: the page asks for a
+    // folder and expects the places beside it.
+    pushFilePlacesToTab(tab);
+    if (!api || typeof api.list !== 'function') {
+      pushFilesListing(tab, viewEl, { path: req.path, entries: [], error: FILES_NO_BRIDGE });
+      return true;
+    }
+    let pending = null;
+    try { pending = api.list(req.path); } catch (err) { pending = null; }
+    if (!pending || typeof pending.then !== 'function') {
+      pushFilesListing(tab, viewEl, { path: req.path, entries: [], error: FILES_NO_BRIDGE });
+      return true;
+    }
+    pending.then(
+      (answer) => pushFilesListing(tab, viewEl, answer),
+      () => pushFilesListing(tab, viewEl, { path: req.path, entries: [], error: 'failed' })
+    );
+    return true;
+  }
+
+  if (req.verb === 'icons') {
+    if (!api || typeof api.icons !== 'function') {
+      pushFileIcons(tab, viewEl, req.paths, {});
+      return true;
+    }
+    let pending = null;
+    try { pending = api.icons(req.paths); } catch (err) { pending = null; }
+    if (!pending || typeof pending.then !== 'function') {
+      pushFileIcons(tab, viewEl, req.paths, {});
+      return true;
+    }
+    pending.then(
+      (answer) => pushFileIcons(tab, viewEl, req.paths, answer),
+      () => pushFileIcons(tab, viewEl, req.paths, {})
+    );
+    return true;
+  }
+
+  const method = req.verb === 'open' ? 'open' : (req.verb === 'reveal' ? 'reveal' : 'copyPath');
+  if (!api || typeof api[method] !== 'function') {
+    pushFileResult(tab, viewEl, req.verb, req.path, { ok: false, reason: 'unavailable' });
+    return true;
+  }
+  let pending = null;
+  try { pending = api[method](req.path); } catch (err) { pending = null; }
+  if (!pending || typeof pending.then !== 'function') {
+    pushFileResult(tab, viewEl, req.verb, req.path, pending);
+    return true;
+  }
+  pending.then(
+    (answer) => pushFileResult(tab, viewEl, req.verb, req.path, answer),
+    () => pushFileResult(tab, viewEl, req.verb, req.path, { ok: false, reason: 'failed' })
+  );
+  return true;
+}
+
+/** The Files tab already open, or null. There is only ever one. */
+function findFilesTab() {
+  for (const tab of tabs) {
+    if (tab && tab.kind === 'page' && isFilesUrl(tab.url)) return tab;
+  }
+  return null;
+}
+
+/**
+ * Ctrl+Alt+E and the palette's "Files" row: one Files tab, reused when it is
+ * already open, exactly as Ctrl+H reuses the history page.
+ */
+function openFilesTab() {
+  const existing = findFilesTab();
+  if (existing) {
+    activateTab(existing.id);
+    return true;
+  }
+  return !!createTab(filesUrl());
+}
 // How many recent sites the new-tab page is given. Its own layout decides how
 // many of them it shows.
 const RECENT_SITES = 8;
@@ -1444,6 +1731,30 @@ function isNewTabUrl(url) {
   return typeof url === 'string' && url.indexOf(NEWTAB_URL) === 0;
 }
 
+// files.html is the folder browser, opened in a tab of its own. Like the new
+// tab page it paints its own chrome, so the theme, the palette and the accent
+// travel in its URL and it is right on its very first frame.
+const FILES_URL = new URL('files.html', window.location.href).href;
+
+/** True for the bundled Files page, query string and hash included. */
+function isFilesUrl(url) {
+  return typeof url === 'string' && url.indexOf(FILES_URL) === 0;
+}
+
+function filesUrl() {
+  const params = new URLSearchParams();
+  params.set('theme', getTheme());
+  const settings = window.Settings;
+  if (settings && typeof settings.all === 'function') {
+    try {
+      const all = settings.all() || {};
+      if (typeof all.accentHue === 'number' && isFinite(all.accentHue)) params.set('hue', String(all.accentHue));
+      if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
+    } catch (err) { /* the authored defaults are fine */ }
+  }
+  return FILES_URL + '?' + params.toString();
+}
+
 // reader.html?src=<article url> is our own page wrapping someone else's article.
 // Everywhere a URL is shown or stored, the article's address is what matters.
 const READER_URL = new URL('reader.html', window.location.href).href;
@@ -1460,6 +1771,9 @@ function readerSourceOf(url) {
 
 function shortLabelFor(url) {
   const parsed = parseUrlOrNull(url);
+  // The folder browser is named, not hostnamed: the chip says Files from the
+  // moment the tab is made, instead of flashing "New tab" until <title> lands.
+  if (isFilesUrl(url)) return 'Files';
   // Local pages (the new-tab page above all) have no hostname worth showing.
   if (parsed && parsed.protocol === 'file:') return 'New tab';
   if (parsed && parsed.hostname) return parsed.hostname.replace(/^www\./, '');
@@ -1485,11 +1799,14 @@ function getTheme() {
 }
 
 /**
- * Hand the theme to one open new-tab guest. Everything else — remote pages,
- * Claude chambers, tabs that are not dom-ready — is skipped.
+ * Hand the theme to one open guest of ours — the new tab page or the folder
+ * browser. Everything else — remote pages, Claude chambers, tabs that are not
+ * dom-ready — is skipped.
  */
 function pushThemeToTab(tab, theme) {
-  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  // The Files page wears the same tokens and follows the same switch: without
+  // this, flipping to light leaves an open folder browser dark until a reload.
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url))) return;
   if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -1650,7 +1967,8 @@ function setOmniboxValue(url, force) {
   // the placeholder, never a file:// path they did not type.
   const store = window.History;
   const ours = !!(store && typeof store.isHistoryUrl === 'function' && store.isHistoryUrl(url));
-  const blank = !url || url === 'about:blank' || isNewTabUrl(url) || ours;
+  // The folder browser has a path bar of its own; its file:// href is noise.
+  const blank = !url || url === 'about:blank' || isNewTabUrl(url) || isFilesUrl(url) || ours;
   // A reader tab shows the article it is reading, not our wrapper page.
   omniboxEl.value = blank ? '' : (readerSourceOf(url) || url);
 }
@@ -4952,6 +5270,7 @@ function wireViewEvents(tab) {
     pushAppsToTab(tab);   // the app dock: pins, the installed list, running state
     pushProcIconCacheToTab(tab);  // process icons we already have, in one go
     pushHistoryToTab(tab);
+    pushFilePlacesToTab(tab, true);  // the folder browser's rail: places and drives
     pushReadoutToTab(tab);
     // A new document has not opted out of anything yet; ask it once, and take
     // the subscription now rather than waiting for that answer to come back.
@@ -5111,6 +5430,12 @@ function wireViewEvents(tab) {
   // `newtab:app {json}`, answered on window.__applyAppResult.
   viewEl.addEventListener('console-message', (event) => {
     handleAppLine(tab, viewEl, event && event.message);
+  });
+
+  // The folder browser is the third preload-less page: `files:<verb> {json}`,
+  // answered on window.__applyFiles / __applyFileIcons / __applyFileResult.
+  viewEl.addEventListener('console-message', (event) => {
+    handleFilesLine(tab, viewEl, event && event.message);
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {
@@ -6307,6 +6632,10 @@ const ACTIONS = {
   'find': () => moduleShortcut('find'),
   'downloads': () => moduleShortcut('downloads'),
   'history': () => moduleShortcut('history'),
+  // The folder browser, in a tab of its own. shortcuts.js does not name this
+  // id yet, so the binding below is hardcoded; the moment it does, every
+  // chrome-side path — the resolver and main's replay — is already wired.
+  'files': () => openFilesTab(),
   'settings': () => moduleShortcut('settings'),
   'bookmark': () => moduleShortcut('bookmark'),
   'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
@@ -6403,6 +6732,16 @@ function wireKeyboard() {
       // cycling is bound through shortcuts.js (Ctrl+Alt+Arrow by default).
       if (event.shiftKey && (key === 'ArrowRight' || key === 'ArrowLeft')
           && isEditableTarget(event.target)) return;
+    }
+
+    // Ctrl+Alt+E opens the folder browser. Hardcoded here rather than resolved,
+    // because shortcuts.js does not name a 'files' action yet — and Ctrl+Shift+E,
+    // the obvious key for it, has been the workspaces panel since it shipped.
+    // Alt is deliberate: a shifted E is a workspace, an Alt-ed one is Files.
+    if (event.ctrlKey && event.altKey && !event.shiftKey && key.toLowerCase() === 'e') {
+      event.preventDefault();
+      openFilesTab();
+      return;
     }
 
     /* Everything else is rebindable. Only Ctrl, Alt and function keys reach the

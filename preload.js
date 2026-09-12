@@ -315,6 +315,33 @@ contextBridge.exposeInMainWorld('api', {
     // and resolve to the same shape as list().
     refresh: () => ipcRenderer.invoke('apps:refresh')
   },
+  // The Files tab. files.html is a guest with no preload, so app.js reaches
+  // these on its behalf once it has decided the console line it parsed was a
+  // real request; main answers nothing but values, never a throw.
+  files: {
+    // One folder -> { path, parent, entries, error, truncated }, where entries
+    // are { name, path, kind: 'dir'|'file', size, mtime, ext } with folders
+    // first, and at most 2,000 of them (then truncated is true). `error` is
+    // null | 'not-found' | 'access-denied' | 'not-a-folder' | a message.
+    // null asks for the root, which is the places and drives below.
+    list: (target) => ipcRenderer.invoke('files:list', typeof target === 'string' ? target : null),
+    // { places: [{ name, path }], drives: [{ name, path, label, freeBytes,
+    // totalBytes }] } — Desktop … Music plus the user folder, and every drive
+    // letter that answered. `label` is always '' (Windows does not hand
+    // Electron a volume label); the page shows the letter alone for that.
+    places: () => ipcRenderer.invoke('files:places'),
+    // Open a file with whatever Windows opens it with -> { ok, reason }. A
+    // shortcut is opened like anything else: that is what a shortcut is for.
+    open: (target) => ipcRenderer.invoke('files:open', String(target == null ? '' : target)),
+    // Show it in Explorer -> { ok, reason }. This one raises a window, so it
+    // only ever runs off the page's own right-click menu.
+    reveal: (target) => ipcRenderer.invoke('files:reveal', String(target == null ? '' : target)),
+    // 16px shell icons by path -> { [path]: dataUrl | null }, at most 64 paths
+    // per call (main drops the rest). Keyed by the exact strings passed in.
+    icons: (paths) => ipcRenderer.invoke('files:icons', Array.isArray(paths) ? paths : []),
+    // The path itself, onto the clipboard -> { ok, reason }.
+    copyPath: (target) => ipcRenderer.invoke('files:copy-path', String(target == null ? '' : target))
+  },
   pty: {
     // opts: { cwd, cols, rows, args } -- args is an allowlist (`--continue`).
     // Called by terminal.js for the first spawn AND for the Enter-to-restart
