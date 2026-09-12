@@ -800,8 +800,10 @@
      string stays the stored shape whenever both are off: an old string-only
      file reads back unchanged, and a session that never touches either option
      never grows an object. pinOptions()/setPinOption() are the way in and out
-     of it, and setPinOption() takes either key on its own — a patch with only
-     `web` in it leaves `native` exactly where it was.
+     of it, and setPinOption() takes either key on its own. The two are
+     exclusive — a press cannot both open the web form and host the window —
+     so turning one ON clears the other, while turning one OFF leaves the
+     other exactly where it was.
      ============================================================ */
 
   /** Anything stored (or handed in) read as a clean list of pins. */
@@ -912,6 +914,8 @@
    * Turn one pin's options on or off, leaving its place in the dock alone.
    * `opts` is a PATCH: a key that is not in it is left exactly as it was, so
    * `{ native: true }` cannot quietly clear the web option a previous press set.
+   * The two options are exclusive, so a patch that turns ONE ON clears the
+   * other; a patch that turns one off leaves the other alone.
    * Idempotent: set() only announces when the stored value really moved, and
    * both options off writes the plain string back, so a session that toggles
    * one off leaves a file indistinguishable from one that never touched it.
@@ -931,10 +935,20 @@
         found = true;
         var was = list[i];
         var obj = (was && typeof was === 'object') ? was : null;
-        var web = Object.prototype.hasOwnProperty.call(patch, 'web')
-          ? !!patch.web : !!(obj && obj.web);
-        var native = Object.prototype.hasOwnProperty.call(patch, 'native')
-          ? !!patch.native : !!(obj && obj.native);
+        var setsWeb = Object.prototype.hasOwnProperty.call(patch, 'web');
+        var setsNative = Object.prototype.hasOwnProperty.call(patch, 'native');
+        var web = setsWeb ? !!patch.web : !!(obj && obj.web);
+        var native = setsNative ? !!patch.native : !!(obj && obj.native);
+        // The two are EXCLUSIVE: one primary click cannot both open the web
+        // form and host the app's window, and the dock draws them as one
+        // three-way choice (program / web / tab). So turning one ON turns the
+        // other off — without this, "as a web app" on a pin already set to
+        // "in a tab" stored both, the badge went on saying `tab` and the press
+        // went on opening the tab, and the option could not be changed back at
+        // all. Turning one OFF still leaves the other exactly as it was, which
+        // is what makes the dock's "the program itself" row work.
+        if (setsWeb && web) native = false;
+        else if (setsNative && native) web = false;
         // normalizeAppPin() is the one place the stored shape is decided, so
         // this hands it the flags and lets it write the string or the object.
         next.push(normalizeAppPin({ id: key, web: web, native: native }));

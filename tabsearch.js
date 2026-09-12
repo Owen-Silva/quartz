@@ -549,13 +549,19 @@
   function appCommand(entry, state) {
     var running = !!(state && state.running);
     var pids = (state && Array.isArray(state.pids)) ? state.pids : [];
+    // An app whose window is hosted in a tab has been re-parented INTO this
+    // window: there is nothing on the desktop left to raise, and asking Windows
+    // to focus its pid does nothing at all. The tab is the thing to show, so
+    // the row routes there — exactly as the dock's own tile does.
+    var inTab = !!openNativeTabFor(entry.id);
     return {
       id: 'app-' + entry.id,
       glyph: GLYPH.app,
       iconDataUrl: entry.iconDataUrl,
       label: 'Open ' + entry.name,
-      hint: running ? 'Running, switch to it' : '',
+      hint: inTab ? 'In a tab, switch to it' : (running ? 'Running, switch to it' : ''),
       run: function () {
+        if (inTab && callGlobal(function () { return openNativeTab; }, entry.id)) return;
         var api = null;
         try { api = window.api && window.api.apps; } catch (err) { api = null; }
         if (!api) return;
@@ -580,6 +586,11 @@
     var hits = [];
     for (var i = 0; i < appsCache.length; i++) {
       var entry = appsCache[i];
+      // One row per app: an app already hosted in a tab is offered by the
+      // in-a-tab row below ("Switch to <app>"), which is the same press and
+      // says so in better words. Two rows that do the identical thing would
+      // also cost two of the eight seats the cap allows.
+      if (openNativeTabFor(entry.id)) continue;
       var cmd = appCommand(entry, map[entry.id]);
       if (!commandMatches(cmd, words)) continue;
       cmd.appRunning = !!(map[entry.id] && map[entry.id].running);
@@ -610,10 +621,14 @@
 
   /** The open native tab for one installed app id, or null. app.js flags them tab.native. */
   function openNativeTabFor(id) {
+    if (typeof id !== 'string' || !id) return null;
     var list = tabList();
     for (var i = 0; i < list.length; i++) {
       var t = list[i];
-      if (t && t.native && t.native.appId === id) return t;
+      // kind as well as the payload: `native` is app.js's word for this tab
+      // kind, and a future tab kind carrying a field of that name must not
+      // read as one of these.
+      if (t && t.kind === 'native' && t.native && t.native.appId === id) return t;
     }
     return null;
   }

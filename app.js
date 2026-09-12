@@ -1738,6 +1738,20 @@ function handleAppLine(tab, viewEl, text) {
       });
       return true;
     }
+    // The pin whose option says "open this app IN a tab". Checked BEFORE the
+    // web option, because the dock's own badge reads that way round
+    // (newtab.js dockWhereMode: the tab wins over the web form) and the lit
+    // option has to be what a press really does. Only a file written before
+    // setPinOption() made the two exclusive can carry both at once.
+    if (pinOpensNative(req.id)) {
+      const made = openNativeTab(req.id);
+      const embed = embedApi();
+      pushAppResult(tab, viewEl, {
+        action: req.action, id: req.id,
+        ok: !!(made && embed), reason: made ? (embed ? '' : 'unavailable') : 'failed'
+      });
+      return true;
+    }
     if (pinOpensWeb(req.id)) {
       const entry = appById(req.id);
       const site = entry ? webAppForExeName(entry.exe) : null;
@@ -1750,18 +1764,6 @@ function handleAppLine(tab, viewEl, text) {
         });
         return true;
       }
-    }
-    // ...and the pin whose option says "open this app IN a tab". Checked after
-    // the web option, so a pin carrying both still opens the web form: that is
-    // the option that existed first and the one a press already meant.
-    if (pinOpensNative(req.id)) {
-      const made = openNativeTab(req.id);
-      const embed = embedApi();
-      pushAppResult(tab, viewEl, {
-        action: req.action, id: req.id,
-        ok: !!(made && embed), reason: made ? (embed ? '' : 'unavailable') : 'failed'
-      });
-      return true;
     }
   }
 
@@ -2440,7 +2442,14 @@ const NATIVE_REASON_TEXT = {
   'already-attached': 'That window is already in another tab',
   'refused': 'Windows refused to hand that window over',
   'gone': 'Its window went away before it could be hosted',
-  'bad-request': 'That app was asked for the wrong way'
+  'bad-request': 'That app was asked for the wrong way',
+  // The rest of what embed.js and main.js can really answer with, so the card
+  // never has to fall back to a bare code the user cannot act on.
+  'no-style': 'Its window is not the kind that can be hosted',
+  'bad-hwnd': 'That window went away while it was being read',
+  'bad-tab': 'This tab is not one the engine knows',
+  'open-pending': 'It is already being opened — give it a moment',
+  'cancelled': 'Opening it was cancelled'
 };
 
 function nativeReasonText(reason) {
@@ -2650,7 +2659,18 @@ let nativeCoverIds = null;
 
 function nativeCoverList() {
   if (nativeCoverIds) return nativeCoverIds;
-  const base = (typeof OVERLAY_IDS !== 'undefined' && Array.isArray(OVERLAY_IDS)) ? OVERLAY_IDS : [];
+  // OVERLAY_IDS is a `const` declared further down this file: `typeof` on a
+  // binding still in its temporal dead zone THROWS rather than answering
+  // 'undefined', so the read is in a try — every caller of this runs long after
+  // load, but a lazy read that can throw is not worth leaving in place.
+  let base = [];
+  try {
+    if (Array.isArray(OVERLAY_IDS)) base = OVERLAY_IDS;
+  } catch (err) { base = []; }
+  // #settings-toast is deliberately NOT here: a toast is two seconds of small
+  // print at the bottom of the window, and blanking a whole hosted app for it
+  // would be the worse of the two. A toast raised over a native tab is the one
+  // chrome surface the app paints over.
   nativeCoverIds = base.concat(['workspaces-panel']);
   return nativeCoverIds;
 }
@@ -2951,6 +2971,35 @@ function disposeNativeTab(tab) {
 }
 
 /**
+ * The rect above is in THIS page's CSS pixels and embed.js multiplies it by the
+ * display's scale factor at the moment of the call — so a change of scale with
+ * no change of CSS size leaves the app's window at the wrong physical bounds
+ * until something else asks for a layout. Two things do that: dragging the
+ * window to a monitor at a different DPI (Windows keeps the logical size, so no
+ * resize event need fire) and zooming the chrome. Both move
+ * window.devicePixelRatio, and a resolution media query is the only thing that
+ * reports it changing, so the query is re-armed at the new ratio each time.
+ */
+function watchNativeScale() {
+  if (typeof window.matchMedia !== 'function') return;
+  const arm = () => {
+    const dpr = window.devicePixelRatio || 1;
+    let mq = null;
+    try { mq = window.matchMedia('(resolution: ' + dpr + 'dppx)'); } catch (err) { return; }
+    if (!mq || typeof mq.addEventListener !== 'function') return;
+    const once = () => {
+      try { mq.removeEventListener('change', once); } catch (err) { /* already off */ }
+      // Forced: the CSS rect is very often the rect last sent, and it is the
+      // physical rect behind it that has moved.
+      queueNativeLayout(true);
+      arm();
+    };
+    try { mq.addEventListener('change', once); } catch (err) { /* no listener: no watch */ }
+  };
+  arm();
+}
+
+/**
  * Called from init(). The resize listener goes on whatever this build can do
  * (queueNativeLayout() costs nothing with no native tab open); the gone
  * subscription only exists where the engine does.
@@ -2958,6 +3007,7 @@ function disposeNativeTab(tab) {
 function wireNativeTabs() {
   // The well changes size with the window, and the hosted window has to follow.
   window.addEventListener('resize', () => queueNativeLayout());
+  watchNativeScale();
 
   const embed = embedApi();
   if (!embed || typeof embed.onGone !== 'function') return;
