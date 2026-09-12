@@ -155,6 +155,7 @@ const embed = (() => {
     close: () => ({ ok: false, reason: 'unavailable' }),
     detachAll: () => ({ ok: true, detached: 0 }),
     handleWindowClose: () => ({ ok: true, detached: 0 }),
+    recoverOrphans: () => ({ ok: false, reason: 'unavailable', fixed: 0, checked: 0 }),
     alive: () => false,
     focusInfo: () => ({
       available: false, foregroundRoot: '0', ours: false, viaOwner: false,
@@ -627,6 +628,27 @@ app.whenReady().then(() => {
   loadPermissionDecisions();
   attachSessionHandlers();
   createWindow();
+
+  /*
+   * A KILLED session's leftovers, repaired once, here (see embed.recoverOrphans).
+   *
+   * Every orderly exit hands hosted app windows back. A kill -- End task, a
+   * crash, the power going -- does not, and owner mode leaves the app ALIVE with
+   * no caption, no border and no taskbar button: a rectangle the user cannot move or
+   * close. embed.js writes what it would take to undo that on every attach, so
+   * this reads a file that is normally absent and, when it is not, puts the
+   * frames back. Guarded four ways inside (age, IsWindow, the same exe, and the
+   * window still wearing OUR style), so it can only ever touch a window this
+   * browser really did leave broken.
+   */
+  try {
+    const fixedUp = embed.recoverOrphans();
+    if (fixedUp && fixedUp.fixed) {
+      console.warn('[embed] put the frame back on ' + fixedUp.fixed
+        + ' window(s) a killed session left frameless');
+    }
+  } catch { /* a repair that cannot run costs nothing that was working */ }
+
   // Deliberately not awaited: a cold start fetches filter lists over the
   // network and the window must not wait on that.
   initAdblock();

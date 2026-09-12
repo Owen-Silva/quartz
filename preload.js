@@ -418,16 +418,24 @@ contextBridge.exposeInMainWorld('api', {
     // cheap -- safe to call on every resize frame. `visible` false hides the
     // window without giving it up (that is what switching tabs does).
     // -> { ok, changed, rect, visible, scale }.
-    layout: (tabId, rect, visible) => ipcRenderer.invoke('embed:layout', {
-      tabId: String(tabId == null ? '' : tabId),
-      rect: {
-        x: Number(rect && rect.x) || 0,
-        y: Number(rect && rect.y) || 0,
-        w: Number(rect && rect.w) || 0,
-        h: Number(rect && rect.h) || 0
-      },
-      visible: visible !== false
-    }),
+    layout: (tabId, rect, visible) => {
+      /* A MISSING OR NON-NUMERIC RECT IS A CALLER BUG, NOT "HIDE THE APP".
+       * (R8, 2026-09-12: measured. `layout(tab, null, true)` used to build
+       * {0,0,0,0} here, which main.js's own guard could not see -- the object was
+       * there -- and a zero-area rect is how this module says "hidden". So one
+       * malformed call made the app in the tab disappear, and answered ok.) */
+      const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+      const box = rect && typeof rect === 'object'
+        ? { x: num(rect.x), y: num(rect.y), w: num(rect.w), h: num(rect.h) } : null;
+      if (!box || box.x === null || box.y === null || box.w === null || box.h === null) {
+        return Promise.resolve({ ok: false, reason: 'bad-rect' });
+      }
+      return ipcRenderer.invoke('embed:layout', {
+        tabId: String(tabId == null ? '' : tabId),
+        rect: box,
+        visible: visible !== false
+      });
+    },
     // Give the window back to the desktop: top-level again, its own frame, its
     // own old position, and never activated. The app keeps running.
     detach: (tabId, opts) => ipcRenderer.invoke('embed:detach', {

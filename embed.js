@@ -51,6 +51,8 @@
 const { app, screen, BrowserWindow } = require('electron');
 const EventEmitter = require('events');
 const { execFile, execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 // ---------------------------------------------------------------------------
 // Win32, through koffi
@@ -95,6 +97,9 @@ const WS_EX_APPWINDOW = 0x00040000n;
 
 const SWP_NOSIZE = 0x0001;
 const SWP_NOMOVE = 0x0002;
+/** Leave the z-order alone. Owner mode's layout needs this more than it needs
+ *  HWND_TOP: see the z-order note in applyLayout(). */
+const SWP_NOZORDER = 0x0004;
 const SWP_NOACTIVATE = 0x0010;
 const SWP_FRAMECHANGED = 0x0020;
 const SWP_SHOWWINDOW = 0x0040;
@@ -184,6 +189,20 @@ function normalizeMode(value) {
  * unbounded walk over a ring of owners would be an infinite loop.
  */
 const OWNER_HOPS = 4;
+
+/**
+ * HOW MANY CONSECUTIVE POLL TICKS MUST SAY "NOT OURS" BEFORE WE LET GO.
+ *
+ * Two, for the same reason the hung watchdog takes two samples (R8,
+ * 2026-09-12). Letting go is not free: it drops the record, restores the styles
+ * and tells the chrome the app is gone, so a SINGLE reading is a bad thing to
+ * spend that on. GetWindow(GW_OWNER) can answer 0 for a live window mid-flight
+ * -- an app re-creating its own frame, a splash handing over to the real window,
+ * a modal being put up -- and koffi throwing on a tick would read as 0 as well.
+ * One extra second of a frameless window in the genuine case (the Store frame)
+ * buys never evicting a healthy app on one bad read.
+ */
+const OWNER_LOSS_SAMPLES = 2;
 
 /**
  * THE OWNER-CHAIN TEST, pure so the harness can drive it without Win32.
@@ -718,6 +737,16 @@ function create(opts) {
     try { return w32.GetWindow(handle, GW_OWNER) || 0n; } catch { return 0n; }
   }
 
+  /**
+   * The same question, but able to say "I could not read it" — which ownerOf()
+   * cannot, because it answers 0n both for "no owner" and for "the call threw".
+   * The poll needs the difference: one is news, the other is a retry.
+   */
+  function readOwner(handle) {
+    try { return { ok: true, owner: w32.GetWindow(handle, GW_OWNER) || 0n }; }
+    catch { return { ok: false, owner: 0n }; }
+  }
+
   /** The thread that owns a window, 0 when it cannot be read. */
   function windowThread(handle) {
     try {
@@ -742,6 +771,53 @@ function create(opts) {
    */
   function ownsRoot(root, mine) {
     return ownsRootVia(root, mine || ourHandles(), ownerOf, OWNER_HOPS);
+  }
+
+  /**
+   * IS THE FOREGROUND OURS RIGHT NOW — the one question the z-order depends on.
+   *
+   * True when the foreground window is one of our own top-level windows or one
+   * we OWN (a hosted app's window: the user is typing inside a tab). False when the user
+   * has activated somebody else's window in front of the browser, and that is
+   * the case where nothing of ours may be pushed to the top of the z-order (see
+   * applyLayout and raiseHosted).
+   *
+   * All kernel-state reads: GetForegroundWindow, GetAncestor and up to four
+   * GetWindow(GW_OWNER) hops cannot block on a hosted app's message loop.
+   */
+  /**
+   * Does the FOREGROUND input queue's focus window belong to one of our own
+   * windows? This is the only honest answer to "did the hand-back land": both
+   * SetActiveWindow and SetFocus answer with the window that held it BEFORE, and
+   * 0 means "there was none" as often as it means "refused". Read while still
+   * joined to the app's queue (see focusChrome), it is the truth.
+   */
+  function focusIsOurs() {
+    if (!w32) return false;
+    try {
+      const gui = { cbSize: w32.GUI_SIZE };
+      if (!w32.GetGUIThreadInfo(0, gui)) return false;
+      const focus = gui.hwndFocus || 0n;
+      if (!focus) return false;
+      let root = focus;
+      try { root = w32.GetAncestor(focus, GA_ROOT) || focus; } catch { root = focus; }
+      return ourHandles().has(root);
+    } catch {
+      return false;
+    }
+  }
+
+  function foregroundIsOurs() {
+    if (!w32) return false;
+    try {
+      const fg = w32.GetForegroundWindow() || 0n;
+      if (!fg) return false;
+      let root = fg;
+      try { root = w32.GetAncestor(fg, GA_ROOT) || fg; } catch { root = fg; }
+      return !!ownsRoot(root, ourHandles()).ours;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1161,6 +1237,9 @@ function create(opts) {
       // The watchdog's carried state (see hungStep). A window being hosted is
       // by definition not one we are watching from the outside.
       hung: { watching: false, hungStreak: 0, okStreak: 0 },
+      // Consecutive poll ticks that read an owner which is not us (see
+      // OWNER_LOSS_SAMPLES). Reset by any tick that reads us, or that fails.
+      ownerMiss: 0,
     };
 
     /* Hosting it again ends any watch on it: by hwnd as well as by tab, so a
@@ -1208,6 +1287,19 @@ function create(opts) {
         w32.SetWindowLongPtrW(handle, GWL_EXSTYLE, ownerEx);
         w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
           SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+        /* DID THE OWNER TAKE? (R8, 2026-09-12.) SetWindowLongPtrW cannot say:
+           it answers the PREVIOUS value, and 0 is a legal previous value. UIPI
+           refuses the write outright for a window of a higher-integrity process
+           (anything started as administrator), and the state that leaves behind
+           is the worst one available -- frame stripped, nothing owning it,
+           nothing hiding it with us, and a poll tick a second later handing it
+           back as "lost its owner" while the tab believes it is hosting. One
+           GetWindow is the whole check, and the catch below puts it all back. */
+        if (ownerOf(handle) !== parent) {
+          const refused = new Error('the window would not take us as its owner');
+          refused.embedReason = 'owner-refused';
+          throw refused;
+        }
       } else {
         const childStyle = (style & ~DECORATION) | WS_CHILD;
 
@@ -1254,7 +1346,7 @@ function create(opts) {
           SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
       } catch { /* nothing further to try */ }
       log('embed: attach failed', err && err.message);
-      return { ok: false, reason: 'attach-failed' };
+      return { ok: false, reason: (err && err.embedReason) || 'attach-failed' };
     }
 
     attached.set(tabId, record);
@@ -1262,6 +1354,9 @@ function create(opts) {
     counters.attaches += 1;
     startPoll();
     ensureShutdownHooks();
+    // What a killed browser would leave behind, on disk before the app is on
+    // screen (see recoverOrphans).
+    persistHosted();
     log('embed: attached', mode, tabId, key, record.exe, record.title);
 
     return {
@@ -1359,10 +1454,33 @@ function create(opts) {
         forget(record, 'gone');
         return { ok: false, reason: 'gone' };
       }
+      /*
+       * THE Z-ORDER, and a plain HWND_TOP here was wrong (R8, 2026-09-12).
+       *
+       * HWND_TOP puts the window at the top of the whole non-topmost band --
+       * above the window the user just switched TO, if he switched away from the
+       * browser. Measured: with Paint activated in front of the test browser, one
+       * SetWindowPos(HWND_TOP) on the hosted window put the app above Paint, over
+       * a window the user was using. A layout can land in exactly that state: the
+       * 1 s poll, a display change, a resize from outside.
+       *
+       * So the z-order is only touched when we are allowed on top -- the window
+       * is coming INTO view, or the foreground really is ours (our window, or a
+       * window we own, which is the same thing here). Otherwise SWP_NOZORDER:
+       * Windows keeps an owned window above its owner by itself, so there is
+       * nothing to fix while the browser is behind something else.
+       *
+       * Child mode keeps HWND_TOP unconditionally: there the z-order is among OUR
+       * OWN child HWNDs (the Chromium render widget), where being on top is the
+       * whole point and no other app's window can be in the list.
+       */
+      const appearing = show && !(last && last.show);
+      const mayRaise = !owner || appearing || foregroundIsOurs();
       // Sizing a hidden window is pointless work AND some apps redraw on it;
       // when it is going away, move nothing and just hide.
       const flags = SWP_NOACTIVATE | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW)
-        | (show ? 0 : SWP_NOMOVE | SWP_NOSIZE);
+        | (show ? 0 : SWP_NOMOVE | SWP_NOSIZE)
+        | (mayRaise ? 0 : SWP_NOZORDER);
       w32.SetWindowPos(record.handle, HWND_TOP, x, y, w, h, flags);
     } catch (err) {
       log('embed: layout failed', record.tabId, err && err.message);
@@ -1415,6 +1533,11 @@ function create(opts) {
    */
   function raiseHosted() {
     if (!win32()) return { ok: false, reason: 'unavailable', raised: 0 };
+    /* ONLY WHILE THE FOREGROUND IS OURS. main.js calls this from the window's
+       'focus', where it is true by definition -- but the call is exported, and
+       raising a hosted app to the top of the z-order while the user is working in
+       ANOTHER app would throw our tab's window over his. (R8, 2026-09-12.) */
+    if (!foregroundIsOurs()) return { ok: true, raised: 0, reason: 'not-foreground' };
     let raised = 0;
     for (const record of Array.from(attached.values())) {
       if (record.mode !== 'owner' || !record.visible) continue;
@@ -1452,6 +1575,7 @@ function create(opts) {
     byHandle.delete(record.key);
     counters.detaches += 1;
     maybeStopPoll();
+    persistHosted();
 
     if (!win32()) return { ok: true, hwnd: record.key, restored: false };
 
@@ -1506,6 +1630,7 @@ function create(opts) {
       attached.set(key, record);
       byHandle.set(record.key, key);
       startPoll();
+      persistHosted();            // still hosted after all: back in the file
       log('embed: detach failed, window kept as a child for a retry', key);
       return { ok: false, reason: 'detach-failed', hwnd: record.key };
     }
@@ -1585,6 +1710,24 @@ function create(opts) {
    */
   function restoreStyles(record) {
     if (!record || !w32) return false;
+    /* ONLY ONTO A WINDOW THAT IS STILL TOP-LEVEL (R8, 2026-09-12). Some apps
+       take their own window back by making it a CHILD of another window of
+       theirs, and writing a top-level style (WS_POPUP | WS_CAPTION) onto a child
+       HWND is not a restore -- it is a window nothing can draw or drive. The
+       saved style is only true of a top-level window, so if it is somebody's
+       child now, we leave it exactly as we found it and say so. */
+    try {
+      /* GA_ROOT, NOT GetParent: GetParent answers with the OWNER for a top-level
+         window, so it is non-zero for every window this module hosts in owner
+         mode. An owned window's GA_ROOT is itself (see GW_OWNER above), so
+         "root is not me" is the only honest test for "I am a child now". */
+      const root = w32.GetAncestor(record.handle, GA_ROOT);
+      const live = BigInt(w32.GetWindowLongPtrW(record.handle, GWL_STYLE)) & 0xffffffffn;
+      if ((root && root !== record.handle) || (live & WS_CHILD)) {
+        log('embed: styles left alone, the app made its window a child', record.tabId);
+        return false;
+      }
+    } catch { /* cannot tell: the restore below is still the better bet */ }
     try {
       w32.SetWindowLongPtrW(record.handle, GWL_STYLE, record.saved.style);
     } catch { /* next */ }
@@ -1606,6 +1749,7 @@ function create(opts) {
     clearCloseTimer(record.tabId);
     dropWatch(record.tabId);      // a dead window has no hang to report on
     maybeStopPoll();
+    persistHosted();              // nothing of ours left on it to undo
     counters.gone += 1;
     log('embed: window ' + reason, record.tabId, record.key);
     emitter.emit('gone', record.tabId);
@@ -1621,6 +1765,190 @@ function create(opts) {
     hungWatch.clear();
     maybeStopPoll();
     return { ok: true, detached: ids.length };
+  }
+
+  // -- a force-killed browser ------------------------------------------------
+
+  /*
+   * THE ONE HOLE LEFT BY OWNER MODE (R8, 2026-09-12).
+   *
+   * Every ORDERLY way out of this process detaches (before-quit, the window's
+   * close, process 'exit', a dead renderer). Task Manager's End task, a kill -9
+   * from a script and a hard power event are not orderly: the browser stops
+   * between instructions and a hosted app is left ALIVE, owned by a window that
+   * no longer exists, wearing the frameless WS_POPUP style we gave it -- no
+   * caption, no border, no taskbar button, out of Alt+Tab. Measured: the app
+   * really does survive, so this is the state the user is left in, and nothing in
+   * the app itself can put it right.
+   *
+   * The fix is one small file: what we would need to undo it, written on attach
+   * and deleted on detach, so its very existence means "the last session did not
+   * finish". On the next start recoverOrphans() reads it and puts the styles back
+   * -- no window enumeration at all, because the handles are in the file.
+   *
+   * An HWND is recycled the moment its window dies, so a saved handle alone
+   * proves nothing. Four guards, all of which must hold before anything is
+   * written to a window:
+   *   1. the row is less than a day old,
+   *   2. IsWindow still says yes,
+   *   3. the window's process is the SAME exe we hosted,
+   *   4. it is still wearing OUR style -- top-level, WS_POPUP, no caption --
+   *      while the style we saved for it HAD a caption. A normal window fails
+   *      that test, so nothing that is already fine is touched.
+   */
+
+  /** A saved row older than this is not acted on. */
+  const ORPHAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+  let stateFile;
+  let stateFileTried = false;
+
+  /**
+   * Where the "what we are hosting right now" file lives: userData, beside the
+   * rest of the browser's state. `options.stateFile` overrides it (a path, or
+   * false to switch persistence off) so the harness can drive this without
+   * Electron.
+   */
+  function hostedStatePath() {
+    if (stateFileTried) return stateFile;
+    stateFileTried = true;
+    stateFile = null;
+    if (options.stateFile === false) return null;
+    if (typeof options.stateFile === 'string' && options.stateFile) {
+      stateFile = options.stateFile;
+      return stateFile;
+    }
+    try { stateFile = path.join(app.getPath('userData'), 'hosted-windows.json'); }
+    catch { stateFile = null; }
+    return stateFile;
+  }
+
+  /**
+   * Write (or delete) that file. Called after every change to what is hosted,
+   * which is a handful of times a session: attach, detach, a window dying.
+   * Owner-mode records only -- a CHILD window is destroyed with the browser
+   * window, so after a kill there is no window left to un-frame.
+   */
+  function persistHosted() {
+    const file = hostedStatePath();
+    if (!file) return false;
+    const rows = [];
+    for (const record of attached.values()) {
+      if (record.mode !== 'owner') continue;
+      rows.push({
+        hwnd: record.key,
+        pid: record.pid,
+        exe: record.exe || '',
+        style: record.saved.style.toString(),
+        exstyle: record.saved.exstyle.toString(),
+        rect: record.saved.rect,
+        at: Date.now(),
+      });
+    }
+    try {
+      if (!rows.length) {
+        try { fs.unlinkSync(file); } catch { /* it was already gone */ }
+        return true;
+      }
+      fs.writeFileSync(file, JSON.stringify({ pid: process.pid, rows }));
+      return true;
+    } catch (err) {
+      log('embed: could not write the hosted-window state', err && err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Put back the frames of any app a killed session left frameless. Cheap: the
+   * file is usually absent, and when it is not it names a handle or two.
+   *
+   * Called once at startup from main.js. Never throws, never activates anything,
+   * and never touches a window that fails any of the four guards above.
+   */
+  function recoverOrphans() {
+    const file = hostedStatePath();
+    if (!file) return { ok: false, reason: 'no-state-file', fixed: 0, checked: 0 };
+    let raw = null;
+    try { raw = fs.readFileSync(file, 'utf8'); }
+    catch { return { ok: true, fixed: 0, checked: 0, reason: 'nothing-to-do' }; }
+    // Read it, then it goes: one crash is repaired once, and a window we cannot
+    // repair must not be poked at on every start for ever.
+    try { fs.unlinkSync(file); } catch { /* the guards below make a retry safe */ }
+
+    let rows = [];
+    try {
+      const data = JSON.parse(raw);
+      rows = Array.isArray(data && data.rows) ? data.rows : [];
+    } catch { rows = []; }
+    if (!rows.length) return { ok: true, fixed: 0, checked: 0 };
+    if (!win32()) return { ok: false, reason: 'unavailable', fixed: 0, checked: rows.length };
+
+    const fixed = [];
+    const skipped = [];
+    const bigint = (value) => {
+      try { return BigInt(String(value == null ? '0' : value)) & 0xffffffffn; }
+      catch { return null; }
+    };
+
+    for (const row of rows) {
+      const info = { hwnd: String((row && row.hwnd) || ''), exe: String((row && row.exe) || '') };
+      const skip = (why) => skipped.push(Object.assign({ why }, info));
+      const handle = toHandle(row && row.hwnd);
+      if (!handle) { skip('bad-hwnd'); continue; }
+      const age = Date.now() - (Number(row && row.at) || 0);
+      if (!(age >= 0 && age < ORPHAN_MAX_AGE_MS)) { skip('stale'); continue; }
+      let live = false;
+      try { live = !!w32.IsWindow(handle); } catch { live = false; }
+      if (!live) { skip('gone'); continue; }
+      const exe = normalizeExe(exeForPid(windowPid(handle)));
+      if (!exe || exe !== normalizeExe(info.exe)) { skip('another-exe'); continue; }
+      const saved = bigint(row && row.style);
+      const savedEx = bigint(row && row.exstyle);
+      if (saved === null || savedEx === null) { skip('bad-style'); continue; }
+      if ((saved & WS_CAPTION) === 0n) { skip('nothing-to-give-back'); continue; }
+      let now = null;
+      try { now = BigInt(w32.GetWindowLongPtrW(handle, GWL_STYLE)) & 0xffffffffn; }
+      catch { now = null; }
+      if (now === null) { skip('no-style'); continue; }
+      const frameless = (now & WS_POPUP) === WS_POPUP && (now & WS_CAPTION) === 0n
+        && (now & WS_CHILD) === 0n;
+      if (!frameless) { skip('not-frameless'); continue; }
+      try { if (w32.GetAncestor(handle, GA_ROOT) !== handle) { skip('not-top-level'); continue; } }
+      catch { /* treat as top-level: the style test above already said so */ }
+
+      try {
+        // The owner first: it is a handle to a window that no longer exists.
+        w32.SetWindowLongPtrW(handle, GWLP_HWNDPARENT, 0n);
+        w32.SetWindowLongPtrW(handle, GWL_STYLE, saved);
+        w32.SetWindowLongPtrW(handle, GWL_EXSTYLE, savedEx);
+        /* Shown as well as re-framed: the kill may have caught it while its tab
+           was in the background, and a hidden window with no taskbar button is
+           one the user cannot reach at all. Back at its own pre-hosting rect when we
+           have a sane one, because the rect it has now is a tab's content area on
+           a browser that is gone. Never activated. */
+        const r = row && row.rect;
+        const rw = r ? Math.max(0, Number(r.right) - Number(r.left)) : 0;
+        const rh = r ? Math.max(0, Number(r.bottom) - Number(r.top)) : 0;
+        if (rw > 0 && rh > 0) {
+          w32.SetWindowPos(handle, HWND_TOP, Number(r.left), Number(r.top), rw, rh,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        } else {
+          w32.SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW
+            | SWP_NOMOVE | SWP_NOSIZE);
+        }
+        fixed.push(Object.assign({}, info));
+      } catch (err) {
+        skip('restore-failed:' + ((err && err.message) || '?'));
+      }
+    }
+
+    if (fixed.length || skipped.length) {
+      log('embed: frameless windows from a killed session',
+        'fixed ' + fixed.length + '/' + rows.length,
+        JSON.stringify({ fixed, skipped }));
+    }
+    return { ok: true, fixed: fixed.length, checked: rows.length, windows: fixed, skipped };
   }
 
   // -- the hung-app watchdog ------------------------------------------------
@@ -1733,17 +2061,30 @@ function create(opts) {
         let ours = true;
         try {
           if (parent && record.mode === 'owner') {
-            if (ownerOf(record.handle) !== parent) {
-              /* MEASURED with Calculator (see STORE_OK_IN_OWNER_MODE): a window
-                 whose owner someone else cleared is still wearing the frameless
-                 style WE gave it, and dropping the record without undoing that
-                 leaves a captionless window with no way back. It is still a
-                 top-level window, so putting its own styles back is safe and
-                 costs one call; its position is left alone (we do not know what
-                 whoever took it wants) and nothing is activated. */
-              restoreStyles(record);
-              forget(record, 'lost its owner');
-              ours = false;
+            /* TWO TICKS, NOT ONE (see OWNER_LOSS_SAMPLES). A read that failed is
+               not an answer at all and does not count; a reading of "somebody
+               else's, or nobody's" has to repeat on the next tick before we act,
+               so a transient -- an app re-creating its frame, a splash handing
+               over, koffi throwing once -- costs a second and nothing else. */
+            const read = readOwner(record.handle);
+            if (!read.ok) {
+              record.ownerMiss = 0;
+            } else if (read.owner !== parent) {
+              record.ownerMiss = (Number(record.ownerMiss) || 0) + 1;
+              if (record.ownerMiss >= OWNER_LOSS_SAMPLES) {
+                /* MEASURED with Calculator (see STORE_OK_IN_OWNER_MODE): a window
+                   whose owner someone else cleared is still wearing the frameless
+                   style WE gave it, and dropping the record without undoing that
+                   leaves a captionless window with no way back. It is still a
+                   top-level window, so putting its own styles back is safe and
+                   costs one call; its position is left alone (we do not know what
+                   whoever took it wants) and nothing is activated. */
+                restoreStyles(record);
+                forget(record, 'lost its owner');
+                ours = false;
+              }
+            } else {
+              record.ownerMiss = 0;
             }
           } else if (parent && w32.GetParent(record.handle) !== parent) {
             forget(record, 'was re-parented away');
@@ -1981,25 +2322,38 @@ function create(opts) {
     let ok = false;
     let joined = false;
     let note = '';
+    /* HOISTED (R8, 2026-09-12) so the belt-and-braces detach below uses the very
+       pair we joined with. Re-reading the app's thread after a throw can answer
+       0 -- the app may have exited mid-hand-back -- and AttachThreadInput(x, 0,
+       false) detaches nothing, which is the one state this must never end in. */
+    let appThread = 0;
+    let ourThread = 0;
     try {
       if (w32.IsHungAppWindow(fgApp)) {
         note = 'app not responding';
       } else {
-        const appThread = windowThread(fgApp);
-        const ourThread = Number(w32.GetCurrentThreadId());
+        appThread = windowThread(fgApp);
+        ourThread = Number(w32.GetCurrentThreadId());
         if (!appThread || !ourThread) {
           note = 'no thread id';
         } else if (appThread === ourThread) {
           w32.SetFocus(parent);
-          ok = true;
-          note = 'same thread';
+          ok = focusIsOurs();
+          note = 'same thread' + (ok ? '' : ', focus did not move');
         } else if (w32.AttachThreadInput(ourThread, appThread, true)) {
           joined = true;
-          w32.SetActiveWindow(parent);
+          const active = w32.SetActiveWindow(parent);
           w32.SetFocus(parent);
-          ok = true;
-          w32.AttachThreadInput(ourThread, appThread, false);
-          joined = false;
+          /* CHECKED, NOT ASSUMED (R8, 2026-09-12). Neither call reports success:
+             both answer the window that held it before, and 0 is "there was
+             none" as often as "refused". So the foreground queue's own focus is
+             read while we are still joined to it -- and a hand-back that did not
+             land answers false, which is what puts fireNativeShortcut's
+             webContents.focus() backstop to work instead of a false "ok". */
+          ok = focusIsOurs();
+          if (!ok) note = 'focus did not move (active ' + handleText(active || 0n) + ')';
+          if (w32.AttachThreadInput(ourThread, appThread, false)) joined = false;
+          else note = (note ? note + '; ' : '') + 'detach refused';
         } else {
           note = 'AttachThreadInput refused';
         }
@@ -2009,8 +2363,10 @@ function create(opts) {
     }
     // Never leave the queues joined: that IS the child-mode failure mode.
     if (joined) {
-      try { w32.AttachThreadInput(Number(w32.GetCurrentThreadId()), windowThread(fgApp), false); }
-      catch { /* nothing further to try */ }
+      try {
+        if (w32.AttachThreadInput(ourThread, appThread, false)) note += ' (detached late)';
+        else note += ' (STILL JOINED)';
+      } catch { note += ' (STILL JOINED)'; }
     }
     counters.handbacks += 1;
     log('embed: keyboard handback ' + (ok ? 'ok' : 'no') + ' in '
@@ -2080,6 +2436,11 @@ function create(opts) {
     hungTabs: () => Array.from(hungWatch.values()).map((e) => ({ tabId: e.tabId, hwnd: e.key })),
     detachAll,
     handleWindowClose,
+    /** Startup repair: put back the frame of any app a KILLED session left
+     *  frameless. Called once from main.js; a no-op when nothing is owed. */
+    recoverOrphans,
+    /** The file recoverOrphans() reads, for the live verification. */
+    hostedStatePath,
     alive,
     focusInfo,
     focusChrome,
@@ -2101,6 +2462,8 @@ module.exports = {
   normalizeMode,
   ownsRootVia,
   OWNER_HOPS,
+  /** Consecutive poll ticks of "not ours" before an owned window is let go. */
+  OWNER_LOSS_SAMPLES,
   pidList,
   parseProcTree,
   descendantsOf,
