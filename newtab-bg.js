@@ -81,6 +81,7 @@
      them: a ring 10px off the glass, pads along one edge, and the cells
      underneath marked so nothing routes below a tile. */
   const MODULE_INFLATE = 10;    // the seat ring stands this far off the tile
+  const MODULE_TIGHT = 4;       // and this far, when the capsule is tall
   const MODULE_CLEAR = 2 * CELL;   // and the tile this far off the socket
   const MODULE_MARGIN = 24;     // a tile never touches the window edge
   const MODULE_GAP = CELL;      // between the two tiles, and above the socket
@@ -601,8 +602,15 @@
            fallback, so it only has to keep the two rings apart — one
            MODULE_INFLATE of air between the seat and the socket — rather
            than the whole MODULE_CLEAR the row above the capsule takes. */
-        const ring = inflateRect({ x: x, y: y, w: it.w, h: it.h }, MODULE_INFLATE);
-        if (rectsOverlap(ring, inflateRect(socket, MODULE_INFLATE))) x = null;
+        const seat = { x: x, y: y, w: it.w, h: it.h };
+        if (rectsOverlap(inflateRect(seat, MODULE_INFLATE), inflateRect(socket, MODULE_INFLATE))) {
+          /* A capsule tall enough to reach the corners (the process list
+             unfolded under the strip) leaves less air than that, and the
+             old rule answered by hiding the clock. Keep the seat as long as
+             it still clears the socket RING — a tile touching the ring is
+             wrong, a tile a hair off it is only tight. */
+          if (rectsOverlap(inflateRect(seat, MODULE_TIGHT), socket)) x = null;
+        }
       }
 
       if (x === null || y === null) {

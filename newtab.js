@@ -745,10 +745,11 @@ window.__stats = function () {
 /*    moves the node. Nothing is rebuilt, so a row you are hovering, a   */
 /*    confirm you have armed and a note that is still showing all        */
 /*    survive the second they land in.                                   */
-/*  - The list lives in a panel over the page, not in the capsule: the   */
-/*    capsule is the height it always was, and the board's traces are    */
-/*    seated where they always were. It starts closed and is never       */
-/*    remembered.                                                        */
+/*  - The list is folded into the capsule under the strip. Closed, the   */
+/*    capsule is the height it always was; open, it grows by the fold    */
+/*    and the board re-seats its traces around the new box. The state    */
+/*    is remembered — he opens this all the time — and restored          */
+/*    without animation.                                                 */
 /*  - A sample that lands while it is closed is KEPT and not drawn. The  */
 /*    page costs the same as it did before this existed until someone    */
 /*    opens it.                                                          */
@@ -763,15 +764,14 @@ const PROC_SORT_STORE = 'newtab.procs.sort';
 const PROC_CONFIRM_MS = 3000;    // an armed End task disarms itself
 const PROC_NOTE_MS = 3000;       // and the answer it got fades
 
-const PROC_PANEL_GAP = 12;       // the panel sits this far under the strip
-const PROC_PANEL_EDGE = 16;      // and never closer than this to the window
+const PROC_OPEN_STORE = 'newtab.procs.open';
+const PROC_FOLD_MS = 160;        // the fold's own transition, mirrored here
 
 const procsPanel = document.getElementById('procs');
-const procsScrim = document.getElementById('procs-scrim');
+const procsWrap = document.getElementById('procs-wrap');
 const procsBody = document.getElementById('procs-body');
 const procsMore = document.getElementById('procs-more');
 const procsOpenBtn = document.getElementById('procs-open');
-const procsCloseBtn = document.getElementById('procs-close');
 const statsPanel = document.getElementById('stats');
 const procSortBtn = {
   cpu: document.getElementById('proc-sort-cpu'),
@@ -1090,60 +1090,92 @@ function applyProcs(procs) {
   renderProcs();
 }
 
-/* --- opening and closing ------------------------------------------ */
+/* --- the fold ------------------------------------------------------ */
+
+/** What the last tab left. A page with no storage starts closed. */
+function readProcOpen() {
+  try {
+    return localStorage.getItem(PROC_OPEN_STORE) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function writeProcOpen(open) {
+  try {
+    localStorage.setItem(PROC_OPEN_STORE, open ? '1' : '0');
+  } catch (err) {
+    /* a page denied storage still folds, it just forgets */
+  }
+}
+
+let procFoldTimer = 0;
 
 /**
- * Under the strip, or as far up the window as it takes to fit. Measured
- * on every open (and on a resize while open) because the strip folds and
- * the window moves; nothing here animates, so this is one write.
+ * The capsule changed height, so the board's socket and every trace it
+ * routed around it are wrong. One forced re-layout AFTER the fold has
+ * finished moving — the transition is stepped, and re-seating on each of
+ * its four frames would be four board rebuilds for one result.
  */
-function seatProcs() {
-  if (!procsPanel || !statsPanel) return;
-
-  const strip = statsPanel.getBoundingClientRect();
-  const panelH = procsPanel.offsetHeight;
-  const room = window.innerHeight - panelH - PROC_PANEL_EDGE;
-
-  let top = strip.bottom + PROC_PANEL_GAP;
-  if (top > room) top = Math.max(PROC_PANEL_EDGE, (window.innerHeight - panelH) / 2);
-
-  const px = Math.round(top) + 'px';
-  if (procsPanel.style.top !== px) procsPanel.style.top = px;
+function relayoutBoard() {
+  if (procFoldTimer) clearTimeout(procFoldTimer);
+  procFoldTimer = setTimeout(function () {
+    procFoldTimer = 0;
+    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
+  }, PROC_FOLD_MS + 30);
 }
 
-function openProcs() {
-  if (procOpen || !procsPanel) return;
-  procOpen = true;
+/**
+ * Open or close the fold. `animate === false` is the restore on load: the
+ * page wears last session's state from the first frame instead of
+ * unfolding in front of whoever opened the tab.
+ */
+function setProcsOpen(open, animate) {
+  if (!statsPanel || !procsPanel) return;
 
-  procsPanel.classList.add('is-open');
-  if (procsScrim) procsScrim.classList.add('is-open');
-  if (procsOpenBtn) procsOpenBtn.setAttribute('aria-expanded', 'true');
+  const next = !!open;
+  const changed = next !== procOpen;
+  procOpen = next;
 
-  renderProcs();                 // the rows this page has been keeping
-  seatProcs();
-  procsPanel.focus();
-}
-
-function closeProcs(returnFocus) {
-  if (!procOpen || !procsPanel) return;
-  procOpen = false;
-
-  procsPanel.classList.remove('is-open');
-  if (procsScrim) procsScrim.classList.remove('is-open');
-  if (procsOpenBtn) {
-    procsOpenBtn.setAttribute('aria-expanded', 'false');
-    if (returnFocus !== false) procsOpenBtn.focus();
+  if (animate === false && procsWrap) {
+    procsWrap.classList.add('no-anim');
+    // Read the box back so the class lands in its own style pass: without
+    // this the browser coalesces both and the fold animates anyway.
+    void procsWrap.offsetHeight;
   }
 
-  // Whatever was armed or showing on a row does not survive the close.
-  procRows.forEach(function (rec) {
-    disarmEnd(rec);
-    if (rec.noteTimer) {
-      clearTimeout(rec.noteTimer);
-      rec.noteTimer = 0;
-      rec.row.classList.remove('has-note');
-    }
-  });
+  statsPanel.classList.toggle('is-procs-open', next);
+  if (procsOpenBtn) procsOpenBtn.setAttribute('aria-expanded', next ? 'true' : 'false');
+  // Nothing inside a closed fold is reachable, by pointer or by tab.
+  if (procsWrap) procsWrap.inert = !next;
+
+  if (animate === false && procsWrap) {
+    void procsWrap.offsetHeight;
+    procsWrap.classList.remove('no-anim');
+  }
+
+  if (next) {
+    renderProcs();               // the rows this page has been keeping
+  } else {
+    // Whatever was armed or showing on a row does not survive the close.
+    procRows.forEach(function (rec) {
+      disarmEnd(rec);
+      if (rec.noteTimer) {
+        clearTimeout(rec.noteTimer);
+        rec.noteTimer = 0;
+        rec.row.classList.remove('has-note');
+      }
+    });
+  }
+
+  if (changed) {
+    writeProcOpen(next);
+    relayoutBoard();
+  }
+}
+
+function toggleProcs() {
+  setProcsOpen(!procOpen, true);
 }
 
 /* --- End task ----------------------------------------------------- */
@@ -1232,6 +1264,7 @@ window.__procs = function () {
     expanded: procExpanded,
     ready: procReady,
     total: procGroups.length,
+    foldHeight: panel ? panel.height : 0,
     panel: panel ? { top: panel.top, left: panel.left, width: panel.width, height: panel.height } : null,
     bodyHeight: procsBody ? procsBody.getBoundingClientRect().height : 0,
     capsuleHeight: statsPanel ? statsPanel.getBoundingClientRect().height : 0,
@@ -1271,38 +1304,48 @@ function wireProcs() {
   });
 
   if (procsMore) {
-    procsMore.addEventListener('click', function () {
+    procsMore.addEventListener('click', function (event) {
+      event.stopPropagation();   // the strip behind it toggles the fold
       procExpanded = !procExpanded;
       if (!procExpanded) procsBody.scrollTop = 0;
       if (procsPanel) procsPanel.classList.toggle('is-expanded', procExpanded);
       renderProcs();
-      seatProcs();               // thirty rows is a taller panel
+      relayoutBoard();           // thirty rows is a taller capsule
     });
   }
 
   // The way in: the word, and the whole strip behind it. A button is what
-  // the keyboard reaches; the strip is what the mouse hits.
+  // the keyboard reaches (Enter and Space are its own), the strip is what
+  // the mouse hits — but a click inside the open fold is a click on the
+  // list, never on the thing holding it.
   if (procsOpenBtn) {
     procsOpenBtn.addEventListener('click', function (event) {
       event.stopPropagation();
-      openProcs();
+      toggleProcs();
     });
   }
-  if (statsPanel) statsPanel.addEventListener('click', function () { openProcs(); });
 
-  if (procsCloseBtn) procsCloseBtn.addEventListener('click', function () { closeProcs(); });
-  if (procsScrim) procsScrim.addEventListener('click', function () { closeProcs(); });
+  if (statsPanel) {
+    statsPanel.addEventListener('click', function (event) {
+      if (procsPanel && procsPanel.contains(event.target)) return;
+      toggleProcs();
+    });
+  }
 
+  // Escape belongs to the fold only while you are inside it: this page has
+  // no overlay, and a key that collapses a list you are not in is a key
+  // that ate something else's Escape.
   document.addEventListener('keydown', function (event) {
-    if (!procOpen) return;
-    if (event.key === 'Escape' || event.key === 'Esc') {
-      event.preventDefault();
-      closeProcs();
-    }
+    if (!procOpen || !procsPanel) return;
+    if (event.key !== 'Escape' && event.key !== 'Esc') return;
+    if (!procsPanel.contains(document.activeElement)) return;
+    event.preventDefault();
+    setProcsOpen(false, true);
+    if (procsOpenBtn) procsOpenBtn.focus();
   });
 
-  // The panel is seated by measurement, so a resized window re-seats it.
-  window.addEventListener('resize', function () { if (procOpen) seatProcs(); });
+  // Last session's state, worn from the first frame rather than unfolded.
+  setProcsOpen(readProcOpen(), false);
 }
 
 /* The accent's base colour differs per theme, so re-derive the same hue

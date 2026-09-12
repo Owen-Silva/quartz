@@ -125,15 +125,60 @@
         <canvas id="sg-gpu" class="stat-graph" width="120" height="28" aria-hidden="true"></canvas>
       </div>
 
-      <!-- The one thing in the strip you can press: it opens the process
-           list over the page. Out of flow at full width (the strip's five
+      <!-- The one thing in the strip you can press: it unfolds the process
+           list underneath. Out of flow at full width (the strip's five
            columns are full), and a grid cell of its own once the strip
-           folds and the last cell is empty — either way the capsule is
-           exactly as tall as it was before it existed, which is what the
-           board measured. -->
+           folds and the last cell is empty — either way the closed capsule
+           is exactly as tall as it was before it existed, which is what
+           the board measured. -->
       <button id="procs-open" class="stats-open" type="button"
-              aria-haspopup="dialog" aria-expanded="false">Processes</button>
+              aria-expanded="false" aria-controls="procs">
+        <span>Processes</span>
+        <span class="stats-open-chevron" aria-hidden="true"></span>
+      </button>
      </div>
+
+      <!-- The process list: what Task Manager's Processes tab shows,
+           grouped by program, folded into the capsule under the strip.
+           Closed on a first run; after that it wears whatever the last
+           tab left in localStorage, restored before the first paint so
+           nothing unfolds in front of you.
+
+           The wrapper is a one-row grid: 0fr closed, 1fr open, stepped
+           over 160ms. That animates the ROW, so the chips and the recents
+           below are pushed down by the section's real height and nothing
+           needs to know what that height is.
+
+           Its interior is the only near-opaque surface on the page: rows
+           of numbers have to be read over whatever the user chose as a
+           background, so it takes --panel-bg and a hairline instead of
+           glass. Nothing in it is ever rebuilt: a sample writes into text
+           nodes of rows that already exist and moves the nodes when the
+           order changes. While it is closed, samples are kept and not
+           drawn. -->
+      <div id="procs-wrap" class="procs-wrap">
+        <section id="procs" class="procs" aria-label="Processes">
+          <div class="procs-inner">
+            <div class="procs-table" role="table" aria-label="Processes">
+              <div class="procs-head" role="row">
+                <span class="proc-col proc-name" role="columnheader">Name</span>
+                <button id="proc-sort-cpu" class="proc-col proc-cpu proc-sort" type="button"
+                        role="columnheader" aria-sort="descending">CPU</button>
+                <button id="proc-sort-mem" class="proc-col proc-mem proc-sort" type="button"
+                        role="columnheader" aria-sort="none">Memory</button>
+                <span class="proc-col proc-io" role="columnheader">Disk and network</span>
+                <span class="proc-col proc-act" role="columnheader">
+                  <span class="proc-sr">End task</span>
+                </span>
+              </div>
+
+              <div id="procs-body" class="procs-body" role="rowgroup"></div>
+            </div>
+
+            <button id="procs-more" class="procs-more" type="button" aria-expanded="false">Show more</button>
+          </div>
+        </section>
+      </div>
     </section>
 
     <nav id="links" class="links" aria-label="Shortcuts"></nav>
@@ -143,47 +188,6 @@
     <nav id="recent" class="recent" aria-label="Recent sites" hidden></nav>
   </div>
 </main>
-
-<!-- The process list: what Task Manager's Processes tab shows, grouped by
-     program, over the page rather than in it. It starts closed and is never
-     remembered, so a new tab is a new tab.
-
-     Opaque on purpose. Every other surface here is glass, but this one has
-     to be read over whatever the user chose as a background — a bright
-     picture, a moving clip — so it takes the ink, a hairline and a real
-     shadow instead of a blur.
-
-     Nothing in it is ever rebuilt: a sample writes numbers into text nodes
-     of rows that already exist and moves the nodes when the order changes,
-     so a row keeps its identity, its hover, its armed confirm. While the
-     panel is closed the samples still arrive and are simply not drawn. -->
-<div id="procs-scrim" class="procs-scrim" aria-hidden="true"></div>
-
-<section id="procs" class="procs" role="dialog" aria-modal="true"
-         aria-labelledby="procs-title" tabindex="-1">
-  <header class="procs-bar">
-    <h2 id="procs-title" class="procs-title">Processes</h2>
-    <button id="procs-close" class="procs-close" type="button" aria-label="Close"></button>
-  </header>
-
-  <div class="procs-table" role="table" aria-labelledby="procs-title">
-    <div class="procs-head" role="row">
-      <span class="proc-col proc-name" role="columnheader">Name</span>
-      <button id="proc-sort-cpu" class="proc-col proc-cpu proc-sort" type="button"
-              role="columnheader" aria-sort="descending">CPU</button>
-      <button id="proc-sort-mem" class="proc-col proc-mem proc-sort" type="button"
-              role="columnheader" aria-sort="none">Memory</button>
-      <span class="proc-col proc-io" role="columnheader">Disk and network</span>
-      <span class="proc-col proc-act" role="columnheader">
-        <span class="proc-sr">End task</span>
-      </span>
-    </div>
-
-    <div id="procs-body" class="procs-body" role="rowgroup"></div>
-  </div>
-
-  <button id="procs-more" class="procs-more" type="button" aria-expanded="false">Show more</button>
-</section>
 
 <script src="newtab-bg.js"></script>
 <script src="newtab.js"></script>

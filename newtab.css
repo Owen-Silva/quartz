@@ -23,6 +23,10 @@
   --edge:     rgba(255,255,255,.11);
   --specular: rgba(255,255,255,.14);
 
+  /* the fold's interior: near-opaque, so rows of numbers read over a
+     picture or a clip. Mirrors chrome.css. */
+  --panel-bg: rgba(34,37,42,.96);
+
   /* the inline note the End task control leaves on a row: opaque, because
      it sits over the row's own numbers for the three seconds it shows */
   --proc-note: #24272d;
@@ -111,6 +115,7 @@
   --edge:     rgba(18,22,42,.12);
   --specular: rgba(255,255,255,.95);
 
+  --panel-bg: rgba(247,248,252,.96);
   --proc-note: #eff1f6;
 
   --ion:      #0b7fd6;
@@ -868,156 +873,69 @@ body {
 }
 
 /* --- the process list ---------------------------------------- */
-/* Task Manager's Processes tab, grouped by program, in a panel over the
-   page. It is a list, not a control surface — no zebra, no hover glow, no
-   lit rows. One hairline between rows, one fading rule under the header,
-   and the page's single accent on the sort caret alone.
+/* Task Manager's Processes tab, grouped by program, folded into the
+   capsule under the strip. It is a list, not a control surface — no
+   zebra, no hover glow, no lit rows. One hairline between rows, one
+   fading rule under the header, and the page's single accent on the
+   sort caret alone.
 
    Every width is stated once, here, and worn by the header and by every
    row: the header does not scroll with the rows, so the two boxes have to
    agree on a grid rather than share one. scrollbar-gutter reserves the
-   scrollbar's width in both states so thirty rows line up with ten.
-
-   OPAQUE, unlike everything else on this page. The background behind it
-   is whatever the user chose — a bright picture, a moving clip — and a
-   list of numbers has to be readable over all of them, so this surface
-   takes the ink, a hairline and a real shadow rather than a blur (which
-   would also be the most expensive thing on the page). */
+   scrollbar's width in both states so thirty rows line up with ten. */
 .procs {
   --proc-grid: minmax(0, 1fr) 52px 76px 104px 78px;
-  position: fixed;
-  left: 50%;
-  top: 96px;                       /* newtab.js seats it under the strip */
-  z-index: 10;
-  width: min(720px, 100vw - 32px);
-  margin-left: calc(min(720px, 100vw - 32px) / -2);
-  padding: 8px 20px 16px;
-  border: 1px solid var(--edge);
-  border-radius: var(--bevel-lg);
-  background: var(--ink-1);
-  box-shadow: 0 24px 60px -24px var(--panel-shadow);
-  color: var(--fg);
+  min-height: 0;                   /* a grid item that may be 0fr tall */
+  overflow: hidden;                /* the fold clips, it does not squash */
   text-align: left;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 120ms steps(3, end),
-    visibility 0s linear 120ms;
+  cursor: default;                 /* the strip's pointer stops at the list */
 }
 
-.procs.is-open {
-  opacity: 1;
-  visibility: visible;
-  transition: opacity 120ms steps(3, end);
+/* The fold. One grid row, 0fr closed and 1fr open: the row is what moves,
+   so the chips and the recents below are pushed down by the section's own
+   height and nothing has to be told what that height is. Stepped, like
+   every other transition on this page — four frames, 160ms, and no
+   opacity or transform anywhere in it. */
+.procs-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 160ms steps(4, end);
 }
 
-.procs:focus-visible { outline: none; }
+.stats.is-procs-open .procs-wrap { grid-template-rows: 1fr; }
 
-/* The page's own bevel, the same axis as the capsule's. */
+/* Restoring last session's state is not an animation: newtab.js wears
+   this for one frame while it puts the fold where it was left. */
+.procs-wrap.no-anim { transition: none; }
+
+/* The interior. The only near-opaque surface on the page: rows of numbers
+   have to be read over whatever the user chose as a background — a bright
+   picture, a moving clip — so this takes --panel-bg and a hairline rather
+   than glass, and no backdrop-filter (which over a playing clip would be
+   the most expensive thing here). */
+.procs-inner {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--bevel);
+  background: var(--panel-bg);
+}
+
 @supports (corner-shape: bevel) {
-  .procs { corner-shape: round bevel round bevel; }
-}
-
-/* The page behind it, dimmed and nothing more: no blur, because the panel
-   is opaque and a blurred full-screen layer over a playing clip is the
-   most expensive thing this page could possibly do. */
-.procs-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 9;
-  background: rgba(0,0,0,.35);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 120ms steps(3, end),
-    visibility 0s linear 120ms;
-}
-
-.procs-scrim.is-open {
-  opacity: 1;
-  visibility: visible;
-  transition: opacity 120ms steps(3, end);
-}
-
-/* --- the panel's own head ------------------------------------ */
-.procs-bar {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-}
-
-/* The same fading hairline the column header wears, so the panel's two
-   rules read as one family rather than as a border and a line. */
-.procs-bar::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
-}
-
-.procs-title {
-  margin: 0;
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-}
-
-/* Two hairlines crossed, rather than a glyph out of an icon font this
-   page does not load. */
-.procs-close {
-  position: relative;
-  width: 28px;
-  height: 28px;
-  margin-right: -6px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
-  background: none;
-  color: var(--fg-2);
-  cursor: pointer;
-  transition:
-    color        160ms steps(4, end),
-    border-color 160ms steps(4, end);
-}
-
-.procs-close::before,
-.procs-close::after {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 13px;
-  width: 11px;
-  height: 1px;
-  background: currentColor;
-}
-
-.procs-close::before { transform: rotate(45deg); }
-.procs-close::after  { transform: rotate(-45deg); }
-
-.procs-close:hover { color: var(--fg); border-color: var(--edge); }
-
-.procs-close:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  color: var(--fg);
+  .procs-inner { corner-shape: round bevel round bevel; }
 }
 
 /* --- the way in: a word at the strip's right edge ------------- */
-/* Out of flow, so the capsule is the height it always was. The strip
-   itself opens the list too — the whole panel is the target, and this is
-   the part a keyboard can reach. */
+/* Out of flow, so the closed capsule is the height it always was. The
+   strip itself toggles the fold too — the whole panel is the target, and
+   this is the part a keyboard can reach. */
 .stats-open {
   position: absolute;
   top: 16px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
   background: none;
@@ -1039,6 +957,32 @@ body {
   outline-offset: 3px;
   border-radius: 2px;
   color: var(--fg);
+}
+
+/* The chevron: two hairlines, down when the fold is closed and up when it
+   is open, turned on the same stepped clock as the fold itself. */
+.stats-open-chevron {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+
+.stats-open-chevron::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms steps(4, end);
+}
+
+.stats.is-procs-open .stats-open-chevron::before {
+  top: 6px;
+  transform: rotate(-135deg);
 }
 
 .procs-head,
@@ -1116,9 +1060,10 @@ body {
 }
 
 /* Ten rows: 10 x 32px. "Show more" opens the box to thirty, and stops at
-   80vh — on a short window the rest scrolls rather than running off it. */
+   60vh — on a short window the rest scrolls inside the fold rather than
+   pushing the chips off the bottom of it. */
 .procs.is-expanded .procs-body {
-  height: min(960px, calc(80vh - 132px));
+  height: min(960px, 60vh);
 }
 
 .procs-body {
