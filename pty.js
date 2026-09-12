@@ -267,6 +267,42 @@ function cleanEnv() {
 }
 
 /**
+ * Stop node-pty from forking its console-list helper when a session is killed.
+ *
+ * On Windows, node-pty's ConPTY kill() forks `conpty_console_list_agent` — a
+ * separate process, because only one console can be attached at a time — to ask
+ * Windows which processes are attached to this pty's console, then kills them
+ * too. Inside Electron that helper's AttachConsole() call fails, so the child
+ * dies with an uncaught "AttachConsole failed" on our stderr, once per terminal
+ * tab closed. node-pty then waits out its own 5s timeout and falls back to the
+ * shell pid alone.
+ *
+ * So the helper never contributes anything here but a crash and a dangling
+ * timer. Replace it with the SAME answer node-pty settles for -- the pty's own
+ * process -- resolved immediately and without a fork. Everything else about
+ * kill() (the ConPTY teardown, the conout worker, the pid it kills) is
+ * untouched; if a future node-pty stops exposing these internals the patch
+ * quietly does nothing and the old behaviour returns.
+ *
+ * @returns {boolean} true when the helper is out of the picture.
+ */
+function suppressConsoleListHelper(p) {
+  try {
+    const agent = p && p._agent;
+    if (!agent || typeof agent._getConsoleProcessList !== 'function') return false;
+    agent._getConsoleProcessList = function () {
+      const pid = this._innerPid;
+      return Promise.resolve(Number.isInteger(pid) && pid > 0 ? [pid] : []);
+    };
+    return true;
+  } catch (err) {
+    // Never fail a spawn over this: a helper crash is noise, a dead tab is not.
+    console.warn('[pty] could not disable the console-list helper:', err && err.message);
+    return false;
+  }
+}
+
+/**
  * Spawn a new PTY session for one program from the table.
  *
  * @param {object} opts
@@ -305,6 +341,9 @@ function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) 
     cwd: safeCwd,
     env: cleanEnv(),
   });
+
+  // Before anything can kill this session (see the note on the helper above).
+  suppressConsoleListHelper(p);
 
   const record = { id, pty: p, alive: true };
   sessions.set(id, record);
@@ -405,6 +444,7 @@ module.exports = {
     resolveCwd,
     sanitizeArgs,
     isStoreStub,
+    suppressConsoleListHelper,
     setWhereRunner(fn) {
       whereRunner = typeof fn === 'function' ? fn : runWhere;
     },

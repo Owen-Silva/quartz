@@ -22,7 +22,28 @@ const REQUIRED_IDS = [
 ];
 
 const log = [];
-const say = (m) => { log.push(m); console.log(m); };
+// Every check speaks through say(), so the tally lives here: a line that opens
+// with OK is a pass, one that opens with FAIL (or a thrown HARNESS ERROR) is a
+// failure. Nothing else in the log counts either way.
+let okCount = 0;
+let failCount = 0;
+const say = (m) => {
+  const text = String(m);
+  if (/^OK\b/.test(text)) okCount += 1;
+  else if (/^(FAIL|HARNESS ERROR)\b/.test(text)) failCount += 1;
+  log.push(m);
+  console.log(m);
+};
+
+// The last line of every run, then the transcript, then the exit code: 1 as
+// soon as anything failed, so a caller can gate on the run instead of reading.
+const finish = () => {
+  const line = `smoke: ${okCount} ok, ${failCount} failed`;
+  log.push(line);
+  console.log(line);
+  fs.writeFileSync(OUT + '.txt', log.join('\n'));
+  process.exit(failCount ? 1 : 0);
+};
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -86,7 +107,7 @@ const evaluate = async (c, expr) => {
   });
 
   const target = await getPageTarget();
-  if (!target) { say('FAIL: app never exposed a CDP page target'); proc.kill(); process.exit(1); }
+  if (!target) { say('FAIL: app never exposed a CDP page target'); proc.kill(); finish(); }
   say('OK: app window is up, CDP target found');
 
   const ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
@@ -184,7 +205,6 @@ const evaluate = async (c, expr) => {
   fs.writeFileSync(OUT + '.png', Buffer.from(shot.data, 'base64'));
   say('screenshot: ' + OUT + '.png');
 
-  fs.writeFileSync(OUT + '.txt', log.join('\n'));
   ws.close();
   if (KEEP) {
     say('KEEP: app left running with the Claude tab open');
@@ -192,9 +212,8 @@ const evaluate = async (c, expr) => {
   } else {
     proc.kill();
   }
-  process.exit(0);
+  finish();
 })().catch((e) => {
   say('HARNESS ERROR: ' + e.message);
-  fs.writeFileSync(OUT + '.txt', log.join('\n'));
-  process.exit(1);
+  finish();
 });
