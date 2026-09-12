@@ -261,14 +261,17 @@
 }
 
 /* --- a folded section ----------------------------------------- */
-/* Only Shortcuts folds (The user: "make the shortcuts thing default collapse and
-   then i can un collapse it if i want to"), and its heading IS the toggle. So
-   the <button> has to read exactly like the <h2> every other section carries:
+/* Every section but About folds now, and ships folded (The user: "make it so that
+   all the different sections in settings are auto collapsed"); the pane opens
+   as a list of headings and you unfold the one you came for. About keeps the
+   plain <h2> and no fold at all, so none of this reaches it. Everywhere else
+   the heading IS the toggle, and the <button> reads exactly like the <h2> it
+   replaced:
    the .set-h rule above still paints it — its colour, weight and fading
    hairline — and everything here only undoes what a button adds of its own
    (chrome background, border, padding, centred text, its own font family).
-   No other section has .set-h-toggle or .set-collapse, so nothing else in the
-   panel moves by a pixel. */
+   Nothing below is new decoration: the chevron and the fold are the same two
+   marks Shortcuts already carried, now on all fourteen. */
 #settings-panel .set-h-toggle {
   display: flex;
   align-items: center;

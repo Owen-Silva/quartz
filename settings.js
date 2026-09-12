@@ -269,13 +269,15 @@
   var recNote = '';
   var recUnbound = null;
 
-  /* Shortcuts is the one section long enough to bury everything under it, so
-     it ships folded and remembers whether it was opened. That is a view
-     state, not a setting: it lives on its own localStorage key rather than
-     in the store, so nothing subscribes to it and nothing syncs it. */
-  var SHORTCUTS_OPEN_KEY = 'settings.shortcuts.open';
-  var shortcutsSectionEl = null;   // the collapsible <section>
-  var shortcutsForced = false;     // held open by a filter, not by the user
+  /* Every section ships folded, so the pane opens as a list of headings and
+     the reader picks what to look at (The user: "make it so that all the
+     different sections in settings are auto collapsed"). About is the one
+     exception and does not fold at all — plain heading, always open. A fold
+     is a view state and a short-lived one: nothing is stored and nothing
+     subscribes to it, so every open starts folded again. */
+  var foldSeq = 0;                 // ids that pair a header with its body
+  var foldsForced = false;         // held open by a filter, not by the reader
+  var shortcutsSectionEl = null;   // the one fold with a side effect
   var resetAllArmed = false;
   var resetAllTimer = 0;
   var focusHint = null;        // [selector] to refocus after a chips re-render
@@ -1335,10 +1337,181 @@
     return b;
   }
 
+  /* ============================================================
+     Folds — a section is a heading and a body that starts closed
+     ============================================================ */
+
+  /**
+   * A section: a heading that is its own toggle, and a body that ships
+   * folded. Everything a caller appends lands in the body — that is what the
+   * redirected `appendChild` is for, so none of the builders below had to
+   * learn about the fold, and a control added long after the build (a render
+   * pass, an IPC answer) still lands inside it rather than beside it.
+   */
   function section(title) {
+    var s = el('section', 'set-section set-foldable');
+    var body = el('div', 'set-collapse');
+    body.id = 'set-fold-' + (++foldSeq);
+    s.appendChild(foldHead(title, body.id, s));
+    s.appendChild(body);
+    s.setAttribute('data-fold-was', '0');
+    applyFold(s, false);
+    /* An own property: it shadows Node.prototype for this element alone. */
+    s.appendChild = function (node) { return body.appendChild(node); };
+    return s;
+  }
+
+  /**
+   * A section with no fold at all: a plain <h2> and the content under it,
+   * always there. About is the only one (The user) — it is three lines and a
+   * button, so a fold would hide less than the control costs. Nothing here
+   * carries .set-foldable, so collapseAllFolds() and the filter's
+   * unfold-the-hits pass both walk straight past it.
+   */
+  function plainSection(title) {
     var s = el('section', 'set-section');
     s.appendChild(el('h2', 'set-h', title));
     return s;
+  }
+
+  /**
+   * The heading as a real <button>, so Tab reaches it and Enter works, and
+   * with aria-expanded so a screen reader hears the state rather than the
+   * chevron. It has to read exactly like the <h2> it replaced: .set-h paints
+   * it, and settings.css only undoes what a button brings of its own.
+   */
+  function foldHead(title, bodyId, s) {
+    var head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'set-h set-h-toggle';
+    head.setAttribute('aria-expanded', 'false');
+    head.setAttribute('aria-controls', bodyId);
+    head.appendChild(el('span', 'set-h-text', title));
+    /* Rotated by CSS when the section opens, so the glyph is the state. */
+    var chev = el('span', 'set-h-chev', '›');
+    chev.setAttribute('aria-hidden', 'true');
+    head.appendChild(chev);
+    head.addEventListener('click', function () { toggleFold(s); });
+    /* A <button> already turns Enter and Space into a click; taking the key
+       ourselves keeps the panel's other key handling out of it, and the
+       preventDefault is what stops the second, native toggle. */
+    head.addEventListener('keydown', function (ev) {
+      var key = ev && ev.key;
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+      if (typeof ev.preventDefault === 'function') ev.preventDefault();
+      toggleFold(s);
+    });
+    return head;
+  }
+
+  /** The header is the record of the state, so nothing can drift from it. */
+  function isFoldOpen(s) {
+    var head = s && s.querySelector ? s.querySelector('.set-h-toggle') : null;
+    return !!head && head.getAttribute('aria-expanded') === 'true';
+  }
+
+  /**
+   * Paint one fold. The body carries `hidden`, so it is out of the tab order
+   * and out of the accessibility tree while folded; `is-open` is only for the
+   * chevron. Never re-renders: a folded section still holds a fully rendered
+   * list. Folding away the row that is recording cancels the recording,
+   * rather than leaving a hidden row eating keystrokes.
+   */
+  function applyFold(s, open) {
+    if (!s) return;
+    var head = s.querySelector('.set-h-toggle');
+    var body = s.querySelector('.set-collapse');
+    if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (body) body.hidden = !open;
+    if (s.classList) {
+      if (open) s.classList.add('is-open');
+      else s.classList.remove('is-open');
+    }
+    if (!open && s === shortcutsSectionEl && recId !== null) stopRecording();
+  }
+
+  /** The reader's own toggle. data-fold-was is what a filter hands back. */
+  function toggleFold(s) {
+    if (!s) return;
+    var open = !isFoldOpen(s);
+    if (s.setAttribute) s.setAttribute('data-fold-was', open ? '1' : '0');
+    applyFold(s, open);
+  }
+
+  /**
+   * Every open starts folded. Nothing is stored, so there is nothing to read
+   * back: whatever was left open last time is gone. About has no fold, so it
+   * is not in this list at all.
+   */
+  function collapseAllFolds() {
+    if (!bodyEl) return;
+    foldsForced = false;
+    var sections = bodyEl.querySelectorAll('.set-foldable');
+    for (var i = 0; i < sections.length; i++) {
+      sections[i].setAttribute('data-fold-was', '0');
+      applyFold(sections[i], false);
+    }
+  }
+
+  /**
+   * A search must not hide its own hits: while the filter has words every
+   * section still showing is held open, and clearing the box puts the
+   * reader's own folds back. Runs after applyFilter() has set `hidden`,
+   * which is how it knows which sections hold a match.
+   */
+  function syncFolds(filtering) {
+    if (!bodyEl) return;
+    var sections = bodyEl.querySelectorAll('.set-foldable');
+    var i;
+    if (filtering) {
+      if (!foldsForced) {
+        foldsForced = true;
+        for (i = 0; i < sections.length; i++) {
+          sections[i].setAttribute('data-fold-was', isFoldOpen(sections[i]) ? '1' : '0');
+        }
+      }
+      for (i = 0; i < sections.length; i++) applyFold(sections[i], !sections[i].hidden);
+      return;
+    }
+    if (!foldsForced) return;
+    foldsForced = false;
+    for (i = 0; i < sections.length; i++) {
+      applyFold(sections[i], sections[i].getAttribute('data-fold-was') === '1');
+    }
+  }
+
+  /**
+   * Open the panel at one section — what a deep link from elsewhere in the
+   * browser needs. Matches on the heading text, unfolds that section (About
+   * has no fold to undo) and brings it into view; an unknown name leaves the
+   * panel exactly as it is.
+   */
+  function revealSection(title) {
+    if (!bodyEl) return false;
+    var want = String(title == null ? '' : title).trim().toLowerCase();
+    if (!want) return false;
+    var sections = bodyEl.querySelectorAll('.set-section');
+    for (var i = 0; i < sections.length; i++) {
+      /* .set-h-text inside a fold's button, the <h2> itself when there is no
+         fold — either way, the heading is the name. */
+      var head = sections[i].querySelector('.set-h-text') || sections[i].querySelector('.set-h');
+      var name = head ? String(head.textContent || '').trim().toLowerCase() : '';
+      if (name !== want) continue;
+      if (sections[i].classList && sections[i].classList.contains('set-foldable')) {
+        sections[i].setAttribute('data-fold-was', '1');
+        applyFold(sections[i], true);
+      }
+      /* Instant, not smooth: a smooth scroll asked for in the same task that
+         un-hides the popover never runs here (measured — the body stays at
+         scrollTop 0), and the pane has no motion of its own to match. */
+      try {
+        sections[i].scrollIntoView({ block: 'start' });
+      } catch (err) {
+        sections[i].scrollIntoView(true);   // older signature, same landing
+      }
+      return true;
+    }
+    return false;
   }
 
   /** A row of mutually exclusive options, drawn as one segmented instrument. */
@@ -3083,7 +3256,7 @@
     }
 
     field.appendChild(el('p', 'set-hint',
-      'Ads still play, at the lowest volume; your level comes back for the next song.'));
+      'Ads still play, at the lowest in-app volume; it goes back to max when the ad ends.'));
   }
 
   /** The whole-computer switch, and the line that says what is true. */
@@ -3243,104 +3416,17 @@
     return mod;
   }
 
-  /** Was the section left open? Closed is the answer to every doubt. */
-  function shortcutsOpen() {
-    try {
-      return window.localStorage.getItem(SHORTCUTS_OPEN_KEY) === '1';
-    } catch (err) { return false; }        // storage blocked: stay folded
-  }
-
-  function rememberShortcutsOpen(open) {
-    try {
-      window.localStorage.setItem(SHORTCUTS_OPEN_KEY, open ? '1' : '0');
-    } catch (err) { /* the fold still holds for this run */ }
-  }
-
   /**
-   * Paint the fold. The body carries `hidden`, so it is out of the tab order
-   * and out of the accessibility tree while folded; `is-open` is only for the
-   * chevron. Never touches the store, and never re-renders: a collapsed
-   * section still holds a fully rendered list.
+   * Shortcuts folds like every other section now; the one thing particular
+   * to it is that folding it away cancels a recording, which applyFold()
+   * does through `shortcutsSectionEl`.
    */
-  function applyShortcutsFold(open) {
-    var s = shortcutsSectionEl;
-    if (!s) return;
-    var head = s.querySelector('.set-h-toggle');
-    var body = s.querySelector('.set-collapse');
-    if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (body) body.hidden = !open;
-    if (s.classList) {
-      if (open) s.classList.add('is-open');
-      else s.classList.remove('is-open');
-    }
-  }
-
-  /**
-   * The user's own toggle: it remembers, and folding away a row that is
-   * recording cancels the recording rather than leaving a hidden row eating
-   * keystrokes.
-   */
-  function toggleShortcutsFold() {
-    var s = shortcutsSectionEl;
-    if (!s) return;
-    var head = s.querySelector('.set-h-toggle');
-    var open = !(head && head.getAttribute('aria-expanded') === 'true');
-    shortcutsForced = false;
-    rememberShortcutsOpen(open);
-    applyShortcutsFold(open);
-    if (!open && recId !== null) stopRecording();
-  }
-
-  /**
-   * A search must not hide its own hits: while the filter has words the fold
-   * is forced open, and clearing the box puts the user's choice back.
-   */
-  function syncShortcutsFold(filtering) {
-    if (!shortcutsSectionEl) return;
-    if (filtering) {
-      shortcutsForced = true;
-      applyShortcutsFold(true);
-      return;
-    }
-    if (!shortcutsForced) return;
-    shortcutsForced = false;
-    applyShortcutsFold(shortcutsOpen());
-  }
-
   function buildShortcuts() {
-    var s = el('section', 'set-section set-foldable');
-    var head = document.createElement('button');
-    head.type = 'button';
-    head.className = 'set-h set-h-toggle';
-    head.setAttribute('aria-expanded', 'false');
-    head.setAttribute('aria-controls', 'set-shortcuts-body');
-    head.appendChild(el('span', 'set-h-text', 'Shortcuts'));
-    /* Rotated by CSS when the section opens, so the glyph is the state. */
-    var chev = el('span', 'set-h-chev', '›');
-    chev.setAttribute('aria-hidden', 'true');
-    head.appendChild(chev);
-    head.addEventListener('click', function () { toggleShortcutsFold(); });
-    /* A <button> already turns Enter and Space into a click; taking the key
-       ourselves keeps the panel's other key handling out of it, and the
-       preventDefault is what stops the second, native toggle. */
-    head.addEventListener('keydown', function (ev) {
-      var key = ev && ev.key;
-      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
-      if (typeof ev.preventDefault === 'function') ev.preventDefault();
-      toggleShortcutsFold();
-    });
-    s.appendChild(head);
-
-    var body = el('div', 'set-collapse');
-    body.id = 'set-shortcuts-body';
+    var s = section('Shortcuts');
     var field = el('div', 'set-field');
     field.setAttribute('data-field', 'shortcuts');
-    body.appendChild(field);
-    s.appendChild(body);
-
+    s.appendChild(field);
     shortcutsSectionEl = s;
-    shortcutsForced = false;
-    applyShortcutsFold(shortcutsOpen());
     return s;
   }
 
@@ -3577,7 +3663,8 @@
   }
 
   function buildAbout() {
-    var s = section('About');
+    /* The one section with no fold: plain heading, always open (The user). */
+    var s = plainSection('About');
     var line = 'Browser';
     var app = window.api && window.api.app;
     if (app && typeof app.versions === 'function') {
@@ -3704,10 +3791,17 @@
       var s = sections[i];
       var fields = s.querySelectorAll('.set-field');
       var chrome = '';                     // the section's text outside its fields
-      var kids = s.children;
+      /* The heading is outside the fold, the rest of the chrome inside it:
+         reading the body's children rather than the section's is what keeps
+         one field's text out of its neighbours' index. */
+      var head = s.querySelector('.set-h');
+      if (head) chrome += ' ' + deepText(head) + ' ';
+      var host = s.querySelector('.set-collapse') || s;
+      var kids = host.children;
       for (var k = 0; k < kids.length; k++) {
         var kid = kids[k];
         if (kid.classList && kid.classList.contains('set-field')) continue;
+        if (kid.classList && kid.classList.contains('set-h')) continue;
         chrome += ' ' + deepText(kid) + ' ';
       }
       /* About has no fields at all: the section is then its own unit. */
@@ -3845,7 +3939,7 @@
 
     if (noneEl) noneEl.hidden = !words.length || anyShown;
     if (panelEl) panelEl.classList.toggle('is-filtering', words.length > 0);
-    syncShortcutsFold(words.length > 0);
+    syncFolds(words.length > 0);
   }
 
   /** Index and filter in one breath — what a re-render owes the filter. */
@@ -4004,8 +4098,17 @@
     panelEl.style.right = right + 'px';
   }
 
-  function openPanel() {
+  /**
+   * `at` is a section heading — Settings.open('Spotify') is a deep link from
+   * anywhere else in the browser, and it is the one thing that arrives with a
+   * section already unfolded and scrolled to. Called with nothing, the panel
+   * opens the way it always does: every section folded.
+   */
+  function openPanel(at) {
     if (!panelEl) return;
+    /* Folded first, rendered second: renderAll() ends in the filter, so a
+       query still sitting in the box re-opens its own hits on the way in. */
+    collapseAllFolds();
     renderAll();
     panelEl.hidden = false;
     open_ = true;
@@ -4029,6 +4132,14 @@
       if (!panelEl.hasAttribute('tabindex')) panelEl.setAttribute('tabindex', '-1');
       try { panelEl.focus({ preventScroll: true }); } catch (err) { /* not focusable yet */ }
     }
+    /* Back to the top of the list. It has to happen with the panel on screen:
+       a display:none element drops a scrollTop assignment and hands back its
+       old offset when it is shown again, and opening the folded list already
+       scrolled to wherever the last visit ended reads as a bug. */
+    if (bodyEl) bodyEl.scrollTop = 0;
+    /* Last, with the panel on screen: scrollIntoView has nothing to measure
+       against while the popover is still hidden. */
+    if (at) revealSection(at);
   }
 
   function closePanel() {
@@ -4225,10 +4336,13 @@
     applyAccent: applyAccent,
     applyPalette: applyPalette,
     palettes: palettes,
+    /* open('Spotify') deep links: the panel opens folded, then that one
+       section unfolds and scrolls into view. */
     open: openPanel,
     close: closePanel,
     toggle: toggle,
     isOpen: isOpen,
+    revealSection: revealSection,
     handleShortcut: handleShortcut,
 
     // test seams
