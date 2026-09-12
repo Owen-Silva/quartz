@@ -743,19 +743,23 @@ function watchTheme() {
 /* ------------------------------------------------------------------ */
 /* Background                                                          */
 /*                                                                     */
-/* Three backgrounds, chosen in Settings and pushed in by the chrome:   */
+/* Four backgrounds, chosen in Settings and pushed in by the chrome:    */
 /*                                                                     */
 /*   board   the circuit board — this page's own default               */
 /*   aurora  the aurora alone; newtab-bg.js then does nothing at all    */
 /*   image   the user's picture, dimmed, with the board optional        */
+/*   video   a moving picture, same slot and same options as image      */
 /*                                                                     */
 /* The picture never travels on the URL: the chrome keeps the blob in   */
 /* IndexedDB and hands it over as a data: URL inside the push. ?bg= is  */
 /* only a first-paint hint, so an image user never watches the board    */
 /* draw itself and then disappear.                                      */
+/*                                                                     */
+/* A clip is too big for either, so the chrome copies the chosen file   */
+/* into its own folder and pushes the file:// URL instead (fileUrl).    */
 /* ------------------------------------------------------------------ */
 
-const BG_KINDS = ['board', 'aurora', 'image'];
+const BG_KINDS = ['board', 'aurora', 'image', 'video'];
 const BG_DIM_DEFAULT = 0.25;
 const BG_DIM_MAX = 0.6;
 
@@ -771,16 +775,149 @@ function bgDim(value) {
   return Math.min(BG_DIM_MAX, Math.max(0, n));
 }
 
-let bgState = { kind: 'board', boardOverImage: false, dim: 0, hasImage: false };
+/** A still picture and a moving one wear the same wash and the same board. */
+function bgIsPicture(kind) {
+  return kind === 'image' || kind === 'video';
+}
+
+/* Which element the chosen file belongs in. A real clip is decoded by the
+   <video> — on this hardware, by the GPU — and a GIF cannot be: it goes in
+   the <img>, where it animates itself. Anything else an <img> can decode
+   ends up there too, which is the right answer for a still frame as well. */
+const BG_CLIP_EXT = /\.(?:mp4|webm|mov|m4v)$/i;
+
+/* file: is what the chrome sends once it has copied the file into its own
+   folder; the rest are here so a test can hand one over directly. */
+const BG_CLIP_PROTO = /^(?:file|blob|data|https?):/i;
+
+/** The path part of a URL, so an extension test never reads a query. */
+function bgUrlPath(url) {
+  return String(url).split('#')[0].split('?')[0];
+}
+
+/** '' for anything this page will not put in a layer. */
+function bgClipUrl(value) {
+  if (typeof value !== 'string' || value === '') return '';
+  return BG_CLIP_PROTO.test(value) ? value : '';
+}
+
+/** 'video' for a clip, 'img' for a GIF (or any other image), '' for neither. */
+function bgClipLayer(url) {
+  if (!url) return '';
+  if (/^data:video\//i.test(url)) return 'video';
+  if (/^data:image\//i.test(url)) return 'img';
+  return BG_CLIP_EXT.test(bgUrlPath(url)) ? 'video' : 'img';
+}
+
+let bgState = {
+  kind: 'board', boardOverImage: false, dim: 0, hasImage: false,
+  clipUrl: '', clipLayer: ''
+};
+
+/* The chrome's __boardPaused(true): an overlay with a backdrop-filter is
+   open over this page, or the window went behind. The clip stops on it for
+   the same reason the board does — everything under a blurred panel is
+   re-composited on every frame it moves. */
+let bgChromePaused = false;
+
+let bgClipWired = false;
+
+/* A clip that cannot be decoded — the file was moved, or the chrome copied
+   something this build has no decoder for — falls back to the board rather
+   than to a black window, and says nothing about it: the setting is still
+   the user's choice, and the next push tries it again. */
+function onClipError() {
+  if (bgState.kind !== 'video') return;
+  applyBackground({ kind: 'board' });
+}
+
+function wireClipLayers(video, img) {
+  if (bgClipWired) return;
+  bgClipWired = true;
+  if (video) video.addEventListener('error', onClipError);
+  if (img) img.addEventListener('error', onClipError);
+}
+
+/**
+ * Fill (or empty) the two moving-picture layers. Exactly one of them ever
+ * carries .on, so a 'video' background with no file yet draws nothing at
+ * all rather than a black rectangle over the aurora.
+ */
+function setClipLayers(layer, url) {
+  const video = document.getElementById('bg-video');
+  const img = document.getElementById('bg-video-img');
+  wireClipLayers(video, img);
+
+  if (video) {
+    if (layer === 'video') {
+      if (video.getAttribute('src') !== url) {
+        video.muted = true;            // the attribute alone is not always enough
+        video.setAttribute('src', url);
+      }
+      video.classList.add('on');
+    } else {
+      video.classList.remove('on');
+      /* Pause before clearing: a media element holding a source it is no
+         longer showing still holds a decoder and a network job. Removing
+         the attribute and reloading is the only way to give both back. */
+      video.pause();
+      if (video.hasAttribute('src')) {
+        video.removeAttribute('src');
+        video.load();
+      }
+    }
+  }
+
+  if (img) {
+    if (layer === 'img') {
+      if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+      img.classList.add('on');
+    } else {
+      img.classList.remove('on');
+      if (img.hasAttribute('src')) img.removeAttribute('src');
+    }
+  }
+}
+
+/** Only while this page is the one a person is looking at. */
+function clipShouldRun() {
+  return bgState.kind === 'video' && bgState.clipLayer === 'video' &&
+    !bgChromePaused && !document.hidden;
+}
+
+/**
+ * Start or stop the clip. Idempotent, and cheap enough to hang off every
+ * signal that means "in front again" — the same three the board resumes on.
+ * A paused <video> costs nothing; the element is never torn down, so coming
+ * back is one call and no reload.
+ */
+function syncClip() {
+  const video = document.getElementById('bg-video');
+  if (!video) return;
+  if (clipShouldRun()) {
+    if (video.paused) {
+      const started = video.play();
+      /* The autoplay promise rejects when the source went away mid-call.
+         Nothing to report: the error handler above owns the fallback. */
+      if (started && typeof started.catch === 'function') started.catch(function () {});
+    }
+    return;
+  }
+  if (!video.paused) video.pause();
+}
 
 function applyBackground(bg) {
   const next = bg && typeof bg === 'object' ? bg : {};
   const kind = bgKind(next.kind);
-  const over = kind === 'image' && next.boardOverImage === true;
-  const dim = kind === 'image' ? bgDim(next.dim) : 0;
+  const picture = bgIsPicture(kind);
+  const over = picture && next.boardOverImage === true;
+  const dim = picture ? bgDim(next.dim) : 0;
   /* Only a data: image URL is ever written into the stylesheet. */
   const url = kind === 'image' && typeof next.dataUrl === 'string' &&
     /^data:image\//i.test(next.dataUrl) ? next.dataUrl : '';
+  /* The clip travels as a URL, not as bytes: the chrome copied the file. */
+  const clipUrl = kind === 'video' ? bgClipUrl(next.fileUrl) : '';
+  const clipLayer = bgClipLayer(clipUrl);
 
   const root = document.documentElement;
   root.setAttribute('data-bg', kind);
@@ -788,7 +925,7 @@ function applyBackground(bg) {
   else root.removeAttribute('data-bg-board');
   /* Only ever inline for a picture: the token has its own default in the
      stylesheet, and <html>'s inline style is otherwise the accent's alone. */
-  if (kind === 'image') root.style.setProperty('--bg-dim', String(dim));
+  if (picture) root.style.setProperty('--bg-dim', String(dim));
   else root.style.removeProperty('--bg-dim');
 
   const layer = document.getElementById('bg-image');
@@ -797,26 +934,51 @@ function applyBackground(bg) {
     else layer.style.removeProperty('background-image');
   }
 
-  bgState = { kind: kind, boardOverImage: over, dim: dim, hasImage: !!url };
+  bgState = {
+    kind: kind, boardOverImage: over, dim: dim, hasImage: !!url,
+    clipUrl: clipUrl, clipLayer: clipLayer
+  };
+  /* Leaving 'video' therefore pauses and clears; arriving sets and plays. */
+  setClipLayers(clipLayer, clipUrl);
+  syncClip();
   return bgState;
 }
 
 /**
  * The chrome pushes the background in on dom-ready and on every settings
- * change: __applyBackground({ kind, boardOverImage, dim, dataUrl }).
+ * change: __applyBackground({ kind, boardOverImage, dim, dataUrl, fileUrl }).
  * Anything missing means this page's own default.
  */
 window.__applyBackground = function (bg) {
   return applyBackground(bg);
 };
 
+/* The chrome's pause reaches the board through newtab-bg.js, which is loaded
+   above this file. Wrap its handler rather than asking the chrome for a
+   second call: the clip and the board then stop on exactly the same signal,
+   in the same order, and a chrome that knows nothing about video still
+   pauses one. */
+(function wrapBoardPaused() {
+  const board = typeof window.__boardPaused === 'function' ? window.__boardPaused : null;
+  window.__boardPaused = function (flag) {
+    bgChromePaused = !!flag;
+    syncClip();
+    if (board) return board.apply(window, arguments);
+    return undefined;
+  };
+})();
+
 /** The background actually on screen, for tests. */
 window.__background = function () {
+  const video = document.getElementById('bg-video');
   return {
     kind: bgState.kind,
     boardOverImage: bgState.boardOverImage,
     dim: bgState.dim,
-    hasImage: bgState.hasImage
+    hasImage: bgState.hasImage,
+    clipLayer: bgState.clipLayer,
+    hasClip: !!bgState.clipUrl,
+    clipPlaying: !!(video && bgState.clipLayer === 'video' && !video.paused)
   };
 };
 
@@ -892,6 +1054,14 @@ function init() {
   document.addEventListener('visibilitychange', refreshClock);
   window.addEventListener('pageshow', refreshClock);
   window.addEventListener('focus', refreshClock);
+
+  /* The moving picture stops and starts on the same three signals, for the
+     stronger reason: a clip nobody can see is a decoder nobody is watching.
+     syncClip() is idempotent and checks every reason on its own, so none of
+     these starts anything the chrome or a hidden page still vetoes. */
+  document.addEventListener('visibilitychange', syncClip);
+  window.addEventListener('pageshow', syncClip);
+  window.addEventListener('focus', syncClip);
 }
 
 if (document.readyState === 'loading') {

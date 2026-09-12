@@ -1075,9 +1075,11 @@ function syncTabAudio(tab) {
   button.setAttribute('aria-label', label);
 }
 
-/** media-started-playing / media-paused. Only the chip cares. */
+/** media-started-playing / media-paused. Only the chip cares. The new tab
+ * page's moving picture is a muted loop: it fires media-started-playing like
+ * any media, but a speaker on the new tab's chip would be a lie. */
 function setTabAudible(tab, on) {
-  if (!tab || isClaudeTab(tab)) return;
+  if (!tab || isClaudeTab(tab) || isNewTabUrl(tab.url)) return;
   tab.audible = !!on;
   syncTabAudio(tab);
 }

@@ -488,6 +488,8 @@ body {
    The picture is an inline background-image set by __applyBackground; the
    wash reads --bg-dim, written on <html> by the same call. */
 #bg-image,
+#bg-video,
+#bg-video-img,
 #bg-dim {
   display: none;                   /* nothing to draw unless a picture is chosen */
   position: fixed;
@@ -497,12 +499,36 @@ body {
 }
 
 :root[data-bg="image"] #bg-image,
-:root[data-bg="image"] #bg-dim { display: block; }
+:root[data-bg="image"] #bg-dim,
+:root[data-bg="video"] #bg-dim { display: block; }
 
 #bg-image {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;          /* fill the window, crop the overflow */
+}
+
+/* --- the moving picture --------------------------------------- */
+/* newtabBackground.kind === 'video'. Same slot as the still picture, and
+   the same wash over it: a clip in the <video>, a GIF in the <img>, never
+   both. newtab.js puts .on on whichever one it filled, so a kind with no
+   file yet — or one whose file has just been cleared — draws nothing at
+   all rather than a black rectangle.
+
+   object-fit: cover is background-size: cover for a replaced element: it
+   fills the window and crops the overflow instead of letterboxing. */
+:root[data-bg="video"] #bg-video.on,
+:root[data-bg="video"] #bg-video-img.on { display: block; }
+
+#bg-video,
+#bg-video-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  /* A background is not a control: no drag image, no selection, no caret. */
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 #bg-dim {
@@ -512,7 +538,8 @@ body {
 
 /* A picture is the light now, so the aurora stands further back than the
    .7 it uses behind the board. */
-:root[data-bg="image"] .backdrop {
+:root[data-bg="image"] .backdrop,
+:root[data-bg="video"] .backdrop {
   opacity: .25;
   transition: opacity 180ms steps(4);
 }
@@ -541,12 +568,16 @@ body {
 :root[data-bg="aurora"] #board,
 :root[data-bg="aurora"] #board-live,
 :root[data-bg="image"] #board,
-:root[data-bg="image"] #board-live { display: none; }
+:root[data-bg="image"] #board-live,
+:root[data-bg="video"] #board,
+:root[data-bg="video"] #board-live { display: none; }
 
 /* ...unless the picture asked for it back, at which point it is a texture
-   over the photo rather than the subject. */
+   over the photo rather than the subject. A clip is a picture here too. */
 :root[data-bg="image"][data-bg-board="over"] #board,
-:root[data-bg="image"][data-bg-board="over"] #board-live {
+:root[data-bg="image"][data-bg-board="over"] #board-live,
+:root[data-bg="video"][data-bg-board="over"] #board,
+:root[data-bg="video"][data-bg-board="over"] #board-live {
   display: block;
   opacity: .55;
 }

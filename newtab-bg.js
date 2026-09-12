@@ -1290,6 +1290,9 @@
                                     repaint would be work nobody can see
        image                        no, unless the picture asked the board
        image + data-bg-board="over" back as a texture over it
+       video                        the same two lines as image: a moving
+       video + data-bg-board="over" picture is still the subject, and the
+                                    board is still optional over it
 
      A hidden board is not just invisible: it costs a full-canvas commit per
      repaint and one compositor element per packet. Everything below checks
@@ -1298,7 +1301,9 @@
     const root = document.documentElement;
     const kind = root.getAttribute('data-bg') || 'board';
     if (kind === 'aurora') return false;
-    if (kind === 'image') return root.getAttribute('data-bg-board') === 'over';
+    if (kind === 'image' || kind === 'video') {
+      return root.getAttribute('data-bg-board') === 'over';
+    }
     return true;                     // 'board', and any value we don't know
   }
 
