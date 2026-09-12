@@ -1821,9 +1821,10 @@ body {
   text-transform: none;
 }
 
-/* An installed app pinned to open as its web form. The one corner nothing
-   else uses: the light has the top-right, the remove glyph takes that
-   corner in edit mode, and the note owns the foot. */
+/* An installed app pinned to open somewhere other than its own window —
+   "web" for its site, "tab" for its real window pulled in here. The one
+   corner nothing else uses: the light has the top-right, the remove glyph
+   takes that corner in edit mode, and the note owns the foot. */
 .dock-badge {
   position: absolute;
   top: 3px;
@@ -1839,51 +1840,79 @@ body {
   pointer-events: none;
 }
 
-/* Edit mode's switch, in the badge's corner: the mark and the control that
-   sets it are the same word in the same place. Lit only when it is on, and
-   that is the only thing down here the accent is spent on besides the
-   running light. */
+/* In edit mode the mark gives way to the chooser that sets it: the same
+   words, one press apart, and never both at once. */
 .dock.is-editing .dock-badge { display: none; }
 
-.dock-webtoggle {
+/* Where an installed pin opens: two options, or three where the same app
+   is also a site. It sits in its own band under the tile rather than in a
+   corner — the corners are the dot's and the unpin glyph's, and nothing in
+   here may cover the name. Edit mode is the only time the band exists, so
+   the row is 20px taller while it is open and the board re-seats once. */
+.dock-where {
   position: absolute;
-  top: -2px;                       /* the opposite corner to unpin, and in
-                                      the same 8px gap: never over the name */
-  left: -2px;
+  left: -2px;                      /* out into the 8px gap on both sides, so
+                                      three options still read at 56px, and
+                                      4px of it is still left between tiles */
+  right: -2px;
+  top: 58px;
   display: none;
-  align-items: center;
-  justify-content: center;
-  height: 18px;
-  padding: 0 4px;
+  height: 16px;
   border: 1px solid var(--edge);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--proc-note);
+}
+
+.dock.is-editing .dock-where { display: flex; }
+
+.dock-where-opt {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--fg-3);
   font-family: inherit;
-  font-size: 10px;
+  font-size: 9px;
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
-  line-height: 1;
+  line-height: 14px;
+  text-align: center;
   cursor: pointer;
   transition:
-    color        140ms steps(3, end),
-    border-color 140ms steps(3, end);
+    background-color 140ms steps(3, end),
+    color            140ms steps(3, end);
 }
 
-.dock.is-editing .dock-webtoggle { display: flex; }
+.dock-where-opt:first-child { border-radius: 7px 0 0 7px; }
+.dock-where-opt:last-child { border-radius: 0 7px 7px 0; }
 
-.dock-webtoggle:hover { color: var(--fg); border-color: var(--glass-3); }
+/* A hairline between them, not around each: three boxes in a 56px band
+   would be all edge and no word. */
+.dock-where-opt + .dock-where-opt { border-left: 1px solid var(--edge); }
 
-.dock-webtoggle.is-on {
-  border-color: var(--ion-line);
-  color: var(--fg-2);
+.dock-where-opt:hover { background-color: var(--glass); color: var(--fg); }
+
+/* The one that is on. Filled, with the same hairline the switch this
+   replaces spent its accent on — a setting, not an event: no glow. */
+.dock-where-opt.is-on {
+  background-color: var(--glass-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--ion-line);
 }
 
-.dock-webtoggle:focus-visible {
+.dock-where-opt:focus-visible {
   outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline-offset: 1px;
   color: var(--fg);
 }
+
+/* The band is out of flow, so the cell is what makes room for it. Every
+   cell grows, not only the ones with a chooser: a row of two heights would
+   read as a bug. */
+.dock.is-editing .dock-cell { height: 76px; }
+.dock.is-editing .dock-row { min-height: 76px; }
 
 /* Running. One 6px dot of ion at the icon's top-right, cut out of whatever
    is behind it by a 1px ring of the page's own ground — no halo, no pulse:
@@ -1999,12 +2028,13 @@ body {
 
 /* What came back when a launch failed, over the tile's foot on its own
    opaque ground for the three seconds it lives. Successes say nothing:
-   the app itself is the answer. */
+   the app itself is the answer. Measured from the top, because the cell's
+   own foot moves down in edit mode and the tile's never does. */
 .dock-note {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  top: 40px;                       /* 56 - 16: the tile's last 16px */
   display: none;
   align-items: center;
   justify-content: center;
@@ -2430,5 +2460,5 @@ body {
   .dock-edit,
   .dock-tile,
   .dock-remove,
-  .dock-webtoggle { transition: none; }
+  .dock-where-opt { transition: none; }
 }

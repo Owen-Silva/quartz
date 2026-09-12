@@ -1978,11 +1978,12 @@ function wireProcs() {
 /*                          through the same service the chips use      */
 /*   a terminal program     'term:<program>': a monospace >_ plate      */
 /*                                                                     */
-/* An installed pin can also be asked to open its web form instead      */
-/* ({ id, web: true } in the pins list) — it keeps its app icon and     */
-/* wears a small "web" mark; edit mode turns that on and off. The page  */
-/* never decides where a press lands: it names the pin and the chrome   */
-/* routes it.                                                          */
+/* An installed pin can also be asked to open somewhere other than its   */
+/* own window: as its web form ({ id, web: true }) or as its real        */
+/* window re-parented into a tab ({ id, native: true }). Either way it   */
+/* keeps its app icon and wears one small mark — "web" or "tab" — and    */
+/* edit mode's chooser is where those are set. The page never decides    */
+/* where a press lands: it names the pin and the chrome routes it.       */
 /*                                                                     */
 /* Three pushes feed it and one console line leaves it:                */
 /*                                                                     */
@@ -1996,8 +1997,9 @@ function wireProcs() {
 /*   window.__applyAppsRunning({ id: { running, pids, tab } })  arrives */
 /*       once a second while this guest is on screen. It touches the    */
 /*       dots and nothing else: no rebuild, no measurement, no board.   */
-/*       An open tab (`tab: true`, which is how a web app or a terminal */
-/*       is ever "running") lights the identical dot.                   */
+/*       An open tab (`tab: true`, which is how a web app, a terminal   */
+/*       or a program re-parented into a tab is ever "running") lights  */
+/*       the identical dot.                                             */
 /*                                                                     */
 /*   window.__applyAppResult({ action, id, ok, reason })  the answer to */
 /*       a line we logged. Only failures show: a 3s note on the tile.   */
@@ -2005,11 +2007,11 @@ function wireProcs() {
 /* Out: `newtab:app {json}`, read off this guest by the chrome exactly  */
 /* like the process list's end-task line. A press on a program is       */
 /* launch, or focus when it is already running; a web pin is open-web   */
-/* and a terminal pin open-term; edit mode sends unpin, and its "web"   */
-/* switch sends pin-web; the picker sends pin. Pin and unpin also land  */
-/* locally at once — the chrome's next push is authoritative, but the   */
-/* row must answer the press whether or not the browser it is inside    */
-/* knows about apps yet. pin-web is the one exception: nothing flips    */
+/* and a terminal pin open-term; edit mode sends unpin, and its chooser */
+/* sends pin-web or pin-native; the picker sends pin. Pin and unpin also */
+/* land locally at once — the chrome's next push is authoritative, but  */
+/* the row must answer the press whether or not the browser it is inside */
+/* knows about apps yet. The chooser is the one exception: nothing flips */
 /* here until the chrome says it did.                                   */
 /* ------------------------------------------------------------------ */
 
@@ -2035,7 +2037,7 @@ const dockCells = new Map();     // id -> { cell, tile, dot, note, running, pids
 /* The three catalogues, by id, so resolving a pin is a lookup and not a
    scan of thirty rows on every push. dockWebByDesktop is the other join:
    installed id -> the web app that is the same thing, which is what puts
-   the "web" switch on a tile in edit mode. */
+   the third option on a tile's chooser in edit mode. */
 const dockInstalledById = new Map();
 const dockWebById = new Map();
 const dockWebByDesktop = new Map();
@@ -2109,6 +2111,9 @@ function normalizePin(entry) {
     icon: dockIcon(e.iconDataUrl),
     host: dockText(e.host),
     web: e.web === true,
+    // The chrome's rule is that a pin is one or the other; if a push ever
+    // says both, the tab is what a press does, so that is what shows.
+    native: e.native === true,
     webAvailable: false,
     running: e.running === true,
     tab: e.tab === true,
@@ -2123,6 +2128,7 @@ function normalizePin(entry) {
     // an iconDataUrl that came with it is not what this tile wears.
     pin.kind = (site || given) ? 'web' : 'missing';
     pin.web = true;
+    pin.native = false;             // a site is a tab already
     pin.icon = null;
     if (site) { pin.name = site.name; pin.host = site.host; }
     return pin;
@@ -2131,6 +2137,7 @@ function normalizePin(entry) {
   if (prefix === DOCK_TERM_PREFIX) {
     const program = dockProgById.get(id);
     pin.kind = (program || given) ? 'term' : 'missing';
+    pin.native = false;             // so is a shell
     pin.icon = null;
     pin.host = '';
     if (program) pin.name = program.name;
@@ -2264,7 +2271,8 @@ function dockPinsKey(list) {
   return list.map(function (pin) {
     return [
       pin.id, pin.kind, pin.name, pin.host,
-      pin.icon ? '1' : '0', pin.web ? '1' : '0', pin.webAvailable ? '1' : '0'
+      pin.icon ? '1' : '0', pin.web ? '1' : '0',
+      pin.native ? '1' : '0', pin.webAvailable ? '1' : '0'
     ].join('\t');
   }).join('\n');
 }
@@ -2344,6 +2352,59 @@ function dockTileTitle(name, running, tab) {
   return name + (tab ? ' — open' : ' — running');
 }
 
+/* Where an installed pin opens, in the order a press is least to most
+   surprising: the program itself, the same thing as a site, the program's
+   own window pulled into a tab. The labels are the words the marks use, so
+   the option that is on and the badge the tile wears read the same; the
+   sentence each one means is in its title and its aria-label. */
+const DOCK_WHERE = [
+  { mode: 'app', label: 'app', verb: 'as a program' },
+  { mode: 'web', label: 'web', verb: 'as a web app in a tab' },
+  { mode: 'tab', label: 'tab', verb: 'in a tab' }
+];
+
+/** Which option a pin is on. The tab wins over the web form, the same way
+    the badge does, so the lit option is always what a press would do. */
+function dockWhereMode(pin) {
+  if (pin.native) return 'tab';
+  if (pin.web) return 'web';
+  return 'app';
+}
+
+/**
+ * The chooser: two options for an app this machine is the only home for,
+ * three when the web catalogue knows the same app as a site. It is under
+ * the tile rather than over it — the corners are taken, and nothing here
+ * may sit on the name.
+ */
+function buildDockWhere(pin) {
+  const group = document.createElement('div');
+  group.className = 'dock-where';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Where ' + pin.name + ' opens');
+
+  const now = dockWhereMode(pin);
+
+  for (const opt of DOCK_WHERE) {
+    if (opt.mode === 'web' && !pin.webAvailable) continue;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dock-where-opt' + (opt.mode === now ? ' is-on' : '');
+    button.dataset.mode = opt.mode;
+    button.textContent = opt.label;
+    button.setAttribute('aria-pressed', opt.mode === now ? 'true' : 'false');
+    button.title = 'Open ' + pin.name + ' ' + opt.verb;
+    button.setAttribute('aria-label', button.title);
+    button.addEventListener('click', function () {
+      chooseDockWhere(pin.id, opt.mode);
+    });
+    group.appendChild(button);
+  }
+
+  return group;
+}
+
 /** One pinned app: the tile, the remove glyph over it, and its note. */
 function buildDockCell(pin) {
   const cell = document.createElement('div');
@@ -2372,14 +2433,18 @@ function buildDockCell(pin) {
   tile.appendChild(ico);
   tile.appendChild(name);
 
-  // An installed app currently opened as its web form says so in the one
-  // corner nothing else uses: the dot has the top-right, the remove glyph
-  // takes that corner in edit mode, and the note owns the foot.
-  if (pin.kind === 'app' && pin.web) {
+  // An installed app that opens somewhere other than its own window says
+  // so in the one corner nothing else uses: the dot has the top-right, the
+  // remove glyph takes that corner in edit mode, and the note owns the
+  // foot. Never two marks — a pin sent as both is the tab, because that is
+  // what a press would do.
+  if (pin.kind === 'app' && (pin.native || pin.web)) {
     const badge = document.createElement('span');
     badge.className = 'dock-badge';
-    badge.title = pin.name + ' opens in a tab';
-    badge.textContent = 'web';
+    badge.textContent = pin.native ? 'tab' : 'web';
+    badge.title = pin.native
+      ? pin.name + ' opens in a tab'
+      : pin.name + ' opens as a web app in a tab';
     tile.appendChild(badge);
   }
 
@@ -2397,32 +2462,23 @@ function buildDockCell(pin) {
   cell.appendChild(remove);
   cell.appendChild(note);
 
-  // The switch, for an app that has a web form: only ever visible in edit
-  // mode, and it does not flip itself. The chrome owns which way this pin
-  // opens, so the tile changes when the next __applyApps says it did.
-  let toggle = null;
-  if (pin.kind === 'app' && pin.webAvailable) {
-    toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'dock-webtoggle' + (pin.web ? ' is-on' : '');
-    toggle.textContent = 'web';
-    toggle.setAttribute('aria-pressed', pin.web ? 'true' : 'false');
-    toggle.title = (pin.web ? 'Open ' + pin.name + ' as a program' : 'Open ' + pin.name + ' in a tab');
-    toggle.setAttribute('aria-label', toggle.title);
-    cell.appendChild(toggle);
+  // The chooser, for an installed app: only ever visible in edit mode, and
+  // it does not flip itself. The chrome owns which way this pin opens, so
+  // the tile changes when the next __applyApps says it did.
+  let where = null;
+  if (pin.kind === 'app') {
+    where = buildDockWhere(pin);
+    cell.appendChild(where);
   }
 
   const rec = {
-    cell: cell, tile: tile, dot: dot, note: note, toggle: toggle,
-    kind: pin.kind, web: pin.web, name: pin.name,
+    cell: cell, tile: tile, dot: dot, note: note, where: where,
+    kind: pin.kind, web: pin.web, native: pin.native, name: pin.name,
     running: pin.running, tab: pin.tab, pids: pin.pids.slice(), noteTimer: 0
   };
 
   tile.addEventListener('click', function () { pressDockTile(pin.id); });
   remove.addEventListener('click', function () { unpinApp(pin.id); });
-  if (toggle) {
-    toggle.addEventListener('click', function () { toggleDockWeb(pin.id); });
-  }
 
   dockCells.set(pin.id, rec);
   return cell;
@@ -2547,21 +2603,35 @@ function pressDockTile(id) {
   if (rec.kind === 'web') { dockSend({ action: 'open-web', id: id }); return; }
   if (rec.kind === 'term') { dockSend({ action: 'open-term', id: id }); return; }
 
-  // A program — including one pinned to open as its web form. That routing
-  // is the chrome's: the press it gets is the press it always got.
-  if (rec.running && rec.pids.length) dockSend({ action: 'focus', id: id, pid: rec.pids[0] });
+  // A program already inside a tab is the one case a pid cannot answer:
+  // its window has been re-parented, so there is nothing on the desktop to
+  // raise and the thing to show is the tab. Every other press is the press
+  // it always was — including a pin set to open as its web form or in a
+  // tab, which the chrome routes itself.
+  if (rec.native && rec.running && rec.tab) dockSend({ action: 'open-native', id: id });
+  else if (rec.running && rec.pids.length) dockSend({ action: 'focus', id: id, pid: rec.pids[0] });
   else dockSend({ action: 'launch', id: id });
 }
 
 /**
- * Edit mode's "web" switch. It asks, and nothing more: the tile is only
- * ever redrawn by the push that comes back, so the row can never disagree
- * with where a press would actually land.
+ * Edit mode's chooser. It asks, and nothing more: the tile is only ever
+ * redrawn by the push that comes back, so the row can never disagree with
+ * where a press would actually land.
+ *
+ * Two lines cover three options, because "the program itself" is just both
+ * of the others turned off: choosing the web form or the tab names itself,
+ * and choosing the program turns off whichever one this pin is on. The one
+ * already on says nothing at all.
  */
-function toggleDockWeb(id) {
+function chooseDockWhere(id, mode) {
   const rec = dockCells.get(id);
   if (!rec || rec.kind !== 'app') return;
-  dockSend({ action: 'pin-web', id: id, web: !rec.web });
+  if (mode === dockWhereMode(rec)) return;
+
+  if (mode === 'web') dockSend({ action: 'pin-web', id: id, web: true });
+  else if (mode === 'tab') dockSend({ action: 'pin-native', id: id, native: true });
+  else if (rec.native) dockSend({ action: 'pin-native', id: id, native: false });
+  else dockSend({ action: 'pin-web', id: id, web: false });
 }
 
 function unpinApp(id) {
@@ -2879,6 +2949,10 @@ window.__applyApps = function (data) {
 /**
  * Running state only, once a second. Dots in place: no tile is rebuilt, no
  * box is measured and the board is never told anything.
+ *
+ * An entry may also say `native: true` — a program whose own window is in a
+ * tab. That lights the identical dot, and it is deliberately not read as a
+ * mode: where a pin opens is __applyApps's to say, never this push's.
  */
 window.__applyAppsRunning = function (map) {
   const m = (map && typeof map === 'object') ? map : {};
@@ -2935,7 +3009,7 @@ window.__dock = function () {
     const label = cell.querySelector('.dock-name');
     const dot = cell.querySelector('.dock-dot');
     const badge = cell.querySelector('.dock-badge');
-    const toggle = cell.querySelector('.dock-webtoggle');
+    const where = cell.querySelector('.dock-where');
     const box = cell.getBoundingClientRect();
     if (!cell.hidden) tops.add(Math.round(box.top));
     return {
@@ -2952,11 +3026,18 @@ window.__dock = function () {
       glyph: !!cell.querySelector('.dock-glyph'),
       term: !!cell.querySelector('.dock-term'),
       badge: !!(badge && getComputedStyle(badge).display !== 'none'),
-      toggle: toggle
+      badgeText: badge ? badge.textContent : null,
+      where: where
         ? {
-            on: toggle.classList.contains('is-on'),
-            pressed: toggle.getAttribute('aria-pressed') === 'true',
-            shown: getComputedStyle(toggle).display !== 'none'
+            shown: getComputedStyle(where).display !== 'none',
+            opts: Array.prototype.map.call(where.children, function (button) {
+              return {
+                mode: button.dataset.mode || null,
+                label: button.textContent,
+                on: button.classList.contains('is-on'),
+                pressed: button.getAttribute('aria-pressed') === 'true'
+              };
+            })
           }
         : null,
       note: cell.classList.contains('has-note')
@@ -2974,7 +3055,7 @@ window.__dock = function () {
     pins: dockPins.map(function (pin) {
       return {
         id: pin.id, kind: pin.kind, name: pin.name, host: pin.host,
-        web: pin.web, webAvailable: pin.webAvailable,
+        web: pin.web, native: pin.native, webAvailable: pin.webAvailable,
         running: pin.running, tab: pin.tab,
         pids: pin.pids.slice(), icon: !!pin.icon
       };
