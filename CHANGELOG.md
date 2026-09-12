@@ -46,6 +46,17 @@ or use Restart browser in Settings → About — to pick any of this up.
   the bare-strip menu lists the top five as "Claude in <folder>" (full path on hover) and the
   command palette offers every one of them — one click instead of the folder picker. The default
   folder from Settings is always in the list, and it all survives a restart.
+- A terminal chamber can run something other than Claude (528558c). pty.js holds a static PROGRAMS
+  table — claude, powershell, pwsh, cmd, python, node and Git Bash — each with fixed arguments and
+  its own allowlist: only claude accepts `--continue`, `--resume` and skip-permissions, and the
+  shells take no arguments from the renderer at all. Binaries resolve once per process through
+  `where.exe` or an absolute path check, and the Store's app-execution-alias stubs are rejected, so a
+  missing python reports "not installed" instead of opening the Microsoft Store. `createSession()`
+  defaults to claude and throws on an unknown id; main's `pty:programs` answers the chrome only, and
+  `pty:start` returns null for an unknown id before it spawns anything. Live on a test profile
+  PowerShell, cmd, Git Bash, node and claude all start, pwsh reports not installed, and path-like
+  ids, unknown ids and extra arguments are all refused. There is no UI for picking a program yet —
+  this is the layer under one.
 
 ### Tabs
 
@@ -73,9 +84,21 @@ or use Restart browser in Settings → About — to pick any of this up.
   fine. Guests keep `allowpopups` now, and main's `setWindowOpenHandler` denies the popup window
   and sends `open-url` to the chrome, which opens a tab — a background tab for background-tab
   dispositions. `javascript:`, `data:`, `file:` and custom schemes stay blocked, and the rest of
-  the guest hardening is untouched. All nine popup cases on a test page open a tab. Known limit:
-  the new tab has no `window.opener`, so an OAuth popup that posts a result back to its opener
-  still will not work.
+  the guest hardening is untouched. All nine popup cases on a test page open a tab. That left one
+  limit, fixed in the next entry: a tab has no `window.opener`, so an OAuth popup that posts a
+  result back to its opener could not complete.
+- Sign-in popups are real windows again, so Google Sign-In works (38bd224). Converting every popup
+  to a tab lost the credential — a tab has no `window.opener`, so the page that opened the popup
+  never got the result, and the attempt ended as a white popup page beside a blank placeholder tab.
+  The guest's window-open handler now decides by disposition instead of denying everything:
+  `target=_blank` links and middle-clicks still open as tabs through `open-url`, and only
+  `window.open` with features — the `new-window` disposition, the shape every sign-in flow uses —
+  becomes a real child BrowserWindow. It takes its size from the features (clamped), centres over
+  the main window, is parented but not modal, is sandboxed with no preload and no devtools, shares
+  the session, follows the page's title, has its own links open as tabs in the main window, and
+  closes with it. Non-http(s) schemes are still refused. Verified live: Pixabay → Log in →
+  Continue with Google opened exactly one popup on accounts.google.com with `window.opener` set,
+  no stray tab, and the page behind it stayed intact.
 
 ### Address bar and pages
 
@@ -116,6 +139,9 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Settings (Ctrl+,) is now sectioned: Look, New tab, Tabs, Claude, Site styles, Shortcuts,
   Downloads, Privacy and About, with a Find a setting box at the top that narrows the panel to
   whatever you type.
+- Settings section names read as headings (0df6795). They were 12px in the dimmed text colour, so
+  the pane read as one long list; they are full text colour, 13.5px and bold now, with a little
+  more room under each title and between sections. The fading rule under each title stays.
 - Contrast and copy pass: the muted foreground now clears 4.5:1 on panel grounds in both themes,
   captions are sentence case throughout, and the split divider is visible in light.
 - Instrument glass: a design pass over the chrome, the panes and the bundled pages. A container
@@ -279,25 +305,127 @@ or use Restart browser in Settings → About — to pick any of this up.
   once, a null answer never removes an icon already on screen, and the placeholder rows keep the
   same slot width so nothing shifts. Both themes, no shadow and no glow. The apps dock above it is
   untouched.
-- Fixed: YouTube's player spinning forever with blocking on. Clicking a video on YouTube is a
-  same-document navigation, so the player is driven by fetches, and the bundled ads and tracking
-  lists were cancelling two of YouTube's own: `youtube.com/youtubei/v1/log_event` and
-  `youtube.com/api/stats/ads`. With those cancelled the player spun until a reload, which takes the
-  document path where the player response arrives inline, which is why reloading always seemed to
-  fix it. Two exception filters, `@@||youtube.com/youtubei/` and `@@||youtube.com/api/stats/`, are
-  applied when the engine is built, on the same NetworkFilter and `blocker.update` path the
-  per-site allowlist already uses. Ad delivery is unchanged: `/pagead/`, doubleclick and
-  googlesyndication still block. The Electron user agent is left exactly as it was; nothing here
-  pretends to be Chrome.
+- Fixed: YouTube's player spinning forever with blocking on (f4d8ca1). Clicking a video on YouTube
+  is a same-document navigation, so the player is built from a fetch rather than from a fresh
+  document — which is why a reload always seemed to fix it, the reload taking the document path
+  where the player response arrives inline. The first attempt (cf86935) added two exception
+  filters, `@@||youtube.com/youtubei/` and `@@||youtube.com/api/stats/`, because the ads and
+  tracking lists were cancelling two of YouTube's own calls. Those filters are harmless and stay,
+  but they were not the cause. The cause is the scriptlets: the ads list carries scriptlet rules
+  for youtube.com (json-prune, replace-fetch-response, prevent-xhr) that the adapter injects with
+  `executeJavaScript` to strip ad fields out of the player response, so after an in-page click the
+  SPA fetches the next video through the patched fetch, gets a rewritten body back, and the player
+  never builds — `ytd-player` in the DOM, no `#movie_player`, no video — until a reload. The
+  cosmetics lookup now answers an empty script list for youtube.com and its subdomains; the
+  cosmetic CSS and every network rule still apply, so ad delivery is unchanged and `/pagead/`,
+  doubleclick and googlesyndication still block. Measured live from a search results page, 20
+  seconds a round: stock 0 of 5 videos played, exception filters for every blocked URL 0 of 3, a
+  whole-page exception 0 of 3, blocking off 3 of 3, scriptlets off for youtube.com 5 of 5. An
+  in-stream ad can still play, exactly as it already did on the reload path — this fixes the player,
+  it does not skip ads. The "Script failed to execute" rejections in the main log were those same
+  injections losing the race; they stop with the scriptlets. The Electron user agent is left exactly
+  as it was; nothing here pretends to be Chrome.
+- The command palette lists apps on a plain search too (7e637cd). "Open <name>" rows used to appear
+  only in command mode; a plain query now shows up to five matching apps under an "Apps" caption,
+  after the tab and recently-closed rows, and the empty note reads "No matching tabs, apps or
+  history". The dock's running dot also failed contrast in the light theme at 4.18:1 on the tile; a
+  new `--ion-dot` token — the accent darkened 21% in light, unchanged in dark — lifts it to 6.1:1
+  and follows palettes and custom accent hues.
+- Focus lands on the right window (439cdd5). `apps:focus` had been scanning same-name processes for
+  a main window, which fails for every console app — their window belongs to the console host — and
+  could raise a different instance entirely. It now enumerates visible titled top-level windows by
+  pid, then the console window attached to that pid, then a conhost / Windows Terminal /
+  OpenConsole child of it, and never falls back to another pid. In the same pass: the shortcut noise
+  filter (release notes, manuals, uninstallers, website links, document targets) now applies to the
+  `Get-StartApps` half as well, so 150 entries become 131 on this machine; Store entries pick up
+  their exe name from the package manifest in the same PowerShell run, 48 of them gaining one
+  (notepad.exe, calculatorapp.exe, mspaint.exe and the rest), so they can show a running dot at
+  all; x86 twins are flagged and sort after their x64 sibling; and the index cache is version 2, so
+  the old one is rebuilt. Build 1.4s warm, 3.4s cold.
+- Review fixes on the dock and its chrome side (a95db9d, 91a3b66). The "+ Add app" tile was hidden
+  the moment the first pin landed while its picker was still open, leaving no way to close the
+  picker with the mouse; it stays while the picker is open now. Typing in the picker changes its
+  height, so the capsule height is settled on each filter instead of re-seating the board. Escape
+  returns focus to the Edit control rather than the tile it just hid. On the chrome side, an
+  `apps:list` answer already in flight could overwrite an index a refresh had just rebuilt, so a
+  newly installed app vanished until the next refresh — the pending promise checks it is still the
+  awaited one. `apps:refresh` resolves to the index rather than an ok flag, so every successful
+  refresh had been reported as a failure. And a 33rd pin was answered ok with no tile drawn; the
+  stored list is used and the dock says "Full".
 
 Verified with harnesses only. The user was gaming while this round was written, so none of it has had a
 live pass in the running browser: the evidence is pure-node harnesses (112/112 on the app index,
 78/78 on the pins, push and palette rows, 61/61 on the icon slot through a DOM shim, 33/33 plus 7/7
 against the real filesystem on the resolver, 108/108 on the chrome wiring), the engine on disk for
-the YouTube filters, and a headless renderer with synthetic pushes for the dock. What that leaves
-owed is listed in each commit message: focus raising a real window, a tile drawn by a real push
-into a real webview, the icon IPC round trip and real `getFileIcon` timing on this machine, and the
-YouTube fix on YouTube itself. That pass is still to come.
+the YouTube filters, and a headless renderer with synthetic pushes for the dock.
+
+Most of that debt has since been paid on a test profile: the palette's app rows and the light-theme
+dock were captured live (7e637cd), a dock-launched PowerShell with no main window handle was
+minimised and its own console window raised while a windowless pid raised nothing (439cdd5, harness
+190/190), and the YouTube fix was measured on YouTube itself, five rounds of five (f4d8ca1). What is
+still owed is the process-icon side: the icon IPC round trip and real `getFileIcon` timing on this
+machine.
+
+### Files tab
+
+- A file browser as a tab, on Ctrl+Alt+E (91682dc, cf13b3a). It opens as a "Files" tab with a blank
+  omnibox, themed and palette-matched like the other bundled pages, and theme pushes reach it.
+  Ctrl+Shift+E is still Workspaces and was not touched. There is a "Files" row in the command
+  palette as well.
+- The page is a left rail of your own folders and the drives with a free-space bar, a breadcrumb
+  path bar that turns into a text field on Ctrl+L, a filter over the current listing, and a listing
+  with a 16px icon slot, size and modified columns, header sort remembered in `localStorage`,
+  keyboard navigation (arrows, Enter, Backspace, Home, End), double-click to open, and a right-click
+  menu with Open, Show in Explorer and Copy path. Empty, error and truncated states are all drawn
+  rather than left blank.
+- Main answers `files:list` / `places` / `open` / `reveal` / `icons` / `copy-path` for the chrome
+  sender only: drive-letter or UNC paths, `readdir` with file types, folders first, a 2,000-row cap
+  that reports itself as truncated, `stat` in waves of 64, errors mapped to not-found /
+  access-denied / not-a-folder, drives probed with `statfs` over C to Z, and icons from
+  `app.getFileIcon` cached per extension. The page talks to the chrome over a `files:` console
+  channel with the same guards as the new tab's channels, so a new-tab guest printing `files:` lines
+  does nothing.
+- Verified live on a test profile: the palette row opened the tab, root showed the places and C:
+  with its free space, Downloads listed 340 rows in 142ms with 80 icon slots filled, and filter, all
+  three sorts, up, System32 truncated at 2,000 rows, a missing folder and a file path all showed
+  what they should. `files:reveal` was not exercised, because it raises Explorer over everything.
+  Volume labels are always empty — Electron exposes none without a spawn.
+
+### Idle music
+
+- Settings has an Idle music section, between New tab and Privacy (33a77e0): Enabled, Source
+  (Built-in ambient, or My tracks with a count, Choose files… and Clear), Where it plays, Volume,
+  and the hint "Plays while nothing else is playing". Preferences live in the `music` group of
+  `localStorage['settings']` — `{ enabled, source, where, volume, files, shuffle }` — normalised on
+  the way in (volume clamped, unknown values falling back to defaults, file paths validated,
+  deduped and capped) and announced with a `music` emit key and a `music-changed` event. Both new
+  controls degrade to a short hint rather than a dead row if the preload or the helper lacks the API.
+- The ambient engine behind the Built-in source (5b85fe2). ambient.js is a generative lobby-style
+  pad on Web Audio: three or four detuned voices through a slow low-pass filter form a chord that
+  crossfades to the next every 16 to 24 seconds along a small modal progression, a sparse sine
+  arpeggio quantised to the chord runs through a feedback delay, and the room is four damped delay
+  lines rather than a convolver (a 2.5s convolver cost 4% of a core on its own), into a compressor
+  and a master gain. One timer for the whole thing; `stop()` clears it, kills the live nodes and
+  suspends the context. Twelve two-word mood titles. Live in a muted test instance the renderer sat
+  at 1.9% of one core playing and under 0.1% paused with the context suspended; an offline render
+  peaks at -6 dBFS steady, -21 dBFS at the default volume, so it is not silent.
+- An Idle music block on the new tab, inside the session tile (4914b45): a state line reading Off,
+  Paused, the mood title or the track name, Play / Pause / Turn on, a Next control for your own
+  tracks, and the same hint. `window.__applyMusic({ enabled, playing, source, title, where })`
+  updates it in place and clicks come back as `newtab:music` console lines. The session counts moved
+  into their own rows so the tile can show music without three dashes, and the modules now sit above
+  the stage layer — they had shared a z-index, so clicks on the controls were landing on the stage.
+- Main and preload carry the bridge calls (bc25347), each answering `{ ok, reason }` within 1500ms
+  and only for the chrome sender: `music:choose-files` (multi-select audio, nothing copied, capped
+  at 500), `media:now` (the Spotify helper's `/now`, with art omitted, full, or by hash) and
+  `media:control` (play, pause, toggle, next, prev). No custom protocol for your own tracks: the
+  chrome is a `file://` document with no CSP, and `file://` audio reaches `loadedmetadata`, proven
+  live with a wav and an mp3. Live against an isolated copy of the helper, now-playing answered in
+  92ms with art by hash. The file dialog itself is not exercised, because it is modal and would take
+  the foreground.
+- The player itself is not here yet. Everything above is the engine, the settings, the page module
+  and the bridge; the chrome-side player that actually decides when nothing else is playing and
+  starts the sound lands in the next commit.
 
 ### Shortcuts
 
@@ -308,6 +436,7 @@ Escape and F12. New or changed defaults from tonight:
 - Ctrl+\ split view, Ctrl+Shift+\ Claude beside the page, Ctrl+Shift+K ask Claude about this page.
 - Ctrl+` toggle a Claude tab, Ctrl+Shift+` new Claude tab in a folder you pick.
 - Ctrl+Shift+E workspaces, Ctrl+Alt+Left / Ctrl+Alt+Right to cycle them.
+- Ctrl+Alt+E the Files tab. Ctrl+Shift+E stayed on Workspaces.
 - Ctrl+Shift+R reader view, Ctrl+Shift+S screenshot, Ctrl+Shift+B bookmarks bar, Ctrl+P print,
   Alt+P picture in picture, Ctrl+D add the page to the new-tab chips, Ctrl+, settings.
 - Ctrl+R is an alias carried on Reload, so it follows Reload wherever you move it.
@@ -347,6 +476,17 @@ it displaces the other action, and the displaced one is left unbound and named.
   changing anything.
 - Verified live: a tab making sound registered `owen-browser` at the bridge within five seconds
   and released the hold when it closed.
+- "Quiet Spotify ads", a third switch in the same section (33a77e0, bc25347). With it on, the helper
+  drops Spotify's own in-app volume to 10% while an ad is playing and puts it back to full when the
+  ad ends, so the free tier's ad breaks stop being the loudest thing in the room. The switch reads
+  the helper's `adDuck` state — carried on the auto-pause status and on every status push through a
+  3-second cache — and writes it back over `api.spotify.setAdDuck`, which POSTs the helper's
+  `/config`. Verified live against an isolated copy of the helper: the round trip works and the
+  switch survives a chrome reload.
+- Now-playing routes for the chrome (bc25347): `media:now` reads the helper's `/now` (art omitted,
+  full, or by hash) and `media:control` sends play, pause, toggle, next and prev. The helper's port
+  comes from the existing client cache, and a failed call forgets it. Invalid commands are refused.
+  These are the plumbing for a now-playing tile; nothing draws one yet.
 
 ### Performance
 
@@ -469,6 +609,14 @@ Found, and not ours to fix:
 - The new tab's stats need Windows' `typeperf` and its English counter names. On a Windows
   installed in another language the disk, network and GPU figures show a dash; CPU and memory come
   from Node itself and read the same everywhere.
+- Scriptlets are off for youtube.com, which is what makes the player build after an in-page click.
+  Network and cosmetic blocking are untouched there, but an in-stream ad can still play — that was
+  already true on the reload path, and this is a player fix, not an ad skipper.
+- The Idle music settings and the new tab's Idle music block are drawn but silent until the
+  chrome-side player lands. Choosing files and flipping the switch persists; nothing plays yet.
+- DRM services cannot play inside a tab. Electron ships Chromium without Widevine, so Spotify and
+  Netflix are handled as the desktop app plus the now-playing controls here, not as pages.
+- Ctrl+Alt+E opens the Files tab. Ctrl+Shift+E is still Workspaces.
 
 ## Commits
 
@@ -543,3 +691,18 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | c984889 | 20:35 | New tab: process icons in the Processes list (page side) |
 | c4d0d21 | 20:36 | Process icons: resolver module for the main process |
 | ce31821 | 20:38 | Process icons: chrome wiring (IPC, cache, push to the new tab) |
+| 7eb3d1a | 20:43 | CHANGELOG + README: the apps dock, process icons and the YouTube ad-block exception |
+| a95db9d | 21:07 | New tab: dock review fixes (Add app tile, picker height, Escape focus) |
+| 91a3b66 | 21:10 | Apps: chrome review fixes (refresh race, refresh answer, pin cap) |
+| 91682dc | 21:13 | Files tab: the folder browser page (page side, not yet wired) |
+| 7e637cd | 21:37 | Palette: app rows on a plain search; new tab: light-theme dot contrast |
+| 38bd224 | 21:43 | Popups: real child windows for window.open, tabs for links |
+| 5b85fe2 | 21:45 | Idle music: the built-in ambient engine (not yet wired) |
+| 439cdd5 | 22:01 | Apps: focus by real window, quieter index, Store exe names, x86 twins |
+| 4914b45 | 22:01 | New tab: the Idle music module (page side) |
+| cf13b3a | 22:04 | Files tab: chrome wiring (IPC, console channel, palette row, Ctrl+Alt+E) |
+| f4d8ca1 | 22:05 | Ad blocker: no scriptlets on youtube.com (in-page clicks play again) |
+| 0df6795 | 22:10 | Settings: section names read as headings |
+| 33a77e0 | 22:12 | Settings: the Idle music section and a Quiet Spotify ads switch |
+| bc25347 | 22:16 | Main and preload: music file picker, now-playing and ad-duck bridge calls |
+| 528558c | 22:25 | Terminal tabs: program table for pty sessions (claude, powershell, pwsh, cmd, python, node, bash) |
