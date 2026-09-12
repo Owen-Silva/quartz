@@ -2420,6 +2420,101 @@ ipcMain.handle('stats:end-task', (event, pids) => {
 });
 
 // ---------------------------------------------------------------------------
+// Process icons for the new tab's process table
+//
+// The page shows the icon of the executable behind each process group. Only the
+// chrome may ask (same gate as stats:end-task), the keys it may ask about are
+// the sampler's own group keys, and the pids come from the sampler's last
+// sample rather than from the renderer -- a page that made a key up gets an
+// answer built from no pids, which is a lookup and never a kill.
+//
+// procicons.js is required LAZILY: a build without the file, or one whose
+// create() throws, answers an empty map and the page keeps its neutral glyphs.
+// ---------------------------------------------------------------------------
+
+/** How many keys one icon call may carry, and how long each may be. */
+const PROC_ICON_MAX_KEYS = 64;
+const PROC_ICON_MAX_KEY_LEN = 64;
+
+/** The one instance, built on first use. `null` + tried = "not available". */
+let procIcons = null;
+let procIconsTried = false;
+
+function procIconsInstance() {
+  if (procIconsTried) return procIcons;
+  procIconsTried = true;
+  try {
+    const mod = require('./procicons');
+    if (!mod || typeof mod.create !== 'function') return null;
+    const lookupPath = (apps && typeof apps.pathForExe === 'function')
+      ? (key) => apps.pathForExe(key)
+      : null;
+    const deps = { app, userDataDir: app.getPath('userData') };
+    if (lookupPath) deps.lookupPath = lookupPath;
+    procIcons = mod.create(deps);
+  } catch {
+    procIcons = null;   // missing file, syntax error, a throw in create()
+  }
+  return procIcons;
+}
+
+/** The keys of one icon request, cleaned: strings, deduped, capped. */
+function cleanIconKeys(keys) {
+  const list = [];
+  if (!Array.isArray(keys)) return list;
+  for (const raw of keys) {
+    if (typeof raw !== 'string') continue;
+    const key = raw.trim().toLowerCase();
+    if (!key || key.length > PROC_ICON_MAX_KEY_LEN) continue;
+    if (list.indexOf(key) !== -1) continue;
+    list.push(key);
+    if (list.length >= PROC_ICON_MAX_KEYS) break;
+  }
+  return list;
+}
+
+/** `[{ key, pids, self }]` for these keys, out of the sampler's last sample. */
+function iconGroupsFor(keys) {
+  let top = [];
+  try {
+    const sample = typeof stats.lastSample === 'function' ? stats.lastSample() : null;
+    const procs = (sample && typeof sample === 'object') ? sample.procs : null;
+    if (procs && Array.isArray(procs.top)) top = procs.top;
+  } catch {
+    top = [];
+  }
+  const byKey = new Map();
+  for (const group of top) {
+    if (group && typeof group === 'object' && typeof group.key === 'string') {
+      byKey.set(group.key, group);
+    }
+  }
+  return keys.map((key) => {
+    const group = byKey.get(key);
+    const pids = (group && Array.isArray(group.pids)) ? group.pids : [];
+    return { key, pids, self: !!(group && group.self) };
+  });
+}
+
+ipcMain.handle('stats:proc-icons', (event, keys) => {
+  if (!isChromeSender(event)) return {};
+  const list = cleanIconKeys(keys);
+  if (!list.length) return {};
+
+  const icons = procIconsInstance();
+  if (!icons || typeof icons.getIcons !== 'function') return {};
+
+  try {
+    return Promise.resolve(icons.getIcons(iconGroupsFor(list))).then(
+      (map) => (map && typeof map === 'object' ? map : {}),
+      () => ({})
+    );
+  } catch {
+    return {};
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Installed apps (the new tab's dock, the palette's "Open <app>" rows)
 //
 // Same gate as stats:end-task, and for the same reason: starting a process and
@@ -2654,6 +2749,11 @@ app.on('before-quit', (event) => {
   // Same idea for the app index: a Get-StartApps or a focus PowerShell caught
   // mid-flight is a child of ours, and it is not going to be missed.
   apps.stop();
+  // And for the icon cache, which may be holding a PowerShell batch and a
+  // debounced write. Only if it was ever built -- this must not build one.
+  if (procIcons && typeof procIcons.stop === 'function') {
+    try { procIcons.stop(); } catch { /* nothing left to protect */ }
+  }
   // Hands our Spotify hold back. That is an HTTP round trip, so it may defer
   // the quit by up to ~1.5 s -- once, and only when a hold is actually out.
   // Skipping it would leave Spotify paused until the bridge's 180 s hold TTL

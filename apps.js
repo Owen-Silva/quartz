@@ -810,7 +810,33 @@ function create(deps = {}) {
       : { builtAt: 0, buildMs: 0, counts: null, iconBytes: 0, iconsOmitted: false, fromCache: false, stopped };
   }
 
-  return { list, refresh, launch, focus, icon, stop, stats, cachePath };
+  /**
+   * The target path of an installed exe-backed app by the basename of its
+   * executable WITHOUT `.exe` ('spotify', 'valorant-win64-shipping') -- the
+   * shape a stats sample's process key has. For the icon lookup, which wants
+   * "where does this running process live?" and must never pay for a build:
+   * this reads the index ALREADY in memory and answers null when there is
+   * none, so the first call of a session can miss and the next one hit.
+   * Store entries are skipped -- their `path` is an AppID, not a file.
+   *
+   * @param {string} base exe basename without the extension, any case
+   * @returns {string|null} a full path, or null
+   */
+  function pathForExe(base) {
+    const want = String(base == null ? '' : base).trim().toLowerCase();
+    if (!want || want.indexOf('\\') !== -1 || want.indexOf('/') !== -1) return null;
+    const file = want.slice(-4) === '.exe' ? want : want + '.exe';
+    const list = (index && Array.isArray(index.apps)) ? index.apps : null;
+    if (!list) return null;
+    for (const entry of list) {
+      if (!entry || entry.kind !== 'exe') continue;
+      if ((entry.exe || '') !== file) continue;
+      if (typeof entry.path === 'string' && entry.path) return entry.path;
+    }
+    return null;
+  }
+
+  return { list, refresh, launch, focus, icon, stop, stats, cachePath, pathForExe };
 }
 
 module.exports = {

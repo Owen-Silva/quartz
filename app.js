@@ -401,8 +401,171 @@ function wireStats() {
       const tab = getActiveTab();
       if (!tab || !isNewTabUrl(tab.url)) return;
       pushStatsToTab(tab, sample);
+      // The icons for this sample's rows, if any of them are new to us.
+      requestProcIcons(sample);
     });
   } catch (err) { /* older preload: the page keeps its dashes */ }
+}
+
+/* ------------------------------------------------------------------ */
+/* Process icons for the new tab's process table                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Each row of the process table shows the icon of the executable behind it.
+ * Main resolves and caches those (procicons.js); this side keeps a copy for the
+ * life of the window so a re-render, a reload or a second new-tab page costs no
+ * IPC at all, and so the same key is never asked for twice.
+ *
+ * The samples arrive every second and the answer never changes that fast, so
+ * the asking is deliberately lazy: only keys we have no icon for, at most one
+ * request in flight, never more than one every PROC_ICON_MIN_GAP_MS, and a key
+ * that came back without an icon is left alone for PROC_ICON_NULL_RETRY_MS
+ * (that is the case where main had to spawn to find out, and the answer is
+ * usually going to be the same the next time).
+ */
+
+/** A key that came back with no icon is not asked about again for this long. */
+const PROC_ICON_NULL_RETRY_MS = 5 * 60 * 1000;
+/** The floor between two requests, however fast the samples come. */
+const PROC_ICON_MIN_GAP_MS = 3000;
+/** Main's own limits, so a request is never trimmed on the other side. */
+const PROC_ICON_MAX_KEYS = 64;
+const PROC_ICON_MAX_KEY_LEN = 64;
+/** Distinct process keys one window will remember. Oldest answer goes first. */
+const PROC_ICON_CACHE_MAX = 300;
+
+/** key -> { dataUrl: string|null, at: ms the ANSWER landed }. */
+const procIconCache = new Map();
+/** One request at a time, and when the last one went out. */
+let procIconInFlight = false;
+let procIconLastAsk = 0;
+
+/** The clock, as one call: the harness replaces this to test the windows. */
+function procIconNow() { return Date.now(); }
+
+/**
+ * Which of these process groups still need an icon: ones we have never asked
+ * about, and ones whose "no icon" answer has gone stale. Deduped and capped to
+ * what main will accept in one call.
+ */
+function procIconsMissing(groups, now) {
+  const out = [];
+  if (!Array.isArray(groups)) return out;
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue;
+    const key = typeof group.key === 'string' ? group.key : '';
+    if (!key || key.length > PROC_ICON_MAX_KEY_LEN) continue;
+    if (out.indexOf(key) !== -1) continue;
+    const entry = procIconCache.get(key);
+    if (entry && entry.dataUrl) continue;                       // already have it
+    if (entry && now - entry.at < PROC_ICON_NULL_RETRY_MS) continue; // asked lately
+    out.push(key);
+    if (out.length >= PROC_ICON_MAX_KEYS) break;
+  }
+  return out;
+}
+
+/** Oldest answers out, so a long-lived window cannot grow without a bound. */
+function trimProcIconCache() {
+  if (procIconCache.size <= PROC_ICON_CACHE_MAX) return;
+  const oldest = Array.from(procIconCache.entries())
+    .sort((a, b) => (a[1] ? a[1].at : 0) - (b[1] ? b[1].at : 0));
+  for (const [key] of oldest) {
+    if (procIconCache.size <= PROC_ICON_CACHE_MAX) break;
+    procIconCache.delete(key);
+  }
+}
+
+/**
+ * Fold one answer into the cache and give back exactly what to push: the keys
+ * main answered, plus the ones it did not (recorded as "no icon" so a build
+ * whose main cannot answer is asked once every five minutes, not every 3 s).
+ */
+function mergeProcIcons(map, now, asked) {
+  const out = {};
+  const answer = (map && typeof map === 'object') ? map : {};
+  const keys = [];
+  for (const key of Object.keys(answer)) keys.push(key);
+  if (Array.isArray(asked)) {
+    for (const key of asked) if (keys.indexOf(key) === -1) keys.push(key);
+  }
+  for (const key of keys) {
+    if (typeof key !== 'string' || !key || key.length > PROC_ICON_MAX_KEY_LEN) continue;
+    const raw = answer[key];
+    // Only a data URL is an icon; anything else (a path, a number, undefined
+    // for a key main dropped) is recorded as "none for now".
+    const dataUrl = (typeof raw === 'string' && raw.slice(0, 5) === 'data:') ? raw : null;
+    procIconCache.set(key, { dataUrl: dataUrl, at: now });
+    out[key] = dataUrl;
+  }
+  trimProcIconCache();
+  return out;
+}
+
+/**
+ * Hand a map of icons to one open new-tab guest. Same two guards as every other
+ * push in this file, and no memo: each key is pushed once per answer, and the
+ * page merges rather than rebuilding its rows.
+ */
+function pushProcIconsToTab(tab, map) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  if (!map || typeof map !== 'object') return false;
+  if (!Object.keys(map).length) return false;
+  let payload = '';
+  try { payload = JSON.stringify(map); } catch (err) { return false; }
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyProcIcons && window.__applyProcIcons(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { return false; /* guest went away mid-call */ }
+  return true;
+}
+
+/**
+ * Everything we know, once, for a guest that has just loaded: a reload, a
+ * second new-tab page, or the first sample landing after the page is up. The
+ * page has no icons of its own, and this is cheaper than re-resolving them.
+ */
+function pushProcIconCacheToTab(tab) {
+  if (!procIconCache.size) return false;
+  const map = {};
+  for (const [key, entry] of procIconCache) map[key] = (entry && entry.dataUrl) || null;
+  return pushProcIconsToTab(tab, map);
+}
+
+/**
+ * One sample's worth of asking. Returns true when a request actually went out,
+ * which is what the harness checks.
+ */
+function requestProcIcons(sample) {
+  const api = statsApi();
+  if (!api || typeof api.procIcons !== 'function') return false; // older preload
+  const tab = getActiveTab();
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  if (procIconInFlight) return false;
+  const now = procIconNow();
+  if (procIconLastAsk && now - procIconLastAsk < PROC_ICON_MIN_GAP_MS) return false;
+
+  const procs = (sample && typeof sample === 'object') ? sample.procs : null;
+  const groups = (procs && Array.isArray(procs.top)) ? procs.top : [];
+  const keys = procIconsMissing(groups, now);
+  if (!keys.length) return false;   // every row is known: nothing runs anywhere
+
+  let pending = null;
+  procIconInFlight = true;
+  procIconLastAsk = now;
+  try { pending = api.procIcons(keys); } catch (err) { procIconInFlight = false; return false; }
+  if (!pending || typeof pending.then !== 'function') { procIconInFlight = false; return false; }
+  pending.then((map) => {
+    procIconInFlight = false;
+    const answered = mergeProcIcons(map, procIconNow(), keys);
+    // Whoever is in front NOW -- the answer may have outlived the tab that
+    // prompted it, and the guest that replaced it wants the same icons.
+    pushProcIconsToTab(getActiveTab(), answered);
+  }, () => { procIconInFlight = false; /* the next sample tries again */ });
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -4759,6 +4922,7 @@ function wireViewEvents(tab) {
     pushRecentToTab(tab);
     pushBackgroundToTab(tab);
     pushAppsToTab(tab);   // the app dock: pins, the installed list, running state
+    pushProcIconCacheToTab(tab);  // process icons we already have, in one go
     pushHistoryToTab(tab);
     pushReadoutToTab(tab);
     // A new document has not opted out of anything yet; ask it once, and take

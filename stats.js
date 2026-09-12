@@ -731,6 +731,13 @@ function create(deps) {
   /** Last os.cpus() reading, so the next tick has something to subtract. */
   let prevCpus = null;
 
+  /**
+   * The last sample that actually went out, kept for main's sake: an IPC call
+   * that has to name a process group (the icon lookup) reads the pids from
+   * here rather than sampling again or trusting the renderer for them.
+   */
+  let lastSampleOut = null;
+
   /** The running tick timer, the grace timer, and the typeperf retry timer. */
   let tickTimer = null;
   let graceTimer = null;
@@ -1066,6 +1073,7 @@ function create(deps) {
         procs: currentProcs(),
         uptimeSec: readUptime(),
       });
+      lastSampleOut = sample;
 
       for (const entry of Array.from(subscribers.values())) {
         const contents = entry.contents;
@@ -1214,6 +1222,12 @@ function create(deps) {
       for (const [id, entry] of subscribers) out[id] = entry.count;
       return out;
     },
+    /**
+     * The last sample sent to a subscriber, or null before the first one (and
+     * a stale one for the grace period after the last unsubscribe). Read-only:
+     * callers get the object as sent, so nobody may mutate it.
+     */
+    lastSample: () => lastSampleOut,
     isRunning: () => tickTimer !== null,
     hasChild: () => active !== null,
     hasPending: () => pending !== null,

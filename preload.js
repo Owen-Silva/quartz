@@ -278,7 +278,14 @@ contextBridge.exposeInMainWorld('api', {
     // Resolves to [{ pid, ok, reason }] -- one entry per pid main accepted,
     // with the refusals ('self', 'protected', 'unavailable') spelled out so
     // the page can say why instead of just failing.
-    endTask: (pids) => ipcRenderer.invoke('stats:end-task', Array.isArray(pids) ? pids : [])
+    endTask: (pids) => ipcRenderer.invoke('stats:end-task', Array.isArray(pids) ? pids : []),
+    // The icon of the executable behind each process group, by the sample's own
+    // group keys ('spotify', 'svchost'). At most 64 keys, each at most 64 chars
+    // -- main drops the rest. Resolves to { [key]: dataUrl | null } with an
+    // entry for every key main accepted; a null means "no icon for this one"
+    // (unknown path, no icon in the exe), and it is worth asking again later.
+    // Known keys come back from main's cache without touching the disk.
+    procIcons: (keys) => ipcRenderer.invoke('stats:proc-icons', Array.isArray(keys) ? keys : [])
   },
   // Installed native apps: the new tab page's dock and the palette's
   // "Open <app>" rows. Main builds the index from Start Menu shortcuts plus
