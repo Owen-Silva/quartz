@@ -13,7 +13,8 @@
     "@mozilla/readability": "^0.6.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "electron": "^44.3.0"
+    "electron": "^44.3.0",
+    "koffi": "^3.2.1"
   },
   "devDependencies": {
     "ws": "^8.21.3"

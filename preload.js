@@ -366,6 +366,80 @@ contextBridge.exposeInMainWorld('api', {
     // and resolve to the same shape as list().
     refresh: () => ipcRenderer.invoke('apps:refresh')
   },
+  // Native app tabs: a real program's own window, hosted inside a tab. Main
+  // re-parents the app's top-level HWND into the browser window and moves it
+  // over the tab's content area -- the app runs as itself, nothing is remoted.
+  //
+  // An hwnd is always a DECIMAL STRING here ('4523874'), in both directions.
+  // Every call answers a value: { ok: true, ... } or { ok: false, reason }
+  // where reason is one of 'unavailable' (this build cannot do it at all),
+  // 'refused', 'bad-request', 'unknown-app', 'no-window', 'gone',
+  // 'store-app' (a UWP/Store window, which cannot be hosted), 'own-window',
+  // 'already-attached', 'not-attached', or a '*-failed'.
+  embed: {
+    // Hostable windows: visible, titled, top-level, never one of ours.
+    // { pid } for one process, { exe: 'notepad' | 'notepad.exe' } for every
+    // copy of a program, neither for all of them. Front-to-back z-order, which
+    // is the practical "newest first" -- a window that just opened is at the
+    // front. Each entry is { hwnd, pid, title, className, exe }.
+    find: (filter) => ipcRenderer.invoke('embed:find', {
+      pid: filter && filter.pid != null ? Number(filter.pid) : undefined,
+      exe: filter && filter.exe != null ? String(filter.exe) : undefined
+    }),
+    // Host an existing window in a tab. It stays HIDDEN until the first
+    // layout() call -> { ok, hwnd, title, className, pid, exe }.
+    attach: (tabId, hwnd) => ipcRenderer.invoke('embed:attach', {
+      tabId: String(tabId == null ? '' : tabId),
+      hwnd: String(hwnd == null ? '' : hwnd)
+    }),
+    // Launch an installed app by its apps.list() id and host its window --
+    // or host the window it already has, rather than starting a second copy.
+    // Waits up to 20 s for the app to draw, then { ok: false, reason:
+    // 'no-window' }. Same attach shape on success.
+    open: (tabId, appId) => ipcRenderer.invoke('embed:open', {
+      tabId: String(tabId == null ? '' : tabId),
+      appId: String(appId == null ? '' : appId)
+    }),
+    // Put the app window over the tab's content area. The rect is in THIS
+    // page's CSS pixels, relative to the window's client area (main converts
+    // to physical pixels with the display's scale factor). Idempotent and
+    // cheap -- safe to call on every resize frame. `visible` false hides the
+    // window without giving it up (that is what switching tabs does).
+    // -> { ok, changed, rect, visible, scale }.
+    layout: (tabId, rect, visible) => ipcRenderer.invoke('embed:layout', {
+      tabId: String(tabId == null ? '' : tabId),
+      rect: {
+        x: Number(rect && rect.x) || 0,
+        y: Number(rect && rect.y) || 0,
+        w: Number(rect && rect.w) || 0,
+        h: Number(rect && rect.h) || 0
+      },
+      visible: visible !== false
+    }),
+    // Give the window back to the desktop: top-level again, its own frame, its
+    // own old position, and never activated. The app keeps running.
+    detach: (tabId, opts) => ipcRenderer.invoke('embed:detach', {
+      tabId: String(tabId == null ? '' : tabId),
+      restore: !(opts && opts.restore === false)
+    }),
+    // Ask the app to close itself (the same WM_CLOSE its X button sends, so
+    // unsaved work still prompts). If it is still there 3 s later it is showing
+    // a dialog, so the window is handed back to the desktop and onGone fires.
+    close: (tabId) => ipcRenderer.invoke('embed:close', {
+      tabId: String(tabId == null ? '' : tabId)
+    }),
+    // { available, windows: [{ tabId, hwnd, pid, title, className, exe,
+    // visible, rect }], stats } -- `available` is false on a build where the
+    // Win32 binding did not load, and then nothing else here will work.
+    list: () => ipcRenderer.invoke('embed:list'),
+    // The app behind a tab went away (it closed itself, crashed, or ignored
+    // WM_CLOSE and was handed back). Returns an unsubscribe function.
+    onGone: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('embed:gone', handler);
+      return () => ipcRenderer.removeListener('embed:gone', handler);
+    }
+  },
   // The Files tab. files.html is a guest with no preload, so app.js reaches
   // these on its behalf once it has decided the console line it parsed was a
   // real request; main answers nothing but values, never a throw.

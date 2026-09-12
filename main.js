@@ -122,6 +122,58 @@ const statsWatched = new Set();
  */
 const apps = appsModule.create({ app, shell });
 
+/**
+ * Native app tabs: a real program's own top-level window, re-parented INTO this
+ * window and positioned over a tab's content area, so the app runs as itself
+ * inside a tab. The module owns all of the Win32 (koffi -> user32) and, more
+ * importantly, owns putting every window back: a child HWND is destroyed with
+ * its parent, so a quit that skipped detachAll() would take the user's app down
+ * with the browser. It registers its own before-quit/exit hooks AND is called
+ * from the ones below, because that is not a thing to get wrong once.
+ *
+ * `win` is passed as a getter: the window does not exist yet at this point.
+ *
+ * REQUIRED AND BUILT INSIDE A try/catch, with a stub for the failure: this is
+ * the only part of the browser that depends on a native binary (koffi), and
+ * The user starts the browser from this folder while it is being worked on. A
+ * missing, half-installed or wrong-ABI koffi must cost him `api.embed`, not a
+ * window. (embed.js loads koffi lazily on first use for the same reason, so
+ * this catch is the second line of defence, not the first.)
+ */
+const embed = (() => {
+  const dead = {
+    available: false,
+    findWindows: () => [],
+    attach: () => ({ ok: false, reason: 'unavailable' }),
+    layout: () => ({ ok: false, reason: 'unavailable' }),
+    detach: () => ({ ok: false, reason: 'unavailable' }),
+    close: () => ({ ok: false, reason: 'unavailable' }),
+    detachAll: () => ({ ok: true, detached: 0 }),
+    handleWindowClose: () => ({ ok: true, detached: 0 }),
+    alive: () => false,
+    list: () => [],
+    stats: () => ({ ffi: null, available: false, attached: 0 }),
+    on: () => {},
+    off: () => {},
+    once: () => {},
+  };
+  try {
+    return require('./embed').create({
+      win: () => liveWin(),
+      log: (...parts) => {
+        if (process.argv.includes('--embed-log')) console.warn('[embed]', ...parts);
+      },
+    });
+  } catch (err) {
+    console.warn('[embed] unavailable:', (err && err.message) || err);
+    return dead;
+  }
+})();
+
+// The tab's app closed itself (its X, its own menu, a crash). The chrome owns
+// what a tab does about that, so it just hears the tabId.
+embed.on('gone', (tabId) => send('embed:gone', { tabId: String(tabId) }));
+
 // ---------------------------------------------------------------------------
 // Window state
 //
@@ -440,6 +492,11 @@ function createWindow() {
       saveTimer = null;
     }
     saveWindowState(win);
+    // THE moment for native app tabs: any app window still parented into this
+    // one is a child HWND, and a child HWND is destroyed with its parent --
+    // which for most programs means the program exits. Hand them all back to
+    // the desktop while the window still exists.
+    try { embed.handleWindowClose(); } catch { /* nothing left to protect */ }
   });
 
   win.loadFile('index.html');
@@ -2976,6 +3033,156 @@ ipcMain.handle('apps:focus', (event, pid) => {
 });
 
 // ---------------------------------------------------------------------------
+// Native app tabs
+//
+// The chrome asks for a window to be hosted; embed.js does the Win32. Same gate
+// as apps and stats, and for a stronger reason than either: these calls move
+// and re-parent OTHER PROGRAMS' windows. Only the chrome document is answered,
+// every answer is a value, and nothing here can throw at the renderer.
+//
+// An hwnd is always a decimal STRING across this boundary (koffi hands out
+// BigInt, which has no business in a renderer).
+// ---------------------------------------------------------------------------
+
+/** How long embed:open waits for a freshly launched app to draw a window. */
+const EMBED_OPEN_TIMEOUT_MS = 20000;
+
+/** How often it looks while waiting. */
+const EMBED_OPEN_POLL_MS = 250;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The app index entry behind an id, or null. Never throws. */
+async function embedAppEntry(appId) {
+  try {
+    const idx = await apps.list();
+    const list = idx && Array.isArray(idx.apps) ? idx.apps : [];
+    return list.find((a) => a && a.id === appId) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Launch an app (or adopt the copy already running) and host its window in a
+ * tab. The sequence matters:
+ *   1. snapshot the app's existing windows,
+ *   2. if it already has one, attach THAT -- launching a second Notepad when
+ *      one is already open is not what "open it in a tab" means,
+ *   3. otherwise launch it exactly the way the dock does (apps.launch) and
+ *      watch for a visible titled window that was not in the snapshot,
+ *   4. attach the first new one, or give up after 20 s.
+ *
+ * An app with no known exe (a packaged entry whose manifest we could not read)
+ * gets the same treatment with the exe filter dropped: any new window from any
+ * process. That is loose, but it only runs inside the 20 s window right after
+ * the user asked for that app.
+ */
+async function embedOpen(tabId, appId) {
+  if (!embed.available) return { ok: false, reason: 'unavailable' };
+  const entry = await embedAppEntry(appId);
+  if (!entry) return { ok: false, reason: 'unknown-app' };
+  const exe = typeof entry.exe === 'string' && entry.exe ? entry.exe : '';
+
+  const before = embed.findWindows(exe ? { exe } : {});
+  const seen = new Set(before.map((w) => w.hwnd));
+  // Already running with a window of its own: host that one.
+  if (exe && before.length) return embed.attach({ tabId, hwnd: before[0].hwnd });
+
+  const started = await apps.launch(appId).catch(() => ({ ok: false, reason: 'failed' }));
+  if (!started || started.ok === false) {
+    return { ok: false, reason: (started && started.reason) || 'launch-failed' };
+  }
+
+  const deadline = Date.now() + EMBED_OPEN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(EMBED_OPEN_POLL_MS);
+    const now = embed.findWindows(exe ? { exe } : {});
+    const fresh = now.find((w) => !seen.has(w.hwnd));
+    if (fresh) {
+      const result = embed.attach({ tabId, hwnd: fresh.hwnd });
+      // A Store app's frame is refused on purpose; so is a window that died
+      // between the sweep and the attach. Both are final answers, not retries.
+      if (result.ok || result.reason === 'store-app') return result;
+      seen.add(fresh.hwnd);
+    }
+  }
+  return { ok: false, reason: 'no-window' };
+}
+
+ipcMain.handle('embed:find', (event, payload) => {
+  if (!isChromeSender(event)) return [];
+  const req = payload && typeof payload === 'object' ? payload : {};
+  try {
+    return embed.findWindows({ pid: req.pid, exe: req.exe });
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle('embed:attach', (event, payload) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const req = payload && typeof payload === 'object' ? payload : {};
+  try {
+    return embed.attach({ tabId: req.tabId, hwnd: req.hwnd });
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('embed:open', (event, payload) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const req = payload && typeof payload === 'object' ? payload : {};
+  const tabId = String(req.tabId == null ? '' : req.tabId);
+  const appId = String(req.appId == null ? '' : req.appId);
+  if (!tabId || !appId) return { ok: false, reason: 'bad-request' };
+  try {
+    return embedOpen(tabId, appId).catch(() => ({ ok: false, reason: 'failed' }));
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('embed:layout', (event, payload) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const req = payload && typeof payload === 'object' ? payload : {};
+  try {
+    return embed.layout(req.tabId, req.rect || req, req.visible !== false);
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('embed:detach', (event, payload) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const req = payload && typeof payload === 'object' ? payload : {};
+  try {
+    return embed.detach(req.tabId, { restore: req.restore !== false });
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('embed:close', (event, payload) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  const req = payload && typeof payload === 'object' ? payload : {};
+  try {
+    return embed.close(req.tabId);
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+});
+
+ipcMain.handle('embed:list', (event) => {
+  if (!isChromeSender(event)) return { available: false, windows: [], stats: null };
+  try {
+    return { available: !!embed.available, windows: embed.list(), stats: embed.stats() };
+  } catch {
+    return { available: false, windows: [], stats: null };
+  }
+});
+
+// ---------------------------------------------------------------------------
 // The Files tab (files.html — a folder browser, as a page)
 //
 // files.html is a <webview> guest with no node and no preload: it asks over
@@ -3607,6 +3814,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  // Before anything else: give every embedded app window back to the desktop.
+  // A child HWND dies with its parent, so this is the difference between "the
+  // browser quit" and "Notepad quit too, taking the document with it".
+  try { embed.detachAll(); } catch { /* best effort, always */ }
   // The one place a synchronous write is still right: there is no event loop
   // left to protect, and a snapshot that never reached disk is a lost session.
   // (app:restart goes through app.quit(), so a restart lands here too.)
