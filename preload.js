@@ -397,8 +397,9 @@ contextBridge.exposeInMainWorld('api', {
       tabId: String(tabId == null ? '' : tabId),
       hwnd: String(hwnd == null ? '' : hwnd)
     }),
-    // Launch an installed app by its apps.list() id and host its window --
-    // or host the window it already has, rather than starting a second copy.
+    // Launch an installed app by its apps.list() id and host the window of
+    // the process it started (a copy already running is adopted only when
+    // no new window appears and nothing of that exe is still starting).
     // Waits up to 20 s for the app to draw, then { ok: false, reason:
     // 'no-window' }. Same attach shape on success.
     open: (tabId, appId) => ipcRenderer.invoke('embed:open', {

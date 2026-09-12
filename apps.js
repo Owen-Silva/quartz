@@ -450,7 +450,7 @@ function finalizeOrder(entries) {
 /**
  * Shape one resolved shortcut into an entry, or null when it is not an app.
  * @param {string} lnkPath  full path to the .lnk
- * @param {{target?:string, args?:string, icon?:string}} link  readShortcutLink result
+ * @param {{target?:string, args?:string, icon?:string, cwd?:string}} link  readShortcutLink result
  */
 function buildShortcutEntry(lnkPath, link) {
   const file = typeof lnkPath === 'string' ? lnkPath : '';
@@ -464,6 +464,9 @@ function buildShortcutEntry(lnkPath, link) {
     kind: 'exe',
     path: target,
     args: link && typeof link.args === 'string' ? link.args.trim() : '',
+    // The shortcut's "Start in" folder. Only launch() reads it -- some apps
+    // resolve their own files relative to it -- and it never leaves over IPC.
+    cwd: link && typeof link.cwd === 'string' && link.cwd.trim() ? link.cwd.trim() : null,
     exe: exeBaseName(target),
     lnk: file,
     iconDataUrl: null,
@@ -679,19 +682,54 @@ function encodeCommand(script) {
   return Buffer.from(String(script), 'utf16le').toString('base64');
 }
 
+/**
+ * A shortcut's argument STRING into the argv ARRAY child_process.spawn wants.
+ *
+ * A .lnk stores its arguments as one command line ('--cd-to-home', '/name
+ * Microsoft.AdministrativeTools', '"C:\\a path\\x.pyw"'), and ShellExecute hands
+ * that string to the target untouched. spawn() takes an array instead, so the
+ * string is split on whitespace with double quotes grouping -- exactly the part
+ * of CommandLineToArgvW that Start Menu shortcuts actually use. Backslashes are
+ * left alone: they are path separators here, not escapes.
+ *
+ * @returns {string[]}
+ */
+function splitArgs(line) {
+  const s = typeof line === 'string' ? line : '';
+  const out = [];
+  let cur = '';
+  let started = false;                                   // '' is a real argument
+  let quoted = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '"') { quoted = !quoted; started = true; continue; }
+    if (!quoted && (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n')) {
+      if (started) { out.push(cur); cur = ''; started = false; }
+      continue;
+    }
+    cur += ch;
+    started = true;
+  }
+  if (started) out.push(cur);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // The module
 // ---------------------------------------------------------------------------
 
 /**
- * @param {{app?:object, shell?:object, env?:object, userDataPath?:string}} deps
+ * @param {{app?:object, shell?:object, env?:object, userDataPath?:string,
+ *          spawn?:function}} deps
  *   `app` and `shell` are Electron's; they are injected rather than required
- *   here so the pure half of this file loads under plain node.
+ *   here so the pure half of this file loads under plain node. `spawn` is an
+ *   injection point for the harness only: nothing real passes it.
  */
 function create(deps = {}) {
   const electronApp = deps.app || null;
   const electronShell = deps.shell || null;
   const env = deps.env || process.env;
+  const spawnFn = typeof deps.spawn === 'function' ? deps.spawn : spawn;
 
   /** { builtAt, apps, payloadBytes, iconsOmitted } or null before the first build. */
   let index = null;
@@ -931,7 +969,7 @@ function create(deps = {}) {
       apps: idx.apps.map((a) => ({
         id: a.id, name: a.name, kind: a.kind, path: a.path, args: a.args || '',
         exe: a.exe || null, variant: a.variant || null,
-        lnk: a.lnk || null, iconPath: a.iconPath || null,
+        lnk: a.lnk || null, cwd: a.cwd || null, iconPath: a.iconPath || null,
         iconDataUrl: a.iconDataUrl || null
       }))
     };
@@ -1031,43 +1069,99 @@ function create(deps = {}) {
   }
 
   /**
+   * Start the target exe OURSELVES, so the caller gets a pid.
+   *
+   * ShellExecute (shell.openPath) is the friendlier launcher -- it honours a
+   * shortcut's "run as administrator" bit and its AppUserModelID -- but it
+   * answers nothing about WHICH process it started, and native app tabs need
+   * that: "host the window this launch produced" is unanswerable from an exe
+   * name alone when two copies of the app are running. So a plain .exe target
+   * is spawned here, detached, with the shortcut's own arguments and working
+   * directory, and the pid is handed back.
+   *
+   * Returns null when this path cannot be used (no target, spawn refused, or
+   * Windows gave us no pid) -- the caller then falls back to the shell.
+   *
+   * @returns {{ok:true, reason:'', pid:number}|null}
+   */
+  function spawnEntry(entry) {
+    const target = entry && typeof entry.path === 'string' ? entry.path.trim() : '';
+    // .exe only: a .bat/.cmd/.msc needs a shell, and this is not the place for
+    // one. (isLaunchableTarget already keeps the index to .exe targets.)
+    if (!target || path.win32.extname(target).toLowerCase() !== '.exe') return null;
+    let child = null;
+    try {
+      child = spawnFn(target, splitArgs(entry.args), {
+        // The shortcut's "Start in", else the exe's own folder -- never the
+        // browser's cwd, which some apps would treat as their data directory.
+        cwd: entry.cwd || path.win32.dirname(target),
+        detached: true,                                    // its life is not ours
+        stdio: 'ignore',
+        windowsHide: false                                 // we WANT its window
+      });
+    } catch {
+      return null;                                         // bad path, EACCES: use the shell
+    }
+    if (!child) return null;
+    // A failed spawn (ENOENT, elevation required) reports its error on the next
+    // tick and leaves pid undefined, so pid is the only reliable "it started".
+    try { if (typeof child.on === 'function') child.on('error', () => {}); } catch { /* fine */ }
+    const pid = Number(child.pid);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    try { if (typeof child.unref === 'function') child.unref(); } catch { /* fine */ }
+    return { ok: true, reason: '', pid: pid };
+  }
+
+  /**
    * Start an app. Detached and never awaited past the handoff: the point is
    * that the click feels instant, and Windows owns the process from there.
-   *   exe   -> ShellExecute on the .lnk, which keeps its args AND working dir
-   *   store -> explorer.exe shell:AppsFolder\<AppID>
+   *   exe   -> spawn the target (pid), else ShellExecute the .lnk (no pid)
+   *   store -> explorer.exe shell:AppsFolder\<AppID> (no pid: explorer's own
+   *            pid says nothing about the packaged process it activates)
+   *
+   * `pid` is the one new thing: a NUMBER when we started the process ourselves
+   * and know which one it is, null when the shell did the starting. Callers
+   * that only care whether the click worked (the dock, the palette) read `ok`
+   * and ignore it.
+   *
+   * @returns {Promise<{ok:boolean, reason:string, pid:number|null}>}
    */
   async function launch(id) {
     const key = String(id || '');
-    if (!key) return { ok: false, reason: 'no app id' };
+    if (!key) return { ok: false, reason: 'no app id', pid: null };
     const idx = await ensureIndex();
     const entry = idx.apps.find((a) => a.id === key);
-    if (!entry) return { ok: false, reason: 'that app is not in the index' };
+    if (!entry) return { ok: false, reason: 'that app is not in the index', pid: null };
 
     if (entry.kind === 'exe') {
+      const direct = spawnEntry(entry);
+      if (direct) return direct;
       const target = entry.lnk || entry.path;
       if (!electronShell || typeof electronShell.openPath !== 'function') {
-        return { ok: false, reason: 'unavailable' };
+        return { ok: false, reason: 'unavailable', pid: null };
       }
       try {
         const err = await electronShell.openPath(target);
-        return err ? { ok: false, reason: String(err) } : { ok: true, reason: '' };
+        return err ? { ok: false, reason: String(err), pid: null } : { ok: true, reason: '', pid: null };
       } catch (e) {
-        return { ok: false, reason: (e && e.message) || 'failed' };
+        return { ok: false, reason: (e && e.message) || 'failed', pid: null };
       }
     }
 
-    if (!isSafeAppId(entry.path)) return { ok: false, reason: 'bad app id' };
+    if (!isSafeAppId(entry.path)) return { ok: false, reason: 'bad app id', pid: null };
     try {
-      const child = spawn('explorer.exe', ['shell:AppsFolder\\' + entry.path], {
+      const child = spawnFn('explorer.exe', ['shell:AppsFolder\\' + entry.path], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true
       });
-      child.on('error', () => { /* explorer is always there; never throw at the page */ });
-      child.unref();                                       // its life is not ours
-      return { ok: true, reason: '' };
+      if (child && typeof child.on === 'function') {
+        child.on('error', () => { /* explorer is always there; never throw at the page */ });
+      }
+      if (child && typeof child.unref === 'function') child.unref();  // its life is not ours
+      return { ok: true, reason: '', pid: null };
     } catch (e) {
-      return { ok: false, reason: (e && e.message) || 'failed' };
+      return { ok: false, reason: (e && e.message) || 'failed', pid: null };
     }
   }
 
@@ -1186,6 +1280,7 @@ module.exports = {
   startMenuRoots,
   focusScript,
   encodeCommand,
+  splitArgs,
   SKIP_NAME_RE,
   TARGET_EXTS,
   CACHE_NAME,

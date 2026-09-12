@@ -144,6 +144,8 @@ const embed = (() => {
   const dead = {
     available: false,
     findWindows: () => [],
+    warmProcessTree: () => Promise.resolve(null),
+    hasNewProcess: () => false,
     attach: () => ({ ok: false, reason: 'unavailable' }),
     layout: () => ({ ok: false, reason: 'unavailable' }),
     detach: () => ({ ok: false, reason: 'unavailable' }),
@@ -3073,14 +3075,33 @@ async function embedAppEntry(appId) {
 }
 
 /**
- * Launch an app (or adopt the copy already running) and host its window in a
- * tab. The sequence matters:
+ * How long a pre-existing window waits for a freshly launched copy to appear
+ * before it is adopted instead.
+ *
+ * Two copies of Paint are two windows and the new one is the answer, so the
+ * launch happens even when the app is already running. But many apps are
+ * single-instance: launching a second copy just raises the window that is
+ * already there and nothing new is ever drawn. Waiting the full 20 s for that
+ * to not happen would make "open it in a tab" feel broken, so the existing
+ * window is adopted after this much silence.
+ */
+const EMBED_OPEN_EXISTING_MS = 4000;
+
+/**
+ * Launch an app and host ITS window in a tab. The sequence matters:
  *   1. snapshot the app's existing windows,
- *   2. if it already has one, attach THAT -- launching a second Notepad when
- *      one is already open is not what "open it in a tab" means,
- *   3. otherwise launch it exactly the way the dock does (apps.launch) and
- *      watch for a visible titled window that was not in the snapshot,
- *   4. attach the first new one, or give up after 20 s.
+ *   2. launch it exactly the way the dock does (apps.launch) -- which now hands
+ *      back the pid when it started the process itself,
+ *   3. watch for a window that is either from that pid (or a descendant of it:
+ *      launchers and App Execution Aliases draw from a child), or new since the
+ *      snapshot and exe-matched,
+ *   4. attach the first one that qualifies. If the app was ALREADY running and
+ *      nothing new appears, adopt the window it already had; give up at 20 s.
+ *
+ * Why the pid matters: with two copies of an app running -- or a launcher whose
+ * real process is a different exe, or two different apps that share an exe name
+ * -- "a window whose exe matches" can easily be the WRONG window. The pid we
+ * started is the only unambiguous handle, so it leads.
  *
  * An app with no known exe (a packaged entry whose manifest we could not read)
  * gets the same treatment with the exe filter dropped: any new window from any
@@ -3118,34 +3139,95 @@ async function embedOpenInner(tabId, appId, pending) {
 
   const before = embed.findWindows(exe ? { exe } : {});
   const seen = new Set(before.map((w) => w.hwnd));
-  // Already running with a window of its own: host that one.
-  if (exe && before.length) {
-    if (pending.cancelled) return { ok: false, reason: 'cancelled' };
-    return embed.attach({ tabId, hwnd: before[0].hwnd });
-  }
+  // The window this app ALREADY had, front-most first -- and only when the exe
+  // is known: with no exe filter `before` is every window on the desktop, and
+  // adopting the front one would host whatever the user happened to be looking at.
+  const had = exe && before.length ? before[0].hwnd : '';
+  /** Windows the attach refused, so the loop stops offering them. */
+  const refused = new Set();
 
+  const launchedAt = Date.now();
   const started = await apps.launch(appId).catch(() => ({ ok: false, reason: 'failed' }));
   if (!started || started.ok === false) {
     return { ok: false, reason: (started && started.reason) || 'launch-failed' };
   }
+  // A number when apps.launch started the process itself (a plain exe or a .lnk
+  // resolved to one), null when the shell did it (a Store app, an elevated
+  // shortcut). Null just means the pid rule cannot help this launch.
+  const launchedPid = Number.isInteger(started.pid) && started.pid > 0 ? started.pid : 0;
+  const preferPids = launchedPid ? [launchedPid] : [];
 
   const deadline = Date.now() + EMBED_OPEN_TIMEOUT_MS;
+  const adoptAt = had ? launchedAt + EMBED_OPEN_EXISTING_MS : 0;
   while (Date.now() < deadline) {
     await sleep(EMBED_OPEN_POLL_MS);
     // The wait is awaited, never spun: every other IPC call (embed:list, a
-    // layout, a detach) is answered normally while it runs.
+    // layout, a detach) is answered normally while it runs. The process-tree
+    // snapshot is warmed the same way, so findWindows never blocks on it.
     if (pending.cancelled) return { ok: false, reason: 'cancelled' };
-    const now = embed.findWindows(exe ? { exe } : {});
-    const fresh = now.find((w) => !seen.has(w.hwnd));
-    if (fresh) {
-      const result = embed.attach({ tabId, hwnd: fresh.hwnd });
-      // A Store app's frame is refused on purpose; so is a window that died
-      // between the sweep and the attach. Both are final answers, not retries.
-      if (result.ok || result.reason === 'store-app') return result;
-      seen.add(fresh.hwnd);
+    // Unconditional: the sweep below asks for a process-tree snapshot for the
+    // `since` rule even when there is no pid to prefer, and a snapshot that is
+    // not already warm would be read SYNCHRONOUSLY inside findWindows.
+    await embed.warmProcessTree().catch(() => null);
+    if (pending.cancelled) return { ok: false, reason: 'cancelled' };
+    const now = embed.findWindows({ exe: exe || undefined, preferPids, since: launchedAt });
+    // (a) it belongs to the process we launched, or a descendant of it, or
+    // (b) it was not there before the launch and its exe matches.
+    let pick = now.find((w) => w.preferred && !refused.has(w.hwnd));
+    let rule = pick ? 'preferred-pid' : '';
+    if (!pick) {
+      pick = now.find((w) => !seen.has(w.hwnd) && !refused.has(w.hwnd));
+      if (pick) rule = 'new-window';
+    }
+    if (pick) {
+      const result = embed.attach({ tabId, hwnd: pick.hwnd });
+      if (result.ok || result.reason === 'store-app') {
+        embedLog('embed:open matched by ' + rule, {
+          tabId, appId, exe: exe || '(any)', launchedPid: launchedPid || null,
+          hwnd: pick.hwnd, pid: pick.pid, winExe: pick.exe, reason: result.reason || 'ok'
+        });
+        // A Store app's frame is refused on purpose; so is a window that died
+        // between the sweep and the attach. Both are final answers.
+        return result;
+      }
+      // 'already-attached', or it died between the sweep and the attach: never
+      // offer this handle again, or a preferred window would be retried for the
+      // whole 20 s.
+      refused.add(pick.hwnd);
+      seen.add(pick.hwnd);
+    }
+    // Single-instance app: the launch raised the window it already had, and no
+    // new one is ever coming. Host that one rather than time out -- but only
+    // once nothing of this app is still STARTING. A packaged activation takes
+    // seconds to draw its window, and adopting the old one while the new copy
+    // is on its way is the very bug this rule exists to avoid.
+    if (adoptAt && Date.now() >= adoptAt
+      && !embed.hasNewProcess({ exe, since: launchedAt })
+      && embed.findWindows({ exe: exe || undefined }).some((w) => w.hwnd === had)) {
+      const result = embed.attach({ tabId, hwnd: had });
+      if (result.ok || result.reason === 'store-app') {
+        embedLog('embed:open matched by pre-existing-window', {
+          tabId, appId, exe: exe || '(any)', launchedPid: launchedPid || null,
+          hwnd: had, reason: result.reason || 'ok'
+        });
+        return result;
+      }
+      return result.reason === 'already-attached' ? result : { ok: false, reason: 'no-window' };
     }
   }
+  embedLog('embed:open matched nothing', { tabId, appId, exe: exe || '(any)', launchedPid: launchedPid || null });
   return { ok: false, reason: 'no-window' };
+}
+
+/**
+ * One line per embed:open decision — WHICH rule matched, and the pids behind
+ * it. Not gated behind --embed-log: this is one line per deliberate user action,
+ * and "it hosted the wrong window" is unanswerable without it.
+ */
+function embedLog(message, fields) {
+  try {
+    console.warn('[embed] ' + message + ' ' + JSON.stringify(fields));
+  } catch { /* a log line is never worth an exception */ }
 }
 
 ipcMain.handle('embed:find', (event, payload) => {

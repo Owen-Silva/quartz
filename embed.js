@@ -39,6 +39,7 @@
 
 const { app, screen, BrowserWindow } = require('electron');
 const EventEmitter = require('events');
+const { execFile, execFileSync } = require('child_process');
 
 // ---------------------------------------------------------------------------
 // Win32, through koffi
@@ -208,6 +209,143 @@ function isFiniteInt(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/** A pid list from anything a caller might pass: a number, an array, junk. */
+function pidList(value) {
+  const raw = Array.isArray(value) ? value : (value === undefined || value === null ? [] : [value]);
+  const out = [];
+  for (const item of raw) {
+    const n = Number(item);
+    if (Number.isInteger(n) && n > 0 && out.indexOf(n) === -1) out.push(n);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// The process tree
+//
+// "Host the window the launch produced" needs more than an exe name. Two copies
+// of Paint are both mspaint.exe; a launcher (Discord's Update.exe, a game's
+// bootstrapper, an App Execution Alias) draws its window from a DIFFERENT
+// process than the one we started. So embed:open hands findWindows the pid it
+// launched, and a window belonging to that pid OR ANY OF ITS DESCENDANTS is the
+// one we want.
+//
+// Windows will not tell us a window's creation time, but it will tell us a
+// PROCESS's, and that is the useful half: a window whose process started after
+// the launch is new, whatever its pid.
+//
+// One PowerShell answers both questions for every process at once (~0.4 s), and
+// the answer is cached for 2 s -- the poll loop looks four times a second, and
+// pids do not move that fast. main.js warms it ASYNCHRONOUSLY between polls, so
+// the synchronous read below is the fallback, not the normal path.
+// ---------------------------------------------------------------------------
+
+/** How long a snapshot is trusted. */
+const PROC_TREE_TTL_MS = 2000;
+
+/** The snapshot read gets this long before it is abandoned. */
+const PROC_TREE_TIMEOUT_MS = 6000;
+
+/** One line per process: '<pid> <parent pid> <start ms since epoch>'. */
+const PROC_TREE_SCRIPT = [
+  '$ErrorActionPreference = \'SilentlyContinue\'',
+  'foreach ($p in Get-CimInstance Win32_Process) {',
+  '  $c = 0',
+  '  if ($p.CreationDate) { $c = ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }',
+  '  "$($p.ProcessId) $($p.ParentProcessId) $c"',
+  '}'
+].join('\n');
+
+const PROC_TREE_ARGS = [
+  '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+  '-EncodedCommand', Buffer.from(PROC_TREE_SCRIPT, 'utf16le').toString('base64')
+];
+
+/**
+ * Parse the snapshot. A line that is not three numbers is skipped rather than
+ * trusted; a truncated run still yields the processes that did print.
+ *
+ * @returns {{parents:Map<number,number>, starts:Map<number,number>}}
+ */
+function parseProcTree(text) {
+  const parents = new Map();
+  const starts = new Map();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    if (!pid) continue;                                    // pid 0 is not a process
+    parents.set(pid, Number(m[2]));
+    starts.set(pid, Number(m[3]));
+  }
+  return { parents: parents, starts: starts };
+}
+
+/**
+ * A pid set grown to include every descendant, breadth-first. The seeds are in
+ * the set whether or not the tree knows them, so a snapshot that failed still
+ * prefers the pid we launched.
+ *
+ * @param {number[]} seeds
+ * @param {Map<number,number>|null} parents  pid -> parent pid
+ * @returns {Set<number>}
+ */
+function descendantsOf(seeds, parents) {
+  const set = new Set(pidList(seeds));
+  if (!set.size || !parents || typeof parents.forEach !== 'function') return set;
+  const kids = new Map();
+  parents.forEach((ppid, pid) => {
+    if (!ppid || ppid === pid) return;                     // no self-parenting cycles
+    const list = kids.get(ppid);
+    if (list) list.push(pid);
+    else kids.set(ppid, [pid]);
+  });
+  const queue = Array.from(set);
+  let guard = 0;
+  while (queue.length && guard < 4096) {
+    guard += 1;
+    const pid = queue.shift();
+    const list = kids.get(pid);
+    if (!list) continue;
+    for (const kid of list) {
+      if (set.has(kid)) continue;                          // already counted: no loops
+      set.add(kid);
+      queue.push(kid);
+    }
+  }
+  return set;
+}
+
+/**
+ * Where a window sits in "which of these is the one I just asked for":
+ *   0  it belongs to the launched process or one of its descendants
+ *   1  its process started after the launch, so the window is new
+ *   2  it was already there
+ *
+ * @param {{pid:number, startedAt?:number}} win
+ * @param {Set<number>|null} prefer
+ * @param {number} since  epoch ms of the launch, 0 to skip the rule
+ */
+function rankWindow(win, prefer, since) {
+  const pid = win && Number(win.pid) ? Number(win.pid) : 0;
+  if (prefer && pid && prefer.has(pid)) return 0;
+  const started = win && Number(win.startedAt) ? Number(win.startedAt) : 0;
+  if (since > 0 && started > 0 && started >= since) return 1;
+  return 2;
+}
+
+/**
+ * Order a sweep: preferred first, then freshly started, then the rest. Sorting
+ * is STABLE, so within a rank the EnumWindows z-order (front to back) survives.
+ *
+ * @returns {object[]} a new array
+ */
+function orderWindows(list, prefer, since) {
+  const arr = Array.isArray(list) ? list.slice() : [];
+  const at = Number(since) > 0 ? Math.trunc(Number(since)) : 0;
+  return arr.sort((a, b) => rankWindow(a, prefer, at) - rankWindow(b, prefer, at));
+}
+
 // ---------------------------------------------------------------------------
 // create()
 // ---------------------------------------------------------------------------
@@ -243,7 +381,7 @@ function create(opts) {
   /** tabId -> timer, for close()'s "it ignored WM_CLOSE" fallback. */
   const closeTimers = new Map();
 
-  const counters = { attaches: 0, detaches: 0, layouts: 0, layoutSkips: 0, polls: 0, gone: 0, finds: 0 };
+  const counters = { attaches: 0, detaches: 0, layouts: 0, layoutSkips: 0, polls: 0, gone: 0, finds: 0, trees: 0 };
 
   let shutdownHooked = false;
 
@@ -418,6 +556,117 @@ function create(opts) {
     return name;
   }
 
+  // -- the process tree, cached ---------------------------------------------
+
+  /** { at, parents, starts } or null before the first read. */
+  let tree = null;
+
+  /** The in-flight async read, so four polls a second cost one PowerShell. */
+  let treeReading = null;
+
+  function treeFresh() {
+    return tree && Date.now() - tree.at <= PROC_TREE_TTL_MS ? tree : null;
+  }
+
+  function keepTree(text) {
+    const parsed = parseProcTree(text);
+    // An empty parse is a failed run, not "no processes": keep the old snapshot
+    // rather than replacing it with nothing.
+    if (!parsed.parents.size) return treeFresh() || tree;
+    counters.trees += 1;
+    tree = { at: Date.now(), parents: parsed.parents, starts: parsed.starts };
+    return tree;
+  }
+
+  /**
+   * The snapshot, refreshed SYNCHRONOUSLY if it is stale. Only the preferPids /
+   * since paths reach this, and main.js warms the cache first, so in practice
+   * this is the fallback for the very first sweep.
+   */
+  function processTree() {
+    const fresh = treeFresh();
+    if (fresh) return fresh;
+    let out = '';
+    try {
+      out = execFileSync('powershell.exe', PROC_TREE_ARGS, {
+        encoding: 'utf8',
+        timeout: PROC_TREE_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+    } catch (err) {
+      log('embed: process tree read failed', err && err.message);
+      return tree;                                         // a stale tree beats none
+    }
+    return keepTree(out);
+  }
+
+  /**
+   * The same read, off the main thread. main.js awaits this between polls so the
+   * 20 s wait never blocks the UI on PowerShell. Never rejects.
+   */
+  function warmProcessTree() {
+    const fresh = treeFresh();
+    if (fresh) return Promise.resolve(fresh);
+    if (treeReading) return treeReading;
+    treeReading = new Promise((resolve) => {
+      let child = null;
+      try {
+        child = execFile('powershell.exe', PROC_TREE_ARGS, {
+          encoding: 'utf8',
+          timeout: PROC_TREE_TIMEOUT_MS,
+          windowsHide: true,
+          maxBuffer: 4 * 1024 * 1024
+        }, (err, stdout) => {
+          if (err && !stdout) {
+            log('embed: process tree warm failed', err && err.message);
+            resolve(tree);
+            return;
+          }
+          resolve(keepTree(stdout));
+        });
+      } catch (err) {
+        log('embed: process tree warm refused', err && err.message);
+        resolve(tree);
+        return;
+      }
+      if (child && typeof child.unref === 'function') { /* keep it: the callback needs it */ }
+    }).then((value) => { treeReading = null; return value; },
+      () => { treeReading = null; return tree; });
+    return treeReading;
+  }
+
+  /**
+   * Did a process of this exe START since `since`, whether or not it has drawn
+   * a window yet?
+   *
+   * This is what tells "the app is single-instance, the launch just raised the
+   * window it already had" apart from "the copy I launched is still starting".
+   * A packaged activation through explorer takes seconds to draw, and adopting
+   * the OLD window while the new one is still coming is exactly the bug this
+   * lane is about.
+   *
+   * Only pids in the current snapshot count, so a launcher stub that already
+   * exited stops holding the wait open.
+   *
+   * @param {{exe?:string, since?:number}} spec
+   */
+  function hasNewProcess(spec) {
+    const req = spec || {};
+    const want = normalizeExe(req.exe);
+    const since = Number(req.since) > 0 ? Math.trunc(Number(req.since)) : 0;
+    if (!want || !since || !win32()) return false;
+    const snap = processTree();
+    if (!snap || !snap.starts) return false;
+    let found = false;
+    snap.starts.forEach((at, pid) => {
+      if (found || !(Number(at) >= since)) return;
+      if (normalizeExe(exeForPid(pid)) === want) found = true;
+    });
+    return found;
+  }
+
   // -- findWindows ----------------------------------------------------------
 
   /**
@@ -430,6 +679,18 @@ function create(opts) {
    * foreground, so it is at the front. (Windows does not record window
    * creation time anywhere a caller can read it.)
    *
+   * TWO EXTRA FILTERS, for "the app I just launched":
+   *   preferPids  the pid embed:open started. A window belonging to it or to
+   *               ANY OF ITS DESCENDANTS is marked `preferred` and sorted to
+   *               the front, and it is kept even when the exe filter would
+   *               have dropped it — a launcher's real window is a different
+   *               exe, and that window is still the answer.
+   *   since       epoch ms of the launch. A window whose PROCESS started after
+   *               it sorts ahead of the ones that were already there.
+   * Either one costs a process-tree snapshot (cached 2 s, warmed
+   * asynchronously by the caller); neither is read on a plain sweep, so the
+   * poll loop and embed:find are exactly as cheap as before.
+   *
    * Our own windows are NEVER returned. Re-parenting the browser into itself
    * is not a thing anyone wants to discover by accident.
    */
@@ -438,6 +699,11 @@ function create(opts) {
     const spec = filter || {};
     const wantPid = isFiniteInt(Number(spec.pid)) && Number(spec.pid) > 0 ? Math.trunc(Number(spec.pid)) : 0;
     const wantExe = normalizeExe(spec.exe);
+    const seeds = pidList(spec.preferPids);
+    const since = Number(spec.since) > 0 ? Math.trunc(Number(spec.since)) : 0;
+    // One snapshot per sweep, and only when something actually asks for it.
+    const snap = (seeds.length || since) ? processTree() : null;
+    const prefer = seeds.length ? descendantsOf(seeds, snap && snap.parents) : null;
     const out = [];
     counters.finds += 1;
     const ours = ourHandles();
@@ -454,13 +720,16 @@ function create(opts) {
           const title = windowTitle(handle);
           if (!title) return true;                                // untitled = plumbing
           const exe = exeForPid(pid);
-          if (wantExe && normalizeExe(exe) !== wantExe) return true;
+          const preferred = !!(prefer && pid && prefer.has(pid));
+          if (wantExe && !preferred && normalizeExe(exe) !== wantExe) return true;
           out.push({
             hwnd: handleText(handle),
             pid,
             title,
             className: windowClass(handle),
             exe,
+            preferred,
+            startedAt: snap && snap.starts ? (snap.starts.get(pid) || 0) : 0,
           });
         } catch { /* one bad window must not end the sweep */ }
         return true;
@@ -468,6 +737,7 @@ function create(opts) {
     } catch (err) {
       log('embed: EnumWindows failed', err && err.message);
     }
+    if (prefer || since) return orderWindows(out, prefer, since);
     return out;
   }
 
@@ -937,6 +1207,8 @@ function create(opts) {
     // A getter: the binding is not attempted until something actually asks.
     get available() { return !!win32(); },
     findWindows,
+    warmProcessTree,
+    hasNewProcess,
     attach,
     layout,
     detach,
@@ -952,4 +1224,15 @@ function create(opts) {
   };
 }
 
-module.exports = { create };
+module.exports = {
+  create,
+  // pure parts, for the harness
+  pidList,
+  parseProcTree,
+  descendantsOf,
+  rankWindow,
+  orderWindows,
+  PROC_TREE_TTL_MS,
+  PROC_TREE_SCRIPT,
+  PROC_TREE_ARGS
+};
