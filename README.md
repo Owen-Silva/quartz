@@ -834,9 +834,13 @@ and hidden whenever a chrome overlay covers the content (the palette, the panes,
 downloads), because a re-parented Win32 window sits above the document. Two ways in: the command
 palette's "Open <app> in a tab" row, with "Switch to <app>" once it is open, or the apps dock, where
 Edit mode gives each installed pin an app | web | tab chooser and a native pin then wears a small
-"tab" badge. The placeholder tells you where it is — starting, running, gone with Relaunch and Close,
-failed with the reason and a "Launch normally" button, or idle with a Start button for a restored
-session, since native tabs never auto-start and never sleep. "Pop out" in the tab context menu gives
+"tab" badge. Either way, a copy that is already running is adopted into the tab rather than launched
+again — a hostable window of that app which no tab is hosting yet is taken where it stands, never
+raised first — and a fresh copy only starts when there is no such window. The placeholder tells you
+where it is — starting, running, gone with Relaunch and Close, failed with the reason and a "Launch
+normally" button, or idle with a Start button for a restored session, since native tabs never
+auto-start and never sleep; Start adopts the running copy the same way, so coming back after a
+restart hosts the app you left open instead of a second one. "Pop out" in the tab context menu gives
 the app back as a normal window; closing the tab closes the app.
 
 Three things to know. Windows 11's packaged Notepad destroys its own window after any `SetParent`, and

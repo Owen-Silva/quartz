@@ -794,7 +794,8 @@ Found, and not ours to fix:
 
 ## Commits
 
-Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 September.
+Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
+onward are the small hours after that same 11 September evening.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -894,3 +895,6 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | 3788d43 | 23:43 | smoketest: the debugging port comes from SMOKE_PORT (default 9222) |
 | 71f60f8 | 23:46 | Review fixes: the window embedding engine |
 | f523390 | 23:51 | Native app tabs: the tab side |
+| 6f4415c | 00:08 | Native app tabs: prefer the window of the process we launched |
+| 60c81fc | 00:19 | Review fixes: native app tab chrome side |
+| 30a4bd9 | 00:24 | Native app tabs: adopt a running app before launching another copy |
