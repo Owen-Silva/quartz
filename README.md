@@ -323,7 +323,12 @@ execute" rejections in the main log, which were those injections losing the race
 something; clicking it mutes the tab without raising it, and the mute rides in the session entry
 and is re-applied on `dom-ready`, since a fresh guest is born unmuted. Pinning makes a chip
 icon-only and moves it into the pinned group at the left of the strip — both directions land on
-the same index, so it is reversible — and a pinned chip ignores middle-click close.
+the same index, so it is reversible — and a pinned chip ignores middle-click close. A page chip
+carries a small minus button before its close button that pins the tab, which is how you collapse
+a tab to its icon without going near the menu; a collapsed chip answers with a small expand badge
+at its top-right corner on hover, and clicking that unpins it. Both buttons swallow the click so
+the tab is not activated, ignore middle-click, and opt out of the chip drag. Claude and native app
+chips have neither.
 
 **Tab sleeping.** A background page tab that has sat untouched past the configured idle time
 (default 30 minutes, `0` = never, swept once a minute) gives its renderer back: the `<webview>` is

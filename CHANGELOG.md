@@ -64,6 +64,11 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Right-click a tab for Duplicate, Move to workspace, Close, Close other tabs, Close tabs to the
   right, Reopen closed tab, and Sleep/Wake. The bare strip has its own menu.
 - Pinned tabs: icon-only, held in a left group, drag-clamped, and remembered across restarts.
+- Collapse a tab from its own chip: a small minus button before the close button pins the tab, so
+  the chip becomes that icon-only 40px one at the left of the strip, and a collapsed chip shows a
+  small expand badge at its top-right corner on hover that brings the full chip back. Pinning is
+  still on the right-click menu and in the palette. Page tabs only — Claude and native app chips
+  have neither button.
 - Audio: a playing or muted tab shows a chip glyph you can click to mute.
 - Sleeping: idle background tabs detach their webview and keep a placeholder, waking when you
   activate them. Pinned, audible and new-tab pages never sleep. The delay is in Settings → Tabs.
@@ -888,7 +893,7 @@ Found, and not ours to fix:
 ## Commits
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
-through 04:30 are the small hours after that same 11 September evening; 09:53 through 10:41 are
+through 04:30 are the small hours after that same 11 September evening; 09:53 through 10:54 are
 12 September.
 
 | Hash | Time | Summary |
@@ -1002,3 +1007,4 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | d33e47b | 09:53 | Omnibox app rows with badges; dock focus across every pid, launching when there is no window; pin options survive pin/unpin |
 | 1a78430 | 10:31 | Omnibox app rows: Enter hosts the app in a tab, Shift+Enter opens it on the desktop |
 | eb8aac3 | 10:41 | New-tab shortcuts are the five most-visited sites from history |
+| 8d6d923 | 10:54 | Tab chips: a minus button collapses the tab to its icon, an expand badge brings it back |
