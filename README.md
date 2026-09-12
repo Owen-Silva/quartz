@@ -864,9 +864,9 @@ decided by process id rather than window class — and the keyboard comes back t
 of them has, while Ctrl+W and the keys a hosted editor or chat app owns — F, R, S, P, N — go to the
 app rather than here. Focus inside the app counts as focus in the browser too, so idle music set to
 play anywhere keeps playing while you work in it. "Pop out" and a clean quit both hand the window
-back whole; only a force-killed browser leaves the app alive but frameless, which popping the tab out
-or restarting the app puts right. The tab side is verified against Character Map, Notepad, Paint and
-a second Electron app.
+back whole; a force-killed browser leaves the app alive but frameless, and it is restored
+automatically the next time the browser starts. The tab side is verified against Character Map,
+Notepad, Paint and a second Electron app.
 
 **Resuming a conversation.** Four ways in, all the same door: right-click bare strip → "Resume a
 Claude conversation…", a Claude chip's menu → "Resume another conversation here", Ctrl+click the

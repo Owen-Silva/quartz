@@ -619,6 +619,23 @@ machine.
   caret in one of the app's own controls, the music gate stayed focused while Electron reported
   blur, a global Ctrl+T opened a tab and returned focus to Chromium, the shortcuts unregistered
   108ms after a tab switch, and the poll stopped when the tab closed.
+- Review fixes on the ownership engine (f6ac242). A layout only asks for `HWND_TOP` when the window
+  is appearing or the foreground is already ours, and `raiseHosted` skips while we are not
+  foreground, so a poll relayout can never put a hosted app over whatever is in front; owner loss
+  needs two consecutive bad samples, because one bad read used to evict a healthy app;
+  `restoreStyles` refuses to write a top-level style onto a window the app has re-parented itself,
+  guarding on the root and `WS_CHILD`; the keyboard handback verifies the focus it claims and always
+  unjoins the input queues, logging a refused unjoin; an owner write refused by UIPI — an elevated
+  app — undoes the attach and answers owner-refused instead of leaving a frameless unowned window;
+  and a missing rect answers bad-rect in preload.js rather than hiding the app. Verified live:
+  z-order stays browser-relative through activation changes and layouts, rects exact in normal,
+  maximised, fullscreen and negative-coordinate positions with minimise hiding without moving, three
+  real Ctrl+T handbacks in 7-9ms with balanced join/unjoin, pop out restoring style, exstyle, owner,
+  rect and the Alt+Tab entry, the child mode round trip identical, and the main process at 0.10% of
+  a core idle with one app hosted. Harnesses N2 334, N6 89, N8 333, N4 82, all green.
+- Recovery after a force-killed browser (f6ac242). Hosted windows are recorded in userData, and the
+  next start restores their frame, taskbar button and rect once and logs what it fixed. A killed test
+  browser left Character Map frameless and a fresh start fixed 1/1.
 
 ### Shortcuts
 
@@ -944,3 +961,4 @@ onward are the small hours after that same 11 September evening.
 | 84717e3 | 01:42 | Native app tabs: "app holds the keyboard" is decided by process id, so hosted Electron and CEF apps arm the shortcuts |
 | 7185f13 | 02:49 | Native app tabs: live tab titles from the app itself, and an honest "(not responding)" state with Pop out and Close tab |
 | ca73bcb | 03:53 | Native app tabs: host by ownership instead of re-parenting, so a hung app can no longer stall the browser |
+| f6ac242 | 04:30 | Review fixes: owner-mode engine, plus recovery after a force-killed browser |
