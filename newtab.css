@@ -1236,6 +1236,427 @@ body {
   white-space: nowrap;
 }
 
+/* --- the app dock -------------------------------------------- */
+/* The native programs, pinned inside the capsule above the web chips: a
+   32px icon, the name under it, and one 6px light when the program is
+   running. That light is the only accent down here — everything else is
+   the same neutral glass, hairlines and quiet type the strip above wears.
+
+   The row is 56px tall whether it holds nothing or nine tiles, so the
+   first pin does not move the box the board measured; two rows grow it,
+   and newtab.js re-seats the board when the count crosses a row. */
+.dock {
+  margin-top: 16px;
+  text-align: left;
+  cursor: default;                 /* the strip's pointer stops at the dock */
+}
+
+/* Caption at the left, the way in at the right, closed by the same
+   double-fading rule the process header uses. */
+.dock-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 20px;
+  margin-bottom: 8px;
+}
+
+.dock-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+}
+
+.dock-caption {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 20px;
+}
+
+/* "Edit" and "Done" in the same box, so the word changing does not move
+   the hairline under it. */
+.dock-edit {
+  flex: 0 0 auto;
+  width: 38px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 20px;
+  text-align: right;
+  cursor: pointer;
+  transition: color 160ms steps(4, end);
+}
+
+.dock-edit:hover { color: var(--fg); }
+
+.dock-edit:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 3px;
+  border-radius: 2px;
+  color: var(--fg);
+}
+
+/* One row reserved: 0 pins and 9 pins are the same height at this width. */
+.dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 56px;
+}
+
+/* The tile's box. The remove glyph and the failure note are laid over the
+   tile rather than inside it — a button cannot hold a button. */
+.dock-cell {
+  position: relative;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+}
+
+/* A tile is a control, so it keeps ordinary round corners: the bevel is
+   the signature of the panels, not of the things you press. At rest it
+   carries the soft rim — one lit corner that fades out before the other —
+   and nothing lights until it is pointed at. */
+.dock-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 56px;
+  height: 56px;
+  padding: 4px 3px;
+  border: 0;
+  border-radius: var(--radius-ctl);
+  background: var(--sheen), var(--glass);
+  color: var(--fg-2);
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background-color 140ms steps(3, end),
+    color            140ms steps(3, end);
+}
+
+.dock-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--rim-soft);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+.dock-tile:hover {
+  background-color: var(--glass-2);
+  color: var(--fg);
+}
+
+.dock-tile:hover::before,
+.dock-tile:active::before { background: var(--rim); }
+
+.dock-tile:active { background-color: var(--glass-3); }
+
+.dock-tile:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+  color: var(--fg);
+}
+
+/* The icon and the light that hangs off its corner. */
+.dock-ico {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+.dock-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+/* No icon came back from the index: a neutral plate with the app's first
+   letter, never a hole where the others have a picture. */
+.dock-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  color: var(--fg-3);
+  font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  text-transform: uppercase;
+}
+
+/* Running. One 6px dot of ion at the icon's top-right, cut out of whatever
+   is behind it by a 1px ring of the page's own ground — no halo, no pulse:
+   it is a state, not an event. Hidden while the row is being edited, where
+   the remove glyph takes that corner. */
+.dock-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ion);
+  box-shadow: 0 0 0 1px var(--ink-1);
+}
+
+.dock-tile.is-running .dock-dot { display: block; }
+.dock.is-editing .dock-dot { display: none; }
+
+.dock-name {
+  max-width: 100%;
+  color: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The way in to pinning: the tile recipe with the glass taken away, so it
+   reads as a space for an app rather than as an app. */
+.dock-add {
+  background: none;
+  border: 1px dashed var(--edge);
+  color: var(--fg-3);
+}
+
+.dock-add::before { display: none; }      /* the dashed edge is the rim */
+
+.dock-add:hover {
+  background-color: var(--glass);
+  border-color: var(--glass-3);
+  color: var(--fg);
+}
+
+.dock-plus {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+
+/* Two hairlines, drawn: a font's plus sign is a different weight in every
+   family this page might fall back to. */
+.dock-plus::before,
+.dock-plus::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: currentColor;
+}
+
+.dock-plus::before {
+  width: 11px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.dock-plus::after {
+  width: 1px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+}
+
+/* Unpin. Only in edit mode, and only ever one press — the pin comes back
+   from the picker, so there is nothing here to confirm. */
+.dock-remove {
+  position: absolute;
+  top: -2px;                       /* inside the 8px gap: never under the next tile */
+  right: -2px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--proc-note);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color        140ms steps(3, end),
+    border-color 140ms steps(3, end);
+}
+
+.dock.is-editing .dock-remove { display: flex; }
+
+.dock-remove:hover { color: var(--fg); border-color: var(--glass-3); }
+
+.dock-remove:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
+/* What came back when a launch failed, over the tile's foot on its own
+   opaque ground for the three seconds it lives. Successes say nothing:
+   the app itself is the answer. */
+.dock-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0 2px;
+  border-radius: 0 0 var(--radius-ctl) var(--radius-ctl);
+  background: var(--proc-note);
+  color: var(--fg-2);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-cell.has-note .dock-note { display: flex; }
+
+/* --- the picker ---------------------------------------------- */
+/* Near-opaque, like the process list and for the same reason: a column of
+   names has to read over a picture or a clip. */
+.dock-picker {
+  width: 100%;
+  max-width: 320px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--bevel);
+  background: var(--panel-bg);
+}
+
+.dock-picker[hidden] { display: none; }
+
+@supports (corner-shape: bevel) {
+  .dock-picker { corner-shape: round bevel round bevel; }
+}
+
+.dock-search {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: var(--glass);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+.dock-search::placeholder { color: var(--fg-3); }
+
+.dock-search:focus {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+.dock-results {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Eight rows at 26px. The list is as tall as what it found — an empty
+   picker is one row saying so, not eight blank ones. */
+.dock-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius-ctl);
+  color: var(--fg-2);
+  font-size: 13px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.dock-result-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.dock-result-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pointed at: one step of ion light over the panel's ground. A white glass
+   wash would be invisible here — the picker's interior is near-opaque, and
+   in the light theme --glass is whiter than the panel it sits on. */
+.dock-result:hover { background: var(--ion-soft); color: var(--fg); }
+
+/* Where the arrow keys are: the same wash with a 2px rail, the way the
+   command palette marks its own selected row. The rail is what separates
+   "the pointer is here" from "Enter lands here". */
+.dock-result.is-active {
+  background: var(--ion-soft);
+  box-shadow: inset 2px 0 0 var(--ion-line);
+  color: var(--fg);
+}
+
+.dock-result.is-empty {
+  color: var(--fg-3);
+  cursor: default;
+}
+
+.dock-result.is-empty:hover { background: none; color: var(--fg-3); }
+
 /* --- shortcut chips ------------------------------------------ */
 .links {
   display: flex;
@@ -1484,5 +1905,8 @@ body {
   .module,
   .stats,
   .chip,
-  .rtile { transition: none; }
+  .rtile,
+  .dock-edit,
+  .dock-tile,
+  .dock-remove { transition: none; }
 }

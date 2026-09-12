@@ -179,6 +179,43 @@
           </div>
         </section>
       </div>
+
+      <!-- The app dock: the native programs this machine opens, pinned into
+           the capsule above the web chips. The chrome pushes them in with
+           window.__applyApps({ pins, installed }) and keeps the running
+           lights current with window.__applyAppsRunning(map) — dots only,
+           never a rebuild, because that arrives once a second.
+
+           A press is a console line (`newtab:app {json}`) exactly like the
+           process list's End task: there is no preload on this page, so a
+           logged line is the whole channel. The chrome answers failures
+           with window.__applyAppResult().
+
+           The row keeps one tile-row of height whether it holds nothing or
+           nine, so the capsule the board measured does not move when the
+           first pin lands; more than one row grows it, and newtab.js
+           re-seats the board when it does. -->
+      <section id="dock" class="dock" aria-label="Apps">
+        <div class="dock-head">
+          <p class="dock-caption">Apps</p>
+          <button id="dock-edit" class="dock-edit" type="button" aria-pressed="false">Edit</button>
+        </div>
+
+        <div id="dock-row" class="dock-row"></div>
+
+        <!-- The picker: a field over the installed index and the eight best
+             names for what is typed. Near-opaque like the process list, for
+             the same reason — a list of names has to read over whatever the
+             user chose as a background. -->
+        <div id="dock-picker" class="dock-picker" hidden>
+          <input id="dock-search" class="dock-search" type="text"
+                 placeholder="Search installed apps" autocomplete="off"
+                 spellcheck="false" aria-label="Search installed apps"
+                 aria-controls="dock-results" aria-expanded="true"
+                 role="combobox" aria-autocomplete="list">
+          <ul id="dock-results" class="dock-results" role="listbox" aria-label="Installed apps"></ul>
+        </div>
+      </section>
     </section>
 
     <nav id="links" class="links" aria-label="Shortcuts"></nav>

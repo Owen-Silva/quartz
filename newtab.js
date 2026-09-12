@@ -36,6 +36,13 @@
         `newtab:end-task {"pids":[...],"key":"..."}`, which the chrome
         reads off this guest and runs. There is no preload here, so a
         logged line is the whole channel; see "the process list".
+
+     6. window.__applyApps({ pins, installed }) — the native programs
+        pinned into the capsule, and the index the picker filters.
+        window.__applyAppsRunning(map) keeps their running lights current
+        once a second, and window.__applyAppResult(r) answers the lines
+        the dock logs: `newtab:app {"action":"launch"|"focus"|"pin"|
+        "unpin"|"refresh",...}`, read off this guest the same way.
    ============================================================ */
 
 'use strict';
@@ -1328,6 +1335,9 @@ function wireProcs() {
   if (statsPanel) {
     statsPanel.addEventListener('click', function (event) {
       if (procsPanel && procsPanel.contains(event.target)) return;
+      // The app dock lives in the capsule too, and a press on a tile is
+      // meant for the tile: the panel behind it does not also fold.
+      if (dockSection && dockSection.contains(event.target)) return;
       toggleProcs();
     });
   }
@@ -1346,6 +1356,668 @@ function wireProcs() {
 
   // Last session's state, worn from the first frame rather than unfolded.
   setProcsOpen(readProcOpen(), false);
+}
+
+/* ------------------------------------------------------------------ */
+/* The app dock                                                        */
+/*                                                                     */
+/* The native programs this machine opens, pinned into the capsule      */
+/* above the web chips. Three pushes feed it and one console line       */
+/* leaves it:                                                          */
+/*                                                                     */
+/*   window.__applyApps({ pins, installed })  the pinned apps, and the  */
+/*       index the picker filters. Rebuilds the row only when the pins  */
+/*       themselves changed — a repeated push leaves every tile, and    */
+/*       every 32px icon, exactly where it was.                        */
+/*                                                                     */
+/*   window.__applyAppsRunning({ id: { running, pids } })  arrives once */
+/*       a second while this guest is on screen. It touches the dots    */
+/*       and nothing else: no rebuild, no measurement, no board.        */
+/*                                                                     */
+/*   window.__applyAppResult({ action, id, ok, reason })  the answer to */
+/*       a line we logged. Only failures show: a 3s note on the tile.   */
+/*                                                                     */
+/* Out: `newtab:app {json}`, read off this guest by the chrome exactly  */
+/* like the process list's end-task line. A press is launch, or focus   */
+/* when the program is already running; edit mode sends unpin; the      */
+/* picker sends pin. Pin and unpin also land locally at once — the      */
+/* chrome's next push is authoritative, but the row must answer the     */
+/* press whether or not the browser it is inside knows about apps yet.  */
+/* ------------------------------------------------------------------ */
+
+const DOCK_RESULTS = 8;          // the picker never shows more than this
+const DOCK_NOTE_MS = 3000;       // and a failure note lives this long
+
+const dockSection = document.getElementById('dock');
+const dockRow = document.getElementById('dock-row');
+const dockEditBtn = document.getElementById('dock-edit');
+const dockPicker = document.getElementById('dock-picker');
+const dockSearch = document.getElementById('dock-search');
+const dockResults = document.getElementById('dock-results');
+
+let dockPins = [];               // the pinned apps, in the chrome's order
+let dockInstalled = [];          // the index, sorted by name, names at least
+const dockCells = new Map();     // id -> { cell, tile, dot, note, running, pids }
+
+let dockKey = null;              // identity of the row that is built
+let dockHeight = -1;             // its last measured height, for the board
+let dockEditing = false;
+let dockPickerOpen = false;
+let dockMatches = [];            // what the picker is showing
+let dockActive = 0;              // and where the arrow keys are in it
+
+let dockAddCell = null;          // the "+ Add app" tile, built once
+let dockAddTile = null;
+
+function dockText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * An icon is a data: URL or it is nothing. The index is built in the main
+ * process; a pin must never make this page fetch anything.
+ */
+function dockIcon(value) {
+  const url = dockText(value);
+  return /^data:image\//i.test(url) ? url : null;
+}
+
+/** The pids the chrome found, bounded by the same cap end-task uses. */
+function dockPids(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const raw of value) {
+    const pid = Number(raw);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    out.push(Math.trunc(pid));
+    if (out.length >= PROC_PIDS_MAX) break;
+  }
+  return out;
+}
+
+function normalizePin(entry) {
+  const e = entry || {};
+  const id = dockText(e.id);
+  if (!id) return null;
+  return {
+    id: id,
+    name: dockText(e.name) || dockText(e.exe) || id,
+    icon: dockIcon(e.iconDataUrl),
+    running: e.running === true,
+    pids: dockPids(e.pids)
+  };
+}
+
+function normalizePins(list) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(list) ? list : []) {
+    const pin = normalizePin(entry);
+    if (!pin || seen.has(pin.id)) continue;
+    seen.add(pin.id);
+    out.push(pin);
+  }
+  return out;
+}
+
+/**
+ * The installed index: id and name are all the picker needs, and an icon
+ * if one happened to come with it. Sorted here, once, so the picker's own
+ * order is the same every time it opens.
+ */
+function normalizeInstalled(list) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(list) ? list : []) {
+    const e = entry || {};
+    const id = dockText(e.id);
+    const name = dockText(e.name);
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id: id, name: name, icon: dockIcon(e.iconDataUrl) });
+  }
+  out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  return out;
+}
+
+/** Identity of the built row: what would make a tile different. */
+function dockPinsKey(list) {
+  return list.map(function (pin) {
+    return pin.id + '\t' + pin.name + '\t' + (pin.icon ? '1' : '0');
+  }).join('\n');
+}
+
+/** The channel out. One line, the same shape end-task uses. */
+function dockSend(message) {
+  console.log('newtab:app ' + JSON.stringify(message));
+}
+
+/** No icon in the index: a neutral plate with the app's first letter. */
+function dockGlyphNode(name) {
+  const glyph = document.createElement('span');
+  glyph.className = 'dock-glyph';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.textContent = (dockText(name) || '?').charAt(0);
+  return glyph;
+}
+
+/**
+ * The 32px icon. A data URL that fails to decode is replaced by the glyph
+ * rather than left as a broken image: this row is on screen full-time.
+ */
+function dockIconNode(pin) {
+  if (!pin.icon) return dockGlyphNode(pin.name);
+
+  const img = document.createElement('img');
+  img.className = 'dock-icon';
+  img.src = pin.icon;
+  img.width = 32;
+  img.height = 32;
+  img.alt = '';
+  img.setAttribute('aria-hidden', 'true');
+  img.onerror = function () {
+    if (img.parentNode) img.parentNode.replaceChild(dockGlyphNode(pin.name), img);
+  };
+  return img;
+}
+
+/** One pinned app: the tile, the remove glyph over it, and its note. */
+function buildDockCell(pin) {
+  const cell = document.createElement('div');
+  cell.className = 'dock-cell';
+  cell.dataset.id = pin.id;
+
+  const tile = document.createElement('button');
+  tile.type = 'button';
+  tile.className = 'dock-tile';
+  tile.title = pin.name;
+
+  const ico = document.createElement('span');
+  ico.className = 'dock-ico';
+  ico.appendChild(dockIconNode(pin));
+
+  const dot = document.createElement('span');
+  dot.className = 'dock-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  ico.appendChild(dot);
+
+  const name = document.createElement('span');
+  name.className = 'dock-name';
+  name.textContent = pin.name;
+
+  tile.appendChild(ico);
+  tile.appendChild(name);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'dock-remove';
+  remove.title = 'Unpin ' + pin.name;
+  remove.setAttribute('aria-label', 'Unpin ' + pin.name);
+  remove.textContent = '×';
+
+  const note = document.createElement('span');
+  note.className = 'dock-note';
+
+  cell.appendChild(tile);
+  cell.appendChild(remove);
+  cell.appendChild(note);
+
+  const rec = {
+    cell: cell, tile: tile, dot: dot, note: note,
+    name: pin.name, running: pin.running, pids: pin.pids.slice(), noteTimer: 0
+  };
+
+  tile.addEventListener('click', function () { pressDockTile(pin.id); });
+  remove.addEventListener('click', function () { unpinApp(pin.id); });
+
+  dockCells.set(pin.id, rec);
+  return cell;
+}
+
+/** The way in to pinning: the tile recipe with the glass taken away. */
+function buildDockAddCell() {
+  const cell = document.createElement('div');
+  cell.className = 'dock-cell dock-cell-add';
+
+  const tile = document.createElement('button');
+  tile.type = 'button';
+  tile.className = 'dock-tile dock-add';
+  tile.title = 'Add an app';
+  tile.setAttribute('aria-expanded', 'false');
+  tile.setAttribute('aria-controls', 'dock-picker');
+
+  const plus = document.createElement('span');
+  plus.className = 'dock-plus';
+  plus.setAttribute('aria-hidden', 'true');
+
+  const name = document.createElement('span');
+  name.className = 'dock-name';
+  name.textContent = 'Add app';
+
+  tile.appendChild(plus);
+  tile.appendChild(name);
+  cell.appendChild(tile);
+
+  tile.addEventListener('click', function () {
+    setPickerOpen(!dockPickerOpen);
+  });
+
+  dockAddCell = cell;
+  dockAddTile = tile;
+  return cell;
+}
+
+function rebuildDockRow() {
+  if (!dockRow) return;
+
+  dockCells.forEach(function (rec) {
+    if (rec.noteTimer) clearTimeout(rec.noteTimer);
+  });
+  dockCells.clear();
+
+  const frag = document.createDocumentFragment();
+  for (const pin of dockPins) frag.appendChild(buildDockCell(pin));
+  frag.appendChild(dockAddCell || buildDockAddCell());
+  dockRow.replaceChildren(frag);
+}
+
+/** The add tile is there while the row is being edited, and while it is empty. */
+function syncDockAdd() {
+  if (!dockAddCell) return;
+  dockAddCell.hidden = !(dockEditing || !dockPins.length);
+  if (dockAddTile) dockAddTile.setAttribute('aria-expanded', dockPickerOpen ? 'true' : 'false');
+}
+
+/** Every dot from the pin list it belongs to. No geometry is touched. */
+function syncDockRunning() {
+  for (const pin of dockPins) {
+    const rec = dockCells.get(pin.id);
+    if (!rec) continue;
+    rec.running = pin.running;
+    rec.pids = pin.pids.slice();
+    rec.tile.classList.toggle('is-running', pin.running);
+    rec.tile.title = pin.running ? pin.name + ' — running' : pin.name;
+  }
+}
+
+/**
+ * The capsule is what the board measured, so a dock that grew a row — or
+ * opened its picker — has to say so. Only ever called from the paths that
+ * can change the box: never from a running-state push.
+ */
+function settleDockHeight() {
+  if (!dockSection) return;
+  const h = dockSection.offsetHeight;
+  if (dockHeight >= 0 && h !== dockHeight) relayoutBoard();
+  dockHeight = h;
+}
+
+function renderDock() {
+  if (!dockRow) return;
+
+  const key = dockPinsKey(dockPins);
+  if (key !== dockKey) {
+    dockKey = key;
+    rebuildDockRow();
+  }
+
+  syncDockAdd();
+  syncDockRunning();
+  if (dockPickerOpen) renderDockResults();
+  settleDockHeight();
+}
+
+function setDockPins(list) {
+  dockPins = list;
+  renderDock();
+}
+
+/* --- pressing things ---------------------------------------------- */
+
+/**
+ * A press is "open it", or "show me the one that is already open". The page
+ * never learns whether that worked: __applyAppResult does, and only when
+ * it did not.
+ */
+function pressDockTile(id) {
+  const rec = dockCells.get(id);
+  if (!rec) return;
+  if (dockEditing) return;         // the row is being arranged, not used
+  if (rec.running && rec.pids.length) dockSend({ action: 'focus', id: id, pid: rec.pids[0] });
+  else dockSend({ action: 'launch', id: id });
+}
+
+function unpinApp(id) {
+  if (!dockCells.has(id)) return;
+  dockSend({ action: 'unpin', id: id });
+  setDockPins(dockPins.filter(function (pin) { return pin.id !== id; }));
+}
+
+function pinApp(app) {
+  if (!app || dockCells.has(app.id)) return;
+  dockSend({ action: 'pin', id: app.id });
+  setDockPins(dockPins.concat([{
+    id: app.id, name: app.name, icon: app.icon, running: false, pids: []
+  }]));
+  // The picker stays up with the field cleared: pinning three apps is three
+  // presses, not three trips through edit mode.
+  if (dockSearch) dockSearch.value = '';
+  renderDockResults();
+  settleDockHeight();
+}
+
+function setDockEditing(on) {
+  const next = !!on;
+  if (next === dockEditing) return;
+  dockEditing = next;
+  if (dockSection) dockSection.classList.toggle('is-editing', next);
+  if (dockEditBtn) {
+    setText(dockEditBtn, next ? 'Done' : 'Edit');
+    dockEditBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+  }
+  if (!next && dockPickerOpen) setPickerOpen(false);
+  syncDockAdd();
+  settleDockHeight();
+}
+
+/* --- the picker --------------------------------------------------- */
+
+function dockMatchApps(query) {
+  const q = dockText(query).toLowerCase();
+  const starts = [];
+  const inside = [];
+
+  for (const app of dockInstalled) {
+    if (dockCells.has(app.id)) continue;        // already on the row
+    if (!q) { starts.push(app); continue; }
+    const at = app.name.toLowerCase().indexOf(q);
+    if (at === 0) starts.push(app);
+    else if (at > 0) inside.push(app);
+  }
+
+  // A name that starts with what was typed is what was meant.
+  return starts.concat(inside).slice(0, DOCK_RESULTS);
+}
+
+function renderDockResults() {
+  if (!dockResults) return;
+
+  dockMatches = dockMatchApps(dockSearch ? dockSearch.value : '');
+  if (dockActive >= dockMatches.length) dockActive = Math.max(0, dockMatches.length - 1);
+
+  const frag = document.createDocumentFragment();
+
+  if (!dockMatches.length) {
+    const empty = document.createElement('li');
+    empty.className = 'dock-result is-empty';
+    empty.textContent = dockInstalled.length ? 'No matches' : 'No apps indexed yet';
+    frag.appendChild(empty);
+    dockResults.replaceChildren(frag);
+    if (dockSearch) dockSearch.removeAttribute('aria-activedescendant');
+    return;
+  }
+
+  dockMatches.forEach(function (app, i) {
+    const row = document.createElement('li');
+    row.className = 'dock-result' + (i === dockActive ? ' is-active' : '');
+    row.id = 'dock-result-' + i;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', i === dockActive ? 'true' : 'false');
+    row.dataset.id = app.id;
+    row.title = app.name;
+
+    if (app.icon) {
+      const icon = document.createElement('img');
+      icon.className = 'dock-result-icon';
+      icon.src = app.icon;
+      icon.width = 16;
+      icon.height = 16;
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.onerror = function () {
+        if (icon.parentNode) icon.parentNode.removeChild(icon);
+      };
+      row.appendChild(icon);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'dock-result-name';
+    name.textContent = app.name;
+    row.appendChild(name);
+
+    // mousedown, not click: the field must not lose focus before the pin.
+    row.addEventListener('mousedown', function (event) {
+      event.preventDefault();
+      pinApp(app);
+    });
+
+    frag.appendChild(row);
+  });
+
+  dockResults.replaceChildren(frag);
+  if (dockSearch) dockSearch.setAttribute('aria-activedescendant', 'dock-result-' + dockActive);
+}
+
+function moveDockActive(delta) {
+  if (!dockMatches.length) return;
+  const last = dockMatches.length - 1;
+  dockActive = Math.min(last, Math.max(0, dockActive + delta));
+  renderDockResults();
+}
+
+function setPickerOpen(open) {
+  if (!dockPicker) return;
+
+  const next = !!open;
+  dockPickerOpen = next;
+  dockPicker.hidden = !next;
+  if (dockAddTile) dockAddTile.setAttribute('aria-expanded', next ? 'true' : 'false');
+
+  if (next) {
+    if (dockSearch) dockSearch.value = '';
+    dockActive = 0;
+    renderDockResults();
+    if (dockSearch) dockSearch.focus();
+    // Nothing to pick from: ask the chrome to build the index. One line,
+    // once per opening, and the picker is usable the moment it answers.
+    if (!dockInstalled.length) dockSend({ action: 'refresh' });
+  } else {
+    dockMatches = [];
+    dockActive = 0;
+    if (dockResults) dockResults.replaceChildren();
+  }
+
+  settleDockHeight();
+}
+
+/* --- what came back ----------------------------------------------- */
+
+/** A failure, in the row's voice. The tile's title carries the whole of it. */
+function dockResultNote(result) {
+  const reason = dockText(result.reason);
+  if (!reason) return result.action === 'focus' ? 'No window' : 'Failed';
+  if (reason === 'not-found' || reason === 'missing') return 'Not found';
+  if (reason === 'no-window') return 'No window';
+  if (reason === 'busy') return 'Busy';
+  const text = reason.replace(/[-_]+/g, ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function showDockNote(rec, text) {
+  rec.note.textContent = text;
+  rec.note.title = text;
+  rec.cell.classList.add('has-note');
+  if (rec.noteTimer) clearTimeout(rec.noteTimer);
+  rec.noteTimer = setTimeout(function () {
+    rec.noteTimer = 0;
+    rec.cell.classList.remove('has-note');
+    rec.note.textContent = '';
+    rec.note.removeAttribute('title');
+  }, DOCK_NOTE_MS);
+}
+
+/* --- the three pushes --------------------------------------------- */
+
+/**
+ * The pinned apps and the index behind the picker. `installed` is only
+ * replaced when one was sent: a push that carries pins alone leaves the
+ * picker with the index it already had.
+ */
+window.__applyApps = function (data) {
+  const d = data || {};
+  if (Array.isArray(d.installed)) dockInstalled = normalizeInstalled(d.installed);
+  if (Array.isArray(d.pins)) setDockPins(normalizePins(d.pins));
+  else renderDock();
+  // A count, not the whole row: this is an executeJavaScript return value,
+  // and __dock() is a forced layout nobody asked for. Tests call that.
+  return { pins: dockPins.length, installed: dockInstalled.length };
+};
+
+/**
+ * Running state only, once a second. Dots in place: no tile is rebuilt, no
+ * box is measured and the board is never told anything.
+ */
+window.__applyAppsRunning = function (map) {
+  const m = (map && typeof map === 'object') ? map : {};
+  let touched = 0;
+
+  for (const id of Object.keys(m)) {
+    const key = dockText(id);
+    const entry = m[id] || {};
+    const running = entry.running === true;
+    const pids = dockPids(entry.pids);
+
+    const pin = dockPins.find(function (p) { return p.id === key; });
+    if (pin) { pin.running = running; pin.pids = pids; }
+
+    const rec = dockCells.get(key);
+    if (!rec) continue;
+    rec.running = running;
+    rec.pids = pids;
+    rec.tile.classList.toggle('is-running', running);
+    rec.tile.title = running ? rec.name + ' — running' : rec.name;
+    touched++;
+  }
+
+  // Deliberately not __dock(): this arrives once a second, and a forced
+  // layout for a return value nobody reads is once a second too often.
+  return { touched: touched };
+};
+
+/**
+ * The answer to a line we logged. Only failures show: a launch that worked
+ * is answered by the program itself. Returns the note it wrote, so a test
+ * can read it without racing the three-second timer.
+ */
+window.__applyAppResult = function (result) {
+  const r = result || {};
+  if (r.ok === true) return null;
+
+  const rec = dockCells.get(dockText(r.id));
+  const text = dockResultNote(r);
+  if (rec) showDockNote(rec, text);
+  return text;
+};
+
+/** What the dock actually shows, for tests. */
+window.__dock = function () {
+  const cap = statsPanel ? statsPanel.getBoundingClientRect() : null;
+  const row = dockRow ? dockRow.getBoundingClientRect() : null;
+  const tops = new Set();
+
+  const tiles = Array.prototype.map.call(dockRow ? dockRow.children : [], function (cell) {
+    const tile = cell.querySelector('.dock-tile');
+    const label = cell.querySelector('.dock-name');
+    const dot = cell.querySelector('.dock-dot');
+    const box = cell.getBoundingClientRect();
+    if (!cell.hidden) tops.add(Math.round(box.top));
+    return {
+      id: cell.dataset.id || null,
+      add: cell.classList.contains('dock-cell-add'),
+      hidden: !!cell.hidden,
+      mark: cell.dataset.mark || null,
+      name: label ? label.textContent : '',
+      title: tile ? tile.title : '',
+      running: !!(tile && tile.classList.contains('is-running')),
+      dot: !!(dot && getComputedStyle(dot).display !== 'none'),
+      icon: !!cell.querySelector('.dock-icon'),
+      glyph: !!cell.querySelector('.dock-glyph'),
+      note: cell.classList.contains('has-note')
+        ? (cell.querySelector('.dock-note') || {}).textContent : null,
+      w: box.width, h: box.height, top: box.top, left: box.left
+    };
+  });
+
+  return {
+    editing: dockEditing,
+    pickerOpen: dockPickerOpen,
+    installed: dockInstalled.length,
+    pins: dockPins.map(function (pin) {
+      return { id: pin.id, name: pin.name, running: pin.running, pids: pin.pids.slice(), icon: !!pin.icon };
+    }),
+    rows: tops.size,
+    capsuleHeight: cap ? cap.height : 0,
+    sectionHeight: dockSection ? dockSection.getBoundingClientRect().height : 0,
+    rowHeight: row ? row.height : 0,
+    active: dockActive,
+    results: dockMatches.map(function (app) { return app.name; }),
+    resultRows: Array.prototype.map.call(dockResults ? dockResults.children : [], function (li) {
+      return { name: li.textContent, active: li.classList.contains('is-active') };
+    }),
+    tiles: tiles
+  };
+};
+
+function wireDock() {
+  if (!dockRow) return;
+
+  /* The capsule behind this row folds the process list when it is clicked,
+     and a press in here is never that. The containment check over in
+     wireProcs() is not enough on its own: unpinning DETACHES the button
+     that was pressed, so by the time the click reaches the panel its
+     target is no longer inside the dock — and the capsule folded. Stopping
+     the click at the section covers every control in here, including the
+     ones that remove themselves. */
+  if (dockSection) {
+    dockSection.addEventListener('click', function (event) {
+      event.stopPropagation();
+    });
+  }
+
+  // The row starts with nothing pinned and the way in showing, so the
+  // capsule wears its final height from the first paint whether or not the
+  // chrome ever pushes a pin.
+  renderDock();
+
+  if (dockEditBtn) {
+    dockEditBtn.addEventListener('click', function () {
+      setDockEditing(!dockEditing);
+    });
+  }
+
+  if (dockSearch) {
+    dockSearch.addEventListener('input', function () {
+      dockActive = 0;
+      renderDockResults();
+    });
+
+    dockSearch.addEventListener('keydown', function (event) {
+      const key = event.key;
+      if (key === 'ArrowDown') { event.preventDefault(); moveDockActive(1); return; }
+      if (key === 'ArrowUp')   { event.preventDefault(); moveDockActive(-1); return; }
+      if (key === 'Enter') {
+        event.preventDefault();
+        pinApp(dockMatches[dockActive]);
+        return;
+      }
+      if (key === 'Escape' || key === 'Esc') {
+        event.preventDefault();
+        event.stopPropagation();
+        setPickerOpen(false);
+        if (dockAddTile) dockAddTile.focus();
+      }
+    });
+  }
 }
 
 /* The accent's base colour differs per theme, so re-derive the same hue
@@ -1671,6 +2343,11 @@ function init() {
      real ten will wear, the sort the user last chose, and the "Show more"
      control holding its space. Nothing below this line changes the box. */
   wireProcs();
+
+  /* The app dock, in the same state and for the same reason: the row keeps
+     one tile-row of height before a single pin has arrived, so the capsule
+     the board is about to measure is already the height it will wear. */
+  wireDock();
 
   /* The canvases are a percentage of the column, so their backing store
      is wrong after a resize. One repaint, no rAF: nothing here animates. */
