@@ -48,7 +48,9 @@ function Get-TreePids([string]$m) {
   $mine = @($all | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($m) })
   $ids = New-Object 'System.Collections.Generic.HashSet[int]'
   foreach ($p in $mine) { [void]$ids.Add([int]$p.ProcessId) }
-  return $ids
+  # The comma keeps the HashSet whole: a bare return unrolls it into an object[]
+  # and [WB]::ForPids never matches its signature (seen live 2026-09-12).
+  return ,$ids
 }
 
 $deadline = (Get-Date).AddSeconds($WaitSec)
@@ -62,6 +64,8 @@ while ((Get-Date) -lt $deadline) {
       if ($sent.ContainsKey([int64]$h)) { continue }
       $sb = New-Object System.Text.StringBuilder 256
       [void][WB]::GetWindowTextW($h, $sb, 256)
+      # Titleless and IME helper windows are not the instance's real windows.
+      if ($sb.Length -eq 0 -or $sb.ToString() -in @('MSCTFIME UI', 'Default IME')) { continue }
       # HWND_BOTTOM = 1, SWP_NOMOVE 0x2 | SWP_NOSIZE 0x1 | SWP_NOACTIVATE 0x10
       [void][WB]::SetWindowPos($h, [IntPtr]1, 0, 0, 0, 0, 0x13)
       $sent[[int64]$h] = $true
