@@ -196,6 +196,39 @@ or use Restart browser in Settings → About — to pick any of this up.
   only while a new-tab page is the active tab and the window is focused, and the counter process is
   killed 5 seconds after the last subscriber. It costs 0.55% of a core in main plus 0.42% for
   typeperf while someone is looking, and 0% otherwise.
+- The stats sample once a second now, Task Manager's own cadence, at the user's request — the typeperf
+  child follows at `-si 1` — so the graphs hold one minute of history rather than two.
+- Under the strip, a "Processes" expander. It opens with a chevron (the strip itself is the toggle)
+  and unfolds the list inline over 160ms, pushing the chips and Recent rows down; whether it is open
+  or closed is remembered across reloads. The rows are grouped the way Task Manager groups them —
+  one row per program with its instance count, friendly names for the usual suspects (Claude Code,
+  Electron, Windows Explorer, Desktop Window Manager, Service Host) — and each shows CPU as a share
+  of the whole machine, private memory, and disk and network bytes. The top 10 by the current sort
+  are drawn, Show more takes it to 30, and the sort (CPU or memory, click a header) is persisted.
+  Rows keep their identity between samples and update their text in place. End task is a two-step:
+  the button arms for 3 seconds and the second press kills every process in the group, and the row
+  answers Ended, Protected or That's this browser. The browser's own tree is greyed out and refused
+  as self, and a protected list of Windows processes — System, Registry, smss, csrss, wininit,
+  winlogon, services, lsass, svchost, dwm, fontdrvhost, Memory Compression, Secure System, MsMpEng,
+  SecurityHealthService, audiodg, sihost, ctfmon — is refused too. While the list is collapsed no
+  table work happens at all: the samples are kept and not drawn. It was first built as a floating
+  pop-out over the strip (bed0643) and replaced with the expander at the user's request, because he
+  wanted it to open downwards rather than sit on top of the page.
+- Fixed: the dashes for disk, network and GPU on the user's machine while the graphs still had data.
+  `typeperf` prints a warning line whenever a counter instance disappears — a process with a GPU
+  engine exiting is enough — and the sampler treated any non-CSV line as a failure and nulled those
+  fields for a minute. Warning lines and repeated headers are skipped now, blanks count as 0 inside
+  sums, a field goes null only after 5 seconds without a valid row, and a dead child respawns in 2
+  seconds. Because `(*)` fixes the instance list at spawn time, the child is also replaced every 30
+  seconds with an overlap — switch to the replacement on its first row, then kill the old one — so
+  processes started after the spawn are counted: 130 consecutive samples across four refresh
+  boundaries with no nulls, and a Notepad started afterwards appeared within 20 seconds.
+- Fixed: the flicker when Settings opens. It was never in the page — the address bar showed a
+  lighter block exactly above the pane's column, and DevTools captures never saw it, because the
+  artefact is in Windows' composition of the acrylic window: every repaint of a region re-composes
+  that whole column, and the auto-focused Find a setting box repainted its caret twice a second for
+  as long as the pane was open. Focus now lands on the panel itself; Tab still reaches the filter
+  and Escape still closes.
 - A moving picture can be the new tab's background. Settings → New tab → Moving picture takes an
   mp4, webm, mov, m4v or gif, copies it into `userData/backgrounds` (512 MB cap) and plays it muted
   on a loop, full-bleed under the dim overlay, with the board-over switch putting the circuit board
@@ -294,6 +327,9 @@ instance:
   surface — the Settings pane, the new-tab field, chips and modules — re-blurring each of them on
   every step, about five points of a core whenever a Claude tab was open. They are static now and
   the keyframes are gone.
+- The counter pipe. `typeperf` writes about 1,400 tiny chunks a second, and reading them in flowing
+  mode cost main 4.7% of a core once the per-process counters rode along. The pipe is paused and
+  drained once per tick instead: 0.35% of a core with the process rows, 0.27% without.
 
 Measured and left alone:
 
@@ -313,8 +349,9 @@ Found, and not ours to fix:
   `sleepTab`; the fix belongs upstream.
 - The flicker on Settings open and on the new tab could not be reproduced headlessly — the guest
   neither repainted nor relaid out, and the only frame differences were the caret blink and blur
-  rounding. The aurora was the one thing moving at rest in both places, so stilling it is the
-  likely fix rather than a proven one.
+  rounding. The aurora was the one thing moving at rest in both places, so stilling it was a likely
+  fix rather than a proven one. The caret turned out to be the other half of it: see the Settings
+  flicker under Look.
 
 ### Security notes
 
@@ -432,3 +469,9 @@ Times are local. 21:26 through 23:54 are 10 September; 00:29 onward are 11 Septe
 | b9f5ca2 | 17:04 | New tab: live system stats replace the search field |
 | dbc8744 | 17:07 | Settings: a Moving picture background, chosen from a file and copied into the profile |
 | d8572e5 | 17:18 | New tab: a Moving picture plays behind the board, muted, and pauses whenever the page is not in front |
+| 669c943 | 18:09 | System stats sample once a second, Task Manager's cadence |
+| b3348e9 | 18:12 | Settings: opening the pane focuses the panel, not the filter box, so no caret blinks under the acrylic |
+| cf15ff9 | 18:16 | End task plumbing: the new-tab page asks over its console line, main kills through stats.endTask, the answer is pushed back |
+| bed0643 | 18:41 | New tab: a Processes pop-out opens from the stats strip, with End task |
+| 16d1b09 | 18:57 | System stats: the counter stream survives vanished instances and refreshes them; per-process rows; endTask with refusals |
+| ad2fa18 | 19:00 | New tab: the process list is an expander under the stats strip, remembered open or closed |

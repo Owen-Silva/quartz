@@ -483,6 +483,9 @@ overlapping words merged into one run, and unmarking re-merges the text nodes so
 never straddles two. It runs 40ms after the last keystroke, once per word for a fast typist.
 Escape empties the field and only a second Escape, on an empty one, closes the panel; Enter moves
 focus to the first control still on screen.
+The box is not focused on open, though: focus lands on the panel itself (`tabindex="-1"`) and Tab
+reaches the filter, because a caret blinking twice a second under the acrylic window made Windows
+re-compose that whole column and showed as a flicker in the address bar above it.
 
 **New tab page.** A plain `file://` page inside a guest — no preload, no `window.api`. The
 chrome passes `?theme`, `?palette`, `?hue`, `?engine`, `?chips` and `?bg` for the first paint
@@ -508,14 +511,38 @@ stats — the field is gone because the user searches from the address bar. CPU,
 (bits per second, down and up) and GPU, each a Bahnschrift tabular value, a sentence-case label and
 a 120x28 graph of the last 60 samples. The strip reserves its height before the first sample and
 shows dashes until then. `window.__applyStats(sample)` appends, writes the text and repaints once;
-there are no timers and no rAF on the page. The numbers come from `stats.js` in main, sampled every
-2s: CPU from `os.cpus()` deltas per core, memory from `process.getSystemMemoryInfo()`, uptime from
-`os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child streaming the same
-Windows performance counters Task Manager reads (PhysicalDisk `_Total`, Network Interface summed,
-GPU Engine `engtype_3D` summed). A counter that fails becomes null and is retried at most once a
-minute. The chrome subscribes only while the active tab is a new-tab page and the window is
-focused, so background new-tab pages get nothing and the `typeperf` child is killed 5s after the
-last unsubscribe.
+there are no timers and no rAF on the page. The numbers come from `stats.js` in main, sampled once
+a second — Task Manager's cadence, so a graph holds one minute: CPU from `os.cpus()` deltas per
+core, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and
+GPU from one long-lived `typeperf` child streaming the same Windows performance counters Task
+Manager reads (PhysicalDisk `_Total`, Network Interface summed, GPU Engine `engtype_3D` summed).
+`typeperf` prints a warning line whenever a counter instance disappears, so warning lines and
+repeated headers are skipped, blanks count as 0 inside sums, a field goes null only after 5s
+without a valid row, and a dead child respawns in 2s. `(*)` fixes the instance list at spawn time,
+so the child is replaced every 30s with an overlap — switch on the replacement's first row, then
+kill the old one — and a process started since the spawn is counted within 20s. The chrome
+subscribes only while the active tab is a new-tab page and the window is focused, so background
+new-tab pages get nothing and the `typeperf` child is killed 5s after the last unsubscribe.
+
+**Processes.** Under the strip is a "Processes" expander — a chevron at the strip's right edge, and
+the strip itself is the toggle. It unfolds the list inline over 160ms, pushing the chips and Recent
+rows down, and whether it is open or closed is kept in `localStorage` and restored without
+animation. Rows are grouped the way Task Manager groups them, one per program with its instance
+count and a friendly name where there is one (Claude Code, Electron, Windows Explorer, Desktop
+Window Manager, Service Host), each showing CPU as a share of the whole machine, private memory
+(Working Set — Private) and disk and network bytes. The top 10 are drawn, Show more takes it to 30,
+and the sort — CPU or memory, click a header — is persisted. Rows keep their identity by group key
+between samples and update their text in place. End task is a two-step: the button arms for 3s, and
+the second press ends every process in the group; the row answers Ended, Protected or That's this
+browser for 3s. Worth knowing: ending a group ends all of its processes, the way Task Manager does,
+and two things are always refused — the browser's own tree, which is greyed out and has no End task,
+and a protected list of Windows processes (System, Registry, smss, csrss, wininit, winlogon,
+services, lsass, svchost, dwm, fontdrvhost, Memory Compression, Secure System, MsMpEng,
+SecurityHealthService, audiodg, sihost, ctfmon). The new tab page has no preload, so the request
+travels the channel the history page already uses: a `newtab:end-task` console line the chrome
+honours only from the tab that owns that guest and only for a new-tab URL, forwarded to
+`stats.endTask` and pushed back as `window.__applyEndTask`. Collapsed, the list costs nothing —
+samples are kept and not drawn.
 
 **New tab backgrounds.** Four of them, picked in Settings → New tab. *Circuit board* is the
 page's own default. *Aurora only* hides the canvas and the packet layer and stops newtab-bg.js
@@ -695,6 +722,9 @@ one run before and one after.
   one gets its own layer.
 - Stats sample only while a new-tab page is in front and the window is focused — 0.55% of a core in
   main plus 0.42% for the `typeperf` child then, and nothing at all the rest of the time.
+- A chatty child's pipe is paused and drained once per tick, never left in flowing mode. `typeperf`
+  writes about 1,400 tiny chunks a second and reading them as they arrived cost main 4.7% of a core
+  with the process counters on; draining once per tick is 0.35%.
 - A video background pauses when it is not in front. A 1080p clip playing costs 26% of a core, all
   of it in the GPU process, against the board's 18%; paused it is 1.4%.
 
@@ -708,7 +738,7 @@ one run before and one after.
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
 | `pty.js` | PTY session manager — spawns `claude.exe` under ConPTY with a scrubbed environment and an argument allowlist (`--continue`, `--resume`, `--dangerously-skip-permissions`, bare). |
-| `stats.js` | System stats, main-process side: a 2s sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
+| `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
