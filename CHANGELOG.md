@@ -114,16 +114,19 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Print the active page through Chromium's own preview (Ctrl+P).
 - Screenshot the page into Downloads (Ctrl+Shift+S).
 - Picture in picture (Alt+P) for any page with a video.
-- The address bar searches your apps (d33e47b). Type a name that matches an installed app, a web
-  app from the catalogue or a terminal program and up to three rows appear under the usual
-  search/address row, each with an "App", "Web app" or "Terminal" pill after the name. Enter does
-  what the palette's row for that app does — open it, or switch to the tab it is already in — and
-  Shift+Enter hosts an installed app's window in a tab. The default row stays first, so typing a
-  URL or a search and pressing Enter is unchanged. Matching is on the name only (exact, then
-  starts-with, then word-prefix, then substring), and two shortcuts with the same name collapse
-  into one row, the running or already-hosted one winning. tabsearch.js exposes
-  `appMatches(query, limit)` and `whenAppsReady(cb)` so the list redraws once the index lands;
-  history.js draws the rows and swallows the Enter, so app.js never navigates for one.
+- The address bar searches your apps (d33e47b, 1a78430). Type a name that matches an installed
+  app, a web app from the catalogue or a terminal program and up to three rows appear under the
+  usual search/address row, each with an "App", "Web app" or "Terminal" pill after the name. Enter
+  on an installed app hosts it in a tab — adopting the window it already has open, or starting the
+  app inside the tab — and Shift+Enter launches or focuses it on the desktop instead; the hint
+  under a hostable app that is not already in a tab reads "Open in a tab · Shift+Enter opens it on
+  the desktop". Web-app and terminal rows are unchanged: Enter opens one, or switches to the tab it
+  is already in. The default row stays first, so typing a URL or a search and pressing Enter is
+  unchanged. Matching is on the name only (exact, then starts-with, then word-prefix, then
+  substring), and two shortcuts with the same name collapse into one row, the running or
+  already-hosted one winning. tabsearch.js exposes `appMatches(query, limit)` and
+  `whenAppsReady(cb)` so the list redraws once the index lands; history.js draws the rows and
+  swallows the Enter, so app.js never navigates for one.
 
 ### Blocking and privacy
 
@@ -278,6 +281,17 @@ or use Restart browser in Settings → About — to pick any of this up.
   events. A file Chromium cannot decode falls back to the board silently. Cost: a 1080p clip
   playing is 26% of a core against the board's 18%, and 1.4% paused. It has no audio, so the tab
   chip shows no speaker and Spotify auto-pause never holds for it.
+- The new tab's five shortcut chips are the sites you actually use (eb8aac3). They come out of the
+  history store instead of a fixed list: one entry per host (www stripped, the port kept), scored
+  as visits with a two-week half-life, so a site you stop opening fades out of the row over a few
+  weeks. Search-result pages are skipped, each chip links to that host's most-visited page, and
+  while the store is still thin the row is padded with the old defaults. A label comes from the
+  web-app catalogue, then the defaults, then a short map of common hosts, else the site's name
+  capitalised — a local server reads "Local :7373". Settings → New tab → the shortcuts field gains
+  a Most visited / My list control: Most visited is the default, My list hands the row back to the
+  hand-edited list, and that editor dims while the history is in charge. The composed row travels
+  on the channel the page already listens on — the `?chips` param and the settings push — at most
+  once every 5 seconds and only when it actually reads differently.
 
 ### Apps, process icons and YouTube
 
@@ -874,7 +888,8 @@ Found, and not ours to fix:
 ## Commits
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
-through 04:30 are the small hours after that same 11 September evening; 09:53 is 12 September.
+through 04:30 are the small hours after that same 11 September evening; 09:53 through 10:41 are
+12 September.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -985,3 +1000,5 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 is
 | ca73bcb | 03:53 | Native app tabs: host by ownership instead of re-parenting, so a hung app can no longer stall the browser |
 | f6ac242 | 04:30 | Review fixes: owner-mode engine, plus recovery after a force-killed browser |
 | d33e47b | 09:53 | Omnibox app rows with badges; dock focus across every pid, launching when there is no window; pin options survive pin/unpin |
+| 1a78430 | 10:31 | Omnibox app rows: Enter hosts the app in a tab, Shift+Enter opens it on the desktop |
+| eb8aac3 | 10:41 | New-tab shortcuts are the five most-visited sites from history |

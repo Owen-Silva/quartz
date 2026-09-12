@@ -360,8 +360,11 @@ typed it leads with the row that mirrors what Enter already does, then history m
 empty focus, what was open recently. It never navigates itself — it writes into `#omnibox` and
 hands Enter back. It searches your apps as well: a name that matches an installed app, a web app
 from the catalogue or a terminal program adds up to three rows under that first row, each with an
-"App", "Web app" or "Terminal" pill after the name. Enter on one opens it, or switches to the tab
-it is already in, and Shift+Enter hosts an installed app's window in a tab. Those rows are the one
+"App", "Web app" or "Terminal" pill after the name. Enter on an installed app hosts it in a tab —
+adopting the window it already has open, or starting the app inside the tab — and Shift+Enter
+launches or focuses it on the desktop instead, so the hint under a hostable app that is not already
+in a tab reads "Open in a tab · Shift+Enter opens it on the desktop". Enter on a web app or a
+terminal program opens it, or switches to the tab it is already in. Those rows are the one
 exception to handing Enter back — history.js runs them itself, so app.js never navigates for one —
 and the default row stays first, so typing a URL or a search and pressing Enter is unchanged. Two
 shortcuts with the same name collapse into a single row, the running or already-hosted one winning.
@@ -438,7 +441,9 @@ panel — and "show in folder" on it is confined to Downloads (see Security note
 **Bookmarks bar.** Ctrl+Shift+B, or the switch in Look, shows a bar of the new-tab chips under
 the address bar. There is no second list of bookmarks in this browser: the chips on the new tab
 page *are* the bookmarks, stored once in `Settings.chips()`, so Ctrl+D still adds in one place
-and settings is still the one place to edit. The bar is a block child of `.chrome-layer` right
+and settings is still the one place to edit. It reads that stored list either way, so on Most
+visited — where the new tab's own five follow your history — the bar still shows what you saved.
+The bar is a block child of `.chrome-layer` right
 after `.navrow`, so it makes the chrome taller and pushes `#views` down rather than floating over
 the page. `settings.bookmarksBar` is the whole feature's state — the key the switch writes and the key
 Ctrl+Shift+B flips — so the two can never be out of step.
@@ -570,7 +575,9 @@ where to save each file", off by default); Search (Google, DuckDuckGo, Bing, Bra
 Websites (the site theme guests see through `prefers-color-scheme`); Site styles and scripts;
 Browser style, below; New tab (the background — circuit board, aurora only, your own image, or
 Moving picture with its file row: the clip's name or "No file chosen", Choose file… and Remove —
-plus the dim slider and the board-over switch, both shared by the image and the clip); Idle music,
+plus the dim slider and the board-over switch, both shared by the image and the clip — and under
+them the shortcut chips: a Most visited / My list control over the list editor, Most visited by
+default, with the editor dimmed while the history is in charge); Idle music,
 described above; Privacy
 (clear browsing history, clear downloads list); Spotify,
 the auto-pause switches, the ad-quieting switch, the site list and the health check described above;
@@ -583,12 +590,12 @@ visible, and collapsing it stops a recording row; and About (Electron and Chromi
 browser button). Everything but the site styles — a view onto sitestyles.js's own store — and the
 key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
-(`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `homepage`, `claudeDir`,
-`claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`, `downloadsAskWhere`,
-`newtabBackground`, `bookmarksBar`, `apps` with its `pins`, the ids of the apps on the new
-tab's dock, and `music` with the idle-music preferences); missing keys fall back to defaults, so an
-older stored object still reads. Section titles are set at full text colour, 13.5px and bold, with
-the fading rule under each one, so the pane reads as headings and rows rather than one long list.
+(`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `chipsSource`, `homepage`,
+`claudeDir`, `claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`,
+`downloadsAskWhere`, `newtabBackground`, `bookmarksBar`, `apps` with its `pins`, the ids of the
+apps on the new tab's dock, and `music` with the idle-music preferences); missing keys fall back to
+defaults, so an older stored object still reads. Section titles are set at full text colour,
+13.5px and bold, with the fading rule under each one, so the pane reads as headings and rows rather than one long list.
 
 **Browser style.** Site styles paint web pages across an async boundary; this paints the chrome —
 titlebar, tabs, omnibox, panels — the document the script is already running in, so there is no
@@ -633,8 +640,16 @@ made, so a reload re-reads the old ones and a dark chrome came back light; the c
 theme, settings, background and recents again on every `dom-ready` (theme first, since the accent
 is derived per theme), which covers F5, a crash reload and a script reload alike. Chips show
 favicons from
-`google.com/s2/favicons`, falling back to the bare label. The page cannot read the history store,
-so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become tiles under the
+`google.com/s2/favicons`, falling back to the bare label. The five of them are the sites you use
+most: the chrome folds the history store by host (www stripped, the port kept), scoring visits with
+a two-week half-life so a site you stop opening fades out over a few weeks, skips search-result
+pages, links each chip to that host's most-visited page, names it from the web-app catalogue, the
+defaults or a short map of common hosts — else the site's name capitalised, and "Local :7373" for a
+local server — and pads the row with the old defaults until the history has five hosts. Settings →
+New tab → My list hands the row back to the hand-edited list. Either way the row travels on the one
+channel the page already listens on, the `?chips` param and `window.__applySettings`, re-pushed at
+most once every 5 seconds and only when it reads differently. The page cannot read the history
+store, so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become tiles under the
 chips, the rest feed the capsule's dropdown. Behind the capsule is the circuit
 board — a socket ring around it, 45-degree traces out to vias and peripheral chips.
 
