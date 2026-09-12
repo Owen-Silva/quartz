@@ -1807,6 +1807,84 @@ body {
   text-transform: uppercase;
 }
 
+/* A site's fallback: the same plate, rounded off, so a web pin whose
+   favicon never arrives still reads as a site and not as a program. */
+.dock-glyph.is-web { border-radius: 50%; }
+
+/* A terminal pin. The prompt itself, in the only monospace on this page —
+   no icon exists for "a shell", and a letter would be a lie. */
+.dock-term {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  font-stretch: normal;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* An installed app pinned to open as its web form. The one corner nothing
+   else uses: the light has the top-right, the remove glyph takes that
+   corner in edit mode, and the note owns the foot. */
+.dock-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: var(--proc-note);
+  color: var(--fg-3);
+  font-size: 9px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .02em;
+  line-height: 12px;
+  pointer-events: none;
+}
+
+/* Edit mode's switch, in the badge's corner: the mark and the control that
+   sets it are the same word in the same place. Lit only when it is on, and
+   that is the only thing down here the accent is spent on besides the
+   running light. */
+.dock.is-editing .dock-badge { display: none; }
+
+.dock-webtoggle {
+  position: absolute;
+  top: -2px;                       /* the opposite corner to unpin, and in
+                                      the same 8px gap: never over the name */
+  left: -2px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  background: var(--proc-note);
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 10px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .02em;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color        140ms steps(3, end),
+    border-color 140ms steps(3, end);
+}
+
+.dock.is-editing .dock-webtoggle { display: flex; }
+
+.dock-webtoggle:hover { color: var(--fg); border-color: var(--glass-3); }
+
+.dock-webtoggle.is-on {
+  border-color: var(--ion-line);
+  color: var(--fg-2);
+}
+
+.dock-webtoggle:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
 /* Running. One 6px dot of ion at the icon's top-right, cut out of whatever
    is behind it by a 1px ring of the page's own ground — no halo, no pulse:
    it is a state, not an event. Hidden while the row is being edited, where
@@ -1987,11 +2065,30 @@ body {
   box-shadow: 0 0 0 3px var(--ion-soft);
 }
 
+/* Three groups now, so the list is bounded and scrolls inside the picker
+   rather than growing the capsule past what the board measured. */
 .dock-results {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
+  max-height: 236px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
+/* A group's name, in the caption's voice: no capitals, no rule, no accent.
+   It is a label on a column of names, not a section of the page. */
+.dock-group {
+  padding: 0 6px;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 22px;
+}
+
+.dock-group + .dock-result { margin-top: 0; }
+.dock-result + .dock-group { margin-top: 4px; }
 
 /* Eight rows at 26px. The list is as tall as what it found — an empty
    picker is one row saying so, not eight blank ones. */
@@ -2019,9 +2116,44 @@ body {
   object-fit: contain;
 }
 
+/* A shell has no icon either: the same prompt the tile wears, at 16px. */
+.dock-result-glyph {
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--fg-3);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
 .dock-result-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* What tells two rows from the same company apart, and — where a site has
+   a program behind it — that this build plays it there. Both give way to
+   the name when the row runs out of width. */
+.dock-result-host {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-result-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  color: var(--fg-3);
+  font-size: 10px;
+  letter-spacing: .02em;
+  line-height: 14px;
 }
 
 /* Pointed at: one step of ion light over the panel's ground. A white glass
@@ -2297,5 +2429,6 @@ body {
   .mod-music-btn,
   .dock-edit,
   .dock-tile,
-  .dock-remove { transition: none; }
+  .dock-remove,
+  .dock-webtoggle { transition: none; }
 }

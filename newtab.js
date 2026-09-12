@@ -1970,32 +1970,54 @@ function wireProcs() {
 /* ------------------------------------------------------------------ */
 /* The app dock                                                        */
 /*                                                                     */
-/* The native programs this machine opens, pinned into the capsule      */
-/* above the web chips. Three pushes feed it and one console line       */
-/* leaves it:                                                          */
+/* What this machine opens, pinned into the capsule above the web       */
+/* chips. Three kinds of pin share the one row:                        */
 /*                                                                     */
-/*   window.__applyApps({ pins, installed })  the pinned apps, and the  */
-/*       index the picker filters. Rebuilds the row only when the pins  */
-/*       themselves changed — a repeated push leaves every tile, and    */
-/*       every 32px icon, exactly where it was.                        */
+/*   an installed program   an opaque index id: its own 32px icon       */
+/*   a web app             'web:<slug>': the site's favicon, fetched    */
+/*                          through the same service the chips use      */
+/*   a terminal program     'term:<program>': a monospace >_ plate      */
 /*                                                                     */
-/*   window.__applyAppsRunning({ id: { running, pids } })  arrives once */
-/*       a second while this guest is on screen. It touches the dots    */
-/*       and nothing else: no rebuild, no measurement, no board.        */
+/* An installed pin can also be asked to open its web form instead      */
+/* ({ id, web: true } in the pins list) — it keeps its app icon and     */
+/* wears a small "web" mark; edit mode turns that on and off. The page  */
+/* never decides where a press lands: it names the pin and the chrome   */
+/* routes it.                                                          */
+/*                                                                     */
+/* Three pushes feed it and one console line leaves it:                */
+/*                                                                     */
+/*   window.__applyApps({ pins, installed, webapps, programs })  the    */
+/*       pinned row, plus the three catalogues the picker groups and    */
+/*       the pins resolve their names out of. Each list is only         */
+/*       replaced when the push carried it. Rebuilds the row only when  */
+/*       the pins themselves changed — a repeated push leaves every     */
+/*       tile, and every 32px icon, exactly where it was.               */
+/*                                                                     */
+/*   window.__applyAppsRunning({ id: { running, pids, tab } })  arrives */
+/*       once a second while this guest is on screen. It touches the    */
+/*       dots and nothing else: no rebuild, no measurement, no board.   */
+/*       An open tab (`tab: true`, which is how a web app or a terminal */
+/*       is ever "running") lights the identical dot.                   */
 /*                                                                     */
 /*   window.__applyAppResult({ action, id, ok, reason })  the answer to */
 /*       a line we logged. Only failures show: a 3s note on the tile.   */
 /*                                                                     */
 /* Out: `newtab:app {json}`, read off this guest by the chrome exactly  */
-/* like the process list's end-task line. A press is launch, or focus   */
-/* when the program is already running; edit mode sends unpin; the      */
-/* picker sends pin. Pin and unpin also land locally at once — the      */
-/* chrome's next push is authoritative, but the row must answer the     */
-/* press whether or not the browser it is inside knows about apps yet.  */
+/* like the process list's end-task line. A press on a program is       */
+/* launch, or focus when it is already running; a web pin is open-web   */
+/* and a terminal pin open-term; edit mode sends unpin, and its "web"   */
+/* switch sends pin-web; the picker sends pin. Pin and unpin also land  */
+/* locally at once — the chrome's next push is authoritative, but the   */
+/* row must answer the press whether or not the browser it is inside    */
+/* knows about apps yet. pin-web is the one exception: nothing flips    */
+/* here until the chrome says it did.                                   */
 /* ------------------------------------------------------------------ */
 
-const DOCK_RESULTS = 8;          // the picker never shows more than this
+const DOCK_RESULTS = 8;          // the picker never shows more per group
 const DOCK_NOTE_MS = 3000;       // and a failure note lives this long
+
+const DOCK_WEB_PREFIX = 'web:';    // 'web:discord'   — a site pinned as an app
+const DOCK_TERM_PREFIX = 'term:';  // 'term:powershell' — a pty in a tab
 
 const dockSection = document.getElementById('dock');
 const dockRow = document.getElementById('dock-row');
@@ -2006,7 +2028,18 @@ const dockResults = document.getElementById('dock-results');
 
 let dockPins = [];               // the pinned apps, in the chrome's order
 let dockInstalled = [];          // the index, sorted by name, names at least
+let dockWebapps = [];            // the web-app catalogue, sorted by name
+let dockPrograms = [];           // the terminal programs that are available
 const dockCells = new Map();     // id -> { cell, tile, dot, note, running, pids }
+
+/* The three catalogues, by id, so resolving a pin is a lookup and not a
+   scan of thirty rows on every push. dockWebByDesktop is the other join:
+   installed id -> the web app that is the same thing, which is what puts
+   the "web" switch on a tile in edit mode. */
+const dockInstalledById = new Map();
+const dockWebById = new Map();
+const dockWebByDesktop = new Map();
+const dockProgById = new Map();
 
 let dockKey = null;              // identity of the row that is built
 let dockHeight = -1;             // its last measured height, for the board
@@ -2044,17 +2077,75 @@ function dockPids(value) {
   return out;
 }
 
+/** 'web:discord' / 'term:powershell', or '' for an installed-app id. */
+function dockPrefix(id) {
+  if (id.indexOf(DOCK_WEB_PREFIX) === 0) return DOCK_WEB_PREFIX;
+  if (id.indexOf(DOCK_TERM_PREFIX) === 0) return DOCK_TERM_PREFIX;
+  return '';
+}
+
+/**
+ * One pin. The chrome may name it three ways and all three arrive here:
+ *
+ *   'a1b2c3'                    a bare id — everything else is looked up
+ *   { id: 'a1b2c3', web: true } an installed app, opened as its web form
+ *   { id, name, iconDataUrl, running, pids, tab }  the whole row
+ *
+ * `kind` is what the tile is made of: 'app', 'web', 'term', or 'missing'
+ * when the id belongs to none of the three catalogues and the push did not
+ * carry a name either — that one renders exactly as an app whose index
+ * entry has gone, which is what it is.
+ */
 function normalizePin(entry) {
-  const e = entry || {};
+  const e = (typeof entry === 'string') ? { id: entry } : (entry || {});
   const id = dockText(e.id);
   if (!id) return null;
-  return {
+
+  const given = dockText(e.name) || dockText(e.exe);
+  const pin = {
     id: id,
-    name: dockText(e.name) || dockText(e.exe) || id,
+    kind: 'app',
+    name: given || id,
     icon: dockIcon(e.iconDataUrl),
+    host: dockText(e.host),
+    web: e.web === true,
+    webAvailable: false,
     running: e.running === true,
+    tab: e.tab === true,
     pids: dockPids(e.pids)
   };
+
+  const prefix = dockPrefix(id);
+
+  if (prefix === DOCK_WEB_PREFIX) {
+    const site = dockWebById.get(id);
+    // A web pin is the web form by definition; its icon is a favicon, so
+    // an iconDataUrl that came with it is not what this tile wears.
+    pin.kind = (site || given) ? 'web' : 'missing';
+    pin.web = true;
+    pin.icon = null;
+    if (site) { pin.name = site.name; pin.host = site.host; }
+    return pin;
+  }
+
+  if (prefix === DOCK_TERM_PREFIX) {
+    const program = dockProgById.get(id);
+    pin.kind = (program || given) ? 'term' : 'missing';
+    pin.icon = null;
+    pin.host = '';
+    if (program) pin.name = program.name;
+    return pin;
+  }
+
+  const app = dockInstalledById.get(id);
+  if (app) {
+    if (!given) pin.name = app.name;
+    if (!pin.icon) pin.icon = app.icon;
+  } else if (!given) {
+    pin.kind = 'missing';
+  }
+  pin.webAvailable = dockWebByDesktop.has(id);
+  return pin;
 }
 
 function normalizePins(list) {
@@ -2089,10 +2180,92 @@ function normalizeInstalled(list) {
   return out;
 }
 
+/**
+ * The web-app catalogue. `desktopId` is the join the chrome worked out —
+ * the installed app this site is the web form of, or null — and it is what
+ * decides whether a tile gets the "web" switch. Sorted by name, like the
+ * installed index, so the picker's second group reads the same way as its
+ * first.
+ */
+function normalizeWebapps(list) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(list) ? list : []) {
+    const e = entry || {};
+    const id = dockText(e.id);
+    const name = dockText(e.name);
+    if (!id || !name || seen.has(id)) continue;
+    if (dockPrefix(id) !== DOCK_WEB_PREFIX) continue;
+    seen.add(id);
+    out.push({
+      id: id,
+      name: name,
+      host: dockText(e.host),
+      drm: e.drm === true,
+      desktopId: dockText(e.desktopId) || null
+    });
+  }
+  out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  return out;
+}
+
+/**
+ * The terminal programs. An unavailable one is dropped here rather than
+ * filtered at every use: a program this machine does not have is not a
+ * thing the picker can offer.
+ */
+function normalizePrograms(list) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(list) ? list : []) {
+    const e = entry || {};
+    const id = dockText(e.id);
+    if (!id || seen.has(id) || e.available === false) continue;
+    if (dockPrefix(id) !== DOCK_TERM_PREFIX) continue;
+    seen.add(id);
+    out.push({ id: id, name: dockText(e.name) || id.slice(DOCK_TERM_PREFIX.length) });
+  }
+  return out;                     // the chrome's order: its table is curated
+}
+
+/* The three catalogues land through these, so the id maps a pin resolves
+   against can never drift from the lists the picker shows. */
+
+function setDockInstalled(list) {
+  dockInstalled = normalizeInstalled(list);
+  dockInstalledById.clear();
+  for (const app of dockInstalled) dockInstalledById.set(app.id, app);
+}
+
+function setDockWebapps(list) {
+  dockWebapps = normalizeWebapps(list);
+  dockWebById.clear();
+  dockWebByDesktop.clear();
+  for (const site of dockWebapps) {
+    dockWebById.set(site.id, site);
+    if (site.desktopId) dockWebByDesktop.set(site.desktopId, site);
+  }
+}
+
+function setDockPrograms(list) {
+  dockPrograms = normalizePrograms(list);
+  dockProgById.clear();
+  for (const program of dockPrograms) dockProgById.set(program.id, program);
+}
+
+/* webapps.js is loaded by this page too, so a web pin has a name and a
+   host to draw from the very first paint — before the chrome's first push,
+   and whether or not that push carries the catalogue. The pushed list is
+   still the authority: it is the only one that knows desktopId. */
+if (Array.isArray(window.WEBAPPS)) setDockWebapps(window.WEBAPPS);
+
 /** Identity of the built row: what would make a tile different. */
 function dockPinsKey(list) {
   return list.map(function (pin) {
-    return pin.id + '\t' + pin.name + '\t' + (pin.icon ? '1' : '0');
+    return [
+      pin.id, pin.kind, pin.name, pin.host,
+      pin.icon ? '1' : '0', pin.web ? '1' : '0', pin.webAvailable ? '1' : '0'
+    ].join('\t');
   }).join('\n');
 }
 
@@ -2101,13 +2274,42 @@ function dockSend(message) {
   console.log('newtab:app ' + JSON.stringify(message));
 }
 
-/** No icon in the index: a neutral plate with the app's first letter. */
-function dockGlyphNode(name) {
+/** No icon in the index: a neutral plate with the app's first letter. A
+    site's fallback is the same letter on a disc, so a web pin still reads
+    as a site when its favicon does not arrive. */
+function dockGlyphNode(name, round) {
   const glyph = document.createElement('span');
-  glyph.className = 'dock-glyph';
+  glyph.className = round ? 'dock-glyph is-web' : 'dock-glyph';
   glyph.setAttribute('aria-hidden', 'true');
   glyph.textContent = (dockText(name) || '?').charAt(0);
   return glyph;
+}
+
+/** A terminal pin: the prompt itself, in the only monospace on this page. */
+function dockTermNode() {
+  const glyph = document.createElement('span');
+  glyph.className = 'dock-glyph dock-term';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.textContent = '>_';
+  return glyph;
+}
+
+/**
+ * A web pin's icon: the same favicon service, and the same 32px request,
+ * the chips row above already uses — one service for the whole page. The
+ * chips drop a missing icon and keep their padding; a tile cannot, so this
+ * one falls back to the lettered disc instead of leaving a hole.
+ */
+function dockFaviconNode(pin) {
+  if (!pin.host) return dockGlyphNode(pin.name, true);
+
+  const img = faviconImg(pin.host, 'dock-icon dock-icon-web');
+  img.width = 32;
+  img.height = 32;
+  img.onerror = function () {
+    if (img.parentNode) img.parentNode.replaceChild(dockGlyphNode(pin.name, true), img);
+  };
+  return img;
 }
 
 /**
@@ -2115,6 +2317,8 @@ function dockGlyphNode(name) {
  * rather than left as a broken image: this row is on screen full-time.
  */
 function dockIconNode(pin) {
+  if (pin.kind === 'web') return dockFaviconNode(pin);
+  if (pin.kind === 'term') return dockTermNode();
   if (!pin.icon) return dockGlyphNode(pin.name);
 
   const img = document.createElement('img');
@@ -2130,16 +2334,27 @@ function dockIconNode(pin) {
   return img;
 }
 
+/**
+ * A tile's title. The state words are the whole difference between the
+ * three kinds: a program runs, a tab is open, and the dot is the same
+ * light for both.
+ */
+function dockTileTitle(name, running, tab) {
+  if (!running) return name;
+  return name + (tab ? ' — open' : ' — running');
+}
+
 /** One pinned app: the tile, the remove glyph over it, and its note. */
 function buildDockCell(pin) {
   const cell = document.createElement('div');
   cell.className = 'dock-cell';
   cell.dataset.id = pin.id;
+  cell.dataset.mark = pin.kind;
 
   const tile = document.createElement('button');
   tile.type = 'button';
-  tile.className = 'dock-tile';
-  tile.title = pin.name;
+  tile.className = 'dock-tile dock-tile-' + pin.kind;
+  tile.title = dockTileTitle(pin.name, pin.running, pin.tab);
 
   const ico = document.createElement('span');
   ico.className = 'dock-ico';
@@ -2157,6 +2372,17 @@ function buildDockCell(pin) {
   tile.appendChild(ico);
   tile.appendChild(name);
 
+  // An installed app currently opened as its web form says so in the one
+  // corner nothing else uses: the dot has the top-right, the remove glyph
+  // takes that corner in edit mode, and the note owns the foot.
+  if (pin.kind === 'app' && pin.web) {
+    const badge = document.createElement('span');
+    badge.className = 'dock-badge';
+    badge.title = pin.name + ' opens in a tab';
+    badge.textContent = 'web';
+    tile.appendChild(badge);
+  }
+
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'dock-remove';
@@ -2171,13 +2397,32 @@ function buildDockCell(pin) {
   cell.appendChild(remove);
   cell.appendChild(note);
 
+  // The switch, for an app that has a web form: only ever visible in edit
+  // mode, and it does not flip itself. The chrome owns which way this pin
+  // opens, so the tile changes when the next __applyApps says it did.
+  let toggle = null;
+  if (pin.kind === 'app' && pin.webAvailable) {
+    toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'dock-webtoggle' + (pin.web ? ' is-on' : '');
+    toggle.textContent = 'web';
+    toggle.setAttribute('aria-pressed', pin.web ? 'true' : 'false');
+    toggle.title = (pin.web ? 'Open ' + pin.name + ' as a program' : 'Open ' + pin.name + ' in a tab');
+    toggle.setAttribute('aria-label', toggle.title);
+    cell.appendChild(toggle);
+  }
+
   const rec = {
-    cell: cell, tile: tile, dot: dot, note: note,
-    name: pin.name, running: pin.running, pids: pin.pids.slice(), noteTimer: 0
+    cell: cell, tile: tile, dot: dot, note: note, toggle: toggle,
+    kind: pin.kind, web: pin.web, name: pin.name,
+    running: pin.running, tab: pin.tab, pids: pin.pids.slice(), noteTimer: 0
   };
 
   tile.addEventListener('click', function () { pressDockTile(pin.id); });
   remove.addEventListener('click', function () { unpinApp(pin.id); });
+  if (toggle) {
+    toggle.addEventListener('click', function () { toggleDockWeb(pin.id); });
+  }
 
   dockCells.set(pin.id, rec);
   return cell;
@@ -2246,9 +2491,10 @@ function syncDockRunning() {
     const rec = dockCells.get(pin.id);
     if (!rec) continue;
     rec.running = pin.running;
+    rec.tab = pin.tab;
     rec.pids = pin.pids.slice();
     rec.tile.classList.toggle('is-running', pin.running);
-    rec.tile.title = pin.running ? pin.name + ' — running' : pin.name;
+    rec.tile.title = dockTileTitle(pin.name, pin.running, pin.tab);
   }
 }
 
@@ -2295,8 +2541,27 @@ function pressDockTile(id) {
   const rec = dockCells.get(id);
   if (!rec) return;
   if (dockEditing) return;         // the row is being arranged, not used
+
+  // A site and a terminal are one line each: the chrome decides whether
+  // that means a new tab or the one already open.
+  if (rec.kind === 'web') { dockSend({ action: 'open-web', id: id }); return; }
+  if (rec.kind === 'term') { dockSend({ action: 'open-term', id: id }); return; }
+
+  // A program — including one pinned to open as its web form. That routing
+  // is the chrome's: the press it gets is the press it always got.
   if (rec.running && rec.pids.length) dockSend({ action: 'focus', id: id, pid: rec.pids[0] });
   else dockSend({ action: 'launch', id: id });
+}
+
+/**
+ * Edit mode's "web" switch. It asks, and nothing more: the tile is only
+ * ever redrawn by the push that comes back, so the row can never disagree
+ * with where a press would actually land.
+ */
+function toggleDockWeb(id) {
+  const rec = dockCells.get(id);
+  if (!rec || rec.kind !== 'app') return;
+  dockSend({ action: 'pin-web', id: id, web: !rec.web });
 }
 
 function unpinApp(id) {
@@ -2308,9 +2573,9 @@ function unpinApp(id) {
 function pinApp(app) {
   if (!app || dockCells.has(app.id)) return;
   dockSend({ action: 'pin', id: app.id });
-  setDockPins(dockPins.concat([{
-    id: app.id, name: app.name, icon: app.icon, running: false, pids: []
-  }]));
+  // The id alone: normalizePin resolves the tile out of the same catalogue
+  // the row was picked from, whichever of the three that was.
+  setDockPins(dockPins.concat([normalizePin(app.id)]));
   // The picker stays up with the field cleared: pinning three apps is three
   // presses, not three trips through edit mode.
   if (dockSearch) dockSearch.value = '';
@@ -2334,21 +2599,114 @@ function setDockEditing(on) {
 
 /* --- the picker --------------------------------------------------- */
 
-function dockMatchApps(query) {
-  const q = dockText(query).toLowerCase();
+/* Three groups, always in this order: what is on the machine, then what is
+   on the web, then the shells. One field filters all three. */
+const DOCK_GROUPS = [
+  { kind: 'app', label: 'Installed' },
+  { kind: 'web', label: 'Web apps' },
+  { kind: 'term', label: 'Terminals' }
+];
+
+/** Where the typed text sits in a row: 0 for a start, -1 for no match. A
+    site is findable by its host too — "gmail" and "mail.google" both. */
+function dockMatchAt(entry, q) {
+  const name = entry.name.toLowerCase().indexOf(q);
+  if (name === 0) return 0;
+  const host = entry.host ? entry.host.toLowerCase().indexOf(q) : -1;
+  if (host === 0) return 0;
+  if (name > 0) return name;
+  if (host > 0) return host;
+  return -1;
+}
+
+function dockGroupMatches(list, kind, q) {
   const starts = [];
   const inside = [];
 
-  for (const app of dockInstalled) {
-    if (dockCells.has(app.id)) continue;        // already on the row
-    if (!q) { starts.push(app); continue; }
-    const at = app.name.toLowerCase().indexOf(q);
-    if (at === 0) starts.push(app);
-    else if (at > 0) inside.push(app);
+  for (const item of list) {
+    if (dockCells.has(item.id)) continue;       // already on the row
+    const entry = {
+      kind: kind,
+      id: item.id,
+      name: item.name,
+      icon: item.icon || null,
+      host: item.host || '',
+      drm: item.drm === true,
+      desktopId: item.desktopId || null
+    };
+    if (!q) { starts.push(entry); continue; }
+    const at = dockMatchAt(entry, q);
+    if (at === 0) starts.push(entry);
+    else if (at > 0) inside.push(entry);
   }
 
   // A name that starts with what was typed is what was meant.
   return starts.concat(inside).slice(0, DOCK_RESULTS);
+}
+
+/** Every group's matches, flattened in group order. The headings are drawn
+    from the `kind` changing, so this list is exactly the options: nothing
+    the arrow keys can land on is a label. */
+function dockMatchApps(query) {
+  const q = dockText(query).toLowerCase();
+  return dockGroupMatches(dockInstalled, 'app', q)
+    .concat(dockGroupMatches(dockWebapps, 'web', q))
+    .concat(dockGroupMatches(dockPrograms, 'term', q));
+}
+
+/** A picker row's leading 16px: the app's icon, a favicon, or the prompt. */
+function dockResultIcon(app) {
+  if (app.kind === 'term') {
+    const glyph = document.createElement('span');
+    glyph.className = 'dock-result-glyph';
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.textContent = '>_';
+    return glyph;
+  }
+
+  if (app.kind === 'web') {
+    return app.host ? faviconImg(app.host, 'dock-result-icon') : null;
+  }
+
+  if (!app.icon) return null;
+
+  const icon = document.createElement('img');
+  icon.className = 'dock-result-icon';
+  icon.src = app.icon;
+  icon.width = 16;
+  icon.height = 16;
+  icon.alt = '';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.onerror = function () {
+    if (icon.parentNode) icon.parentNode.removeChild(icon);
+  };
+  return icon;
+}
+
+/** The heading over a group. Quiet: the caption voice, not a new one. */
+function dockGroupRow(label) {
+  const row = document.createElement('li');
+  row.className = 'dock-group';
+  row.setAttribute('role', 'presentation');
+  row.textContent = label;
+  return row;
+}
+
+/**
+ * Keep the arrow keys' row in view without scrolling the page under it.
+ * Measured against the list's own box rather than offsetTop: neither the
+ * list nor its rows establish a containing block, so offsetTop is counted
+ * from some panel further up and would scroll the list to the wrong place.
+ */
+function scrollDockActiveIntoView() {
+  if (!dockResults || typeof dockResults.getBoundingClientRect !== 'function') return;
+  const row = dockResults.querySelector('.dock-result.is-active');
+  if (!row) return;
+
+  const list = dockResults.getBoundingClientRect();
+  const box = row.getBoundingClientRect();
+  if (box.top < list.top) dockResults.scrollTop -= (list.top - box.top);
+  else if (box.bottom > list.bottom) dockResults.scrollTop += (box.bottom - list.bottom);
 }
 
 function renderDockResults() {
@@ -2362,40 +2720,59 @@ function renderDockResults() {
   if (!dockMatches.length) {
     const empty = document.createElement('li');
     empty.className = 'dock-result is-empty';
-    empty.textContent = dockInstalled.length ? 'No matches' : 'No apps indexed yet';
+    const anything = dockInstalled.length || dockWebapps.length || dockPrograms.length;
+    empty.textContent = anything ? 'No matches' : 'No apps indexed yet';
     frag.appendChild(empty);
     dockResults.replaceChildren(frag);
     if (dockSearch) dockSearch.removeAttribute('aria-activedescendant');
     return;
   }
 
+  let group = null;
+
   dockMatches.forEach(function (app, i) {
+    // One heading each time the kind changes: the list is already in group
+    // order, so a group with nothing in it never announces itself.
+    if (app.kind !== group) {
+      group = app.kind;
+      const label = DOCK_GROUPS.find(function (g) { return g.kind === group; });
+      frag.appendChild(dockGroupRow(label ? label.label : group));
+    }
+
     const row = document.createElement('li');
-    row.className = 'dock-result' + (i === dockActive ? ' is-active' : '');
+    row.className = 'dock-result dock-result-' + app.kind + (i === dockActive ? ' is-active' : '');
     row.id = 'dock-result-' + i;
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', i === dockActive ? 'true' : 'false');
     row.dataset.id = app.id;
-    row.title = app.name;
+    row.dataset.mark = app.kind;
+    row.title = app.host ? app.name + ' — ' + app.host : app.name;
 
-    if (app.icon) {
-      const icon = document.createElement('img');
-      icon.className = 'dock-result-icon';
-      icon.src = app.icon;
-      icon.width = 16;
-      icon.height = 16;
-      icon.alt = '';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.onerror = function () {
-        if (icon.parentNode) icon.parentNode.removeChild(icon);
-      };
-      row.appendChild(icon);
-    }
+    const icon = dockResultIcon(app);
+    if (icon) row.appendChild(icon);
 
     const name = document.createElement('span');
     name.className = 'dock-result-name';
     name.textContent = app.name;
     row.appendChild(name);
+
+    // The host is what tells two Google rows apart, so it travels with the
+    // name rather than only living in the title.
+    if (app.kind === 'web' && app.host) {
+      const host = document.createElement('span');
+      host.className = 'dock-result-host';
+      host.textContent = app.host;
+      row.appendChild(host);
+    }
+
+    // This build has no Widevine, so a protected site plays through the
+    // program instead — worth saying here, where the pin is chosen.
+    if (app.kind === 'web' && app.desktopId) {
+      const hint = document.createElement('span');
+      hint.className = 'dock-result-hint';
+      hint.textContent = 'desktop';
+      row.appendChild(hint);
+    }
 
     // mousedown, not click: the field must not lose focus before the pin.
     row.addEventListener('mousedown', function (event) {
@@ -2408,6 +2785,7 @@ function renderDockResults() {
 
   dockResults.replaceChildren(frag);
   if (dockSearch) dockSearch.setAttribute('aria-activedescendant', 'dock-result-' + dockActive);
+  scrollDockActiveIntoView();
 }
 
 function moveDockActive(delta) {
@@ -2475,18 +2853,27 @@ function showDockNote(rec, text) {
 /* --- the three pushes --------------------------------------------- */
 
 /**
- * The pinned apps and the index behind the picker. `installed` is only
- * replaced when one was sent: a push that carries pins alone leaves the
- * picker with the index it already had.
+ * The pinned row and the three catalogues behind the picker. Each list is
+ * only replaced when one was sent: a push that carries pins alone leaves
+ * the picker with the catalogues it already had. The catalogues land first,
+ * because a pin resolves its name, its host and its "web" switch out of
+ * them.
  */
 window.__applyApps = function (data) {
   const d = data || {};
-  if (Array.isArray(d.installed)) dockInstalled = normalizeInstalled(d.installed);
+  if (Array.isArray(d.installed)) setDockInstalled(d.installed);
+  if (Array.isArray(d.webapps)) setDockWebapps(d.webapps);
+  if (Array.isArray(d.programs)) setDockPrograms(d.programs);
   if (Array.isArray(d.pins)) setDockPins(normalizePins(d.pins));
   else renderDock();
   // A count, not the whole row: this is an executeJavaScript return value,
   // and __dock() is a forced layout nobody asked for. Tests call that.
-  return { pins: dockPins.length, installed: dockInstalled.length };
+  return {
+    pins: dockPins.length,
+    installed: dockInstalled.length,
+    webapps: dockWebapps.length,
+    programs: dockPrograms.length
+  };
 };
 
 /**
@@ -2501,17 +2888,19 @@ window.__applyAppsRunning = function (map) {
     const key = dockText(id);
     const entry = m[id] || {};
     const running = entry.running === true;
+    const tab = entry.tab === true;
     const pids = dockPids(entry.pids);
 
     const pin = dockPins.find(function (p) { return p.id === key; });
-    if (pin) { pin.running = running; pin.pids = pids; }
+    if (pin) { pin.running = running; pin.tab = tab; pin.pids = pids; }
 
     const rec = dockCells.get(key);
     if (!rec) continue;
     rec.running = running;
+    rec.tab = tab;
     rec.pids = pids;
     rec.tile.classList.toggle('is-running', running);
-    rec.tile.title = running ? rec.name + ' — running' : rec.name;
+    rec.tile.title = dockTileTitle(rec.name, running, tab);
     touched++;
   }
 
@@ -2545,6 +2934,8 @@ window.__dock = function () {
     const tile = cell.querySelector('.dock-tile');
     const label = cell.querySelector('.dock-name');
     const dot = cell.querySelector('.dock-dot');
+    const badge = cell.querySelector('.dock-badge');
+    const toggle = cell.querySelector('.dock-webtoggle');
     const box = cell.getBoundingClientRect();
     if (!cell.hidden) tops.add(Math.round(box.top));
     return {
@@ -2557,7 +2948,17 @@ window.__dock = function () {
       running: !!(tile && tile.classList.contains('is-running')),
       dot: !!(dot && getComputedStyle(dot).display !== 'none'),
       icon: !!cell.querySelector('.dock-icon'),
+      favicon: !!cell.querySelector('.dock-icon-web'),
       glyph: !!cell.querySelector('.dock-glyph'),
+      term: !!cell.querySelector('.dock-term'),
+      badge: !!(badge && getComputedStyle(badge).display !== 'none'),
+      toggle: toggle
+        ? {
+            on: toggle.classList.contains('is-on'),
+            pressed: toggle.getAttribute('aria-pressed') === 'true',
+            shown: getComputedStyle(toggle).display !== 'none'
+          }
+        : null,
       note: cell.classList.contains('has-note')
         ? (cell.querySelector('.dock-note') || {}).textContent : null,
       w: box.width, h: box.height, top: box.top, left: box.left
@@ -2568,8 +2969,15 @@ window.__dock = function () {
     editing: dockEditing,
     pickerOpen: dockPickerOpen,
     installed: dockInstalled.length,
+    webapps: dockWebapps.length,
+    programs: dockPrograms.length,
     pins: dockPins.map(function (pin) {
-      return { id: pin.id, name: pin.name, running: pin.running, pids: pin.pids.slice(), icon: !!pin.icon };
+      return {
+        id: pin.id, kind: pin.kind, name: pin.name, host: pin.host,
+        web: pin.web, webAvailable: pin.webAvailable,
+        running: pin.running, tab: pin.tab,
+        pids: pin.pids.slice(), icon: !!pin.icon
+      };
     }),
     rows: tops.size,
     capsuleHeight: cap ? cap.height : 0,
@@ -2577,8 +2985,14 @@ window.__dock = function () {
     rowHeight: row ? row.height : 0,
     active: dockActive,
     results: dockMatches.map(function (app) { return app.name; }),
+    resultKinds: dockMatches.map(function (app) { return app.kind; }),
     resultRows: Array.prototype.map.call(dockResults ? dockResults.children : [], function (li) {
-      return { name: li.textContent, active: li.classList.contains('is-active') };
+      return {
+        name: li.textContent,
+        group: li.classList.contains('dock-group'),
+        kind: li.dataset.mark || null,
+        active: li.classList.contains('is-active')
+      };
     }),
     tiles: tiles
   };

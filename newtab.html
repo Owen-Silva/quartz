@@ -278,11 +278,14 @@
         </section>
       </div>
 
-      <!-- The app dock: the native programs this machine opens, pinned into
-           the capsule above the web chips. The chrome pushes them in with
-           window.__applyApps({ pins, installed }) and keeps the running
-           lights current with window.__applyAppsRunning(map) — dots only,
-           never a rebuild, because that arrives once a second.
+      <!-- The app dock: what this machine opens — installed programs, web
+           apps ('web:' pins, drawn with the site's favicon) and terminal
+           programs ('term:' pins, a monospace >_ plate) — pinned into the
+           capsule above the web chips. The chrome pushes them in with
+           window.__applyApps({ pins, installed, webapps, programs }) and
+           keeps the running lights current with
+           window.__applyAppsRunning(map) — dots only, never a rebuild,
+           because that arrives once a second.
 
            A press is a console line (`newtab:app {json}`) exactly like the
            process list's End task: there is no preload on this page, so a
@@ -301,17 +304,18 @@
 
         <div id="dock-row" class="dock-row"></div>
 
-        <!-- The picker: a field over the installed index and the eight best
-             names for what is typed. Near-opaque like the process list, for
-             the same reason — a list of names has to read over whatever the
-             user chose as a background. -->
+        <!-- The picker: one field over three groups — the installed index,
+             the web apps, and the terminal programs this machine has — and
+             the eight best names in each for what is typed. Near-opaque
+             like the process list, for the same reason: a list of names has
+             to read over whatever the user chose as a background. -->
         <div id="dock-picker" class="dock-picker" hidden>
           <input id="dock-search" class="dock-search" type="text"
-                 placeholder="Search installed apps" autocomplete="off"
-                 spellcheck="false" aria-label="Search installed apps"
+                 placeholder="Search apps, sites and shells" autocomplete="off"
+                 spellcheck="false" aria-label="Search apps, sites and shells"
                  aria-controls="dock-results" aria-expanded="true"
                  role="combobox" aria-autocomplete="list">
-          <ul id="dock-results" class="dock-results" role="listbox" aria-label="Installed apps"></ul>
+          <ul id="dock-results" class="dock-results" role="listbox" aria-label="Apps to pin"></ul>
         </div>
       </section>
     </section>
@@ -325,6 +329,10 @@
 </main>
 
 <script src="newtab-bg.js"></script>
+<!-- The web-app catalogue, so a 'web:' pin has a name and a host to draw
+     from the first paint. The chrome's push is still the authority — it is
+     the only side that knows which of these apps is also installed. -->
+<script src="webapps.js"></script>
 <script src="newtab.js"></script>
 </body>
 </html>
