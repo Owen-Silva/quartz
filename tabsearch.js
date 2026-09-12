@@ -642,6 +642,7 @@
       // openAppTab() raises the tab that exists and opens one when it does not,
       // so both spellings of this row run the same call.
       webOpen: open,
+      webId: entry.id,
       webName: name.toLowerCase(),
       run: function () { callGlobal(function () { return openAppTab; }, entry.id); }
     };
@@ -670,6 +671,29 @@
     return hits.slice(0, MAX_APPS);
   }
 
+  /**
+   * The catalogue rows to show BESIDE a list of open-tab rows (the plain-query
+   * mode, which lists the tabs themselves). An app whose tab is already on that
+   * list contributes nothing: its "Switch to X" row and that tab's own row do
+   * the same thing, and under a plain query the tab row is what was asked for.
+   * A tab the MAX_OPEN cap left out keeps its switch row — then it is the only
+   * way to reach it.
+   * @param {string} query
+   * @param {Array} openRows the tab rows already on screen (collect().open)
+   */
+  function webAppCommandsBesideTabs(query, openRows) {
+    var listed = Object.create(null);
+    var rows = Array.isArray(openRows) ? openRows : [];
+    for (var k = 0; k < rows.length; k++) {
+      if (rows[k] && rows[k].tab && rows[k].tab.app && rows[k].tab.app.id) {
+        listed[rows[k].tab.app.id] = true;
+      }
+    }
+    return webAppCommands(query).filter(function (cmd) {
+      return !(cmd.webOpen && listed[cmd.webId]);
+    });
+  }
+
   /** app.js's pty table, as dock ids: [{ id:'term:pwsh', name, available }]. */
   function programRows() {
     var fn = globalRef(function () { return ptyProgramsPayload; });
@@ -679,9 +703,26 @@
     return Array.isArray(list) ? list : [];
   }
 
-  /** Ask app.js for the program table once, on the first open. */
+  /**
+   * Ask app.js for the program table once, on the first open — and redraw when
+   * the answer lands, exactly as ensureApps() does. main resolves every binary
+   * with where.exe the first time, so the first open of the palette would
+   * otherwise show no terminal rows at all.
+   */
+  var programsAsked = false;
   function ensurePrograms() {
-    callGlobal(function () { return ensurePtyPrograms; });
+    if (programsAsked) return;
+    var fn = globalRef(function () { return ensurePtyPrograms; });
+    if (typeof fn !== 'function') return;   // an older app.js: no rows, no retry
+    programsAsked = true;
+    var pending = null;
+    try { pending = fn(); } catch (err) { return; }
+    if (!pending || typeof pending.then !== 'function') return;
+    try {
+      pending.then(function () {
+        if (open_) render(hi < 0 ? 0 : hi);
+      }, function () { /* no table: no rows */ });
+    } catch (err) { /* not a real promise */ }
   }
 
   function termCommand(row) {
@@ -690,7 +731,11 @@
       glyph: GLYPH.claude,
       label: 'New ' + row.name + ' tab',
       hint: 'A terminal in this window',
-      run: function () { callGlobal(function () { return openTerminalTab; }, row.id); }
+      // This row says NEW: a second PowerShell is a thing to be able to ask
+      // for. The dock's press is the one that raises the chamber already open.
+      run: function () {
+        callGlobal(function () { return openTerminalTab; }, row.id, { fresh: true });
+      }
     };
   }
 
@@ -1427,7 +1472,7 @@
     // plain query the tabs are what was asked for.
     if (tokenize(value).length) {
       var apps = appCommands(value).slice(0, MAX_APPS_TABS);
-      var web = webAppCommands(value).slice(0, MAX_APPS_TABS);
+      var web = webAppCommandsBesideTabs(value, data.open).slice(0, MAX_APPS_TABS);
       if (apps.length || web.length) {
         listEl.appendChild(captionEl('Apps'));
         // The installed programs first, then the sites presented as apps: an
@@ -1732,8 +1777,11 @@
       MAX_APPS_TABS: MAX_APPS_TABS,
       // web apps + terminals
       webAppCommands: webAppCommands,
+      webAppCommandsBesideTabs: webAppCommandsBesideTabs,
       webAppCommand: webAppCommand,
       webAppRows: webAppRows,
+      openAppTabFor: openAppTabFor,
+      ensurePrograms: ensurePrograms,
       termCommands: termCommands,
       termCommand: termCommand,
       programRows: programRows

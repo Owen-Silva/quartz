@@ -451,6 +451,7 @@ let mediaAnswer = null;
 let mediaSeen = { hash: '', artHash: '', art: '' };
 let mediaStatus = 'none';
 let mediaPollTimer = null;
+let mediaSoonTimer = null;   // the one-shot read after a transport command
 let mediaInFlight = false;
 
 /** The music group, or null when settings.js predates it. */
@@ -663,6 +664,12 @@ function syncMediaPolling() {
   } else {
     window.clearInterval(mediaPollTimer);
     mediaPollTimer = null;
+    // A transport command's follow-up read must not outlive the gate that let
+    // it be asked for: the tab it came from may have just been closed.
+    if (mediaSoonTimer != null) {
+      window.clearTimeout(mediaSoonTimer);
+      mediaSoonTimer = null;
+    }
   }
 }
 
@@ -750,7 +757,16 @@ function handleMediaLine(tab, viewEl, text) {
 
   let pending = null;
   try { pending = api.control(req.cmd); } catch (err) { return false; }
-  const soon = () => window.setTimeout(pollMediaOnce, 250);
+  // One pending follow-up read at a time, and none once the gate has closed:
+  // mashing Next must not queue five of them, and a tab closing takes the last
+  // one with it (syncMediaPolling clears this alongside the interval).
+  const soon = () => {
+    if (mediaSoonTimer != null) window.clearTimeout(mediaSoonTimer);
+    mediaSoonTimer = window.setTimeout(() => {
+      mediaSoonTimer = null;
+      pollMediaOnce();
+    }, 250);
+  };
   if (pending && typeof pending.then === 'function') pending.then(soon, soon);
   else soon();
   return true;
@@ -2053,7 +2069,11 @@ function syncAppNote(tab) {
   if (!entry || !entry.drm || tab.noteDismissed) { clearAppNote(tab); return; }
   const wanted = tab.app.id;
   ensureAppsIndex().then(() => {
-    // Everything may have moved while the index was in flight.
+    // Everything may have moved while the index was in flight — including the
+    // tab being closed. closeTab() leaves tab.app alone, so the strip is what
+    // says whether this tab is still one: without this check a note bar for a
+    // tab that no longer exists is appended to #views and stays there.
+    if (tabs.indexOf(tab) === -1) return;
     if (!isAppTab(tab) || tab.app.id !== wanted || tab.noteDismissed) return;
     const desktop = entry.exe ? installedAppForExe(entry.exe) : null;
     showAppNote(tab, drmNoteText(), desktop ? desktop.id : '');
@@ -2187,9 +2207,20 @@ function tabForProgram(program) {
  * a toast and opens nothing rather than a tab that dies on spawn.
  * @returns {Promise<Object|null>} the tab, or null when nothing opened.
  */
-function openTerminalTab(program) {
+function openTerminalTab(program, options) {
   const name = terminalProgramName(program);
   if (!name) return Promise.resolve(null);
+  // A press on the dock tile means "show me the one that is already open",
+  // exactly as it does for a catalogue app: the tile is drawn as open, and the
+  // tooltip says so. The palette's row is spelled "New <program> tab", so it
+  // asks for a fresh chamber outright.
+  if (!(options && options.fresh)) {
+    const open = tabForProgram(name);
+    if (open) {
+      activateTab(open.id); // raises its workspace too
+      return Promise.resolve(open);
+    }
+  }
   return ensurePtyPrograms().then(() => {
     const entry = ptyProgramEntry(name);
     // An id pty.js does not have is refused there anyway; refuse it here too,
@@ -3265,6 +3296,21 @@ function setTabAudible(tab, on) {
   if (before !== tab.audible) syncMusicPlayback();
 }
 
+/**
+ * The guest that was making the sound is gone (it crashed, or we took it away
+ * to sleep the tab). Chromium fires no media-paused for a renderer that has
+ * died, so the flag has to be dropped here or it stands for ever: a stale
+ * `audible` keeps the speaker on the chip, keeps the tab from ever sleeping,
+ * and — since anyTabAudible() is one of the idle music's four facts — keeps the
+ * music off for the life of the window.
+ */
+function forgetTabAudio(tab) {
+  if (!tab || !tab.audible) return;
+  tab.audible = false;
+  syncTabAudio(tab);
+  syncMusicPlayback();
+}
+
 /** Mute or unmute one tab. An unattached guest throws; the flag still holds. */
 function setTabMuted(tab, on) {
   if (!tab || isClaudeTab(tab)) return;
@@ -4180,6 +4226,7 @@ function sleepTab(tab) {
   tab.ready = false;
   tab.asleep = true;
   setTabLoading(tab, false); // a load in flight died with the guest
+  forgetTabAudio(tab);       // ...and so did any sound it was making
   if (tab.chipEl) {
     tab.chipEl.classList.add('asleep');
     tab.chipEl.title = chipTooltip(tab);
@@ -4505,14 +4552,19 @@ function syncSplitOverlays() {
 
   const box = viewsEl.getBoundingClientRect();
   for (const tab of pair) {
+    // One measurement per tab, taken BEFORE anything reads it: the note bar and
+    // the crash card are inset to the same half.
+    const half = tab.viewEl ? tab.viewEl.getBoundingClientRect() : null;
+    if (!half) continue;
+    const left = Math.round(half.left - box.left) + 'px';
+    const right = Math.round(box.right - half.right) + 'px';
     if (tab.noteEl) {
-      tab.noteEl.style.left = Math.round(half.left - box.left) + 'px';
-      tab.noteEl.style.right = Math.round(box.right - half.right) + 'px';
+      tab.noteEl.style.left = left;
+      tab.noteEl.style.right = right;
     }
     if (!tab.cardEl) continue;
-    const half = tab.viewEl.getBoundingClientRect();
-    tab.cardEl.style.left = Math.round(half.left - box.left) + 'px';
-    tab.cardEl.style.right = Math.round(box.right - half.right) + 'px';
+    tab.cardEl.style.left = left;
+    tab.cardEl.style.right = right;
   }
 
   const mark = ensureSplitFocusMark();
@@ -6418,6 +6470,7 @@ function wireViewEvents(tab) {
   viewEl.addEventListener('destroyed', () => {
     if (stale()) return;
     tab.ready = false;
+    forgetTabAudio(tab); // a dead guest never sends media-paused
   });
 
   // Clicking into the OTHER half of a split moves the chrome to that tab. The
@@ -6507,6 +6560,7 @@ function wireViewEvents(tab) {
     if (reason === 'clean-exit') return; // an ordinary teardown, not a crash
     tab.ready = false;
     setTabLoading(tab, false);
+    forgetTabAudio(tab); // the sound died with the renderer; the flag must too
     showTabCard(tab, 'crash', hostLabel(tab.url));
   };
   viewEl.addEventListener('render-process-gone', (event) => {
