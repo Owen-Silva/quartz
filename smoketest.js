@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 9222;
+const PORT = Number(process.env.SMOKE_PORT) || 9222;
 const OUT = process.argv[2] || path.join(__dirname, 'smoke');
 // --keep leaves the app running (terminal pane open) so an OS-level screenshot
 // can be taken afterwards; kill electron.exe yourself when done.
