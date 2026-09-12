@@ -41,6 +41,13 @@
  * stamp <html data-palette> before the first paint, long before this file
  * parses. applyPalette() writes both, so the two never drift.
  *
+ * THE STOCKS SECTION IS NOT IN THERE EITHER, and that one is a rule rather
+ * than a tidiness: its Finnhub key lives in MAIN (stocks.js, in
+ * <userData>/stocks.json, as `stocks.finnhubKey`) and never crosses back.
+ * The pane asks window.api.stocks.describe() for { enabled, hasKey, keyMask,
+ * symbols, … } and writes with setKey/setEnabled/setSymbols; a key in this
+ * file's localStorage object would be a key any devtools console could read.
+ *
  * Per-site CSS is NOT stored here: it belongs to window.SiteStyles, which
  * keeps its own localStorage key and pushes changes into open tabs itself.
  * This panel only draws it, and only when that module is present.
@@ -3225,6 +3232,292 @@
     renderAutopauseHealth();
   }
 
+  /* ============================================================
+     Stocks — the new tab page's live price tile
+
+     THE ONE SECTION WITH NOTHING IN localStorage. Everything here lives in
+     MAIN: stocks.js keeps <userData>/stocks.json and is the only process that
+     ever holds the Finnhub key. So there is no DEFAULTS entry, no set({…})
+     and no `get()` below — the state is whatever describe() last said, and
+     every write goes out over window.api.stocks and comes back as the same
+     shape. That is the same arrangement the Spotify rows have with the
+     bridge, and for a stronger reason: a key in this file's localStorage
+     object would be a key any devtools console could read.
+
+     THE KEY ONLY EVER GOES ONE WAY. describe() answers `hasKey` and a
+     `keyMask` ('••••4f21'), never the key. So the field is NEVER pre-filled:
+     the mask is placeholder text, typing replaces the key, and the eye
+     reveals only what has just been typed — a saved key cannot be shown
+     because this side does not have it.
+     ============================================================ */
+
+  var stkState = null;        // the last describe(), or null before the first
+  var stkFocus = '';          // which control to hand focus back to
+  var stkShowKey = false;     // the eye: reveal what is being TYPED, only
+
+  /** The preload bridge, or null on a build without one. */
+  function stocksApi() {
+    var api = window.api && window.api.stocks;
+    return api && typeof api.describe === 'function' ? api : null;
+  }
+
+  function buildStocks() {
+    var s = section('Stocks');
+
+    var sw = el('div', 'set-field');
+    sw.setAttribute('data-field', 'stockson');
+    s.appendChild(sw);
+
+    var key = el('div', 'set-field');
+    key.setAttribute('data-field', 'finnhubkey');
+    s.appendChild(key);
+
+    var syms = el('div', 'set-field');
+    syms.setAttribute('data-field', 'stocksymbols');
+    s.appendChild(syms);
+
+    return s;
+  }
+
+  function renderStocks() {
+    renderStocksSwitch();
+    renderFinnhubKey();
+    renderStockSymbols();
+  }
+
+  /**
+   * Every call into main answers the same describe() shape, so one taker
+   * handles all four. A null answer means main refused the call (this is not
+   * the chrome) and the section is left exactly as it was.
+   */
+  function stocksTake(answer) {
+    if (!answer || typeof answer !== 'object') return;
+    stkState = answer;
+    renderStocks();
+    refreshFilter();
+    if (stkFocus) {
+      var back = panelEl && panelEl.querySelector(stkFocus);
+      stkFocus = '';
+      if (back) { try { back.focus(); } catch (err) { /* re-rendered away */ } }
+    }
+  }
+
+  /**
+   * The write path, shaped like spotifyWrite(): guess the new state so the
+   * control moves under the finger, send, and let the real answer correct it.
+   * Nothing is stored locally on failure — main is the only side that knows
+   * what is saved.
+   */
+  function stocksWrite(method, arg, guess, failed) {
+    var api = stocksApi();
+    if (!api || typeof api[method] !== 'function') return;
+    if (stkState && typeof guess === 'function') {
+      guess(stkState);
+      renderStocks();
+      refreshFilter();
+    }
+    var answer;
+    try { answer = api[method](arg); }
+    catch (err) { showToast(failed); return; }
+    try {
+      Promise.resolve(answer).then(function (value) {
+        if (value) stocksTake(value);
+        else showToast(failed);
+      }, function () { showToast(failed); });
+    } catch (err) { showToast(failed); }
+  }
+
+  /** One describe() when the pane opens. Quiet on failure: the rows hold. */
+  function stocksRefresh() {
+    var api = stocksApi();
+    if (!api) { stkState = null; renderStocks(); return; }
+    var answer;
+    try { answer = api.describe(); } catch (err) { return; }
+    try {
+      Promise.resolve(answer).then(function (value) {
+        if (value) stocksTake(value);
+      }, function () { /* leave the last state up */ });
+    } catch (err) { /* nothing to take */ }
+  }
+
+  function renderStocksSwitch() {
+    var field = panelEl && panelEl.querySelector('[data-field="stockson"]');
+    if (!field) return;
+    field.textContent = '';
+
+    /* No channel at all (an older preload): say so once rather than draw a
+       switch that writes nowhere. */
+    if (!stocksApi()) {
+      field.appendChild(el('p', 'set-hint',
+        'This build has no price channel, so the tile stays off.'));
+      return;
+    }
+
+    var on = !!(stkState && stkState.enabled);
+    field.appendChild(switchRow('Live prices on the new tab', on, function (next) {
+      stkFocus = '[data-field="stockson"] .set-row';
+      stocksWrite('setEnabled', next, function (st) { st.enabled = next; },
+        'That switch could not be saved');
+    }));
+    field.appendChild(el('p', 'set-hint',
+      'A tile in the bottom-right corner of the new tab: your symbols, the ' +
+      'day’s change and an intraday chart. It holds no connection at all ' +
+      'while that tab is not the one on screen.'));
+  }
+
+  function renderFinnhubKey() {
+    var field = panelEl && panelEl.querySelector('[data-field="finnhubkey"]');
+    if (!field) return;
+    field.textContent = '';
+    if (!stocksApi()) return;
+
+    var has = !!(stkState && stkState.hasKey);
+    var mask = (stkState && stkState.keyMask) || '';
+
+    var label = el('label', 'set-label', 'Finnhub API key');
+    label.setAttribute('for', 'set-finnhub-key');
+    field.appendChild(label);
+
+    var row = el('div', 'set-path-row');
+
+    /* NEVER pre-filled — main does not hand the key back. The mask is the
+       placeholder, so an empty field means "leave the saved one alone"
+       rather than "clear it", and Remove is the only way to clear it. */
+    var input = document.createElement('input');
+    input.type = stkShowKey ? 'text' : 'password';
+    input.id = 'set-finnhub-key';
+    input.className = 'set-path';
+    input.value = '';
+    input.placeholder = has ? mask : 'Paste your key';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.title = has ? 'A key is saved. Type to replace it.' : 'Paste the key from finnhub.io';
+    row.appendChild(input);
+
+    /* The eye reveals what is BEING TYPED and nothing else: a key that is
+       already saved is not on this side of the process boundary to show. */
+    row.appendChild(textButton(stkShowKey ? 'Hide' : 'Show', 'set-text set-key-eye', function () {
+      stkShowKey = !stkShowKey;
+      var live = field.querySelector('.set-path');
+      var typed = live ? live.value : '';
+      renderFinnhubKey();
+      var again = field.querySelector('.set-path');
+      if (again) {
+        again.value = typed;                    // a re-render must not eat it
+        try { again.focus(); } catch (err) { /* gone */ }
+      }
+    }));
+
+    row.appendChild(textButton('Save', 'set-btn set-key-save', function () {
+      var live = field.querySelector('.set-path');
+      var next = live ? live.value.trim() : '';
+      if (!next) return;
+      stkShowKey = false;
+      stkFocus = '.set-key-save';
+      stocksWrite('setKey', next, function (st) {
+        st.hasKey = true;
+        st.keyState = '';
+      }, 'That key could not be saved');
+    }));
+
+    if (has) {
+      row.appendChild(textButton('Remove', 'set-text set-key-clear', function () {
+        stkShowKey = false;
+        stkFocus = '.set-path';
+        stocksWrite('setKey', '', function (st) {
+          st.hasKey = false;
+          st.keyMask = '';
+          st.keyState = '';
+        }, 'That key could not be removed');
+      }));
+    }
+
+    field.appendChild(row);
+
+    /* Enter saves, the same way the Claude folder field commits on Enter. */
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var save = field.querySelector('.set-key-save');
+      if (save) save.click();
+    });
+
+    if (stkState && stkState.keyState === 'rejected') {
+      field.appendChild(el('p', 'set-note', 'Finnhub refused that key'));
+    }
+
+    field.appendChild(el('p', 'set-hint', stocksHint(stkState)));
+  }
+
+  /**
+   * The line under the field. The history sentence is worth saying out loud:
+   * a free key's candle endpoint answers 403, so the chart quietly comes from
+   * Yahoo instead, and a user who does not know that reads it as broken.
+   */
+  function stocksHint(st) {
+    var where = 'Get a free key at finnhub.io — it streams real-time US ' +
+      'stock prices. Stored by the browser itself and never given to a page.';
+    if (!st || !st.hasKey) return where;
+    if (st.historyPath === 'finnhub') return where + ' The chart’s history comes from Finnhub.';
+    if (st.historyPath === 'yahoo') {
+      return where + ' Free keys cannot read Finnhub’s candles, so the ' +
+        'chart’s history comes from Yahoo instead; the prices are still Finnhub’s.';
+    }
+    return where;
+  }
+
+  /**
+   * The watchlist as one comma-separated line, mirroring the tile's own + and
+   * x. Committed on blur and on Enter, like the Claude folder row; main
+   * normalises, de-duplicates and caps it, and the answer is what gets drawn
+   * back, so a typo simply does not survive the round trip.
+   */
+  function renderStockSymbols() {
+    var field = panelEl && panelEl.querySelector('[data-field="stocksymbols"]');
+    if (!field) return;
+    field.textContent = '';
+    if (!stocksApi()) return;
+
+    var list = (stkState && Array.isArray(stkState.symbols)) ? stkState.symbols : [];
+    var text = list.join(', ');
+
+    var label = el('label', 'set-label', 'Symbols');
+    label.setAttribute('for', 'set-stock-symbols');
+    field.appendChild(label);
+
+    var row = el('div', 'set-path-row');
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'set-stock-symbols';
+    input.className = 'set-path';
+    input.value = text;
+    input.placeholder = 'SPY, QQQ, NVDA';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'characters');
+    row.appendChild(input);
+    field.appendChild(row);
+    field.appendChild(el('p', 'set-hint',
+      'The same list the tile’s + and × edit. Eight at most.'));
+
+    var before = text;
+    var commit = function () {
+      var next = input.value.split(/[\s,]+/).filter(function (s) { return !!s; });
+      if (next.join(',').toUpperCase() === before.split(/[\s,]+/).join(',').toUpperCase()) return;
+      if (!next.length) { input.value = before; return; }   // an empty list is not a list
+      stkFocus = '#set-stock-symbols';
+      stocksWrite('setSymbols', next, function (st) { st.symbols = next; },
+        'Those symbols could not be saved');
+    };
+    input.addEventListener('change', commit);               // blur, and Enter
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      input.blur();
+    });
+  }
+
   /**
    * Quiet the ads instead of pausing them. Spotify will not let anything
    * skip an ad, and muting it outright is what makes the player think it was
@@ -4057,6 +4350,7 @@
     bodyEl.appendChild(buildMusic());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildSpotify());
+    bodyEl.appendChild(buildStocks());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
 
@@ -4084,6 +4378,7 @@
     renderMusic();
     renderPrivacy();
     renderSpotify();
+    renderStocks();
     renderShortcuts();
     refreshFilter();          // the text just changed under the index
   }
@@ -4115,6 +4410,11 @@
     /* The Spotify readout is live only while the pane is: one subscription
        and one 4s poll, started here and taken down again in closePanel(). */
     autopauseWatch();
+    /* And one describe() for the Stocks section: its state lives in main, so
+       the rows are drawn from whatever main last said until the answer lands.
+       One call per open, never a poll -- nothing in that section moves on its
+       own. */
+    stocksRefresh();
     position();
     if (buttonEl) {
       buttonEl.classList.add('is-open');

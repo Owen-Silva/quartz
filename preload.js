@@ -377,6 +377,28 @@ contextBridge.exposeInMainWorld('api', {
   // re-parents the app's top-level HWND into the browser window and moves it
   // over the tab's content area -- the app runs as itself, nothing is remoted.
   //
+  // The new tab page's live price tile. Everything here is the SETTINGS side
+  // of it: the tile itself is a preload-less guest and talks to stocks.js on a
+  // console line, so nothing on this channel carries a price.
+  //
+  // THE KEY ONLY EVER GOES ONE WAY. There is deliberately no read: describe()
+  // answers { enabled, hasKey, keyMask, keyState, symbols, selected,
+  // historyPath, market, socket } and keyMask is bullets plus the last four
+  // characters. A renderer -- and therefore a devtools console -- can tell
+  // whether a key is set and can replace it, and can never read it back.
+  //
+  // keyState is '' or 'rejected' (Finnhub refused it; the module has backed
+  // off rather than retrying). historyPath is 'unknown' until the first chart
+  // loads, then 'finnhub' (a paid key) or 'yahoo' (the free tier, whose candle
+  // endpoint answers 403). Every call resolves null if main refuses it.
+  stocks: {
+    describe: () => ipcRenderer.invoke('stocks:describe'),
+    // '' clears the key. Resolves the same describe() shape, already updated.
+    setKey: (key) => ipcRenderer.invoke('stocks:set-key', String(key == null ? '' : key)),
+    setEnabled: (on) => ipcRenderer.invoke('stocks:set-enabled', on !== false),
+    // Upper-case tickers; main normalises, de-duplicates and caps the list.
+    setSymbols: (list) => ipcRenderer.invoke('stocks:set-symbols', Array.isArray(list) ? list : [])
+  },
   // An hwnd is always a DECIMAL STRING here ('4523874'), in both directions.
   // Every call answers a value: { ok: true, ... } or { ok: false, reason }
   // where reason is one of 'unavailable' (this build cannot do it at all),

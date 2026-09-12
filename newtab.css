@@ -2462,3 +2462,309 @@ body {
   .dock-remove,
   .dock-where-opt { transition: none; }
 }
+
+/* --- markets: live prices, bottom right ---------------------- */
+/* The fourth tile, and the only one that is not seated by the board: it takes
+   the bottom-right corner and holds it. Same material as the other three —
+   the sheen over the glass, the rim as a ring on ::before, the bevelled
+   corners — inherited from .module, so this block only adds what a price
+   readout needs and never re-states the tile.
+
+   It is wider than the other three (the other three are 208px by authorship;
+   a chart and a five-row table are not) and it is the one tile that takes
+   clicks, so pointer-events comes back on here.
+
+   NOTHING IN HERE ANIMATES. Both canvases are repainted by newtab.js at most
+   twice a second and only when a number moved; there is no transition on a
+   price, no pulse on a tick, and no CSS animation anywhere below. A tile that
+   breathed would cost a share of a core for as long as the tab is open. */
+/* Up and down. Scoped to this tile because nothing else on the page has a
+   sign, and desaturated on purpose: a trading terminal's #00ff88 on a glass
+   tile over a photograph is the exact "lit rim" look the rest of this browser
+   spent a session getting rid of. These are close to the foreground's own
+   lightness, so the colour reads as a direction rather than as an alarm.
+   Two definitions, because the light theme's ground needs the darker pair to
+   clear 4.5:1 the way --fg-3 does. */
+:root {
+  --stk-up:   #7fb98f;
+  --stk-down: #c98b86;
+}
+
+:root[data-theme="light"] {
+  --stk-up:   #2f7d4f;
+  --stk-down: #b04a43;
+}
+
+.module-stocks {
+  top: auto;
+  bottom: 24px;
+  right: 24px;
+  width: 352px;
+  padding: 14px 16px 12px;
+  pointer-events: auto;
+}
+
+/* No room in this window: the same rule the board's tiles keep. */
+@media (max-height: 560px), (max-width: 720px) {
+  .module-stocks { display: none; }
+}
+
+.stk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  height: 16px;
+}
+
+.stk-caption {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 16px;
+}
+
+/* Pre / Open / After / Closed. One hairline dot, and the accent only for the
+   session that is actually trading — the rest are the quiet foreground. */
+.stk-market {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 16px;
+}
+
+.stk-market::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .7;
+}
+
+.stk-market[data-market="open"] { color: var(--ion-dot, var(--ion)); }
+.stk-market[data-market="pre"],
+.stk-market[data-market="after"] { color: var(--fg-2); }
+
+/* The one-line states: no key, a refused key, nothing on the wire. This is
+   the whole tile in those cases — the chart, the rows and the foot are all
+   [hidden], so the tile shrinks to two lines rather than showing an empty
+   frame with a message under it. */
+.stk-note {
+  margin: 10px 0 2px;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  line-height: 17px;
+}
+
+.module-stocks[data-state="nokey"] .stk-chart,
+.module-stocks[data-state="nokey"] .stk-rows,
+.module-stocks[data-state="nokey"] .stk-foot,
+.module-stocks[data-state="rejected"] .stk-chart,
+.module-stocks[data-state="rejected"] .stk-rows,
+.module-stocks[data-state="rejected"] .stk-foot { display: none; }
+
+/* --- the chart ----------------------------------------------- */
+.stk-chart {
+  position: relative;
+  margin: 8px 0 6px;
+  height: 66px;
+}
+
+.stk-canvas {
+  display: block;
+  width: 100%;
+  height: 66px;
+}
+
+/* display:flex beats the UA's [hidden] rule, so the hidden state has to be
+   said out loud -- without this the note sits over a drawn chart forever. */
+.stk-chart-empty[hidden] { display: none; }
+
+.stk-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+}
+
+/* --- the rows ------------------------------------------------ */
+.stk-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.stk-row + .stk-row { margin-top: 1px; }
+
+.stk-row:hover { background: var(--ion-soft); }
+
+.stk-row.is-on {
+  background: var(--ion-soft);
+  border-color: var(--ion-line);
+}
+
+.stk-row:focus-visible {
+  outline: none;
+  border-color: var(--ion-line);
+}
+
+.stk-sym {
+  flex: 0 0 46px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The sparkline sits between the name and the numbers, so the eye reads
+   name -> shape -> price without crossing back. */
+.stk-spark {
+  flex: 1 1 auto;
+  display: block;
+  width: 100%;
+  height: 16px;
+  min-width: 0;
+}
+
+.stk-last {
+  flex: 0 0 auto;
+  min-width: 56px;
+  color: var(--fg);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Green and red on the TEXT only — no lit chip, no coloured pill. Both are
+   desaturated a long way from a trading terminal's neon: this tile sits on a
+   photograph half the time. */
+.stk-chg {
+  flex: 0 0 auto;
+  min-width: 54px;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.stk-row[data-dir="up"]   .stk-chg { color: var(--stk-up); }
+.stk-row[data-dir="down"] .stk-chg { color: var(--stk-down); }
+
+/* A row whose price has stopped arriving keeps its number and loses its
+   certainty. Not a badge: the whole row goes quiet. */
+.stk-row.is-stale .stk-last,
+.stk-row.is-stale .stk-chg { opacity: .5; }
+
+/* The x. Present in the DOM always (so no row is rebuilt to grow one) and
+   invisible until the row is hovered or something in it has focus. */
+.stk-drop {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  visibility: hidden;
+}
+
+.stk-row:hover .stk-drop,
+.stk-row:focus-within .stk-drop,
+.stk-drop:focus-visible { visibility: visible; }
+
+.stk-drop:hover { color: var(--fg); }
+
+/* --- the foot ------------------------------------------------ */
+.stk-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 20px;
+  margin-top: 8px;
+}
+
+.stk-add {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.stk-add:hover { color: var(--fg); border-color: var(--ion-line); }
+.stk-add:focus-visible { outline: none; border-color: var(--ion-line); }
+
+.stk-add-field {
+  flex: 0 0 88px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--ion-line);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.stk-add-field:focus-visible { outline: none; }
+
+.stk-as-of {
+  flex: 1 1 auto;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

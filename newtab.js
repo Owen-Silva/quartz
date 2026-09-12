@@ -60,6 +60,15 @@
         MACHINE is playing, off the media session the chrome polls. Its
         transport answers the same way: `newtab:media {"cmd":"toggle"|
         "next"|"prev"}`; see "now playing".
+
+    10. window.__applyStocks({ enabled, hasKey, keyState, market, socket,
+        offline, lastTickAt, selected, rows, series }) — live prices for
+        the bottom-right tile. The ONE push that does not come from the
+        chrome: stocks.js in MAIN owns the Finnhub key, the websocket and
+        the REST budget, and listens to this guest itself. The tile answers
+        on `newtab:stocks {"action":"subscribe"|"unsubscribe"|"select"|
+        "add"|"remove"|"refresh","symbol":…}`; see "markets" at the foot of
+        this file. The key is never in the payload and never in this page.
    ============================================================ */
 
 'use strict';
@@ -3532,3 +3541,512 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
+/* ============================================================
+   Markets — the bottom-right tile
+
+   The only module on this page whose data comes straight from MAIN. stocks.js
+   puts a console-message listener on this guest and answers the lines below;
+   the chrome is not in the path at all, which is why nothing here looks like
+   __applyStats's push.
+
+     out   console.log('newtab:stocks {"action":…,"symbol":…}')
+           subscribe | unsubscribe | select | add | remove | refresh
+     in    window.__applyStocks(payload)
+
+   The payload is the whole tile every time — rows, the selected symbol's
+   series, the market session, the socket's health — because it arrives at
+   most twice a second and a diff of forty numbers is not worth the bug.
+
+   THE KEY IS NEVER IN IT. The page is told `hasKey` and nothing else; it
+   cannot read, print or leak a key it was never given.
+
+   REPAINT. PAINT_MS is the floor between two paints and every path goes
+   through schedulePaint(), so a burst of trades at the open costs two paints
+   a second, not forty. There is no requestAnimationFrame here, no CSS
+   animation on the tile, and no timer at all while the page is hidden: the
+   page unsubscribes on visibilitychange, which is what frees the websocket
+   in main.
+   ============================================================ */
+
+(function () {
+  /* Two paints a second, no more. See the block comment. */
+  var PAINT_MS = 500;
+  /* A price older than this reads as stale rather than as current. */
+  var STALE_MS = 120000;
+  /* The chart's own padding, in CSS pixels. */
+  var CHART_PAD_X = 2;
+  var CHART_PAD_Y = 6;
+
+  var MARKET_LABEL = {
+    pre: 'Pre-market',
+    open: 'Open',
+    after: 'After hours',
+    closed: 'Closed'
+  };
+
+  var root = null;
+  var noteEl = null;
+  var marketEl = null;
+  var rowsEl = null;
+  var canvasEl = null;
+  var emptyEl = null;
+  var addBtn = null;
+  var addField = null;
+  var asOfEl = null;
+
+  /** The last payload main sent, and whether it still needs painting. */
+  var data = null;
+  var paintTimer = 0;
+  var lastPaintAt = 0;
+
+  /** symbol -> { li, sym, last, chg, spark, drop } — rows are reused. */
+  var rows = new Map();
+  /** What the rows currently spell, so a list that did not change is not rebuilt. */
+  var rowKey = '';
+
+  /** Whether we have told main we are watching. */
+  var watching = false;
+
+  /* --- the channel --------------------------------------------- */
+
+  function say(action, symbol) {
+    var msg = { action: action };
+    if (symbol) msg.symbol = symbol;
+    console.log('newtab:stocks ' + JSON.stringify(msg));
+  }
+
+  function watch() {
+    if (watching) return;
+    watching = true;
+    say('subscribe');
+  }
+
+  function unwatch() {
+    if (!watching) return;
+    watching = false;
+    say('unsubscribe');
+  }
+
+  /* A hidden tab is a tab whose socket main should not be holding open. This
+     is the same rule the clock, the clip and the now-playing hairline keep,
+     and the strongest case of it: the other three cost a timer, this one
+     costs a websocket and a REST budget. */
+  function syncWatch() {
+    if (!root) return;
+    if (document.hidden) { unwatch(); return; }
+    watch();
+  }
+
+  /* --- colours ------------------------------------------------- */
+
+  /* Read off the tile rather than hard-coded, so a palette or a theme flip
+     moves the chart with everything else. Cached per paint, not per point. */
+  function tokens() {
+    var css = window.getComputedStyle(root);
+    return {
+      up: css.getPropertyValue('--stk-up').trim() || '#7fb98f',
+      down: css.getPropertyValue('--stk-down').trim() || '#c98b86',
+      grid: css.getPropertyValue('--fg-3').trim() || '#a6abb5',
+      flat: css.getPropertyValue('--fg-2').trim() || '#a6abb5'
+    };
+  }
+
+  /* --- paint scheduling ---------------------------------------- */
+
+  function schedulePaint() {
+    if (paintTimer || document.hidden) return;
+    var since = Date.now() - lastPaintAt;
+    if (since >= PAINT_MS) { paint(); return; }
+    paintTimer = setTimeout(function () {
+      paintTimer = 0;
+      paint();
+    }, PAINT_MS - since);
+  }
+
+  /* --- the rows ------------------------------------------------ */
+
+  function makeRow(symbol) {
+    var li = document.createElement('li');
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'stk-row';
+    btn.setAttribute('data-symbol', symbol);
+
+    var sym = document.createElement('span');
+    sym.className = 'stk-sym';
+    sym.textContent = symbol;
+    btn.appendChild(sym);
+
+    var spark = document.createElement('canvas');
+    spark.className = 'stk-spark';
+    spark.width = 120;
+    spark.height = 32;
+    spark.setAttribute('aria-hidden', 'true');
+    btn.appendChild(spark);
+
+    var last = document.createElement('span');
+    last.className = 'stk-last';
+    last.textContent = '--';
+    btn.appendChild(last);
+
+    var chg = document.createElement('span');
+    chg.className = 'stk-chg';
+    chg.textContent = '--';
+    btn.appendChild(chg);
+
+    var drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'stk-drop';
+    drop.textContent = '×';
+    drop.setAttribute('aria-label', 'Remove ' + symbol);
+    btn.appendChild(drop);
+
+    btn.addEventListener('click', function (ev) {
+      if (ev.target === drop) return;             // the x has its own handler
+      say('select', symbol);
+    });
+    drop.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      say('remove', symbol);
+    });
+
+    li.appendChild(btn);
+    return { li: li, btn: btn, sym: sym, last: last, chg: chg, spark: spark, drop: drop };
+  }
+
+  /* The list is rebuilt only when the SYMBOLS change; a new price rewrites two
+     text nodes and repaints one 120x32 canvas, and touches nothing else. */
+  function syncRows(list) {
+    var key = list.map(function (r) { return r.symbol; }).join(',');
+    if (key === rowKey) return;
+    rowKey = key;
+
+    var seen = Object.create(null);
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < list.length; i += 1) {
+      var symbol = list[i].symbol;
+      seen[symbol] = true;
+      var rec = rows.get(symbol);
+      if (!rec) { rec = makeRow(symbol); rows.set(symbol, rec); }
+      frag.appendChild(rec.li);
+    }
+    rows.forEach(function (rec, symbol) {
+      if (!seen[symbol]) rows.delete(symbol);
+    });
+    rowsEl.textContent = '';
+    rowsEl.appendChild(frag);
+  }
+
+  function money(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    var abs = Math.abs(n);
+    var places = abs >= 1000 ? 2 : (abs >= 1 ? 2 : 4);
+    return n.toFixed(places);
+  }
+
+  function percent(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+
+  function clockOf(ms) {
+    if (!ms) return '';
+    try {
+      return new Date(ms).toLocaleTimeString(undefined, {
+        hour: 'numeric', minute: '2-digit', second: '2-digit'
+      });
+    } catch (err) {
+      return '';
+    }
+  }
+
+  /* --- canvas -------------------------------------------------- */
+
+  /* Sized in device pixels off the CSS box, and only when that box actually
+     changed: a setAttribute on width clears the canvas, so doing it every
+     paint would be a full redraw of everything, every time. */
+  function fitCanvas(canvas, cssW, cssH) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(cssW * dpr));
+    var h = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    return ctx;
+  }
+
+  function drawSpark(canvas, values, colour) {
+    var box = canvas.getBoundingClientRect();
+    var w = box.width || 120;
+    var h = box.height || 16;
+    var ctx = fitCanvas(canvas, w, h);
+    if (!ctx || !values || values.length < 2) return;
+
+    var lo = values[0];
+    var hi = values[0];
+    for (var i = 1; i < values.length; i += 1) {
+      if (values[i] < lo) lo = values[i];
+      if (values[i] > hi) hi = values[i];
+    }
+    var span = hi - lo;
+    if (!(span > 0)) span = Math.abs(hi) * 0.001 || 1;
+
+    var pad = 2;
+    var innerH = h - pad * 2;
+    ctx.beginPath();
+    for (var j = 0; j < values.length; j += 1) {
+      var x = (j / (values.length - 1)) * w;
+      var y = pad + (1 - (values[j] - lo) / span) * innerH;
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = colour;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /* The selected symbol's day: the previous close as a dashed hairline, the
+     line itself, and the area under it tinted by the day's sign. A line, a
+     dash and a fill — no gradient stack, no glow, no second pass. */
+  function drawChart(series, colours) {
+    var box = canvasEl.getBoundingClientRect();
+    var w = box.width || 352;
+    var h = box.height || 66;
+    var ctx = fitCanvas(canvasEl, w, h);
+    if (!ctx) return false;
+
+    var points = (series && series.points) || [];
+    if (points.length < 2) return false;
+
+    var prevClose = series.prevClose;
+    var lo = points[0][1];
+    var hi = points[0][1];
+    for (var i = 1; i < points.length; i += 1) {
+      if (points[i][1] < lo) lo = points[i][1];
+      if (points[i][1] > hi) hi = points[i][1];
+    }
+    /* The previous close is part of the picture even when the day never
+       traded back to it — otherwise the dashed line falls off the canvas. */
+    if (prevClose !== null && prevClose !== undefined && isFinite(prevClose)) {
+      if (prevClose < lo) lo = prevClose;
+      if (prevClose > hi) hi = prevClose;
+    }
+    var span = hi - lo;
+    if (!(span > 0)) span = Math.abs(hi) * 0.001 || 1;
+
+    var left = CHART_PAD_X;
+    var right = w - CHART_PAD_X;
+    var top = CHART_PAD_Y;
+    var bottom = h - CHART_PAD_Y;
+    var innerW = right - left;
+    var innerH = bottom - top;
+
+    var xAt = function (idx) { return left + (idx / (points.length - 1)) * innerW; };
+    var yAt = function (v) { return top + (1 - (v - lo) / span) * innerH; };
+
+    var lastValue = points[points.length - 1][1];
+    var base = (prevClose !== null && prevClose !== undefined && isFinite(prevClose))
+      ? prevClose : points[0][1];
+    var dir = lastValue > base ? 'up' : (lastValue < base ? 'down' : 'flat');
+    var colour = dir === 'up' ? colours.up : (dir === 'down' ? colours.down : colours.flat);
+
+    /* the area, first, so the line sits on top of its own tint */
+    ctx.beginPath();
+    ctx.moveTo(xAt(0), yAt(points[0][1]));
+    for (var a = 1; a < points.length; a += 1) ctx.lineTo(xAt(a), yAt(points[a][1]));
+    ctx.lineTo(xAt(points.length - 1), bottom);
+    ctx.lineTo(xAt(0), bottom);
+    ctx.closePath();
+    ctx.fillStyle = colour;
+    ctx.globalAlpha = 0.10;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    /* the previous close */
+    if (prevClose !== null && prevClose !== undefined && isFinite(prevClose)) {
+      var py = yAt(prevClose);
+      ctx.beginPath();
+      ctx.setLineDash([3, 3]);
+      ctx.moveTo(left, py);
+      ctx.lineTo(right, py);
+      ctx.strokeStyle = colours.grid;
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    /* the line */
+    ctx.beginPath();
+    ctx.moveTo(xAt(0), yAt(points[0][1]));
+    for (var b = 1; b < points.length; b += 1) ctx.lineTo(xAt(b), yAt(points[b][1]));
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    return true;
+  }
+
+  /* --- the paint ----------------------------------------------- */
+
+  function paint() {
+    lastPaintAt = Date.now();
+    if (!root || !data) return;
+
+    if (data.enabled === false) { root.hidden = true; return; }
+    root.hidden = false;
+
+    var market = String(data.market || 'closed');
+    marketEl.setAttribute('data-market', market);
+    marketEl.textContent = MARKET_LABEL[market] || 'Closed';
+
+    if (!data.hasKey) {
+      root.setAttribute('data-state', 'nokey');
+      noteEl.hidden = false;
+      noteEl.textContent = 'Add a Finnhub API key in Settings to see live prices';
+      return;
+    }
+    if (data.keyState === 'rejected') {
+      root.setAttribute('data-state', 'rejected');
+      noteEl.hidden = false;
+      noteEl.textContent = 'Finnhub rejected the key';
+      return;
+    }
+    root.setAttribute('data-state', 'live');
+    noteEl.hidden = true;
+
+    var list = Array.isArray(data.rows) ? data.rows : [];
+    syncRows(list);
+
+    var colours = tokens();
+    var nowMs = Date.now();
+    for (var i = 0; i < list.length; i += 1) {
+      var row = list[i];
+      var rec = rows.get(row.symbol);
+      if (!rec) continue;
+
+      var pct = row.changePct;
+      var dir = 'flat';
+      if (typeof pct === 'number' && isFinite(pct)) {
+        if (pct > 0) dir = 'up';
+        else if (pct < 0) dir = 'down';
+      }
+      rec.btn.setAttribute('data-dir', dir);
+      rec.btn.classList.toggle('is-on', row.symbol === data.selected);
+
+      var lastText = money(row.last);
+      if (rec.last.textContent !== lastText) rec.last.textContent = lastText;
+      var pctText = percent(pct);
+      if (rec.chg.textContent !== pctText) rec.chg.textContent = pctText;
+
+      var stale = !!data.offline || (!!row.t && (nowMs - row.t) > STALE_MS);
+      rec.btn.classList.toggle('is-stale', stale);
+
+      drawSpark(rec.spark, row.spark, dir === 'down' ? colours.down : (dir === 'up' ? colours.up : colours.flat));
+    }
+
+    var drew = drawChart(data.series, colours);
+    emptyEl.hidden = drew;
+
+    var when = data.lastTickAt ? clockOf(data.lastTickAt) : '';
+    var asOf = '';
+    if (data.offline) asOf = when ? 'Offline · ' + when : 'Offline';
+    else if (when) asOf = 'As of ' + when;
+    else if (data.socket === 'live') asOf = 'Waiting for a trade';
+    if (asOfEl.textContent !== asOf) asOfEl.textContent = asOf;
+  }
+
+  /* --- the + field --------------------------------------------- */
+
+  function openAdd() {
+    addBtn.hidden = true;
+    addField.hidden = false;
+    addField.value = '';
+    addField.focus();
+  }
+
+  function closeAdd() {
+    addField.hidden = true;
+    addBtn.hidden = false;
+  }
+
+  function commitAdd() {
+    var raw = addField.value.trim().toUpperCase();
+    closeAdd();
+    if (raw) say('add', raw);
+  }
+
+  /* --- boot ---------------------------------------------------- */
+
+  function start() {
+    root = document.getElementById('mod-stocks');
+    if (!root) return;
+    noteEl = document.getElementById('stk-note');
+    marketEl = document.getElementById('stk-market');
+    rowsEl = document.getElementById('stk-rows');
+    canvasEl = document.getElementById('stk-canvas');
+    emptyEl = document.getElementById('stk-chart-empty');
+    addBtn = document.getElementById('stk-add');
+    addField = document.getElementById('stk-add-field');
+    asOfEl = document.getElementById('stk-as-of');
+    if (!noteEl || !marketEl || !rowsEl || !canvasEl || !emptyEl || !addBtn || !addField || !asOfEl) {
+      root = null;
+      return;
+    }
+
+    addBtn.addEventListener('click', openAdd);
+    addField.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); closeAdd(); }
+    });
+    addField.addEventListener('blur', closeAdd);
+
+    /* The same three "back on screen" signals the rest of the page uses, and
+       the only thing that starts or stops the socket in main. */
+    document.addEventListener('visibilitychange', syncWatch);
+    window.addEventListener('pageshow', syncWatch);
+    window.addEventListener('focus', syncWatch);
+    window.addEventListener('pagehide', unwatch);
+
+    /* A resize changes both canvases' device size. Debounced, and a repaint
+       rather than a reflow: nothing is measured that the paint does not. */
+    var resizeTimer = 0;
+    window.addEventListener('resize', function () {
+      if (resizeTimer) return;
+      resizeTimer = setTimeout(function () {
+        resizeTimer = 0;
+        schedulePaint();
+      }, 200);
+    });
+
+    syncWatch();
+  }
+
+  /**
+   * The whole tile, from main. Never carries the key — see the block comment.
+   * { enabled, hasKey, keyState, market, socket, offline, historyPath,
+   *   lastTickAt, selected,
+   *   rows: [{ symbol, last, change, changePct, prevClose, t, spark: [] }],
+   *   series: { symbol, prevClose, points: [[t, c], …] } }
+   */
+  window.__applyStocks = function (payload) {
+    if (!payload || typeof payload !== 'object') return;
+    data = payload;
+    schedulePaint();
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+}());

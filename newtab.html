@@ -328,6 +328,53 @@
   </div>
 </main>
 
+<!-- Live prices, bottom right. The only tile on this page the board does not
+     seat: newtab-bg.js's MODULE_SPEC names three ids and this is not one of
+     them, so it keeps the corner CSS gives it and the traces simply run
+     under it (the glass is opaque enough that they do not read through).
+
+     Its data is main's, not the chrome's: stocks.js puts a listener on this
+     guest and answers `newtab:stocks {json}` lines — subscribe, unsubscribe,
+     select, add, remove — with window.__applyStocks(). The Finnhub key is
+     never part of that, in either direction; the page is only ever told
+     whether one is set.
+
+     Both canvases are drawn by newtab.js at most twice a second and only
+     when a number actually moved. Nothing here animates. -->
+<section id="mod-stocks" class="module module-stocks" aria-label="Markets"
+         data-state="loading" hidden>
+  <div class="stk-head">
+    <p class="stk-caption">Markets</p>
+    <span id="stk-market" class="stk-market" data-market="closed">Closed</span>
+  </div>
+
+  <!-- The one-line states: no key, a refused key, nothing to draw. -->
+  <p id="stk-note" class="stk-note" hidden></p>
+
+  <!-- The selected symbol's day. The dashed line is the previous close, the
+       tint under the line is the day's sign, and the whole thing is one
+       canvas sized in CSS pixels times devicePixelRatio. -->
+  <div class="stk-chart">
+    <canvas id="stk-canvas" class="stk-canvas" width="352" height="132"
+            role="img" aria-label="Intraday chart"></canvas>
+    <p id="stk-chart-empty" class="stk-chart-empty" hidden>No history yet</p>
+  </div>
+
+  <!-- One row per symbol: name, last, day change, sparkline, and an x that
+       only appears on hover or focus. Rows are <button>s so the keyboard can
+       reach the selection at all. -->
+  <ul id="stk-rows" class="stk-rows"></ul>
+
+  <div class="stk-foot">
+    <button id="stk-add" class="stk-add" type="button" aria-label="Add a symbol">+</button>
+    <!-- Shown in place of the button while a ticker is being typed. -->
+    <input id="stk-add-field" class="stk-add-field" type="text" hidden
+           maxlength="12" autocomplete="off" spellcheck="false"
+           placeholder="Ticker" aria-label="Add a symbol">
+    <span id="stk-as-of" class="stk-as-of"></span>
+  </div>
+</section>
+
 <script src="newtab-bg.js"></script>
 <!-- The web-app catalogue, so a 'web:' pin has a name and a host to draw
      from the first paint. The chrome's push is still the authority — it is

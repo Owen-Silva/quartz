@@ -30,6 +30,7 @@ const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
 const appsModule = require('./apps');
+const stocksModule = require('./stocks');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -122,6 +123,24 @@ const statsWatched = new Set();
  * IPC gate in front of it.
  */
 const apps = appsModule.create({ app, shell });
+
+/**
+ * Live prices for the new tab page's bottom-right tile. Everything about it is
+ * its own -- the store, the Finnhub socket, the REST budget, and the listener
+ * it puts on each <webview> guest, because the page is preload-less and asks
+ * for its data on a console line the way the process list does. Main hands it
+ * three things it cannot have on its own: `app` (for userData), the chrome
+ * gate in front of the Settings channels, and which URLs are our own pages.
+ *
+ * The Finnhub key never comes back out of this module. `stocks.describe()` is
+ * a mask and a boolean, and that is what IPC returns.
+ */
+const stocks = stocksModule.create({
+  app,
+  ipcMain,
+  isChromeSender: (event) => isChromeSender(event),
+  isBundledPage: (url) => isBundledPageUrl(url),
+});
 
 /**
  * Native app tabs: a real program's own top-level window, re-parented INTO this
@@ -4399,6 +4418,10 @@ app.on('before-quit', (event) => {
   // Same idea for the app index: a Get-StartApps or a focus PowerShell caught
   // mid-flight is a child of ours, and it is not going to be missed.
   apps.stop();
+  // The price tile's socket and its poll timer. It is already ref-counted down
+  // to nothing when the last new tab goes away; this is the case where the
+  // window is closed with one still open.
+  stocks.stop();
   // And for the icon cache, which may be holding a PowerShell batch and a
   // debounced write. Only if it was ever built -- this must not build one.
   if (procIcons && typeof procIcons.stop === 'function') {
