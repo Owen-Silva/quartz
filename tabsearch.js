@@ -78,12 +78,15 @@
     shield:  '\uE83D',
     screen:  '\uE740',
     trash:   '\uE74D',
-    check:   '\uE73E'
+    check:   '\uE73E',
+    app:     '\uECAA'
   };
 
   /** The pane is a shortlist, not a tab manager: what does not fit is a count. */
   var MAX_OPEN = 12;
   var MAX_CLOSED = 8;
+  /** ...and the same for the installed apps: the query narrows them, not a scroll. */
+  var MAX_APPS = 8;
 
   /** The one character that turns the pane into a command palette. */
   var CMD_PREFIX = '>';
@@ -107,6 +110,15 @@
 
   /** The id of a two-step command waiting for its second Enter. */
   var pendingId = null;
+
+  /**
+   * The installed native apps, as api.apps.list() answered — built the first
+   * time the palette opens and kept for the life of the window, because a
+   * rebuild is main's job and takes seconds. null means "never asked", [] means
+   * "asked, and there is nothing (or no bridge in this build)".
+   */
+  var appsCache = null;
+  var appsAsked = false;
 
   /**
    * The rendered model, index-aligned with the selectable row elements: what
@@ -457,6 +469,129 @@
     };
   }
 
+  /* --- the installed native apps --------------------------------- */
+
+  /*
+   * "Open Spotify" is a palette row like any other, with two differences: the
+   * list comes from main (over api.apps, which an older build has none of) and
+   * an app that is ALREADY up is switched to rather than started again — the
+   * running state comes from app.js's last stats sample, so it costs nothing
+   * to read here.
+   *
+   * The list is asked for once, on the first open, and then cached: it is
+   * hundreds of entries and main builds it from the Start Menu. app.js calls
+   * appsChanged() after a refresh, which is the only thing that drops it.
+   */
+
+  /** The preload's apps group, or null when this build has none. */
+  function appsApiRef() {
+    try {
+      var api = window.api && window.api.apps;
+      return (api && typeof api.list === 'function') ? api : null;
+    } catch (err) { return null; }
+  }
+
+  /** Ask main for the list, once. Nothing here throws and nothing waits. */
+  function ensureApps() {
+    if (appsAsked) return;
+    var api = appsApiRef();
+    if (!api) { appsAsked = true; appsCache = []; return; }
+    appsAsked = true;
+    var pending = null;
+    try { pending = api.list(); } catch (err) { appsCache = []; return; }
+    if (!pending || typeof pending.then !== 'function') { setApps(pending); return; }
+    try {
+      pending.then(function (answer) { setApps(answer); }, function () { appsCache = []; });
+    } catch (err) { appsCache = []; }
+  }
+
+  /** Park one answer and, if the list is on screen right now, re-render it. */
+  function setApps(answer) {
+    var list = [];
+    var rows_ = (answer && Array.isArray(answer.apps)) ? answer.apps
+      : (Array.isArray(answer) ? answer : []);
+    for (var i = 0; i < rows_.length; i++) {
+      var entry = rows_[i];
+      if (!entry || typeof entry !== 'object') continue;
+      if (typeof entry.id !== 'string' || !entry.id) continue;
+      if (typeof entry.name !== 'string' || !entry.name) continue;
+      list.push({
+        id: entry.id,
+        name: entry.name,
+        iconDataUrl: (typeof entry.iconDataUrl === 'string' && entry.iconDataUrl)
+          ? entry.iconDataUrl : null
+      });
+    }
+    list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    appsCache = list;
+    if (open_ && isCommandMode()) render(hi < 0 ? 0 : hi);
+  }
+
+  /** app.js: the index was rebuilt, so whatever is cached here is stale. */
+  function appsChanged() {
+    appsCache = null;
+    appsAsked = false;
+    if (open_ && isCommandMode()) { ensureApps(); render(hi < 0 ? 0 : hi); }
+  }
+
+  /** app.js's running map (id -> { running, pids }) for the last sample. */
+  function appRunningMap() {
+    var fn = globalRef(function () { return appRunningState; });
+    if (typeof fn !== 'function') return {};
+    var map = null;
+    try { map = fn(); } catch (err) { return {}; }
+    return (map && typeof map === 'object') ? map : {};
+  }
+
+  /** One app as a palette row: switch to it when it is up, start it when not. */
+  function appCommand(entry, state) {
+    var running = !!(state && state.running);
+    var pids = (state && Array.isArray(state.pids)) ? state.pids : [];
+    return {
+      id: 'app-' + entry.id,
+      glyph: GLYPH.app,
+      iconDataUrl: entry.iconDataUrl,
+      label: 'Open ' + entry.name,
+      hint: running ? 'Running, switch to it' : '',
+      run: function () {
+        var api = null;
+        try { api = window.api && window.api.apps; } catch (err) { api = null; }
+        if (!api) return;
+        try {
+          if (running && pids.length && typeof api.focus === 'function') api.focus(pids[0]);
+          else if (typeof api.launch === 'function') api.launch(entry.id);
+        } catch (err) { /* the bridge went away: nothing to open */ }
+      }
+    };
+  }
+
+  /**
+   * The app rows for one query: the running ones first (they are what the user
+   * is most likely reaching for), then by name, capped. Built from the cache
+   * only — a list that has not landed yet simply contributes no rows.
+   */
+  function appCommands(query) {
+    ensureApps();
+    if (!appsCache || !appsCache.length) return [];
+    var words = tokenize(query);
+    var map = appRunningMap();
+    var hits = [];
+    for (var i = 0; i < appsCache.length; i++) {
+      var entry = appsCache[i];
+      var cmd = appCommand(entry, map[entry.id]);
+      if (!commandMatches(cmd, words)) continue;
+      cmd.appRunning = !!(map[entry.id] && map[entry.id].running);
+      cmd.appName = entry.name.toLowerCase();
+      hits.push(cmd);
+      if (hits.length > 400) break;   // a pathological index is still one frame
+    }
+    hits.sort(function (a, b) {
+      if (a.appRunning !== b.appRunning) return a.appRunning ? -1 : 1;
+      return a.appName < b.appName ? -1 : (a.appName > b.appName ? 1 : 0);
+    });
+    return hits.slice(0, MAX_APPS);
+  }
+
   /**
    * Every verb the palette offers, in the order it offers them. Rebuilt on each
    * render rather than kept, because half of these read the world: the label is
@@ -793,6 +928,17 @@
       out.push(cmd);
     }
     out.sort(function (a, b) { return (a.rank - b.rank) || (a.order - b.order); });
+
+    // The native apps go last, already filtered, ranked and capped by their
+    // own rule: the browser's own verbs are what `>` is mainly for, and there
+    // are hundreds of installed apps to one of these.
+    var apps = appCommands(query);
+    for (var j = 0; j < apps.length; j++) {
+      apps[j].kind = 'command';
+      apps[j].order = all.length + j;
+      apps[j].rank = commandRank(apps[j], query);
+      out.push(apps[j]);
+    }
     return out;
   }
 
@@ -1010,7 +1156,17 @@
     row.classList.add('ts-row--cmd');
 
     var box = el('span', 'ts-ico ts-ico--cmd');
-    box.appendChild(glyphEl(cmd.glyph || GLYPH.chevron));
+    // A native app carries its own 32px icon; everything else is a glyph. The
+    // image wears the favicon class, which is already the icon column's size.
+    if (cmd.iconDataUrl) {
+      var img = document.createElement('img');
+      img.className = 'ts-favicon';
+      img.alt = '';
+      img.src = cmd.iconDataUrl;
+      box.appendChild(img);
+    } else {
+      box.appendChild(glyphEl(cmd.glyph || GLYPH.chevron));
+    }
     row.appendChild(box);
 
     var hint = null;
@@ -1221,6 +1377,9 @@
     if (inputEl) inputEl.value = '';
     pendingId = null;
     probeReader();
+    // The installed apps, on the first open of the window: the answer lands on
+    // a promise and re-renders the list if the commands are what is on screen.
+    ensureApps();
     render(0);
     if (inputEl && typeof inputEl.focus === 'function') {
       try { inputEl.focus(); } catch (err) { /* not attached yet */ }
@@ -1353,6 +1512,8 @@
     toggle: toggle,
     isOpen: isOpen,
     handleShortcut: handleShortcut,
+    // app.js calls this after api.apps.refresh(): the cached list is stale.
+    appsChanged: appsChanged,
     // Pure model, reachable so it can be exercised without a window.
     _helpers: {
       describeTab: describeTab,
@@ -1379,7 +1540,14 @@
       activateIndex: activateIndex,
       onKeyDown: onKeyDown,
       MAX_OPEN: MAX_OPEN,
-      MAX_CLOSED: MAX_CLOSED
+      MAX_CLOSED: MAX_CLOSED,
+      // apps
+      appCommands: appCommands,
+      appCommand: appCommand,
+      ensureApps: ensureApps,
+      setApps: setApps,
+      appsOf: function () { return appsCache; },
+      MAX_APPS: MAX_APPS
     }
   };
 })();

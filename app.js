@@ -395,6 +395,9 @@ function wireStats() {
   if (!api || typeof api.onSample !== 'function') return;
   try {
     api.onSample((sample) => {
+      // The app dock's running dots come out of the same sample, and they are
+      // kept up to date whoever is in front: the palette reads this map too.
+      syncAppsRunning(sample);
       const tab = getActiveTab();
       if (!tab || !isNewTabUrl(tab.url)) return;
       pushStatsToTab(tab, sample);
@@ -499,6 +502,516 @@ function handleEndTaskLine(tab, viewEl, text) {
       req.pids.map((pid) => ({ pid: pid, ok: false, reason: 'failed' })))
   );
   return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Native apps on the new tab page                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The new tab page shows a dock of pinned native apps, and the palette offers
+ * "Open <name>" for every installed one. Neither of them can see a .lnk or a
+ * process, so this section is the whole of the chrome's half:
+ *
+ *   pins       Settings.appPins() -> ids, joined against the installed index
+ *   installed  api.apps.list(), cached here for the life of the window
+ *   running    derived from the stats sample the strip already receives
+ *
+ * Pushes go out as window.__applyApps({ pins, installed }) on dom-ready and
+ * whenever the pins change, and as window.__applyAppsRunning(diff) on the
+ * samples where a pin actually started or stopped — a whole dock per second
+ * would be an IPC and a re-render for nothing.
+ *
+ * Requests come back the same preload-less way end-task does: one console
+ * line, `newtab:app {json}`, answered on window.__applyAppResult.
+ *
+ * EVERY call into the preload is feature-detected. api.apps belongs to a
+ * later build than some of these guests, and a browser without it shows an
+ * empty dock and no palette rows rather than throwing.
+ */
+
+/* --- the bridge, and the shapes derived from it -------------------- */
+
+/** The preload's apps group, or null when this build has none. */
+function appsApi() {
+  const api = (window.api && window.api.apps) ? window.api.apps : null;
+  if (!api || typeof api !== 'object') return null;
+  return api;
+}
+
+/** The pinned ids, or [] when settings.js is not loaded yet. */
+function appPinIds() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.appPins !== 'function') return [];
+  let ids = null;
+  try { ids = settings.appPins(); } catch (err) { return []; }
+  return Array.isArray(ids) ? ids.slice() : [];
+}
+
+/*
+ * The installed index, fetched once and kept: a rebuild is minutes of work in
+ * main, and nothing in it changes while the window is open unless the user
+ * asks for a refresh (which clears this). `appsIndexPending` makes the fetch
+ * idempotent, so four guests loading at once cost one IPC.
+ */
+let appsIndex = null;          // { builtAt, apps: [...] } once it has landed
+let appsIndexPending = null;   // the in-flight promise, if any
+
+/**
+ * The index, on a promise that always resolves: null when there is no bridge,
+ * no answer, or a malformed one. Never rejects, so no caller needs a catch.
+ */
+function ensureAppsIndex() {
+  if (appsIndex) return Promise.resolve(appsIndex);
+  if (appsIndexPending) return appsIndexPending;
+  const api = appsApi();
+  if (!api || typeof api.list !== 'function') return Promise.resolve(null);
+  let pending = null;
+  try { pending = api.list(); } catch (err) { return Promise.resolve(null); }
+  if (!pending || typeof pending.then !== 'function') {
+    appsIndex = normalizeAppsIndex(pending);
+    return Promise.resolve(appsIndex);
+  }
+  appsIndexPending = Promise.resolve(pending).then((answer) => {
+    appsIndexPending = null;
+    appsIndex = normalizeAppsIndex(answer);
+    return appsIndex;
+  }, () => {
+    appsIndexPending = null;
+    return null;   // main could not build it: the dock stays empty this time
+  });
+  return appsIndexPending;
+}
+
+/** Anything main hands over read as { builtAt, apps: [...] }, or null. */
+function normalizeAppsIndex(answer) {
+  if (!answer || typeof answer !== 'object') return null;
+  const list = Array.isArray(answer.apps) ? answer.apps : (Array.isArray(answer) ? answer : null);
+  if (!list) return null;
+  const apps = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' ? entry.id : '';
+    const name = typeof entry.name === 'string' ? entry.name : '';
+    if (!id || !name) continue;
+    apps.push({
+      id: id,
+      name: name,
+      kind: entry.kind === 'store' ? 'store' : 'exe',
+      exe: typeof entry.exe === 'string' && entry.exe ? entry.exe : null,
+      iconDataUrl: typeof entry.iconDataUrl === 'string' && entry.iconDataUrl
+        ? entry.iconDataUrl : null
+    });
+  }
+  const builtAt = typeof answer.builtAt === 'number' ? answer.builtAt : 0;
+  return { builtAt: builtAt, apps: apps };
+}
+
+/** The entries the chrome knows about right now (never null). */
+function appsList() {
+  return appsIndex ? appsIndex.apps : [];
+}
+
+function appById(id) {
+  const list = appsList();
+  for (const entry of list) if (entry.id === id) return entry;
+  return null;
+}
+
+/* --- running state, derived from the stats sample ------------------ */
+
+/*
+ * The sampler's process groups are keyed on the perfmon instance name, which
+ * is the executable's base name with no extension ('Spotify', 'chrome'). A
+ * pin carries the basename WITH it ('spotify.exe'), so one of the two has to
+ * be trimmed: that is the whole of the match, plus case, because perfmon's
+ * casing is the binary's and a shortcut's target is whatever was typed.
+ */
+
+/** 'C:\x\Spotify.exe' or 'Spotify.exe' -> 'spotify'. '' for anything else. */
+function procKeyForExe(exe) {
+  if (typeof exe !== 'string') return '';
+  let text = exe.trim();
+  if (!text) return '';
+  const cut = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
+  if (cut >= 0) text = text.slice(cut + 1);
+  text = text.toLowerCase();
+  if (text.length > 4 && text.slice(-4) === '.exe') text = text.slice(0, -4);
+  return text;
+}
+
+// The last sample from main, kept so a fresh guest and the palette can both be
+// told what is running without waiting for the next second to come round.
+let lastStatsSample = null;
+
+/** The process groups in the last sample (never null). */
+function lastProcGroups() {
+  const procs = (lastStatsSample && typeof lastStatsSample === 'object')
+    ? lastStatsSample.procs : null;
+  const top = (procs && typeof procs === 'object') ? procs.top : null;
+  return Array.isArray(top) ? top : [];
+}
+
+/** { running, pids } for one app's exe against one list of process groups. */
+function runningForExe(exe, groups) {
+  const key = procKeyForExe(exe);
+  if (!key) return { running: false, pids: [] };
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue;
+    if (typeof group.key !== 'string') continue;
+    if (group.key.toLowerCase() !== key) continue;
+    const pids = [];
+    if (Array.isArray(group.pids)) {
+      for (const pid of group.pids) {
+        if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) pids.push(pid);
+      }
+    }
+    return { running: true, pids: pids };
+  }
+  return { running: false, pids: [] };
+}
+
+/**
+ * The running map for every app the chrome knows about: the pins (so the dock
+ * is right even before the index has landed) and the whole index (so the
+ * palette can hint at an app the dock has never shown).
+ */
+function computeAppRunning(pins, groups) {
+  const out = Object.create(null);
+  const seen = Object.create(null);
+  const consider = (entry) => {
+    if (!entry || !entry.id || seen[entry.id]) return;
+    seen[entry.id] = true;
+    out[entry.id] = runningForExe(entry.exe, groups);
+  };
+  for (const id of (Array.isArray(pins) ? pins : [])) consider(appById(id) || { id: id, exe: null });
+  for (const entry of appsList()) consider(entry);
+  return out;
+}
+
+// id -> { running, pids } as of the last sample. Replaced wholesale, so a
+// reader never sees half of one update.
+let appRunning = Object.create(null);
+
+/** True when two { running, pids } entries say the same thing. */
+function sameAppRunning(one, two) {
+  if (!one || !two) return false;
+  if (!one.running !== !two.running) return false;
+  const p1 = Array.isArray(one.pids) ? one.pids : [];
+  const p2 = Array.isArray(two.pids) ? two.pids : [];
+  if (p1.length !== p2.length) return false;
+  for (let i = 0; i < p1.length; i++) if (p1[i] !== p2[i]) return false;
+  return true;
+}
+
+/** True when these two maps say anything different at all. */
+function appRunningDiffers(a, b) {
+  for (const k in a) if (!(k in b) || !sameAppRunning(a[k], b[k])) return true;
+  for (const k in b) if (!(k in a)) return true;
+  return false;
+}
+
+/** Only the ids whose state moved between two maps — what the guest is sent. */
+function appRunningDiff(before, after) {
+  const out = {};
+  for (const k in after) {
+    if (!sameAppRunning(before[k], after[k])) out[k] = after[k];
+  }
+  // An id that has left the map (the index was refreshed) is reported as
+  // stopped rather than dropped: the dot has to come off the tile.
+  for (const k in before) {
+    if (!(k in after)) out[k] = { running: false, pids: [] };
+  }
+  return out;
+}
+
+/**
+ * Read by tabsearch.js, which needs to know whether an app is already up
+ * before it offers to launch it. A copy: the palette must never be able to
+ * edit the chrome's state by holding onto the object.
+ */
+function appRunningState() {
+  const out = {};
+  for (const k in appRunning) {
+    out[k] = { running: !!appRunning[k].running, pids: (appRunning[k].pids || []).slice() };
+  }
+  return out;
+}
+
+/**
+ * Called from the stats listener with every sample. The map is recomputed
+ * each time (it is a handful of string compares) but only a real change
+ * reaches a guest.
+ */
+function syncAppsRunning(sample) {
+  lastStatsSample = (sample && typeof sample === 'object') ? sample : null;
+  const next = computeAppRunning(appPinIds(), lastProcGroups());
+  if (!appRunningDiffers(appRunning, next)) return false;
+  const diff = appRunningDiff(appRunning, next);
+  appRunning = next;
+  for (const tab of tabs) pushAppsRunning(tab, diff);
+  return true;
+}
+
+/** Hand one running-state diff to one open new-tab guest. */
+function pushAppsRunning(tab, diff) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (!diff || typeof diff !== 'object') return;
+  let keys = null;
+  try { keys = Object.keys(diff); } catch (err) { return; }
+  if (!keys || !keys.length) return;
+  let payload = '';
+  try { payload = JSON.stringify(diff); } catch (err) { return; }
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyAppsRunning && window.__applyAppsRunning(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+/* --- the dock push ------------------------------------------------- */
+
+/**
+ * One dock, as the page reads it: the pins with everything they need to draw
+ * (icon included) and the installed list with only what the picker needs to
+ * filter on. Icons are the heavy half — a 32px PNG data URL each — so they go
+ * only to the pins.
+ */
+function appsPayload() {
+  const groups = lastProcGroups();
+  const pins = [];
+  for (const id of appPinIds()) {
+    const entry = appById(id);
+    // A pin whose app is not in the index (uninstalled, or the index has not
+    // landed) is left out of the drawing and kept in the settings: it comes
+    // back on its own if the app does.
+    if (!entry) continue;
+    const state = appRunning[id] || runningForExe(entry.exe, groups);
+    pins.push({
+      id: entry.id,
+      name: entry.name,
+      iconDataUrl: entry.iconDataUrl || null,
+      exe: entry.exe || null,
+      running: !!state.running,
+      pids: (state.pids || []).slice()
+    });
+  }
+  const installed = appsList().map((entry) => ({
+    id: entry.id, name: entry.name, kind: entry.kind, exe: entry.exe || null
+  }));
+  return { pins: pins, installed: installed };
+}
+
+/**
+ * Push the dock to one new-tab guest. Asynchronous only because the index may
+ * still be on its way; once it is in hand this is one memoised IPC, and a
+ * build with no api.apps pushes an empty dock (the page clears its row rather
+ * than keeping a stale one).
+ */
+function pushAppsToTab(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const viewEl = tab.viewEl;
+  ensureAppsIndex().then(() => {
+    if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+    if (tab.viewEl !== viewEl) return;   // the guest was replaced mid-flight
+    // The first push is also what seeds the running map for the palette, on a
+    // window where no sample has arrived yet.
+    if (!Object.keys(appRunning).length) {
+      appRunning = computeAppRunning(appPinIds(), lastProcGroups());
+    }
+    let payload = '';
+    try { payload = JSON.stringify(appsPayload()); } catch (err) { return; }
+    if (pushUnchanged(tab, 'apps', payload)) return;
+    try {
+      const pending = viewEl.executeJavaScript(
+        'window.__applyApps && window.__applyApps(' + payload + ')'
+      );
+      if (pending && typeof pending.catch === 'function') {
+        pending.catch(() => pushFailed(tab, 'apps'));
+      }
+    } catch (err) { pushFailed(tab, 'apps'); /* guest went away mid-call */ }
+  }, () => { /* ensureAppsIndex never rejects; here for the contract */ });
+}
+
+function pushAppsToAll() {
+  for (const tab of tabs) pushAppsToTab(tab);
+}
+
+/* --- newtab:app, asked for over the console channel ---------------- */
+
+/*
+ * Exactly the end-task channel, one door down:
+ *
+ *   newtab:app {"action":"launch","id":"a1b2c3"}
+ *   newtab:app {"action":"focus","pid":1234}
+ *   newtab:app {"action":"pin","id":"a1b2c3"}
+ *   newtab:app {"action":"unpin","id":"a1b2c3"}
+ *   newtab:app {"action":"refresh"}
+ *
+ * and the answer on window.__applyAppResult({ action, id, ok, reason }).
+ * Same reasoning as there: a console line is not a trusted channel, so
+ * anything that is not exactly one of these five shapes is ignored in
+ * silence, and only the guest the listener was attached to is heard.
+ */
+
+const APP_PREFIX = 'newtab:app ';
+
+/** An id is a hash; a pid is a pid. Neither is ever this long. */
+const APP_ID_MAX = 200;
+
+/**
+ * Parse one console line into { action, id, pid }, or null when it is not an
+ * app request or not a well-formed one. Pure, and the whole of the
+ * validation: a missing id, a fractional pid or a made-up action all come
+ * back null rather than partly honoured.
+ */
+function parseAppLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(APP_PREFIX) !== 0) return null;
+
+  let msg = null;
+  try { msg = JSON.parse(line.slice(APP_PREFIX.length)); } catch (err) { return null; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
+  const action = msg.action;
+  if (action !== 'launch' && action !== 'focus' && action !== 'pin'
+    && action !== 'unpin' && action !== 'refresh') return null;
+
+  if (action === 'refresh') return { action: action, id: '', pid: 0 };
+
+  if (action === 'focus') {
+    const pid = msg.pid;
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return null;
+    const id = typeof msg.id === 'string' && msg.id.length <= APP_ID_MAX ? msg.id : '';
+    return { action: action, id: id, pid: pid };
+  }
+
+  if (typeof msg.id !== 'string') return null;
+  const id = msg.id.trim();
+  if (!id || id.length > APP_ID_MAX) return null;
+  return { action: action, id: id, pid: 0 };
+}
+
+/** Hand one answer back to the guest that asked for it. */
+function pushAppResult(tab, viewEl, result) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (tab.viewEl !== viewEl) return;   // the guest was replaced mid-flight
+  let payload = '';
+  try {
+    payload = JSON.stringify({
+      action: String(result && result.action || ''),
+      id: String(result && result.id || ''),
+      ok: !!(result && result.ok),
+      reason: (result && typeof result.reason === 'string') ? result.reason : ''
+    });
+  } catch (err) { return; }
+  try {
+    const pending = viewEl.executeJavaScript(
+      'window.__applyAppResult && window.__applyAppResult(' + payload + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch (err) { /* guest went away mid-call */ }
+}
+
+/** One api.apps call, whatever it answers with, as one pushed result. */
+function answerAppCall(tab, viewEl, req, pending) {
+  if (!pending || typeof pending.then !== 'function') {
+    const ok = !!(pending && pending.ok);
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok,
+      reason: (pending && pending.reason) || (ok ? '' : 'failed')
+    });
+    return;
+  }
+  pending.then((answer) => {
+    const ok = !!(answer && answer.ok);
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok,
+      reason: (answer && answer.reason) || (ok ? '' : 'failed')
+    });
+  }, () => {
+    pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
+  });
+}
+
+/**
+ * One console line from one guest. Honoured only for a new-tab page whose
+ * viewEl is still the one the listener was attached to — any other guest can
+ * print the same line and nothing happens. Returns true when the request was
+ * acted on (or answered 'unavailable'), which is what the harness checks.
+ */
+function handleAppLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const req = parseAppLine(text);
+  if (!req) return false;
+
+  // Pins are the chrome's own state: they work with no bridge at all.
+  if (req.action === 'pin' || req.action === 'unpin') {
+    const settings = window.Settings;
+    if (!settings || typeof settings.setAppPins !== 'function') {
+      pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'unavailable' });
+      return true;
+    }
+    const ids = appPinIds();
+    const at = ids.indexOf(req.id);
+    if (req.action === 'pin') { if (at === -1) ids.push(req.id); }
+    else { if (at >= 0) ids.splice(at, 1); }
+    let ok = true;
+    try { settings.setAppPins(ids); } catch (err) { ok = false; }
+    // The settings listener wired in wireSettings() re-pushes every dock.
+    pushAppResult(tab, viewEl, {
+      action: req.action, id: req.id, ok: ok, reason: ok ? '' : 'failed'
+    });
+    return true;
+  }
+
+  const api = appsApi();
+  const method = req.action === 'launch' ? 'launch'
+    : (req.action === 'focus' ? 'focus' : 'refresh');
+  if (!api || typeof api[method] !== 'function') {
+    pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'unavailable' });
+    return true;
+  }
+
+  let pending = null;
+  try {
+    if (req.action === 'launch') pending = api.launch(req.id);
+    else if (req.action === 'focus') pending = api.focus(req.pid);
+    else pending = api.refresh();
+  } catch (err) {
+    pushAppResult(tab, viewEl, { action: req.action, id: req.id, ok: false, reason: 'failed' });
+    return true;
+  }
+
+  if (req.action === 'refresh') {
+    // Whatever main answers, the cached index is now stale: drop it, re-fetch
+    // it, and hand the new one to every dock and to the palette.
+    appsIndex = null;
+    appsIndexPending = null;
+    const done = () => {
+      appsIndex = null;
+      appsIndexPending = null;
+      ensureAppsIndex().then(() => {
+        appRunning = computeAppRunning(appPinIds(), lastProcGroups());
+        pushAppsToAll();
+        notifyAppsChanged();
+      }, () => {});
+    };
+    if (pending && typeof pending.then === 'function') pending.then(done, done);
+    else done();
+  }
+
+  answerAppCall(tab, viewEl, req, pending);
+  return true;
+}
+
+/** The palette caches its own copy of the list; tell it to drop that. */
+function notifyAppsChanged() {
+  const ts = window.TabSearch;
+  if (!ts || typeof ts.appsChanged !== 'function') return;
+  try { ts.appsChanged(); } catch (err) { /* the palette can look after itself */ }
 }
 
 // How many recent sites the new-tab page is given. Its own layout decides how
@@ -612,12 +1125,15 @@ function wireSettings() {
   const settings = window.Settings;
   if (!settings || typeof settings.on !== 'function') return;
   pushClaudeSkipToPreload(); // the switch as it stands at boot
-  settings.on(() => {
+  settings.on((all, keys) => {
     pushClaudeSkipToPreload(); // ...and after any write, including that switch
     for (const tab of tabs) {
       pushSettingsToTab(tab);
       pushBackgroundToTab(tab); // the store emits on every image replace/remove too
     }
+    // The dock is only redrawn when the pins themselves moved; an older
+    // settings.js that emits no key list gets the push either way.
+    if (!Array.isArray(keys) || keys.indexOf('apps') >= 0) pushAppsToAll();
   });
 }
 
@@ -4242,6 +4758,7 @@ function wireViewEvents(tab) {
     pushSettingsToTab(tab);
     pushRecentToTab(tab);
     pushBackgroundToTab(tab);
+    pushAppsToTab(tab);   // the app dock: pins, the installed list, running state
     pushHistoryToTab(tab);
     pushReadoutToTab(tab);
     // A new document has not opted out of anything yet; ask it once, and take
@@ -4396,6 +4913,12 @@ function wireViewEvents(tab) {
   // console line per press, answered on window.__applyEndTask.
   viewEl.addEventListener('console-message', (event) => {
     handleEndTaskLine(tab, viewEl, event && event.message);
+  });
+
+  // ...and to launch, focus, pin, unpin or re-index a native app, on
+  // `newtab:app {json}`, answered on window.__applyAppResult.
+  viewEl.addEventListener('console-message', (event) => {
+    handleAppLine(tab, viewEl, event && event.message);
   });
 
   viewEl.addEventListener('page-favicon-updated', (event) => {

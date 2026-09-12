@@ -103,8 +103,19 @@
        The picture itself is NOT in here — see the asset store below. The clip
        is not either: main copies it into <userData>/backgrounds/ and only its
        file:// URL is stored. */
-    newtabBackground: { kind: 'board' }
+    newtabBackground: { kind: 'board' },
+    /* The native apps pinned to the new tab page's dock, as apps.js ids —
+       names, icons and running state are NOT stored, they are looked up
+       against the installed index every time. `{ pins: [] }` is the whole of
+       it for now; the object leaves room for the rest of the group later.
+       There is no UI for this in the pane: the page manages its own dock. */
+    apps: { pins: [] }
   };
+
+  /* A dock is a shortlist. Anything past this is dropped on the way in. */
+  var APP_PINS_MAX = 32;
+  /* An id is a hash from apps.js; anything longer is not one. */
+  var APP_ID_MAX = 200;
 
   /* The backgrounds, as the select offers them. */
   var NEWTAB_BACKGROUNDS = [
@@ -737,6 +748,57 @@
     list.splice(to, 0, item);
     set({ chips: list });
     return true;
+  }
+
+  /* ============================================================
+     Pinned apps
+
+     Ids only. The new tab page's dock is drawn from these ids joined
+     against the installed-app index app.js pushes it, so a pin for an app
+     that has been uninstalled costs nothing and comes back if it is
+     reinstalled. app.js reads them through appPins() and writes them
+     through setAppPins() when the page asks over its console channel.
+     ============================================================ */
+
+  /** Anything stored (or handed in) read as a clean list of ids. */
+  function normalizeAppPins(value) {
+    var out = [];
+    if (!Array.isArray(value)) return out;
+    for (var i = 0; i < value.length; i++) {
+      var raw = value[i];
+      if (typeof raw !== 'string' && typeof raw !== 'number') continue;
+      var id = String(raw).trim();
+      if (!id || id.length > APP_ID_MAX) continue;
+      if (out.indexOf(id) >= 0) continue;   // a dock shows an app once
+      out.push(id);
+      if (out.length >= APP_PINS_MAX) break;
+    }
+    return out;
+  }
+
+  function appPins() {
+    var group = get('apps');
+    return normalizeAppPins(group && typeof group === 'object' ? group.pins : null);
+  }
+
+  /**
+   * Replace the whole list. Normalised on the way in, so a caller may hand
+   * over the page's raw array; set() emits only when the stored value really
+   * moved, which is what keeps app.js from re-pushing an unchanged dock.
+   * @returns {string[]} the list as it is now stored.
+   */
+  function setAppPins(ids) {
+    var next = normalizeAppPins(ids);
+    var group = get('apps');
+    var patch = {};
+    if (group && typeof group === 'object' && !Array.isArray(group)) {
+      for (var k in group) {
+        if (Object.prototype.hasOwnProperty.call(group, k)) patch[k] = group[k];
+      }
+    }
+    patch.pins = next;
+    set({ apps: patch });
+    return appPins();
   }
 
   /* ============================================================
@@ -3457,6 +3519,10 @@
     background: background,
     setBackground: setBackground,
 
+    /* The new tab's app dock: ids, in the order the page shows them. */
+    appPins: appPins,
+    setAppPins: setAppPins,
+
     engines: engines,
     searchUrl: searchUrl,
     isSearchUrl: isSearchUrl,
@@ -3478,6 +3544,8 @@
     _sleepTimes: SLEEP_TIMES,
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
+    _normalizeAppPins: normalizeAppPins,
+    _appPinsMax: APP_PINS_MAX,
     _backgrounds: NEWTAB_BACKGROUNDS,
     _chooseBackgroundVideo: chooseBackgroundVideo,
     _removeBackgroundVideo: removeBackgroundVideo,
