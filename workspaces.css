@@ -18,6 +18,46 @@
    than 150ms.
    ============================================================ */
 
+/* ============================================================
+   The five workspace colours, as tokens.
+
+   They were written inline on the .ws-dot rules when the dot was
+   the only thing that wore them; the titlebar now washes itself in
+   the current workspace's colour too (chrome.css, #titlebar
+   [data-ws-colour]), so the values live here once and both read
+   them. Same colours, same light-theme drop to 44% lightness —
+   nothing new was invented for the wash, it is the same hue at the
+   alpha a tint takes (7% dark, 9% light, where a slightly stronger
+   wash is needed to read against white glass).
+   ============================================================ */
+:root {
+  --ws-ion:      var(--ion);            /* chrome.css owns ion in both themes */
+  --ws-ember:    hsl(345 100% 72%);
+  --ws-forest:   hsl(160 84% 68%);
+  --ws-ocean:    hsl(190 100% 70%);
+  --ws-midnight: hsl(262 92% 76%);
+
+  /* the same five at wash strength: a tint you read without looking at */
+  --ws-ion-wash:      rgba(114, 173, 202, .07);   /* = --ion, dark theme */
+  --ws-ember-wash:    hsl(345 100% 72% / .07);
+  --ws-forest-wash:   hsl(160 84% 68% / .07);
+  --ws-ocean-wash:    hsl(190 100% 70% / .07);
+  --ws-midnight-wash: hsl(262 92% 76% / .07);
+}
+
+:root[data-theme="light"] {
+  --ws-ember:    hsl(345 100% 44%);
+  --ws-forest:   hsl(160 84% 44%);
+  --ws-ocean:    hsl(190 100% 44%);
+  --ws-midnight: hsl(262 92% 44%);
+
+  --ws-ion-wash:      rgba(11, 127, 214, .09);    /* = --ion, light theme */
+  --ws-ember-wash:    hsl(345 100% 44% / .09);
+  --ws-forest-wash:   hsl(160 84% 44% / .09);
+  --ws-ocean-wash:    hsl(190 100% 44% / .09);
+  --ws-midnight-wash: hsl(262 92% 44% / .09);
+}
+
 /* There is no global reset in this app, and chrome.css gives every
    button `display: inline-flex`, which outranks the UA's [hidden].
    These rules put the attribute back in charge. */
@@ -117,11 +157,11 @@
   transition: background-color 120ms steps(2);
 }
 
-.ws-dot[data-colour="ion"]      { --ws-mark: var(--ion);        --ws-mark-glow: var(--ion-glow); }
-.ws-dot[data-colour="ember"]    { --ws-mark: hsl(345 100% 72%); --ws-mark-glow: hsl(345 100% 72% / .5); }
-.ws-dot[data-colour="forest"]   { --ws-mark: hsl(160 84% 68%);  --ws-mark-glow: hsl(160 84% 68% / .5); }
-.ws-dot[data-colour="ocean"]    { --ws-mark: hsl(190 100% 70%); --ws-mark-glow: hsl(190 100% 70% / .5); }
-.ws-dot[data-colour="midnight"] { --ws-mark: hsl(262 92% 76%);  --ws-mark-glow: hsl(262 92% 76% / .5); }
+.ws-dot[data-colour="ion"]      { --ws-mark: var(--ws-ion);      --ws-mark-glow: var(--ion-glow); }
+.ws-dot[data-colour="ember"]    { --ws-mark: var(--ws-ember);    --ws-mark-glow: hsl(345 100% 72% / .5); }
+.ws-dot[data-colour="forest"]   { --ws-mark: var(--ws-forest);   --ws-mark-glow: hsl(160 84% 68% / .5); }
+.ws-dot[data-colour="ocean"]    { --ws-mark: var(--ws-ocean);    --ws-mark-glow: hsl(190 100% 70% / .5); }
+.ws-dot[data-colour="midnight"] { --ws-mark: var(--ws-midnight); --ws-mark-glow: hsl(262 92% 76% / .5); }
 
 /* The workspace you are in states itself as light: the pill's mark and the
    current row's mark are pips, lit in their own hue. Every other dot — the
@@ -403,6 +443,128 @@
 }
 
 /* ============================================================
+   The folder + pane block
+   Opened from the folder button on a row, under that row: two
+   labelled lines in the same 100%-wide seat the colour strip takes,
+   so the list does not reflow around it.
+   ============================================================ */
+
+/* the expander button itself: lit while open, marked while the workspace
+   actually has a folder or a pane set */
+#workspaces-panel .ws-act-setup.is-set { color: var(--fg-2); }
+#workspaces-panel .ws-act-setup.is-on {
+  background: var(--glass-3);
+  color: var(--fg);
+}
+
+#workspaces-panel .ws-setup {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0 7px 1px;
+}
+
+#workspaces-panel .ws-setup-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#workspaces-panel .ws-setup-label {
+  flex: 0 0 44px;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+/* The path, as a button: the folder's own name, with the whole path in the
+   title. A long path would push the popover wide, so it is ellipsised. */
+#workspaces-panel .ws-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: var(--glass);
+  color: var(--fg);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+}
+
+#workspaces-panel .ws-folder:hover:not(:disabled) { background: var(--glass-2); }
+#workspaces-panel .ws-folder.is-unset { color: var(--fg-3); }
+#workspaces-panel .ws-folder:disabled { opacity: .55; cursor: default; }
+
+/* A folder that is not there any more. A warning is the one place a line is
+   allowed to be coloured; it still does not glow. */
+#workspaces-panel .ws-folder.is-missing {
+  border-color: var(--ws-ember);
+  color: var(--ws-ember);
+}
+
+#workspaces-panel .ws-folder:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* Why something is not available, in words, under the row it belongs to. */
+#workspaces-panel .ws-setup-note {
+  padding-left: 50px;
+  color: var(--ws-ember);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* the two pane choices, as one segmented control */
+#workspaces-panel .ws-panes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#workspaces-panel .ws-pane-opt {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-stretch: var(--readout-stretch);
+  transition: background-color 120ms steps(2), color 120ms steps(2);
+}
+
+#workspaces-panel .ws-pane-opt:hover:not(:disabled) { background: var(--glass-2); color: var(--fg); }
+#workspaces-panel .ws-pane-opt.is-on {
+  background: var(--glass-3);
+  border-color: var(--edge);
+  color: var(--fg);
+}
+#workspaces-panel .ws-pane-opt:disabled { opacity: .55; cursor: default; }
+
+#workspaces-panel .ws-pane-opt:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* ============================================================
    The "New workspace" footer
    ============================================================ */
 
@@ -572,6 +734,8 @@
   #workspaces-panel .ws-row-acts,
   #workspaces-panel .ws-act,
   #workspaces-panel .ws-swatch,
+  #workspaces-panel .ws-folder,
+  #workspaces-panel .ws-pane-opt,
   #workspaces-panel .ws-newbtn,
   #workspaces-panel .ws-create,
   .ws-dot { transition: none; }

@@ -767,6 +767,24 @@ button.glass:focus-visible {
   -webkit-app-region: drag;
 }
 
+/* --- the strip tint: which workspace you are in, very faintly ---
+   app.js stamps data-ws-colour on the titlebar (the row the tab strip lives
+   in) with the current workspace's colour; the five values are workspaces.css
+   tokens, the same ones the dots wear, at 7% — enough to tell two workspaces
+   apart out of the corner of the eye, not enough to be a colour scheme. Home
+   has no colour, so it carries no attribute and this never applies to it. */
+#titlebar[data-ws-colour] {
+  background:
+    linear-gradient(var(--ws-tint), var(--ws-tint)),
+    var(--sheen), var(--glass-thin);
+}
+
+#titlebar[data-ws-colour="ion"]      { --ws-tint: var(--ws-ion-wash); }
+#titlebar[data-ws-colour="ember"]    { --ws-tint: var(--ws-ember-wash); }
+#titlebar[data-ws-colour="forest"]   { --ws-tint: var(--ws-forest-wash); }
+#titlebar[data-ws-colour="ocean"]    { --ws-tint: var(--ws-ocean-wash); }
+#titlebar[data-ws-colour="midnight"] { --ws-tint: var(--ws-midnight-wash); }
+
 #tabstrip {
   display: flex;
   align-items: center;
@@ -1508,7 +1526,11 @@ body.claude-live #newclaude.attn .dot {
 /* --- tab well ------------------------------------------------- */
 /* No radius, no overflow clipping: guest views do not clip reliably.
    No ground of its own, so the aurora reaches the glass chamber. */
-#views {
+/* The well ROW: the tab well, and the side pane beside it when a workspace
+   asks for one. The row carries what #views used to carry — the seat under
+   the chrome and the hairline along its top — so with the pane hidden the
+   layout is pixel for pixel what it was before the pane existed. */
+#well {
   position: relative;
   z-index: 1;
   flex: 1 1 auto;
@@ -1516,6 +1538,63 @@ body.claude-live #newclaude.attn .dot {
   display: flex;
   border-top: 1px solid var(--edge);
 }
+
+#views {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* --- the side pane: a column BESIDE the well ------------------ */
+/* Opaque, not glass: it stands next to a <webview>, and a guest page is not
+   in this document's compositing tree — there is nothing behind the pane to
+   blur, exactly as find.css and settings.css say of their own panes. One
+   hairline on its left edge, no glow: it is furniture, not an alert. */
+#sidepane {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 380px;          /* app.js writes the real width, min 280 / max 60% */
+  width: 380px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--edge);
+}
+
+#sidepane-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The 6px grab strip on the pane's left edge. It is INSIDE the pane's width,
+   so it can never drift out of line with the edge it moves. Stepped hover,
+   like every other control in the chrome; nothing animates while dragging. */
+#sidepane-resize {
+  flex: 0 0 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 120ms steps(2);
+  touch-action: none;       /* the pointer events are ours, not the scroller's */
+}
+
+#sidepane-resize:hover { background: var(--glass-2); }
+#sidepane-resize:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* While the handle is held: no transition anywhere in the row, and no text
+   selection anywhere in the window. */
+body.sidepane-dragging { cursor: col-resize; }
+body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition: none; }
 
 #views webview {
   flex: 1 1 auto;
@@ -1921,7 +2000,7 @@ body,
   #omnibox, #zoom-badge,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
-  .tab.drag-shift, #tabmenu .menu-item { transition: none; }
+  .tab.drag-shift, #tabmenu .menu-item, #sidepane-resize { transition: none; }
   /* the theme still switches, it just arrives all at once */
   html, body, .chrome-layer, #titlebar, .navrow, .tab, .claude-view { transition: none; }
 }
@@ -1932,7 +2011,9 @@ body,
    ------------------------------------------------------------------ */
 body.fullscreen .chrome-layer,
 body.page-fullscreen .chrome-layer { display: none; }
-body.fullscreen #views,
-body.page-fullscreen #views { border-top: 0; }
+/* The hairline moved to the well ROW when the side pane joined it, so this
+   is the row it comes off — #views itself no longer draws one. */
+body.fullscreen #well,
+body.page-fullscreen #well { border-top: 0; }
 body.fullscreen .backdrop,
 body.page-fullscreen .backdrop { display: none; }

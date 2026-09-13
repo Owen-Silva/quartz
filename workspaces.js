@@ -14,16 +14,27 @@
  * Contract with app.js — every one of these is OPTIONAL at runtime. When
  * workspaceList is missing the whole feature renders nothing at all:
  *
- *   workspaceList()      -> [{ id, name, colour, tabCount, current }]
+ *   workspaceList()      -> [{ id, name, colour, folder, pane, preset,
+ *                              tabCount, current }]
  *                           colour in null|'ion'|'ember'|'forest'|'ocean'|'midnight'
+ *                           folder: the Claude folder for the workspace, or null
+ *                           pane:   null | 'school' (the side pane it wants)
+ *                           preset: null | 'school' | 'project' | 'club' | 'trading'
  *   currentWorkspace()   -> the current workspace (object or id; both accepted)
  *   switchWorkspace(id)
  *   createWorkspace(name, colour) -> id
  *   renameWorkspace(id, name)
  *   setWorkspaceColour(id, colour)
+ *   setWorkspaceFolder(id, folder)  // null clears it
+ *   setWorkspacePane(id, kind)      // null | 'school'
  *   deleteWorkspace(id)           // 'main' can never be deleted
  *   moveTabToWorkspace(tabId, wsId)
  *   moveActiveTabToWorkspace(wsId)
+ *
+ * The folder picker is window.api.app.pickFolder(defaultPath) and the check
+ * that a folder still exists is window.api.app.dirExists(path). Both are
+ * optional too: without the picker the row says so instead of offering a
+ * button that does nothing.
  *
  * app.js fires `workspacechange` (detail: { id }) on the document for any
  * change to the model; `tabchange` covers the tab counts.
@@ -46,6 +57,8 @@
   var GLYPH_DELETE = '\uE74D';   // Delete
   var GLYPH_CHECK = '\uE73E';    // CheckMark
   var GLYPH_CHEVRON = '\uE70D';  // ChevronDown
+  var GLYPH_FOLDER = '\uE8B7';   // Folder: the folder-and-pane expander
+  var GLYPH_CLEAR = '\uE711';    // Cancel: clears a folder back to none
 
   /* There is no glyph in either icon font that reads as "workspace", so the
      pill carries a coloured dot instead — the same dot the rows use, which
@@ -57,6 +70,13 @@
     'forest': 'Forest',
     'ocean': 'Ocean',
     'midnight': 'Midnight'
+  };
+
+  /* The side panes a workspace can ask for, in the order the toggle offers
+     them. null is "no pane", which is what every workspace starts on. */
+  var PANES = [null, 'school'];
+  var PANE_LABEL = {
+    'school': 'School notes'
   };
 
   /* ============================================================
@@ -72,7 +92,15 @@
   function fnCreate() { return (typeof createWorkspace === 'function') ? createWorkspace : null; }
   function fnRename() { return (typeof renameWorkspace === 'function') ? renameWorkspace : null; }
   function fnColour() { return (typeof setWorkspaceColour === 'function') ? setWorkspaceColour : null; }
+  function fnFolder() { return (typeof setWorkspaceFolder === 'function') ? setWorkspaceFolder : null; }
+  function fnPane() { return (typeof setWorkspacePane === 'function') ? setWorkspacePane : null; }
   function fnDelete() { return (typeof deleteWorkspace === 'function') ? deleteWorkspace : null; }
+
+  /** window.api.app, or null in a build whose preload predates it. */
+  function appApi() {
+    var api = window.api;
+    return (api && api.app) ? api.app : null;
+  }
   function fnMoveTab() { return (typeof moveTabToWorkspace === 'function') ? moveTabToWorkspace : null; }
   function fnMoveActive() { return (typeof moveActiveTabToWorkspace === 'function') ? moveActiveTabToWorkspace : null; }
 
@@ -82,6 +110,19 @@
   function isColour(c) {
     for (var i = 0; i < COLOURS.length; i++) if (COLOURS[i] === c) return true;
     return false;
+  }
+
+  function isPane(kind) {
+    for (var i = 0; i < PANES.length; i++) if (PANES[i] === kind) return true;
+    return false;
+  }
+
+  /** The last segment of a path — what the folder button shows when it fits. */
+  function baseName(path) {
+    var text = String(path == null ? '' : path).replace(/[\\/]+$/, '');
+    if (!text) return '';
+    var at = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
+    return at === -1 ? text : text.slice(at + 1);
   }
 
   /** workspaceList(), normalised, and never throwing into a render. */
@@ -100,6 +141,11 @@
         id: String(w.id),
         name: (typeof w.name === 'string' && w.name) ? w.name : 'Workspace',
         colour: isColour(w.colour) ? (w.colour || null) : null,
+        // Anything this build does not recognise as a pane reads as no pane,
+        // the same tolerance the colour gets.
+        folder: (typeof w.folder === 'string' && w.folder) ? w.folder : null,
+        pane: isPane(w.pane) ? w.pane : null,
+        preset: (typeof w.preset === 'string' && w.preset) ? w.preset : null,
         tabCount: Number(w.tabCount) || 0,
         current: !!w.current
       });
@@ -158,6 +204,7 @@
   var editId = null;          // the row being renamed
   var editValue = '';         // its live input value, kept across re-renders
   var colourId = null;        // the row showing its colour strip
+  var setupId = null;         // the row showing its folder + pane block
   var confirmId = null;       // the row showing "Delete?"
 
   var newOpen = false;        // the "New workspace" form is expanded
@@ -218,6 +265,142 @@
       strip.appendChild(colourSwatch(COLOURS[i], chosen, onPick));
     }
     return strip;
+  }
+
+  /* --- the folder + pane block, under one row -------------------- *
+   * Both settings belong to the workspace rather than to a tab, and both are
+   * rare enough that they live behind the folder button instead of taking a
+   * line in every row: what a workspace's folder IS matters on the day it is
+   * set and never again.
+   */
+  function setupBlock(w) {
+    var wrap = el('div', 'ws-setup');
+
+    /* --- Folder ------------------------------------------------- */
+    var fRow = el('div', 'ws-setup-row');
+    fRow.appendChild(el('span', 'ws-setup-label'));
+    fRow.firstChild.textContent = 'Folder';
+
+    var pick = el('button', 'ws-folder');
+    pick.type = 'button';
+    var api = appApi();
+    var canPick = !!(api && typeof api.pickFolder === 'function');
+    if (w.folder) {
+      pick.textContent = baseName(w.folder) || w.folder;
+      pick.title = w.folder + (canPick ? ' — click to choose another' : '');
+      pick.setAttribute('data-path', w.folder);
+    } else {
+      pick.classList.add('is-unset');
+      pick.textContent = canPick ? 'Choose…' : 'Not set';
+      pick.title = canPick
+        ? 'Choose the folder a Claude tab opens in here'
+        : 'This build cannot open a folder picker';
+    }
+    pick.disabled = !canPick || !fnFolder();
+    pick.addEventListener('click', function (event) {
+      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+      chooseFolder(w);
+    });
+    fRow.appendChild(pick);
+
+    if (w.folder && fnFolder()) {
+      fRow.appendChild(iconButton(GLYPH_CLEAR, 'Clear the folder', 'ws-folder-clear', function () {
+        call(fnFolder(), w.id, null);
+        render();
+      }));
+    }
+    wrap.appendChild(fRow);
+
+    // Nothing here fails quietly: a missing folder says so on the button
+    // itself, and a build with no picker says that instead of offering one.
+    var note = el('div', 'ws-setup-note');
+    note.hidden = true;
+    wrap.appendChild(note);
+    if (!canPick) {
+      note.textContent = 'No folder picker in this build: window.api.app.pickFolder is missing.';
+      note.hidden = false;
+    } else if (w.folder) {
+      checkFolder(w.folder, pick, note);
+    }
+
+    /* --- Pane --------------------------------------------------- */
+    var pRow = el('div', 'ws-setup-row');
+    pRow.appendChild(el('span', 'ws-setup-label'));
+    pRow.firstChild.textContent = 'Pane';
+
+    var group = el('div', 'ws-panes');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', 'Side pane');
+    for (var i = 0; i < PANES.length; i++) {
+      group.appendChild(paneOption(w, PANES[i]));
+    }
+    pRow.appendChild(group);
+    wrap.appendChild(pRow);
+
+    return wrap;
+  }
+
+  function paneOption(w, kind) {
+    var b = el('button', 'ws-pane-opt');
+    b.type = 'button';
+    b.textContent = kind ? (PANE_LABEL[kind] || kind) : 'None';
+    b.title = kind
+      ? 'Open the ' + (PANE_LABEL[kind] || kind) + ' pane beside the tabs here'
+      : 'No side pane in this workspace';
+    if ((w.pane || null) === kind) {
+      b.classList.add('is-on');
+      b.setAttribute('aria-pressed', 'true');
+    } else {
+      b.setAttribute('aria-pressed', 'false');
+    }
+    b.disabled = !fnPane();
+    b.addEventListener('click', function (event) {
+      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+      call(fnPane(), w.id, kind);
+      render();
+    });
+    return b;
+  }
+
+  /**
+   * The native folder dialog, then the model. The popover stays open behind
+   * the dialog (it is modal to the window, so no click-outside fires), and a
+   * cancelled pick leaves the folder exactly as it was.
+   */
+  function chooseFolder(w) {
+    var api = appApi();
+    var set = fnFolder();
+    if (!api || typeof api.pickFolder !== 'function' || !set) return;
+    var pending = null;
+    try { pending = api.pickFolder(w.folder || ''); } catch (err) { pending = null; }
+    if (!pending || typeof pending.then !== 'function') return;
+    pending.then(function (picked) {
+      if (typeof picked !== 'string' || !picked) return; // cancelled
+      call(set, w.id, picked);
+      render();
+    }, function () { /* the dialog failed: the folder is unchanged */ });
+  }
+
+  /**
+   * Ask main whether a folder is still there and mark the button when it is
+   * not. Asynchronous, so the answer is dropped unless the button is still on
+   * screen showing the same path: a render may have replaced it by then.
+   */
+  function checkFolder(path, button, note) {
+    var api = appApi();
+    if (!api || typeof api.dirExists !== 'function' || !button) return;
+    var pending = null;
+    try { pending = api.dirExists(path); } catch (err) { pending = null; }
+    if (!pending || typeof pending.then !== 'function') return;
+    pending.then(function (exists) {
+      if (exists !== false) return;
+      if (!button.isConnected || button.getAttribute('data-path') !== path) return;
+      button.classList.add('is-missing');
+      if (note) {
+        note.textContent = 'That folder is not there any more: ' + path;
+        note.hidden = false;
+      }
+    }, function () { /* main could not answer: the button says nothing new */ });
   }
 
   function colourSwatch(colour, chosen, onPick) {
@@ -397,10 +580,24 @@
       colourBtn.addEventListener('click', function (event) {
         if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
         colourId = (colourId === w.id) ? null : w.id;
+        setupId = null;
         confirmId = null;
         render();
       });
       acts.appendChild(colourBtn);
+
+      // The folder and the pane, behind one button: what a workspace IS
+      // beyond its name and colour, opened on the day it is set up.
+      var setupBtn = iconButton(GLYPH_FOLDER, 'Folder and pane', 'ws-act-setup', function () {
+        setupId = (setupId === w.id) ? null : w.id;
+        colourId = null;
+        confirmId = null;
+        render();
+      });
+      if (setupId === w.id) setupBtn.classList.add('is-on');
+      // A workspace with a folder or a pane says so without opening the block.
+      if (w.folder || w.pane) setupBtn.classList.add('is-set');
+      acts.appendChild(setupBtn);
 
       acts.appendChild(iconButton(GLYPH_RENAME, 'Rename', 'ws-act-rename', function () {
         editId = w.id;
@@ -442,6 +639,10 @@
         call(fnColour(), w.id, colour);
         render();
       }));
+    }
+
+    if (setupId === w.id && mode !== 'move' && editId !== w.id) {
+      row.appendChild(setupBlock(w));
     }
 
     return row;
@@ -630,6 +831,7 @@
     editId = null;
     editValue = '';
     colourId = null;
+    setupId = null;
     confirmId = null;
     newOpen = false;
     newName = '';

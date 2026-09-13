@@ -3,8 +3,8 @@
 #
 #   powershell -File toback.ps1 -Match <profile-name> [-WaitSec 40] [-Restore <hwnd>]
 #
-# -Match   is matched against electron.exe command lines (use the --profile-name you
-#          launched the test instance with); every visible window of those pids is sent
+# -Match   is the --profile-name you launched the test instance with; it is matched as
+#          the whole '--profile-name=<x>' flag, never as a bare substring; every visible window of those pids is sent
 #          to HWND_BOTTOM with SWP_NOACTIVATE the moment it appears (polls for -WaitSec).
 # -Restore is the hwnd that should be in the foreground afterwards (read
 #          GetForegroundWindow before launching); it is put back via AttachThreadInput.
@@ -45,7 +45,10 @@ try { Add-Type -TypeDefinition $sig -ErrorAction Stop } catch { }
 
 function Get-TreePids([string]$m) {
   $all = Get-CimInstance Win32_Process -Filter "Name='electron.exe'"
-  $mine = @($all | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($m) })
+  # Match the --profile-name flag itself, never a bare substring: '-Match ws'
+  # matched 'browser' in the live browser's path and sent IT to the back once.
+  $needle = if ($m.Contains('=')) { $m } else { '--profile-name=' + $m }
+  $mine = @($all | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) })
   $ids = New-Object 'System.Collections.Generic.HashSet[int]'
   foreach ($p in $mine) { [void]$ids.Add([int]$p.ProcessId) }
   # The comma keeps the HashSet whole: a bare return unrolls it into an object[]

@@ -2446,7 +2446,10 @@ function clearAppNote(tab) {
  * @param {string} desktopId an installed app id to offer, or '' for none
  */
 function showAppNote(tab, text, desktopId) {
-  if (!tab || tab.kind !== 'page' || !viewsEl) return;
+  // Page tabs and Claude chambers both: the bar is parked over one tab's well
+  // and follows the same display swap either way, and a chamber that opened in
+  // the wrong folder needs to say so exactly as loudly as a DRM site does.
+  if (!tab || (tab.kind !== 'page' && tab.kind !== 'claude') || !viewsEl) return;
   clearAppNote(tab); // one note per tab, always the current one
 
   const bar = document.createElement('div');
@@ -4041,13 +4044,29 @@ let nextTabId = 1;
 const DEFAULT_WORKSPACE_ID = 'main';
 const WORKSPACE_COLOURS = ['ion', 'ember', 'forest', 'ocean', 'midnight'];
 const WORKSPACE_NAME_MAX = 40;
+// The side panes a workspace can ask for. null is "no pane" and is the only
+// answer Home ever gives; 'school' is school-pane.js's. A kind this list does
+// not name reads as null, so a session written by a newer build cannot leave
+// the well beside an empty column.
+const WORKSPACE_PANES = ['school'];
+const WORKSPACE_FOLDER_MAX = 400;
 
 /**
+ * A workspace's `folder` is where a Claude tab opened while it is on screen
+ * starts (defaultClaudeCwd()), `pane` is the side pane it wants, and `preset`
+ * is the stable key of a seeded workspace ('school' | 'project' | 'club' |
+ * 'trading') so code can find "the School workspace" however it is renamed.
+ * All three are null on a workspace the user made themselves.
+ *
  * @type {Array<{id:string, name:string, colour:string|null,
+ *               folder:string|null, pane:string|null, preset:string|null,
  *               lastActiveTabId:number|null}>}
  */
 const workspaces = [
-  { id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActiveTabId: null }
+  {
+    id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null,
+    folder: null, pane: null, preset: null, lastActiveTabId: null
+  }
 ];
 let currentWorkspaceId = DEFAULT_WORKSPACE_ID;
 let nextWorkspaceSeq = 1;
@@ -4836,6 +4855,109 @@ function newWorkspaceId() {
 }
 
 /**
+ * A workspace's default folder, or null. Kept as written (the picker hands
+ * back a real path and nothing else may set it), only trimmed and capped —
+ * whether it still exists is a question for the moment a chamber opens in it,
+ * and warnMissingCwd() is what says so out loud when it does not.
+ */
+function cleanWorkspaceFolder(folder) {
+  const text = (typeof folder === 'string') ? folder.trim() : '';
+  if (!text || text.length > WORKSPACE_FOLDER_MAX) return null;
+  return text;
+}
+
+/** One of the side pane kinds, or null for "no pane". */
+function cleanWorkspacePane(kind) {
+  return WORKSPACE_PANES.indexOf(kind) === -1 ? null : kind;
+}
+
+/** A preset key this build knows, or null. Never invented from a session. */
+function cleanWorkspacePreset(key) {
+  for (const row of WORKSPACE_PRESETS) if (row.preset === key) return key;
+  return null;
+}
+
+/* --- the four presets ----------------------------------------------
+ * The user works in the same four places, so the browser ships them rather than
+ * making him build them: School, Project, Club and Trading, seeded once after
+ * the session is restored and never again — a preset he deletes stays deleted
+ * (presetsSeeded rides in the session snapshot, with a localStorage backstop
+ * for the sessions sanitiseSession() cannot return: see seedWorkspacePresets).
+ *
+ * `folder` is written under the user's own home folder wherever the path is in
+ * it, so the seed is right on another machine too; Club has none on purpose —
+ * The user sets it from the popover, and until he does a Claude tab there opens
+ * wherever it would have anyway.
+ */
+const WORKSPACE_PRESETS = [
+  { preset: 'school',  name: 'School',  colour: 'forest', home: 'Documents\\notes', pane: 'school' },
+  { preset: 'project',   name: 'Project',   colour: 'ion',    home: 'Downloads\\Project',  pane: null },
+  { preset: 'club',    name: 'Club',    colour: 'ocean',  home: null,                pane: null },
+  { preset: 'trading', name: 'Trading', colour: 'ember',  home: 'trading-bot',   pane: null }
+];
+
+// Written the moment the presets go in, so a browser whose session snapshot
+// cannot be read back (every tab in it unpersistable, storage cleared under it)
+// still does not resurrect a workspace the user deleted.
+const PRESETS_SEEDED_KEY = 'workspacePresetsSeeded';
+let presetsSeeded = false;
+
+/** `Documents\notes` -> `C:\Users\you\Documents\notes`, or null with no home. */
+function underHome(relative) {
+  const home = homeDir();
+  if (!home || typeof relative !== 'string' || !relative) return null;
+  return home.replace(/[\\/]+$/, '') + '\\' + relative;
+}
+
+/** The workspace carrying a preset key ('school' ...), or null once deleted. */
+function presetWorkspace(key) {
+  return workspaces.find((w) => w.preset === key) || null;
+}
+
+/**
+ * Put the four presets in, once in the life of a profile. Called after the
+ * session is restored — on a fresh profile and on an old one that predates
+ * them alike — so the rows the user already had are never disturbed: Home
+ * stays first, the presets go in behind it in their own order, and anything
+ * the user made keeps its place after them.
+ *
+ * @param {object|null} session the restored snapshot, for its seeded flag.
+ * @returns {boolean} true when this call actually seeded.
+ */
+function seedWorkspacePresets(session) {
+  if (presetsSeeded) return false;                 // restoreSession() read the flag
+  if (session && session.presetsSeeded) { presetsSeeded = true; return false; }
+  let stored = null;
+  try { stored = window.localStorage.getItem(PRESETS_SEEDED_KEY); } catch (err) { stored = null; }
+  if (stored === '1') { presetsSeeded = true; return false; }
+
+  let at = 1; // straight after Home, whatever else the list holds
+  for (const row of WORKSPACE_PRESETS) {
+    // A preset that is somehow already there (a flag lost, the rows kept) is
+    // never doubled: the key is what identifies it, not the name.
+    if (presetWorkspace(row.preset)) continue;
+    let id = row.preset;
+    if (findWorkspace(id)) id = newWorkspaceId(); // an id the user's own row took
+    workspaces.splice(Math.min(at, workspaces.length), 0, {
+      id: id,
+      name: row.name,
+      colour: cleanWorkspaceColour(row.colour),
+      folder: row.home ? cleanWorkspaceFolder(underHome(row.home)) : null,
+      pane: cleanWorkspacePane(row.pane),
+      preset: row.preset,
+      lastActiveTabId: null
+    });
+    at += 1;
+  }
+
+  presetsSeeded = true;
+  try { window.localStorage.setItem(PRESETS_SEEDED_KEY, '1'); } catch (err) { /* this run only */ }
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/**
  * One chip's workspace state: hidden unless its tab is in the workspace on
  * screen, and stamped with the workspace colour chrome.css underlines it in.
  */
@@ -4867,6 +4989,10 @@ function setTabWorkspace(tab, id) {
  */
 function emitWorkspaceChange() {
   if (restoring) return; // one event at the end of the rebuild, not forty
+  // The two pieces of chrome the workspace itself owns. Both compare before
+  // they write, so the tab-count calls that also land here cost nothing.
+  syncStripTint();
+  syncSidePane();
   try {
     document.dispatchEvent(new CustomEvent('workspacechange', {
       detail: { id: currentWorkspaceId }
@@ -4911,9 +5037,25 @@ function workspaceList() {
     id: w.id,
     name: w.name,
     colour: w.colour,
+    // The three that came with the presets. Every one is null on a workspace
+    // the user made, so a reader that predates them sees exactly what it did.
+    folder: w.folder || null,
+    pane: w.pane || null,
+    preset: w.preset || null,
     tabCount: tabs.reduce((n, t) => n + (tabWorkspace(t) === w.id ? 1 : 0), 0),
     current: w.id === currentWorkspaceId
   }));
+}
+
+/**
+ * One workspace, by id — a copy, exactly like workspaceList()'s rows. The
+ * popover reads a single row through this rather than filtering the list.
+ * @returns {object|null} null when nothing carries that id.
+ */
+function workspaceInfo(id) {
+  const ws = findWorkspace(id);
+  if (!ws) return null;
+  return workspaceList().find((row) => row.id === ws.id) || null;
 }
 
 /** The id of the workspace the strip is showing. */
@@ -4959,6 +5101,12 @@ function createWorkspace(name, colour) {
     id: newWorkspaceId(),
     name: cleanWorkspaceName(name),
     colour: cleanWorkspaceColour(colour),
+    // A workspace the user makes starts with no folder and no pane; both are
+    // set afterwards from the popover, and neither is worth a second dialog
+    // in front of "New workspace".
+    folder: null,
+    pane: null,
+    preset: null,
     lastActiveTabId: null
   };
   workspaces.push(ws);
@@ -4984,6 +5132,36 @@ function setWorkspaceColour(id, colour) {
   if (!ws) return false;
   ws.colour = cleanWorkspaceColour(colour);
   syncChipWorkspaces(); // every chip in it wears the new underline
+  syncStripTint();      // ...and the strip itself, when it is the one on screen
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/**
+ * The folder a Claude tab opened in this workspace starts in. Null clears it,
+ * which puts the workspace back on the Settings folder (defaultClaudeCwd).
+ * Nothing here checks the folder exists: a path that has since gone is caught
+ * where it matters, in the chamber that tried to open in it.
+ */
+function setWorkspaceFolder(id, folder) {
+  const ws = findWorkspace(id);
+  if (!ws) return false;
+  ws.folder = cleanWorkspaceFolder(folder);
+  emitWorkspaceChange();
+  saveSession();
+  return true;
+}
+
+/**
+ * The side pane this workspace wants: null or 'school'. The pane opens the
+ * moment the workspace being changed is the one on screen.
+ */
+function setWorkspacePane(id, kind) {
+  const ws = findWorkspace(id);
+  if (!ws) return false;
+  ws.pane = cleanWorkspacePane(kind);
+  if (ws.id === currentWorkspaceId) syncSidePane();
   emitWorkspaceChange();
   saveSession();
   return true;
@@ -5063,6 +5241,234 @@ function ensureWorkspaceSlot() {
   slot.className = 'no-drag';
   try { tabstripEl.parentNode.insertBefore(slot, tabstripEl); } catch (err) { return null; }
   return slot;
+}
+
+/* ------------------------------------------------------------------ */
+/* The strip tint: the current workspace's colour, very faintly         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The titlebar (the row the strip lives in) wears the current workspace's
+ * colour as a wash — 7% of it, which is a tint you read without looking at.
+ * chrome.css owns the strength and workspaces.css owns the five colours; this
+ * only says which one, through data-ws-colour. Home has no colour, so the
+ * attribute comes off entirely and the bar is exactly what it always was.
+ */
+function syncStripTint() {
+  if (!titlebarEl) return;
+  const ws = findWorkspace(currentWorkspaceId);
+  const colour = (ws && cleanWorkspaceColour(ws.colour)) || '';
+  const now = titlebarEl.getAttribute('data-ws-colour') || '';
+  if (now === colour) return; // compares before it writes: no needless restyle
+  if (colour) titlebarEl.setAttribute('data-ws-colour', colour);
+  else titlebarEl.removeAttribute('data-ws-colour');
+}
+
+/* ------------------------------------------------------------------ */
+/* The side pane: a workspace's own column BESIDE the well             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * <aside id="sidepane"> is index.html's, and it is a sibling of #views inside
+ * #well — beside the tab well, never over it. That is the whole reason it is
+ * not in nativeCoverList(): a hosted app window paints over this document, so
+ * a pane ON the well has to blank the app, while a pane BESIDE it simply makes
+ * the well narrower and the app follows the placeholder's new rect.
+ *
+ * This file owns the host — whether it is up, how wide it is, and the handle
+ * that resizes it. What goes INSIDE it belongs to whoever owns the kind
+ * (school-pane.js for 'school'), which is why the only contract is the
+ * `sidepane` event and window.sidePane: no module here reaches into the other.
+ */
+const SIDEPANE_WIDTH_KEY = 'sidepane.width';
+const SIDEPANE_WIDTH_DEFAULT = 380;
+const SIDEPANE_WIDTH_MIN = 280;
+const SIDEPANE_MAX_FRACTION = 0.6;  // never more than 60% of the window
+const SIDEPANE_HANDLE_W = 6;
+const SIDEPANE_KEY_STEP = 16;       // one arrow press on the focused handle
+
+let sidePaneEl = null;
+let sidePaneBodyEl = null;
+let sidePaneHandleEl = null;
+let sidePaneWidth = SIDEPANE_WIDTH_DEFAULT;
+let sidePaneKind = null;            // what the chrome last acted on
+let sidePaneWired = false;
+let sidePaneDragId = null;
+
+/** The widest the pane may be right now: 60% of the window, never under MIN. */
+function sidePaneMaxWidth() {
+  const room = Math.round((window.innerWidth || 0) * SIDEPANE_MAX_FRACTION);
+  return Math.max(SIDEPANE_WIDTH_MIN, room);
+}
+
+/**
+ * A width that is inside the limits and lands on an even pixel. Stepped on
+ * purpose: the pane sits over a backdrop-filter, so a drag that writes every
+ * sub-pixel re-blurs the chrome for nothing.
+ */
+function clampSidePaneWidth(px) {
+  const n = Number(px);
+  if (!isFinite(n)) return SIDEPANE_WIDTH_DEFAULT;
+  const held = Math.max(SIDEPANE_WIDTH_MIN, Math.min(sidePaneMaxWidth(), Math.round(n)));
+  // Down to the even pixel, not the nearest one: rounding up could step back
+  // over the 60% ceiling on a window whose 60% is an odd number.
+  return Math.floor(held / 2) * 2;
+}
+
+function readSidePaneWidth() {
+  let raw = null;
+  try { raw = window.localStorage.getItem(SIDEPANE_WIDTH_KEY); } catch (err) { raw = null; }
+  const n = Number(raw);
+  return clampSidePaneWidth(isFinite(n) && n > 0 ? n : SIDEPANE_WIDTH_DEFAULT);
+}
+
+function writeSidePaneWidth() {
+  try { window.localStorage.setItem(SIDEPANE_WIDTH_KEY, String(sidePaneWidth)); } catch (err) {
+    /* storage blocked: this run keeps the width, the next one starts at 380 */
+  }
+}
+
+/** The pane kind the workspace on screen asks for: 'school' or null. */
+function currentPaneKind() {
+  const ws = findWorkspace(currentWorkspaceId);
+  return (ws && cleanWorkspacePane(ws.pane)) || null;
+}
+
+/**
+ * Everything that measured the well has to measure it again: the window did
+ * not change size, but the well did. Split view keeps its own rects (it parks
+ * the focus mark and the crash card over measured boxes) and the native tabs
+ * follow their placeholder, which is inside #views and therefore already
+ * observed — observeNativePlaceholder() puts every one of them in one
+ * ResizeObserver whose callback is queueNativeLayout().
+ */
+function afterWellResize() {
+  try { refreshSplit(); } catch (err) { /* layout is never fatal */ }
+}
+
+function emitSidePaneEvent() {
+  try {
+    document.dispatchEvent(new CustomEvent('sidepane', {
+      detail: { kind: sidePaneKind, open: sidePaneKind !== null, width: sidePaneWidth }
+    }));
+  } catch (err) { /* never fatal */ }
+}
+
+/** Push the current width onto the element. The handle is inside that width. */
+function applySidePaneWidth() {
+  if (!sidePaneEl) return;
+  sidePaneEl.style.width = sidePaneWidth + 'px';
+  sidePaneEl.style.flex = '0 0 ' + sidePaneWidth + 'px';
+  if (sidePaneHandleEl) sidePaneHandleEl.setAttribute('aria-valuenow', String(sidePaneWidth));
+}
+
+/**
+ * Resolve the host, build the drag handle and wire it. Called from init() and
+ * defensively from syncSidePane(), so a build where index.html is missing the
+ * <aside> simply never has a pane rather than throwing on every switch.
+ */
+function ensureSidePane() {
+  if (!sidePaneEl) sidePaneEl = document.getElementById('sidepane');
+  if (!sidePaneEl) return null;
+  if (!sidePaneBodyEl) sidePaneBodyEl = document.getElementById('sidepane-body');
+  if (sidePaneWired) return sidePaneEl;
+  sidePaneWired = true;
+
+  sidePaneWidth = readSidePaneWidth();
+  applySidePaneWidth();
+
+  // The handle is the pane's own first child rather than an absolutely
+  // positioned strip over the well: a 6px flex seat cannot drift out of line
+  // with the edge it resizes, whatever the pane's width is.
+  const handle = document.createElement('div');
+  handle.id = 'sidepane-resize';
+  handle.className = 'no-drag';
+  handle.setAttribute('role', 'separator');
+  handle.setAttribute('aria-orientation', 'vertical');
+  handle.setAttribute('aria-label', 'Resize the side pane');
+  handle.setAttribute('aria-valuemin', String(SIDEPANE_WIDTH_MIN));
+  handle.setAttribute('aria-valuenow', String(sidePaneWidth));
+  handle.tabIndex = 0;
+  sidePaneEl.insertBefore(handle, sidePaneEl.firstChild);
+  sidePaneHandleEl = handle;
+
+  const setWidth = (px) => {
+    const next = clampSidePaneWidth(px);
+    if (next === sidePaneWidth) return;
+    sidePaneWidth = next;
+    applySidePaneWidth();
+    afterWellResize();
+    emitSidePaneEvent();
+  };
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    sidePaneDragId = event.pointerId;
+    try { handle.setPointerCapture(event.pointerId); } catch (err) { /* mouse still works */ }
+    document.body.classList.add('sidepane-dragging');
+    event.preventDefault(); // no text selection, no drag of the window
+  });
+
+  handle.addEventListener('pointermove', (event) => {
+    if (sidePaneDragId === null || event.pointerId !== sidePaneDragId) return;
+    // The pane is anchored to the right edge, so its width is whatever is to
+    // the right of the pointer.
+    setWidth((window.innerWidth || 0) - event.clientX);
+  });
+
+  const endDrag = (event) => {
+    if (sidePaneDragId === null || (event && event.pointerId !== sidePaneDragId)) return;
+    try { handle.releasePointerCapture(sidePaneDragId); } catch (err) { /* already released */ }
+    sidePaneDragId = null;
+    document.body.classList.remove('sidepane-dragging');
+    writeSidePaneWidth(); // the remembered width is the one the drag ended on
+  };
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+
+  // The same resize from the keyboard, so the pane is not mouse-only.
+  handle.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') setWidth(sidePaneWidth + SIDEPANE_KEY_STEP);
+    else if (event.key === 'ArrowRight') setWidth(sidePaneWidth - SIDEPANE_KEY_STEP);
+    else return;
+    event.preventDefault();
+    writeSidePaneWidth();
+  });
+
+  // A window that shrinks takes the 60% ceiling down with it.
+  window.addEventListener('resize', () => {
+    if (!sidePaneEl || sidePaneEl.hidden) return;
+    setWidth(sidePaneWidth); // clamps against the new window
+  });
+
+  return sidePaneEl;
+}
+
+/**
+ * Show, hide or re-kind the pane for the workspace on screen. Compares before
+ * it writes, so the tab-count changes that also reach emitWorkspaceChange()
+ * cost one attribute read.
+ * @param {boolean} [force] emit the `sidepane` event even when nothing moved
+ *        (init() does this once, so a module that loaded late has a state).
+ */
+function syncSidePane(force) {
+  const el = ensureSidePane();
+  if (!el) return;
+  const kind = currentPaneKind();
+  if (kind === sidePaneKind && !force) return;
+
+  sidePaneKind = kind;
+  if (kind) {
+    el.setAttribute('data-kind', kind);
+    sidePaneWidth = clampSidePaneWidth(sidePaneWidth);
+    applySidePaneWidth();
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+    el.removeAttribute('data-kind');
+  }
+  afterWellResize();
+  emitSidePaneEvent();
 }
 
 /* ------------------------------------------------------------------ */
@@ -6435,11 +6841,16 @@ function homeDir() {
 }
 
 /**
- * The folder a new Claude tab opens in: the one settings names, else home.
- * Whether it still exists cannot be checked from here without waiting, so the
- * path is passed through as written — pty.js falls back to home on a bad cwd.
+ * The folder a new Claude tab opens in: the workspace on screen has the first
+ * word (that is what a workspace folder IS), then the one settings names, then
+ * home. Whether it still exists cannot be checked from here without waiting,
+ * so the path is passed through as written — pty.js falls back to home on a
+ * bad cwd, and warnMissingCwd() is what tells the user it did.
  */
 function defaultClaudeCwd() {
+  const ws = findWorkspace(currentWorkspaceId);
+  const folder = ws ? cleanWorkspaceFolder(ws.folder) : null;
+  if (folder) return folder;
   const dir = settingGet('claudeDir');
   if (typeof dir === 'string' && dir.trim()) return dir.trim();
   return homeDir();
@@ -6643,6 +7054,34 @@ function pushClaudeSkipToPreload() {
  *        background: build it behind the current tab. The host is hidden while
  *        the session starts, so activateTab() fits it on first raise.
  */
+/**
+ * A chamber's folder, checked after the fact. pty.js resolves a cwd that is
+ * not there to the home folder and says so on the MAIN console only — from
+ * the chamber it looks like an ordinary prompt in the wrong place, which is
+ * the kind of silent failure that costs an hour. So the folder is asked about
+ * (api.app.dirExists, main's own fs.statSync) and a missing one puts a line
+ * over that tab's well naming the folder that is gone.
+ *
+ * Asynchronous on purpose: the tab is on screen immediately either way, and a
+ * folder that IS there costs nothing but one IPC round trip.
+ */
+function warnMissingCwd(tab) {
+  const app = (window.api && window.api.app) ? window.api.app : null;
+  if (!tab || !app || typeof app.dirExists !== 'function') return;
+  const cwd = (typeof tab.cwd === 'string') ? tab.cwd.trim() : '';
+  if (!cwd) return;
+  let pending = null;
+  try { pending = app.dirExists(cwd); } catch (err) { return; }
+  if (!pending || typeof pending.then !== 'function') return;
+  pending.then((exists) => {
+    if (exists !== false) return;
+    if (!tabs.includes(tab) || tab.noteDismissed) return; // closed, or told already
+    const home = homeDir();
+    showAppNote(tab, 'That folder is not there: ' + cwd
+      + (home ? ' — this session opened in ' + home + ' instead.' : '.'), '');
+  }, () => { /* main could not answer: the chamber is no worse off */ });
+}
+
 function createClaudeTab(options) {
   if (!viewsEl || !tabstripEl) return null;
 
@@ -6703,6 +7142,7 @@ function createClaudeTab(options) {
   emitWorkspaceChange(); // a tab count moved
   pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession(); // a chamber is a session entry now; debounced with the rest
+  warnMissingCwd(tab);   // ...and says so out loud if the folder has gone
 
   // Never leave the window with nothing on screen: the very first tab of a boot
   // is raised even when the caller asked for a background one.
@@ -7521,13 +7961,24 @@ function sessionSnapshot() {
   return {
     tabs: capped,
     active: active < capped.length ? active : -1,
-    workspaces: workspaces.map((w) => ({
-      id: w.id,
-      name: w.name,
-      colour: w.colour,
-      lastActive: seatOf(w.lastActiveTabId)
-    })),
+    workspaces: workspaces.map((w) => {
+      const row = {
+        id: w.id,
+        name: w.name,
+        colour: w.colour,
+        lastActive: seatOf(w.lastActiveTabId)
+      };
+      // Written only when set, exactly like a tab's flags: a session with no
+      // folders and no panes reads back byte for byte what it used to.
+      if (w.folder) row.folder = w.folder;
+      if (w.pane) row.pane = w.pane;
+      if (w.preset) row.preset = w.preset;
+      return row;
+    }),
     currentWorkspace: currentWorkspaceId,
+    // Seeded once per profile. It rides here so a preset the user DELETES
+    // stays deleted: without it every boot would put School back.
+    presetsSeeded: presetsSeeded,
     savedAt: Date.now() // boot compares the two copies on this
   };
 }
@@ -7592,7 +8043,10 @@ function sanitiseSession(parsed) {
 
   // Workspaces first: an entry's `ws` is only kept when it names one of these,
   // and 'main' is always the head of the list whatever the file said.
-  const wsList = [{ id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActive: -1 }];
+  const wsList = [{
+    id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null,
+    folder: null, pane: null, preset: null, lastActive: -1
+  }];
   const wsSeen = new Set([DEFAULT_WORKSPACE_ID]);
   const wsRaw = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
   for (const row of wsRaw) {
@@ -7601,15 +8055,26 @@ function sanitiseSession(parsed) {
     const at = Number(row && row.lastActive);
     const lastActive = (isFinite(at) && at >= 0) ? Math.floor(at) : -1;
     const colour = cleanWorkspaceColour(row && row.colour);
+    // The folder, the pane and the preset key are sanitised exactly like the
+    // name and the colour: anything a file says that this build does not know
+    // reads as "none" rather than being carried into the model.
+    const folder = cleanWorkspaceFolder(row && row.folder);
+    const pane = cleanWorkspacePane(row && row.pane);
+    const preset = cleanWorkspacePreset(row && row.preset);
     if (id === DEFAULT_WORKSPACE_ID) {
       wsList[0].name = cleanWorkspaceName(row && row.name, 'Home');
       wsList[0].colour = colour;
+      wsList[0].folder = folder;
+      wsList[0].pane = pane;
       wsList[0].lastActive = lastActive;
       continue;
     }
     if (wsSeen.has(id)) continue;
     wsSeen.add(id);
-    wsList.push({ id: id, name: cleanWorkspaceName(row && row.name), colour: colour, lastActive: lastActive });
+    wsList.push({
+      id: id, name: cleanWorkspaceName(row && row.name), colour: colour,
+      folder: folder, pane: pane, preset: preset, lastActive: lastActive
+    });
     if (wsList.length >= SESSION_MAX_WORKSPACES) break;
   }
 
@@ -7678,6 +8143,9 @@ function sanitiseSession(parsed) {
     active: inRange ? active : entries.length - 1,
     workspaces: wsList,
     currentWorkspace: current,
+    // Only `true` means seeded: a session written before the presets existed
+    // says nothing here and is seeded on the boot that reads it.
+    presetsSeeded: parsed.presetsSeeded === true,
     // A snapshot written before savedAt existed loses every tie-break.
     savedAt: (isFinite(savedAt) && savedAt > 0) ? savedAt : 0
   };
@@ -7761,16 +8229,25 @@ function restoreSession(snapshot) {
     workspaces.length = 0;
     for (const row of storedWorkspaces) {
       workspaces.push({
-        id: row.id, name: row.name, colour: row.colour, lastActiveTabId: null
+        id: row.id, name: row.name, colour: row.colour,
+        folder: row.folder || null, pane: row.pane || null,
+        preset: row.preset || null, lastActiveTabId: null
       });
       // Never mint an id a restored workspace already holds.
       const n = /^ws(\d+)$/.exec(row.id);
       if (n) nextWorkspaceSeq = Math.max(nextWorkspaceSeq, Number(n[1]) + 1);
     }
     if (!findWorkspace(DEFAULT_WORKSPACE_ID)) {
-      workspaces.unshift({ id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null, lastActiveTabId: null });
+      workspaces.unshift({
+        id: DEFAULT_WORKSPACE_ID, name: 'Home', colour: null,
+        folder: null, pane: null, preset: null, lastActiveTabId: null
+      });
     }
   }
+  // Whether this profile has ever been given the presets. Read here rather
+  // than in seedWorkspacePresets() so a restore that fails later still leaves
+  // the flag where the snapshot put it.
+  if (session.presetsSeeded === true) presetsSeeded = true;
   const wantCurrent = validWorkspaceId(session.currentWorkspace);
   currentWorkspaceId = wantCurrent;
 
@@ -8370,6 +8847,23 @@ function selectTabByIndex(index) {
   const list = visibleTabs();
   const tab = n === 9 ? list[list.length - 1] : list[n - 1];
   if (tab) activateTab(tab.id);
+}
+
+/**
+ * Ctrl+Alt+1..9: the nth workspace in the list the popover shows, Home being
+ * the first. Structural, exactly like Ctrl+1..9 on the tabs — the digits are
+ * positions, not bindings — so shortcuts.js reserves the nine combos rather
+ * than letting them be rebound onto something else.
+ *
+ * Ctrl+Alt+9 is deliberately NOT "the last workspace": the tab digits do that
+ * because a strip of 30 tabs has a meaningful end, while nine covers every
+ * workspace list there will ever be.
+ */
+function selectWorkspaceByIndex(index) {
+  const n = Number(index);
+  if (!isFinite(n) || n < 1 || n > 9) return;
+  const ws = workspaces[n - 1];
+  if (ws) switchWorkspace(ws.id);
 }
 
 const ZOOM_STEP = 0.5;
@@ -9266,8 +9760,9 @@ const ACTIONS = {
   'focus-omnibox': focusOmnibox,
   'next-tab': () => cycleTab(1),
   'prev-tab': () => cycleTab(-1),
-  // The only action carrying data: payload.index is 1-9.
+  // The only actions carrying data: payload.index is 1-9.
   'select-tab': (payload) => selectTabByIndex(payload && payload.index),
+  'select-workspace': (payload) => selectWorkspaceByIndex(payload && payload.index),
   'move-tab-left': () => moveActiveTab(-1),
   'move-tab-right': () => moveActiveTab(1),
   // Workspaces. Ctrl+Alt+Right / Left by default; shortcuts.js owns the binding
@@ -9418,6 +9913,16 @@ function wireKeyboard() {
       // cycling is bound through shortcuts.js (Ctrl+Alt+Arrow by default).
       if (event.shiftKey && (key === 'ArrowRight' || key === 'ArrowLeft')
           && isEditableTarget(event.target)) return;
+    }
+
+    // Ctrl+Alt+1..9 jump to the nth workspace, the same way Ctrl+1..9 jump to
+    // the nth tab: structural, so they are resolved here rather than through
+    // the binding map (shortcuts.js reserves them and never hands them out).
+    if (event.ctrlKey && event.altKey && !event.shiftKey
+        && key.length === 1 && key >= '1' && key <= '9') {
+      event.preventDefault();
+      selectWorkspaceByIndex(Number(key));
+      return;
     }
 
     // Ctrl+Alt+E opens the folder browser. Hardcoded here rather than resolved,
@@ -9630,6 +10135,9 @@ function init() {
   // The switcher UI's slot in the titlebar, left of the strip. Empty until
   // workspaces.js fills it; the browser boots fine when it never does.
   ensureWorkspaceSlot();
+  // The side pane host beside the well: resolved and wired now (the handle,
+  // the stored width), shown only once a workspace with a pane is on screen.
+  ensureSidePane();
 
   wireChrome();
   wireTabMenu();
@@ -9688,6 +10196,15 @@ function init() {
   // window is already on screen.
   const openStrip = (session) => {
     if (!restoreSession(session)) createTab(HOME_URL);
+    // The presets go in AFTER the restore, on a fresh profile and on an old
+    // one alike: the session is what says whether they have ever been seeded,
+    // and seeding before reading it would put back what the user deleted.
+    seedWorkspacePresets(session);
+    // The strip tint and the pane, for the workspace the boot landed in — and
+    // one `sidepane` event whatever it decided, so a module that wants to know
+    // the pane is CLOSED hears that too rather than waiting for a switch.
+    syncStripTint();
+    syncSidePane(true);
     // One frame later so the launch entrance animation has a state to start from.
     window.requestAnimationFrame(() => {
       document.body.classList.add('booted');
@@ -9811,12 +10328,15 @@ window.restartBrowser = restartBrowser;
 // anything. Every one of these that changes the model fires 'workspacechange'
 // on `document` with { detail: { id } }.
 window.workspaceList = workspaceList;
+window.workspaceInfo = workspaceInfo;
 window.currentWorkspace = currentWorkspace;
 window.switchWorkspace = switchWorkspace;
 window.cycleWorkspace = cycleWorkspace;
 window.createWorkspace = createWorkspace;
 window.renameWorkspace = renameWorkspace;
 window.setWorkspaceColour = setWorkspaceColour;
+window.setWorkspaceFolder = setWorkspaceFolder;
+window.setWorkspacePane = setWorkspacePane;
 window.deleteWorkspace = deleteWorkspace;
 window.moveTabToWorkspace = moveTabToWorkspace;
 window.moveActiveTabToWorkspace = moveActiveTabToWorkspace;
@@ -9824,6 +10344,21 @@ window.moveActiveTabToWorkspace = moveActiveTabToWorkspace;
 // the whole `tabs` array — every item carries .workspace now, so it can group.
 window.visibleTabs = visibleTabs;
 window.WORKSPACE_COLOURS = WORKSPACE_COLOURS.slice();
+window.WORKSPACE_PANES = WORKSPACE_PANES.slice();
+
+/*
+ * The side pane, for whoever fills it. app.js decides WHETHER the column is up
+ * and HOW WIDE it is (the current workspace's `pane` kind, and the handle on
+ * its left edge); the module that owns the kind only has to know the state and
+ * be told when it changes. `sidepane` fires on `document` with
+ * { kind, open, width } on every open, close, kind change and width change,
+ * and once after boot so a late listener never has to ask.
+ */
+window.sidePane = {
+  kind: () => sidePaneKind,
+  isOpen: () => sidePaneKind !== null,
+  width: () => sidePaneWidth
+};
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init, { once: true });

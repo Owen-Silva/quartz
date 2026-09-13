@@ -2554,6 +2554,12 @@ function shortcutFor(input) {
     if (key === 'Tab') return { action: input.shift ? 'prev-tab' : 'next-tab' };
     if (/^[1-9]$/.test(key)) return { action: 'select-tab', index: Number(key) };
   }
+  // Ctrl+Alt+1..9 is the workspace counterpart, fixed for the same reason:
+  // app.js resolves it structurally, so it is absent from bindings() and would
+  // otherwise be lost whenever a <webview> holds the keyboard.
+  if (input.control && input.alt && !input.shift && /^[1-9]$/.test(key)) {
+    return { action: 'select-workspace', index: Number(key) };
+  }
   // Everything else is whatever the renderer has bound the combo to.
   const action = bindingFor(comboFromInput(input));
   return typeof action === 'string' && action ? { action } : null;

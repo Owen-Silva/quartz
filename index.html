@@ -93,18 +93,27 @@
 
   </div>
 
-  <!-- Tab well. Holds every tab body: <webview> pages and .claude-view chambers,
-       created at runtime. Guest views do not clip, so nothing rounds or hides
-       overflow here. -->
-  <div id="views"></div>
+  <!-- The well row: the tab well and, beside it, the workspace's side pane.
+       The row is what fills the window under the chrome; #views keeps every
+       pixel of it while the pane is hidden, which is the whole layout this
+       had before the pane existed. -->
+  <div id="well">
 
-  <!-- Side pane: a workspace-owned column BESIDE the tab well (never over it).
-       app.js shows and sizes it for the current workspace's pane kind and sets
-       data-kind; school-pane.js fills #sidepane-body while the kind is 'school'.
-       Hidden here, so it costs no layout until a workspace asks for it. -->
-  <aside id="sidepane" hidden>
-    <div id="sidepane-body"></div>
-  </aside>
+    <!-- Tab well. Holds every tab body: <webview> pages and .claude-view
+         chambers, created at runtime. Guest views do not clip, so nothing
+         rounds or hides overflow here. -->
+    <div id="views"></div>
+
+    <!-- Side pane: a workspace-owned column BESIDE the tab well (never over it).
+         app.js shows and sizes it for the current workspace's pane kind, sets
+         data-kind, and puts its 6px drag handle in as the first child;
+         school-pane.js fills #sidepane-body while the kind is 'school'.
+         Hidden here, so it costs no layout until a workspace asks for it. -->
+    <aside id="sidepane" hidden>
+      <div id="sidepane-body"></div>
+    </aside>
+
+  </div>
 
   <!-- Tab context menu. Rows are written by app.js on right-click and cleared
        when it closes; position:fixed, so it also hangs over a guest page. -->

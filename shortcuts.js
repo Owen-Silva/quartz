@@ -64,6 +64,14 @@
     { id: 'workspaces',     label: 'Workspaces',              group: 'Tabs',     default: 'Ctrl+Shift+E' },
     { id: 'workspace-next', label: 'Next workspace',          group: 'Tabs',     default: 'Ctrl+Alt+Right' },
     { id: 'workspace-prev', label: 'Previous workspace',      group: 'Tabs',     default: 'Ctrl+Alt+Left' },
+    /* Ctrl+Alt+1..9 are to the workspace list what Ctrl+1..9 are to the tab
+       strip: a position, not a binding. Structural for the same reason — the
+       digit IS the argument — so they are reserved here and resolved in
+       app.js, and Settings prints the hint instead of a single keycap. */
+    { id: 'select-workspace', label: 'Jump to workspace 1-9', group: 'Tabs',     default: null, fixed: true,
+      hint: 'Ctrl+Alt+1 ... Ctrl+Alt+9',
+      reserved: ['Ctrl+Alt+1', 'Ctrl+Alt+2', 'Ctrl+Alt+3', 'Ctrl+Alt+4', 'Ctrl+Alt+5',
+        'Ctrl+Alt+6', 'Ctrl+Alt+7', 'Ctrl+Alt+8', 'Ctrl+Alt+9'] },
 
     /* -- Navigate ---------------------------------------------- */
     { id: 'focus-omnibox',  label: 'Focus the address bar',   group: 'Navigate', default: 'Ctrl+L' },

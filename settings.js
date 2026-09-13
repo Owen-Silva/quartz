@@ -223,6 +223,7 @@
     ['Ctrl+Shift+T', 'Reopen the last tab'],
     ['Ctrl+Tab / Ctrl+Shift+Tab', 'Next tab, previous tab'],
     ['Ctrl+1-9', 'Jump to a tab'],
+    ['Ctrl+Alt+1-9', 'Jump to a workspace'],
     ['Ctrl+L', 'Address bar'],
     ['Ctrl+F', 'Find on page'],
     ['Ctrl+Shift+R', 'Reader view'],
