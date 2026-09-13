@@ -879,6 +879,36 @@ Found, and not ours to fix:
 - The README is current through the last commit: shortcuts, features, security notes, performance
   numbers and a file-by-file map.
 
+### Workspaces, the School pane and the titlebar readouts (2026-09-12, evening)
+
+- Four workspaces are seeded once behind Home: School, Project, Club and Trading, each with a colour
+  and (except Club, which is left for you to point somewhere) a folder. The folder is where a new
+  Claude tab opens while that workspace is current; the popover has a Folder row (click to pick,
+  a clear control) and a Pane toggle. A folder that no longer exists is named in the popover and
+  over the chamber, instead of the terminal quietly starting in your home folder. Delete a preset
+  and it stays deleted. The current workspace's colour washes the tab strip at 7%.
+- Ctrl+Alt+1 to 9 jumps to the nth workspace in list order, also while a page has the keyboard.
+- A workspace can own a side pane: a resizable column beside the tab well (380px by default,
+  280 to 60% of the window, drag the 6px handle, width remembered). School owns the notes pane.
+- The School pane shows a chip per class notebook in Documents\notes (plus Auto), a status strip
+  that prints the reader's mode and reason, the helper's state and reason, and the section that
+  matched, and the notebook itself, which scrolls to the matched section with a short highlight.
+  Nothing in it is quiet: a refused command shows its reason beside the control.
+- The reader looks at LessonPlayer. "Install LessonPlayer policy" writes a per-app WebView2 policy that opens
+  a local remote-debugging port on LessonPlayer's next start; from then on the pane reads the question
+  straight off the page. If LessonPlayer ignores the policy the pane says so and falls back to UI
+  Automation, then to Windows OCR of the window, each fallback announced.
+- The matcher is a headless Claude Code session per class (Sonnet, no tools, --safe-mode, resumed
+  between questions): it answers a section id only, never the answer, in 3 to 6 seconds for about
+  a cent a question after the first. It reads the budget pill and pauses itself at 90% of the
+  5-hour limit or 95% of the week, saying so in the pane. "Paste a question" runs it by hand.
+- Two readouts in the titlebar: the Claude budget pill (5-hour and week percentages from the
+  statusline hook's JSON, amber from 80%, red from 95%, a card with the countdowns, today's spend
+  and the reading's age; a stale or missing reading says so in the pill) and the now-playing pill
+  off the Spotify bridge (playing, paused, held for a video, "ad · quiet" while an ad is ducked
+  and "ad · not ducked" in red when it is not; click toggles, the card has prev and next). The
+  new tab's readout gains the same budget row.
+
 ## Things to know
 
 - A forced kill can lose the last few seconds of tab state. A normal close cannot — the strip is
@@ -934,6 +964,14 @@ Found, and not ours to fix:
   one of the five from the catalogue gives you a note bar saying so, with a link that launches the
   desktop app when it is installed.
 - Ctrl+Alt+E opens the Files tab. Ctrl+Shift+E is still Workspaces.
+- The School pane's reader needs the LessonPlayer policy installed once (the button in the pane) and
+  then a restart of LessonPlayer. Whether LessonPlayer honours it has not been seen yet: the pane will say
+  "policy ignored" and fall back to UI Automation if it does not.
+- The helper is a real Claude session and spends real budget: about a cent per question on Sonnet
+  once the class index is loaded. It pauses itself at 90% of the 5-hour limit or 95% of the week.
+- The budget pill reads the JSON that Claude Code's statusline hook writes under
+  mission-control; with no active Claude Code session the reading goes stale after ten minutes
+  and the pill says so, rather than showing an old number as current.
 
 ## Commits
 
@@ -1058,3 +1096,9 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 53dca7a | 11:50 | Tooling: toback.ps1 sends a test instance's windows to the back without activating them |
 | 6a872d6 | 11:59 | New tab: a live Markets tile bottom-right, fed by Finnhub with a key from Settings |
 | cb8cde0 | 12:00 | Tooling: toback.ps1 keeps its pid set whole and skips titleless and IME windows |
+| 655bafd | 18:39 | Scaffold: budget, school and pill modules with their IPC and slots |
+| 9a78e68 | 18:58 | School pane: class chips, live reader/helper status, and notes that jump to the matching section |
+| 0a771ab | 18:59 | School: reads the on-screen question and finds the matching notes section |
+| bbff8fa | 19:03 | Workspaces: four presets, per-workspace folder and side pane, strip tint, Ctrl+Alt+1-9 |
+| 0d12828 | 19:07 | Titlebar readouts: Claude usage pill with limits and today's spend, plus now playing |
+| 0eaf9eb | 19:11 | Now playing: the pill says "ad · quiet" while the bridge has Spotify turned down |

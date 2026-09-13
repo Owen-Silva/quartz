@@ -82,6 +82,7 @@ process read, and Settings rewrites it, so anything not marked fixed can be move
 | Ctrl+\ | Split view: pair the active tab with the next splittable one, or break the pair |
 | Ctrl+Shift+E | Workspaces — the switcher popover (Ctrl+Shift+W is "close the window" everywhere else, so it is left alone) |
 | Ctrl+Alt+Right / Ctrl+Alt+Left | Next / previous workspace, wrapping |
+| Ctrl+Alt+1 … Ctrl+Alt+9 | Jump to the nth workspace in list order (fixed, like Ctrl+1..9 for tabs) |
 | Ctrl+Alt+E | Files — the folder browser, as a tab (Ctrl+Shift+E stays on Workspaces) |
 | Ctrl+L | Focus the address bar |
 | Alt+Left / Alt+Right | Back / forward |
@@ -173,6 +174,39 @@ the one workspace that must exist — or create a new one, which opens a tab in 
 window must never sit empty. A chip's menu has "Move to workspace…". Ctrl+Alt+Right / Left cycle
 with wrapping, switching raises that workspace's own last active tab, and a split whose halves
 land in different workspaces is broken up.
+
+Four of them are seeded once, behind Home: **School** (forest, `Documents\notes`, and it owns the
+notes pane), **Project** (ion, `Downloads\Project`), **Club** (ocean, no folder until you set one) and
+**Trading** (ember, `trading-bot`). A workspace's folder is where a new Claude tab opens while
+it is current — the popover's Folder row picks or clears it, and a folder that has gone missing is
+named there and over the chamber rather than the terminal silently opening at home. Delete a
+preset and it stays deleted. The current workspace's colour washes the strip at 7%, and
+Ctrl+Alt+1 to 9 jumps to the nth workspace, page focus or not.
+
+**Side pane.** A workspace may own a column beside the tab well (never over it): 380px by default,
+280 to 60% of the window, a 6px drag handle, width remembered. app.js shows it for the current
+workspace's pane kind and tells the tenant with a `sidepane` event; hosted apps and split view
+re-lay out when the well narrows.
+
+**School pane.** The pane School owns: a chip per notebook in `Documents\notes` plus Auto, a
+status strip that prints the reader's mode and reason, the helper's state and reason and the
+matched section, and the notebook itself, which scrolls to the matched section with a short
+highlight — once per question, never while you are scrolling, never at all while pinned. The reader
+takes the current question from LessonPlayer: "Install LessonPlayer policy" writes a per-app WebView2 policy
+that opens a local remote-debugging port on LessonPlayer's next start; if LessonPlayer ignores it the pane
+says so and falls back to UI Automation, then to Windows OCR of the window. The matcher is a
+headless Claude Code session per class (Sonnet, no tools, `--safe-mode`, resumed between
+questions) that answers a section id only — never the answer — in 3 to 6 seconds for about a cent
+a question, and pauses itself at 90% of the 5-hour limit or 95% of the week. "Paste a question"
+runs it by hand. Every failure in the chain is a line in the strip with its reason.
+
+**Titlebar readouts.** The budget pill reads the JSON that Claude Code's statusline hook writes
+(5-hour and week percentages, amber from 80%, red from 95%; the card has the countdowns, today's
+spend across sessions and the reading's age; stale or missing reads say so in the pill). The
+now-playing pill follows the Spotify bridge: playing, paused, held for a video, "ad · quiet" while
+an ad is turned down and "ad · not ducked" in red with the bridge's reason when it is not; click
+toggles, the card carries art, prev and next, and every refusal. The new tab's readout row shows
+the same budget figures.
 
 **Tab search.** Ctrl+Shift+A, or the list glyph in the titlebar, opens one glass pane over the
 page: every open tab — title, host or Claude folder, tags for current / pinned / muted / playing
@@ -1099,6 +1133,10 @@ one run before and one after.
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the Files tab and its `files:` console channel, `openAppTab()` and `openTerminalTab()` with the app flag they persist and the DRM note bar, the idle-music presence signals and the now-playing poll behind music.js, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
+| `school-pane.js` / `school-pane.css` | The School workspace's side pane, a tenant of app.js's `#sidepane` host: the class chips, the status strip that prints every reader / helper / match state and reason from school.js, the controls (helper on-off, pin, retry, the LessonPlayer policy install, paste-a-question) and the notebook in a `file://` `<webview>` that navigates on class change and scrolls to the matched section with a stepped highlight — never twice for one question, never while the user is scrolling. Falls back to a sandboxed iframe if the guest fails to load, and says so. |
+| `school.js` / `school-reader.ps1` | The School brain, main-process side: the notebook scan (classes, sections, a capped per-class index), the LessonPlayer reader (CDP over the per-app WebView2 policy, then UI Automation, then Windows OCR through the persistent PowerShell child, each mode carrying its reason), subject detection, and the helper — one headless `claude -p` session per class, section id only, resumed between questions, one in flight, budget-gated. State and commands per the header; `<userData>/school.json` keeps the manual subject, helper switch, model and pin. |
+| `budget.js` | The Claude Code usage reading, main-process side: newest statusline JSON by mtime every 30s, 5-hour and week percentages with their resets, today's spend summed over the sessions touched today, stale after ten minutes and error states with reasons, pushed to the chrome on change and to every new-tab guest over the same console-line channel stocks.js uses. |
+| `pills.js` / `pills.css` | The two titlebar readouts in `#budget-slot` and `#np-slot`: the budget pill and its card, and the now-playing pill off `api.media` (2s no-art poll while visible, art on hash change, playing / paused / held / ad states, click toggles, card with prev and next and every refusal). `window.Pills` exposes their state for harnesses. |
 | `pty.js` | PTY session manager — spawns a program under ConPTY with a scrubbed environment, out of a static PROGRAMS table (claude, powershell, pwsh, cmd, python, node, Git Bash) with fixed arguments, a per-program argument allowlist (only claude takes `--continue`, `--resume`, `--dangerously-skip-permissions`), one-time binary resolution through `where.exe` with Store alias stubs rejected, and `listPrograms()` / `hasProgram()`. |
 | `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
 | `stocks.js` | Live prices, main-process side, and the only place the Finnhub key exists: the `<userData>/stocks.json` store (`stocks.enabled` / `finnhubKey` / `symbols` / `selected`), the `wss://ws.finnhub.io` trade stream with its resubscribing backoff reconnect, REST `/quote` snapshots and `/stock/candle` history with the documented free-tier 403 falling through to Yahoo's keyless chart JSON, a 60-calls-a-minute token bucket in front of every REST call, and the poll spacing that follows the market session. It puts its own `console-message` listener on each `<webview>` guest (`newtab:stocks` in, `window.__applyStocks` out, coalesced to one push per 500ms) and ref-counts subscribers per webContents, so with nothing on screen it holds no socket and no timer. `describe()` answers a mask and a boolean and there is no channel that returns the key. Its parsers, the market-session clock and the budget are pure and exported, so they run under plain node. |
