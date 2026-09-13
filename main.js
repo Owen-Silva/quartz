@@ -31,6 +31,8 @@ const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
+const budgetModule = require('./budget');
+const schoolModule = require('./school');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -140,6 +142,26 @@ const stocks = stocksModule.create({
   ipcMain,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
+});
+
+/**
+ * The Claude Code budget readout (titlebar pill + new-tab row) and the School
+ * workspace's reader/helper. Both register their own IPC; main only hands them
+ * the gate, the push function and each other.
+ */
+const budget = budgetModule.create({
+  app,
+  ipcMain,
+  isChromeSender: (event) => isChromeSender(event),
+  isBundledPage: (url) => isBundledPageUrl(url),
+  send: (channel, payload) => send(channel, payload),
+});
+const school = schoolModule.create({
+  app,
+  ipcMain,
+  isChromeSender: (event) => isChromeSender(event),
+  send: (channel, payload) => send(channel, payload),
+  getBudget: () => budget.snapshot(),
 });
 
 /**
@@ -4422,6 +4444,10 @@ app.on('before-quit', (event) => {
   // to nothing when the last new tab goes away; this is the case where the
   // window is closed with one still open.
   stocks.stop();
+  // The budget poller's timer and the school helper's child processes (a
+  // headless claude, a UIA/OCR reader) must not outlive the quit either.
+  try { budget.stop(); } catch { /* best effort */ }
+  try { school.stop(); } catch { /* best effort */ }
   // And for the icon cache, which may be holding a PowerShell batch and a
   // debounced write. Only if it was ever built -- this must not build one.
   if (procIcons && typeof procIcons.stop === 'function') {

@@ -3,7 +3,9 @@
 //   node cdp-eval.js "document.title"
 const WebSocket = require('ws');
 
-const PORT = 9222;
+// CDP_PORT picks a test instance on another port (never point this at 9222
+// while smoketest.js owns it, and never at the live browser).
+const PORT = Number(process.env.CDP_PORT) || 9222;
 // --guest evaluates inside the new-tab page (the <webview> guest) instead of
 // the chrome document.
 const args = process.argv.slice(2);

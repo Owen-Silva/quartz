@@ -19,6 +19,8 @@
   <link rel="stylesheet" href="bookmarks.css">
   <link rel="stylesheet" href="tabsearch.css">
   <link rel="stylesheet" href="workspaces.css">
+  <link rel="stylesheet" href="pills.css">
+  <link rel="stylesheet" href="school-pane.css">
 </head>
 <body>
 
@@ -40,6 +42,10 @@
         <span class="glyph">&#xE710;</span>
       </button>
       <div class="spacer"></div>
+      <!-- Titlebar readouts, filled by pills.js: the Claude budget pill and the
+           now-playing pill. Empty slots take no space. -->
+      <div id="budget-slot"></div>
+      <div id="np-slot"></div>
       <div class="wincontrols">
         <button id="win-min" type="button" title="Minimize" aria-label="Minimize">
           <span class="glyph">&#xE921;</span>
@@ -92,6 +98,14 @@
        overflow here. -->
   <div id="views"></div>
 
+  <!-- Side pane: a workspace-owned column BESIDE the tab well (never over it).
+       app.js shows and sizes it for the current workspace's pane kind and sets
+       data-kind; school-pane.js fills #sidepane-body while the kind is 'school'.
+       Hidden here, so it costs no layout until a workspace asks for it. -->
+  <aside id="sidepane" hidden>
+    <div id="sidepane-body"></div>
+  </aside>
+
   <!-- Tab context menu. Rows are written by app.js on right-click and cleared
        when it closes; position:fixed, so it also hangs over a guest page. -->
   <div id="tabmenu" role="menu" tabindex="-1" hidden></div>
@@ -117,6 +131,9 @@
   <script src="siteinfo.js"></script>
   <script src="tabsearch.js"></script>
   <script src="workspaces.js"></script>
+  <!-- Titlebar readouts and the School pane. Both read window.api only. -->
+  <script src="pills.js"></script>
+  <script src="school-pane.js"></script>
   <!-- node_modules/@mozilla/readability/Readability.js is deliberately NOT
        here: reader.js is the only thing that uses it and injects it itself the
        first time a reading page is opened, so boot does not pay for ~100KB
