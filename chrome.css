@@ -1565,6 +1565,11 @@ body.claude-live #newclaude.attn .dot {
   border-left: 1px solid var(--edge);
 }
 
+/* display:flex above outranks the UA sheet's [hidden]{display:none}, so without
+   this the hidden host still took its 380px beside the well on Home and drew
+   an empty grey column (seen live 2026-09-12). The attribute is the switch. */
+#sidepane[hidden] { display: none; }
+
 #sidepane-body {
   flex: 1 1 auto;
   min-width: 0;
