@@ -3691,6 +3691,624 @@
       'Reads the helper without changing anything: the task, the bridge, and Spotify itself.'));
   }
 
+  /* ============================================================
+     Phone - the user's phone on the screen
+
+     LIKE STOCKS, NOTHING HERE IS IN localStorage. Every value is
+     main's: phone.js owns the tools (adb + the scrcpy server), the
+     pairing, the connection and the stream, and this section is a
+     window onto its describe() plus the commands in its contract.
+     So there is no DEFAULTS entry and no get()/set() below - the
+     rows are whatever main last said, and every write goes out as
+     api.phone.command(name, arg) and comes back as { ok, reason }.
+
+     AND EVERY REASON IS SHOWN. A command that fails answers
+     { ok: false, reason } and that reason is printed against the
+     button that sent it, verbatim: while phone.js is still a
+     scaffold, pressing Connect says so in those words rather than
+     doing nothing. The same goes for a missing bridge, a describe()
+     that answers null (main refused: not the chrome) and a call
+     that throws. Nothing in this section may fail quietly.
+     ============================================================ */
+
+  var phnState = null;        // the last describe(), or null before the first
+  var phnStateReason = '';    // why there is no state, when there is none
+  var phnOff = null;          // the onUpdate unsubscribe, while the panel is open
+  var phnWatching = false;
+  var phnBusy = '';           // which command is in flight, so its button says so
+  var phnResults = {};        // slot -> { ok, reason }: the last answer, shown inline
+  var phnDraft = {};          // what is typed in the fields, kept across re-renders
+  var phnForgetArmed = false;
+  var phnForgetTimer = 0;
+
+  /* Both readouts and every button key off these. 'error' is amber rather
+     than unlit on purpose: something IS happening, and it is wrong. */
+  var PHONE_LIVE = { ready: 1, paired: 1, connected: 1, running: 1 };
+  var PHONE_HOLD = {
+    downloading: 1, pairing: 1, connecting: 1, starting: 1,
+    stalled: 1, unreachable: 1, error: 1
+  };
+
+  /** The preload bridge, or null on a build without one. */
+  function phoneApi() {
+    var api = window.api && window.api.phone;
+    return api && typeof api.describe === 'function' ? api : null;
+  }
+
+  function phoneErrText(err) {
+    if (!err) return 'no reason given';
+    if (err.message) return String(err.message);
+    return String(err);
+  }
+
+  /* --- the small pieces every field is built out of ------------- */
+
+  function phoneLight(state) {
+    if (PHONE_LIVE[state]) return ' is-live';
+    if (PHONE_HOLD[state]) return ' is-hold';
+    return '';
+  }
+
+  /** A pip, the state as a word, and the reason behind it, never dropped. */
+  function phoneReadout(label, state, reason) {
+    var p = el('p', 'set-readout');
+    p.appendChild(el('span', 'set-pip' + phoneLight(state)));
+    var text = label + ': ' + (state || 'unknown');
+    if (reason) text += ' - ' + reason;
+    p.appendChild(el('span', 'set-readout-text', text));
+    return p;
+  }
+
+  /** A name on the left, a value on the right. Readouts only; nothing typed. */
+  function phoneRow(label, value) {
+    var row = el('div', 'set-ctl-row');
+    row.appendChild(el('span', 'set-ctl-label', label));
+    row.appendChild(el('span', 'set-readout-text', value));
+    return row;
+  }
+
+  /**
+   * A typed field. `phnDraft` is what is in it, so an onUpdate push landing
+   * mid-word cannot swallow half a pairing code: the draft is seeded from
+   * main's settings once and is the user's from then on.
+   */
+  function phoneInput(key, id, labelText, placeholder) {
+    var row = el('div', 'set-ctl-row');
+    var label = el('label', 'set-ctl-label', labelText);
+    label.setAttribute('for', id);
+    row.appendChild(label);
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = id;
+    input.className = 'set-path';
+    input.value = phnDraft[key] === undefined ? '' : String(phnDraft[key]);
+    input.placeholder = placeholder || '';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.addEventListener('input', function () { phnDraft[key] = input.value; });
+    row.appendChild(input);
+    return row;
+  }
+
+  /** The last answer to one command, against the button that sent it. */
+  function phoneResultRow(slot) {
+    var r = phnResults[slot];
+    if (!r) return null;
+    var p = el('p', 'set-readout');
+    p.appendChild(el('span', 'set-pip' + (r.ok ? ' is-live' : ' is-hold')));
+    p.appendChild(el('span', 'set-readout-text',
+      (r.ok ? 'Done. ' : 'That did not work. ') + r.reason));
+    return p;
+  }
+
+  /** A command button: busy while its call is out, and its answer under it. */
+  function phoneButton(field, label, slot, run) {
+    var row = el('div', 'set-path-row');
+    var busy = phnBusy === slot;
+    var b = textButton(busy ? 'Working...' : label, 'set-btn', run);
+    if (busy) b.disabled = true;
+    row.appendChild(b);
+    field.appendChild(row);
+    var answer = phoneResultRow(slot);
+    if (answer) field.appendChild(answer);
+    return b;
+  }
+
+  /* --- formatting ---------------------------------------------- */
+
+  function phoneMb(n) {
+    var v = Number(n);
+    if (!isFinite(v) || v <= 0) return '0';
+    return (v / 1048576).toFixed(1);
+  }
+
+  function phoneKbps(n) {
+    var v = Number(n);
+    if (!isFinite(v) || v <= 0) return '0 Mbps';
+    return (v / 1000000).toFixed(1) + ' Mbps';
+  }
+
+  function phoneShaShort(sha) {
+    if (typeof sha !== 'string' || !sha) return 'none yet';
+    return sha.length > 12 ? sha.slice(0, 12) + '...' : sha;
+  }
+
+  function phoneAgo(at) {
+    var t = Number(at);
+    if (!isFinite(t) || t <= 0) return 'never';
+    var secs = Math.round((Date.now() - t) / 1000);
+    if (secs < 0) secs = 0;
+    if (secs < 60) return secs + 's ago';
+    if (secs < 3600) return Math.round(secs / 60) + 'm ago';
+    return Math.round(secs / 3600) + 'h ago';
+  }
+
+  /* --- talking to main ----------------------------------------- */
+
+  /** One describe(). A null answer is a reason too: main refused the call. */
+  function phoneRefresh() {
+    var api = phoneApi();
+    if (!api) {
+      phnState = null;
+      phnStateReason = 'this build has no phone bridge (window.api.phone is missing)';
+      renderPhone();
+      return;
+    }
+    var answer;
+    try { answer = api.describe(); }
+    catch (err) {
+      phnStateReason = 'describe() threw: ' + phoneErrText(err);
+      renderPhone();
+      return;
+    }
+    try {
+      Promise.resolve(answer).then(function (value) {
+        if (value && typeof value === 'object') phoneTake(value);
+        else {
+          phnState = null;
+          phnStateReason = 'the browser answered nothing (main refused: not the chrome)';
+          renderPhone();
+        }
+      }, function (err) {
+        phnStateReason = 'describe() was refused: ' + phoneErrText(err);
+        renderPhone();
+      });
+    } catch (err) {
+      phnStateReason = 'describe() could not be called: ' + phoneErrText(err);
+      renderPhone();
+    }
+  }
+
+  /** Every state that lands - describe() or a push - comes through here. */
+  function phoneTake(state) {
+    if (!state || typeof state !== 'object') return;
+    phnState = state;
+    phnStateReason = '';
+    phoneSeedDraft(state);
+    renderPhone();
+    refreshFilter();
+  }
+
+  /** The typed fields start at main's saved values, and only once. */
+  function phoneSeedDraft(state) {
+    var s = state && state.settings ? state.settings : null;
+    if (!s) return;
+    if (phnDraft.host === undefined) phnDraft.host = s.host ? String(s.host) : '';
+    if (phnDraft.pairPort === undefined) {
+      phnDraft.pairPort = (Number(s.pairPort) > 0) ? String(s.pairPort) : '';
+    }
+    if (phnDraft.port === undefined) phnDraft.port = (Number(s.port) > 0) ? String(s.port) : '';
+    if (phnDraft.code === undefined) phnDraft.code = '';
+  }
+
+  /**
+   * Send one command. The answer - ok or not - is recorded against `slot` and
+   * drawn under that button. Nothing is guessed optimistically here: pairing
+   * and connecting are slow and fallible, and a row that lies about them
+   * would be worse than one that waits.
+   */
+  function phoneRun(name, arg, slot) {
+    var key = slot || name;
+    var api = phoneApi();
+    if (!api || typeof api.command !== 'function') {
+      phnResults[key] = { ok: false, reason: 'this build has no phone bridge (window.api.phone)' };
+      renderPhone();
+      return;
+    }
+    phnBusy = key;
+    phnResults[key] = null;
+    renderPhone();
+
+    var settle = function (ok, reason) {
+      phnBusy = '';
+      phnResults[key] = { ok: ok, reason: reason };
+      renderPhone();
+    };
+
+    var answer;
+    try { answer = api.command(name, arg); }
+    catch (err) { settle(false, 'the call threw: ' + phoneErrText(err)); return; }
+    try {
+      Promise.resolve(answer).then(function (value) {
+        if (!value || typeof value !== 'object') {
+          settle(false, 'the browser answered nothing at all');
+          return;
+        }
+        settle(value.ok === true,
+          value.reason ? String(value.reason) : (value.ok === true ? 'done' : 'no reason given'));
+        phoneRefresh();          // whatever it did, the state may have moved
+      }, function (err) {
+        settle(false, 'the browser refused it: ' + phoneErrText(err));
+      });
+    } catch (err) {
+      settle(false, 'the answer could not be read: ' + phoneErrText(err));
+    }
+  }
+
+  /** One partial into settings.* over 'set-settings'. */
+  function phoneSetSetting(partial, slot) {
+    phoneRun('set-settings', partial, slot || 'set-settings');
+  }
+
+  /** Open: one describe() and a live subscription. Closed: neither. */
+  function phoneWatch() {
+    if (phnWatching) return;                   // opened twice is still one of each
+    phnWatching = true;
+    var api = phoneApi();
+    if (api && typeof api.onUpdate === 'function') {
+      try {
+        var off = api.onUpdate(function (state) { phoneTake(state); });
+        if (typeof off === 'function') phnOff = off;
+      } catch (err) { phnOff = null; }
+    }
+    phoneRefresh();
+  }
+
+  function phoneRelease() {
+    phnWatching = false;
+    if (phnOff) {
+      try { phnOff(); } catch (err) { /* the channel is already gone */ }
+    }
+    phnOff = null;
+    phnForgetArmed = false;
+    if (phnForgetTimer && typeof window.clearTimeout === 'function') {
+      try { window.clearTimeout(phnForgetTimer); } catch (err) { /* already gone */ }
+    }
+    phnForgetTimer = 0;
+  }
+
+  /* --- the section --------------------------------------------- */
+
+  function buildPhone() {
+    var s = section('Phone');
+    ['phonetools', 'phonepair', 'phoneconnect', 'phonedevice',
+     'phonestream', 'phonequality', 'phoneforget'].forEach(function (name) {
+      var f = el('div', 'set-field');
+      f.setAttribute('data-field', name);
+      s.appendChild(f);
+    });
+    return s;
+  }
+
+  /**
+   * A re-render throws the fields away and builds them again, which would
+   * take the caret with it while the user is typing a pairing code. So the
+   * focused control's id and selection are put back afterwards.
+   */
+  function renderPhone() {
+    var active = document.activeElement;
+    var keepId = (active && active.id && panelEl && panelEl.contains(active)) ? active.id : '';
+    var start = null;
+    var end = null;
+    if (keepId) {
+      try { start = active.selectionStart; end = active.selectionEnd; }
+      catch (err) { start = null; end = null; }
+    }
+
+    renderPhoneTools();
+    renderPhonePair();
+    renderPhoneConnect();
+    renderPhoneDevice();
+    renderPhoneStream();
+    renderPhoneQuality();
+    renderPhoneForget();
+
+    if (!keepId) return;
+    var back = document.getElementById(keepId);
+    if (!back) return;
+    try {
+      back.focus();
+      if (start !== null && typeof back.setSelectionRange === 'function') {
+        back.setSelectionRange(start, end);
+      }
+    } catch (err) { /* the control is not a text field, or went away */ }
+  }
+
+  /** The field element, cleared, or null when the panel is not built yet. */
+  function phoneField(name) {
+    var field = panelEl && panelEl.querySelector('[data-field="' + name + '"]');
+    if (!field) return null;
+    field.textContent = '';
+    return field;
+  }
+
+  /**
+   * Said once, at the top: with no state there is nothing honest to draw in
+   * any of the fields, so each one says why rather than showing zeroes.
+   * @returns {boolean} true when the caller should stop.
+   */
+  function phoneNoState(field, what) {
+    if (phnState) return false;
+    field.appendChild(el('p', 'set-hint',
+      'No ' + what + ' yet: ' + (phnStateReason || 'the browser has not answered describe() yet.')));
+    return true;
+  }
+
+  function renderPhoneTools() {
+    var field = phoneField('phonetools');
+    if (!field) return;
+
+    /* The one sentence that explains the whole section, and the one fact no
+       readout can discover: if the phone's Tailscale is off, nothing below
+       this line can work and every failure will be a timeout. */
+    field.appendChild(el('p', 'set-hint',
+      'Your phone on the screen, over Tailscale: adb and the scrcpy server are ' +
+      'downloaded here, the phone is paired once, and the Phone workspace mirrors it. ' +
+      'The phone\'s Tailscale has to be ON and connected - there is no cable path, ' +
+      'and none of this goes over the open internet.'));
+
+    if (phoneNoState(field, 'tool state')) {
+      phoneButton(field, 'Download tools', 'install-tools', function () {
+        phoneRun('install-tools', null, 'install-tools');
+      });
+      return;
+    }
+
+    var t = phnState.tools || {};
+    field.appendChild(phoneReadout('Tools', t.state, t.reason));
+
+    var prog = t.progress || {};
+    if (Number(prog.total) > 0 || Number(prog.received) > 0) {
+      field.appendChild(phoneRow('Downloading',
+        phoneMb(prog.received) + ' of ' + phoneMb(prog.total) + ' MB, ' +
+        (prog.item || 'unnamed')));
+    }
+    field.appendChild(phoneRow('adb', t.adbVersion ? String(t.adbVersion) : 'not installed'));
+    field.appendChild(phoneRow('scrcpy server',
+      (t.serverVersion ? 'v' + t.serverVersion : 'unknown') +
+      ', sha ' + phoneShaShort(t.sha && t.sha.server)));
+    field.appendChild(phoneRow('adb sha', phoneShaShort(t.sha && t.sha.adb)));
+    if (t.sha && t.sha.server && t.sha.serverExpected && t.sha.server !== t.sha.serverExpected) {
+      field.appendChild(el('p', 'set-hint',
+        'That is NOT the published checksum (' + phoneShaShort(t.sha.serverExpected) +
+        '). The server will not be used.'));
+    }
+    field.appendChild(phoneRow('Folder', t.dir ? String(t.dir) : 'not chosen yet'));
+
+    phoneButton(field, t.state === 'ready' ? 'Check tools again' : 'Download tools',
+      'install-tools', function () { phoneRun('install-tools', null, 'install-tools'); });
+  }
+
+  function renderPhonePair() {
+    var field = phoneField('phonepair');
+    if (!field) return;
+
+    field.appendChild(el('p', 'set-label', 'Pairing'));
+    field.appendChild(el('p', 'set-hint',
+      'On the phone: Developer options, then Wireless debugging, then "Pair device ' +
+      'with pairing code". It shows an IP address, a PAIRING port and six digits - ' +
+      'and that pairing port is not the same number as the connect port below.'));
+
+    field.appendChild(phoneInput('host', 'set-phone-host', 'Phone address', '100.64.0.1'));
+    field.appendChild(phoneInput('pairPort', 'set-phone-pairport', 'Pairing port', '37419'));
+    field.appendChild(phoneInput('code', 'set-phone-code', 'Pairing code', '123456'));
+
+    phoneButton(field, 'Pair', 'pair', function () {
+      phoneRun('pair', {
+        host: String(phnDraft.host || '').trim(),
+        port: Number(String(phnDraft.pairPort || '').trim()),
+        code: String(phnDraft.code || '').trim()
+      }, 'pair');
+    });
+
+    if (phnState && phnState.device) {
+      field.appendChild(phoneRow('Paired', phnState.device.paired ? 'yes' : 'not yet'));
+    }
+  }
+
+  function renderPhoneConnect() {
+    var field = phoneField('phoneconnect');
+    if (!field) return;
+
+    field.appendChild(el('p', 'set-label', 'Connection'));
+    field.appendChild(phoneInput('port', 'set-phone-port', 'Connect port', '5555'));
+
+    phoneButton(field, 'Connect', 'connect', function () {
+      phoneRun('connect', {
+        host: String(phnDraft.host || '').trim(),
+        port: Number(String(phnDraft.port || '').trim())
+      }, 'connect');
+    });
+    phoneButton(field, 'Disconnect', 'disconnect', function () {
+      phoneRun('disconnect', null, 'disconnect');
+    });
+
+    var pinned = phnState && phnState.device ? phnState.device.tcpipPinned : null;
+    field.appendChild(phoneRow('Port 5555',
+      pinned === true ? 'pinned' : (pinned === false ? 'not pinned' : 'unknown')));
+    phoneButton(field, 'Pin port 5555', 'pin-tcpip', function () {
+      phoneRun('pin-tcpip', null, 'pin-tcpip');
+    });
+    field.appendChild(el('p', 'set-hint',
+      'Wireless debugging picks a new connect port every time it is switched off ' +
+      'and on again. Pinning 5555 holds one number until the phone reboots, and it ' +
+      'keeps working when the phone is on cellular instead of Wi-Fi.'));
+  }
+
+  function renderPhoneDevice() {
+    var field = phoneField('phonedevice');
+    if (!field) return;
+
+    field.appendChild(el('p', 'set-label', 'Phone'));
+    if (phoneNoState(field, 'device state')) return;
+
+    var d = phnState.device || {};
+    field.appendChild(phoneReadout('Device', d.state, d.reason));
+    field.appendChild(phoneRow('Name', d.name ? String(d.name) : 'not known yet'));
+    field.appendChild(phoneRow('Model', d.model ? String(d.model) : 'not known yet'));
+    field.appendChild(phoneRow('Android', d.android ? String(d.android) : 'not known yet'));
+    field.appendChild(phoneRow('Address',
+      (d.host || '?') + ':' + (Number(d.port) > 0 ? d.port : '?')));
+    field.appendChild(phoneRow('Round trip',
+      (Number(d.latencyMs) > 0) ? Math.round(d.latencyMs) + ' ms' : 'not measured'));
+    field.appendChild(phoneRow('Battery', d.battery
+      ? (Math.round(Number(d.battery.level) || 0) + '%' + (d.battery.charging ? ', charging' : ''))
+      : 'not read'));
+    field.appendChild(phoneRow('Last seen', phoneAgo(d.lastSeenAt)));
+  }
+
+  function renderPhoneStream() {
+    var field = phoneField('phonestream');
+    if (!field) return;
+
+    field.appendChild(el('p', 'set-label', 'Mirroring'));
+    if (!phoneNoState(field, 'stream state')) {
+      var st = phnState.stream || {};
+      field.appendChild(phoneReadout('Stream', st.state, st.reason));
+      field.appendChild(phoneRow('Video',
+        (st.codec ? String(st.codec) : 'no codec yet') + ', ' +
+        (Number(st.width) > 0 ? st.width + 'x' + st.height : 'no size yet')));
+      field.appendChild(phoneRow('Rate',
+        (Number(st.fps) > 0 ? Math.round(st.fps) + ' fps' : '0 fps') + ', ' + phoneKbps(st.kbps * 1000)));
+      field.appendChild(phoneRow('Profile in use', st.profile ? String(st.profile) : 'unknown'));
+      field.appendChild(phoneRow('Audio',
+        st.audio ? (st.audioCodec ? String(st.audioCodec) : 'on, no codec yet') : 'off'));
+      var ws = phnState.ws || {};
+      field.appendChild(phoneRow('Page link',
+        (Number(ws.port) > 0 ? 'ws port ' + ws.port : 'no socket yet') +
+        ', ' + (Number(ws.clients) || 0) + ' connected'));
+    }
+
+    phoneButton(field, 'Start mirroring', 'start', function () {
+      phoneRun('start', null, 'start');
+    });
+    phoneButton(field, 'Stop', 'stop', function () {
+      phoneRun('stop', null, 'stop');
+    });
+  }
+
+  function renderPhoneQuality() {
+    var field = phoneField('phonequality');
+    if (!field) return;
+
+    field.appendChild(el('p', 'set-label', 'Quality'));
+    if (phoneNoState(field, 'settings')) return;
+
+    var s = phnState.settings || {};
+
+    field.appendChild(controlRow('Profile', null, segmented([
+      { id: 'lan',  name: 'At home' },
+      { id: 'away', name: 'Away' },
+      { id: 'auto', name: 'Auto' }
+    ], s.profile, function (next) {
+      phoneSetSetting({ profile: next }, 'set-profile');
+    })));
+    field.appendChild(el('p', 'set-hint',
+      'At home is the full-rate stream over the local network; Away is the lean one ' +
+      'for cellular. Auto picks between them on how the link is behaving.'));
+    var profileAnswer = phoneResultRow('set-profile');
+    if (profileAnswer) field.appendChild(profileAnswer);
+
+    field.appendChild(controlRow('At-home bitrate', 'set-phone-lanrate', glassSelect(
+      'set-phone-lanrate',
+      [4, 8, 12, 16, 25].map(function (mb) {
+        return { value: mb * 1000000, name: mb + ' Mbps' };
+      }), s.lanBitrate, function (next) {
+        phoneSetSetting({ lanBitrate: Number(next) }, 'set-lanrate');
+      })));
+    field.appendChild(controlRow('Away bitrate', 'set-phone-awayrate', glassSelect(
+      'set-phone-awayrate',
+      [500000, 1000000, 1500000, 2000000, 4000000].map(function (bps) {
+        return { value: bps, name: (bps / 1000000).toFixed(1) + ' Mbps' };
+      }), s.awayBitrate, function (next) {
+        phoneSetSetting({ awayBitrate: Number(next) }, 'set-awayrate');
+      })));
+    field.appendChild(controlRow('Longest side', 'set-phone-maxsize', glassSelect(
+      'set-phone-maxsize',
+      [720, 1024, 1280, 1600, 1920].map(function (px) {
+        return { value: px, name: px + ' px' };
+      }), s.maxSize, function (next) {
+        phoneSetSetting({ maxSize: Number(next) }, 'set-maxsize');
+      })));
+    field.appendChild(controlRow('Frame rate', 'set-phone-maxfps', glassSelect(
+      'set-phone-maxfps',
+      [24, 30, 48, 60].map(function (fps) {
+        return { value: fps, name: fps + ' fps' };
+      }), s.maxFps, function (next) {
+        phoneSetSetting({ maxFps: Number(next) }, 'set-maxfps');
+      })));
+
+    var rateAnswer = phoneResultRow('set-lanrate') || phoneResultRow('set-awayrate')
+      || phoneResultRow('set-maxsize') || phoneResultRow('set-maxfps');
+    if (rateAnswer) field.appendChild(rateAnswer);
+
+    field.appendChild(switchRow('Phone audio', !!s.audio, function (next) {
+      phoneSetSetting({ audio: next }, 'set-audio');
+    }));
+    var audioAnswer = phoneResultRow('set-audio');
+    if (audioAnswer) field.appendChild(audioAnswer);
+
+    field.appendChild(switchRow('Turn the phone screen off while mirroring',
+      !!s.screenOffWhileMirroring, function (next) {
+        phoneSetSetting({ screenOffWhileMirroring: next }, 'set-screenoff');
+      }));
+    var screenAnswer = phoneResultRow('set-screenoff');
+    if (screenAnswer) field.appendChild(screenAnswer);
+
+    field.appendChild(switchRow('Connect on its own when the browser starts',
+      !!s.autoConnect, function (next) {
+        phoneSetSetting({ autoConnect: next }, 'set-autoconnect');
+      }));
+    var autoAnswer = phoneResultRow('set-autoconnect');
+    if (autoAnswer) field.appendChild(autoAnswer);
+  }
+
+  function renderPhoneForget() {
+    var field = phoneField('phoneforget');
+    if (!field) return;
+
+    var row = el('div', 'set-path-row');
+    var label = phnForgetArmed ? 'Press again to forget this phone' : 'Forget phone';
+    row.appendChild(textButton(label, 'set-text', function () {
+      if (!phnForgetArmed) {
+        phnForgetArmed = true;
+        renderPhone();
+        if (typeof window.clearTimeout === 'function') window.clearTimeout(phnForgetTimer);
+        if (typeof window.setTimeout === 'function') {
+          phnForgetTimer = window.setTimeout(function () {
+            if (!phnForgetArmed) return;
+            phnForgetArmed = false;
+            renderPhone();
+          }, 4000);
+        }
+        return;
+      }
+      phnForgetArmed = false;
+      if (typeof window.clearTimeout === 'function') window.clearTimeout(phnForgetTimer);
+      phoneRun('forget', null, 'forget');
+    }));
+    field.appendChild(row);
+
+    var answer = phoneResultRow('forget');
+    if (answer) field.appendChild(answer);
+
+    field.appendChild(el('p', 'set-hint',
+      'Drops the stored address, port and pairing state. The adb keys stay, so the ' +
+      'phone does not have to be paired from scratch unless it forgets this computer too.'));
+  }
+
   /* ------------------------------------------------------------
      Shortcuts
 
@@ -4352,6 +4970,7 @@
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildSpotify());
     bodyEl.appendChild(buildStocks());
+    bodyEl.appendChild(buildPhone());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
 
@@ -4380,6 +4999,7 @@
     renderPrivacy();
     renderSpotify();
     renderStocks();
+    renderPhone();
     renderShortcuts();
     refreshFilter();          // the text just changed under the index
   }
@@ -4416,6 +5036,11 @@
        One call per open, never a poll -- nothing in that section moves on its
        own. */
     stocksRefresh();
+    /* And the Phone section, which unlike Stocks DOES move on its own: a
+       download's progress, a device coming and going, a stream's bitrate.
+       So it takes a subscription as well as one describe(), and gives both
+       back in closePanel() - nothing of this section is left running. */
+    phoneWatch();
     position();
     if (buttonEl) {
       buttonEl.classList.add('is-open');
@@ -4447,6 +5072,7 @@
     if (panelEl) panelEl.hidden = true;
     open_ = false;
     autopauseRelease();
+    phoneRelease();
     if (buttonEl) {
       buttonEl.classList.remove('is-open');
       buttonEl.setAttribute('aria-expanded', 'false');

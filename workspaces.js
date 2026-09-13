@@ -19,7 +19,8 @@
  *                           colour in null|'ion'|'ember'|'forest'|'ocean'|'midnight'
  *                           folder: the Claude folder for the workspace, or null
  *                           pane:   null | 'school' (the side pane it wants)
- *                           preset: null | 'school' | 'project' | 'club' | 'trading'
+ *                           preset: null | 'school' | 'project' | 'club' | 'trading' | 'phone'
+ *                                   (a key this panel only ever passes through)
  *   currentWorkspace()   -> the current workspace (object or id; both accepted)
  *   switchWorkspace(id)
  *   createWorkspace(name, colour) -> id

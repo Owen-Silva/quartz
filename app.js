@@ -4178,11 +4178,25 @@ function readerSourceOf(url) {
   return source.href;
 }
 
+// phone.html is the user's phone on the screen — the Phone workspace's own page,
+// and the tab that workspace opens when it has none. Like the new tab page and
+// the folder browser it is a bundled, preload-less file:// guest; unlike them
+// it talks to main over a localhost WebSocket (see the contract in phone.js).
+const PHONE_URL = new URL('phone.html', window.location.href).href;
+
+/** True for the bundled Phone page, query string and hash included. */
+function isPhoneUrl(url) {
+  return typeof url === 'string' && url.indexOf(PHONE_URL) === 0;
+}
+
 function shortLabelFor(url) {
   const parsed = parseUrlOrNull(url);
   // The folder browser is named, not hostnamed: the chip says Files from the
   // moment the tab is made, instead of flashing "New tab" until <title> lands.
   if (isFilesUrl(url)) return 'Files';
+  // The Phone page the same way: "Phone" from the first frame, not "New tab"
+  // until phone.html's own <title> arrives.
+  if (isPhoneUrl(url)) return 'Phone';
   // Local pages (the new-tab page above all) have no hostname worth showing.
   if (parsed && parsed.protocol === 'file:') return 'New tab';
   if (parsed && parsed.hostname) return parsed.hostname.replace(/^www\./, '');
@@ -4376,8 +4390,10 @@ function setOmniboxValue(url, force) {
   // the placeholder, never a file:// path they did not type.
   const store = window.History;
   const ours = !!(store && typeof store.isHistoryUrl === 'function' && store.isHistoryUrl(url));
-  // The folder browser has a path bar of its own; its file:// href is noise.
-  const blank = !url || url === 'about:blank' || isNewTabUrl(url) || isFilesUrl(url) || ours;
+  // The folder browser has a path bar of its own; its file:// href is noise,
+  // and so is the Phone page's — neither is an address the user ever typed.
+  const blank = !url || url === 'about:blank' || isNewTabUrl(url)
+    || isFilesUrl(url) || isPhoneUrl(url) || ours;
   // A reader tab shows the article it is reading, not our wrapper page.
   omniboxEl.value = blank ? '' : (readerSourceOf(url) || url);
 }
@@ -4467,10 +4483,29 @@ function setTabLoading(tab, loading) {
 // The last two are the titlebar's own window controls, borrowed on purpose: a
 // chip collapses to its icon with the same E921 dash #win-min draws, and comes
 // back with #win-max's E922 square, so "minimize" is one shape in this chrome.
+//   E8EA = phone (the bundled Phone page, which has no favicon to report).
 const TAB_GLYPH = {
   audible: '\uE767', muted: '\uE74F', globe: '\uE774', split: '\uE89F',
-  collapse: '\uE921', expand: '\uE922'
+  collapse: '\uE921', expand: '\uE922', phone: '\uE8EA'
 };
+
+/**
+ * The glyph standing in for a bundled page's missing favicon. Everything that
+ * is not one of ours gets the globe, exactly as it always did. This is only
+ * how the Phone chip comes up as a phone rather than a planet when it is
+ * pinned or collapsed. Kept in step by syncChipGlyph() below, because a tab
+ * can be navigated onto and off phone.html after its chip is built.
+ */
+function chipGlyphFor(url) {
+  return isPhoneUrl(url) ? TAB_GLYPH.phone : TAB_GLYPH.globe;
+}
+
+/** Put the right stand-in glyph on a chip. Safe on a chip with no globe. */
+function syncChipGlyph(tab) {
+  if (!tab || !tab.globeEl) return;
+  const glyph = chipGlyphFor(tab.url);
+  if (tab.globeEl.textContent !== glyph) tab.globeEl.textContent = glyph;
+}
 
 function buildChip(tab) {
   const chip = document.createElement('div');
@@ -4492,7 +4527,7 @@ function buildChip(tab) {
   if (!isClaudeTab(tab)) {
     const globe = document.createElement('span');
     globe.className = 'glyph tab-globe';
-    globe.textContent = TAB_GLYPH.globe;
+    globe.textContent = chipGlyphFor(tab.url);
     globe.setAttribute('aria-hidden', 'true');
     chip.appendChild(globe);
     tab.globeEl = globe;
@@ -4790,6 +4825,10 @@ function setTabTitle(tab, title) {
   if (tab.titleEl) tab.titleEl.textContent = text;
   // A pinned chip has no title on it, so the tooltip is all the hover gives.
   if (tab.chipEl) tab.chipEl.title = chipTooltip(tab);
+  // Every navigation calls through here (onNavigate re-titles the tab), so
+  // this is where the stand-in glyph learns that the tab is now the Phone
+  // page, or has just left it.
+  syncChipGlyph(tab);
 }
 
 /* ------------------------------------------------------------------ */
@@ -4877,30 +4916,71 @@ function cleanWorkspacePreset(key) {
   return null;
 }
 
-/* --- the four presets ----------------------------------------------
- * The user works in the same four places, so the browser ships them rather than
- * making him build them: School, Project, Club and Trading, seeded once after
- * the session is restored and never again — a preset he deletes stays deleted
- * (presetsSeeded rides in the session snapshot, with a localStorage backstop
- * for the sessions sanitiseSession() cannot return: see seedWorkspacePresets).
+/* --- the seeded presets ---------------------------------------------
+ * The user works in the same few places, so the browser ships them rather than
+ * making him build them: School, Project, Club, Trading and now Phone, each
+ * seeded once after the session is restored and never again - a preset he
+ * deletes stays deleted (the list of keys already seeded rides in the session
+ * snapshot, with a localStorage backstop for the sessions sanitiseSession()
+ * cannot return: see seedWorkspacePresets).
  *
  * `folder` is written under the user's own home folder wherever the path is in
- * it, so the seed is right on another machine too; Club has none on purpose —
+ * it, so the seed is right on another machine too; Club has none on purpose -
  * The user sets it from the popover, and until he does a Claude tab there opens
  * wherever it would have anyway.
+ *
+ * `opens` is the page the workspace puts up when it has no tabs at all, and is
+ * null everywhere the answer is the ordinary home page. Phone is the one that
+ * is not: an empty Phone workspace is the phone itself, not a new tab page.
+ * Ctrl+T in it still opens a new tab page, because that is what Ctrl+T means.
  */
 const WORKSPACE_PRESETS = [
-  { preset: 'school',  name: 'School',  colour: 'forest', home: 'Documents\\notes', pane: 'school' },
-  { preset: 'project',   name: 'Project',   colour: 'ion',    home: 'Downloads\\Project',  pane: null },
-  { preset: 'club',    name: 'Club',    colour: 'ocean',  home: null,                pane: null },
-  { preset: 'trading', name: 'Trading', colour: 'ember',  home: 'trading-bot',   pane: null }
+  { preset: 'school',  name: 'School',  colour: 'forest',   home: 'Documents\\notes', pane: 'school', opens: null },
+  { preset: 'project',   name: 'Project',   colour: 'ion',      home: 'Downloads\\Project',  pane: null,     opens: null },
+  { preset: 'club',    name: 'Club',    colour: 'ocean',    home: null,                pane: null,     opens: null },
+  { preset: 'trading', name: 'Trading', colour: 'ember',    home: 'trading-bot',   pane: null,     opens: null },
+  { preset: 'phone',   name: 'Phone',   colour: 'midnight', home: null,                pane: null,     opens: PHONE_URL }
 ];
 
-// Written the moment the presets go in, so a browser whose session snapshot
-// cannot be read back (every tab in it unpersistable, storage cleared under it)
-// still does not resurrect a workspace the user deleted.
-const PRESETS_SEEDED_KEY = 'workspacePresetsSeeded';
-let presetsSeeded = false;
+/**
+ * The page a workspace opens into when nothing is in it. A preset says so
+ * through `opens`; everything else - Home, a workspace the user made himself, a
+ * preset row with no page of its own - gets the home page, exactly as before.
+ *
+ * @param {object|null} ws a workspace record (not one of workspaceList()'s copies).
+ * @returns {string} a URL, never empty.
+ */
+function workspaceOpensUrl(ws) {
+  const key = ws && ws.preset;
+  if (key) {
+    for (const row of WORKSPACE_PRESETS) {
+      if (row.preset === key && row.opens) return row.opens;
+    }
+  }
+  return HOME_URL;
+}
+
+/*
+ * Written the moment the presets go in, so a browser whose session snapshot
+ * cannot be read back (every tab in it unpersistable, storage cleared under it)
+ * still does not resurrect a workspace the user deleted.
+ *
+ * SEEDING IS PER KEY, not once for the set. The first four shipped together
+ * and were recorded as one flag ('1' here, `presetsSeeded: true` in the
+ * snapshot); a fifth added later would never have reached a profile that
+ * already carried that flag, so what is recorded now is the LIST of keys a
+ * profile has been given. The old flag still reads as "the original four",
+ * which is exactly what it meant, and it is still WRITTEN beside the list so
+ * that a build without this change reads a profile of the user's correctly.
+ */
+const PRESETS_SEEDED_KEY = 'workspacePresetsSeeded';           // '1' = the original four
+const PRESETS_SEEDED_KEYS_KEY = 'workspacePresetsSeededKeys';  // JSON array of preset keys
+// What the old boolean stood for. Never reordered and never added to: a key
+// that ships later belongs in WORKSPACE_PRESETS, and only there.
+const ORIGINAL_PRESET_KEYS = ['school', 'project', 'club', 'trading'];
+// Keys this profile has already been offered, whether or not the workspace is
+// still there. Empty means "this profile has never been seeded at all".
+let seededPresets = [];
 
 /** `Documents\notes` -> `C:\Users\you\Documents\notes`, or null with no home. */
 function underHome(relative) {
@@ -4915,27 +4995,90 @@ function presetWorkspace(key) {
 }
 
 /**
- * Put the four presets in, once in the life of a profile. Called after the
- * session is restored — on a fresh profile and on an old one that predates
- * them alike — so the rows the user already had are never disturbed: Home
- * stays first, the presets go in behind it in their own order, and anything
- * the user made keeps its place after them.
+ * The seeded-key list a stored value stands for. `true` (and the string '1')
+ * is the old flag and means the original four; an array is the list itself.
+ * An unknown key is KEPT rather than dropped, so a snapshot written by a build
+ * with one more preset than this one does not lose it and get it seeded twice.
  *
- * @param {object|null} session the restored snapshot, for its seeded flag.
- * @returns {boolean} true when this call actually seeded.
+ * @returns {string[]} a fresh array, empty when the value says nothing.
+ */
+function cleanSeededPresets(value) {
+  if (value === true || value === '1') return ORIGINAL_PRESET_KEYS.slice();
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const key of value) {
+    if (typeof key !== 'string' || !key || out.indexOf(key) !== -1) continue;
+    out.push(key);
+    if (out.length >= 32) break;     // a corrupt session cannot grow without end
+  }
+  return out;
+}
+
+/** The keys this profile has been given, from localStorage. Never throws. */
+function seededPresetsFromStorage() {
+  let raw = null;
+  try { raw = window.localStorage.getItem(PRESETS_SEEDED_KEYS_KEY); } catch (err) { raw = null; }
+  if (raw) {
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch (err) { parsed = null; }
+    const list = cleanSeededPresets(parsed);
+    if (list.length) return list;
+  }
+  // No list: the old single flag is the whole answer, and it means the four.
+  let flag = null;
+  try { flag = window.localStorage.getItem(PRESETS_SEEDED_KEY); } catch (err) { flag = null; }
+  return flag === '1' ? ORIGINAL_PRESET_KEYS.slice() : [];
+}
+
+/** Both copies written together: the list, and the old flag a past build reads. */
+function writeSeededPresets(list) {
+  try {
+    window.localStorage.setItem(PRESETS_SEEDED_KEYS_KEY, JSON.stringify(list));
+    if (list.length) window.localStorage.setItem(PRESETS_SEEDED_KEY, '1');
+  } catch (err) { /* this run only */ }
+}
+
+/**
+ * Put the presets in, each one once in the life of a profile. Called after the
+ * session is restored - on a fresh profile and on an old one that predates
+ * them alike - so the rows the user already had are never disturbed: Home
+ * stays first, a new preset goes in behind the last one already there, and
+ * anything the user made keeps its place after them.
+ *
+ * A preset the user DELETES stays deleted: its key is in the seeded list, and
+ * a key in that list is never offered again. That is the whole reason the list
+ * exists rather than a count or a version number.
+ *
+ * @param {object|null} session the restored snapshot, for its seeded keys.
+ * @returns {boolean} true when this call actually added a workspace.
  */
 function seedWorkspacePresets(session) {
-  if (presetsSeeded) return false;                 // restoreSession() read the flag
-  if (session && session.presetsSeeded) { presetsSeeded = true; return false; }
-  let stored = null;
-  try { stored = window.localStorage.getItem(PRESETS_SEEDED_KEY); } catch (err) { stored = null; }
-  if (stored === '1') { presetsSeeded = true; return false; }
+  // Whichever copy speaks first: the one restoreSession() already read, the
+  // snapshot handed in (a restore that failed still carries it), then storage.
+  let seeded = seededPresets.slice();
+  if (!seeded.length && session) {
+    seeded = cleanSeededPresets(
+      Array.isArray(session.seededPresets) ? session.seededPresets : session.presetsSeeded
+    );
+  }
+  if (!seeded.length) seeded = seededPresetsFromStorage();
 
+  const before = seeded.length;
+  let added = 0;
   let at = 1; // straight after Home, whatever else the list holds
   for (const row of WORKSPACE_PRESETS) {
-    // A preset that is somehow already there (a flag lost, the rows kept) is
-    // never doubled: the key is what identifies it, not the name.
-    if (presetWorkspace(row.preset)) continue;
+    // A preset that is already there (a flag lost, the rows kept; or simply a
+    // profile that has it) is never doubled: the key identifies it, not the
+    // name. It also fixes where the NEXT new one goes - right behind it.
+    const already = workspaces.findIndex((w) => w.preset === row.preset);
+    if (already !== -1) {
+      at = already + 1;
+      if (seeded.indexOf(row.preset) === -1) seeded.push(row.preset);
+      continue;
+    }
+    // Seeded once and then deleted. It stays deleted.
+    if (seeded.indexOf(row.preset) !== -1) continue;
+
     let id = row.preset;
     if (findWorkspace(id)) id = newWorkspaceId(); // an id the user's own row took
     workspaces.splice(Math.min(at, workspaces.length), 0, {
@@ -4947,14 +5090,18 @@ function seedWorkspacePresets(session) {
       preset: row.preset,
       lastActiveTabId: null
     });
+    seeded.push(row.preset);
     at += 1;
+    added += 1;
   }
 
-  presetsSeeded = true;
-  try { window.localStorage.setItem(PRESETS_SEEDED_KEY, '1'); } catch (err) { /* this run only */ }
-  emitWorkspaceChange();
+  seededPresets = seeded;
+  writeSeededPresets(seeded);
+  // Nothing moved and nothing new was recorded: leave the session alone.
+  if (!added && seeded.length === before) return false;
+  if (added) emitWorkspaceChange();
   saveSession();
-  return true;
+  return added > 0;
 }
 
 /**
@@ -5022,7 +5169,9 @@ function raiseCurrentWorkspace() {
   const ws = findWorkspace(currentWorkspaceId);
   const list = visibleTabs();
   if (!list.length) {
-    createTab(HOME_URL); // createTab() stamps the current workspace on it
+    // Whatever this workspace opens into: the home page everywhere but the
+    // Phone workspace, which opens into the phone.
+    createTab(workspaceOpensUrl(ws)); // createTab() stamps the workspace on it
     return;
   }
   const wanted = (ws && list.find((t) => t.id === ws.lastActiveTabId)) || list[list.length - 1];
@@ -7976,9 +8125,13 @@ function sessionSnapshot() {
       return row;
     }),
     currentWorkspace: currentWorkspaceId,
-    // Seeded once per profile. It rides here so a preset the user DELETES
-    // stays deleted: without it every boot would put School back.
-    presetsSeeded: presetsSeeded,
+    // Which presets this profile has been given, each seeded once. It rides
+    // here so a preset the user DELETES stays deleted: without it every boot
+    // would put School back.
+    seededPresets: seededPresets.slice(),
+    // The same fact in the shape a build without seededPresets understands:
+    // it reads `true` as "the original four", which is what it always meant.
+    presetsSeeded: seededPresets.length > 0,
     savedAt: Date.now() // boot compares the two copies on this
   };
 }
@@ -8143,8 +8296,13 @@ function sanitiseSession(parsed) {
     active: inRange ? active : entries.length - 1,
     workspaces: wsList,
     currentWorkspace: current,
-    // Only `true` means seeded: a session written before the presets existed
-    // says nothing here and is seeded on the boot that reads it.
+    // Which presets the profile has been given. A session written before the
+    // list existed carries the old boolean, and `true` there means the four
+    // that shipped together; a session written before either says nothing at
+    // all and is seeded on the boot that reads it.
+    seededPresets: cleanSeededPresets(
+      Array.isArray(parsed.seededPresets) ? parsed.seededPresets : parsed.presetsSeeded
+    ),
     presetsSeeded: parsed.presetsSeeded === true,
     // A snapshot written before savedAt existed loses every tie-break.
     savedAt: (isFinite(savedAt) && savedAt > 0) ? savedAt : 0
@@ -8244,10 +8402,14 @@ function restoreSession(snapshot) {
       });
     }
   }
-  // Whether this profile has ever been given the presets. Read here rather
-  // than in seedWorkspacePresets() so a restore that fails later still leaves
-  // the flag where the snapshot put it.
-  if (session.presetsSeeded === true) presetsSeeded = true;
+  // Which presets this profile has ever been given. Read here rather than in
+  // seedWorkspacePresets() so a restore that fails later still leaves the list
+  // where the snapshot put it. sanitiseSession() has already turned the old
+  // boolean into the four keys it stood for.
+  const restoredSeeded = cleanSeededPresets(
+    Array.isArray(session.seededPresets) ? session.seededPresets : session.presetsSeeded
+  );
+  if (restoredSeeded.length) seededPresets = restoredSeeded;
   const wantCurrent = validWorkspaceId(session.currentWorkspace);
   currentWorkspaceId = wantCurrent;
 
@@ -9570,6 +9732,25 @@ function wireWindowControls() {
   // the chrome follows it onto that tab.
   if (window.api && typeof window.api.onGuestFocus === 'function') {
     window.api.onGuestFocus(onGuestFocused);
+  }
+
+  // The Phone page is a preload-less guest: it cannot open Settings itself, so
+  // its "set this up" buttons ask main, and main asks the chrome here. If the
+  // panel is missing (settings.js not loaded) nothing silently swallows it -
+  // the page is told by the command's own answer, and the toast says so here.
+  const phoneApi = (window.api && window.api.phone) ? window.api.phone : null;
+  if (phoneApi && typeof phoneApi.onOpenSettings === 'function') {
+    phoneApi.onOpenSettings(() => {
+      const settings = window.Settings;
+      if (settings && typeof settings.open === 'function') {
+        settings.open('Phone');
+        return;
+      }
+      const toast = window.Toast;
+      if (toast && typeof toast.show === 'function') {
+        toast.show('The Phone page asked for Settings, but this window has none');
+      }
+    });
   }
 
   if (win && typeof win.info === 'function') {
