@@ -101,8 +101,17 @@
   var CH_VIDEO = 0, CH_AUDIO = 1, CH_DEVICE = 2, CH_CONTROL = 3;
 
   /* Tuning. All of these are visible in a readout when they bite. */
-  var DECODE_QUEUE_LIMIT = 4;     // deltas are dropped above this
-  var STALL_AFTER_MS = 3000;      // "no frames for N s"
+  /* The decode queue is allowed to run DEEP before anything is thrown away:
+     dropping a delta costs the picture up to a whole key-frame interval
+     (~10 s from scrcpy), so a queue of a dozen frames is far cheaper than a
+     drop. It also has to be OVER the limit on DROP_AFTER_BEHIND packets in a
+     row: one late frame is a hiccup, several is a decoder that cannot keep up. */
+  var DECODE_QUEUE_LIMIT = 12;
+  var DROP_AFTER_BEHIND = 2;      // consecutive over-limit packets before dropping
+  var STILL_AFTER_MS = 3000;      // after this much quiet the status says "still N s"
+  var KEY_FRAME_GAP_MS = 500;     // at most one RESET_VIDEO per this
+  var SHED_WINDOW_MS = 2000;      // still behind this soon after a key frame = too slow
+  var SHED_GAP_MS = 5000;         // and never ask main to turn the load down faster than this
   var AUDIO_TARGET_S = 0.06;      // ~60 ms of buffer
   var AUDIO_MAX_AHEAD_S = 0.35;   // beyond this the buffer is resynced
   var PING_EVERY_MS = 2000;
@@ -284,7 +293,16 @@
     err: '',
     note: 'waiting for the first frame',
     paused: false,
-    selftest: false
+    selftest: false,
+    behind: 0,               // consecutive packets found with the queue over the limit
+    keyAsked: 0,             // RESET_VIDEO requests that actually went out
+    keyAt: 0,                // when the last one did (rate limit)
+    keyFail: '',             // why the last one could not be sent, in words
+    accel: 'prefer-hardware',// what the decoder was configured with
+    accelFell: '',           // why it fell back to software, if it did
+    decodeMs: 0,             // decode -> output, EWMA
+    sentAt: null,            // pts -> performance.now() at decode(), for that number
+    notPainting: false       // frames decoding but nothing reaching the screen
   };
 
   var audio = {
@@ -305,6 +323,12 @@
     down: new Set(),         // pointerIds currently down on the canvas
     clipSeq: 0
   };
+
+  /* Turning the load down when this machine's decoder simply cannot keep up
+     with what the phone is sending. Asking for a key frame fixes a hiccup;
+     asking again and again means the stream is too heavy, and the answer is
+     fewer frames (then a smaller picture), not a faster loop. */
+  var shed = { at: 0, step: 0, note: '' };
 
   /* ==================================================================== */
   /* 4. The status strip, the frame note and the rail note                */
@@ -463,38 +487,86 @@
       return;
     }
 
-    /* running / stalled: now the page's own view of the picture decides. */
-    var age = video.lastPaintAt ? (performance.now() - video.lastPaintAt) : Infinity;
-    if (s.state === 'stalled' || age > STALL_AFTER_MS) {
-      var secs = video.lastPaintAt ? Math.floor(age / 1000) : null;
-      setStatus('warn', secs === null ? 'no frames yet' : 'no frames for ' + secs + ' s',
-        s.reason || video.err || video.note,
-        { label: 'Restart', run: function () { runCommand('start'); } });
-      setFrameNote((secs === null ? 'no frames yet.' : 'no frames for ' + secs + ' s.') +
-        '\n' + (s.reason || video.err || video.note || ''));
+    /* running (and a legacy 'stalled' from an older phone.js, which this page
+       now treats as running): the page's own view of the picture decides.
+
+       A STILL SCREEN IS NOT A STALL. scrcpy's server encodes a frame only when
+       the display CHANGES, so a phone resting on its home screen sends nothing
+       at all for minutes — and that is the stream working perfectly. So once a
+       frame has painted, the picture is NEVER covered again and silence alone
+       never warns: stillness is said quietly, in the sub-line and in the
+       frame-age readout. The overlay belongs to the states before a picture
+       exists, and Restart belongs to 'off' and 'error' (above). */
+    if (!video.lastPaintAt) {
+      setStatus('warn', 'no frames yet', s.reason || video.err || video.note, null);
+      setFrameNote('no frames yet.\n' + (s.reason || video.err || video.note || ''));
       return;
     }
 
-    setStatus('ok', 'mirroring ' + video.w + '×' + video.h,
-      video.fps + ' fps · ' + video.kbps + ' kbps' + (video.err ? ' · ' + video.err : ''), null);
+    var still = stillMs();
+    var sub = '';
+    /* The still marker goes FIRST: the sub-line is ellipsised from the right
+       in a narrow tab, and "still 12 s" is the part worth keeping. */
+    if (still > STILL_AFTER_MS) sub += 'still ' + fmtAge(still) + ' · ';
+    sub += video.fps + ' fps · ' + video.kbps + ' kbps';
+    if (video.decodeMs) sub += ' · decode ' + video.decodeMs.toFixed(1) + ' ms';
+    if (shed.note) sub += ' · ' + shed.note;
+    if (video.notPainting) sub += ' · this window is not painting (occluded or minimised)';
+    if (video.err) sub += ' · ' + video.err;
+    setStatus('ok', 'mirroring ' + video.w + '×' + video.h, sub, null);
     setFrameNote('');
+  }
+
+  /* How long the picture has been unchanged, in ms. phone.js reports
+     stream.lastVideoAt (epoch ms: the last video packet off the phone's
+     socket), which is the truth about the WIRE; this page's lastPaintAt is the
+     truth about the SCREEN, in performance.now()'s clock. Main's is preferred
+     where it exists, so a hidden tab (which decodes nothing on purpose) is not
+     reported as a still phone. */
+  function stillMs() {
+    var s = (phone && phone.stream) || {};
+    if (typeof s.lastVideoAt === 'number' && s.lastVideoAt > 0) {
+      return Math.max(0, Date.now() - s.lastVideoAt);
+    }
+    return video.lastPaintAt ? Math.max(0, performance.now() - video.lastPaintAt) : Infinity;
+  }
+
+  function fmtAge(ms) {
+    if (!isFinite(ms)) return 'never';
+    if (ms < 1000) return Math.round(ms) + ' ms';
+    if (ms < 90000) return Math.floor(ms / 1000) + ' s';
+    return Math.floor(ms / 60000) + ' min';
+  }
+
+  /* Bitrates come off the wire in bits per second (scrcpy's video_bit_rate). */
+  function fmtRate(bps) {
+    if (!bps) return '—';
+    if (bps >= 1000000) return (bps / 1000000).toFixed(bps % 1000000 ? 1 : 0) + ' Mbps';
+    return Math.round(bps / 1000) + ' kbps';
   }
 
   /* ==================================================================== */
   /* 5. Readouts                                                          */
   /* ==================================================================== */
 
+  /* Two round trips, and they measure different things: 'phone rtt' is what
+     phone.js measures over adb (this machine → the phone → back), 'browser
+     rtt' is this page's own ping to the relay in the main process. Labelling
+     both "latency" is how the first live pass was misread. */
   var READOUT_ROWS = [
     ['device', 'device'],
     ['battery', 'battery'],
-    ['phone', 'phone latency'],
-    ['rtt', 'ws rtt'],
+    ['phone', 'phone rtt'],
+    ['rtt', 'browser rtt'],
     ['fps', 'fps'],
     ['kbps', 'kbps'],
+    ['decoder', 'decoder'],
+    ['decodems', 'decode time'],
     ['queue', 'decode queue'],
     ['dropped', 'dropped'],
+    ['keyframes', 'key frames asked'],
     ['age', 'frame age'],
-    ['profile', 'bitrate'],
+    ['profile', 'profile · bitrate'],
     ['audio', 'audio'],
     ['keys', 'keys']
   ];
@@ -507,6 +579,7 @@
     READOUT_ROWS.forEach(function (row) {
       var dt = document.createElement('dt');
       dt.textContent = row[1];
+      dt.title = row[1];               // the rail is narrow: a clipped label still hovers
       var dd = document.createElement('dd');
       dd.textContent = '—';
       dl.appendChild(dt);
@@ -530,18 +603,44 @@
     readout('device', d.state ? d.state : 'unknown',
       d.state === 'connected' ? 'ok' : (d.state === 'unreachable' || d.state === 'error' ? 'error' : 'warn'));
     readout('battery', d.battery ? (d.battery.level + '%' + (d.battery.charging ? ' ⚡' : '')) : '—');
-    readout('phone', typeof d.latencyMs === 'number' ? d.latencyMs + ' ms' : '—');
+    readout('phone', typeof d.latencyMs === 'number' ? d.latencyMs + ' ms' : '—', '',
+      'phone rtt: what phone.js measures over adb — this machine to the phone and back');
     readout('rtt', wire.rtt === null ? (wire.state === 'open' ? 'waiting' : 'no link') : wire.rtt + ' ms',
-      wire.state === 'open' ? '' : 'error');
-    readout('fps', String(video.fps), video.fps > 0 ? 'ok' : 'warn');
+      wire.state === 'open' ? '' : 'error',
+      'browser rtt: this page to the relay in the browser and back over the WebSocket');
+    readout('fps', String(video.fps), video.fps > 0 ? 'ok' : '',
+      'frames painted in the last second — 0 on a still screen is normal');
     readout('kbps', String(video.kbps));
+    readout('decoder', video.accelFell ? 'software' : (video.dec ? 'hardware' : 'not built yet'),
+      video.accelFell ? 'warn' : '',
+      video.accelFell
+        ? 'fell back to software decoding: ' + video.accelFell
+        : 'configured with hardwareAcceleration: prefer-hardware (WebCodecs does not report which one Chromium then picked)');
+    readout('decodems', video.decodeMs ? video.decodeMs.toFixed(1) + ' ms' : '—',
+      video.decodeMs > 16 ? 'warn' : '',
+      'decode() to the decoded frame, smoothed — above ~16 ms the decoder cannot hold 60 fps');
     readout('queue', video.dec ? String(video.dec.decodeQueueSize) : 'no decoder',
-      video.dec ? (video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT ? 'warn' : '') : 'warn');
+      video.dec ? (video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT ? 'warn' : '') : 'warn',
+      'frames handed to the decoder and not yet back (limit ' + DECODE_QUEUE_LIMIT + ')');
     readout('dropped', video.dropped + (video.skipped ? ' (+' + video.skipped + ' skipped)' : ''),
-      video.dropped ? 'warn' : '');
-    readout('age', video.lastPaintAt ? Math.round(performance.now() - video.lastPaintAt) + ' ms' : '—',
-      video.lastPaintAt && (performance.now() - video.lastPaintAt) > STALL_AFTER_MS ? 'warn' : '');
-    readout('profile', s.profile ? (s.profile + ' · ' + Math.round((s.bitrate || 0) / 1000) + 'k') : '—');
+      video.dropped ? 'warn' : '',
+      'dropped: deltas thrown away because the decoder was behind. skipped: frames decoded but ' +
+      'replaced by a newer one before the screen could paint them (that one is harmless).');
+    readout('keyframes', String(video.keyAsked) + (video.keyFail ? ' · failed' : ''),
+      video.keyFail ? 'warn' : '',
+      video.keyFail || (video.keyAsked
+        ? video.keyAsked + ' RESET_VIDEO requests: after a drop, a decoder reset or a reconnect, ' +
+          'rather than waiting up to 10 s for scrcpy\'s own key frame'
+        : 'no key frame has had to be asked for'));
+    var age = stillMs();
+    readout('age', isFinite(age) ? fmtAge(age) : '—', '',
+      'how long since the last frame. A still screen sends nothing at all — that is scrcpy ' +
+      'encoding only what changes, not a stall.');
+    var want = (phone && phone.settings) ? phone.settings.profile : '';
+    var prof = s.profile ? ((want && want !== s.profile) ? want + ' → ' + s.profile : s.profile) : '';
+    readout('profile', prof ? (prof + ' · ' + fmtRate(s.bitrate || 0)) : '—', '',
+      prof ? (prof + ' · ' + fmtRate(s.bitrate || 0) + ' · at most ' + (s.maxSize || '?') +
+        ' px and ' + (s.maxFps || '?') + ' fps') : 'no stream');
     readout('audio', audioSummary(),
       (audio.unavailable || audio.blocked) ? 'warn' : (audio.packets ? 'ok' : ''),
       audio.unavailable ? ('no audio: ' + audio.reason) : audioSummary());
@@ -595,6 +694,10 @@
       wire.tries = 0;
       wire.reason = '';
       startPings();
+      /* A reconnect lost whatever was in flight. If main still says the stream
+         is running, ask for a key frame rather than sit on a frozen picture
+         until scrcpy's next one. */
+      requestKeyFrame('the link to the browser reopened');
       renderStatus();
       renderReadouts();
     };
@@ -748,6 +851,98 @@
     return true;
   }
 
+  /* A key frame, please — now, not in ten seconds.
+
+     scrcpy's encoder only emits a key frame every ~10 s, so the moment a delta
+     is thrown away the picture freezes until the next one. RESET_VIDEO
+     (ControlMessage.java v4.1: type 17, empty payload) asks the server for a
+     fresh one immediately. It deliberately does NOT go through sendControl:
+     this is housekeeping, not something the user did, so it writes no rail note
+     when it works. It speaks up only when it CANNOT ask, and the count is
+     always in the readouts either way.
+
+     `why` names the caller in that failure sentence. Returns true if a request
+     actually went out. */
+  function requestKeyFrame(why) {
+    var st = (phone && phone.stream) || {};
+    /* No stream, nothing to refresh — and the status strip is already saying
+       that in words. A non-event, not a failure. */
+    if (st.state !== 'running' && st.state !== 'stalled') return false;
+    var now = performance.now();
+    if (video.keyAt && (now - video.keyAt) < KEY_FRAME_GAP_MS) return false;
+
+    var reason = '';
+    if (!wire.ws || wire.ws.readyState !== 1) {
+      reason = 'the link to the browser is ' + (wire.state || 'closed');
+    } else {
+      try {
+        var out = new Uint8Array(2);
+        out[0] = CH_CONTROL;
+        out[1] = CTL.RESET_VIDEO;
+        wire.ws.send(out);
+      } catch (err) {
+        reason = msg(err);
+      }
+    }
+    if (reason) {
+      video.keyFail = why + ': could not ask for a key frame — ' + reason;
+      video.note = video.keyFail;
+      renderReadouts();
+      return false;
+    }
+    video.keyAt = now;
+    video.keyAsked++;
+    video.keyFail = '';
+    renderReadouts();
+    return true;
+  }
+
+  /* Still behind straight after a key-frame request? Then the stream is heavier
+     than this machine can decode, and asking for key frames forever would just
+     stutter. Ask main to send less: fewer frames first (the cheapest loss),
+     then a smaller picture. Once per step, never faster than SHED_GAP_MS, and
+     the reason is written into the status sub-line so it is never a mystery
+     why the phone suddenly looks different. */
+  function shedLoad() {
+    var s = (phone && phone.stream) || {};
+    var now = Date.now();
+    if (now - shed.at < SHED_GAP_MS) return;
+    shed.at = now;
+
+    var fps = s.maxFps || (phone && phone.settings && phone.settings.maxFps) || 0;
+    var size = s.maxSize || (phone && phone.settings && phone.settings.maxSize) || 0;
+
+    if (shed.step === 0 && (!fps || fps > 30)) {
+      shed.step = 1;
+      shed.note = 'the decoder is too slow at ' + (fps || 'this') + ' fps — asked the phone for 30';
+      askLess({ maxFps: 30 });
+    } else if (shed.step <= 1 && (!size || size > 800)) {
+      shed.step = 2;
+      shed.note = 'the decoder is still too slow at 30 fps — asked the phone for a smaller picture (800 px)';
+      askLess({ maxSize: 800 });
+    } else {
+      shed.step = 3;
+      shed.note = 'the decoder is still behind at ' + (fps || '?') + ' fps and ' + (size || '?') +
+        ' px — there is nothing left to turn down from here';
+    }
+    renderStatus();
+  }
+
+  function askLess(partial) {
+    var what = Object.keys(partial).map(function (k) { return k + ' ' + partial[k]; }).join(', ');
+    railNote('', 'the decoder cannot keep up: asking for ' + what + '…');
+    sendCommand('set-settings', partial).then(function (res) {
+      if (res && res.ok) {
+        railNote('ok', 'asked for ' + what + ' (the stream restarts at the new quality)');
+      } else {
+        var reason = (res && res.reason) || 'no reason given';
+        railNote('error', 'could not ask for ' + what + ': ' + reason);
+        shed.note = 'the decoder is too slow and the browser refused ' + what + ': ' + reason;
+        renderStatus();
+      }
+    });
+  }
+
   /* ==================================================================== */
   /* 7. Binary frames: video, audio, device messages                      */
   /* ==================================================================== */
@@ -819,13 +1014,32 @@
     if (!video.dec && !ensureDecoder(payload)) return;
 
     if (video.needKey && !isKey) return;            // waiting for a key frame
+
+    /* Is the decoder behind? A deep queue only costs latency; a DROP costs the
+       whole picture until the next key frame. So the queue is allowed to run
+       to DECODE_QUEUE_LIMIT, and one packet over it is treated as a hiccup:
+       only DROP_AFTER_BEHIND in a row means the decoder genuinely cannot keep
+       up with the stream. */
     if (!isKey && video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT) {
-      /* The decoder is behind. Drop deltas (and everything after them, which
-         would decode wrong anyway) until the next key frame. */
-      video.dropped++;
-      video.needKey = true;
-      video.note = 'the decoder fell behind: dropping until the next key frame';
-      return;
+      video.behind++;
+      if (video.behind >= DROP_AFTER_BEHIND) {
+        video.behind = 0;
+        video.dropped++;
+        video.needKey = true;
+        video.note = 'the decoder fell behind (' + video.dec.decodeQueueSize +
+          ' frames queued): dropping until the next key frame';
+        /* How long ago the last key frame was asked for — read BEFORE asking
+           for this one. Behind again within SHED_WINDOW_MS means that key
+           frame did not help and the stream itself is too heavy. */
+        var sinceKey = video.keyAt ? (performance.now() - video.keyAt) : Infinity;
+        requestKeyFrame('the decoder fell behind');
+        if (sinceKey < SHED_WINDOW_MS) shedLoad();
+        renderReadouts();
+        return;
+      }
+      /* one over-limit packet: keep decoding, it may just be a hiccup */
+    } else {
+      video.behind = 0;
     }
 
     var data = payload;
@@ -836,6 +1050,16 @@
     }
 
     try {
+      /* Time this frame through the decoder: the "decode time" readout is how
+         the next slow-decoder round is diagnosed in one glance instead of
+         guessed at. The map is bounded — a frame the decoder never returns
+         must not leak. */
+      if (!video.sentAt) video.sentAt = new Map();
+      video.sentAt.set(ptsUs, performance.now());
+      if (video.sentAt.size > 64) {
+        var oldest = video.sentAt.keys().next();
+        if (!oldest.done) video.sentAt.delete(oldest.value);
+      }
       video.dec.decode(new EncodedVideoChunk({
         type: isKey ? 'key' : 'delta',
         timestamp: ptsUs,
@@ -889,29 +1113,51 @@
       return false;
     }
     var dec;
+    /* Hardware first. A software H.264 decoder is what falls behind a 60 fps
+       phone stream, and falling behind costs whole seconds of picture. If this
+       build refuses the config outright, or the hardware decoder errors once
+       it is running, fall back to no-preference — and the readout says which
+       one is in use, with the reason, rather than leaving it a mystery.
+       (WebCodecs has no way to ask which one Chromium actually chose, so the
+       readout says what was asked for; the fallback is what is certain.) */
+    var accel = video.accelFell ? 'no-preference' : 'prefer-hardware';
     try {
       dec = new VideoDecoder({
         output: onDecodedFrame,
-        error: function (err) { resetDecoder('the decoder failed: ' + msg(err)); }
+        error: function (err) {
+          if (video.accel === 'prefer-hardware' && !video.accelFell) {
+            video.accelFell = 'the hardware decoder failed: ' + msg(err);
+          }
+          resetDecoder('the decoder failed: ' + msg(err));
+        }
       });
       dec.configure({
         codec: codec,
         /* Annex B is signalled by the ABSENCE of `description`; the avc member
            is what the encoder side needs and is harmless (and ignored) here. */
         avc: { format: 'annexb' },
+        hardwareAcceleration: accel,
         optimizeForLatency: true
       });
     } catch (err) {
-      video.err = 'the decoder refused ' + codec + ': ' + msg(err);
+      try { if (dec) dec.close(); } catch (e) { /* never configured */ }
       video.dec = null;
+      if (accel === 'prefer-hardware') {
+        /* One retry, in software, straight away. */
+        video.accelFell = 'the hardware decoder refused ' + codec + ': ' + msg(err);
+        renderReadouts();
+        return ensureDecoder(sample);
+      }
+      video.err = 'the decoder refused ' + codec + ': ' + msg(err);
       renderStatus();
       return false;
     }
     video.dec = dec;
+    video.accel = accel;
     video.codec = codec;
     video.err = '';
     video.needKey = true;
-    video.note = 'decoder ready (' + codec + ') — waiting for a key frame';
+    video.note = 'decoder ready (' + codec + ', ' + accel + ') — waiting for a key frame';
     return true;
   }
 
@@ -921,12 +1167,31 @@
     }
     video.dec = null;
     video.needKey = true;
+    video.behind = 0;
+    if (video.sentAt) video.sentAt.clear();
     video.note = reason || 'decoder reset';
     if (reason && /fail|threw|refus/.test(reason)) video.err = reason;
+    /* Nothing decodable arrives until the next key frame, and scrcpy's own is
+       up to ~10 s away — so ask, if there is a running stream to ask. */
+    var st = (phone && phone.stream) || {};
+    if (st.state === 'running' || st.state === 'stalled') requestKeyFrame(reason || 'the decoder was reset');
     renderReadouts();
   }
 
   function onDecodedFrame(frame) {
+    /* decode() -> here, smoothed: the one number that says whether this
+       machine can keep up. The exact pts is the right key; scrcpy's realtime
+       stream carries no B-frames, so output order is input order and the
+       oldest pending entry is this frame if the key ever misses. */
+    if (video.sentAt && video.sentAt.size) {
+      var key = video.sentAt.has(frame.timestamp) ? frame.timestamp : video.sentAt.keys().next().value;
+      var t0 = video.sentAt.get(key);
+      video.sentAt.delete(key);
+      if (typeof t0 === 'number') {
+        var dt = performance.now() - t0;
+        video.decodeMs = video.decodeMs ? (video.decodeMs * 0.8 + dt * 0.2) : dt;
+      }
+    }
     /* Always paint the newest frame; a frame that never made it to the screen
        must still be closed or the decoder runs out of buffers. */
     if (video.pending) { video.pending.close(); video.skipped++; }
@@ -1475,15 +1740,26 @@
 
   function layoutFrame() {
     if (!els.stage || !els.frame) return;
-    var availW = els.stage.clientWidth - 32;     // the stage's 16px padding
-    var availH = els.stage.clientHeight - 32;
+    /* The frame's hairline border is part of its box (box-sizing: border-box),
+       so what gets fitted to the device's aspect is the PICTURE inside that
+       border — the canvas — and the border is added back afterwards. Fitting
+       the border box instead leaves the canvas two pixels short on each axis
+       and squashes the picture by a fraction of a percent. */
+    var bw = Math.max(0, els.frame.offsetWidth - els.frame.clientWidth);
+    var bh = Math.max(0, els.frame.offsetHeight - els.frame.clientHeight);
+    var availW = els.stage.clientWidth - 32 - bw;   // the stage's 16px padding
+    var availH = els.stage.clientHeight - 32 - bh;
     if (availW <= 0 || availH <= 0) return;
     var aspect = (video.w && video.h) ? (video.w / video.h) : (9 / 20);
     var w = availW;
     var h = w / aspect;
     if (h > availH) { h = availH; w = h * aspect; }
-    els.frame.style.width = Math.max(60, Math.floor(w)) + 'px';
-    els.frame.style.height = Math.max(60, Math.floor(h)) + 'px';
+    /* Both axes come from the same fit and neither gets a floor of its own: a
+       minimum on one side alone stretches the picture, which is exactly what a
+       320px-wide tab used to do. A stage too small for a picture gets a small
+       picture, never a distorted one. */
+    els.frame.style.width = Math.max(1, Math.floor(w) + bw) + 'px';
+    els.frame.style.height = Math.max(1, Math.floor(h) + bh) + 'px';
   }
 
   var lastTick = { at: 0, painted: 0, bytes: 0, skipped: 0 };
@@ -1497,7 +1773,8 @@
       /* Frames decoding but nothing painting means requestAnimationFrame is
          not running: the window is occluded or minimised. Chromium does that
          on purpose, but it must not look like a dead stream. */
-      if (video.skipped > lastTick.skipped && video.painted === lastTick.painted) {
+      video.notPainting = (video.skipped > lastTick.skipped && video.painted === lastTick.painted);
+      if (video.notPainting) {
         video.note = 'frames are arriving and decoding, but this window is not painting (occluded or minimised)';
       }
     }
@@ -1505,6 +1782,9 @@
     lastTick.painted = video.painted;
     lastTick.bytes = video.bytes;
     lastTick.skipped = video.skipped;
+    /* "asked the phone for 30 fps" is worth saying while it is news; a minute
+       later the profile readout is the place it lives. */
+    if (shed.note && shed.at && (Date.now() - shed.at) > 60000) shed.note = '';
     renderReadouts();
     renderStatus();
   }
@@ -1516,16 +1796,9 @@
     } else {
       video.needKey = true;
       video.note = 'the tab is visible again: waiting for the next key frame';
-      /* Ask the server for a fresh key frame instead of waiting for its
-         next one — RESET_VIDEO is a single byte (ControlMessage.java 17). */
-      if (wire.ws && wire.ws.readyState === 1 && phone && phone.stream && phone.stream.state === 'running') {
-        try {
-          var out = new Uint8Array(2);
-          out[0] = CH_CONTROL;
-          out[1] = CTL.RESET_VIDEO;
-          wire.ws.send(out);
-        } catch (err) { video.note = 'could not ask for a new key frame: ' + msg(err); }
-      }
+      /* Ask for a fresh key frame instead of waiting up to ~10 s for the
+         server's next one. */
+      requestKeyFrame('the tab is visible again');
     }
     renderReadouts();
   }
@@ -1536,7 +1809,19 @@
 
   function applyState(state) {
     if (!state) return;
+    var was = (phone && phone.stream) ? phone.stream.state : '';
     phone = state;
+    var now = (state.stream && state.stream.state) || '';
+    /* A stream that stopped leaves its last frame on the canvas. The page must
+       not then call that stale picture a live, merely still one: forget the
+       paint clock so the states before a picture (which DO cover the canvas
+       and DO carry the Start/Retry button) apply again. */
+    if (was !== now && now !== 'running' && now !== 'stalled') {
+      video.lastPaintAt = 0;
+      video.notPainting = false;
+      if (els.frame) els.frame.dataset.live = '0';
+      if (now === 'off') { shed.step = 0; shed.note = ''; }
+    }
     renderStatus();
     renderReadouts();
   }

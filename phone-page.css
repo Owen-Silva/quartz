@@ -135,6 +135,9 @@ body {
    first paint, before any session packet says what the device really is. */
 .frame {
   position: relative;
+  /* border-box: the hairline lives INSIDE the size the script sets, so the
+     frame can never be two pixels bigger than the space it was fitted to. */
+  box-sizing: border-box;
   aspect-ratio: 9 / 20;
   max-width: 100%;
   max-height: 100%;
@@ -173,8 +176,11 @@ body {
 
 /* --- the rail ------------------------------------------------------------ */
 
+/* 208px, not 186: the readouts name two round trips ("phone rtt" / "browser
+   rtt") and the decoder's own numbers, and a label that squeezes its value
+   into an ellipsis is a readout that has stopped reading out. */
 .rail {
-  width: 186px;
+  width: 208px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -236,13 +242,21 @@ body {
 .rail-read {
   margin: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* Both columns may shrink: in a very narrow tab the label gives way first,
+     because the number is the part being read. Every row also carries the full
+     words in its title. */
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   gap: 2px 8px;
   font-size: 11px;
   border-top: 1px solid var(--pp-line);
   padding-top: 8px;
 }
-.rail-read dt { color: var(--pp-fg-3); }
+.rail-read dt {
+  color: var(--pp-fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rail-read dd {
   margin: 0;
   text-align: right;
@@ -255,6 +269,14 @@ body {
 .rail-read dd[data-kind="ok"] { color: var(--pp-ok); }
 .rail-read dd[data-kind="warn"] { color: var(--pp-warn); }
 .rail-read dd[data-kind="error"] { color: var(--pp-err); }
+
+/* A very narrow tab (a split view, a phone-width window): the rail must not
+   eat the picture. Narrower rail only — labels ellipsis and keep their title,
+   and nothing here can reach a desktop-width tab. */
+@media (max-width: 520px) {
+  .rail { width: 150px; padding: 10px 8px 12px; }
+  .rail-read { grid-template-columns: minmax(0, auto) minmax(0, 1fr); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
