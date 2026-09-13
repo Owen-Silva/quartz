@@ -19,17 +19,24 @@
   on the console; phone.js (main) answers with window.__applyPhone({ ws, state })
   and everything after that flows over that WebSocket (contract: phone.js header).
 
-  SCAFFOLD: the layout below is the skeleton phone-page.js fills in. Every
-  state the relay can be in has a sentence here — nothing on this page is ever
-  blank while something is wrong.
+  The skeleton below is only the three regions — status strip, stage, rail.
+  phone-page.js fills the rail and every readout, and keeps the status strip
+  saying, in words, what is happening and what to do about it. Nothing on this
+  page is ever blank while something is wrong: a state with no sentence is a
+  bug, not a quiet success.
+
+  ?selftest=1 runs the built-in check (encode -> wrap as scrcpy packets ->
+  the live parse/decode/paint path, plus control-message serialisation against
+  the scrcpy v4.1 reference tests) with no phone and no browser attached.
 -->
 
 <main class="phone-page">
   <!-- The status strip: what the relay, the tools, the device and the stream
-       are doing, each with its reason. Never hidden, only quiet. -->
+       are doing, each with its reason, and the one button that moves it on. -->
   <header class="status" id="status" role="status" aria-live="polite">
-    <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+    <span class="status-dot" id="status-dot" data-kind="off" aria-hidden="true"></span>
     <span class="status-text" id="status-text">waiting for the browser…</span>
+    <span class="status-sub" id="status-sub"></span>
     <button type="button" class="status-action" id="status-action" hidden></button>
   </header>
 
@@ -42,8 +49,15 @@
     </div>
   </section>
 
-  <!-- The rail: hardware keys and readouts. Filled by phone-page.js. -->
-  <aside class="rail" id="rail" aria-label="Phone controls"></aside>
+  <!-- The rail: the keys-go-where pill, the hardware keys, then the readouts.
+       Every one of these is built by phone-page.js so the button and the
+       message it sends are written in one place. -->
+  <aside class="rail" id="rail" aria-label="Phone controls">
+    <div class="rail-pill" id="rail-pill" title="Ctrl+Alt+K">keys → browser</div>
+    <div class="rail-keys" id="rail-keys"></div>
+    <div class="rail-note" id="rail-note"></div>
+    <dl class="rail-read" id="rail-read"></dl>
+  </aside>
 </main>
 
 <script src="phone-page.js"></script>
