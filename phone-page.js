@@ -112,6 +112,16 @@
   var KEY_FRAME_GAP_MS = 500;     // at most one RESET_VIDEO per this
   var SHED_WINDOW_MS = 2000;      // still behind this soon after a key frame = too slow
   var SHED_GAP_MS = 5000;         // and never ask main to turn the load down faster than this
+  var HEAL_CLEAN_MS = 30000;      // keeping up this long = ask for the shed quality back (once)
+  /* A decoder's FIRST frames include its own start-up: opening the GPU video
+     device, allocating textures. MEASURED 2026-09-13 on the user's laptop: the
+     first output after configure() took 30-200 ms where the steady state is
+     0.6 ms, and while that was happening the chunks behind it piled up — which
+     is enough to trip the drop/shed logic below and pin the stream at 30 fps
+     and 800 px for good. So the queue is not judged until this decoder has
+     returned its first frame — and never for longer than this, in case it
+     never returns one at all. */
+  var DECODER_WARMUP_MS = 2500;
   var AUDIO_TARGET_S = 0.06;      // ~60 ms of buffer
   var AUDIO_MAX_AHEAD_S = 0.35;   // beyond this the buffer is resynced
   var PING_EVERY_MS = 2000;
@@ -124,6 +134,30 @@
   var params = null;
   try { params = new URLSearchParams(window.location.search); } catch (err) { params = null; }
   var SELFTEST = !!(params && params.get('selftest') === '1');
+  /* Which H.264 decoder to ask WebCodecs for. ?decoder=software|hardware|auto
+     on the page URL wins (an experiment), then localStorage 'phoneDecoder'
+     (a choice that sticks), else the default below.
+     MEASURED 2026-09-13 on the user's laptop against the real phone — 560×1280
+     h264 at 8 Mb/s, 60 fps cap, a 4 s drag on the launcher, the browser window
+     on screen, two runs each, numbers from the middle 2.5 s of each drag:
+         prefer-hardware   decode 0.6-0.9 ms   queue 0    dropped 0
+         prefer-software   decode 1.9-3.3 ms   queue 0-2  dropped 0
+         no-preference     decode 0.6-0.8 ms   queue 0    dropped 0   (= hardware)
+     All three kept up with 58-60 frames a second; hardware costs a third of
+     what software does per frame and never queued, so it is the default and
+     'auto' lands on it anyway. The one thing hardware does cost is start-up:
+     its first frame after configure() is tens of ms (see DECODER_WARMUP_MS),
+     which is what used to trip the shed below and pin the stream at 30 fps.
+     NOT measured: whether a different GPU/driver would change this order. */
+  var DECODER_PREF = (function () {
+    var want = (params && params.get('decoder')) || '';
+    if (!want) { try { want = window.localStorage.getItem('phoneDecoder') || ''; } catch (err) { want = ''; } }
+    if (want === 'software') return 'prefer-software';
+    if (want === 'hardware') return 'prefer-hardware';
+    if (want === 'auto') return 'no-preference';
+    return 'prefer-hardware';
+  })();
+  try { window.__phoneDecoderPref = DECODER_PREF; } catch (err) { /* readout only */ }
 
   var encoder = new TextEncoder();
   var decoderUtf8 = new TextDecoder();
@@ -284,8 +318,10 @@
     config: null,            // the latest config packet (SPS/PPS, Annex B)
     needKey: true,
     w: 0, h: 0,
-    pending: null,           // the newest decoded frame, not yet painted
-    raf: 0,
+    rafs: 0,                 // requestAnimationFrame callbacks seen: the screen's own clock
+    screenHz: 0,             // ...per second. 0 while the window is not presenting at all
+    drawnSinceRaf: 0,        // draws since the last callback, to count what the screen never showed
+    lastArrivalAt: 0,        // performance.now() of the last video packet off the wire
     painted: 0, dropped: 0, skipped: 0,
     bytes: 0,
     fps: 0, kbps: 0,
@@ -300,7 +336,10 @@
     keyFail: '',             // why the last one could not be sent, in words
     accel: 'prefer-hardware',// what the decoder was configured with
     accelFell: '',           // why it fell back to software, if it did
-    decodeMs: 0,             // decode -> output, EWMA
+    decodeMs: 0,             // decode -> output, EWMA (steady state, start-up excluded)
+    decoderAt: 0,            // when the current decoder was configured
+    firstOut: true,          // the next output is this decoder's first
+    initMs: 0,               // what that first frame cost: the decoder's start-up
     sentAt: null,            // pts -> performance.now() at decode(), for that number
     notPainting: false       // frames decoding but nothing reaching the screen
   };
@@ -328,7 +367,13 @@
      with what the phone is sending. Asking for a key frame fixes a hiccup;
      asking again and again means the stream is too heavy, and the answer is
      fewer frames (then a smaller picture), not a faster loop. */
-  var shed = { at: 0, step: 0, note: '' };
+  var shed = {
+    at: 0, step: 0, note: '',
+    was: {},            // what the stream was set to before this page turned it down
+    dropAt: 0,          // video.dropped when it last shed: no new drops = keeping up
+    cleanSince: 0,      // performance.now() since when it has been keeping up
+    healed: false       // the one restore attempt this page is allowed
+  };
 
   /* ==================================================================== */
   /* 4. The status strip, the frame note and the rail note                */
@@ -520,14 +565,23 @@
   /* How long the picture has been unchanged, in ms. phone.js reports
      stream.lastVideoAt (epoch ms: the last video packet off the phone's
      socket), which is the truth about the WIRE; this page's lastPaintAt is the
-     truth about the SCREEN, in performance.now()'s clock. Main's is preferred
-     where it exists, so a hidden tab (which decodes nothing on purpose) is not
-     reported as a still phone. */
+     truth about the SCREEN, in performance.now()'s clock.
+     Main's number only arrives inside a pushed state, and those are debounced,
+     so during a fast scene it is stale by however long ago the last push was:
+     MEASURED 2026-09-13, it read 360-500 ms while 58 frames a second were
+     actually landing, which looks like half a second of lag and is not. This
+     page sees every packet itself, so its own arrival clock is the newer,
+     truer number whenever the two disagree; main's still covers the case where
+     this page is decoding nothing on purpose (a hidden tab), so the two are
+     combined rather than swapped. */
   function stillMs() {
     var s = (phone && phone.stream) || {};
-    if (typeof s.lastVideoAt === 'number' && s.lastVideoAt > 0) {
-      return Math.max(0, Date.now() - s.lastVideoAt);
-    }
+    var mine = video.lastArrivalAt ? Math.max(0, performance.now() - video.lastArrivalAt) : Infinity;
+    var theirs = (typeof s.lastVideoAt === 'number' && s.lastVideoAt > 0)
+      ? Math.max(0, Date.now() - s.lastVideoAt) : Infinity;
+    if (video.paused) return theirs;          // decoding nothing: only the wire knows
+    var best = Math.min(mine, theirs);
+    if (isFinite(best)) return best;
     return video.lastPaintAt ? Math.max(0, performance.now() - video.lastPaintAt) : Infinity;
   }
 
@@ -608,24 +662,32 @@
     readout('rtt', wire.rtt === null ? (wire.state === 'open' ? 'waiting' : 'no link') : wire.rtt + ' ms',
       wire.state === 'open' ? '' : 'error',
       'browser rtt: this page to the relay in the browser and back over the WebSocket');
-    readout('fps', String(video.fps), video.fps > 0 ? 'ok' : '',
-      'frames painted in the last second — 0 on a still screen is normal');
+    readout('fps', String(video.fps), video.notPainting ? 'warn' : (video.fps > 0 ? 'ok' : ''),
+      'frames painted in the last second — 0 on a still screen is normal. ' +
+      (video.notPainting
+        ? 'The screen itself is not being composited (occluded, minimised or asleep), so none of them are reaching it.'
+        : 'The screen is being composited at ' + video.screenHz + ' Hz, which is the ceiling on this number.'));
     readout('kbps', String(video.kbps));
-    readout('decoder', video.accelFell ? 'software' : (video.dec ? 'hardware' : 'not built yet'),
+    readout('decoder', !video.dec ? 'not built yet'
+        : (video.accelFell ? 'auto (fallback)' : { 'prefer-hardware': 'hardware', 'prefer-software': 'software', 'no-preference': 'auto' }[video.accel] || video.accel),
       video.accelFell ? 'warn' : '',
       video.accelFell
-        ? 'fell back to software decoding: ' + video.accelFell
-        : 'configured with hardwareAcceleration: prefer-hardware (WebCodecs does not report which one Chromium then picked)');
+        ? 'fell back to no-preference: ' + video.accelFell
+        : 'configured with hardwareAcceleration: ' + (video.accel || DECODER_PREF)
+          + ' (WebCodecs does not report which one Chromium then picked; ?decoder=software|hardware|auto or localStorage phoneDecoder overrides)');
     readout('decodems', video.decodeMs ? video.decodeMs.toFixed(1) + ' ms' : '—',
       video.decodeMs > 16 ? 'warn' : '',
-      'decode() to the decoded frame, smoothed — above ~16 ms the decoder cannot hold 60 fps');
+      'decode() to the decoded frame, smoothed — above ~16 ms the decoder cannot hold 60 fps.' +
+      (video.initMs ? ' This decoder\'s first frame took ' + video.initMs.toFixed(0) +
+        ' ms (its own start-up) and is left out of the average.' : ''));
     readout('queue', video.dec ? String(video.dec.decodeQueueSize) : 'no decoder',
       video.dec ? (video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT ? 'warn' : '') : 'warn',
       'frames handed to the decoder and not yet back (limit ' + DECODE_QUEUE_LIMIT + ')');
     readout('dropped', video.dropped + (video.skipped ? ' (+' + video.skipped + ' skipped)' : ''),
       video.dropped ? 'warn' : '',
-      'dropped: deltas thrown away because the decoder was behind. skipped: frames decoded but ' +
-      'replaced by a newer one before the screen could paint them (that one is harmless).');
+      'dropped: deltas thrown away because the decoder was behind. skipped: frames painted but ' +
+      'replaced by a newer one before the screen was composited again (that one is harmless — ' +
+      'the phone sent two frames inside one screen refresh).');
     readout('keyframes', String(video.keyAsked) + (video.keyFail ? ' · failed' : ''),
       video.keyFail ? 'warn' : '',
       video.keyFail || (video.keyAsked
@@ -912,12 +974,22 @@
     var fps = s.maxFps || (phone && phone.settings && phone.settings.maxFps) || 0;
     var size = s.maxSize || (phone && phone.settings && phone.settings.maxSize) || 0;
 
+    /* What it was before this page turned it down. set-settings is PERSISTED
+       by phone.js, so without this the stream stays at whatever a bad minute
+       shed it to — for ever, across restarts. (That is exactly how the user's
+       phone ended up pinned at 30 fps and 800 px on 2026-09-13: one cold
+       hardware decoder, two sheds, and no way back.) */
+    shed.dropAt = video.dropped;
+    shed.cleanSince = 0;
+
     if (shed.step === 0 && (!fps || fps > 30)) {
       shed.step = 1;
+      if (fps) shed.was.maxFps = fps;
       shed.note = 'the decoder is too slow at ' + (fps || 'this') + ' fps — asked the phone for 30';
       askLess({ maxFps: 30 });
     } else if (shed.step <= 1 && (!size || size > 800)) {
       shed.step = 2;
+      if (size) shed.was.maxSize = size;
       shed.note = 'the decoder is still too slow at 30 fps — asked the phone for a smaller picture (800 px)';
       askLess({ maxSize: 800 });
     } else {
@@ -925,6 +997,52 @@
       shed.note = 'the decoder is still behind at ' + (fps || '?') + ' fps and ' + (size || '?') +
         ' px — there is nothing left to turn down from here';
     }
+    renderStatus();
+  }
+
+  /* The way back up. A shed is cheap insurance against a stuttering minute,
+     but phone.js PERSISTS what it is asked for, so a shed that is never undone
+     is a permanent downgrade of the user's picture bought by one bad minute — and
+     the commonest bad minute is a decoder's own cold start. So: once per page,
+     after HEAL_CLEAN_MS of genuinely keeping up (a decoder that exists, a
+     shallow queue and not one dropped frame since the shed), ask for exactly
+     what this page turned down, and say so. If the machine really cannot hold
+     it, the next shed takes it back down and `healed` stops it happening again
+     — no oscillation, at most one round trip. */
+  function healShed(now) {
+    /* Deliberately NOT keyed on shed.step: a shed restarts the stream, and the
+       restart passes through 'off', which resets the step (applyState) — so
+       what a page remembers having turned down is shed.was, and that is what
+       decides whether there is anything to give back. MEASURED: without this
+       the heal never fired at all, because step was always 0 again by the time
+       the new stream was running. */
+    if (shed.healed) return;
+    if (!shed.was.maxFps && !shed.was.maxSize) return;
+    var live = (phone && phone.stream && phone.stream.state) === 'running';
+    var ok = live && video.dec && !video.paused &&
+      video.dropped === shed.dropAt && video.dec.decodeQueueSize <= 2 &&
+      stillMs() < 3000;                       // frames actually flowing, not a still screen
+    if (!ok) { shed.cleanSince = 0; return; }
+    if (!shed.cleanSince) { shed.cleanSince = now; return; }
+    if (now - shed.cleanSince < HEAL_CLEAN_MS) return;
+
+    shed.healed = true;
+    var back = {};
+    if (shed.was.maxFps) back.maxFps = shed.was.maxFps;
+    if (shed.was.maxSize) back.maxSize = shed.was.maxSize;
+    var what = Object.keys(back).map(function (k) { return k + ' ' + back[k]; }).join(', ');
+    shed.note = 'the decoder has kept up for ' + Math.round(HEAL_CLEAN_MS / 1000) +
+      ' s — asking the phone for ' + what + ' again';
+    railNote('', shed.note + '…');
+    sendCommand('set-settings', back).then(function (res) {
+      if (res && res.ok) {
+        shed.step = 0;
+        shed.was = {};
+        railNote('ok', 'back to ' + what + ' (it was turned down when the decoder fell behind)');
+      } else {
+        railNote('error', 'could not ask for ' + what + ' again: ' + ((res && res.reason) || 'no reason given'));
+      }
+    });
     renderStatus();
   }
 
@@ -981,6 +1099,7 @@
     var lo = view.getUint32(4);
     var isConfig = (hi & 0x40000000) !== 0;   // bit 62 of the u64
     var isKey = (hi & 0x20000000) !== 0;      // bit 61
+    video.lastArrivalAt = performance.now();  // this page's own "frame age" clock
     var size = view.getUint32(8);
     var ptsUs = (hi & 0x1fffffff) * 4294967296 + lo;
 
@@ -1020,7 +1139,17 @@
        to DECODE_QUEUE_LIMIT, and one packet over it is treated as a hiccup:
        only DROP_AFTER_BEHIND in a row means the decoder genuinely cannot keep
        up with the stream. */
-    if (!isKey && video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT) {
+    /* Warming up = this decoder has not handed back its first frame yet, so
+       its own start-up is still in flight and the queue behind it means
+       nothing about whether this machine can keep up. Capped, in case a decoder
+       is simply wedged and never returns anything. */
+    var warming = video.firstOut && video.decoderAt &&
+      (performance.now() - video.decoderAt) < DECODER_WARMUP_MS;
+    if (warming && video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT) {
+      /* Starting up, not failing: say so rather than dropping the picture. */
+      video.note = 'the decoder is starting up (' + video.dec.decodeQueueSize + ' frames queued)';
+      video.behind = 0;
+    } else if (!isKey && video.dec.decodeQueueSize > DECODE_QUEUE_LIMIT) {
       video.behind++;
       if (video.behind >= DROP_AFTER_BEHIND) {
         video.behind = 0;
@@ -1120,13 +1249,13 @@
        one is in use, with the reason, rather than leaving it a mystery.
        (WebCodecs has no way to ask which one Chromium actually chose, so the
        readout says what was asked for; the fallback is what is certain.) */
-    var accel = video.accelFell ? 'no-preference' : 'prefer-hardware';
+    var accel = video.accelFell ? 'no-preference' : DECODER_PREF;
     try {
       dec = new VideoDecoder({
         output: onDecodedFrame,
         error: function (err) {
-          if (video.accel === 'prefer-hardware' && !video.accelFell) {
-            video.accelFell = 'the hardware decoder failed: ' + msg(err);
+          if (video.accel !== 'no-preference' && !video.accelFell) {
+            video.accelFell = 'the ' + video.accel + ' decoder failed: ' + msg(err);
           }
           resetDecoder('the decoder failed: ' + msg(err));
         }
@@ -1142,9 +1271,9 @@
     } catch (err) {
       try { if (dec) dec.close(); } catch (e) { /* never configured */ }
       video.dec = null;
-      if (accel === 'prefer-hardware') {
-        /* One retry, in software, straight away. */
-        video.accelFell = 'the hardware decoder refused ' + codec + ': ' + msg(err);
+      if (accel !== 'no-preference') {
+        /* One retry with no preference, straight away. */
+        video.accelFell = 'the ' + accel + ' decoder refused ' + codec + ': ' + msg(err);
         renderReadouts();
         return ensureDecoder(sample);
       }
@@ -1153,6 +1282,8 @@
       return false;
     }
     video.dec = dec;
+    video.decoderAt = performance.now();   // the warm-up window starts here
+    video.firstOut = true;
     video.accel = accel;
     video.codec = codec;
     video.err = '';
@@ -1189,21 +1320,37 @@
       video.sentAt.delete(key);
       if (typeof t0 === 'number') {
         var dt = performance.now() - t0;
-        video.decodeMs = video.decodeMs ? (video.decodeMs * 0.8 + dt * 0.2) : dt;
+        if (video.firstOut) {
+          /* The first frame out of a new decoder carries that decoder's whole
+             start-up (GPU video device, textures) — tens to hundreds of ms
+             against a 0.6 ms steady state. Averaging it in makes the readout
+             lie about this machine for the next twenty frames, so it is kept
+             on its own and named in the readout's hover instead. */
+          video.firstOut = false;
+          video.initMs = dt;
+        } else {
+          video.decodeMs = video.decodeMs ? (video.decodeMs * 0.8 + dt * 0.2) : dt;
+        }
       }
     }
-    /* Always paint the newest frame; a frame that never made it to the screen
-       must still be closed or the decoder runs out of buffers. */
-    if (video.pending) { video.pending.close(); video.skipped++; }
-    video.pending = frame;
-    if (!video.raf) video.raf = requestAnimationFrame(paintFrame);
+    /* Paint it NOW, not at the next requestAnimationFrame. MEASURED against
+       The user's phone on 2026-09-13, 560×1280 at a 60 fps cap, window on screen:
+       parking the frame for the next rAF callback painted only 43-48 of the
+       56-60 frames a second the relay delivered, and threw 16 a second away —
+       and not because the screen was slow (the rAF clock measured a steady
+       61 Hz throughout). Frames come off a WebSocket in bursts: two land
+       between two callbacks, the older one is binned, then a callback finds
+       nothing to do. Drawing on arrival keeps every frame and shows the newest
+       one the instant a frame is composited: painted then tracks the relay
+       (58-60 of 58-60) and the picture stops stuttering.
+       The canvas is 2D and desynchronized, so a draw is cheap and never
+       blocks; the compositor still presents at the screen's rate. */
+    paintFrame(frame);
   }
 
-  function paintFrame() {
-    video.raf = 0;
-    var frame = video.pending;
-    video.pending = null;
+  function paintFrame(frame) {
     if (!frame) return;
+    video.drawnSinceRaf++;
     try {
       els.ctx.drawImage(frame, 0, 0, els.canvas.width, els.canvas.height);
       video.painted++;
@@ -1762,7 +1909,24 @@
     els.frame.style.height = Math.max(1, Math.floor(h) + bh) + 'px';
   }
 
-  var lastTick = { at: 0, painted: 0, bytes: 0, skipped: 0 };
+  /* The screen's own clock. Frames are painted the moment they decode, so the
+     paint count no longer says anything about whether the SCREEN is alive —
+     this does. A requestAnimationFrame loop that does nothing but count is
+     free (Chromium runs one callback per composited frame), it stops dead when
+     the window is occluded, minimised or the monitor sleeps — which is exactly
+     the state that must never look like a dead stream — and every draw beyond
+     the first between two callbacks is a frame the screen never showed. */
+  function startScreenClock() {
+    function beat() {
+      video.rafs++;
+      if (video.drawnSinceRaf > 1) video.skipped += video.drawnSinceRaf - 1;
+      video.drawnSinceRaf = 0;
+      requestAnimationFrame(beat);
+    }
+    requestAnimationFrame(beat);
+  }
+
+  var lastTick = { at: 0, painted: 0, bytes: 0, rafs: 0 };
 
   function tick() {
     var now = performance.now();
@@ -1770,21 +1934,26 @@
       var dt = (now - lastTick.at) / 1000;
       video.fps = Math.round((video.painted - lastTick.painted) / dt);
       video.kbps = Math.round(((video.bytes - lastTick.bytes) * 8 / 1000) / dt);
-      /* Frames decoding but nothing painting means requestAnimationFrame is
-         not running: the window is occluded or minimised. Chromium does that
-         on purpose, but it must not look like a dead stream. */
-      video.notPainting = (video.skipped > lastTick.skipped && video.painted === lastTick.painted);
+      video.screenHz = Math.round((video.rafs - lastTick.rafs) / dt);
+      /* Frames painting but no callbacks at all means the window is not being
+         composited: occluded, minimised, or the monitor has gone to sleep.
+         Chromium does that on purpose — and a <webview> guest is never told,
+         its own document stays 'visible' — but it must not look like a dead
+         stream. (Measured 2026-09-13: with the terminal covering the browser,
+         the guest kept decoding 60 frames a second and painted none.) */
+      video.notPainting = (video.screenHz === 0 && video.painted > lastTick.painted);
       if (video.notPainting) {
-        video.note = 'frames are arriving and decoding, but this window is not painting (occluded or minimised)';
+        video.note = 'frames are arriving and decoding, but this window is not painting (occluded, minimised, or the screen is asleep)';
       }
     }
     lastTick.at = now;
     lastTick.painted = video.painted;
     lastTick.bytes = video.bytes;
-    lastTick.skipped = video.skipped;
+    lastTick.rafs = video.rafs;
     /* "asked the phone for 30 fps" is worth saying while it is news; a minute
        later the profile readout is the place it lives. */
     if (shed.note && shed.at && (Date.now() - shed.at) > 60000) shed.note = '';
+    healShed(now);
     renderReadouts();
     renderStatus();
   }
@@ -1873,6 +2042,7 @@
     else window.addEventListener('resize', layoutFrame);
     document.addEventListener('visibilitychange', onVisibility);
     video.paused = document.hidden;   // the tab can already be in the background
+    startScreenClock();
     setInterval(tick, 1000);
 
     if (SELFTEST) {
