@@ -82,6 +82,20 @@
     </p>
   </div>
 
+  <!-- Claude usage, pushed by budget.js in MAIN (newtab:budget on the console,
+       window.__applyBudget back) rather than by the chrome. Its own block
+       instead of a fourth row inside #session-rows, so a budget reading can
+       reveal itself without revealing three dashes the chrome has not pushed
+       yet. The note line only appears when the reading is stale, partial or
+       unreadable — an empty readout would say nothing about why. -->
+  <div id="mod-budget" class="mod-budget" hidden>
+    <p class="mod-row">
+      <span id="read-budget" class="mod-value">--</span>
+      <span id="read-budget-label" class="mod-label">Claude 5H / week</span>
+    </p>
+    <p id="read-budget-note" class="mod-note" hidden></p>
+  </div>
+
   <!-- Idle music. The player itself lives in the chrome so it survives tab
        switches; this is only its face and its two controls. Every state
        ("Off", "Paused", a mood name, a file name) is one fixed-height line

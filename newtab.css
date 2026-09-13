@@ -774,6 +774,43 @@ body {
   text-overflow: ellipsis;
 }
 
+/* --- Claude usage -------------------------------------------- */
+/* One more row in the session tile, in the tile's own typography: the big
+   readout value and its label, plus a note line that only exists while the
+   reading is stale, partial or unreadable. The tones are the titlebar pill's
+   tones and the same two colours: amber from 80% of a limit, red from 95%.
+   The red is --stk-down, the only red in the app (see the markets tile). The
+   amber has to be declared here: --amber is a CHROME token and this page is a
+   separate document that never had one — and like the markets pair, the light
+   theme needs a darker value to clear 4.5:1 on a white ground. */
+:root { --budget-warm: #e0a059; }         /* the chrome's --amber */
+:root[data-theme="light"] { --budget-warm: #a8650a; }
+
+.mod-budget { margin-top: 8px; }
+
+#read-budget[data-tone="warm"] { color: var(--budget-warm); }
+#read-budget[data-tone="hot"]  { color: var(--stk-down); }
+
+/* A reading that is old or unreadable is a SOURCE state, never a limit
+   state: it dims rather than colours, so the two never look alike. */
+#read-budget[data-state="stale"],
+#read-budget[data-state="error"] { color: var(--fg-3); }
+
+/* The reason, in as many words as it takes. This is the one line in the tile
+   allowed to wrap and to change the tile's height — it is only there when
+   something is wrong, and a silent readout would be worse. */
+.mod-note {
+  margin: 4px 0 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.mod-note[hidden] { display: none; }
+
 /* --- now playing --------------------------------------------- */
 /* The machine's media session, in its own tile: 48px of art, the title and
    the artist, the position as a hairline, and the transport. The board gives

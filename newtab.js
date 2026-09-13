@@ -524,6 +524,138 @@ window.__readout = function () {
 };
 
 /* ------------------------------------------------------------------ */
+/* Claude usage                                                        */
+/*                                                                     */
+/* The other readout whose data comes straight from MAIN, and it comes */
+/* the same way the markets tile's does: budget.js puts a              */
+/* console-message listener on this guest and answers the line below,  */
+/* so the chrome is not in the path at all.                            */
+/*                                                                     */
+/*   out   console.log('newtab:budget {"action":"subscribe"}')         */
+/*   in    window.__applyBudget(snapshot)   — budget.js's snapshot()   */
+/*                                                                     */
+/* The wording and the two tones are the titlebar pill's, deliberately: */
+/* one reading must not read as two different things in two places.    */
+/* The block is [hidden] until the first push, and it reveals itself    */
+/* rather than the three session counts — those are the chrome's to     */
+/* reveal, and three dashes are still worse than no readout.           */
+/* ------------------------------------------------------------------ */
+
+(function () {
+  /* main marks a reading stale at ten minutes; this clock keeps that true
+     between pushes instead of waiting for the next one. */
+  var STALE_MS = 600000;
+
+  var budgetBlock = document.getElementById('mod-budget');
+  var budgetValue = document.getElementById('read-budget');
+  var budgetLabel = document.getElementById('read-budget-label');
+  var budgetNote = document.getElementById('read-budget-note');
+  if (!budgetBlock || !budgetValue || !budgetLabel || !budgetNote) return;
+
+  var snap = null;
+  var watching = false;
+
+  /* --- the channel --------------------------------------------- */
+
+  function say(action) {
+    console.log('newtab:budget ' + JSON.stringify({ action: action }));
+  }
+
+  function watch() { if (watching) return; watching = true; say('subscribe'); }
+  function unwatch() { if (!watching) return; watching = false; say('unsubscribe'); }
+
+  /* A hidden tab is a tab main should not be pushing at. Same rule as the
+     clock, the clip and the markets tile. */
+  function syncWatch() {
+    if (document.hidden) unwatch();
+    else watch();
+  }
+
+  /* --- words --------------------------------------------------- */
+
+  function shortSpan(ms) {
+    var n = Math.max(0, Math.round(ms / 60000));
+    if (n < 60) return Math.max(1, n) + ' m';
+    var h = Math.floor(n / 60);
+    var m = n % 60;
+    return m ? h + ' h ' + m + ' m' : h + ' h';
+  }
+
+  function pctOf(win) {
+    return win ? Math.round(win.pct) + '%' : '--';
+  }
+
+  /** neutral under 80%, amber from 80, red from 95 — on the HIGHER limit. */
+  function toneOf(data) {
+    var top = -1;
+    if (data.fiveHour) top = Math.max(top, data.fiveHour.pct);
+    if (data.week) top = Math.max(top, data.week.pct);
+    if (top < 0) return 'none';
+    if (top >= 95) return 'hot';
+    if (top >= 80) return 'warm';
+    return 'cool';
+  }
+
+  function paintBudget() {
+    if (!snap) return;
+    var state = snap.state === 'ok' || snap.state === 'stale' ? snap.state : 'error';
+    var age = snap.source ? Math.max(0, Date.now() - snap.source.receivedAt) : null;
+    if (state === 'ok' && age !== null && age > STALE_MS) state = 'stale';
+
+    var numbers = (snap.fiveHour || snap.week)
+      ? pctOf(snap.fiveHour) + ' / ' + pctOf(snap.week)
+      : '--';
+
+    setText(budgetValue, numbers);
+    budgetValue.setAttribute('data-state', state);
+    budgetValue.setAttribute('data-tone', state === 'error' ? 'none' : toneOf(snap));
+    setText(budgetLabel, 'Claude 5H / week');
+
+    /* The note is the honest half: why the numbers are old, what could not
+       be read, or that there is nothing to read at all. */
+    var note = '';
+    if (state === 'stale') {
+      note = 'Stale ' + shortSpan(age === null ? 0 : age) + ' — ' +
+        (snap.reason || 'Claude Code only writes this while a session is running');
+    } else if (state === 'error') {
+      note = snap.reason || 'the reading could not be taken';
+    } else if (snap.reason) {
+      note = snap.reason;
+    }
+    setText(budgetNote, note);
+    budgetNote.hidden = !note;
+  }
+
+  window.__applyBudget = function (data) {
+    if (!data || typeof data !== 'object') return window.__budget();
+    snap = data;
+    paintBudget();
+
+    var grew = false;
+    if (budgetBlock.hidden) { budgetBlock.hidden = false; grew = true; }
+    if (sessionModule && sessionModule.hidden) { sessionModule.hidden = false; grew = true; }
+    if (grew && typeof window.__boardRelayout === 'function') window.__boardRelayout();
+    return window.__budget();
+  };
+
+  /** What the row actually shows, for tests. */
+  window.__budget = function () {
+    return {
+      value: budgetValue.textContent,
+      label: budgetLabel.textContent,
+      tone: budgetValue.getAttribute('data-tone'),
+      state: budgetValue.getAttribute('data-state'),
+      note: budgetNote.hidden ? '' : budgetNote.textContent,
+      shown: !budgetBlock.hidden
+    };
+  };
+
+  document.addEventListener('visibilitychange', syncWatch);
+  window.addEventListener('pageshow', syncWatch);
+  syncWatch();
+})();
+
+/* ------------------------------------------------------------------ */
 /* Idle music                                                          */
 /*                                                                     */
 /* Quiet music while nothing else on the machine is playing. The player */

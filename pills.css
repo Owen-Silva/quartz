@@ -1,3 +1,343 @@
-/* pills.css — #budget-slot and #np-slot in the titlebar, and every .pill-* part
-   inside them. Scaffold: filled in by the readouts lane. Every colour must
-   resolve through a chrome.css token; no glow at rest. */
+/* ============================================================
+   pills.css — #budget-slot and #np-slot in the titlebar, and every
+   .pill-* part inside them.
+
+   Loaded after chrome.css and scoped entirely to the two slots:
+   nothing here reaches another element.
+
+   THE IDIOM is #zoom-badge and #newclaude — a readout you can
+   press: 26-28px tall, --radius-ctl, a 1px --edge lip, --fg-2 type
+   at the readout stretch, tabular numerals, and the glass lifting
+   one step on hover and two on press. The cards borrow the
+   workspaces popover's ground so all the floating panes in the app
+   read as siblings.
+
+   COLOUR. Everything resolves through a chrome.css token but one:
+   chrome.css has no red, because until now nothing in the chrome
+   needed one. --pill-hot is that red, and it is the SAME red the
+   markets tile already uses for a falling price (newtab.css's
+   --stk-down), so the app still only has one. It gets a light-theme
+   value for the same reason the workspace colours do: #c98b86 is a
+   dark-ground red and disappears on white glass.
+
+   MOTION. Both slots sit on the titlebar's backdrop-filter, where
+   an animated frame re-blurs the whole row. Every transition here
+   is stepped and none runs longer than 150ms. Nothing glows at
+   rest: the amber and the red are type colour, and the only glow in
+   the file is the focus halo.
+   ============================================================ */
+
+:root {
+  --pill-hot: #c98b86;          /* >= 95% of a limit; newtab.css --stk-down */
+}
+
+:root[data-theme="light"] {
+  --pill-hot: #b04a43;
+}
+
+/* ============================================================
+   The slots
+   Flex children of #titlebar, full height so the few pixels under
+   a pill still belong to the slot — that is what keeps a hover
+   card open while the pointer travels down onto it.
+   ============================================================ */
+
+#budget-slot,
+#np-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 100%;
+  margin-right: 2px;
+}
+
+/* An empty slot takes no width at all: the now-playing pill is
+   hidden whenever nothing is playing, and the titlebar must look
+   exactly as it did before this file existed. */
+#np-slot[data-showing="0"] { margin-right: 0; }
+
+/* chrome.css gives every button display:inline-flex, which outranks
+   the UA's [hidden]. This puts the attribute back in charge. */
+#budget-slot .pill[hidden],
+#np-slot .pill[hidden],
+#budget-slot [hidden],
+#np-slot [hidden] { display: none; }
+
+/* ============================================================
+   The pills
+   ============================================================ */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  max-width: 240px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-weight: 350;
+  /* read as an instrument readout, like the zoom badge and the chips */
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+  /* the titlebar drags the window; these do not */
+  -webkit-app-region: no-drag;
+  transition: color 140ms steps(3, end), background-color 140ms steps(3, end),
+              border-color 140ms steps(3, end);
+}
+
+.pill:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+.pill:active { background: var(--sheen), var(--glass-3); }
+
+/* focus is light: a 1px ion line and a soft halo, never a white slab */
+.pill:focus { outline: none; }
+.pill:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+.pill .pill-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- the budget pill's three tones ---------------------------
+   Tone is the colour of the TYPE, not a lamp: a titlebar that
+   glows at 81% would be glowing most of the week. */
+
+.pill-budget[data-tone="warm"] { color: var(--amber); }
+.pill-budget[data-tone="hot"]  { color: var(--pill-hot); }
+.pill-budget[data-tone="warm"]:hover,
+.pill-budget[data-tone="hot"]:hover { color: var(--fg); }
+
+/* A reading that is old or missing reads as dimmer and dashed-off
+   rather than coloured: it is not a limit state, it is a source
+   state, and the two must never look like each other. */
+.pill-budget[data-state="stale"],
+.pill-budget[data-state="error"] {
+  color: var(--fg-3);
+  border-style: dashed;
+}
+
+.pill-budget[data-state="error"] { border-color: var(--amber-glow); }
+
+/* --- the now-playing pill ------------------------------------ */
+
+.pill-np { max-width: 230px; }
+
+.pill-np .pill-glyph {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+/* paused is the dimmed state, and a hold is dimmer still: the
+   music is not stopped, it is being kept quiet for a video */
+.pill-np[data-state="paused"] { color: var(--fg-3); }
+.pill-np[data-state="paused"]:hover { color: var(--fg-2); }
+.pill-np[data-held="1"] { border-style: dashed; }
+
+/* ============================================================
+   The hover/focus cards
+   Same ground, lip and radius as the workspaces popover, so every
+   floating pane in the app reads as one family.
+
+   POSITIONED BY CSS, not by measuring. #titlebar carries a
+   backdrop-filter and .chrome-layer a boot transform, and either one
+   makes a position:fixed descendant resolve against THAT box rather
+   than the viewport — so a top computed from a viewport rect lands
+   wrong by however much the chrome is transformed. Absolute, under
+   its own slot, is right in every state and needs no JS at all.
+   Nothing between here and the window clips, and .chrome-layer
+   (z-index 3) already paints over the tab well (1).
+   ============================================================ */
+
+.pill-card {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 268px;
+  max-width: calc(100vw - 20px);
+  padding: 10px 12px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--bevel);
+  color: var(--fg-2);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  /* Opaque, and opaque WITHOUT a backdrop-filter, which is two decisions:
+     a pane over a <webview> does not blur the guest anyway (the guest is its
+     own surface), and a blurred pane over the new tab page makes its board
+     re-blur every frame — app.js freezes the board for exactly that reason
+     while one of the named overlays is open, and this one opens on HOVER,
+     many times a minute. --ink-1 under --panel-bg is what makes it opaque
+     enough to read over a page without one. */
+  background:
+    var(--sheen) padding-box,
+    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
+    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
+    var(--rim) border-box;
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 -1px 0 var(--shade-in),
+    0 14px 34px var(--shade-drop);
+}
+
+/* two cut corners on the diagonal: the container signature */
+@supports (corner-shape: bevel) {
+  .pill-card { corner-shape: round bevel round bevel; }
+}
+
+/* --- the budget card's rows ---------------------------------- */
+
+.pill-rows {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 3px 8px;
+}
+
+.pill-row {
+  display: contents;
+}
+
+.pill-row-label {
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+.pill-row-value {
+  justify-self: end;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill-row-note {
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+
+/* --- the notes under both cards ------------------------------ */
+
+.pill-note {
+  margin: 9px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 1.45;
+  /* a file name or a bridge message can be long; it wraps rather
+     than widening the card */
+  overflow-wrap: anywhere;
+}
+
+/* the source line and the reason line stack without a second rule */
+.pill-source + .pill-reason {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+/* a reason is the thing that went wrong: it carries the warm colour */
+.pill-reason { color: var(--amber); }
+
+/* --- the now-playing card ------------------------------------ */
+
+.np-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.np-art {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 4px;
+  border: 1px solid var(--edge);
+  object-fit: cover;
+}
+
+.np-lines {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.np-title,
+.np-artist,
+.np-album {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.np-title {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.np-artist { margin-top: 2px; color: var(--fg-2); font-size: 11.5px; }
+.np-album  { margin-top: 1px; color: var(--fg-3); font-size: 11px; }
+
+.np-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.np-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  transition: color 140ms steps(3, end), background-color 140ms steps(3, end);
+}
+
+.np-btn .glyph { font-size: 12px; }
+.np-btn:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
+.np-btn:active { background: var(--sheen), var(--glass-3); }
+.np-btn:focus { outline: none; }
+.np-btn:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* A control the track does not offer is dim and dead, not absent:
+   a button that disappears reads as a bug. */
+.np-btn:disabled {
+  color: var(--fg-3);
+  opacity: .45;
+  cursor: default;
+}
+.np-btn:disabled:hover { background: transparent; color: var(--fg-3); }
+
+/* --- reduced motion ------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .pill, .np-btn { transition: none; }
+}
