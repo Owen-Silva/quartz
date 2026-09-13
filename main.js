@@ -2916,47 +2916,8 @@ async function bridgeCall(method, route, bodyObject) {
 
 ipcMain.handle('media:now', async (event, artHash) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
-  const answer = await bridgeCall('GET', nowRoute(artHash), null);
-  if (!answer || answer.ok !== true) return answer;
-  // The live ad state rides along, so the now-playing pill can say "ad · quiet"
-  // while the bridge has Spotify turned down for an ad -- and can say when an
-  // ad is on and the duck did NOT take, which is the failure the user wants to see.
-  const port = await bridgeMediaPort();
-  const ad = port == null ? null : await refreshAdLive(port);
-  return Object.assign({}, answer, { ad });
+  return bridgeCall('GET', nowRoute(artHash), null);
 });
-
-/**
- * The bridge's LIVE ad state (/status.adDuck: is an ad on, is Spotify ducked
- * right now), as opposed to the /config switch cached below. Polled by every
- * media:now while a pill is up, so it is cached for AD_DUCK_MAX_AGE_MS; the
- * answer is always an object with a reason, never a silent null.
- */
-let lastAdLive = null;
-let lastAdLiveAt = 0;
-async function refreshAdLive(port) {
-  if (lastAdLive && Date.now() - lastAdLiveAt < AD_DUCK_MAX_AGE_MS) return lastAdLive;
-  const answer = await bridgeJson(port, 'GET', '/status', null, MEDIA_TIMEOUT_MS);
-  const duck = answer && answer.ok && answer.json ? answer.json.adDuck : null;
-  if (duck && typeof duck === 'object') {
-    lastAdLive = {
-      enabled: duck.enabled === true,
-      active: duck.active === true,
-      ducked: duck.ducked === true,
-      level: Number.isFinite(Number(duck.level)) ? Number(duck.level) : null,
-      reason: typeof duck.reason === 'string' ? duck.reason : ''
-    };
-  } else {
-    lastAdLive = {
-      enabled: false, active: false, ducked: false, level: null,
-      reason: answer && answer.ok
-        ? 'the bridge /status carried no adDuck block'
-        : 'the bridge /status call failed: ' + ((answer && answer.reason) || 'unknown')
-    };
-  }
-  lastAdLiveAt = Date.now();
-  return lastAdLive;
-}
 
 ipcMain.handle('media:control', async (event, cmd) => {
   if (!isChromeSender(event)) return { ok: false, reason: 'refused' };

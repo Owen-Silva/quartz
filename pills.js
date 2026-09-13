@@ -1,61 +1,55 @@
 'use strict';
 
 /*
- * pills.js — the two titlebar readouts: the Claude budget pill (#budget-slot)
- * and the now-playing pill (#np-slot). Both slots are static in index.html,
- * between the spacer and the window controls.
+ * pills.js — the titlebar readout: the Claude budget pill (#budget-slot),
+ * a static slot in index.html between the spacer and the window controls.
  *
- * Plain browser script (contextIsolation on): reads window.api.budget and
- * window.api.media only; owns every .pill-* class and everything inside the
- * two slots, nothing else.
+ * Plain browser script (contextIsolation on): reads window.api.budget only;
+ * owns every .pill-* class and everything inside its slot, nothing else.
  *
- * WHAT EACH ONE IS
+ * WHAT IT IS. Always present. It shows the higher of the two Claude limits at
+ * a glance and everything else on hover/focus, and it never goes blank: a
+ * reading that is old, unreadable or missing says so IN the pill, with the
+ * reason in the card, because a slot that empties itself when the source
+ * breaks is the definition of a silent failure. main pushes it (budget.js,
+ * 30 s poll); this file only re-words the age between pushes, off its own
+ * clock, which is also what makes a main that STOPPED pushing visible rather
+ * than frozen at "1 min ago".
  *
- *   budget   Always present. Shows the higher of the two Claude limits at a
- *            glance and everything else on hover/focus. It never goes blank:
- *            a reading that is stale, unreadable or missing says so IN the
- *            pill, with the reason in the card, because a slot that empties
- *            itself when the source breaks is the definition of a silent
- *            failure. main pushes it (budget.js, 30 s poll); this file only
- *            re-words the age between pushes, off its own clock.
+ * AGE IS NOT A FAULT. A Claude Code session that goes idle simply stops
+ * writing, so ten minutes without a tick buys the age beside the numbers and
+ * a dashed border, nothing more — the percentages are still the truth. Only
+ * an hour earns the word "stale" and a dimmed pill.
  *
- *   now      Hidden unless something is actually playing or paused. There is
- *            no "nothing playing" state on purpose: a pill saying "no music"
- *            is noise in a titlebar, and an empty slot costs no width. It
- *            polls the cheap no-art /now every 2 s while this document is
- *            visible, and asks for the art only when the track's art hash
- *            changes.
+ * THE CARD IS IN <body>. See wireCard: a card inside the titlebar is trapped
+ * in that row's stacking context and the nav row paints over it.
  *
- * WHAT IT CANNOT SHOW. The bridge's ad-ducking state ("quieted for an ad")
- * is not reachable from a renderer in time to be true: main caches it from
- * GET /config and only refreshes that cache inside the 'autopause:status'
- * handler, so the value riding on 'autopause:changed' can be hours old. A
- * fourth pill state driven off an hours-old cache would be a lie, so it is
- * not built. The one-line main change that would make it honest is in the
- * lane report (attach a 3 s-cached adDuck to the 'media:now' answer).
- *
- * MOTION. Both pills sit on the titlebar's backdrop-filter, where every
- * animated frame re-blurs the row behind them. Nothing here animates: the
+ * MOTION. The pill sits on the titlebar's backdrop-filter, where every
+ * animated frame re-blurs the row behind it. Nothing here animates: the
  * transitions are stepped and none runs longer than 150ms.
  */
 
 (function () {
   /* --- shared ---------------------------------------------------------- */
 
-  /** How wide a track line may get before it is cut, in characters. */
-  var TRACK_CHARS = 28;
-
-  /** The no-art /now poll. Matches app.js's own media gate. */
-  var NP_POLL_MS = 2000;
-
   /** How often the budget card's "read 4 min ago" is re-worded locally. */
   var AGE_TICK_MS = 30000;
 
-  /** How long a refused transport command stays on the card. */
-  var REASON_MS = 8000;
-
-  /** Both cards survive the pointer crossing the gap under the titlebar. */
+  /** The card survives the pointer crossing the gap under the titlebar. */
   var CLOSE_GRACE_MS = 140;
+
+  /** How close a card may come to the window's edge. #workspaces-panel's. */
+  var GUTTER = 8;
+
+  /**
+   * From here the budget pill shows the age of the reading beside the
+   * numbers. A Claude Code session that goes idle simply stops writing: the
+   * limits it last reported are still the truth, only older.
+   */
+  var AGE_NOTE_MS = 600000;
+
+  /** And from here it is old enough to be CALLED stale, and the pill dims. */
+  var STALE_MS = 3600000;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -67,33 +61,6 @@
   function setText(node, text) {
     var next = String(text === undefined || text === null ? '' : text);
     if (node && node.textContent !== next) node.textContent = next;
-  }
-
-  /** A string cut to n characters with an ellipsis, never mid-space. */
-  function clip(text, n) {
-    var s = String(text === undefined || text === null ? '' : text).trim();
-    if (s.length <= n) return s;
-    return s.slice(0, Math.max(1, n - 1)).replace(/\s+$/, '') + '…';
-  }
-
-  /**
-   * "Title · Artist" inside TRACK_CHARS, with both halves still readable: the
-   * title gives up its characters first, but never below eight, and the
-   * artist keeps at least six. The titlebar must not reflow the tab strip
-   * because a track has a long name, so the CSS caps the width too — this is
-   * what makes the cut land in a sensible place rather than mid-word.
-   */
-  function trackLine(title, artist) {
-    var t = String(title || '').trim();
-    var a = String(artist || '').trim();
-    if (!t) return clip(a, TRACK_CHARS);
-    if (!a) return clip(t, TRACK_CHARS);
-    var sep = ' · ';
-    if ((t + sep + a).length <= TRACK_CHARS) return t + sep + a;
-    var room = TRACK_CHARS - sep.length;
-    var tLen = Math.max(8, Math.min(t.length, room - Math.min(a.length, 10)));
-    var aLen = Math.max(6, room - tLen);
-    return clip(t, tLen) + sep + clip(a, aLen);
   }
 
   /** "3 h 12 m", "14 min", "under a minute" — a span in plain words. */
@@ -140,28 +107,60 @@
   }
 
   /**
-   * One hover/focus card wired to one pill. The card is a DOM CHILD of the
-   * slot, so the pointer moving down onto it never leaves the slot and
-   * mouseleave does not fire; the grace timer covers the few pixels of gap
-   * under the titlebar all the same. Click toggles it open so it is usable
-   * without a pointer to hold still.
+   * One hover/focus card wired to one pill.
+   *
+   * THE CARD LIVES IN <body>, not in its slot. A card inside #titlebar is
+   * trapped in that row's stacking context — the titlebar carries a
+   * backdrop-filter, which makes one — so no z-index can lift it over the nav
+   * row below, and the nav row painted straight over its top. #workspaces-panel
+   * met this first and this follows it exactly: appended to the body, fixed,
+   * z-index 20, placed from the slot's rect on every open and every resize.
+   *
+   * Measuring is right HERE and was wrong before: a fixed element in the body
+   * resolves against the viewport, while a fixed DESCENDANT of #titlebar or
+   * .chrome-layer (a boot transform) resolves against that box instead — which
+   * is what the comment that used to sit here was about.
+   *
+   * The pointer now has to LEAVE the slot to reach the card, so the card
+   * carries the same enter/leave pair and the same grace timer covers the gap
+   * between the two. Click toggles it open so it is usable without a pointer
+   * to hold still.
    */
   function wireCard(slot, pill, card) {
     var closeTimer = 0;
     var stuck = false;
 
-    /* The card is positioned by CSS alone (absolute, under its own slot) and
-       not by measuring: #titlebar carries a backdrop-filter and .chrome-layer
-       a boot transform, and either one makes a position:fixed descendant
-       resolve against THAT box instead of the viewport — so a top measured in
-       viewport coordinates lands in the wrong place by however much the chrome
-       is transformed. Anchoring to the slot sidesteps the whole question. */
+    document.body.appendChild(card);
+
+    /**
+     * Right-aligned under the slot, and never off the edge of the window: a
+     * pill near the window controls would otherwise hang a 268px card over the
+     * right edge, and a short window would hang it off the bottom.
+     */
+    function position() {
+      var r = slot.getBoundingClientRect();
+      if (!r || (!r.width && !r.height)) return;
+      var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      var w = card.offsetWidth || 268;
+      var h = card.offsetHeight || 0;
+      var left = Math.round(r.right - w);
+      if (vw && left + w > vw - GUTTER) left = vw - GUTTER - w;
+      if (left < GUTTER) left = GUTTER;
+      var top = Math.round(r.bottom + 6);
+      if (vh && h && top + h > vh - GUTTER) top = vh - GUTTER - h;
+      if (top < GUTTER) top = GUTTER;
+      card.style.left = left + 'px';
+      card.style.top = top + 'px';
+    }
 
     function open() {
       if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; }
-      if (!card.hidden) return;
+      if (!card.hidden) { position(); return; }
       card.hidden = false;
       pill.setAttribute('aria-expanded', 'true');
+      /* After it is shown, so offsetWidth/Height are real numbers. */
+      position();
     }
 
     function close(now) {
@@ -175,23 +174,58 @@
       pill.setAttribute('aria-expanded', 'false');
     }
 
-    slot.addEventListener('mouseenter', open);
-    slot.addEventListener('mouseleave', function () { if (!stuck) close(false); });
-    slot.addEventListener('focusin', open);
-    slot.addEventListener('focusout', function (event) {
+    /** Focus that went from one of the pair to the other has not left. */
+    function stillInside(event) {
+      var to = event.relatedTarget;
+      return !!(to && (slot.contains(to) || card.contains(to)));
+    }
+
+    /* Escape puts focus back on the pill, and the pill is inside the slot
+       whose focusin OPENS the card — so without this flag the card closed and
+       reopened in the same tick and Escape did nothing at all. It is cleared
+       the moment focus really leaves, or the pointer deliberately arrives. */
+    var dismissed = false;
+
+    function onEnter() { dismissed = false; open(); }
+    function onLeave() { if (!stuck) close(false); }
+    function onFocusIn() { if (!dismissed) open(); }
+    function onFocusOut(event) {
+      if (stillInside(event)) return;
+      dismissed = false;
       if (stuck) return;
-      if (event.relatedTarget && slot.contains(event.relatedTarget)) return;
       close(true);
-    });
+    }
+    function onKey(event) {
+      if (event.key !== 'Escape' || card.hidden) return;
+      dismissed = true;
+      close(true);
+      pill.focus();
+    }
+
+    slot.addEventListener('mouseenter', onEnter);
+    slot.addEventListener('mouseleave', onLeave);
+    card.addEventListener('mouseenter', onEnter);
+    card.addEventListener('mouseleave', onLeave);
+    slot.addEventListener('focusin', onFocusIn);
+    card.addEventListener('focusin', onFocusIn);
+    slot.addEventListener('focusout', onFocusOut);
+    card.addEventListener('focusout', onFocusOut);
     pill.addEventListener('click', function () {
       stuck = !stuck;
       if (stuck) open(); else close(true);
     });
-    slot.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && !card.hidden) { close(true); pill.focus(); }
-    });
+    slot.addEventListener('keydown', onKey);
+    card.addEventListener('keydown', onKey);
+    /* A resized window has moved the slot; an open card follows it instead of
+       hanging where the slot used to be. */
+    window.addEventListener('resize', function () { if (!card.hidden) position(); });
 
-    return { open: open, close: close, isOpen: function () { return !card.hidden; } };
+    return {
+      open: open,
+      close: close,
+      position: position,
+      isOpen: function () { return !card.hidden; }
+    };
   }
 
   /* ====================================================================== */
@@ -229,15 +263,23 @@
     }
     var rowFive = makeRow('5-hour');
     var rowWeek = makeRow('Week');
-    var rowToday = makeRow("Today's sessions");
+    /* "Today", not "Today's sessions": the figure is what has been SPENT
+       today, not what the sessions have cost in their lifetimes. */
+    var rowToday = makeRow('Today');
+    /* Shown only when a baseline had to be taken mid-flight, because only then
+       is the figure a partial one and only then does the user need to know. */
+    var since = el('p', 'pill-note pill-since', '');
+    since.hidden = true;
     var source = el('p', 'pill-note pill-source', '');
     var reason = el('p', 'pill-note pill-reason', '');
     card.appendChild(rows);
+    card.appendChild(since);
     card.appendChild(source);
     card.appendChild(reason);
 
+    /* The card is appended to <body> by wireCard, not to the slot: see the
+       comment there. Only the pill belongs to the titlebar. */
     slot.appendChild(pill);
-    slot.appendChild(card);
     pill.setAttribute('aria-describedby', card.id);
     var cardCtl = wireCard(slot, pill, card);
 
@@ -279,9 +321,14 @@
       if (!snap) return;
       var state = snap.state === 'ok' || snap.state === 'stale' ? snap.state : 'error';
       var age = ageMs();
-      /* main marks a reading stale at ten minutes; this clock keeps that
-         true between pushes rather than waiting for the next one. */
-      if (state === 'ok' && age !== null && age > 600000) state = 'stale';
+      /* main calls a reading stale at an hour; this clock keeps that true
+         between pushes rather than waiting for the next one, in BOTH
+         directions — a snapshot that arrives already stale is stale, and one
+         that ages past the hour on screen becomes stale without a push. */
+      if (state !== 'error' && age !== null) state = age >= STALE_MS ? 'stale' : 'ok';
+      /* Ten minutes is not a fault, it is an age: the pill says how old the
+         numbers are and keeps showing them in their own tone. */
+      var aged = state !== 'error' && age !== null && age >= AGE_NOTE_MS;
 
       var numbers = (snap.fiveHour || snap.week)
         ? '5H ' + pct(snap.fiveHour) + ' · WK ' + pct(snap.week)
@@ -289,20 +336,25 @@
 
       if (state === 'error') {
         setText(pillText, 'budget: error');
+      } else if (!numbers) {
+        /* Only a reading with no percentages at all falls back to words. */
+        setText(pillText, state === 'stale'
+          ? 'budget: stale ' + spanShort(age === null ? 0 : age)
+          : 'budget: no reading');
       } else if (state === 'stale') {
-        /* A stale reading still holds the last real percentages, so they stay
-           on the pill with the staleness marked beside them; only a stale
-           reading with no numbers at all falls back to words. */
-        setText(pillText, numbers
-          ? numbers + ' · stale ' + spanShort(age === null ? 0 : age)
-          : 'budget: stale ' + spanShort(age === null ? 0 : age));
+        setText(pillText, numbers + ' · stale ' + spanShort(age));
+      } else if (aged) {
+        setText(pillText, numbers + ' · ' + spanShort(age));
       } else {
-        setText(pillText, numbers || 'budget: no reading');
+        setText(pillText, numbers);
       }
 
       pill.setAttribute('data-state', state);
+      /* Two separate things: 'old' dashes the border from ten minutes and
+         leaves the limit's tone alone, 'stale' dims the type from an hour. */
+      pill.setAttribute('data-age', aged ? 'old' : 'fresh');
       pill.setAttribute('data-tone', state === 'error' ? 'none' : toneOf(snap));
-      pill.title = state === 'ok'
+      pill.title = (state === 'ok' && !aged)
         ? 'Claude usage — hover for the detail'
         : 'Claude usage — ' + (snap.reason || state);
 
@@ -318,6 +370,14 @@
       setText(rowToday.note, snap.todayUsd === null
         ? 'no readings to add up'
         : '(' + snap.sessionsToday + (snap.sessionsToday === 1 ? ' session)' : ' sessions)'));
+
+      /* A figure counted from part-way through a session says so. Without
+         this line "Today $3.10" would look like the whole day. */
+      var sinceText = snap.todaySince
+        ? 'counted since the browser first looked today at ' + clockWords(snap.todaySince)
+        : '';
+      setText(since, sinceText);
+      since.hidden = !sinceText;
 
       if (snap.source) {
         setText(source, 'read ' + spanWords(age === null ? 0 : age) + ' ago · ' + snap.source.file);
@@ -339,7 +399,8 @@
     function local(reason_) {
       return {
         state: 'error', reason: reason_, at: Date.now(),
-        fiveHour: null, week: null, todayUsd: null, sessionsToday: 0, source: null
+        fiveHour: null, week: null, todayUsd: null, sessionsToday: 0,
+        todaySince: null, source: null
       };
     }
 
@@ -371,6 +432,7 @@
         return {
           text: pillText.textContent,
           state: pill.getAttribute('data-state'),
+          age: pill.getAttribute('data-age'),
           tone: pill.getAttribute('data-tone'),
           cardOpen: !card.hidden,
           rows: {
@@ -378,296 +440,15 @@
             week: rowWeek.value.textContent + ' ' + rowWeek.note.textContent,
             today: rowToday.value.textContent + ' ' + rowToday.note.textContent
           },
+          since: since.hidden ? '' : since.textContent,
           source: source.textContent,
           reason: reason.hidden ? '' : reason.textContent,
           snapshot: snap
         };
       },
       open: function () { cardCtl.open(); },
+      close: function () { cardCtl.close(true); },
       apply: apply
-    };
-  })();
-
-  /* ====================================================================== */
-  /* The now-playing pill                                                   */
-  /* ====================================================================== */
-
-  var nowPlaying = (function () {
-    var slot = document.getElementById('np-slot');
-    if (!slot) return null;
-
-    var pill = el('button', 'pill pill-np');
-    pill.type = 'button';
-    pill.id = 'np-pill';
-    pill.setAttribute('aria-haspopup', 'true');
-    pill.setAttribute('aria-expanded', 'false');
-    var glyph = el('span', 'glyph pill-glyph');
-    glyph.setAttribute('aria-hidden', 'true');
-    var pillText = el('span', 'pill-text', '');
-    pill.appendChild(glyph);
-    pill.appendChild(pillText);
-
-    var card = el('div', 'pill-card pill-card-np');
-    card.id = 'np-card';
-    card.setAttribute('role', 'group');
-    card.setAttribute('aria-label', 'Now playing');
-    card.hidden = true;
-
-    var head = el('div', 'np-head');
-    var art = el('img', 'np-art');
-    art.alt = '';
-    art.hidden = true;
-    var lines = el('div', 'np-lines');
-    var npTitle = el('p', 'np-title', '');
-    var npArtist = el('p', 'np-artist', '');
-    var npAlbum = el('p', 'np-album', '');
-    lines.appendChild(npTitle);
-    lines.appendChild(npArtist);
-    lines.appendChild(npAlbum);
-    head.appendChild(art);
-    head.appendChild(lines);
-
-    var acts = el('div', 'np-acts');
-    function actButton(cmd, label, mark) {
-      var button = el('button', 'np-btn');
-      button.type = 'button';
-      button.title = label;
-      button.setAttribute('aria-label', label);
-      button.setAttribute('data-cmd', cmd);
-      var span = el('span', 'glyph', mark);
-      span.setAttribute('aria-hidden', 'true');
-      button.appendChild(span);
-      button.addEventListener('click', function () { control(cmd); });
-      acts.appendChild(button);
-      return button;
-    }
-    /* Segoe Fluent Icons: E892 previous, E768 play, E769 pause, E893 next. */
-    var prevBtn = actButton('prev', 'Previous track', '');
-    var toggleBtn = actButton('toggle', 'Play or pause', '');
-    var nextBtn = actButton('next', 'Next track', '');
-
-    var note = el('p', 'pill-note np-note', '');
-    note.hidden = true;
-    card.appendChild(head);
-    card.appendChild(acts);
-    card.appendChild(note);
-
-    slot.appendChild(pill);
-    slot.appendChild(card);
-    pill.setAttribute('aria-describedby', card.id);
-    var cardCtl = wireCard(slot, pill, card);
-
-    /** The last /now answer, the art we hold for it, and the last refusal. */
-    var last = null;
-    var artHash = '';
-    var artData = '';
-    var refusal = '';
-    var refusalTimer = 0;
-    var timer = 0;
-    var inFlight = false;
-
-    function api() {
-      var group = (window.api && window.api.media) ? window.api.media : null;
-      return group && typeof group.now === 'function' ? group : null;
-    }
-
-    /**
-     * The bridge hands art over as raw base64 with the type beside it, not as
-     * a data URL — assigning it to img.src as-is resolves it as a file path
-     * and shows a broken image. Same rule the new tab page's media tile keeps.
-     */
-    function artUrl(raw, mime) {
-      var s = String(raw === undefined || raw === null ? '' : raw);
-      if (!s) return '';
-      if (s.slice(0, 5) === 'data:') return s;
-      return 'data:' + (mime || 'image/jpeg') + ';base64,' + s;
-    }
-
-    /** Nothing to show: the slot goes back to costing no width at all. */
-    function hide() {
-      if (!pill.hidden) {
-        pill.hidden = true;
-        cardCtl.close(true);
-      }
-      slot.setAttribute('data-showing', '0');
-    }
-
-    function playable(answer) {
-      if (!answer || answer.ok !== true) return false;
-      var status = String(answer.status || 'none');
-      if (status === 'none' || status === 'stopped') return false;
-      if (!answer.source && !answer.title) return false;
-      return !!(answer.title || answer.artist);
-    }
-
-    function paint() {
-      if (!playable(last)) { hide(); return; }
-      var playing = String(last.status) === 'playing';
-      var held = last.held === true;
-      /* The bridge's live ad state rides on every /now answer (main attaches it).
-         quiet = an ad is on and Spotify is turned down for it; adLoud = an ad is
-         on and the duck did NOT take, which the card must say out loud. */
-      var ad = last.ad && typeof last.ad === 'object' ? last.ad : null;
-      var quiet = !!(ad && ad.active && ad.ducked);
-      var adLoud = !!(ad && ad.active && !ad.ducked);
-
-      pill.hidden = false;
-      slot.setAttribute('data-showing', '1');
-      setText(glyph, playing ? '' : '');
-      setText(pillText, quiet ? 'ad · quiet' : adLoud ? 'ad · not ducked' : trackLine(last.title, last.artist));
-      pill.setAttribute('data-state', quiet ? 'ad' : adLoud ? 'ad-loud' : playing ? 'playing' : 'paused');
-      pill.setAttribute('data-held', held ? '1' : '0');
-      pill.title = (last.title || '') + (last.artist ? ' — ' + last.artist : '') +
-        (quiet ? ' (ad · quiet)' : adLoud ? ' (ad · NOT ducked)' : held ? ' (paused for a video)' : playing ? ' (playing)' : ' (paused)');
-
-      setText(npTitle, last.title || 'Unknown track');
-      setText(npArtist, last.artist || '');
-      npArtist.hidden = !last.artist;
-      setText(npAlbum, last.album || '');
-      npAlbum.hidden = !last.album;
-      if (artData) { art.src = artData; art.hidden = false; } else { art.hidden = true; }
-
-      setText(toggleBtn.querySelector('.glyph'), playing ? '' : '');
-      toggleBtn.title = playing ? 'Pause' : 'Play';
-      prevBtn.disabled = last.canPrev === false;
-      nextBtn.disabled = last.canNext === false;
-      toggleBtn.disabled = last.canPlayPause === false;
-
-      /* One line under the buttons, and it is the most important line on the
-         card: why a press did nothing, or why the music is quiet. */
-      var text = refusal;
-      if (!text && held) {
-        text = 'paused for a video — auto-pause is holding Spotify until the video stops';
-      }
-      if (!text && quiet) {
-        text = 'ad · quiet — the bridge turned Spotify down' +
-          (ad.level != null ? ' to ' + ad.level + '%' : '') + ' until the ad ends';
-      }
-      if (!text && adLoud) {
-        text = 'an ad is on and Spotify was NOT turned down' + (ad.reason ? ': ' + ad.reason : '') +
-          (ad.enabled ? '' : ' (Quiet Spotify ads is off in Settings)');
-      }
-      setText(note, text);
-      note.hidden = !text;
-    }
-
-    function showRefusal(text) {
-      refusal = text;
-      if (refusalTimer) clearTimeout(refusalTimer);
-      refusalTimer = setTimeout(function () { refusalTimer = 0; refusal = ''; paint(); }, REASON_MS);
-      paint();
-    }
-
-    function control(cmd) {
-      var group = api();
-      if (!group || typeof group.control !== 'function') {
-        showRefusal('this build cannot drive the player (preload has no media.control)');
-        return;
-      }
-      Promise.resolve(group.control(cmd)).then(function (answer) {
-        if (answer && answer.ok === true) {
-          refusal = '';
-          if (refusalTimer) { clearTimeout(refusalTimer); refusalTimer = 0; }
-          /* The bridge takes a beat to report the new state. */
-          setTimeout(poll, 350);
-          return;
-        }
-        var why = (answer && answer.reason) ? String(answer.reason) : 'the bridge refused it';
-        showRefusal(why === 'held'
-          ? 'held: auto-pause is holding Spotify for a video and will not be overruled'
-          : cmd + ': ' + why);
-      }).catch(function (err) {
-        showRefusal(cmd + ': ' + ((err && err.message) || 'the call failed'));
-      });
-    }
-
-    /**
-     * One cheap read. Art is asked for only when the hash we hold is not the
-     * hash the bridge just named, and then exactly once per change — the art
-     * is ~30 KB of base64 and this runs every two seconds.
-     */
-    function poll() {
-      var group = api();
-      if (!group) { hide(); return; }
-      if (inFlight) return;
-      inFlight = true;
-      Promise.resolve(group.now()).then(function (answer) {
-        inFlight = false;
-        last = answer;
-        if (!playable(answer)) { artHash = ''; artData = ''; paint(); return; }
-        var hash = String(answer.artHash || '');
-        if (hash && hash !== artHash) {
-          /* Pass the hash we HOLD: the bridge answers with the bytes only
-             because it differs from the one it has. */
-          Promise.resolve(group.now(artHash || '')).then(function (full) {
-            if (full && full.ok === true && typeof full.art === 'string' && full.art) {
-              artHash = String(full.artHash || hash);
-              artData = artUrl(full.art, full.artMime);
-              paint();
-            } else {
-              /* No art for this track: the card shows the lines alone. */
-              artHash = hash;
-              artData = '';
-              paint();
-            }
-          }).catch(function () { artHash = hash; artData = ''; paint(); });
-        } else if (!hash && artData) {
-          artHash = '';
-          artData = '';
-        }
-        paint();
-      }).catch(function () {
-        inFlight = false;
-        /* A bridge that is not answering is not a player that is playing:
-           the pill goes away. The bridge's own health is in Settings ->
-           Spotify auto-pause, which says what is wrong and why. */
-        last = null;
-        hide();
-      });
-    }
-
-    function sync() {
-      if (document.visibilityState === 'visible') {
-        if (!timer) timer = setInterval(poll, NP_POLL_MS);
-        poll();
-      } else if (timer) {
-        clearInterval(timer);
-        timer = 0;
-      }
-    }
-
-    function start() {
-      pill.hidden = true;
-      slot.setAttribute('data-showing', '0');
-      pill.addEventListener('click', function (event) {
-        /* The click that toggles the card also drives the player: the pill IS
-           the play/pause control, and the card is what the hover already
-           showed. Modifier-free left click only. */
-        if (event.altKey || event.ctrlKey || event.shiftKey) return;
-        control('toggle');
-      });
-      document.addEventListener('visibilitychange', sync);
-      sync();
-    }
-
-    return {
-      start: start,
-      poll: poll,
-      /* For a DOM probe over CDP. */
-      state: function () {
-        return {
-          hidden: pill.hidden,
-          text: pillText.textContent,
-          state: pill.getAttribute('data-state'),
-          held: pill.getAttribute('data-held'),
-          cardOpen: !card.hidden,
-          note: note.hidden ? '' : note.textContent,
-          hasArt: !art.hidden,
-          answer: last
-        };
-      },
-      open: function () { cardCtl.open(); },
-      control: control
     };
   })();
 
@@ -675,16 +456,12 @@
 
   function start() {
     if (budget) budget.start();
-    if (nowPlaying) nowPlaying.start();
-    /* One handle for both, so a CDP probe or a later doctor page can read
-       exactly what the titlebar is showing without touching the DOM. */
+    /* One handle, so a CDP probe or a later doctor page can read exactly what
+       the titlebar is showing without touching the DOM. */
     window.Pills = {
       budget: budget ? budget.state : function () { return null; },
-      np: nowPlaying ? nowPlaying.state : function () { return null; },
       openBudget: budget ? budget.open : function () {},
-      openNp: nowPlaying ? nowPlaying.open : function () {},
-      pollNp: nowPlaying ? nowPlaying.poll : function () {},
-      npControl: nowPlaying ? nowPlaying.control : function () {},
+      closeBudget: budget ? budget.close : function () {},
       applyBudget: budget ? budget.apply : function () {}
     };
   }

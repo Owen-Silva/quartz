@@ -11,20 +11,47 @@
  *   C:\Users\you\mission-control\data\statusline\<session>.json
  * with `receivedAt`, `cost.total_cost_usd`, `rate_limits.five_hour
  * .{used_percentage,resets_at}` and `rate_limits.seven_day.{...}` (resets_at
- * is epoch SECONDS). The newest file by mtime is the truth; a file older than
- * ten minutes is reported as stale, never silently.
+ * is epoch SECONDS). The newest file by mtime is the truth; an age of ten
+ * minutes or more is reported, and an hour or more is called stale — never
+ * silently either way.
+ *
+ * AGE IS NOT A FAULT. A Claude Code session that is idle simply stops writing:
+ * the limits it last reported are still the truth, only older. So ten minutes
+ * buys a note and the age beside the numbers, and only an hour earns the word
+ * "stale" and a dimmed pill. Unreadable or missing files are the real fault
+ * and are still 'error'.
+ *
+ * TODAY'S SPEND IS A DELTA, NOT A TOTAL. Each statusline file carries its
+ * session's LIFETIME cost, and a session that has run for days would otherwise
+ * dump all of it into "today". A per-day baseline file (<userData>/
+ * budget-day.json) remembers what each session had already cost when this
+ * machine first looked at it today; today's spend is the sum of the growth
+ * since. A session that STARTED today is the exception: all of its cost is
+ * today's, so its baseline is zero.
+ *
+ * HOW A SESSION'S START IS KNOWN. Not from the file's birthtime: the hook
+ * writes a .tmp and renames it over the target on every tick, so the file is
+ * brand new every 30 seconds and its birthtime always equals its mtime
+ * (measured on the live folder — every one of the user's files had birth == mtime
+ * to the millisecond). The honest number is `receivedAt - cost
+ * .total_duration_ms`, which is wall-clock since the session opened; checked
+ * against the birthtimes of the matching .jsonl transcripts, it lands on the
+ * same minute for every live session. Birthtime is kept only as a fallback
+ * for a document with no duration in it, and the fallback from THERE is to
+ * treat the session as older — the side that never overcounts.
  *
  * CONTRACT
  *   create({ app, ipcMain, isChromeSender, isBundledPage, send })
  *     -> { snapshot(), stop() }
  *   snapshot() -> {
- *     state: 'ok' | 'stale' | 'error' | 'unbuilt',
+ *     state: 'ok' | 'stale' | 'error' | 'unbuilt',   // 'stale' = an hour or older
  *     reason: string,                       // plain words, always set when state != 'ok'
  *     at: number,                            // ms, when this snapshot was taken
  *     fiveHour: { pct: number, resetsAt: number } | null,   // resetsAt in ms
  *     week:     { pct: number, resetsAt: number } | null,
- *     todayUsd: number | null,               // sum over sessions touched today
+ *     todayUsd: number | null,               // growth today, over sessions touched today
  *     sessionsToday: number,
+ *     todaySince: number | null,             // ms: when a mid-flight baseline was taken
  *     source: { file: string, receivedAt: number, ageMs: number } | null
  *   }
  *   IPC (chrome only, gated by isChromeSender):
@@ -44,8 +71,10 @@
  *     honest — the numbers ARE good — and the note still reaches the card,
  *     because a file we silently skipped is exactly the kind of thing that
  *     should not be silent.
- *   - The extra create() options `dir`, `now`, `setTimer` and `clearTimer`
- *     exist for the harness. Main passes none of them.
+ *   - The extra create() options `dir`, `now`, `setTimer`, `clearTimer`,
+ *     `stateFile` and `stat` exist for the harness. Main passes none of them:
+ *     it gets the folder from the home directory and the baseline file from
+ *     app.getPath('userData').
  */
 
 const fs = require('fs');
@@ -56,12 +85,19 @@ const path = require('path');
 const POLL_MS = 30000;
 
 /**
- * Older than this and the reading is stale. Claude Code only writes while a
- * session is actually running, so "stale" is the normal state of a quiet
- * afternoon — which is why the reason says so in as many words instead of
- * looking like a fault.
+ * From here the age is worth saying out loud: the pill appends it and the card
+ * explains it. The numbers are still the truth — Claude Code only writes while
+ * a session is actually running, so a quiet afternoon is not a fault.
  */
-const STALE_MS = 10 * 60 * 1000;
+const AGE_NOTE_MS = 10 * 60 * 1000;
+
+/**
+ * And from HERE the reading is old enough to be called stale: an hour without
+ * a tick means nothing has been running long enough that the percentages may
+ * have moved under us (a limit window can roll in an hour). The word and the
+ * dimmed pill are reserved for this, not for a ten-minute pause.
+ */
+const STALE_MS = 60 * 60 * 1000;
 
 /**
  * A file is only opened when its mtime is near enough to today to be able to
@@ -86,6 +122,22 @@ function startOfLocalDay(ms) {
 /** True when the two instants are the same LOCAL calendar day. */
 function sameLocalDay(a, b) {
   return startOfLocalDay(a) === startOfLocalDay(b);
+}
+
+/**
+ * 'YYYY-MM-DD' in LOCAL time — the key the baseline file is stamped with.
+ * Deliberately not toISOString(): that is UTC, and a day that rolls over at
+ * 8 pm local would reset the figure in the middle of the user's evening.
+ */
+function localDateKey(ms) {
+  const d = new Date(ms);
+  const pad = (n) => (n < 10 ? '0' + n : String(n));
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+/** The session id a statusline file belongs to: its name without '.json'. */
+function sessionIdOf(name) {
+  return String(name).slice(0, -5);
 }
 
 /** A finite number, or null. Percentages and dollars both come through here. */
@@ -129,9 +181,15 @@ function parseDoc(text) {
     return { pct, resetsAt: resets === null ? 0 : Math.round(resets * 1000) };
   };
 
+  /* Wall-clock since the session opened. It is what makes "did this session
+     start today" answerable — see the note at the top of the file. */
+  const durationMs = num(json.cost && json.cost.total_duration_ms);
+
   return {
     receivedAt,
     costUsd: num(json.cost && json.cost.total_cost_usd),
+    durationMs,
+    startedAt: durationMs === null ? null : receivedAt - durationMs,
     fiveHour: window('five_hour'),
     week: window('seven_day'),
   };
@@ -147,6 +205,7 @@ function changeKey(snap) {
     pct(snap.week),
     snap.todayUsd === null ? '-' : snap.todayUsd.toFixed(4),
     snap.sessionsToday,
+    snap.todaySince === null || snap.todaySince === undefined ? '-' : snap.todaySince,
     snap.source ? snap.source.receivedAt : '-',
   ].join('|');
 }
@@ -162,6 +221,27 @@ function create(options) {
   const now = typeof opts.now === 'function' ? opts.now : () => Date.now();
   const setTimer = opts.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = opts.clearTimer || ((t) => clearTimeout(t));
+  /* The harness fakes birthtimes through here; main never passes it. */
+  const statFile = typeof opts.stat === 'function' ? opts.stat : (file) => fs.statSync(file);
+
+  /* Where the per-day baselines live. The user's userData, not the statusline
+     folder: that one is Claude Code's and this module never writes to it. */
+  let stateFile = '';
+  let stateWhy = '';
+  const memoryOnly = "today's baselines are held in memory only (no app data folder), " +
+    "so today's figure restarts with the browser";
+  if (typeof opts.stateFile === 'string') {
+    stateFile = opts.stateFile;
+    if (!stateFile) stateWhy = memoryOnly;
+  } else if (electronApp && typeof electronApp.getPath === 'function') {
+    try { stateFile = path.join(electronApp.getPath('userData'), 'budget-day.json'); } catch (err) {
+      stateFile = '';
+      stateWhy = 'the app data folder could not be found (' + ((err && err.message) || 'error') +
+        '), so today\'s figure is counted from when this window opened';
+    }
+  } else {
+    stateWhy = memoryOnly;
+  }
 
   /** contents.id -> { contents, count, lastKey } — the new-tab guests. */
   const guests = new Map();
@@ -169,6 +249,77 @@ function create(options) {
   let last = null;
   let lastKey = '';
   let timer = null;
+
+  /* --- the per-day baselines -------------------------------------------
+     { date: 'YYYY-MM-DD' local, sessions: { <id>: { baseline, first } } }
+     `baseline` is what a session had ALREADY cost when this machine first saw
+     it today, and `first` is when that happened. A session whose file was born
+     today has a baseline of 0, because all of its cost is today's. Kept on
+     disk so closing the browser does not reset the day. */
+
+  let day = { date: '', sessions: {} };
+  let dayOnDisk = '';        // what was last written, so an unchanged day is not rewritten
+  let saveFailed = false;
+
+  function dayJson() {
+    try { return JSON.stringify(day); } catch { return ''; }
+  }
+
+  function loadDay() {
+    day = { date: '', sessions: {} };
+    dayOnDisk = '';
+    if (!stateFile) return;
+    let text;
+    try {
+      text = fs.readFileSync(stateFile, 'utf8');
+    } catch (err) {
+      /* Not there on the first run of a profile: that is the normal case and
+         it is not a fault. Anything else is, and it says so. */
+      if (!err || err.code !== 'ENOENT') {
+        stateWhy = 'the day-baseline file could not be read (' + ((err && err.code) || 'error') +
+          "), so today's figure is counted from now: " + stateFile;
+      }
+      return;
+    }
+    let json = null;
+    try { json = JSON.parse(text); } catch { json = null; }
+    const sessions = json && json.sessions && typeof json.sessions === 'object' && !Array.isArray(json.sessions)
+      ? json.sessions : null;
+    if (!json || typeof json.date !== 'string' || !sessions) {
+      stateWhy = 'the day-baseline file was unreadable and was started over, ' +
+        "so today's figure is counted from now: " + stateFile;
+      return;
+    }
+    /* Every row is checked: a baseline of NaN would make today's figure NaN
+       for the rest of the day. */
+    const clean = {};
+    for (const id of Object.keys(sessions)) {
+      const row = sessions[id];
+      if (!row || typeof row !== 'object') continue;
+      const baseline = num(row.baseline);
+      if (baseline === null || baseline < 0) continue;
+      const first = num(row.first);
+      clean[id] = { baseline, first: first === null ? 0 : first };
+    }
+    day = { date: json.date, sessions: clean };
+    dayOnDisk = dayJson();
+  }
+
+  function saveDay() {
+    if (!stateFile) return;
+    const text = dayJson();
+    if (!text || text === dayOnDisk) return;      // nothing moved; no disk churn
+    try {
+      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+      fs.writeFileSync(stateFile, text);
+      dayOnDisk = text;
+      if (saveFailed) { saveFailed = false; stateWhy = ''; }
+    } catch (err) {
+      saveFailed = true;
+      stateWhy = 'the day-baseline file could not be saved (' + ((err && err.code) || 'error') +
+        "), so today's figure may restart: " + stateFile;
+    }
+  }
 
   /* --- reading the folder ---------------------------------------------- */
 
@@ -185,6 +336,7 @@ function create(options) {
       week: null,
       todayUsd: null,
       sessionsToday: 0,
+      todaySince: null,
       source: null,
     };
   }
@@ -211,9 +363,12 @@ function create(options) {
     for (const name of names) {
       if (name.length < 6 || name.slice(-5).toLowerCase() !== '.json') continue;
       let stat;
-      try { stat = fs.statSync(path.join(dir, name)); } catch { continue; }
+      try { stat = statFile(path.join(dir, name)); } catch { continue; }
       if (!stat.isFile()) continue;
-      files.push({ name, mtimeMs: stat.mtimeMs });
+      /* birthtime is how a session that STARTED today is told from one that
+         has been running for days; a filesystem that has no real one gives 0
+         or NaN, which reads as "older" — the side that never overcounts. */
+      files.push({ name, mtimeMs: stat.mtimeMs, birthtimeMs: num(stat.birthtimeMs) });
     }
 
     if (!files.length) {
@@ -224,11 +379,17 @@ function create(options) {
     const newest = files[0];
 
     /* Today's spend. Every file whose reading landed on today's LOCAL date
-       counts once; the rest are not even opened (see TODAY_SLACK_MS). */
+       counts once; the rest are not even opened (see TODAY_SLACK_MS). What is
+       counted is the GROWTH since the baseline, never the session's lifetime
+       total — three sessions that have run all week are not $1,800 of today. */
     const at = now();
     const dayFloor = startOfLocalDay(at) - TODAY_SLACK_MS;
+    const dateKey = localDateKey(at);
+    /* Midnight: the day's baselines are yesterday's and are thrown away. */
+    if (day.date !== dateKey) day = { date: dateKey, sessions: {} };
     let todayUsd = 0;
     let sessionsToday = 0;
+    let todaySince = null;
     let unreadable = 0;
     let newestDoc = null;
 
@@ -244,43 +405,71 @@ function create(options) {
       if (!doc) {
         unreadable += 1;
         if (isNewest) {
+          saveDay();
           return failed('the newest statusline file is not readable as a reading: ' + file.name);
         }
         continue;
       }
       if (isNewest) newestDoc = doc;
       if (sameLocalDay(doc.receivedAt, at) && doc.costUsd !== null) {
-        todayUsd += doc.costUsd;
+        const id = sessionIdOf(file.name);
+        let row = day.sessions[id];
+        if (!row) {
+          /* First sight of this session today. A session that STARTED today
+             spent all of its money today; one that was already running spent
+             an unknown part of it yesterday, so only what it spends from this
+             moment on can honestly be called today's. */
+          const startedToday = doc.startedAt !== null
+            ? sameLocalDay(doc.startedAt, at)
+            : (file.birthtimeMs !== null && sameLocalDay(file.birthtimeMs, at));
+          row = { baseline: startedToday ? 0 : doc.costUsd, first: at };
+          day.sessions[id] = row;
+        }
+        /* Never negative: a cost that went DOWN is a session id reused or a
+           file rewritten from scratch, and neither is money spent today. */
+        todayUsd += Math.max(0, doc.costUsd - row.baseline);
         sessionsToday += 1;
+        /* Only a MID-FLIGHT baseline makes the figure a partial one, and only
+           then does the card say what it is counted from. */
+        if (row.baseline > 0 && (todaySince === null || row.first < todaySince)) {
+          todaySince = row.first;
+        }
       }
     }
+
+    saveDay();
 
     if (!newestDoc.fiveHour && !newestDoc.week) {
       return failed('the newest statusline file has no rate limits in it: ' + newest.name);
     }
 
     const ageMs = Math.max(0, at - newestDoc.receivedAt);
-    const stale = ageMs > STALE_MS;
+    const stale = ageMs >= STALE_MS;
 
-    /* An 'ok' reading can still carry a note. A file we skipped without
-       saying so would be exactly the silent failure this app does not do. */
-    let reason = '';
-    if (stale) {
-      reason = 'newest reading is ' + ageWords(ageMs) +
-        ' old — Claude Code only writes while a session is running';
-    } else if (unreadable) {
-      reason = unreadable + (unreadable === 1 ? ' file in' : ' files in') +
-        ' the statusline folder could not be read; the rest are counted';
+    /* An 'ok' reading can still carry notes, and it carries ALL of them: a
+       file we skipped, or a baseline we could not keep, without saying so
+       would be exactly the silent failure this app does not do. Age is first
+       because it is the one that explains the pill. */
+    const notes = [];
+    if (ageMs >= AGE_NOTE_MS) {
+      notes.push('last written ' + ageWords(ageMs) +
+        ' ago — Claude Code writes only while a session is active');
     }
+    if (unreadable) {
+      notes.push(unreadable + (unreadable === 1 ? ' file in' : ' files in') +
+        ' the statusline folder could not be read; the rest are counted');
+    }
+    if (stateWhy) notes.push(stateWhy);
 
     return {
       state: stale ? 'stale' : 'ok',
-      reason,
+      reason: notes.join(' · '),
       at,
       fiveHour: newestDoc.fiveHour,
       week: newestDoc.week,
       todayUsd: Math.round(todayUsd * 1e6) / 1e6,
       sessionsToday,
+      todaySince,
       source: { file: newest.name, receivedAt: newestDoc.receivedAt, ageMs },
     };
   }
@@ -445,6 +634,10 @@ function create(options) {
 
   /* --- wiring ----------------------------------------------------------- */
 
+  /* The baselines have to be in hand BEFORE the first reading, or the first
+     reading of every run would re-baseline every session to its current cost
+     and today's figure would restart at zero on every launch. */
+  loadDay();
   last = read();
   lastKey = changeKey(last);
   schedule();
@@ -471,7 +664,11 @@ function create(options) {
     handleGuestLine,
     watchGuest,
     guestCount: () => guests.size,
+    dayState: () => JSON.parse(dayJson() || '{}'),
   };
 }
 
-module.exports = { create, parseDoc, changeKey, ageWords, startOfLocalDay, sameLocalDay };
+module.exports = {
+  create, parseDoc, changeKey, ageWords, startOfLocalDay, sameLocalDay, localDateKey,
+  AGE_NOTE_MS, STALE_MS,
+};

@@ -1,14 +1,14 @@
 /* ============================================================
-   pills.css — #budget-slot and #np-slot in the titlebar, and every
-   .pill-* part inside them.
+   pills.css — #budget-slot in the titlebar and every .pill-* part
+   of it.
 
-   Loaded after chrome.css and scoped entirely to the two slots:
-   nothing here reaches another element.
+   Loaded after chrome.css and scoped entirely to that slot and its
+   card: nothing here reaches another element.
 
    THE IDIOM is #zoom-badge and #newclaude — a readout you can
    press: 26-28px tall, --radius-ctl, a 1px --edge lip, --fg-2 type
    at the readout stretch, tabular numerals, and the glass lifting
-   one step on hover and two on press. The cards borrow the
+   one step on hover and two on press. The card borrows the
    workspaces popover's ground so all the floating panes in the app
    read as siblings.
 
@@ -20,7 +20,7 @@
    value for the same reason the workspace colours do: #c98b86 is a
    dark-ground red and disappears on white glass.
 
-   MOTION. Both slots sit on the titlebar's backdrop-filter, where
+   MOTION. The slot sits on the titlebar's backdrop-filter, where
    an animated frame re-blurs the whole row. Every transition here
    is stepped and none runs longer than 150ms. Nothing glows at
    rest: the amber and the red are type colour, and the only glow in
@@ -36,14 +36,13 @@
 }
 
 /* ============================================================
-   The slots
-   Flex children of #titlebar, full height so the few pixels under
-   a pill still belong to the slot — that is what keeps a hover
+   The slot
+   A flex child of #titlebar, full height so the few pixels under
+   the pill still belong to the slot — that is what keeps the hover
    card open while the pointer travels down onto it.
    ============================================================ */
 
-#budget-slot,
-#np-slot {
+#budget-slot {
   position: relative;
   display: flex;
   align-items: center;
@@ -52,20 +51,13 @@
   margin-right: 2px;
 }
 
-/* An empty slot takes no width at all: the now-playing pill is
-   hidden whenever nothing is playing, and the titlebar must look
-   exactly as it did before this file existed. */
-#np-slot[data-showing="0"] { margin-right: 0; }
-
 /* chrome.css gives every button display:inline-flex, which outranks
    the UA's [hidden]. This puts the attribute back in charge. */
 #budget-slot .pill[hidden],
-#np-slot .pill[hidden],
-#budget-slot [hidden],
-#np-slot [hidden] { display: none; }
+#budget-slot [hidden] { display: none; }
 
 /* ============================================================
-   The pills
+   The pill
    ============================================================ */
 
 .pill {
@@ -122,9 +114,14 @@
 .pill-budget[data-tone="warm"]:hover,
 .pill-budget[data-tone="hot"]:hover { color: var(--fg); }
 
-/* A reading that is old or missing reads as dimmer and dashed-off
-   rather than coloured: it is not a limit state, it is a source
-   state, and the two must never look like each other. */
+/* An OLD reading (ten minutes without a tick) is dashed off and
+   nothing else: the numbers are still the truth, only older, so the
+   limit's tone stays and the pill only grows an age beside them. */
+.pill-budget[data-age="old"] { border-style: dashed; }
+
+/* A reading that is genuinely stale (an hour) or missing reads as
+   dimmer as well: that is a source state, not a limit state, and the
+   two must never look like each other. */
 .pill-budget[data-state="stale"],
 .pill-budget[data-state="error"] {
   color: var(--fg-3);
@@ -133,47 +130,27 @@
 
 .pill-budget[data-state="error"] { border-color: var(--amber-glow); }
 
-/* --- the now-playing pill ------------------------------------ */
-
-.pill-np { max-width: 230px; }
-
-.pill-np .pill-glyph {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--fg-3);
-}
-
-/* paused is the dimmed state, and a hold is dimmer still: the
-   music is not stopped, it is being kept quiet for a video */
-.pill-np[data-state="paused"] { color: var(--fg-3); }
-.pill-np[data-state="paused"]:hover { color: var(--fg-2); }
-.pill-np[data-held="1"] { border-style: dashed; }
-
-/* an ad: quiet is the bridge doing its job (amber type, nothing lit); a loud
-   ad is the duck having failed, and it says so in the same red the budget
-   pill uses for a blown limit */
-.pill-np[data-state="ad"] { color: var(--amber); }
-.pill-np[data-state="ad-loud"] { color: var(--pill-hot); border-style: dashed; }
-
 /* ============================================================
-   The hover/focus cards
+   The hover/focus card
    Same ground, lip and radius as the workspaces popover, so every
    floating pane in the app reads as one family.
 
-   POSITIONED BY CSS, not by measuring. #titlebar carries a
-   backdrop-filter and .chrome-layer a boot transform, and either one
-   makes a position:fixed descendant resolve against THAT box rather
-   than the viewport — so a top computed from a viewport rect lands
-   wrong by however much the chrome is transformed. Absolute, under
-   its own slot, is right in every state and needs no JS at all.
-   Nothing between here and the window clips, and .chrome-layer
-   (z-index 3) already paints over the tab well (1).
+   IN <body>, FIXED, AND PLACED BY pills.js. It started inside its
+   slot, where the titlebar's backdrop-filter makes a stacking
+   context that no z-index can climb out of — the nav row below
+   painted straight over the top of the open card. #workspaces-panel
+   already solved this: appended to the body, position:fixed, the
+   same z-index 20 (over .chrome-layer's 3 and #views's 1), placed
+   from the slot's rect by JS on open and on resize. Measuring is
+   right here precisely because the card is no longer a descendant of
+   the transformed chrome; left/top below are only the values it
+   holds before the first placement.
    ============================================================ */
 
 .pill-card {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   z-index: 20;
   box-sizing: border-box;
   width: 268px;
@@ -209,6 +186,12 @@
   .pill-card { corner-shape: round bevel round bevel; }
 }
 
+/* The card lives in <body> now, so the slot's own [hidden] rule no
+   longer reaches it. Both halves are put back explicitly: a card
+   that is closed, and a note inside it that has nothing to say. */
+.pill-card[hidden] { display: none !important; }
+.pill-card [hidden] { display: none; }
+
 /* --- the budget card's rows ---------------------------------- */
 
 .pill-rows {
@@ -240,7 +223,7 @@
   font-size: 11.5px;
 }
 
-/* --- the notes under both cards ------------------------------ */
+/* --- the notes under the card -------------------------------- */
 
 .pill-note {
   margin: 9px 0 0;
@@ -254,96 +237,22 @@
   overflow-wrap: anywhere;
 }
 
-/* the source line and the reason line stack without a second rule */
-.pill-source + .pill-reason {
+/* stacked notes sit closer to each other than to the rows above
+   them; :not([hidden]) so a note that is not showing does not pull
+   the next one up against the rows */
+.pill-note:not([hidden]) + .pill-note {
   margin-top: 6px;
   padding-top: 6px;
 }
 
+/* what today's figure is counted from: a fact about the number, not
+   a fault, so it stays the quiet note colour */
+.pill-since { color: var(--fg-3); }
+
 /* a reason is the thing that went wrong: it carries the warm colour */
 .pill-reason { color: var(--amber); }
 
-/* --- the now-playing card ------------------------------------ */
-
-.np-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.np-art {
-  flex: 0 0 auto;
-  width: 46px;
-  height: 46px;
-  border-radius: 4px;
-  border: 1px solid var(--edge);
-  object-fit: cover;
-}
-
-.np-lines {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.np-title,
-.np-artist,
-.np-album {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.np-title {
-  color: var(--fg);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.np-artist { margin-top: 2px; color: var(--fg-2); font-size: 11.5px; }
-.np-album  { margin-top: 1px; color: var(--fg-3); font-size: 11px; }
-
-.np-acts {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.np-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: transparent;
-  color: var(--fg-2);
-  transition: color 140ms steps(3, end), background-color 140ms steps(3, end);
-}
-
-.np-btn .glyph { font-size: 12px; }
-.np-btn:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-.np-btn:active { background: var(--sheen), var(--glass-3); }
-.np-btn:focus { outline: none; }
-.np-btn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
-}
-
-/* A control the track does not offer is dim and dead, not absent:
-   a button that disappears reads as a bug. */
-.np-btn:disabled {
-  color: var(--fg-3);
-  opacity: .45;
-  cursor: default;
-}
-.np-btn:disabled:hover { background: transparent; color: var(--fg-3); }
-
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .pill, .np-btn { transition: none; }
+  .pill { transition: none; }
 }
