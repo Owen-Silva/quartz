@@ -33,6 +33,7 @@ const appsModule = require('./apps');
 const stocksModule = require('./stocks');
 const budgetModule = require('./budget');
 const schoolModule = require('./school');
+const phoneModule = require('./phone');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -162,6 +163,20 @@ const school = schoolModule.create({
   isChromeSender: (event) => isChromeSender(event),
   send: (channel, payload) => send(channel, payload),
   getBudget: () => budget.snapshot(),
+});
+
+/**
+ * The Phone workspace: adb + the scrcpy server on the user's Android, relayed to
+ * the bundled phone.html guest over a localhost WebSocket. Owns its tools,
+ * its device state and its stream; registers its own IPC; the contract is
+ * the header of phone.js.
+ */
+const phone = phoneModule.create({
+  app,
+  ipcMain,
+  isChromeSender: (event) => isChromeSender(event),
+  isBundledPage: (url) => isBundledPageUrl(url),
+  send: (channel, payload) => send(channel, payload),
 });
 
 /**
@@ -4454,6 +4469,9 @@ app.on('before-quit', (event) => {
   // headless claude, a UIA/OCR reader) must not outlive the quit either.
   try { budget.stop(); } catch { /* best effort */ }
   try { school.stop(); } catch { /* best effort */ }
+  // The phone relay's adb daemon and the scrcpy server on the phone: stop()
+  // tears the stream down and kills the adb server so nothing outlives us.
+  try { phone.stop(); } catch { /* best effort */ }
   // And for the icon cache, which may be holding a PowerShell batch and a
   // debounced write. Only if it was ever built -- this must not build one.
   if (procIcons && typeof procIcons.stop === 'function') {

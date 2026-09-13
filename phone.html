@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone</title>
+<!-- Sets data-theme on <html> from ?theme= before anything paints, exactly as
+     newtab.html and reader.html do. Must stay the first script and must stay
+     above the stylesheets. -->
+<script src="newtab-theme.js"></script>
+<link rel="stylesheet" href="phone-page.css">
+</head>
+<body>
+
+<!--
+  The Phone workspace's tab: the user's Android phone, mirrored here at true aspect
+  and driven with the mouse and keyboard. This page is a bundled, preload-less
+  file:// guest: it has no window.api. It bootstraps by printing `phone:hello`
+  on the console; phone.js (main) answers with window.__applyPhone({ ws, state })
+  and everything after that flows over that WebSocket (contract: phone.js header).
+
+  SCAFFOLD: the layout below is the skeleton phone-page.js fills in. Every
+  state the relay can be in has a sentence here — nothing on this page is ever
+  blank while something is wrong.
+-->
+
+<main class="phone-page">
+  <!-- The status strip: what the relay, the tools, the device and the stream
+       are doing, each with its reason. Never hidden, only quiet. -->
+  <header class="status" id="status" role="status" aria-live="polite">
+    <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+    <span class="status-text" id="status-text">waiting for the browser…</span>
+    <button type="button" class="status-action" id="status-action" hidden></button>
+  </header>
+
+  <!-- The phone: a frame at the device's aspect ratio wrapping the canvas the
+       decoder paints. Pointer events on the canvas become touches. -->
+  <section class="stage" id="stage">
+    <div class="frame" id="frame">
+      <canvas id="screen" width="720" height="1600" tabindex="0" aria-label="Phone screen"></canvas>
+      <div class="frame-note" id="frame-note">no picture yet</div>
+    </div>
+  </section>
+
+  <!-- The rail: hardware keys and readouts. Filled by phone-page.js. -->
+  <aside class="rail" id="rail" aria-label="Phone controls"></aside>
+</main>
+
+<script src="phone-page.js"></script>
+</body>
+</html>

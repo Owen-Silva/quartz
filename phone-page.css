@@ -1,0 +1,90 @@
+/*
+ * phone-page.css — the Phone tab. Same instrument-glass voice as the other
+ * bundled pages: neutral dark ground, plain hairlines, glow only for focus and
+ * live states, motion stepped and short. SCAFFOLD: enough to lay the three
+ * regions out; phone-page proper replaces this file wholesale.
+ */
+
+:root {
+  --pp-bg: #171819;
+  --pp-fg: #e6e6e6;
+  --pp-fg-2: #a9abad;
+  --pp-fg-3: #6f7275;
+  --pp-line: rgba(255, 255, 255, 0.08);
+  --pp-panel: rgba(255, 255, 255, 0.03);
+  --pp-ok: #7fd18a;
+  --pp-warn: #e0b45a;
+  --pp-err: #e07a6a;
+  --pp-font: system-ui, "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+html[data-theme="light"] {
+  --pp-bg: #f2f2f3;
+  --pp-fg: #1b1c1d;
+  --pp-fg-2: #4a4c4f;
+  --pp-fg-3: #7b7e82;
+  --pp-line: rgba(0, 0, 0, 0.1);
+  --pp-panel: rgba(0, 0, 0, 0.03);
+}
+
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--pp-bg);
+  color: var(--pp-fg);
+  font: 13px/1.4 var(--pp-font);
+  overflow: hidden;
+}
+
+.phone-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr auto;
+  height: 100%;
+}
+
+.status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  color: var(--pp-fg-2);
+}
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--pp-fg-3);
+}
+.status-dot[data-kind="ok"] { background: var(--pp-ok); }
+.status-dot[data-kind="warn"] { background: var(--pp-warn); }
+.status-dot[data-kind="error"] { background: var(--pp-err); }
+.status-action { margin-left: auto; }
+
+.stage {
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  min-height: 0;
+}
+.frame {
+  position: relative;
+  height: 100%;
+  max-height: calc(100vh - 80px);
+  aspect-ratio: 9 / 20;
+  border: 1px solid var(--pp-line);
+  border-radius: 22px;
+  background: #000;
+  overflow: hidden;
+}
+#screen { width: 100%; height: 100%; display: block; outline: none; }
+#screen:focus-visible { box-shadow: inset 0 0 0 2px rgba(120, 170, 255, 0.6); }
+.frame-note {
+  position: absolute; inset: auto 0 12px 0;
+  text-align: center; color: var(--pp-fg-3); pointer-events: none;
+}
+
+.rail {
+  width: 64px;
+  border-left: 1px solid var(--pp-line);
+  background: var(--pp-panel);
+}

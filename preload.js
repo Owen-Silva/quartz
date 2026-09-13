@@ -424,6 +424,27 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('school:update', handler);
     }
   },
+
+  // The Phone workspace (Settings → Phone drives pairing/connecting; the
+  // Phone page itself is a preload-less guest that talks to main over its own
+  // localhost WebSocket). State shape and command names are documented in
+  // phone.js. Every call resolves; a refused or failing command comes back as
+  // { ok: false, reason } and the reason is shown, never swallowed.
+  phone: {
+    describe: () => ipcRenderer.invoke('phone:describe'),
+    command: (name, arg) => ipcRenderer.invoke('phone:command', String(name == null ? '' : name), arg == null ? null : arg),
+    onUpdate: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('phone:update', handler);
+      return () => ipcRenderer.removeListener('phone:update', handler);
+    },
+    // The page asked for Settings → Phone (it cannot open it itself).
+    onOpenSettings: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on('phone:open-settings', handler);
+      return () => ipcRenderer.removeListener('phone:open-settings', handler);
+    }
+  },
   // An hwnd is always a DECIMAL STRING here ('4523874'), in both directions.
   // Every call answers a value: { ok: true, ... } or { ok: false, reason }
   // where reason is one of 'unavailable' (this build cannot do it at all),
