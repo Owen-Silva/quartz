@@ -902,12 +902,13 @@ Found, and not ours to fix:
   between questions): it answers a section id only, never the answer, in 3 to 6 seconds for about
   a cent a question after the first. It reads the budget pill and pauses itself at 90% of the
   5-hour limit or 95% of the week, saying so in the pane. "Paste a question" runs it by hand.
-- Two readouts in the titlebar: the Claude budget pill (5-hour and week percentages from the
-  statusline hook's JSON, amber from 80%, red from 95%, a card with the countdowns, today's spend
-  and the reading's age; a stale or missing reading says so in the pill) and the now-playing pill
-  off the Spotify bridge (playing, paused, held for a video, "ad · quiet" while an ad is ducked
-  and "ad · not ducked" in red when it is not; click toggles, the card has prev and next). The
-  new tab's readout gains the same budget row.
+- A budget pill in the titlebar: 5-hour and week percentages from the statusline hook's JSON,
+  amber from 80%, red from 95%, and a card with the countdowns, today's spend and the reading's
+  age. An idle session simply stops writing, so an older reading keeps its numbers and shows its
+  age; only a reading over an hour old is called stale, and a missing or unreadable one says so
+  in the pill. The new tab's readout gains the same budget row. (A now-playing pill shipped
+  beside it for twenty minutes and was removed at the user's request; the new tab's now-playing tile
+  is unchanged.)
 
 ## Things to know
 
@@ -1102,3 +1103,5 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | bbff8fa | 19:03 | Workspaces: four presets, per-workspace folder and side pane, strip tint, Ctrl+Alt+1-9 |
 | 0d12828 | 19:07 | Titlebar readouts: Claude usage pill with limits and today's spend, plus now playing |
 | 0eaf9eb | 19:11 | Now playing: the pill says "ad · quiet" while the bridge has Spotify turned down |
+| ac9b4bd | 19:48 | Side pane: a hidden host no longer draws an empty column beside the well |
+| 70d06e8 | 19:55 | Budget pill: card clears the nav row, today's spend is today's, 10 min is not stale; now-playing pill removed |

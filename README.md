@@ -200,13 +200,13 @@ questions) that answers a section id only — never the answer — in 3 to 6 sec
 a question, and pauses itself at 90% of the 5-hour limit or 95% of the week. "Paste a question"
 runs it by hand. Every failure in the chain is a line in the strip with its reason.
 
-**Titlebar readouts.** The budget pill reads the JSON that Claude Code's statusline hook writes
-(5-hour and week percentages, amber from 80%, red from 95%; the card has the countdowns, today's
-spend across sessions and the reading's age; stale or missing reads say so in the pill). The
-now-playing pill follows the Spotify bridge: playing, paused, held for a video, "ad · quiet" while
-an ad is turned down and "ad · not ducked" in red with the bridge's reason when it is not; click
-toggles, the card carries art, prev and next, and every refusal. The new tab's readout row shows
-the same budget figures.
+**Budget pill.** The one titlebar readout: it reads the JSON that Claude Code's statusline hook
+writes (5-hour and week percentages, amber from 80%, red from 95%; the card has the countdowns,
+today's spend across the sessions that ran today — counted from a per-day baseline per session,
+so a days-old session contributes only what it spent today — and the reading's age). An idle
+session stops writing, so an older reading keeps its numbers and adds its age; only a reading
+over an hour old is called stale, and a missing or unreadable one says so in the pill. The new
+tab's readout row shows the same figures.
 
 **Tab search.** Ctrl+Shift+A, or the list glyph in the titlebar, opens one glass pane over the
 page: every open tab — title, host or Claude folder, tags for current / pinned / muted / playing
@@ -1136,7 +1136,7 @@ one run before and one after.
 | `school-pane.js` / `school-pane.css` | The School workspace's side pane, a tenant of app.js's `#sidepane` host: the class chips, the status strip that prints every reader / helper / match state and reason from school.js, the controls (helper on-off, pin, retry, the LessonPlayer policy install, paste-a-question) and the notebook in a `file://` `<webview>` that navigates on class change and scrolls to the matched section with a stepped highlight — never twice for one question, never while the user is scrolling. Falls back to a sandboxed iframe if the guest fails to load, and says so. |
 | `school.js` / `school-reader.ps1` | The School brain, main-process side: the notebook scan (classes, sections, a capped per-class index), the LessonPlayer reader (CDP over the per-app WebView2 policy, then UI Automation, then Windows OCR through the persistent PowerShell child, each mode carrying its reason), subject detection, and the helper — one headless `claude -p` session per class, section id only, resumed between questions, one in flight, budget-gated. State and commands per the header; `<userData>/school.json` keeps the manual subject, helper switch, model and pin. |
 | `budget.js` | The Claude Code usage reading, main-process side: newest statusline JSON by mtime every 30s, 5-hour and week percentages with their resets, today's spend summed over the sessions touched today, stale after ten minutes and error states with reasons, pushed to the chrome on change and to every new-tab guest over the same console-line channel stocks.js uses. |
-| `pills.js` / `pills.css` | The two titlebar readouts in `#budget-slot` and `#np-slot`: the budget pill and its card, and the now-playing pill off `api.media` (2s no-art poll while visible, art on hash change, playing / paused / held / ad states, click toggles, card with prev and next and every refusal). `window.Pills` exposes their state for harnesses. |
+| `pills.js` / `pills.css` | The budget pill in `#budget-slot` and its card (a child of `<body>`, positioned under the slot so no chrome row can paint over it): percentages, tones, the age suffix, the countdowns and today's spend. `window.Pills` exposes its state for harnesses. |
 | `pty.js` | PTY session manager — spawns a program under ConPTY with a scrubbed environment, out of a static PROGRAMS table (claude, powershell, pwsh, cmd, python, node, Git Bash) with fixed arguments, a per-program argument allowlist (only claude takes `--continue`, `--resume`, `--dangerously-skip-permissions`), one-time binary resolution through `where.exe` with Store alias stubs rejected, and `listPrograms()` / `hasProgram()`. |
 | `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
 | `stocks.js` | Live prices, main-process side, and the only place the Finnhub key exists: the `<userData>/stocks.json` store (`stocks.enabled` / `finnhubKey` / `symbols` / `selected`), the `wss://ws.finnhub.io` trade stream with its resubscribing backoff reconnect, REST `/quote` snapshots and `/stock/candle` history with the documented free-tier 403 falling through to Yahoo's keyless chart JSON, a 60-calls-a-minute token bucket in front of every REST call, and the poll spacing that follows the market session. It puts its own `console-message` listener on each `<webview>` guest (`newtab:stocks` in, `window.__applyStocks` out, coalesced to one push per 500ms) and ref-counts subscribers per webContents, so with nothing on screen it holds no socket and no timer. `describe()` answers a mask and a boolean and there is no channel that returns the key. Its parsers, the market-session clock and the budget are pure and exported, so they run under plain node. |
