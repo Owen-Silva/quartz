@@ -149,6 +149,12 @@
 .pill-np[data-state="paused"]:hover { color: var(--fg-2); }
 .pill-np[data-held="1"] { border-style: dashed; }
 
+/* an ad: quiet is the bridge doing its job (amber type, nothing lit); a loud
+   ad is the duck having failed, and it says so in the same red the budget
+   pill uses for a blown limit */
+.pill-np[data-state="ad"] { color: var(--amber); }
+.pill-np[data-state="ad-loud"] { color: var(--pill-hot); border-style: dashed; }
+
 /* ============================================================
    The hover/focus cards
    Same ground, lip and radius as the workspaces popover, so every

@@ -504,15 +504,21 @@
       if (!playable(last)) { hide(); return; }
       var playing = String(last.status) === 'playing';
       var held = last.held === true;
+      /* The bridge's live ad state rides on every /now answer (main attaches it).
+         quiet = an ad is on and Spotify is turned down for it; adLoud = an ad is
+         on and the duck did NOT take, which the card must say out loud. */
+      var ad = last.ad && typeof last.ad === 'object' ? last.ad : null;
+      var quiet = !!(ad && ad.active && ad.ducked);
+      var adLoud = !!(ad && ad.active && !ad.ducked);
 
       pill.hidden = false;
       slot.setAttribute('data-showing', '1');
       setText(glyph, playing ? '' : '');
-      setText(pillText, trackLine(last.title, last.artist));
-      pill.setAttribute('data-state', playing ? 'playing' : 'paused');
+      setText(pillText, quiet ? 'ad · quiet' : adLoud ? 'ad · not ducked' : trackLine(last.title, last.artist));
+      pill.setAttribute('data-state', quiet ? 'ad' : adLoud ? 'ad-loud' : playing ? 'playing' : 'paused');
       pill.setAttribute('data-held', held ? '1' : '0');
       pill.title = (last.title || '') + (last.artist ? ' — ' + last.artist : '') +
-        (held ? ' (paused for a video)' : playing ? ' (playing)' : ' (paused)');
+        (quiet ? ' (ad · quiet)' : adLoud ? ' (ad · NOT ducked)' : held ? ' (paused for a video)' : playing ? ' (playing)' : ' (paused)');
 
       setText(npTitle, last.title || 'Unknown track');
       setText(npArtist, last.artist || '');
@@ -532,6 +538,14 @@
       var text = refusal;
       if (!text && held) {
         text = 'paused for a video — auto-pause is holding Spotify until the video stops';
+      }
+      if (!text && quiet) {
+        text = 'ad · quiet — the bridge turned Spotify down' +
+          (ad.level != null ? ' to ' + ad.level + '%' : '') + ' until the ad ends';
+      }
+      if (!text && adLoud) {
+        text = 'an ad is on and Spotify was NOT turned down' + (ad.reason ? ': ' + ad.reason : '') +
+          (ad.enabled ? '' : ' (Quiet Spotify ads is off in Settings)');
       }
       setText(note, text);
       note.hidden = !text;
