@@ -41,12 +41,23 @@
  *               reason: string, host: string, port: number, serial: string|null,
  *               name: string|null, model: string|null, android: string|null,
  *               paired: boolean, tcpipPinned: boolean|null,      // null = unknown
- *               latencyMs: number|null, lastSeenAt: number,        // adb round trip, probed every few s while connected
+ *               latencyMs: number|null, lastSeenAt: number,
+ *                 // latencyMs is a TCP round trip to the phone's adb port (connect()
+ *                 // -> 'connect', best of two), probed every few s while connected —
+ *                 // NOT an `adb shell` round trip: spawning adb costs ~170 ms on a
+ *                 // 7 ms LAN and that number made 'auto' pick Away for ever.
  *               battery: { level: number, charging: boolean } | null },
  *     stream: { state: 'off'|'starting'|'running'|'stalled'|'error', reason: string,
  *               codec: string|null, width: number, height: number, fps: number, kbps: number,
  *               profile: 'lan'|'away'|'auto', bitrate: number, maxSize: number, maxFps: number,
- *               audio: boolean, audioCodec: string|null, scid: string|null, since: number },
+ *               audio: boolean, audioCodec: string|null, scid: string|null, since: number,
+ *               lastVideoAt: number },
+ *                 // lastVideoAt: epoch ms of the last video packet, 0 while off. A
+ *                 // still phone screen sends NOTHING (scrcpy encodes only on change),
+ *                 // so this is a quiet "still for N s" readout — never a fault.
+ *                 // 'stalled' is NOT derived from video silence: it needs the scrcpy
+ *                 // shell still alive AND > 15 s of silence AND the control socket
+ *                 // dead (the device-message path), which is a real broken link.
  *     ws: { port: number, clients: number },
  *     settings: { host: string, port: number, pairPort: number, profile: 'lan'|'away'|'auto',
  *                 audio: boolean, lanBitrate: number, awayBitrate: number, maxSize: number,
@@ -127,10 +138,19 @@
  * connecting (`adb connect host:port`) -> connected -> (start) ... Wireless
  * debugging only runs while the phone is on SOME Wi-Fi and its connect port
  * changes every time it is toggled; `adb tcpip 5555` pins a fixed port that
- * survives on cellular until the phone reboots (phone.js does it for you after
- * any successful connect on another port), and the state says plainly when the
- * pin is missing. Every adb call's stderr becomes the reason. All adb calls are
- * serialised: one child process at a time, each with its own timeout.
+ * phone.js sets after any successful connect on another port. MEASURED
+ * 2026-09-13, correcting an earlier claim here: that pin holds on cellular and
+ * across ordinary reconnects, but it is LOST whenever the phone changes Wi-Fi
+ * network (and on reboot), because Wireless debugging restarts adbd on a fresh
+ * random port — the old serial then shows up `offline` and 5555 answers
+ * "actively refused". So: when the phone is listed offline, `adb disconnect`
+ * before connecting (otherwise `adb connect` answers "already connected", a
+ * lie); when 5555 is refused, ask `adb mdns services` where Wireless debugging
+ * moved to, connect on that LAN ip:port, re-pin 5555 and reconnect on the
+ * Tailscale address so it keeps working away from home; and if discovery finds
+ * nothing, say in plain words that the port must be read off the phone. Every
+ * adb call's stderr becomes the reason. All adb calls are serialised: one child
+ * process at a time, each with its own timeout.
  *
  * STREAM. `adb push` the server to /data/local/tmp/scrcpy-server.jar (skipped
  * when the size already matches), then
@@ -198,13 +218,31 @@ const DEV_UHID_OUTPUT = 2;
 
 /* ControlMessage.java: type 10 = SET_DISPLAY_POWER, then one boolean byte. */
 const CTRL_SET_DISPLAY_POWER = 10;
+/* ControlMessage.java: type 17 = RESET_VIDEO, and ControlMessageReader.java:49
+   makes it with createEmpty(type) — the byte on its own, no payload. It asks the
+   encoder for a new key frame, which is the only way out of a frozen picture
+   before scrcpy's own key-frame interval (up to 10 s) comes round. */
+const CTRL_RESET_VIDEO = 17;
 
 const PUSH_MS = 100;          // state push debounce (the contract's ceiling)
 const PROBE_MS = 5000;        // latency + `adb devices` tick while connected
 const BATTERY_EVERY = 6;      // ... and the battery every 6th tick (30 s)
-const STALL_MS = 3000;        // no video packet for this long while running
+const STILL_NOTE_MS = 2000;   // quiet "still for N s" readout (NOT a fault)
+const STALL_MS = 15000;       // silence this long is *necessary* for 'stalled'…
+                              // …and never sufficient on its own: see stallCheck()
 const BACKPRESSURE_BYTES = 4 * 1024 * 1024;
+const KEY_REQUEST_MS = 500;   // at most one RESET_VIDEO per this, across all clients
 const AWAY_LATENCY_MS = 60;   // profile 'auto' picks 'away' above this
+const AUTO_SWITCH_TICKS = 3;  // …after this many probes agree, mid-stream
+const RTT_TIMEOUT_MS = 2500;  // one TCP round-trip probe's own ceiling
+
+/* What the page must say when the phone has changed Wi-Fi network, 5555 is
+   refused and adb's mDNS discovery found nothing: there is genuinely nothing
+   left but reading the new port off the phone. Word for word, because it is the
+   only instruction that gets the mirror back. */
+const NEW_PORT_MESSAGE = 'Wireless debugging is on a new port since the phone changed networks'
+  + " — read the port on the phone's Wireless debugging screen and press Connect"
+  + ' (the 5555 pin is lost whenever the phone changes Wi-Fi)';
 
 /* --- pure helpers, shared with the harness ------------------------------ */
 
@@ -296,6 +334,75 @@ function clampInt(value, low, high, fallback) {
 }
 
 /**
+ * How long the phone's adb port takes to answer a TCP handshake: connect() to
+ * the 'connect' event, then the socket is destroyed at once. This is the real
+ * network round trip. `adb -s … shell echo 1` is NOT: it spawns a process, talks
+ * to the local adb server and starts a shell on the phone, which measured
+ * 166-195 ms over a 7 ms LAN — enough to make profile 'auto' choose the Away
+ * bitrate for ever, which is exactly what happened on the first live run.
+ * Resolves { ms, reason }: ms is null when it did not answer, and reason then
+ * says why in plain words.
+ */
+function tcpRoundTrip(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = new net.Socket();
+    const started = process.hrtime.bigint();
+    const finish = (ms, reason) => {
+      if (done) return;
+      done = true;
+      try { socket.destroy(); } catch { /* already gone */ }
+      resolve({ ms, reason });
+    };
+    socket.setTimeout(timeoutMs, () => finish(null, 'no answer within ' + timeoutMs + ' ms'));
+    socket.once('connect', () => {
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      finish(Math.round(ms * 10) / 10, '');
+    });
+    socket.once('error', (err) => finish(null, msgOf(err)));
+    try { socket.connect(port, host); } catch (err) { finish(null, msgOf(err)); }
+  });
+}
+
+/**
+ * Parse `adb mdns services`. adb prints a header line and then one line per
+ * service: `<instance>\t_adb-tls-connect._tcp\t<ip>:<port>` (the pairing
+ * service `_adb-tls-pairing._tcp` is a different thing and is ignored here).
+ * Anything that is not such a line — including Windows adb's "mdns daemon
+ * unavailable", or nothing at all — yields an empty list, never a throw.
+ */
+function parseMdnsServices(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.indexOf('_adb-tls-connect._tcp') < 0) continue;
+    const addr = /(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})(?!\d)/.exec(line);
+    if (!addr) continue;
+    const octets = addr[1].split('.').map(Number);
+    if (octets.some((n) => n > 255)) continue;
+    const port = Number(addr[2]);
+    if (!(port >= 1 && port <= 65535)) continue;
+    const instance = (line.split(/\s+/)[0] || '').replace(/\.?_adb-tls-connect\._tcp\.?$/, '');
+    out.push({ instance, host: addr[1], port });
+  }
+  return out;
+}
+
+/**
+ * Profile 'auto', decided again on every probe while the stream runs: the tier
+ * the measured latency asks for, and whether it has asked long enough (three
+ * probes in a row) to be worth restarting the stream for. Pure, so the harness
+ * can walk it tick by tick.
+ */
+function autoDecision(latencyMs, currentTier, crossings) {
+  if (latencyMs == null || !Number.isFinite(latencyMs)) return { tier: currentTier, crossings: 0, restart: false };
+  const wanted = latencyMs > AWAY_LATENCY_MS ? 'away' : 'lan';
+  if (wanted === currentTier) return { tier: wanted, crossings: 0, restart: false };
+  const next = crossings + 1;
+  return { tier: wanted, crossings: next >= AUTO_SWITCH_TICKS ? 0 : next, restart: next >= AUTO_SWITCH_TICKS };
+}
+
+/**
  * Electron has changed console-message's shape: ≥36 emits one details object,
  * older builds emit (event, level, message, …). Both are read, so the module
  * does not break on an Electron bump in either direction. (Copied from
@@ -363,7 +470,10 @@ function create(deps) {
       audio: true,
       audioCodec: null,
       scid: null,
-      since: 0
+      since: 0,
+      /* Epoch ms of the last video packet (0 while off). A still phone screen is
+         silent for minutes on purpose, so this is a readout, never a fault. */
+      lastVideoAt: 0
     },
     ws: { port: 0, clients: 0 },
     settings: {
@@ -405,6 +515,13 @@ function create(deps) {
   let reconnectTries = 0;
   let autoBusy = false;
   let stopped = false;
+  /* profile 'auto', re-decided live: how many probes in a row have asked for
+     the other bitrate, and whether a restart for it is already under way. */
+  let autoCrossings = 0;
+  let autoSwitching = false;
+  /* TEST HOOK ONLY (set through _test.setAdbRunner): when set, every adb call
+     goes here instead of spawning adb.exe. Nothing in the app ever sets it. */
+  let adbRunner = null;
 
   function log() {
     const parts = ['[phone]'];
@@ -509,8 +626,11 @@ function create(deps) {
       return;
     }
     if (state.device.state === 'unreachable') {
-      state.reason = 'phone unreachable at ' + state.device.host + ':' + state.device.port
-        + ' — is Tailscale on, and Wireless debugging still enabled?';
+      /* device.reason is the specific one (which port was refused, what mDNS
+         found, what to do about it); only fall back to the general line. */
+      state.reason = state.device.reason
+        || ('phone unreachable at ' + state.device.host + ':' + state.device.port
+          + ' — is Tailscale on, and Wireless debugging still enabled?');
       return;
     }
     if (state.device.state === 'error') { state.reason = state.device.reason; return; }
@@ -548,6 +668,14 @@ function create(deps) {
   /* --- adb: one child at a time, every one with a timeout --------------- */
 
   function runAdb(args, timeoutMs) {
+    if (adbRunner) {
+      /* TEST HOOK: a stub stands in for adb.exe so the harness can assert the
+         exact argv order (disconnect before connect) without a phone. */
+      return Promise.resolve(adbRunner(args, timeoutMs)).then(
+        (res) => Object.assign({ ok: false, out: '', err: '', code: -1, ms: 0 }, res || {}),
+        (err) => ({ ok: false, out: '', err: msgOf(err), code: -1, ms: 0 })
+      );
+    }
     return new Promise((resolve) => {
       const adbPath = state.tools.adbPath;
       if (!adbPath) {
@@ -888,6 +1016,94 @@ function create(deps) {
     state.device.name = parts.join(' ').trim() || null;
   }
 
+  /**
+   * What `adb devices -l` says about one serial: '' when it is not listed at
+   * all, otherwise the state word ('device', 'offline', 'unauthorized'…).
+   */
+  async function deviceListWord(serial) {
+    const list = await adb(['devices', '-l'], 10000);
+    if (!list.ok) return '';
+    const line = String(list.out || '').split('\n').map((s) => s.trim())
+      .find((s) => s === serial || s.startsWith(serial + ' ') || s.startsWith(serial + '\t'));
+    if (!line) return '';
+    return line.slice(serial.length).trim().split(/\s+/)[0] || '';
+  }
+
+  /**
+   * Wireless debugging restarts adbd on a NEW random port whenever the phone
+   * changes Wi-Fi network, and the `adb tcpip 5555` pin does not survive it
+   * (MEASURED 2026-09-13: the serial went `offline`, and 5555 answered
+   * "actively refused (10061)"). `adb mdns services` is the only way to find the
+   * new port without reading it off the phone — and on Windows adb's mDNS may
+   * simply answer "mdns daemon unavailable", which is "no discovery", never a
+   * crash. When it does find the phone we connect on that LAN address, re-pin
+   * 5555 and move back to the Tailscale address, so it still works away from
+   * home. Every step is narrated in device.reason as it happens.
+   */
+  async function recoverByDiscovery(preferredHost, firstReason) {
+    state.device.reason = firstReason + ' — asking adb where Wireless debugging moved to (mDNS)…';
+    pushNow();
+    const res = await adb(['mdns', 'services'], 12000);
+    const text = String(res.out || '') + '\n' + String(res.err || '');
+    const found = parseMdnsServices(text);
+    if (!found.length) {
+      const why = (!res.ok || /unavailable/i.test(text))
+        ? 'adb’s own mDNS discovery is not working here (' + adbReason(res, 'no answer') + ')'
+        : 'mDNS found nothing advertising Wireless debugging on this network';
+      state.device.tcpipPinned = false;
+      saveStore();
+      return { ok: false, reason: NEW_PORT_MESSAGE + ' — ' + why };
+    }
+
+    const hit = found[0];
+    const lanSerial = hit.host + ':' + hit.port;
+    const others = found.length > 1 ? ' (' + (found.length - 1) + ' more advertised; trying this one)' : '';
+    state.device.reason = 'mDNS found a phone at ' + lanSerial + others
+      + ' — Wireless debugging moved, connecting there…';
+    pushNow();
+    const again = await adb(['connect', lanSerial], 30000);
+    const againText = (String(again.out || '') + '\n' + String(again.err || '')).toLowerCase();
+    if (!againText.includes('connected to') || againText.includes('cannot connect') || againText.includes('failed')) {
+      state.device.tcpipPinned = false;
+      saveStore();
+      return {
+        ok: false,
+        reason: 'mDNS said the phone is at ' + lanSerial + ', but connecting there failed: '
+          + adbReason(again, 'no answer') + ' — ' + NEW_PORT_MESSAGE
+      };
+    }
+
+    state.device.state = 'connected';
+    state.device.serial = lanSerial;
+    state.device.port = hit.port;
+    state.device.host = preferredHost;   // pinTcpip reconnects HERE, not on the LAN address
+    state.device.paired = true;
+    state.device.lastSeenAt = Date.now();
+    reconnectTries = 0;
+    state.device.reason = 'reconnected by mDNS at ' + lanSerial + ' — pinning port 5555 again…';
+    pushNow();
+    await readDeviceInfo(lanSerial);
+    const pin = await pinTcpip();
+    if (pin.ok) {
+      state.device.reason = 'found again by mDNS at ' + lanSerial + ' and re-pinned 5555 at '
+        + preferredHost + ' — Wireless debugging had moved to a new port when the phone changed network';
+      saveStore();
+      startProbing();
+      pushNow();
+      return { ok: true, reason: state.device.reason };
+    }
+    /* Connected, but only on this LAN address: it will change again the next
+       time the phone changes network, and it is no use away from home. */
+    state.device.host = hit.host;
+    state.device.tcpipPinned = false;
+    state.device.reason = 'reconnected by mDNS at ' + lanSerial + ', but pinning 5555 failed: ' + pin.reason
+      + ' — this port changes again whenever the phone changes network, and it will not work away from home';
+    saveStore();
+    startProbing();
+    pushNow();
+    return { ok: true, reason: state.device.reason };
+  }
+
   async function connect(arg) {
     const blocked = requireTools();
     if (blocked) return { ok: false, reason: blocked };
@@ -903,14 +1119,41 @@ function create(deps) {
     pushNow();
     await ensureAdbServer();
     const serial = host + ':' + port;
+
+    /* An entry adb still lists as `offline` — what a Wi-Fi change leaves behind —
+       answers `adb connect` with "already connected", which is a lie: it never
+       reconnects (MEASURED 2026-09-13). Drop the stale entry first, and say so. */
+    const stale = await deviceListWord(serial);
+    if (stale && stale !== 'device') {
+      state.device.reason = 'adb still lists ' + serial + ' as ' + stale
+        + ' — dropping that stale entry before reconnecting…';
+      pushNow();
+      await adb(['disconnect', serial], 15000);
+    }
+
     const res = await adb(['connect', serial], 30000);
     const text = (res.out + '\n' + res.err).toLowerCase();
-    const good = text.includes('connected to') && !text.includes('cannot connect') && !text.includes('failed');
+    let good = text.includes('connected to') && !text.includes('cannot connect') && !text.includes('failed');
+    if (good) {
+      /* …and "already connected" can be a lie even so: believe the device list. */
+      const word = await deviceListWord(serial);
+      if (word && word !== 'device') {
+        good = false;
+        await adb(['disconnect', serial], 15000);
+        res.err = (res.err ? res.err + '; ' : '') + 'adb answered "' + String(res.out || '').trim()
+          + '" but still lists the phone as ' + word;
+      }
+    }
     if (!good) {
+      const firstReason = 'could not connect to ' + serial + ': '
+        + adbReason(res, 'no answer — is Tailscale on, is Wireless debugging still enabled, and is this still the right port?');
+      /* The Wi-Fi-change case: adbd restarted on a new random port. Ask adb's own
+         mDNS discovery where it went before giving up. */
+      const recovered = await recoverByDiscovery(host, firstReason);
+      if (recovered.ok) return recovered;
       state.device.state = 'unreachable';
       state.device.serial = null;
-      state.device.reason = 'could not connect to ' + serial + ': '
-        + adbReason(res, 'no answer — is Tailscale on, is Wireless debugging still enabled, and is this still the right port?');
+      state.device.reason = recovered.reason;
       pushNow();
       scheduleReconnect();
       return { ok: false, reason: state.device.reason };
@@ -1043,7 +1286,11 @@ function create(deps) {
     /* Is it still in the device list, and is it still 'device' (not 'offline')? */
     const list = await adb(['devices', '-l'], 10000);
     if (list.ok) {
-      const line = list.out.split('\n').map((s) => s.trim()).find((s) => s.startsWith(serial + ' ') || s === serial);
+      /* `adb devices` separates the serial from the state word with a TAB, and
+         `adb devices -l` pads with spaces: accept both, or a tab looks exactly
+         like a phone that has dropped off the list. */
+      const line = list.out.split('\n').map((s) => s.trim())
+        .find((s) => s === serial || s.startsWith(serial + ' ') || s.startsWith(serial + '\t'));
       const word = line ? (line.slice(serial.length).trim().split(/\s+/)[0] || '') : '';
       if (!line || word === 'offline' || word === 'unauthorized') {
         markUnreachable(!line
@@ -1054,14 +1301,27 @@ function create(deps) {
     }
     if (state.device.state !== 'connected') return;
 
-    /* Round trip: how long a trivial shell command takes, spawn included. */
+    /* The round trip that decides the picture quality: a TCP handshake with the
+       phone's adb port, best of two, nothing spawned. */
+    const rtt = await measureLatency();
+    state.device.latencyMs = rtt.ms;
+
+    /* Liveness is a separate question, and only adb can answer it: the port can
+       accept a socket while the phone itself has stopped talking. This is the
+       slow call (it spawns adb), which is exactly why it no longer sets the
+       latency. */
     const echo = await adb(['-s', serial, 'shell', 'echo', '1'], 8000);
     if (!echo.ok) {
       markUnreachable('the phone stopped answering: ' + adbReason(echo, 'no answer'));
       return;
     }
-    state.device.latencyMs = echo.ms;
     state.device.lastSeenAt = Date.now();
+    if (rtt.ms == null) {
+      /* adb answers but the phone's adb port refused a plain TCP probe: say so,
+         because 'auto' is now guessing instead of measuring. */
+      state.device.reason = 'connected, but a TCP probe of ' + probeTarget()
+        + ' got no answer (' + rtt.reason + ') — the auto profile is guessing';
+    }
 
     if (probeTick % BATTERY_EVERY === 1 || !state.device.battery) {
       const battery = await adb(['-s', serial, 'shell', 'dumpsys', 'battery'], 10000);
@@ -1077,7 +1337,77 @@ function create(deps) {
         }
       }
     }
+    maybeSwitchProfile();
     push();
+  }
+
+  /** The address the TCP round-trip probe actually talks to. */
+  function probeTarget() {
+    const fromSerial = splitSerial(state.device.serial);
+    const host = (fromSerial && fromSerial.host) || state.device.host;
+    const port = (fromSerial && fromSerial.port) || state.device.port || state.settings.port;
+    return host && port ? host + ':' + port : '';
+  }
+
+  function splitSerial(serial) {
+    const m = /^(.+):(\d{1,5})$/.exec(String(serial || ''));
+    if (!m) return null;
+    return { host: m[1].replace(/^\[|\]$/g, ''), port: Number(m[2]) };
+  }
+
+  /** Best of two TCP round trips to the phone's adb port. */
+  async function measureLatency() {
+    const target = probeTarget();
+    if (!target) return { ms: null, reason: 'no address to probe yet' };
+    const at = splitSerial(target);
+    let best = null;
+    let reason = '';
+    for (let i = 0; i < 2; i += 1) {
+      const one = await tcpRoundTrip(at.host, at.port, RTT_TIMEOUT_MS);
+      if (one.ms != null) best = best == null ? one.ms : Math.min(best, one.ms);
+      else reason = one.reason;
+    }
+    return { ms: best, reason: best == null ? (reason || 'no answer') : '' };
+  }
+
+  /**
+   * profile 'auto' is not a one-shot decision: the phone moves between Wi-Fi and
+   * cellular while the stream runs. When AUTO_SWITCH_TICKS probes in a row ask
+   * for the other bitrate, restart the stream at it — and say so in the reason,
+   * because the picture visibly changes.
+   */
+  function maybeSwitchProfile() {
+    if (autoSwitching || !live || state.settings.profile !== 'auto' || state.stream.state !== 'running') {
+      autoCrossings = 0;
+      return null;
+    }
+    const verdict = autoDecision(state.device.latencyMs, live.tier || 'lan', autoCrossings);
+    autoCrossings = verdict.crossings;
+    if (!verdict.restart) return null;
+    return restartForTier(verdict.tier, state.device.latencyMs);
+  }
+
+  async function restartForTier(tier, latencyMs) {
+    if (autoSwitching || !live) return;
+    autoSwitching = true;
+    const label = tier === 'away' ? 'Away' : 'LAN';
+    const why = 'the link changed (' + latencyMs + ' ms round trip on '
+      + AUTO_SWITCH_TICKS + ' probes in a row) — restarting at the ' + label + ' bitrate';
+    state.stream.reason = why;
+    pushNow();
+    try {
+      await stopStream(why);
+      const res = await startStream();
+      state.stream.reason = res.ok
+        ? state.stream.reason + ' — switched to the ' + label + ' bitrate after the link changed'
+        : 'could not restart at the ' + label + ' bitrate: ' + res.reason;
+      pushNow();
+    } catch (err) {
+      state.stream.reason = 'could not restart at the ' + label + ' bitrate: ' + msgOf(err);
+      pushNow();
+    } finally {
+      autoSwitching = false;
+    }
   }
 
   function markUnreachable(reason) {
@@ -1369,11 +1699,39 @@ function create(deps) {
    * client: a page that cannot keep up loses non-key VIDEO packets until the
    * next key/config/session packet, and the drop count is named in the reason.
    */
+  /**
+   * The moment a client starts dropping, the picture it shows is frozen until
+   * the next key frame — and scrcpy's own key-frame interval is up to 10 s, which
+   * is what the first live run looked like. RESET_VIDEO (ControlMessage.java type
+   * 17, createEmpty: the byte on its own) asks the phone's encoder for one now.
+   * Rate-limited across every client, because each one would otherwise ask.
+   * Returns false — with a visible reason — when it could not be sent.
+   */
+  function requestKeyFrame(why) {
+    if (!live || !live.control || live.control.closed) return false;
+    const now = Date.now();
+    if (now - (live.lastKeyRequestAt || 0) < KEY_REQUEST_MS) return false;
+    live.lastKeyRequestAt = now;
+    try {
+      live.control.socket.write(Buffer.from([CTRL_RESET_VIDEO]));
+      live.keyRequests = (live.keyRequests || 0) + 1;
+      return true;
+    } catch (err) {
+      state.stream.reason = 'could not ask the phone for a fresh key frame after ' + why
+        + ': ' + msgOf(err) + ' — the picture may sit frozen for a few seconds';
+      pushNow();
+      return false;
+    }
+  }
+
   function broadcastPacket(channel, packet, info) {
     for (const client of clients) {
       if (client.ws.readyState !== 1) continue;
       if (channel === CH_VIDEO && !(info && (info.session || info.config || info.key))) {
-        if (client.ws.bufferedAmount > BACKPRESSURE_BYTES) client.dropping = true;
+        if (client.ws.bufferedAmount > BACKPRESSURE_BYTES && !client.dropping) {
+          client.dropping = true;
+          requestKeyFrame('a page fell behind');
+        }
         if (client.dropping) {
           client.drops += 1;
           if (live) live.drops += 1;
@@ -1396,12 +1754,13 @@ function create(deps) {
 
   function chooseBitrate() {
     const s = state.settings;
-    if (s.profile === 'lan') return { bitrate: s.lanBitrate, why: 'LAN profile' };
-    if (s.profile === 'away') return { bitrate: s.awayBitrate, why: 'Away profile' };
+    if (s.profile === 'lan') return { bitrate: s.lanBitrate, why: 'LAN profile', tier: 'lan' };
+    if (s.profile === 'away') return { bitrate: s.awayBitrate, why: 'Away profile', tier: 'away' };
+    /* 'auto' reads the TCP round trip — the network, not adb's process spawn. */
     const latency = state.device.latencyMs;
-    if (latency == null) return { bitrate: s.lanBitrate, why: 'auto → LAN (no latency measured yet)' };
-    if (latency > AWAY_LATENCY_MS) return { bitrate: s.awayBitrate, why: 'auto → Away (' + latency + ' ms round trip)' };
-    return { bitrate: s.lanBitrate, why: 'auto → LAN (' + latency + ' ms round trip)' };
+    if (latency == null) return { bitrate: s.lanBitrate, why: 'auto → LAN (no round trip measured yet)', tier: 'lan' };
+    if (latency > AWAY_LATENCY_MS) return { bitrate: s.awayBitrate, why: 'auto → Away (' + latency + ' ms round trip)', tier: 'away' };
+    return { bitrate: s.lanBitrate, why: 'auto → LAN (' + latency + ' ms round trip)', tier: 'lan' };
   }
 
   function freePort() {
@@ -1460,12 +1819,18 @@ function create(deps) {
       lastSession: null,
       lastConfig: null,
       drops: 0,
+      keyRequests: 0,          // RESET_VIDEO messages sent after a drop
+      lastKeyRequestAt: 0,
+      tier: picked.tier,       // which bitrate this run is using, for profile 'auto'
       bytes: [],
       lastVideoAt: 0,
+      runReason: '',           // the "mirroring …" line, so the ticker can restore it
       tick: null,
       screenOff: false,
       stopping: false
     };
+    autoCrossings = 0;
+    state.stream.lastVideoAt = 0;
 
     try {
       /* 1. the jar — only when the phone does not already have this exact one */
@@ -1545,7 +1910,12 @@ function create(deps) {
    * server on a plain TCP port without adb anywhere near it.
    */
   async function openAndRelay(localPort, wantAudio) {
-    if (!live) live = { meta: [], bytes: [], drops: 0, serverLog: [], lastVideoAt: 0, stopping: false };
+    if (!live) {
+      live = {
+        meta: [], bytes: [], drops: 0, keyRequests: 0, lastKeyRequestAt: 0,
+        tier: chooseBitrate().tier, serverLog: [], lastVideoAt: 0, runReason: '', stopping: false
+      };
+    }
     state.stream.state = 'starting';
     state.stream.reason = 'waiting for the phone to answer on the tunnel…';
     pushNow();
@@ -1632,6 +2002,7 @@ function create(deps) {
       } else {
         if (info.config) live.lastConfig = Buffer.from(packet);
         live.lastVideoAt = Date.now();
+        state.stream.lastVideoAt = live.lastVideoAt;
         live.bytes.push({ t: live.lastVideoAt, n: packet.length });
       }
       broadcastPacket(CH_VIDEO, packet, info);
@@ -1665,10 +2036,12 @@ function create(deps) {
     state.stream.state = 'running';
     state.stream.since = Date.now();
     live.lastVideoAt = Date.now();
-    state.stream.reason = 'mirroring ' + (state.stream.codec || '')
+    state.stream.lastVideoAt = live.lastVideoAt;
+    live.runReason = 'mirroring ' + (state.stream.codec || '')
       + (state.stream.bitrate ? ' at ' + Math.round(state.stream.bitrate / 100000) / 10 + ' Mb/s' : '')
       + (live.audio ? ' with ' + (state.stream.audioCodec || 'audio') : '')
       + (audioNote ? ' — ' + audioNote : (live.audio ? '' : ' (no audio)'));
+    state.stream.reason = live.runReason;
     startStreamTicker();
     pushNow();
     return { ok: true, reason: state.stream.reason };
@@ -1680,7 +2053,44 @@ function create(deps) {
     for (const c of clients) sendText(c, text);
   }
 
-  /** fps / kbps / stall, once a second, off one timer. */
+  /**
+   * 'stalled' the honest way. Video silence is NOT a fault: the scrcpy server
+   * encodes a frame only when the display changes, so a phone sitting on its
+   * home screen sends nothing for minutes — and the first live run covered a
+   * perfectly good picture with "no video for 25 s". It now takes all three:
+   *   - the scrcpy shell on the phone is still alive (a server that exited has
+   *     its own, better error), and
+   *   - no video for longer than STALL_MS, and
+   *   - the control socket is gone: the device-message path is the only thing
+   *     that can tell a dead link from a still screen.
+   * The adb liveness probe deliberately is NOT the third leg: a failed probe
+   * calls markUnreachable(), which stops the stream outright and says why, so
+   * it could never also leave the stream 'stalled'.
+   */
+  function stallCheck(stillMs) {
+    if (!live || stillMs <= STALL_MS) return '';
+    const serverAlive = !!live.server && live.server.exitCode === null && !live.server.killed;
+    if (!serverAlive) return '';
+    if (!live.control || !live.control.closed) return '';
+    return 'no video for ' + Math.round(stillMs / 1000) + ' s and the control channel to the phone'
+      + ' is dead while the scrcpy server is still running — the link is broken; press Stop, then Start';
+  }
+
+  /** The "mirroring …" line, plus whatever is worth saying about it right now. */
+  function runningReason(stillMs) {
+    const base = (live && live.runReason) || ('mirroring ' + (state.stream.codec || ''));
+    if (live && live.drops) {
+      return base + ' — dropping frames to keep the page up to date (' + live.drops + ' dropped, '
+        + (live.keyRequests || 0) + ' fresh key frame' + (live.keyRequests === 1 ? '' : 's') + ' asked for)';
+    }
+    if (stillMs >= STILL_NOTE_MS) {
+      return base + ' — still for ' + Math.round(stillMs / 1000)
+        + ' s (the phone sends a frame only when the picture changes)';
+    }
+    return base;
+  }
+
+  /** fps / kbps / how long the picture has been still, once a second. */
   function startStreamTicker() {
     if (!live || live.tick) return;
     live.tick = setInterval(() => {
@@ -1690,17 +2100,17 @@ function create(deps) {
       const bytes = live.bytes.reduce((sum, row) => sum + row.n, 0);
       state.stream.fps = live.bytes.length;
       state.stream.kbps = Math.round((bytes * 8) / 1000);
-      if (state.stream.state === 'running' && now - live.lastVideoAt > STALL_MS) {
-        state.stream.state = 'stalled';
-        state.stream.reason = 'no video for ' + Math.round((now - live.lastVideoAt) / 1000)
-          + ' s — the phone may be asleep, or the link dropped';
-      } else if (state.stream.state === 'stalled' && now - live.lastVideoAt <= STALL_MS) {
-        state.stream.state = 'running';
-        state.stream.reason = 'mirroring again';
-      }
-      if (live.drops && state.stream.state === 'running') {
-        state.stream.reason = 'mirroring ' + (state.stream.codec || '')
-          + ' — dropping frames to keep the page up to date (' + live.drops + ' dropped)';
+      state.stream.lastVideoAt = live.lastVideoAt;
+      if (state.stream.state === 'running' || state.stream.state === 'stalled') {
+        const stillMs = now - live.lastVideoAt;
+        const broken = stallCheck(stillMs);
+        if (broken) {
+          state.stream.state = 'stalled';
+          state.stream.reason = broken;
+        } else {
+          state.stream.state = 'running';
+          state.stream.reason = runningReason(stillMs);
+        }
       }
       push();
     }, 1000);
@@ -1746,6 +2156,8 @@ function create(deps) {
     state.stream.fps = 0;
     state.stream.kbps = 0;
     state.stream.scid = null;
+    state.stream.lastVideoAt = 0;
+    autoCrossings = 0;
     pushNow();
     return { ok: true, reason: state.stream.reason };
   }
@@ -1977,14 +2389,32 @@ function create(deps) {
       stopStream,
       handleGuestLine,
       isPhonePage,
-      clientCount: () => clients.size
+      clientCount: () => clients.size,
+      clients: () => Array.from(clients),
+      connect,
+      probe,
+      stopProbing,
+      measureLatency,        // the TCP round trip, against any listener
+      maybeSwitchProfile,    // profile 'auto', re-decided mid-stream
+      /* Stand a stub in for adb.exe: fn(args, timeoutMs) -> { ok, out, err, ms }.
+         Nothing in the app calls this; it is how the harness asserts argv order. */
+      setAdbRunner(fn) { adbRunner = typeof fn === 'function' ? fn : null; },
+      setAdbPath(p) { state.tools.adbPath = p || null; }
     }
   };
 }
 
 module.exports = {
   create,
-  /* ---- TEST HOOK: the pure byte-level parsers, so they can be exercised
-     without an Electron app, a phone, or a socket. ---- */
-  _test: { parseMediaPackets, parseDeviceMessages, VIDEO_CODECS, AUDIO_CODECS }
+  /* ---- TEST HOOK: the pure byte-level parsers and decisions, so they can be
+     exercised without an Electron app, a phone, or a socket. ---- */
+  _test: {
+    parseMediaPackets,
+    parseDeviceMessages,
+    parseMdnsServices,
+    autoDecision,
+    tcpRoundTrip,
+    VIDEO_CODECS,
+    AUDIO_CODECS
+  }
 };
