@@ -1073,6 +1073,11 @@ Found, and not ours to fix:
 - The 5555 pin does not survive a Wi-Fi change or a phone reboot. Usually the reconnect finds the
   new port on its own; when it cannot, the tab names the port to read off the phone under Wireless
   debugging, and one connect re-pins it.
+- "Turn the phone screen off while mirroring" is a trap on battery: the panel goes off at every stream
+  start, the phone then falls asleep at its own screen timeout, and a sleeping phone mirrors black
+  until Wake. Only a charging phone stays awake with the panel off; the setting's row and the black
+  note both say so now. A quality change the page asks for on its own (a shed while the decoder
+  was cold) lasts the session and is never saved — Settings → Phone is the only thing that persists.
 - Screen off does exactly what it says and nothing more: the panel goes dark on the desk while
   Android keeps compositing, so the mirror carries on unchanged — the rail repeats the server's
   own "display turned off" line so you know it landed. The old Screen on key could never wake a
@@ -1231,3 +1236,4 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 92f7864 | 20:01 | Processes: every Electron process on its own row, named by the tab it hosts |
 | 252359e | 20:14 | Processes: a renderer's row names its tab and its workspace |
 | 1660003 | 20:34 | Workspaces sleep: only the workspace you are looking at keeps its pages running |
+| 54d6a57 | 20:46 | Phone: Wake sends display-on before the wake key (the server otherwise forces the display off again), a server child flushing after a restart no longer crashes main, page sheds stay temporary and never reach phone.json, and the black note names the screen-off-while-mirroring setting |
