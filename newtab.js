@@ -29,7 +29,9 @@
      4. window.__applyStats(sample) every second while this guest is
         the one on screen — see "the instrument strip" below. The
         sample carries the process list the lower half of the capsule
-        shows.
+        shows, and every group of more than one process carries its
+        own `children` (one per pid, with the role and, for this
+        browser's renderers, the tab it holds) for the row to unfold.
 
      5. window.__applyEndTask({ key, results }) — the answer to the one
         thing this page asks the browser FOR: a console line,
@@ -1362,7 +1364,10 @@ window.__stats = function () {
 /*                                                                      */
 /* The same sample carries `procs: { top: [group...], total: n }`, one   */
 /* group per program — `{ key, name, count, pids, cpu, memBytes,        */
-/* ioBps, self }` — already summed and already sorted by the sampler.    */
+/* ioBps, self, children, childrenMore, childrenNote }` — already summed */
+/* and already sorted by the sampler. `children` is one entry per pid,   */
+/* memory-heaviest first, `{ pid, cpu, memBytes, ioBps, role, label,     */
+/* url }`: the answer to "Electron (12), which one is the 1.5 GB tab".   */
 /*                                                                      */
 /* Three rules hold this together:                                      */
 /*                                                                      */
@@ -1371,6 +1376,12 @@ window.__stats = function () {
 /*    moves the node. Nothing is rebuilt, so a row you are hovering, a   */
 /*    confirm you have armed and a note that is still showing all        */
 /*    survive the second they land in.                                   */
+/*  - A group of more than one process UNFOLDS: its chevron, or the row  */
+/*    itself (never its End task), lays one indented row per process     */
+/*    under it, memory-heaviest first, each named by what it is — and    */
+/*    this browser's own renderers by the tab they hold. Which groups    */
+/*    are open is remembered by key. A child row is kept and reused by   */
+/*    pid exactly the way a group row is kept by key.                    */
 /*  - The list is folded into the capsule under the strip. Closed, the   */
 /*    capsule is the height it always was; open, it grows by the fold    */
 /*    and the board re-seats its traces around the new box. The state    */
@@ -1393,6 +1404,10 @@ const PROC_NOTE_MS = 3000;       // and the answer it got fades
 const PROC_OPEN_STORE = 'newtab.procs.open';
 const PROC_FOLD_MS = 160;        // the fold's own transition, mirrored here
 
+const PROC_CHILD_STORE = 'procsExpandedKeys';  // which groups are unfolded
+const PROC_CHILD_MAX = 24;       // what the sampler sends, mirrored here
+const PROC_CHILD_KEYS_MAX = 40;  // remembered keys, so storage cannot creep
+
 const procsPanel = document.getElementById('procs');
 const procsWrap = document.getElementById('procs-wrap');
 const procsBody = document.getElementById('procs-body');
@@ -1406,6 +1421,12 @@ const procSortBtn = {
 
 /* key -> { row, label, count, cpu, mem, io, end, note, pids, ... } */
 const procRows = new Map();
+
+/* key -> Map pid -> the child row that process owns, kept the same way. */
+const procChildRows = new Map();
+
+/* The group keys whose children are showing, restored in wireProcs(). */
+let procChildOpen = new Set();
 
 let procGroups = [];             // the last sample's groups, normalised
 let procReady = false;           // a sample has landed at least once
@@ -1429,6 +1450,55 @@ function writeProcSort(value) {
     /* a page denied storage still sorts, it just forgets */
   }
 }
+
+/* --- which groups are unfolded ------------------------------------- */
+/* Remembered by key, not by index: the list re-sorts every second, and
+   the thing the user unfolded has to still be unfolded when it moves. */
+
+/** The keys the last session left open. A page with no storage opens none. */
+function readProcChildOpen() {
+  try {
+    const raw = localStorage.getItem(PROC_CHILD_STORE);
+    if (!raw) return new Set();
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return new Set();
+    return new Set(list
+      .filter(function (key) { return typeof key === 'string' && key; })
+      .slice(0, PROC_CHILD_KEYS_MAX));
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function writeProcChildOpen() {
+  try {
+    localStorage.setItem(
+      PROC_CHILD_STORE,
+      JSON.stringify(Array.from(procChildOpen).slice(0, PROC_CHILD_KEYS_MAX))
+    );
+  } catch (err) {
+    /* a page denied storage still unfolds, it just forgets */
+  }
+}
+
+/** What a child row calls its role. Anything unlisted keeps its own word. */
+const PROC_ROLE_WORDS = {
+  main: 'main',
+  renderer: 'renderer',
+  gpu: 'GPU',
+  audio: 'audio',
+  network: 'network',
+  utility: 'utility',
+  pending: 'reading…',
+  unknown: 'unknown'
+};
+
+/** ...and what it says when you rest on it, for the two that are states. */
+const PROC_ROLE_TITLES = {
+  pending: 'Reading this process’s command line…',
+  unknown: 'The command line could not be read — another user’s process, '
+    + 'or it exited while the browser was asking.'
+};
 
 /** A finite number >= 0, or null — the same rule the strip uses. */
 function procNum(value) {
@@ -1483,8 +1553,38 @@ function normalizeGroup(group) {
     cpu: procNum(group.cpu),
     memBytes: procNum(group.memBytes),
     ioBps: procNum(group.ioBps),
-    self: group.self === true
+    self: group.self === true,
+    children: normalizeChildren(group.children),
+    childrenMore: (typeof group.childrenMore === 'number' && group.childrenMore > 0)
+      ? Math.round(group.childrenMore)
+      : 0,
+    childrenNote: typeof group.childrenNote === 'string' ? group.childrenNote : ''
   };
+}
+
+/**
+ * The processes inside one group. The sampler already sorted them by
+ * memory and already capped them; this only refuses what it cannot draw.
+ */
+function normalizeChildren(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (let i = 0; i < list.length && out.length < PROC_CHILD_MAX; i++) {
+    const child = list[i];
+    if (!child || typeof child !== 'object') continue;
+    const pid = child.pid;
+    if (typeof pid !== 'number' || !isFinite(pid) || pid <= 0) continue;
+    out.push({
+      pid: Math.round(pid),
+      cpu: procNum(child.cpu),
+      memBytes: procNum(child.memBytes),
+      ioBps: procNum(child.ioBps),
+      role: typeof child.role === 'string' ? child.role : '',
+      label: typeof child.label === 'string' ? child.label : '',
+      url: typeof child.url === 'string' ? child.url : ''
+    });
+  }
+  return out;
 }
 
 /** Biggest first, on the chosen column, with the other as the tiebreak. */
@@ -1629,10 +1729,12 @@ function buildRow(group) {
   row.dataset.key = group.key;
 
   const name = procCell('proc-name');
+  const chev = buildProcChevron();
   const icon = buildProcIconSlot();
   const label = document.createTextNode('');
   const count = document.createElement('span');
   count.className = 'proc-count';
+  name.appendChild(chev);
   name.appendChild(icon);
   name.appendChild(label);
   name.appendChild(count);
@@ -1663,6 +1765,7 @@ function buildRow(group) {
     row: row,
     label: label,
     count: count,
+    chev: chev,
     icon: icon,
     iconImg: null,
     iconGlyph: null,
@@ -1675,13 +1778,45 @@ function buildRow(group) {
     name: '',
     pids: [],
     self: false,
+    expandable: false,
+    chevOpen: false,
+    chevName: '',
     confirmTimer: 0,
     noteTimer: 0
   };
 
   end.addEventListener('click', function () { armEnd(rec); });
+
+  // The way in is the whole row, because a 12px chevron is a poor target —
+  // but End task is a control sitting ON the row, and a press of it must
+  // never also unfold what is under it.
+  chev.addEventListener('click', function (event) {
+    event.stopPropagation();
+    toggleChildren(rec);
+  });
+  row.addEventListener('click', function (event) {
+    // End task, and the answer it leaves lying over the row, are controls.
+    if (event.target && event.target.closest && event.target.closest('.proc-end, .proc-note')) return;
+    toggleChildren(rec);
+  });
+
   syncRowIcon(rec);              // whatever is already known, worn at once
   return rec;
+}
+
+/**
+ * The unfold control: a 12px caret drawn in borders, the same way the sort
+ * header draws its own. A button, so the keyboard reaches it; hidden (but
+ * still holding its width) on a group of one process, which has nothing
+ * under it to show.
+ */
+function buildProcChevron() {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'proc-chev';
+  btn.setAttribute('aria-expanded', 'false');
+  btn.tabIndex = -1;             // set to 0 by updateRow once it does something
+  return btn;
 }
 
 function procRowFor(group) {
@@ -1712,11 +1847,246 @@ function updateRow(rec, group) {
   rec.row.classList.toggle('is-self', group.self);
   rec.row.classList.remove('is-blank');
 
+  // One process is already its own row: nothing to unfold, and a chevron
+  // that opens an empty list is worse than no chevron. It keeps its width
+  // all the same, so every name in the column starts in the same place.
+  rec.expandable = group.count > 1;
+  rec.row.classList.toggle('can-open', rec.expandable);
+  const open = rec.expandable && procChildOpen.has(rec.key);
+  if (rec.chev.disabled !== !rec.expandable) {
+    rec.chev.disabled = !rec.expandable;
+    rec.chev.tabIndex = rec.expandable ? 0 : -1;
+  }
+  rec.chev.classList.toggle('is-open', open);
+  if (rec.chevOpen !== open || rec.name !== rec.chevName) {
+    rec.chevOpen = open;
+    rec.chevName = rec.name;
+    rec.chev.setAttribute('aria-expanded', open ? 'true' : 'false');
+    rec.chev.setAttribute('aria-label',
+      (open ? 'Hide the processes in ' : 'Show the processes in ') + group.name);
+  }
+  rec.row.classList.toggle('is-open', open);
+
   // This browser is stated like anything else and offered no control:
   // there is nothing sensible on the other side of that button.
   const offered = !group.self && rec.pids.length > 0;
   if (rec.end.hidden === offered) rec.end.hidden = !offered;
   if (!offered) disarmEnd(rec);
+}
+
+/* --- the processes inside a group ---------------------------------- */
+/* Kept by pid the way the group rows are kept by key: the same element
+   is rewritten every second and MOVED when the order changes, so the
+   list under a group is as still as the list above it. */
+
+/** Open or close one group. Cheap: the fold's own height never moves. */
+function toggleChildren(rec) {
+  if (!rec.expandable) return;
+
+  if (procChildOpen.has(rec.key)) {
+    procChildOpen.delete(rec.key);
+  } else {
+    procChildOpen.add(rec.key);
+    // Nothing is ever open by accident forever: the oldest key falls out.
+    while (procChildOpen.size > PROC_CHILD_KEYS_MAX) {
+      const oldest = procChildOpen.values().next();
+      if (oldest.done) break;
+      procChildOpen.delete(oldest.value);
+    }
+  }
+
+  writeProcChildOpen();
+  // The body is a fixed height that scrolls, so unfolding changes nothing
+  // outside it — no board relayout, unlike "Show more".
+  renderProcs();
+}
+
+/** The record store for one group's children, made on first use. */
+function childStore(key) {
+  let store = procChildRows.get(key);
+  if (!store) { store = new Map(); procChildRows.set(key, store); }
+  return store;
+}
+
+/**
+ * One process's row: the same five columns as its group, indented, with
+ * the role where the icon sits and the name of what it holds beside it.
+ */
+function buildChildRow(child) {
+  const row = document.createElement('div');
+  row.className = 'proc-row proc-child';
+  row.setAttribute('role', 'row');
+  row.dataset.pid = String(child.pid);
+
+  const name = procCell('proc-name');
+  const role = document.createElement('span');
+  role.className = 'proc-role';
+  const label = document.createElement('span');
+  label.className = 'proc-child-label';
+  const pid = document.createElement('span');
+  pid.className = 'proc-pid';
+  name.appendChild(role);
+  name.appendChild(label);
+  name.appendChild(pid);
+
+  const cpu = procCell('proc-cpu');
+  const mem = procCell('proc-mem');
+  const io = procCell('proc-io');
+  const act = procCell('proc-act');   // End task is the group's, not a child's
+
+  row.appendChild(name);
+  row.appendChild(cpu);
+  row.appendChild(mem);
+  row.appendChild(io);
+  row.appendChild(act);
+
+  return {
+    pid: child.pid,
+    row: row,
+    role: role,
+    label: label,
+    pidCell: pid,
+    cpu: cpu,
+    mem: mem,
+    io: io,
+    title: ''
+  };
+}
+
+function childRowFor(store, child) {
+  let rec = store.get(child.pid);
+  if (!rec) {
+    rec = buildChildRow(child);
+    store.set(child.pid, rec);
+  }
+  return rec;
+}
+
+/** The writes, the same shape as updateRow's: only what actually moved. */
+function updateChildRow(rec, child) {
+  // hasOwnProperty, not a bare lookup: the role is a word off a command
+  // line, and `constructor` must read as the word it is, not as Object's.
+  const known = Object.prototype.hasOwnProperty.call(PROC_ROLE_WORDS, child.role);
+  setText(rec.role, known ? PROC_ROLE_WORDS[child.role] : (child.role || ''));
+  setText(rec.label, child.label);
+  setText(rec.pidCell, String(child.pid));
+  setText(rec.cpu, procCpuText(child.cpu));
+  setText(rec.mem, procMemText(child.memBytes));
+  setText(rec.io, procIoText(child.ioBps));
+
+  rec.row.classList.toggle('has-label', !!child.label);
+  rec.row.classList.toggle('is-unknown', child.role === 'unknown' || child.role === 'pending');
+
+  // The whole url, the state of a role that is not one, and the pid — the
+  // things the row has no room for but a person sometimes wants.
+  const parts = [];
+  if (child.label) parts.push(child.label);
+  if (child.url) parts.push(child.url);
+  if (Object.prototype.hasOwnProperty.call(PROC_ROLE_TITLES, child.role)) {
+    parts.push(PROC_ROLE_TITLES[child.role]);
+  }
+  parts.push('pid ' + child.pid);
+  const title = parts.join('\n');
+  if (rec.title !== title) {
+    rec.title = title;
+    rec.row.title = title;
+  }
+}
+
+/* key -> the one note row that group's unfold may end with. */
+const procChildNotes = new Map();
+
+/**
+ * The last row under a group, when there is something to say: what the
+ * list left out, or why it could not read the rest. One element per
+ * group, rewritten rather than remade, like every other row here.
+ */
+function noteRowFor(key, text) {
+  let rec = procChildNotes.get(key);
+  if (!rec) {
+    const row = document.createElement('div');
+    row.className = 'proc-row proc-child proc-child-note';
+    row.setAttribute('role', 'row');
+    const cell = procCell('proc-name');
+    row.appendChild(cell);
+    rec = { row: row, cell: cell, text: '' };
+    procChildNotes.set(key, rec);
+  }
+  if (rec.text !== text) {
+    rec.text = text;
+    setText(rec.cell, text);
+  }
+  return rec.row;
+}
+
+/** Forget everything one group's unfold was holding. */
+function dropChildRows(key) {
+  const store = procChildRows.get(key);
+  if (store) {
+    store.forEach(function (rec) {
+      if (rec.row.parentNode) rec.row.parentNode.removeChild(rec.row);
+    });
+    procChildRows.delete(key);
+  }
+  const note = procChildNotes.get(key);
+  if (note) {
+    if (note.row.parentNode) note.row.parentNode.removeChild(note.row);
+    procChildNotes.delete(key);
+  }
+}
+
+/**
+ * The elements one group contributes, in order: its own row, then its
+ * children while it is open. Returns them rather than placing them, so
+ * renderProcs keeps one diff over one flat list.
+ */
+function childElements(rec, group) {
+  const out = [];
+  if (!rec.expandable || !procChildOpen.has(group.key)) {
+    dropChildRows(group.key);                 // closed: the records go too
+    return out;
+  }
+
+  const store = childStore(group.key);
+  const live = new Set();
+
+  for (let i = 0; i < group.children.length; i++) {
+    const child = group.children[i];
+    const childRec = childRowFor(store, child);
+    updateChildRow(childRec, child);
+    live.add(child.pid);
+    out.push(childRec.row);
+  }
+
+  store.forEach(function (childRec, pid) {
+    if (live.has(pid)) return;
+    if (childRec.row.parentNode) childRec.row.parentNode.removeChild(childRec.row);
+    store.delete(pid);
+  });
+
+  // Whatever the list left out or could not read is STATED. A silent gap
+  // between "(12)" and eight rows is exactly the thing this page refuses.
+  let note = '';
+  if (!group.children.length) {
+    note = group.childrenNote || 'No detail for these processes in this sample';
+  } else if (group.childrenMore > 0) {
+    note = '+' + group.childrenMore + ' smaller '
+      + (group.childrenMore === 1 ? 'process' : 'processes') + ' not listed';
+    if (group.childrenNote) note += ' · ' + group.childrenNote;
+  } else if (group.childrenNote) {
+    note = group.childrenNote;
+  }
+  if (note) {
+    out.push(noteRowFor(group.key, note));
+  } else {
+    const stale = procChildNotes.get(group.key);   // nothing to say any more
+    if (stale) {
+      if (stale.row.parentNode) stale.row.parentNode.removeChild(stale.row);
+      procChildNotes.delete(group.key);
+    }
+  }
+
+  return out;
 }
 
 /** A dashed row: what the list is before the first sample lands. */
@@ -1726,6 +2096,9 @@ function buildBlankRow() {
   row.setAttribute('role', 'row');
 
   const name = procCell('proc-name');
+  const chev = buildProcChevron();         // nothing to unfold, but the width
+  chev.disabled = true;
+  name.appendChild(chev);
   name.appendChild(buildProcIconSlot());   // empty, but the same 24px wide
   name.appendChild(document.createTextNode(DASH));
   const cpu = procCell('proc-cpu');
@@ -1794,16 +2167,28 @@ function renderProcs() {
   const sorted = procGroups.slice().sort(procCompare);
   const visible = sorted.slice(0, procExpanded ? PROC_MAX : PROC_ROWS);
 
+  // One flat list of the elements this sample should leave in the body: a
+  // group row, then the rows it is unfolded into, then the next group. The
+  // diff below is the same one as before — it just runs over this list
+  // instead of over `visible`, so a child row is placed, moved and dropped
+  // by exactly the rules its parent is.
+  const expected = [];
   for (let i = 0; i < visible.length; i++) {
     const rec = procRowFor(visible[i]);
     updateRow(rec, visible[i]);
+    expected.push(rec.row);
+    const kids = childElements(rec, visible[i]);
+    for (let k = 0; k < kids.length; k++) expected.push(kids[k]);
+  }
+
+  for (let i = 0; i < expected.length; i++) {
     const at = procsBody.children[i];
-    if (at !== rec.row) procsBody.insertBefore(rec.row, at || null);
+    if (at !== expected[i]) procsBody.insertBefore(expected[i], at || null);
   }
 
   // Whatever is left past the visible list: the blank rows on the first
   // sample, and any row this sample pushed out of sight.
-  while (procsBody.childElementCount > visible.length) {
+  while (procsBody.childElementCount > expected.length) {
     procsBody.removeChild(procsBody.lastElementChild);
   }
 
@@ -1816,6 +2201,7 @@ function renderProcs() {
     if (rec.noteTimer) clearTimeout(rec.noteTimer);
     if (rec.row.parentNode) rec.row.parentNode.removeChild(rec.row);
     procRows.delete(key);
+    dropChildRows(key);        // and everything it was unfolded into
   });
 
   syncProcMore();
@@ -2014,20 +2400,33 @@ window.__procs = function () {
     bodyHeight: procsBody ? procsBody.getBoundingClientRect().height : 0,
     capsuleHeight: statsPanel ? statsPanel.getBoundingClientRect().height : 0,
     columnHeight: column ? column.getBoundingClientRect().height : 0,
+    open_keys: Array.from(procChildOpen),
     rows: Array.prototype.map.call(procsBody ? procsBody.children : [], function (row) {
       const end = row.querySelector('.proc-end');
       const note = row.querySelector('.proc-note');
       const slot = row.querySelector('.proc-icon');
+      const chev = row.querySelector('.proc-chev');
+      const role = row.querySelector('.proc-role');
       return {
         key: row.dataset.key || null,
+        pid: row.dataset.pid ? Number(row.dataset.pid) : null,
+        child: row.classList.contains('proc-child'),
+        childNote: row.classList.contains('proc-child-note'),
+        role: role ? role.textContent : null,
+        label: row.querySelector('.proc-child-label')
+          ? row.querySelector('.proc-child-label').textContent
+          : null,
+        title: row.title || null,
+        chev: chev ? (chev.disabled ? 'off' : (chev.classList.contains('is-open') ? 'open' : 'shut')) : null,
         icon: slot
           ? (slot.querySelector('img') ? 'img'
             : (slot.querySelector('svg') ? 'glyph' : 'empty'))
           : null,
         name: row.querySelector('.proc-name') ? row.querySelector('.proc-name').textContent : '',
-        cpu: row.querySelector('.proc-cpu').textContent,
-        mem: row.querySelector('.proc-mem').textContent,
-        io: row.querySelector('.proc-io').textContent,
+        // A note row is one cell wide, so these three can be absent.
+        cpu: row.querySelector('.proc-cpu') ? row.querySelector('.proc-cpu').textContent : null,
+        mem: row.querySelector('.proc-mem') ? row.querySelector('.proc-mem').textContent : null,
+        io: row.querySelector('.proc-io') ? row.querySelector('.proc-io').textContent : null,
         self: row.classList.contains('is-self'),
         blank: row.classList.contains('is-blank'),
         end: end ? (end.hidden ? null : end.textContent) : null,
@@ -2047,6 +2446,7 @@ window.__procIcons = function () {
 
 function wireProcs() {
   procSort = readProcSort();
+  procChildOpen = readProcChildOpen();
   syncProcHead();
 
   ['cpu', 'mem'].forEach(function (which) {

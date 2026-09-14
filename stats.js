@@ -41,6 +41,25 @@
 //      its first data row, and only then is the old one killed. The sample
 //      never has a gap.
 //
+//   5. A GROUP CAN NAME ITS OWN PROCESSES. "Electron (12) · 7.4% · 2.8 GB" is
+//      useless when one of the twelve is holding 1.5 GB and nothing says which
+//      tab it is. So every group with more than one process carries
+//      `children`: one entry per pid, biggest first, each with its role read
+//      off the command line (renderer / gpu / audio / network / utility /
+//      main) and, for OUR renderers, the tab it hosts, matched through
+//      webContents.getOSProcessId().
+//
+//      Command lines are not in a performance counter, so they cost a
+//      PowerShell. It runs ONLY when a pid we care about is new, answers for
+//      the whole batch at once, and its answer is cached until the pid exits.
+//      A pid nobody could read says 'unknown' and a query that failed outright
+//      puts its reason on the group, in words -- neither is ever a blank.
+//
+//      What it costs the per-second push, measured on a 163-process machine:
+//      4.7 kB of JSON becomes 12.0 kB. That is the price of the whole feature
+//      and the reason `children` stops at MAX_PROC_CHILDREN and is not sent
+//      at all for a group of one process.
+//
 // CPU and memory need no child: os.cpus() deltas and
 // process.getSystemMemoryInfo() cover them, and they are the two figures that
 // must never be missing.
@@ -154,6 +173,36 @@ const PROCESS_COUNTERS = [
 
 /** Groups pushed to the page. It shows 10 and reveals up to 30. */
 const MAX_PROC_GROUPS = 30;
+
+/**
+ * Children pushed with a group, memory-heaviest first. Chrome can run forty
+ * processes and every one of them rides a per-second payload, so the list is
+ * a reading aid rather than a census: it is capped, and whatever it left out
+ * is STATED (`childrenMore`) rather than dropped in silence.
+ */
+const MAX_PROC_CHILDREN = 24;
+
+/**
+ * The programs whose children are worth naming. Chromium's process model is
+ * the only one where a command line says something a person wants (renderer
+ * vs gpu vs the audio service), and our own renderers are the only ones whose
+ * tab we can name. Everything else gets children that carry a pid and its
+ * three numbers, role '' -- there is nothing to read off notepad's command
+ * line that the group row has not already said, and asking would cost a
+ * PowerShell per pid for it.
+ */
+const CHROMIUM_BASES = new Set([
+  'electron', 'chrome', 'msedge', 'msedgewebview2', 'chromium',
+  'brave', 'vivaldi', 'opera', 'opera_gx', 'code', 'discord', 'slack',
+]);
+
+/** Pids per command-line query, and how far apart two queries may be. */
+const CMDLINE_BATCH = 80;
+const CMDLINE_MIN_MS = 1500;     // a burst of new pids is one query, not ten
+const CMDLINE_FAIL_MS = 60000;   // a query that failed outright is not retried fast
+const CMDLINE_TIMEOUT_MS = 8000; // a wedged PowerShell is dropped, not waited on
+const CMDLINE_MAX_CHARS = 1024;  // enough for --type= and --utility-sub-type=
+const CMDLINE_CACHE_MAX = 500;   // one entry per live pid, with room to spare
 
 function typeperfArgs(withProcesses) {
   const counters = withProcesses === false
@@ -559,6 +608,146 @@ function selfPids(rows, root) {
 }
 
 /**
+ * A Chromium process's command line -> what that process IS. `--type=` is the
+ * whole story: absent means the browser process itself, and a utility says
+ * which service it runs in `--utility-sub-type=`.
+ *
+ * Three of the answers are states rather than roles, and they exist so the
+ * page can say WHICH ONE it is instead of drawing a blank:
+ *   'pending'  the lookup has not come back yet (undefined here),
+ *   'unknown'  it came back with nothing -- another user's process, a denied
+ *              query, or a pid that exited between the sample and the query,
+ *   ''         we never asked, because this is not a Chromium program.
+ */
+function roleFromCommandLine(cmd) {
+  if (cmd === undefined) return 'pending';
+  if (cmd === null || !String(cmd).trim()) return 'unknown';
+  const s = String(cmd);
+  const typed = /--type=([^\s"]+)/.exec(s);
+  if (!typed) return 'main';
+  const type = typed[1].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+  if (type === 'renderer') return 'renderer';
+  if (type === 'gpu-process') return 'gpu';
+  if (type === 'utility') {
+    const sub = /--utility-sub-type=([^\s"]+)/.exec(s);
+    const name = sub ? sub[1] : '';
+    if (/audio\.mojom\.AudioService/i.test(name)) return 'audio';
+    if (/network\.mojom\.NetworkService/i.test(name)) return 'network';
+    return 'utility';
+  }
+  // zygote, crashpad-handler, ppapi...: stated as itself rather than folded
+  // into 'utility', because a person reading the row wants the real word.
+  return type || 'unknown';
+}
+
+/** Our own file:// pages, named the way their tab chip names them. */
+const BUNDLED_PAGES = {
+  'newtab.html': 'New tab',
+  'index.html': 'Browser UI',
+  'phone.html': 'Phone',
+  'files.html': 'Files',
+  'reader.html': 'Reader',
+  'historypage.html': 'History',
+};
+
+/** A tab title is a whole sentence sometimes. One line, and bounded. */
+const LABEL_MAX = 64;
+
+function tidyLabel(text) {
+  const s = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  return s.length <= LABEL_MAX ? s : s.slice(0, LABEL_MAX - 1).trimEnd() + '\u2026';
+}
+
+/** `file:///c:/.../newtab.html?theme=dark` -> `newtab.html`, else ''. */
+function bundledFileName(url) {
+  const s = String(url == null ? '' : url);
+  if (!/^file:\/\//i.test(s)) return '';
+  const path = s.replace(/[?#].*$/, '');
+  let last = path.slice(path.lastIndexOf('/') + 1);
+  try { last = decodeURIComponent(last); } catch { /* keep it as written */ }
+  return last.toLowerCase();
+}
+
+/**
+ * The host of a url and nothing else. What a renderer is SHOWING is the
+ * user's business: the label says `youtube.com`, never the watch id. The
+ * whole url rides in the row's `url`, where the title attribute reads it.
+ */
+function urlHost(url) {
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(String(url == null ? '' : url));
+  if (!m) return '';
+  return m[1].replace(/^[^@]*@/, '').replace(/:\d+$/, '');
+}
+
+/** One webContents -> the words its row wears. */
+function labelForContents(type, title, url) {
+  const file = bundledFileName(url);
+  if (file && BUNDLED_PAGES[file]) return BUNDLED_PAGES[file];
+  if (String(type) === 'window') return 'Browser UI';
+  const named = tidyLabel(title);
+  if (named) return named;
+  const host = urlHost(url);
+  if (host) return host;
+  if (file) return file;
+  return 'untitled page';
+}
+
+/**
+ * Every webContents -> `pid -> { label, url }`. Chromium shares one process
+ * between pages of the same site, so a pid can hold several: they are joined,
+ * three named and the rest counted, in the order Electron lists them.
+ *
+ * Every call into a webContents is wrapped: this runs a second and one of
+ * them being destroyed mid-loop must cost the sample nothing.
+ */
+function webContentsLabels(list) {
+  const seen = new Map();
+  if (!Array.isArray(list)) return new Map();
+
+  for (const wc of list) {
+    if (!wc) continue;
+    try { if (wc.isDestroyed && wc.isDestroyed()) continue; } catch { continue; }
+
+    let pid = null;
+    try { pid = Number(wc.getOSProcessId()); } catch { pid = null; }
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+
+    let type = '';
+    let title = '';
+    let url = '';
+    try { type = String(wc.getType()); } catch { /* a type we do not need */ }
+    try { title = String(wc.getTitle()); } catch { /* an empty title is fine */ }
+    try { url = String(wc.getURL()); } catch { /* so is an empty url */ }
+
+    let entry = seen.get(pid);
+    if (!entry) { entry = { labels: [], urls: [] }; seen.set(pid, entry); }
+    entry.labels.push(labelForContents(type, title, url));
+    if (url) entry.urls.push(url);
+  }
+
+  const out = new Map();
+  for (const [pid, entry] of seen) {
+    const names = entry.labels;
+    let label = names.slice(0, 3).join(', ');
+    if (names.length > 3) label += ' +' + (names.length - 3);
+    out.set(pid, { label, url: entry.urls.slice(0, 3).join('\n') });
+  }
+  return out;
+}
+
+/**
+ * A Map, a plain object or nothing -> a lookup that answers `undefined` for
+ * "not asked yet". The distinction matters: `null` is "asked, unreadable".
+ */
+function lookupIn(src) {
+  if (src instanceof Map) return (pid) => (src.has(pid) ? src.get(pid) : undefined);
+  if (src && typeof src === 'object') {
+    return (pid) => (Object.prototype.hasOwnProperty.call(src, String(pid)) ? src[String(pid)] : undefined);
+  }
+  return null;
+}
+
+/**
  * Per-process rows -> Task Manager's grouped list. One row per base name,
  * summing cpu, private memory and I/O, so a 19-process Chrome is one line
  * that reads "Google Chrome (19)" instead of nineteen lines of 0.1%.
@@ -566,14 +755,28 @@ function selfPids(rows, root) {
  * Sorted busiest first, memory breaking the tie -- the same order Task
  * Manager lands on when you click CPU, and the reason anyone opens this at
  * all is to find what is eating the machine right now.
+ *
+ * A group of more than one process also carries `children`: its own pids,
+ * memory-heaviest first, each `{ pid, cpu, memBytes, ioBps, role, label, url }`.
+ * That is the answer to "twelve Electrons, which one is the 1.5 GB tab".
+ * opts:
+ *   selfPids     Set of our own pids (marks `self`, and only these get labels)
+ *   cmdlines     Map pid -> command line (null = read and empty). Absent
+ *                altogether means nobody asked, and every role stays ''.
+ *   labels       Map pid -> { label, url } from webContentsLabels()
+ *   cmdlineNote  why the last command-line query gave nothing, in words
  */
 function groupProcesses(rows, opts) {
   const o = opts || {};
   const mine = o.selfPids instanceof Set
     ? o.selfPids
     : new Set(Array.isArray(o.selfPids) ? o.selfPids : []);
+  const cmdline = lookupIn(o.cmdlines);
+  const label = lookupIn(o.labels);
+  const note = typeof o.cmdlineNote === 'string' ? o.cmdlineNote : '';
 
   const map = new Map();
+  const members = new Map();     // key -> the rows themselves, for the children
   for (const r of rows || []) {
     if (!r || !Number.isFinite(r.pid)) continue;
     const key = String(r.base).toLowerCase();
@@ -581,6 +784,7 @@ function groupProcesses(rows, opts) {
     if (!g) {
       g = { key, name: friendlyName(r.base), count: 0, pids: [], cpu: 0, memBytes: 0, ioBps: 0, self: false };
       map.set(key, g);
+      members.set(key, []);
     }
     g.count += 1;
     g.pids.push(r.pid);
@@ -588,6 +792,7 @@ function groupProcesses(rows, opts) {
     g.memBytes += Number.isFinite(r.memBytes) ? r.memBytes : 0;
     g.ioBps += Number.isFinite(r.ioBps) ? r.ioBps : 0;
     if (mine.has(r.pid)) g.self = true;
+    members.get(key).push(r);
   }
 
   const groups = Array.from(map.values());
@@ -596,9 +801,64 @@ function groupProcesses(rows, opts) {
     g.memBytes = Math.round(g.memBytes);
     g.ioBps = Math.round(g.ioBps);
     g.pids.sort((a, b) => a - b);
+    attachChildren(g, members.get(g.key) || [], { cmdline, label, note });
   }
   groups.sort((a, b) => (b.cpu - a.cpu) || (b.memBytes - a.memBytes) || a.name.localeCompare(b.name));
   return groups;
+}
+
+/**
+ * The children of one group, written onto it. Memory-heaviest first: the
+ * question this list answers is always "which of them is holding the gigabyte".
+ *
+ * A one-process group gets no children at all -- its own row already says
+ * everything a child row could, and the page draws no chevron for it, so
+ * sending twelve hundred bytes a second for it would buy nothing.
+ */
+function attachChildren(g, rows, ctx) {
+  g.children = [];
+  g.childrenMore = 0;
+  g.childrenNote = '';
+  if (!Array.isArray(rows) || rows.length < 2) return;
+
+  // Roles come off a command line, and we only pay for the command lines of
+  // programs whose command lines say something: Chromium's, and our own.
+  const bare = String(g.key).replace(/\.exe$/, '');
+  const detail = !!ctx.cmdline && (g.self === true || CHROMIUM_BASES.has(bare));
+
+  const sorted = rows.slice().sort((a, b) => (
+    (b.memBytes - a.memBytes) || (b.cpu - a.cpu) || (a.pid - b.pid)
+  ));
+  const kept = sorted.slice(0, MAX_PROC_CHILDREN);
+  g.childrenMore = sorted.length - kept.length;
+
+  let missing = false;
+  g.children = kept.map((r) => {
+    const role = detail ? roleFromCommandLine(ctx.cmdline(r.pid)) : '';
+    if (role === 'unknown' || role === 'pending') missing = true;
+
+    // Only OUR renderers can be named: a webContents in this process is a tab,
+    // the chrome document, or a bundled page. One that holds none is a
+    // renderer Chromium is keeping warm, which is worth saying out loud.
+    let named = null;
+    if (ctx.label && g.self === true && role === 'renderer') {
+      named = ctx.label(r.pid) || { label: 'idle renderer', url: '' };
+    }
+
+    return {
+      pid: r.pid,
+      cpu: round1(clampPercent(r.cpu)) || 0,
+      memBytes: Math.round(Number.isFinite(r.memBytes) ? r.memBytes : 0),
+      ioBps: Math.round(Number.isFinite(r.ioBps) ? r.ioBps : 0),
+      role,
+      label: named && named.label ? String(named.label) : '',
+      url: named && named.url ? String(named.url) : '',
+    };
+  });
+
+  // A failure gets carried to the page in words. Without this the rows would
+  // just read "unknown" and nothing would say why.
+  if (detail && missing && ctx.note) g.childrenNote = ctx.note;
 }
 
 /**
@@ -724,6 +984,10 @@ function create(deps) {
    * escape hatch.
    */
   const wantProcs = d.procs === false || process.env.BROWSER_STATS_NO_PROCS === '1' ? false : true;
+  /** pids -> Promise<Map pid -> command line>. A PowerShell, unless stubbed. */
+  const readCommandLines = d.commandLines || defaultCommandLines;
+  /** Every live webContents, for naming the tab a renderer holds. */
+  const readWebContents = d.webContents || defaultWebContents;
 
   /** webContents id -> { contents, count }. The whole on/off switch. */
   const subscribers = new Map();
@@ -767,6 +1031,24 @@ function create(deps) {
   let procRows = [];
   let procRowsAt = 0;
   let procSelf = new Set([rootPid]);
+
+  /**
+   * pid -> its command line, or null when the query answered and had nothing
+   * for it. A pid that is not a key here has not been asked about yet, which
+   * is a different thing and reads as "reading..." on the page. Entries are
+   * dropped when their pid leaves the sample, so a machine that churns
+   * processes does not accumulate them.
+   */
+  const cmdLines = new Map();
+  /** The query in flight (the pids it asked about), so only one ever runs. */
+  let cmdQuery = null;
+  let cmdQueryAt = 0;
+  /** Why the last query gave nothing, in the words the page will show. */
+  let cmdNote = '';
+  /** When the last query settled, and the pids a failed one gave up on. */
+  let cmdAt = 0;
+  let cmdRetryAt = 0;
+  let cmdFailed = null;
 
   let lastFailAt = 0;
   let lastError = null;
@@ -824,6 +1106,7 @@ function create(deps) {
       procRows = row.procs;
       procRowsAt = t;
       procSelf = selfPids(procRows, rootPid);
+      pruneCommandLines();
     }
     lastError = null;
   }
@@ -1018,10 +1301,118 @@ function create(deps) {
     return any ? out : null;
   }
 
+  // -- command lines ---------------------------------------------------------
+  // The only thing here that is not free. One PowerShell, only when a pid we
+  // care about is new to us, and the answer is kept until that pid exits.
+
+  /** A pid that left the sample takes its command line with it. */
+  function pruneCommandLines() {
+    if (!cmdLines.size) return;
+    const live = new Set();
+    for (const r of procRows) live.add(r.pid);
+    for (const pid of Array.from(cmdLines.keys())) {
+      if (!live.has(pid)) cmdLines.delete(pid);
+    }
+    // A cache bigger than the machine's process table means something is
+    // wrong upstream; drop the oldest rather than grow without a bound.
+    while (cmdLines.size > CMDLINE_CACHE_MAX) {
+      const oldest = cmdLines.keys().next();
+      if (oldest.done) break;
+      cmdLines.delete(oldest.value);
+    }
+  }
+
+  /** The pids whose command line would tell the page something new. */
+  function pidsNeedingCommandLines() {
+    const out = [];
+    for (const r of procRows) {
+      if (cmdLines.has(r.pid)) continue;
+      const bare = String(r.base).toLowerCase().replace(/\.exe$/, '');
+      if (!procSelf.has(r.pid) && !CHROMIUM_BASES.has(bare)) continue;
+      out.push(r.pid);
+      if (out.length >= CMDLINE_BATCH) break;   // the rest ride the next query
+    }
+    return out;
+  }
+
+  /**
+   * Ask, if there is anything to ask about and nothing already asking. Every
+   * outcome is recorded: an answer fills the cache, a pid the answer skipped
+   * is cached as null (it reads 'unknown'), and a query that failed outright
+   * leaves `cmdNote` for the page to print under the group and backs off for
+   * a minute before trying those pids again.
+   */
+  function maybeQueryCommandLines() {
+    if (cmdFailed && cmdRetryAt && now() >= cmdRetryAt) {
+      for (const pid of cmdFailed) cmdLines.delete(pid);
+      cmdFailed = null;
+      cmdRetryAt = 0;
+      cmdNote = '';
+    }
+    // A query that never answers would stop every later one forever, so it is
+    // dropped the way a wedged typeperf child is -- and says it was.
+    if (cmdQuery && now() - cmdQueryAt > CMDLINE_TIMEOUT_MS * 2) {
+      cmdQuery = null;
+      cmdAt = now();
+      cmdNote = 'process details: the query never answered';
+      lastError = cmdNote;
+    }
+    if (cmdQuery) return;
+    if (now() - cmdAt < CMDLINE_MIN_MS) return;
+
+    const pids = pidsNeedingCommandLines();
+    if (!pids.length) return;
+    cmdQuery = pids;
+    cmdQueryAt = now();
+
+    const settle = (map, why) => {
+      if (cmdQuery !== pids) return;             // a stop() beat the answer
+      cmdQuery = null;
+      cmdAt = now();
+      const answers = map instanceof Map ? map : new Map();
+      for (const pid of pids) {
+        const line = answers.has(pid) ? answers.get(pid) : null;
+        cmdLines.set(pid, typeof line === 'string' && line ? line.slice(0, CMDLINE_MAX_CHARS) : null);
+      }
+      if (why) {
+        cmdNote = why;
+        cmdFailed = new Set(pids);
+        cmdRetryAt = cmdAt + CMDLINE_FAIL_MS;
+        lastError = why;
+      } else {
+        cmdNote = '';
+        cmdFailed = null;
+        cmdRetryAt = 0;
+      }
+    };
+
+    const failed = (err) => {
+      const msg = err && err.message ? String(err.message) : String(err || 'no answer');
+      settle(null, 'process details unavailable: ' + msg.slice(0, 120));
+    };
+
+    let pending;
+    try {
+      pending = readCommandLines(pids.slice());
+    } catch (err) {
+      failed(err);
+      return;
+    }
+    Promise.resolve(pending).then((map) => settle(map, ''), failed);
+  }
+
   /** The grouped process table, or null while there is nothing fresh. */
   function currentProcs() {
     if (!procRowsAt || now() - procRowsAt > COUNTER_STALE_MS) return null;
-    const groups = groupProcesses(procRows, { selfPids: procSelf });
+    maybeQueryCommandLines();
+    let labels = null;
+    try { labels = webContentsLabels(readWebContents()); } catch { labels = null; }
+    const groups = groupProcesses(procRows, {
+      selfPids: procSelf,
+      cmdlines: cmdLines,
+      labels,
+      cmdlineNote: cmdNote,
+    });
     return { top: groups.slice(0, MAX_PROC_GROUPS), total: groups.length };
   }
 
@@ -1106,6 +1497,14 @@ function create(deps) {
     for (const field of COUNTER_FIELDS) { delete counterValues[field]; delete counterAt[field]; }
     procRows = [];
     procRowsAt = 0;
+    // The command lines go with them: pids are reused, and a stale one would
+    // put yesterday's tab title on somebody else's process.
+    cmdLines.clear();
+    cmdQuery = null;
+    cmdNote = '';
+    cmdFailed = null;
+    cmdRetryAt = 0;
+    cmdAt = 0;
   }
 
   function cancelGrace() {
@@ -1233,9 +1632,116 @@ function create(deps) {
     hasPending: () => pending !== null,
     childCount: () => (active ? 1 : 0) + (pending ? 1 : 0),
     procCount: () => procRows.length,
+    /** The command-line cache, for the harness and for a diagnostics pane. */
+    commandLines: () => new Map(cmdLines),
+    commandLineNote: () => cmdNote,
     selfPids: () => new Set(procSelf),
     lastError: () => lastError,
   };
+}
+
+/**
+ * Every live webContents, or an empty list outside Electron (the harness, and
+ * anything that requires this file as a plain module). An empty list is not a
+ * failure: it means no renderer can be named, and those rows say so with
+ * their role instead of a tab title.
+ */
+function defaultWebContents() {
+  try {
+    const electron = require('electron');
+    const wc = electron && electron.webContents;
+    if (wc && typeof wc.getAllWebContents === 'function') return wc.getAllWebContents();
+  } catch { /* not Electron */ }
+  return [];
+}
+
+/**
+ * The command lines of a batch of pids, in one PowerShell.
+ *
+ * Win32_Process is the only place a command line lives on Windows, and there
+ * is no counter for it -- so this is the one thing in this file that spawns on
+ * demand rather than on a clock. It is asked once per pid in a process's life
+ * (see the cache in create()), never on the per-second path.
+ *
+ * A process owned by another user answers with an empty CommandLine rather
+ * than an error; that pid simply does not come back, and the caller caches
+ * null for it, which the page prints as 'unknown'.
+ */
+function defaultCommandLines(pids) {
+  return new Promise((resolve, reject) => {
+    const list = (Array.isArray(pids) ? pids : []).filter((p) => Number.isInteger(p) && p > 0);
+    if (!list.length) { resolve(new Map()); return; }
+
+    const filter = list.map((p) => 'ProcessId=' + p).join(' or ');
+    const script = '$ErrorActionPreference=\'SilentlyContinue\';'
+      + 'Get-CimInstance Win32_Process -Filter "' + filter + '"'
+      + ' | ForEach-Object { $_.ProcessId.ToString() + \'|\' + ($_.CommandLine -replace \'[\\r\\n]+\', \' \') }';
+
+    let child;
+    try {
+      child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    if (!child) { reject(new Error('powershell could not start')); return; }
+
+    let out = '';
+    let err = '';
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { child.kill(); } catch { /* already gone */ }
+      reject(new Error('the query took longer than ' + Math.round(CMDLINE_TIMEOUT_MS / 1000) + ' s'));
+    }, CMDLINE_TIMEOUT_MS);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+
+    if (child.stdout) {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        if (out.length < 1000000) out += chunk;
+      });
+    }
+    if (child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => { if (err.length < 2000) err += chunk; });
+    }
+    child.on('error', (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const map = parseCommandLines(out);
+      // A non-zero exit with nothing to show for it is a real failure and has
+      // to be said; one that still printed rows is just a warning on stderr.
+      if (!map.size && code !== 0) {
+        reject(new Error(err.trim().split(/[\r\n]+/)[0] || ('powershell exited ' + code)));
+        return;
+      }
+      resolve(map);
+    });
+  });
+}
+
+/** `1234|C:\\path\\app.exe --type=renderer` lines -> Map pid -> command line. */
+function parseCommandLines(text) {
+  const out = new Map();
+  for (const raw of String(text == null ? '' : text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const cut = line.indexOf('|');
+    if (cut <= 0) continue;
+    const pid = Number(line.slice(0, cut));
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    out.set(pid, line.slice(cut + 1).trim());
+  }
+  return out;
 }
 
 /** Electron's figures where they exist (kB), Node's otherwise. */
@@ -1260,6 +1766,12 @@ module.exports = {
   parseTypeperfLine,
   parseProcessRows,
   groupProcesses,
+  attachChildren,
+  roleFromCommandLine,
+  webContentsLabels,
+  labelForContents,
+  parseCommandLines,
+  defaultCommandLines,
   friendlyName,
   isProtected,
   selfPids,
@@ -1274,6 +1786,9 @@ module.exports = {
   PROCESS_COUNTERS,
   TYPEPERF_ARGS,
   MAX_PROC_GROUPS,
+  MAX_PROC_CHILDREN,
+  CHROMIUM_BASES,
+  CMDLINE_BATCH,
   SAMPLE_MS,
   FIRST_SAMPLE_MS,
   GRACE_MS,

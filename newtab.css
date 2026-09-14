@@ -1542,8 +1542,113 @@ body {
    --fg-3 is defined in both. */
 .proc-icon-glyph { color: var(--fg-3); }
 
-/* The header names the column the names are in, not the slot. */
-.procs-head .proc-name { padding-left: 24px; }
+/* The header names the column the names are in, not the chevron and the
+   slot in front of it: 16px of caret + 24px of icon. */
+.procs-head .proc-name { padding-left: 40px; }
+
+/* --- unfolding a group ---------------------------------------- */
+/* "Electron (12)" is not an answer when one of the twelve is holding
+   1.5 GB, so a group of more than one process opens: one indented row
+   per process, memory-heaviest first, named by what it is.
+
+   The caret is drawn in borders, exactly like the sort header's, and
+   turns in four steps — this page has no smooth motion anywhere. A
+   group of one process keeps the caret's WIDTH and not its caret, so
+   every name in the column still starts in the same place. */
+.proc-chev {
+  display: inline-block;
+  width: 12px;
+  height: 16px;
+  margin: 0 4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  vertical-align: top;
+  cursor: pointer;
+  color: var(--fg-3);
+}
+
+.proc-chev::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  margin: 5px 0 0 3px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+  transition: transform 120ms steps(3, end);
+}
+
+.proc-chev.is-open::before { transform: rotate(90deg); }
+.proc-chev:hover { color: var(--fg-2); }
+
+/* The same ring every other control on this page wears. */
+.proc-chev:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+}
+
+/* Nothing under it: the column keeps its 16px, the caret goes. */
+.proc-chev:disabled {
+  visibility: hidden;
+  cursor: default;
+}
+
+/* A row that opens says so under the pointer, and nowhere else: no
+   hover fill, no lit edge — it is still a list. */
+.proc-row.can-open { cursor: pointer; }
+
+/* The rows underneath. Shorter than a group row and indented to where
+   the group's name starts, so the eye reads them as belonging to it,
+   and on the same grid so the four numbers stay in their columns. */
+.proc-row.proc-child {
+  height: 28px;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+/* 40px is where the group's own name starts (caret + icon); the extra 8
+   is what makes these read as under it rather than beside it. */
+.proc-row.proc-child .proc-name { padding-left: 48px; }
+
+/* What the process IS: one quiet word where the group wears its icon. */
+.proc-role {
+  display: inline-block;
+  min-width: 62px;
+  margin-right: 8px;
+  color: var(--fg-3);
+}
+
+/* ...and what it holds. A renderer with a tab is the one row anybody
+   opened this for, so it is the one that reads at full strength. */
+.proc-child-label { color: var(--fg-2); }
+.proc-row.proc-child.has-label .proc-child-label { color: var(--fg); font-weight: 500; }
+
+.proc-pid {
+  margin-left: 6px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A role that is not a role — 'reading…' or 'unknown' — is stated, never
+   left blank; the row's title says which of the two it is and why. */
+.proc-row.proc-child.is-unknown .proc-role { font-style: italic; }
+
+/* The last row of an unfold when there is something to say: what was
+   left out, or why it could not be read. */
+.proc-row.proc-child-note {
+  height: 24px;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+/* One sentence, so it takes the whole width rather than the name column. */
+.proc-row.proc-child-note .proc-name {
+  grid-column: 1 / -1;
+  white-space: nowrap;
+}
 
 /* This browser's own processes: stated, never offered an End task. */
 .proc-row.is-self .proc-name { color: var(--fg-2); }
@@ -2459,6 +2564,12 @@ body {
   .procs { --proc-grid: minmax(0, 1fr) 48px 72px 76px; }
   .proc-io { display: none; }
 
+  /* An unfolded group keeps its rows on the same grid; they just give
+     back the indent and the role's fixed column, which is what a 400px
+     window needs to still read the label. */
+  .proc-row.proc-child .proc-name { padding-left: 28px; }
+  .proc-role { min-width: 0; margin-right: 6px; }
+
   /* Folded, the strip's last grid cell is empty — so the way in stops
      being out of flow and simply sits in it, and the capsule still ends
      up the height it was. */
@@ -2498,6 +2609,9 @@ body {
   .dock-tile,
   .dock-remove,
   .dock-where-opt { transition: none; }
+
+  /* the unfold caret snaps rather than turns */
+  .proc-chev::before { transition: none; }
 }
 
 /* --- markets: live prices, bottom right ---------------------- */
