@@ -15,7 +15,10 @@
  * workspaceList is missing the whole feature renders nothing at all:
  *
  *   workspaceList()      -> [{ id, name, colour, folder, pane, preset,
- *                              tabCount, current }]
+ *                              tabCount, asleepCount, current }]
+ *                           asleepCount: how many of those tabs have given
+ *                                   their renderer back (0 on a build that
+ *                                   predates workspace sleep)
  *                           colour in null|'ion'|'ember'|'forest'|'ocean'|'midnight'
  *                           folder: the Claude folder for the workspace, or null
  *                           pane:   null | 'school' (the side pane it wants)
@@ -148,6 +151,9 @@
         pane: isPane(w.pane) ? w.pane : null,
         preset: (typeof w.preset === 'string' && w.preset) ? w.preset : null,
         tabCount: Number(w.tabCount) || 0,
+        // Never more than the tab count, whatever app.js hands over: the row
+        // reads "3 of 3 asleep" and that has to stay true on its face.
+        asleepCount: Math.max(0, Math.min(Number(w.asleepCount) || 0, Number(w.tabCount) || 0)),
         current: !!w.current
       });
     }
@@ -560,8 +566,27 @@
 
       var count = el('span', 'ws-count');
       count.textContent = String(w.tabCount);
-      count.title = w.tabCount === 1 ? '1 tab' : (w.tabCount + ' tabs');
+      var countTitle = w.tabCount === 1 ? '1 tab' : (w.tabCount + ' tabs');
+      // Sleeping tabs are said on the row, not only in the count's hover: a
+      // workspace you are not looking at is meant to cost nothing, and that
+      // is only reassuring if you can see it. The count itself stays the
+      // number of TABS — they are all still there.
+      if (w.asleepCount) {
+        countTitle += ' — ' + (w.asleepCount === w.tabCount
+          ? (w.tabCount === 1 ? 'asleep' : 'all asleep')
+          : (w.asleepCount + ' asleep'));
+      }
+      count.title = countTitle;
       main.appendChild(count);
+
+      if (w.asleepCount) {
+        var doze = el('span', 'ws-asleep');
+        doze.textContent = w.asleepCount === w.tabCount
+          ? 'asleep' : (w.asleepCount + ' asleep');
+        doze.title = 'These tabs gave their memory back. '
+          + 'Switching here wakes the one you were last on.';
+        main.appendChild(doze);
+      }
     }
 
     if (w.current) main.appendChild(glyph(GLYPH_CHECK, 'ws-check'));

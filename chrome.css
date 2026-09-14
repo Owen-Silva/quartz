@@ -1055,6 +1055,34 @@ img.tab-icon[src=""],
 
 .tab.asleep:hover .tab-title { color: var(--fg-2); }
 
+/* ...and one mark, so a dim chip is not the only tell — a workspace can come
+   back from a restart with every chip in it asleep, and "dim" needs something
+   to be dim against. The crescent is parked ABSOLUTELY over the close button's
+   seat, so it costs the chip no width and the strip does not reshuffle when a
+   tab sleeps; it steps aside the moment the close button lights up. */
+.tab .tab-sleep {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  color: var(--fg-3);
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.tab.asleep .tab-sleep { display: block; }
+
+/* The close and collapse buttons own that corner whenever they are visible. */
+.tab.asleep:hover .tab-sleep,
+.tab.asleep.active .tab-sleep { display: none; }
+
+/* A pinned or collapsed chip is 40px of favicon with no corner to spare: the
+   dimmed icon is the whole of the state there, exactly as it was. */
+.tab.asleep.pinned .tab-sleep,
+.tab.asleep.collapsed .tab-sleep { display: none; }
+
 /* audible / muted: a speaker button left of the title, which app.js only
    hangs on a chip that has actually made a sound. Clicking it mutes the tab
    without raising it, so it must read as a control, not as a status dot. */

@@ -4616,9 +4616,10 @@ function setTabLoading(tab, loading) {
 // chip collapses to its icon with the same E921 dash #win-min draws, and comes
 // back with #win-max's E922 square, so "minimize" is one shape in this chrome.
 //   E8EA = phone (the bundled Phone page, which has no favicon to report).
+//   E708 = the crescent the chip wears while it is asleep.
 const TAB_GLYPH = {
   audible: '\uE767', muted: '\uE74F', globe: '\uE774', split: '\uE89F',
-  collapse: '\uE921', expand: '\uE922', phone: '\uE8EA'
+  collapse: '\uE921', expand: '\uE922', phone: '\uE8EA', sleep: '\uE708'
 };
 
 /**
@@ -4671,6 +4672,16 @@ function buildChip(tab) {
     split.textContent = TAB_GLYPH.split;
     split.setAttribute('aria-hidden', 'true');
     chip.appendChild(split);
+
+    // The crescent a sleeping chip wears. Built once, like the split glyph,
+    // and shown by chrome.css only while the chip is .asleep — and parked
+    // ABSOLUTELY over the close button, so a tab going to sleep costs the
+    // chip no width and the strip never reshuffles underneath the pointer.
+    const doze = document.createElement('span');
+    doze.className = 'glyph tab-sleep';
+    doze.textContent = TAB_GLYPH.sleep;
+    doze.setAttribute('aria-hidden', 'true');
+    chip.appendChild(doze);
   }
 
   const title = document.createElement('span');
@@ -4715,6 +4726,10 @@ function buildChip(tab) {
   // Truncation is chrome.css's job; the full string stays here for the tooltip.
   chip.title = chipTooltip(tab);
   if (tab.pinned) chip.classList.add('pinned');
+  // A tab can be BORN asleep — restoreSession() rebuilds every workspace but
+  // the one on screen that way — so the state is read off the tab here rather
+  // than only being added by sleepTab().
+  if (tab.asleep) chip.classList.add('asleep');
   // Collapsed survives a rebuild: restoreSession() and any later re-chip read
   // the flag off the tab rather than the DOM.
   if (tab.collapsed) chip.classList.add('collapsed');
@@ -4794,8 +4809,13 @@ function chipTooltip(tab) {
   const short = shortLabelFor(readCurrentUrl(tab) || tab.url);
   const base = (!short || short === tab.title) ? tab.title : tab.title + ' — ' + short;
   // A sleeping chip keeps its title and its favicon, so the tooltip is the only
-  // place the state is spelled out.
-  return tab.asleep ? 'Sleeping — ' + base : base;
+  // place the state is spelled out — including what waking it costs, because a
+  // new tab page comes back identical and a real page comes back reloaded.
+  if (!tab.asleep) return base;
+  const cost = isNewTabUrl(tab.url)
+    ? 'a new tab page comes back fresh'
+    : 'this page will reload';
+  return base + ' — asleep, click to wake (' + cost + ')';
 }
 
 /**
@@ -5324,6 +5344,11 @@ function workspaceList() {
     pane: w.pane || null,
     preset: w.preset || null,
     tabCount: tabs.reduce((n, t) => n + (tabWorkspace(t) === w.id ? 1 : 0), 0),
+    // How many of those gave their renderer back. The popover says so on the
+    // row, because a workspace with five tabs and five sleepers costs nothing
+    // and the user should be able to see that rather than guess it.
+    asleepCount: tabs.reduce(
+      (n, t) => n + ((t.asleep && tabWorkspace(t) === w.id) ? 1 : 0), 0),
     current: w.id === currentWorkspaceId
   }));
 }
@@ -5354,10 +5379,21 @@ function switchWorkspace(id) {
   const ws = findWorkspace(id);
   if (!ws || ws.id === currentWorkspaceId) return false;
 
+  const leaving = currentWorkspaceId;
   unsplitAcrossWorkspaces();
   currentWorkspaceId = ws.id;
+  // The workspace arriving is being looked at again: its clock stops.
+  workspaceLeftAt.delete(ws.id);
   syncChipWorkspaces();
+  // This wakes the workspace's own last active tab and NOTHING else in it —
+  // activateTab() wakes its target. The rest of these chips stay asleep until
+  // they are clicked.
   raiseCurrentWorkspace();
+  // ...and only now, with the active tab safely in the new workspace, is the
+  // old one asleep-able: sleepTab() refuses the tab on screen, so doing this
+  // before the raise would spare whichever tab we were just on.
+  workspaceLeftAt.set(leaving, Date.now());
+  sleepWorkspaceTabs(leaving);
   emitWorkspaceChange();
   saveSession();
   return true;
@@ -6142,14 +6178,15 @@ function buildWebview(tab, url) {
 /**
  * @param {string} [url]
  * @param {{background?:boolean, pinned?:boolean, muted?:boolean, afterId?:number,
- *          workspace?:string}} [options]
+ *          workspace?:string, asleep?:boolean}} [options]
  *        background:true opens the tab behind the current one (Ctrl+click,
  *        target="_blank" with a background hint). pinned/muted are only used by
  *        restoreSession(), which rebuilds both from the stored entry. afterId
  *        slots the new tab in directly behind that tab id instead of at the end
  *        of the strip (the reader opens next to the page it was made from).
  *        workspace is restoreSession()'s too: a tab the user opens lands in the
- *        workspace they are looking at.
+ *        workspace they are looking at. asleep:true builds the tab with no
+ *        guest at all (restoreSession() only) — see below.
  */
 function createTab(url, options) {
   if (!viewsEl || !tabstripEl) return null;
@@ -6209,7 +6246,14 @@ function createTab(url, options) {
     openedAt: Date.now()
   };
 
-  const viewEl = buildWebview(tab, target);
+  // A tab can be born asleep. restoreSession() rebuilds every workspace but the
+  // one coming up on screen that way, so a boot with six workspaces in it makes
+  // ONE renderer instead of seven — and nothing is built only to be torn down a
+  // frame later: the guest is simply never made. The chip, the title and the
+  // seat in the strip are all exactly what an awake tab would have.
+  tab.asleep = !!opts.asleep;
+  const viewEl = tab.asleep ? sleepPlaceholder() : buildWebview(tab, target);
+  if (tab.asleep) tab.viewEl = viewEl;
   tab.chipEl = buildChip(tab);
 
   tabs.push(tab);
@@ -6231,6 +6275,10 @@ function createTab(url, options) {
   emitWorkspaceChange(); // a tab count moved
   pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession(); // debounced: activateTab() below folds into the same write
+
+  // A tab born asleep has no guest to put on screen, so it is a background tab
+  // whatever the caller asked for. (Its only caller asks for background anyway.)
+  if (tab.asleep) return tab;
 
   // Never leave the window with nothing on screen: the very first tab is opened
   // in front even when the caller asked for a background one.
@@ -6258,6 +6306,162 @@ function createTab(url, options) {
 
 const TAB_SLEEP_DEFAULT_MINUTES = 30;
 const TAB_SLEEP_SWEEP_MS = 60000;
+
+/*
+ * Workspace sleep, which is a different question from the one above. The idle
+ * sweep asks "has this tab sat untouched long enough?"; this asks "is anyone
+ * even looking at the workspace it is in?".
+ *
+ * It exists because every preset workspace opens on a new tab page, and a new
+ * tab page paints a moving background. Seven of them decode 60 fps each into
+ * the one GPU process whether or not their <webview> is hidden — el.hidden on
+ * the element does NOT reliably make the guest report document.hidden — so on
+ * an 11.7 GB laptop the GPU process sat at 1.9 GB and the whole window lagged.
+ *
+ *   'newtab' (default) the moment a workspace stops being the one on screen,
+ *                      every new tab page in it sleeps. Nothing else does: a
+ *                      new tab page is stateless, so waking one costs nothing
+ *                      a user could notice.
+ *   'all'              every page in a workspace nobody has looked at for N
+ *                      minutes sleeps, the Phone page included (its stream
+ *                      stops with the tab and starts again on wake). Real
+ *                      pages reload on wake, the way Chrome's memory saver
+ *                      works, so the tooltip says so before you click.
+ *   'off'              nothing sleeps for being in another workspace. The
+ *                      idle sweep above still runs.
+ *
+ * A Claude chamber and a native app tab NEVER sleep under any mode: one is a
+ * live terminal and the other is somebody's real window hosted in the strip,
+ * and neither can be rebuilt from a url.
+ */
+const WORKSPACE_SLEEP_MODES = ['newtab', 'all', 'off'];
+const WORKSPACE_SLEEP_DEFAULT_MODE = 'newtab';
+const WORKSPACE_SLEEP_DEFAULT_MINUTES = 10;
+
+/**
+ * When each workspace stopped being the one on screen. A workspace that has
+ * not been current in this run at all is measured from boot instead, which is
+ * what `sleepEpoch` stands for: without it, a workspace restored asleep and
+ * never visited would have no clock and 'all' would never reach it.
+ */
+const workspaceLeftAt = new Map();
+const sleepEpoch = Date.now();
+
+/** The workspace sleep policy. Anything the store does not recognise reads as the default. */
+function workspaceSleepMode() {
+  const value = settingGet('workspaceSleep');
+  if (typeof value !== 'string') return WORKSPACE_SLEEP_DEFAULT_MODE;
+  return WORKSPACE_SLEEP_MODES.indexOf(value) === -1 ? WORKSPACE_SLEEP_DEFAULT_MODE : value;
+}
+
+/** Minutes a workspace must go unlooked-at before 'all' sleeps it. 0 = on the next sweep. */
+function workspaceSleepMinutes() {
+  const value = settingGet('workspaceSleepMinutes');
+  if (value === null || value === undefined || value === '') return WORKSPACE_SLEEP_DEFAULT_MINUTES;
+  const minutes = Number(value);
+  if (!isFinite(minutes) || minutes < 0) return WORKSPACE_SLEEP_DEFAULT_MINUTES;
+  return minutes;
+}
+
+/**
+ * Whether the workspace policy may sleep this tab right now. Deliberately NOT
+ * canSleepTab(): that one spares a new tab page ("nothing to reload"), which
+ * is the exact tab this policy is here to put down.
+ */
+function canSleepInWorkspace(tab, mode) {
+  if (mode === 'off') return false;
+  if (!tab || tab.kind !== 'page') return false; // a Claude chamber is not a page
+  if (isNativeTab(tab)) return false;            // a hosted window is not a url
+  if (tab.asleep) return false;
+  if (tab.id === activeTabId) return false;
+  if (isTabOnScreen(tab)) return false;          // the other half of a split is visible too
+  if (tab.broken) return false;                  // its card IS the page
+  if (!isViewUsable(tab)) return false;
+  // A new tab page comes back byte for byte identical, so nothing about it is
+  // worth sparing — not a pin, not the fact that it is playing its own muted
+  // loop (setTabAudible() never flags one anyway).
+  if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return true;
+  if (mode !== 'all') return false;
+  // A real page loses its scroll, its forms and its session on the way back,
+  // so 'all' spares exactly what the idle sweep spares.
+  if (tab.pinned) return false;
+  if (tab.audible) return false;
+  return true;
+}
+
+/**
+ * The mode that applies to ONE workspace at this instant. Only 'all' has a
+ * clock, and until that clock is up it still owes the new tab pages: they are
+ * the reason the whole feature exists and they cost nothing to put down. So
+ * 'all' reads as 'newtab' while the workspace is still inside its N minutes.
+ */
+function sleepModeFor(id) {
+  const mode = workspaceSleepMode();
+  if (mode !== 'all') return mode;
+  const left = workspaceLeftAt.has(id) ? workspaceLeftAt.get(id) : sleepEpoch;
+  return (left <= Date.now() - workspaceSleepMinutes() * 60000) ? 'all' : 'newtab';
+}
+
+/**
+ * Apply the policy to one workspace — the one being left, or one the sweep has
+ * decided nobody is looking at.
+ * @param {string} [mode] the mode to apply, defaulting to this workspace's own.
+ * @returns {number} how many tabs went to sleep.
+ */
+function sleepWorkspaceTabs(id, mode) {
+  const use = mode || sleepModeFor(id);
+  if (use === 'off') return 0;
+  let slept = 0;
+  // A copy: sleepTab() swaps an element inside #views while we walk the list.
+  for (const tab of workspaceTabs(id).slice()) {
+    if (canSleepInWorkspace(tab, use) && sleepTab(tab)) slept++;
+  }
+  return slept;
+}
+
+/**
+ * One sweep of the WORKSPACES, on the same 60s tick as the tab sweep.
+ *
+ * 'newtab' does most of its work the moment a workspace is left, so this looks
+ * like a belt-and-braces pass — but it is load-bearing: leaving a workspace
+ * one second after entering it leaves a <webview> that has not reached
+ * dom-ready, and a guest with nothing attached yet has nothing to give back.
+ * wireViewEvents() catches that one on dom-ready; this catches anything that
+ * never arrives at all.
+ * @returns {number} how many tabs were put to sleep.
+ */
+function sleepIdleWorkspaces() {
+  if (workspaceSleepMode() === 'off') return 0;
+  let slept = 0;
+  for (const ws of workspaces) {
+    if (ws.id === currentWorkspaceId) continue;
+    slept += sleepWorkspaceTabs(ws.id);
+  }
+  return slept;
+}
+
+/** How many of a workspace's tabs are asleep. The popover puts this on the row. */
+function workspaceAsleepCount(id) {
+  const want = validWorkspaceId(id);
+  return tabs.reduce((n, t) => n + ((t.asleep && tabWorkspace(t) === want) ? 1 : 0), 0);
+}
+
+/** Both sweeps on one interval: one timer, one walk of the strip per minute. */
+function sleepSweep() {
+  return sleepIdleTabs() + sleepIdleWorkspaces();
+}
+
+/**
+ * The stand-in a sleeping tab leaves behind in #views. activateTab() toggles
+ * tab.viewEl.style.display on EVERY tab, so a tab with no guest still has to
+ * have an element there; this one holds no space and never paints.
+ */
+function sleepPlaceholder() {
+  const el = document.createElement('div');
+  el.className = 'sleeping-view';
+  el.hidden = true;
+  return el;
+}
 
 /** Idle minutes before a background tab sleeps; 0 means never. */
 function tabSleepMinutes() {
@@ -6311,9 +6515,7 @@ function sleepTab(tab) {
 
   tab.url = readCurrentUrl(tab) || tab.url;
 
-  const placeholder = document.createElement('div');
-  placeholder.className = 'sleeping-view';
-  placeholder.hidden = true;
+  const placeholder = sleepPlaceholder();
 
   const viewEl = tab.viewEl;
   try {
@@ -6352,7 +6554,12 @@ function wakeTab(tab) {
   if (!viewsEl) return false;
 
   const placeholder = tab.viewEl;
-  const viewEl = buildWebview(tab, tab.url || HOME_URL);
+  // A new tab page comes back FRESH rather than on the url it slept on: its
+  // url carries the theme it was born with, and the theme may well have
+  // changed while the tab was away. Everything else wakes where it was.
+  const target = isNewTabUrl(tab.url) ? newTabUrl() : (tab.url || HOME_URL);
+  tab.url = target;
+  const viewEl = buildWebview(tab, target);
   try {
     // Back in its own slot, so #views keeps the strip's order.
     if (placeholder && placeholder.isConnected) viewsEl.insertBefore(viewEl, placeholder);
@@ -6388,11 +6595,22 @@ function sleepIdleTabs() {
   return slept;
 }
 
-/** Strip menu: sleep every eligible tab now. canSleepTab() spares the active one. */
+/**
+ * Whether the user may put this tab to sleep BY HAND, right now — the union of
+ * the two automatic rules, because a menu item the user clicked is not the
+ * place to enforce a policy they set for the background. The idle rule spares a
+ * new tab page ("nothing to reload"); the workspace rule is the one that knows
+ * a new tab page is exactly what is worth putting down.
+ */
+function canSleepNow(tab) {
+  return canSleepTab(tab) || canSleepInWorkspace(tab, 'all');
+}
+
+/** Strip menu: sleep every eligible tab now. canSleepNow() spares the active one. */
 function sleepOtherTabs() {
   let slept = 0;
   for (const tab of tabs.slice()) {
-    if (canSleepTab(tab) && sleepTab(tab)) slept++;
+    if (canSleepNow(tab) && sleepTab(tab)) slept++;
   }
   return slept;
 }
@@ -7995,7 +8213,7 @@ function tabMenuItemsForTab(tab) {
     // there: disabled on a tab that is not allowed to sleep right now.
     items.push(tab.asleep
       ? { label: 'Wake tab', run: () => wakeTab(tab) }
-      : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepTab(tab) });
+      : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) });
   } else {
     // Same folder, fresh session — the chamber already running is untouched.
     // Duplicate is deliberately not offered: a PTY cannot be copied.
@@ -8067,7 +8285,7 @@ function tabMenuItemsForStrip() {
   // The folders chambers have actually run in: the picker, already answered.
   for (const row of claudeRecentMenuItems(5)) items.push(row);
   // The manual version of the idle sweep: the tab in front is never touched.
-  items.push({ label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepTab) });
+  items.push({ label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepNow) });
   items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
   return items;
 }
@@ -8167,6 +8385,10 @@ const SESSION_NEWTAB = 'newtab';
 // page instead of the phone (seen 2026-09-13). The marker survives the filter
 // and is resolved to PHONE_URL on restore.
 const SESSION_PHONE = 'phone';
+// A stored chip title is a courtesy for a tab that comes back ASLEEP and has
+// no guest to ask; a page can set <title> to anything, so it is capped here
+// rather than trusted.
+const SESSION_TITLE_MAX = 200;
 
 // True only while restoreSession() is building the strip. Saves are suppressed
 // throughout, so a half-built session never overwrites the stored one.
@@ -8228,6 +8450,15 @@ function sessionSnapshot() {
       entry = { url: url };
       if (tab.pinned) entry.pinned = true;
       if (tab.muted) entry.muted = true;
+      // The page's own <title>, but only for a real web page (a bundled page
+      // names itself from its first frame) and only when it says more than the
+      // url does. A tab restored ASLEEP has no guest to ask, so without this
+      // its chip would come back reading "example.com" where it used to read
+      // the article's name — and would stay wrong until the user clicked it.
+      if (url !== SESSION_NEWTAB && url !== SESSION_PHONE
+        && tab.title && tab.title !== shortLabelFor(url)) {
+        entry.title = String(tab.title).slice(0, SESSION_TITLE_MAX);
+      }
       // Which catalogue app this tab is, by id: the name, url and host are the
       // catalogue's to say, and it may have moved between runs.
       if (isAppTab(tab)) entry.app = tab.app.id;
@@ -8380,7 +8611,7 @@ function sanitiseSession(parsed) {
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
       entries.push({
         claude: true, cwd: cwd, url: '', pinned: false, muted: false,
-        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: ''
+        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: '', title: ''
       });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
@@ -8390,7 +8621,7 @@ function sanitiseSession(parsed) {
       if (appId.length > APP_ID_MAX) continue; // not an id anything wrote
       entries.push({
         claude: false, cwd: '', url: '', pinned: false, muted: false,
-        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: appId
+        collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: appId, title: ''
       });
       if (entries.length >= SESSION_MAX_TABS) break;
       continue;
@@ -8407,12 +8638,17 @@ function sanitiseSession(parsed) {
       href = target.href;
     }
     const appId = (entry && typeof entry.app === 'string') ? entry.app.trim() : '';
+    // Written only for real web pages, and only when it beat the url; a
+    // session from a build that predates it simply has none, and the chip
+    // falls back to the url exactly as it always did.
+    const storedTitle = (entry && typeof entry.title === 'string')
+      ? entry.title.trim().slice(0, SESSION_TITLE_MAX) : '';
     entries.push({
       claude: false, cwd: '', url: href,
       pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted),
       collapsed: !!(entry && entry.collapsed), ws: ws,
       app: (appId && appId.length <= APP_ID_MAX) ? appId : '',
-      native: ''
+      native: '', title: storedTitle
     });
     if (entries.length >= SESSION_MAX_TABS) break;
   }
@@ -8559,8 +8795,18 @@ function restoreSession(snapshot) {
   try {
     // All background: the strip is built in order, then the saved tab is raised.
     const resume = settingGet('claudeResume') !== false; // unset means yes
+    // Every workspace but the one coming up on screen is rebuilt ASLEEP unless
+    // the policy is off. This is the whole point of the feature at boot: six
+    // preset workspaces, each holding a new tab page, used to come back as six
+    // renderers all decoding the same moving background into the one GPU
+    // process before the user had looked at anything.
+    const sleepOthers = workspaceSleepMode() !== 'off';
     for (const row of ordered) {
       const entry = row.entry;
+      // Page tabs only: a Claude chamber and a native app tab have their own
+      // restore shapes and neither can be rebuilt from a url.
+      const bornAsleep = sleepOthers && !entry.claude && !entry.native
+        && entry.ws !== wantCurrent;
       // A native tab comes back as a PLACEHOLDER and nothing else: relaunching
       // somebody's apps behind their back on every boot is not a restore, it is
       // a surprise. The card on it offers "Start <app>".
@@ -8573,9 +8819,15 @@ function restoreSession(snapshot) {
             background: true,
             pinned: entry.pinned,
             muted: entry.muted,
-            workspace: entry.ws
+            workspace: entry.ws,
+            asleep: bornAsleep
           }));
       if (!tab) continue;
+      // The stored <title>, for a chip that has no guest to ask for one. Only
+      // a tab born asleep needs it — an awake one is re-titled the moment its
+      // page loads — but applying it to both keeps the strip from flickering
+      // through the url on the way to the title it had before the restart.
+      if (entry.title) setTabTitle(tab, entry.title);
       // Collapsed is a chip-size flag on every kind of tab, so it goes back on
       // here rather than through any one creator's options.
       if (entry.collapsed) setTabCollapsed(tab, true);
@@ -8724,6 +8976,15 @@ function wireViewEvents(tab) {
     // page is there to take CSS and is not yet on screen.
     applySiteStyles(tab);
     emitTabEvent('tabready', tab);
+    // The workspace sleep policy could not reach this tab while it was still
+    // loading: sleepTab() has nothing to give back before dom-ready, so a tab
+    // opened by entering a workspace and left a second later would otherwise
+    // stay awake until the next minute's sweep found it. This is that sweep,
+    // one tab early — and a no-op for every tab in the workspace on screen.
+    if (tab.id !== activeTabId && tabWorkspace(tab) !== currentWorkspaceId) {
+      const wsMode = sleepModeFor(tabWorkspace(tab));
+      if (canSleepInWorkspace(tab, wsMode)) sleepTab(tab);
+    }
   });
 
   // The page started or stopped making a sound. Chromium fires these per media
@@ -10497,10 +10758,11 @@ function init() {
   // A pending debounced session write must not be lost to the window closing.
   window.addEventListener('beforeunload', flushSession);
 
-  // Tab sleeping: one sweep a minute for the life of the window. Deliberately
-  // never cleared — the chrome outlives every tab in it, and the setting is
-  // re-read on each sweep, so a change takes effect without a restart.
-  window.setInterval(sleepIdleTabs, TAB_SLEEP_SWEEP_MS);
+  // Tab sleeping: one sweep a minute for the life of the window — the idle
+  // clock and the workspace clock on the same tick. Deliberately never cleared
+  // — the chrome outlives every tab in it, and both settings are re-read on
+  // each sweep, so a change takes effect without a restart.
+  window.setInterval(sleepSweep, TAB_SLEEP_SWEEP_MS);
 
   // Re-apply the theme theme-boot.js already stamped on <html>: this is what
   // paints the toggle glyph and hands the theme to terminal.js. Runs before the
@@ -10548,6 +10810,15 @@ window.sleepTab = sleepTab;
 window.wakeTab = wakeTab;
 window.sleepIdleTabs = sleepIdleTabs;
 window.canSleepTab = canSleepTab;
+window.canSleepNow = canSleepNow;
+// The workspace half: sleepSweep() is what the minute timer actually calls, so
+// a harness can run one tick of BOTH clocks without waiting a minute for it.
+window.sleepSweep = sleepSweep;
+window.sleepIdleWorkspaces = sleepIdleWorkspaces;
+window.sleepWorkspaceTabs = sleepWorkspaceTabs;
+window.sleepModeFor = sleepModeFor;
+window.workspaceAsleepCount = workspaceAsleepCount;
+window.workspaceSleepMode = workspaceSleepMode;
 window.splitWithNext = splitWithNext;
 window.splitWithTab = splitWithTab;
 window.splitTabs = splitTabs;

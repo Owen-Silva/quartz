@@ -23,6 +23,9 @@
  *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions
  *     claudeNotify: true | false,           // toast when a tab goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
+ *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
+ *                                           // you are not looking at
+ *     workspaceSleepMinutes: 0|5|10|30|60,  // 'all' only: minutes away first
  *     newtabBackground: { kind: 'board'|'aurora'|'image',
  *                         boardOverImage: bool, dim: 0..0.6, rev },
  *     music:        { enabled, source: 'ambient'|'files',
@@ -108,6 +111,16 @@
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
     tabSleepMinutes: 30,
+    /* Workspace sleep. Every preset workspace opens on a new tab page, and a
+       new tab page paints a moving background: six of them decode 60 fps each
+       into the one GPU process whether or not their view is hidden. 'newtab'
+       (the default) puts those pages down the moment you leave the workspace
+       they are in — they come back identical, so nothing is lost. 'all' also
+       sleeps real pages once a workspace has gone unlooked-at for
+       workspaceSleepMinutes, which costs them their scroll and their forms.
+       app.js reads both through Settings.get(); there is no IPC either way. */
+    workspaceSleep: 'newtab',
+    workspaceSleepMinutes: 10,
     /* Downloads: off means a file goes straight to the Downloads folder with
        no prompt, which is what every browser does. downloads.js pushes this
        to main, which is the only process that can act on it. */
@@ -214,6 +227,22 @@
     { value: 30, name: '30 minutes' },
     { value: 60, name: '1 hour' },
     { value: 180, name: '3 hours' }
+  ];
+
+  /* Workspace sleep: what may go to sleep in a workspace you have left. */
+  var WORKSPACE_SLEEP = [
+    { id: 'newtab', name: 'New tab pages' },
+    { id: 'all', name: 'Every page' },
+    { id: 'off', name: 'Off' }
+  ];
+
+  /* ...and, for 'Every page', how long a workspace goes unlooked-at first. */
+  var WORKSPACE_AWAY_TIMES = [
+    { value: 0, name: 'Straight away' },
+    { value: 5, name: '5 minutes' },
+    { value: 10, name: '10 minutes' },
+    { value: 30, name: '30 minutes' },
+    { value: 60, name: '1 hour' }
   ];
 
   /* The keyboard map, as the user would describe it to themselves. */
@@ -1979,7 +2008,61 @@
     var field = el('div', 'set-field');
     field.setAttribute('data-field', 'tabsleep');
     s.appendChild(field);
+    // The workspace half of the same idea, in the same section: both answers
+    // are "what may stop running while you are not looking at it".
+    var ws = el('div', 'set-field');
+    ws.setAttribute('data-field', 'wssleep');
+    s.appendChild(ws);
     return s;
+  }
+
+  /** The stored workspace sleep policy; anything unrecognised is the default. */
+  function workspaceSleepMode() {
+    var value = get('workspaceSleep');
+    for (var i = 0; i < WORKSPACE_SLEEP.length; i++) {
+      if (WORKSPACE_SLEEP[i].id === value) return value;
+    }
+    return DEFAULTS.workspaceSleep;
+  }
+
+  function renderWorkspaceSleep() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="wssleep"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var mode = workspaceSleepMode();
+    field.appendChild(controlRow(
+      'In workspaces you are not in, sleep',
+      null,
+      segmented(WORKSPACE_SLEEP, mode, function (next) {
+        set({ workspaceSleep: next });
+      })
+    ));
+
+    if (mode === 'all') {
+      var minutes = Number(get('workspaceSleepMinutes'));
+      if (!isFinite(minutes) || minutes < 0) minutes = DEFAULTS.workspaceSleepMinutes;
+      field.appendChild(controlRow(
+        'once the workspace has been left for',
+        'set-ws-sleep',
+        glassSelect('set-ws-sleep', WORKSPACE_AWAY_TIMES, minutes, function (value) {
+          set({ workspaceSleepMinutes: Number(value) });
+        })
+      ));
+    }
+
+    // One plain sentence per choice — what it does and what it costs.
+    var hint = 'Off: every workspace keeps all of its pages running, '
+      + 'whether or not you are looking at it.';
+    if (mode === 'newtab') {
+      hint = 'Sleep new tab pages in workspaces you are not looking at '
+        + '(they come back fresh). Nothing else in them sleeps.';
+    } else if (mode === 'all') {
+      hint = 'Sleep every page in a workspace you have been away from that long '
+        + '(pages reload when you return; new tab pages come back fresh). '
+        + 'Claude tabs and app tabs never sleep.';
+    }
+    field.appendChild(el('p', 'set-hint', hint));
   }
 
   function renderTabs() {
@@ -5005,6 +5088,7 @@
     renderLook();
     renderClaude();
     renderTabs();
+    renderWorkspaceSleep();
     renderDownloads();
     renderSearch();
     renderSites();
@@ -5184,6 +5268,10 @@
       if (keys.indexOf('claudeSkipPermissions') >= 0) renderClaudeSkip();
       if (keys.indexOf('claudeNotify') >= 0) renderClaudeNotify();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
+      // The mode decides whether the minutes row is there at all, so both keys
+      // redraw the whole field.
+      if (keys.indexOf('workspaceSleep') >= 0
+        || keys.indexOf('workspaceSleepMinutes') >= 0) renderWorkspaceSleep();
       if (keys.indexOf('downloadsAskWhere') >= 0) renderDownloads();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
