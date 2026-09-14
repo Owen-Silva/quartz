@@ -190,6 +190,20 @@ recorded now is the list of preset keys a profile has been offered, so a preset 
 stays deleted. The old flag is still written beside the list, and still reads as "the original
 four", so an older build reads the same profile correctly.
 
+**Sleep.** A workspace you are not looking at stops paying for itself. Seven new-tab pages across
+the seeded workspaces were each decoding the moving background at 60 fps, because a hidden
+`<webview>` does not reliably tell its guest it is hidden, and the GPU process sat at 1.9 GB with
+the whole browser lagging. Leaving a workspace now puts its new-tab pages to sleep at once: the
+guest is torn down, the chip keeps its title with a crescent where the close button sits, and a
+woken new-tab page comes back fresh, because a new tab page has nothing to lose. Settings → Tabs
+carries the policy — New tab pages (the default), Every page, or Off — and Every page also sleeps
+real pages once the workspace has gone unlooked-at for the chosen time, which costs them their
+scroll and their forms, so they reload on return. A Claude chamber and a native app tab never sleep
+under any mode; the Phone page does, and its stream goes down with it. A restart restores only the
+current workspace's pages awake, the rest born asleep under the titles they had, and the switcher
+says how many ("2 asleep", "all asleep"). Six workspaces visited leaves two guests instead of six
+and one video decoding instead of five.
+
 **Side pane.** A workspace may own a column beside the tab well (never over it): 380px by default,
 280 to 60% of the window, a 6px drag handle, width remembered. app.js shows it for the current
 workspace's pane kind and tells the tenant with a `sidepane` event; hosted apps and split view
@@ -693,7 +707,9 @@ and the bookmarks-bar switch); Claude — the folder new Claude tabs start in (t
 the native picker, and only written once main confirms it is a real directory), the switch for
 resuming the last conversation on restore, "Skip permission prompts" (on by default, described
 above), and `claudeNotify`, behind the Windows notification described above; Tabs (the background
-idle time before a tab sleeps, or never); Downloads ("Ask
+idle time before a tab sleeps, or never, and under it the workspace sleep policy described above —
+New tab pages, Every page or Off, Every page carrying the minutes away it waits first, each choice
+saying in one sentence what it does and what it costs); Downloads ("Ask
 where to save each file", off by default); Search (Google, DuckDuckGo, Bing, Brave, Startpage);
 Websites (the site theme guests see through `prefers-color-scheme`); Site styles and scripts;
 Browser style, below; New tab (the background — circuit board, aurora only, your own image, or
@@ -713,6 +729,7 @@ key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
 (`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `chipsSource`, `homepage`,
 `claudeDir`, `claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`,
+`workspaceSleep`, `workspaceSleepMinutes`,
 `downloadsAskWhere`, `newtabBackground`, `bookmarksBar`, `apps` with its `pins`, the ids of the
 apps on the new tab's dock, and `music` with the idle-music preferences); missing keys fall back to
 defaults, so an older stored object still reads. Section titles are set at full text colour,
@@ -872,6 +889,20 @@ travels the channel the history page already uses: a `newtab:end-task` console l
 honours only from the tab that owns that guest and only for a new-tab URL, forwarded to
 `stats.endTask` and pushed back as `window.__applyEndTask`. Collapsed, the list costs nothing —
 samples are kept and not drawn.
+
+A group of more than one process carries its own processes. A chevron on such a group unfolds child
+rows under it — pid, the role read once from the command line (main, renderer, GPU, audio, network,
+utility), CPU, memory and I/O — kept by pid between samples so nothing thrashes, with which groups
+are open remembered like the list's own fold. A renderer row also names what it holds: a bundled
+page by its file name, the chrome document as Browser UI, a renderer holding nothing as idle
+renderer, and for a tab the tab and the workspace it lives in — "New tab · Home (this page)",
+"Example Domain · School", a Claude tab as "Claude · <workspace>", up to three names and then +N for
+a process several tabs share. Main sends each renderer row the webContents ids living in it and the
+chrome, which alone knows workspaces, rewrites the labels before the sample reaches the page; every
+label is worked out before any of them is written, so a throw relays the sample untouched with a
+note under the group rather than a half-rewritten list. A command line that could not be read is
+words on the row — another user's process, or one the browser is not allowed to open — never a
+blank.
 
 **Markets.** Live stock prices in the new tab's bottom-right corner, and the one module the board
 does not seat — `newtab-bg.js`'s `MODULE_SPEC` names three ids and this is not one of them, so it

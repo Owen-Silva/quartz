@@ -969,6 +969,42 @@ Found, and not ours to fix:
   down back after 30 s of clean running. A dropped frame, a decoder reset, a tab coming back into
   view or a reconnect asks the phone for a key frame at once instead of waiting up to ten seconds.
 
+### Processes (2026-09-13)
+
+- Every Electron process on its own row. A group of more than one process carries its children now:
+  pid, the role read once from the command line (main, renderer, GPU, audio, network, utility), CPU,
+  memory and I/O. The new tab page draws a chevron on such a group, keeps the child rows by pid so
+  nothing thrashes between samples, and remembers which groups you left open.
+- A renderer row says what it holds — a bundled page by its file name, the chrome document as
+  Browser UI, a renderer holding nothing as idle renderer — and for a tab, the tab and the workspace
+  it lives in: "New tab · Home (this page)", "Example Domain · School", a Claude tab as
+  "Claude · <workspace>", three names at most and then +N for a process several tabs share. main
+  hands each renderer row the webContents ids living in it and the chrome, which alone knows
+  workspaces, rewrites the labels on the way past.
+- Failures are words, not blanks. A command line that could not be read says why on the row —
+  another user's process, or one the browser is not allowed to open — and a throw in the rewrite
+  relays the sample untouched with a note under the group rather than a half-rewritten list. Every
+  label is worked out before any of them is written, which is what makes that possible.
+
+### Workspaces sleep (2026-09-13)
+
+- Only the workspace you are looking at keeps its pages running. Seven new-tab pages across the
+  seeded workspaces each kept decoding the video background at 60 fps, because a hidden `<webview>`
+  does not reliably tell its guest it is hidden; the GPU process sat at 1.9 GB and the whole browser
+  lagged.
+- Leaving a workspace puts its new-tab pages to sleep at once: the guest is torn down, the chip
+  keeps its title with a crescent where the close button sits, and a woken new-tab page comes back
+  fresh — a new tab page has nothing to lose.
+- An optional mode sleeps every page in a workspace once you have been away from it for N minutes.
+  Those reload on return, at the cost of their scroll and their forms. A Claude chamber and a native
+  app tab never sleep under any mode; the Phone page does, and its stream goes down with it.
+- A restart restores only the current workspace's pages awake — the rest come back born asleep under
+  the titles they had. Settings → Tabs carries the policy (New tab pages, Every page, Off) and says
+  in one sentence what each choice does and what it costs; the workspace popover shows "2 asleep"
+  beside the count.
+- Measured in a test instance: 6 workspaces visited leaves 2 guests instead of 6, one video decoding
+  instead of five, and GPU memory flat.
+
 ## Things to know
 
 - A forced kill can lose the last few seconds of tab state. A normal close cannot — the strip is
@@ -1047,12 +1083,17 @@ Found, and not ours to fix:
   live press in the browser.
 - Only adb and the scrcpy server are downloaded, on first use, into the profile's tools folder. A
   cleared profile fetches them again, and that first Phone tab needs the network.
+- If the browser lags with many workspaces open, it was the new tab pages. A hidden `<webview>` does
+  not reliably tell its guest it is hidden, so every workspace parked on a new tab page carried on
+  decoding the moving background at 60 fps into the one GPU process — seven of them took it to
+  1.9 GB. Workspace sleep is on by default and is the fix; turn it off in Settings → Tabs and this
+  comes back.
 
 ## Commits
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
 through 04:30 are the small hours after that same 11 September evening; 09:53 through 19:55 are
-12 September; 14:19 through 16:57 are 13 September.
+12 September; 14:19 through 20:34 are 13 September.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -1187,3 +1228,6 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | b87e772 | 16:07 | Phone page: what the first live pass taught it — silence reads as "still N s", key frames on the way back, a deeper decode queue with its own readouts, and two geometry bugs from the size probe |
 | 770b6de | 16:57 | Phone page: paint every frame in the decoder's callback, forgive a cold decoder, and ask back for what a shed turned down after 30 s of clean running |
 | 0406ef5 | 19:39 | Phone: Screen on becomes Wake, a black picture names its cause on the canvas, a refused control frame is no longer dropped silently, Settings → Phone gets the Phone link switch, the keyboard release chord moves to Ctrl+Alt+P, and the Phone workspace keeps its page across a restart |
+| 92f7864 | 20:01 | Processes: every Electron process on its own row, named by the tab it hosts |
+| 252359e | 20:14 | Processes: a renderer's row names its tab and its workspace |
+| 1660003 | 20:34 | Workspaces sleep: only the workspace you are looking at keeps its pages running |
