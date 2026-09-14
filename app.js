@@ -8029,6 +8029,12 @@ const SESSION_MAX_WORKSPACES = 24;
 // Stand-in for the bundled new-tab page. Storing its file:// URL would freeze a
 // stale ?theme= into the session, so the marker is resolved on restore instead.
 const SESSION_NEWTAB = 'newtab';
+// Same idea for the Phone workspace's page: phone.html is a bundled file://
+// page, and the restore filter rightly floors every file:// url, so without a
+// marker the Phone workspace came back after a restart holding a blank new-tab
+// page instead of the phone (seen 2026-09-13). The marker survives the filter
+// and is resolved to PHONE_URL on restore.
+const SESSION_PHONE = 'phone';
 
 // True only while restoreSession() is building the strip. Saves are suppressed
 // throughout, so a half-built session never overwrites the stored one.
@@ -8044,6 +8050,7 @@ function sessionUrlFor(tab) {
   if (!tab || tab.kind !== 'page') return null;
   const url = readCurrentUrl(tab) || tab.url;
   if (isNewTabUrl(url)) return SESSION_NEWTAB;
+  if (isPhoneUrl(url)) return SESSION_PHONE;
   // The article itself is what comes back after a restart: the reader wrapper
   // has no article to show until someone opens it from a loaded page.
   const parsed = parseUrlOrNull(readerSourceOf(url) || url);
@@ -8259,8 +8266,8 @@ function sanitiseSession(parsed) {
     const url = (entry && typeof entry.url === 'string') ? entry.url : '';
     if (!url) continue;
     let href = '';
-    if (url === SESSION_NEWTAB) {
-      href = SESSION_NEWTAB;
+    if (url === SESSION_NEWTAB || url === SESSION_PHONE) {
+      href = url; // a marker, resolved to the bundled page on restore
     } else {
       const target = parseUrlOrNull(url);
       // Anything that is not plain web goes on the floor, whoever wrote it.
@@ -8429,7 +8436,8 @@ function restoreSession(snapshot) {
         ? createNativeTab(entry.native, { background: true, workspace: entry.ws })
         : (entry.claude
           ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws })
-          : createTab(entry.url === SESSION_NEWTAB ? HOME_URL : entry.url, {
+          : createTab(entry.url === SESSION_NEWTAB ? HOME_URL
+            : (entry.url === SESSION_PHONE ? PHONE_URL : entry.url), {
             background: true,
             pinned: entry.pinned,
             muted: entry.muted,

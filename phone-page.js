@@ -72,7 +72,10 @@
     TAB: 61, ENTER: 66, DEL: 67, APP_SWITCH: 187,
     DPAD_UP: 19, DPAD_DOWN: 20, DPAD_LEFT: 21, DPAD_RIGHT: 22,
     PAGE_UP: 92, PAGE_DOWN: 93, ESCAPE: 111, FORWARD_DEL: 112,
-    MOVE_HOME: 122, MOVE_END: 123
+    MOVE_HOME: 122, MOVE_END: 123,
+    /* KEYCODE_WAKEUP (Android KeyEvent, API 20+). The ONE thing that wakes a
+       dozing phone from here: SET_DISPLAY_POWER cannot (measured 2026-09-13). */
+    WAKEUP: 224
   };
 
   /* android.view.KeyEvent.META_*: SHIFT_ON 0x01 and SHIFT_LEFT_ON 0x40 are
@@ -341,7 +344,13 @@
     firstOut: true,          // the next output is this decoder's first
     initMs: 0,               // what that first frame cost: the decoder's start-up
     sentAt: null,            // pts -> performance.now() at decode(), for that number
-    notPainting: false       // frames decoding but nothing reaching the screen
+    notPainting: false,      // frames decoding but nothing reaching the screen
+    /* "The screen is just black." A phone whose display is asleep composites
+       nothing, so the mirror is a live, perfectly black picture: frames keep
+       arriving, the decoder is happy, and nothing says why. blackSince is when
+       the picture went black (0 = it is not), blackMax the brightest channel
+       found in the last sample, blackErr why the sample could not be taken. */
+    blackSince: 0, blackMax: 255, blackErr: '', blackNoteOn: false
   };
 
   var audio = {
@@ -463,7 +472,17 @@
       return;
     }
 
-    /* 3. tools -> device -> stream, in the order they must be satisfied */
+    /* 3. the master switch, ahead of everything it turns off. Nothing below is
+       true while the phone link is off, and there is exactly one way out. */
+    if (linkIsOff()) {
+      setStatus('off', 'phone link is off',
+        'nothing is connected and no adb is running until it is switched back on',
+        { label: 'Open Settings → Phone', run: function () { runCommand('open-settings'); } });
+      setFrameNote('the phone link is turned off in Settings → Phone');
+      return;
+    }
+
+    /* 4. tools -> device -> stream, in the order they must be satisfied */
     var t = phone.tools || {};
     if (t.state === 'missing') {
       setStatus('warn', 'the phone tools are not installed yet', t.reason || 'adb and the scrcpy server are missing',
@@ -824,7 +843,13 @@
       renderReadouts();
     } else if (m.type === 'result') {
       var done = wire.pending.get(m.id);
-      if (done) { wire.pending.delete(m.id); done(m); }
+      if (done) { wire.pending.delete(m.id); done(m); return; }
+      /* A result nobody is waiting for is NOT noise: phone.js answers a binary
+         control frame it could not write with { id: 0, ok: false, reason }
+         (there is no control socket, or the channel was refused). Dropping it
+         is how a rail button came to look like it worked while the bytes went
+         nowhere — so an unmatched failure is always said out loud. */
+      if (m.ok === false) railNote('error', 'the browser could not pass that to the phone: ' + (m.reason || 'no reason given'));
     } else if (m.type === 'stream') {
       onStreamMeta(m);
     }
@@ -893,7 +918,19 @@
 
   /* Every control message the page sends goes through here, so there is one
      place that can say "there is nowhere to send this". */
+  /* The master switch in Settings → Phone. While it is off there is no stream,
+     no adb and nothing to press; the page says so rather than looking broken. */
+  var LINK_OFF_TEXT = 'the phone link is turned off in Settings → Phone';
+
+  function linkIsOff() {
+    return !!(phone && phone.settings && phone.settings.enabled === false);
+  }
+
   function sendControl(bytes, what) {
+    if (linkIsOff()) {
+      railNote('error', (what || 'that') + ' went nowhere: ' + LINK_OFF_TEXT);
+      return false;
+    }
     if (!wire.ws || wire.ws.readyState !== 1) {
       railNote('error', (what || 'that') + ' went nowhere: not connected to the browser');
       return false;
@@ -1698,6 +1735,10 @@
     input.captured = on;
     els.pill.textContent = on ? 'keys → phone' : 'keys → browser';
     els.pill.dataset.on = on ? '1' : '0';
+    /* phone.html still carries the old title="Ctrl+Alt+K" (a chord the chrome
+       swallows before the guest ever sees it), so the pill is re-titled here
+       rather than left lying about which key releases the keyboard. */
+    els.pill.title = on ? 'Ctrl+Alt+P releases the keyboard' : 'Ctrl+Alt+P sends the keyboard to the phone';
     if (!on) {
       /* Release anything still held so the phone does not see a stuck key. */
       input.held.forEach(function (count, key) {
@@ -1719,8 +1760,13 @@
   }
 
   function onKeyDown(e) {
-    /* The release hotkey works whichever side has the keys. */
-    if (e.ctrlKey && e.altKey && (e.key === 'k' || e.key === 'K')) {
+    /* The release hotkey works whichever side has the keys. It is Ctrl+Alt+P —
+       P for phone — and NOT Ctrl+Alt+K, which could never arrive: main.js's
+       before-input-event swallows every combo that shortcuts.js binds, and
+       Ctrl+Alt+K is "Show Claude this page" (bound today: Ctrl+Alt+K, Left,
+       Right, Shift+K, Shift+R and Ctrl+Alt+1..9). Ctrl+Alt+P is unbound, so it
+       reaches the guest. Clicking outside the canvas still releases too. */
+    if (e.ctrlKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
       e.preventDefault();
       e.stopPropagation();
       var want = !input.captured;
@@ -1729,8 +1775,8 @@
          window that does not have the OS focus, and the pill must never lie
          about where the keys are going. */
       setCaptured(want);
-      railNote('', want ? 'keys go to the phone (Ctrl+Alt+K releases them)'
-        : 'keys go to the browser (Ctrl+Alt+K sends them to the phone)');
+      railNote('', want ? 'keys go to the phone (Ctrl+Alt+P releases them)'
+        : 'keys go to the browser (Ctrl+Alt+P sends them to the phone)');
       return;
     }
     if (!input.captured) return;
@@ -1801,6 +1847,72 @@
     };
   }
 
+  /* --- the two screen-power buttons, and why they are shaped like this -----
+
+     MEASURED against the user's phone (Android phone, Android 16 / SDK 36) on
+     2026-09-13, with a control-only scrcpy v4.1 session and `dumpsys` read
+     before and after every message:
+
+       phone awake  + SET_DISPLAY_POWER(off) -> server logs "Device display
+         turned off", SurfaceFlinger isPoweredOn=0: the panel really goes dark.
+         The MIRROR does not change at all (31 packets / 353 kB in the 2.5 s
+         while the panel was dark, same as before it) — Android keeps
+         compositing, so the picture here carries on. That is why the button
+         looked like it "did nothing": everything it does happens on the desk.
+
+       phone ASLEEP + SET_DISPLAY_POWER(on)  -> server logs "Device display
+         turned on" and SurfaceFlinger says isPoweredOn=1, but the phone stays
+         asleep: mWakefulness=Dozing, mScreenState=OFF, and a screenshot is
+         still 0.0/255 black. SET_DISPLAY_POWER sits UNDER PowerManager; it
+         cannot wake a dozing phone, and a dozing phone composites nothing.
+         KEYCODE_WAKEUP on the same socket woke it every time (Awake,
+         mScreenState=ON, screenshot 76.4/255, keyguard fully visible).
+
+     So "Screen on" was never going to work — the button anyone presses on a
+     dark mirror is a WAKE. It sends the wake key first and the display-power
+     message after it, which covers both states with one press. */
+
+  function displayPowerSaid(on, pressedAt) {
+    /* The scrcpy server logs "Device display turned on|off" on its own stdout
+       and phone.js forwards its newest line as stream.serverLine. There is no
+       device MESSAGE for this, so that log line is the only confirmation that
+       exists — and if it does not arrive, the page says exactly that. */
+    var line = phone && phone.stream ? String(phone.stream.serverLine || '') : '';
+    var at = phone && phone.stream ? (phone.stream.serverLineAt || 0) : 0;
+    if (at >= pressedAt && /display turned (on|off)/i.test(line)) {
+      railNote('ok', 'the phone said: ' + line.replace(/^\[server\]\s*/, '').replace(/^\w+:\s*/, ''));
+      return true;
+    }
+    return false;
+  }
+
+  function screenOff() {
+    var pressedAt = Date.now();
+    if (!sendControl(msgSetDisplayPower(false), null)) return;
+    railNote('', 'asked the phone to turn its screen off — the mirror keeps running, so the picture here will not change');
+    setTimeout(function () {
+      if (displayPowerSaid(false, pressedAt)) return;
+      railNote('error', 'asked the phone to turn its screen off, but it never said it did: scrcpy 4.1 reports this only in its own log, and nothing came back within 2 s — look at the phone');
+    }, 2000);
+  }
+
+  function wakePhone() {
+    var pressedAt = Date.now();
+    /* The wake key is what actually wakes a sleeping phone; the display-power
+       message covers the other case (awake, but WE powered the panel off). */
+    if (!sendControl(msgInjectKeycode(KEY_DOWN, AKEYCODE.WAKEUP, 0, 0), null)) return;
+    sendControl(msgInjectKeycode(KEY_UP, AKEYCODE.WAKEUP, 0, 0));
+    sendControl(msgSetDisplayPower(true));
+    railNote('', 'asked the phone to wake…');
+    setTimeout(function () {
+      if (video.blackSince) {
+        railNote('error', 'the phone did not wake: the picture is still black. Press the phone\'s power button — a locked phone can refuse a wake from a computer');
+        return;
+      }
+      if (!displayPowerSaid(true, pressedAt)) railNote('ok', 'wake sent; the picture is not black');
+    }, 2000);
+  }
+
   var RAIL_BUTTONS = [
     { label: 'Back', run: function () {
       if (sendControl(msgBackOrScreenOn(KEY_DOWN), 'back')) sendControl(msgBackOrScreenOn(KEY_UP));
@@ -1812,8 +1924,8 @@
     { label: 'Vol −', run: tap(AKEYCODE.VOLUME_DOWN, 'volume down') },
     { label: 'Rotate', run: function () { sendControl(msgEmpty(CTL.ROTATE_DEVICE), 'rotate'); } },
     { label: 'Notifs', run: function () { sendControl(msgEmpty(CTL.EXPAND_NOTIFICATION_PANEL), 'notifications'); } },
-    { label: 'Screen off', run: function () { sendControl(msgSetDisplayPower(false), 'screen off'); } },
-    { label: 'Screen on', run: function () { sendControl(msgSetDisplayPower(true), 'screen on'); } },
+    { label: 'Screen off', run: screenOff },
+    { label: 'Wake', run: wakePhone },
     { label: 'Copy ← phone', run: copyFromPhone },
     { label: 'Paste → phone', run: pasteToPhone },
     { label: 'Screenshot', wide: true, run: screenshot },
@@ -1833,6 +1945,21 @@
       if (spec.id) els['btn_' + spec.id] = b;
       keys.appendChild(b);
     });
+    syncRailEnabled();
+  }
+
+  /* Rail keys while the link is off: dimmed and marked disabled, but still
+     clickable on purpose — a dead button explains nothing, and a real
+     `disabled` one cannot even fire the click that would say why. Pressing one
+     is refused in sendControl with the reason, in the rail note. */
+  function syncRailEnabled() {
+    if (!els.railKeys) return;
+    var off = linkIsOff();
+    var kids = els.railKeys.children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].setAttribute('aria-disabled', off ? 'true' : 'false');
+      kids[i].style.opacity = off ? '0.45' : '';
+    }
   }
 
   function toggleMute() {
@@ -1928,8 +2055,67 @@
 
   var lastTick = { at: 0, painted: 0, bytes: 0, rafs: 0 };
 
+  /* --- is the picture black? ---------------------------------------------
+
+     MEASURED on the user's phone 2026-09-13: with the phone asleep (Dozing,
+     mScreenState=OFF) Android composites nothing, and a screenshot of it is
+     0.0/255 — so the mirror shows a live, flawless, completely black picture.
+     The keyguard and the PIN pad themselves are NOT hidden from capture on
+     this phone (76.4/255 and 59.5/255 with the display on, 94-100 % of pixels
+     non-black), so "the sign-in screen is black" is always the phone being
+     asleep, never Android refusing to show the lock screen.
+
+     One 8x16 read-back a second off a canvas the GPU already holds. */
+  var blackProbe = null, blackProbeCtx = null;
+
+  function pictureIsBlack() {
+    if (!els.canvas || !els.canvas.width || !els.canvas.height) return false;
+    try {
+      if (!blackProbe) {
+        blackProbe = document.createElement('canvas');
+        blackProbe.width = 8; blackProbe.height = 16;
+        blackProbeCtx = blackProbe.getContext('2d', { willReadFrequently: true });
+      }
+      if (!blackProbeCtx) return false;
+      blackProbeCtx.drawImage(els.canvas, 0, 0, 8, 16);
+      var d = blackProbeCtx.getImageData(0, 0, 8, 16).data;
+      var max = 0;
+      for (var i = 0; i < d.length; i += 4) {
+        var v = d[i] > d[i + 1] ? d[i] : d[i + 1];
+        if (d[i + 2] > v) v = d[i + 2];
+        if (v > max) max = v;
+      }
+      video.blackMax = max;
+      video.blackErr = '';
+      return max <= 10;
+    } catch (err) {
+      /* Never let a read-back failure invent a black screen. */
+      video.blackErr = 'the picture could not be sampled: ' + msg(err);
+      return false;
+    }
+  }
+
+  var BLACK_NOTE = 'the picture is black because the phone\'s screen is off — press Wake in the rail, or the phone\'s own power button. '
+    + 'A sleeping Android draws nothing, so there is nothing to mirror (the lock screen and the PIN pad themselves mirror fine).';
+
+  function checkBlackPicture(painting) {
+    var running = phone && phone.stream && phone.stream.state === 'running';
+    if (!running || !painting || !video.painted || video.paused) {
+      video.blackSince = 0;
+    } else if (pictureIsBlack()) {
+      if (!video.blackSince) video.blackSince = Date.now();
+    } else {
+      video.blackSince = 0;
+    }
+    /* > 1 s of black, so a single dark frame between two scenes says nothing. */
+    var show = !!video.blackSince && (Date.now() - video.blackSince) > 1000;
+    if (show && !video.blackNoteOn) { video.blackNoteOn = true; setFrameNote(BLACK_NOTE); }
+    else if (!show && video.blackNoteOn) { video.blackNoteOn = false; setFrameNote(''); }
+  }
+
   function tick() {
     var now = performance.now();
+    var paintingNow = video.painted > lastTick.painted;
     if (lastTick.at) {
       var dt = (now - lastTick.at) / 1000;
       video.fps = Math.round((video.painted - lastTick.painted) / dt);
@@ -1954,6 +2140,8 @@
        later the profile readout is the place it lives. */
     if (shed.note && shed.at && (Date.now() - shed.at) > 60000) shed.note = '';
     healShed(now);
+    checkBlackPicture(paintingNow);
+    syncRailEnabled();
     renderReadouts();
     renderStatus();
   }
@@ -1991,6 +2179,9 @@
       if (els.frame) els.frame.dataset.live = '0';
       if (now === 'off') { shed.step = 0; shed.note = ''; }
     }
+    /* The master switch must take effect on the push that carried it, not up
+       to a second later on the next tick. */
+    syncRailEnabled();
     renderStatus();
     renderReadouts();
   }
@@ -2024,6 +2215,8 @@
     els.note = $('frame-note');
     els.rail = $('rail');
     els.pill = $('rail-pill');
+    /* Right from the first paint, not only after the first toggle. */
+    if (els.pill) els.pill.title = 'Ctrl+Alt+P sends the keyboard to the phone';
     els.railKeys = $('rail-keys');
     els.railNote = $('rail-note');
     els.read = $('rail-read');

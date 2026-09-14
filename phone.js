@@ -5,8 +5,11 @@
  * scrcpy server), the device (pairing, connecting, pinning), the stream (the
  * scrcpy server running ON the phone, its three sockets tunnelled over adb),
  * and the relay that hands those sockets to the Phone page over a localhost
- * WebSocket. The user's phone is an Android phone (2025), Android 15, reached over
- * Tailscale (100.64.0.1) — never a cable, never the open internet.
+ * WebSocket. The user's phone is an Android phone (2025), Android 16 (ro.build.version.sdk
+ * = 36, read off the phone 2026-09-13 — it was 15 when this was written),
+ * reached over Tailscale (100.64.0.1) — never a cable, never the open
+ * internet. Nothing here branches on the SDK level: adb and the scrcpy server
+ * do all the version work, and v4.1 is current for API 36.
  *
  * CONTRACT (the single source of truth for phone.js, phone-page.js, and the
  * Settings → Phone section; change it here first, then everywhere)
@@ -51,7 +54,13 @@
  *               codec: string|null, width: number, height: number, fps: number, kbps: number,
  *               profile: 'lan'|'away'|'auto', bitrate: number, maxSize: number, maxFps: number,
  *               audio: boolean, audioCodec: string|null, scid: string|null, since: number,
- *               lastVideoAt: number },
+ *               lastVideoAt: number, serverLine: string, serverLineAt: number },
+ *                 // serverLine: the newest line the scrcpy server printed on the
+ *                 // phone ('' while off), serverLineAt its epoch ms. It is the
+ *                 // ONLY confirmation some control messages have: scrcpy answers
+ *                 // TYPE_SET_DISPLAY_POWER with a log line ("Device display turned
+ *                 // off") and no device message, so without this the page could
+ *                 // only claim it sent the bytes. Pushed like any other change.
  *                 // lastVideoAt: epoch ms of the last video packet, 0 while off. A
  *                 // still phone screen sends NOTHING (scrcpy encodes only on change),
  *                 // so this is a quiet "still for N s" readout — never a fault.
@@ -59,10 +68,25 @@
  *                 // shell still alive AND > 15 s of silence AND the control socket
  *                 // dead (the device-message path), which is a real broken link.
  *     ws: { port: number, clients: number },
- *     settings: { host: string, port: number, pairPort: number, profile: 'lan'|'away'|'auto',
+ *     settings: { enabled: boolean, host: string, port: number, pairPort: number,
+ *                 profile: 'lan'|'away'|'auto',
  *                 audio: boolean, lanBitrate: number, awayBitrate: number, maxSize: number,
  *                 maxFps: number, autoConnect: boolean, screenOffWhileMirroring: boolean }
  *   }
+ *
+ * DISABLED (settings.enabled === false — the master switch in Settings → Phone).
+ * The phone link is OFF: the stream stops ('phone link turned off'), the probe
+ * and reconnect timers stop, the device is disconnected and the adb SERVER is
+ * killed, and after that nothing here spawns adb at all — no auto-connect, no
+ * tools download on a page hello, no reconnect. 'connect', 'start', 'pair' and
+ * 'pin-tcpip' answer { ok: false, reason: 'phone link is off — turn it on in
+ * Settings → Phone' }. Pairing is KEPT (device.paired survives; only 'forget'
+ * clears it). ready is false with that same reason, device.state stays 'paired'
+ * or 'unpaired' with device.reason 'phone link is off (Settings → Phone)', and
+ * stream.state is 'off'. The ws relay keeps running and hellos are still
+ * answered, so an open Phone page still gets state and can say why it is dark.
+ * Turning it back on resumes exactly as a fresh start would (tools, connect,
+ * start — every step a visible state).
  *
  * THE PAGE SIDE (phone.html is a bundled, preload-less file:// guest like
  * newtab.html — it has no window.api, so it bootstraps on a console line, the
@@ -473,10 +497,16 @@ function create(deps) {
       since: 0,
       /* Epoch ms of the last video packet (0 while off). A still phone screen is
          silent for minutes on purpose, so this is a readout, never a fault. */
-      lastVideoAt: 0
+      lastVideoAt: 0,
+      /* The newest line the scrcpy server printed, and when. Some control
+         messages have no other answer (see the contract above). */
+      serverLine: '', serverLineAt: 0
     },
     ws: { port: 0, clients: 0 },
     settings: {
+      /* The master switch (Settings → Phone). false = the whole phone link is
+         off: no stream, no timers, no adb process at all. */
+      enabled: true,
       host: '100.64.0.1',
       port: 5555,
       pairPort: 0,
@@ -584,6 +614,7 @@ function create(deps) {
 
   function sanitiseSettings(raw, base) {
     const out = Object.assign({}, base);
+    if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
     if (typeof raw.host === 'string' && raw.host.trim()) out.host = raw.host.trim();
     if (raw.port != null) out.port = clampInt(raw.port, 1, 65535, base.port);
     if (raw.pairPort != null) out.pairPort = clampInt(raw.pairPort, 0, 65535, base.pairPort);
@@ -606,6 +637,9 @@ function create(deps) {
    */
   function refreshReady() {
     state.ready = state.tools.state === 'ready' && state.device.state === 'connected';
+    /* The master switch wins over every other reason: nothing else is true
+       while the link is off, and the way out is one switch. */
+    if (linkOff()) { state.ready = false; state.reason = OFF_REASON; return; }
     if (relayNote) { state.reason = relayNote; return; }
     if (wsLoadError) {
       state.reason = 'the ws module did not load (' + wsLoadError + ') — run npm install in the browser folder';
@@ -1266,7 +1300,7 @@ function create(deps) {
   /* --- the pollers that notice a phone going away ----------------------- */
 
   function startProbing() {
-    if (probeTimer) return;
+    if (probeTimer || linkOff()) return;   // nothing polls a link that is switched off
     probeTick = 0;
     probeTimer = setInterval(() => { probe().catch(() => {}); }, PROBE_MS);
     if (probeTimer.unref) probeTimer.unref();
@@ -1428,6 +1462,10 @@ function create(deps) {
   function scheduleReconnect() {
     stopReconnect();
     if (stopped) return;
+    if (linkOff()) {
+      state.device.reason = 'phone link is off (Settings → Phone)';
+      return;
+    }
     if (!state.settings.autoConnect) {
       state.device.reason += ' — auto-connect is off, press Connect';
       return;
@@ -1442,7 +1480,7 @@ function create(deps) {
     pushNow();
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (stopped || !guests.size || !state.settings.autoConnect) return;
+      if (stopped || linkOff() || !guests.size || !state.settings.autoConnect) return;
       connect({ host: state.settings.host, port: state.settings.port }).then((res) => {
         if (res && res.ok) autoStart('reconnected').catch(() => {});
       }).catch(() => {});
@@ -1872,11 +1910,22 @@ function create(deps) {
       pushNow();
       live.server = spawn(state.tools.adbPath, args, { windowsHide: true });
       const keep = (chunk) => {
+        let newest = '';
         for (const line of String(chunk).split('\n')) {
           const text = line.trim();
-          if (text) live.serverLog.push(text);
+          if (text) { live.serverLog.push(text); newest = text; }
         }
         while (live.serverLog.length > 40) live.serverLog.shift();
+        /* The server's own words, forwarded as state. For some control messages
+           this is the only answer that exists: scrcpy logs "Device display
+           turned off" and sends no device message, so a page that could not see
+           this line could only ever say "I sent the bytes". (MEASURED on the
+           phone 2026-09-13: the line arrives ~1 s after the message.) */
+        if (newest) {
+          state.stream.serverLine = newest;
+          state.stream.serverLineAt = Date.now();
+          push();
+        }
       };
       live.server.stdout.on('data', keep);
       live.server.stderr.on('data', keep);
@@ -2157,6 +2206,9 @@ function create(deps) {
     state.stream.kbps = 0;
     state.stream.scid = null;
     state.stream.lastVideoAt = 0;
+    /* The server is gone; its last words belonged to the run that just ended. */
+    state.stream.serverLine = '';
+    state.stream.serverLineAt = 0;
     autoCrossings = 0;
     pushNow();
     return { ok: true, reason: state.stream.reason };
@@ -2165,6 +2217,45 @@ function create(deps) {
   /* --- settings --------------------------------------------------------- */
 
   const QUALITY_KEYS = ['profile', 'audio', 'lanBitrate', 'awayBitrate', 'maxSize', 'maxFps', 'screenOffWhileMirroring'];
+
+  /* --- the master switch ------------------------------------------------- */
+
+  /* One sentence, used everywhere something is refused for being switched off,
+     so the page, the Settings section and every command reason agree. */
+  const OFF_REASON = 'phone link is off — turn it on in Settings → Phone';
+
+  function linkOff() { return state.settings.enabled === false; }
+
+  /**
+   * settings.enabled just changed. Off: tear the whole link down and leave no
+   * timer, no socket and no adb process behind — but keep the pairing, which is
+   * The user's to throw away with 'forget'. On: pick up exactly where a fresh start
+   * would, with every step visible.
+   */
+  async function applyEnabled() {
+    if (linkOff()) {
+      stopProbing();
+      stopReconnect();
+      await stopStream('phone link turned off');
+      const serial = state.device.serial;
+      /* adb, and only adb, is allowed to run here: this IS the turning-off. */
+      if (serial) { try { await adb(['disconnect', serial], 15000); } catch { /* it is going away anyway */ } }
+      try { await adb(['kill-server'], 15000); } catch { /* likewise */ }
+      adbServerStarted = false;
+      state.device.state = state.device.paired ? 'paired' : 'unpaired';
+      state.device.serial = null;
+      state.device.latencyMs = null;
+      state.device.battery = null;
+      state.device.reason = 'phone link is off (Settings → Phone)';
+      state.stream.state = 'off';
+      pushNow();
+      return { ok: true, reason: 'phone link turned off' };
+    }
+    state.device.reason = 'phone link turned back on';
+    pushNow();
+    autoStart('the phone link was turned back on').catch(() => {});
+    return { ok: true, reason: 'phone link turned on' };
+  }
 
   async function setSettings(partial) {
     if (!partial || typeof partial !== 'object') return { ok: false, reason: 'nothing to change' };
@@ -2177,6 +2268,14 @@ function create(deps) {
     state.stream.maxSize = state.settings.maxSize;
     state.stream.maxFps = state.settings.maxFps;
     if (state.stream.state === 'off') state.stream.audio = state.settings.audio;
+    /* The master switch outranks everything else in the same call: turning the
+       link off ends with the stream stopped, so there is nothing to restart. */
+    if (state.settings.enabled !== before.enabled) {
+      saveStore();
+      const res = await applyEnabled();
+      pushNow();
+      return res;
+    }
     saveStore();
     pushNow();
     if (changed.length && live) {
@@ -2193,6 +2292,13 @@ function create(deps) {
 
   async function command(name, arg) {
     try {
+      /* Switched off means switched off: the four commands that would reach
+         for the phone say so instead of quietly doing nothing. 'stop',
+         'disconnect', 'set-settings', 'forget' and 'open-settings' still work
+         (they only ever tidy up or turn it back on). */
+      if (linkOff() && (name === 'connect' || name === 'start' || name === 'pair' || name === 'pin-tcpip')) {
+        return { ok: false, reason: OFF_REASON };
+      }
       switch (name) {
         case 'install-tools': return await installTools();
         case 'pair': return await pair(arg);
@@ -2288,6 +2394,14 @@ function create(deps) {
    */
   async function autoStart(why) {
     if (autoBusy || stopped || !guests.size) return;
+    /* The master switch is off: a page opening must not download tools, must
+       not connect, must not spawn adb. The page says why (settings.enabled is
+       in the state it just got). */
+    if (linkOff()) {
+      state.device.reason = 'phone link is off (Settings → Phone)';
+      pushNow();
+      return;
+    }
     autoBusy = true;
     try {
       if (state.tools.state === 'missing' || state.tools.state === 'error') {

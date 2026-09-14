@@ -4059,6 +4059,23 @@
       'The phone\'s Tailscale has to be ON and connected - there is no cable path, ' +
       'and none of this goes over the open internet.'));
 
+    /* The master switch, first, above everything it governs. Off means: the
+       stream stops, adb disconnects and its server is killed, and nothing
+       below reconnects, downloads or spawns adb again until this is on. The
+       pairing is kept, so on is one press away. It is drawn even before the
+       first state arrives (defaulting to on) so the way OUT never depends on
+       the thing being switched off answering. Contract: settings.enabled in
+       phone.js, written through 'set-settings' { enabled }. */
+    var linkOn = !(phnState && phnState.settings && phnState.settings.enabled === false);
+    field.appendChild(switchRow('Phone link', linkOn, function (next) {
+      phoneSetSetting({ enabled: next }, 'set-enabled');
+    }));
+    field.appendChild(el('p', 'set-hint', linkOn
+      ? 'On. Off disconnects the phone, stops adb, and never reconnects until you turn it back on. Pairing is kept.'
+      : 'Off. The phone is disconnected and nothing here will reconnect, download or start adb until this is on.'));
+    var linkAnswer = phoneResultRow('set-enabled');
+    if (linkAnswer) field.appendChild(linkAnswer);
+
     if (phoneNoState(field, 'tool state')) {
       phoneButton(field, 'Download tools', 'install-tools', function () {
         phoneRun('install-tools', null, 'install-tools');
