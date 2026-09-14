@@ -49,7 +49,12 @@
  *                 // -> 'connect', best of two), probed every few s while connected —
  *                 // NOT an `adb shell` round trip: spawning adb costs ~170 ms on a
  *                 // 7 ms LAN and that number made 'auto' pick Away for ever.
- *               battery: { level: number, charging: boolean } | null },
+ *               battery: { level: number, charging: boolean } | null,
+ *               awake: boolean|null, screenOn: boolean|null, keyguard: boolean|null },
+ *                 // what the phone is showing, from dumpsys on every probe tick, so a
+ *                 // black picture can be named: asleep (Wake), the lock screen (Android
+ *                 // hides it from capture — keys still land) or a secure app. null =
+ *                 // unknown: a dozing phone breaks the dumpsys pipe.
  *     stream: { state: 'off'|'starting'|'running'|'stalled'|'error', reason: string,
  *               codec: string|null, width: number, height: number, fps: number, kbps: number,
  *               profile: 'lan'|'away'|'auto', bitrate: number, maxSize: number, maxFps: number,
@@ -476,6 +481,7 @@ function create(deps) {
       paired: false,
       tcpipPinned: null,
       latencyMs: null,
+      awake: null, screenOn: null, keyguard: null,
       lastSeenAt: 0,
       battery: null
     },
@@ -1356,6 +1362,24 @@ function create(deps) {
       return;
     }
     state.device.lastSeenAt = Date.now();
+
+    /* What the phone is showing, for the page's black-picture note. MEASURED
+       2026-09-13: the user's password screen is lit on the phone and black in the
+       mirror — Android 16 hides the sign-in surface from screen capture — and
+       by pixels alone that is indistinguishable from a sleeping phone. One
+       shell, three greps, every tick. A dozing phone breaks the dumpsys pipe
+       ("Failed to write while dumping service"), and then all three stay null
+       rather than guessing. */
+    const shown = await adb(['-s', serial, 'shell',
+      "dumpsys power | grep -m1 -o 'mWakefulness=[A-Za-z]*'; dumpsys display | grep -m1 -o 'mScreenState=[A-Z_]*'; dumpsys window | grep -m1 -o -i 'isKeyguardShowing=[a-z]*'"], 8000);
+    const shownText = shown.ok ? String(shown.out || '') : '';
+    const wake = /mWakefulness=(\w+)/.exec(shownText);
+    const scr = /mScreenState=(\w+)/.exec(shownText);
+    const kg = /isKeyguardShowing=(\w+)/i.exec(shownText);
+    state.device.awake = wake ? wake[1] === 'Awake' : null;
+    state.device.screenOn = scr ? scr[1] === 'ON' : null;
+    state.device.keyguard = kg ? kg[1].toLowerCase() === 'true' : null;
+
     if (rtt.ms == null) {
       /* adb answers but the phone's adb port refused a plain TCP probe: say so,
          because 'auto' is now guessing instead of measuring. */

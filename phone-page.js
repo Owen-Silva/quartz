@@ -578,7 +578,11 @@
     if (video.notPainting) sub += ' · this window is not painting (occluded or minimised)';
     if (video.err) sub += ' · ' + video.err;
     setStatus('ok', 'mirroring ' + video.w + '×' + video.h, sub, null);
-    setFrameNote('');
+    /* The black-picture note is the one overlay that belongs OVER a running
+       stream: a black picture with no words was exactly what the user saw at his
+       sign-in screen on 2026-09-13, because this line wiped the note a
+       second after checkBlackPicture() had set it. */
+    if (!video.blackNoteOn) setFrameNote('');
   }
 
   /* How long the picture has been unchanged, in ms. phone.js reports
@@ -2115,16 +2119,29 @@
   }
 
   var BLACK_NOTE = 'the picture is black because the phone\'s screen is off — press Wake in the rail, or the phone\'s own power button. '
-    + 'A sleeping Android draws nothing, so there is nothing to mirror (the lock screen and the PIN pad themselves mirror fine).';
+    + 'A sleeping Android draws nothing, so there is nothing to mirror.';
   /* Appended when the reason is our own doing: with "turn the phone screen off
      while mirroring" on, the panel is powered off at every stream start and a
      phone on battery then falls asleep at its screen timeout — every time. */
   var BLACK_NOTE_SCREEN_OFF = ' The screen was turned off by this browser: "turn the phone screen off while mirroring" is on in '
     + 'Settings → Phone, and a phone on battery falls asleep at its screen timeout with the panel off. Turn that setting off if this keeps happening.';
+  /* MEASURED 2026-09-13 with the user at the keyboard: the password screen is lit on
+     the phone and black here — Android 16 keeps the sign-in surface out of
+     every screen capture. The control channel does not care: keys still land. */
+  var BLACK_NOTE_KEYGUARD = 'the phone is awake at its sign-in screen, and Android hides that screen from screen capture — that is why this is black, '
+    + 'not the phone. Your keys still reach it: click the picture, type your password and press Enter, or unlock on the phone itself.';
+  var BLACK_NOTE_SECURE_APP = 'the phone is awake and lit, but the app on its screen hides itself from screen capture (banking apps and DRM video '
+    + 'draw black in any mirror). Switch apps on the phone to see it again.';
 
-  function checkBlackPicture(painting) {
+  function checkBlackPicture() {
+    /* No "is the window painting" gate here, on purpose: the sampler reads
+       the CANVAS, and a canvas keeps its last frame whether or not Chromium is
+       compositing the window, so occlusion cannot fake a black picture. The
+       gate it used to have (a frame this tick, then the rAF heartbeat) was
+       exactly what failed on a sleeping phone or a still lock screen — both
+       send nothing, both are black, and the note vanished (2026-09-13). */
     var running = phone && phone.stream && phone.stream.state === 'running';
-    if (!running || !painting || !video.painted || video.paused) {
+    if (!running || !video.painted || video.paused) {
       video.blackSince = 0;
     } else if (pictureIsBlack()) {
       if (!video.blackSince) video.blackSince = Date.now();
@@ -2133,17 +2150,32 @@
     }
     /* > 1 s of black, so a single dark frame between two scenes says nothing. */
     var show = !!video.blackSince && (Date.now() - video.blackSince) > 1000;
-    if (show && !video.blackNoteOn) {
-      video.blackNoteOn = true;
+    if (show) {
+      /* Which black this is. The relay asks the phone what it is showing on
+         every probe tick (device.awake / screenOn / keyguard), so the text is
+         recomputed each second and swapped the moment a better answer lands —
+         the first second after a lock is "asleep?" until dumpsys says "awake,
+         keyguard", and then it must say so. */
+      var d = (phone && phone.device) || {};
+      var text;
       if (video.screenOffByUs) {
-        setFrameNote('the picture is black because you turned the phone\'s screen off from the rail. On this phone (Android 16) '
-          + 'the mirror goes black with the panel — press Wake to bring both back.');
+        text = 'the picture is black because you turned the phone\'s screen off from the rail. On this phone (Android 16) '
+          + 'the mirror goes black with the panel — press Wake to bring both back.';
+      } else if (d.awake === true && d.keyguard === true) {
+        text = BLACK_NOTE_KEYGUARD;
+      } else if (d.awake === true && d.screenOn === true && d.keyguard === false) {
+        text = BLACK_NOTE_SECURE_APP;
       } else {
         var ours = !!(phone && phone.settings && phone.settings.screenOffWhileMirroring);
-        setFrameNote(BLACK_NOTE + (ours ? BLACK_NOTE_SCREEN_OFF : ''));
+        text = BLACK_NOTE + (ours ? BLACK_NOTE_SCREEN_OFF : '');
+      }
+      if (!video.blackNoteOn || text !== video.blackNoteText) {
+        video.blackNoteOn = true;
+        video.blackNoteText = text;
+        setFrameNote(text);
       }
     }
-    else if (!show && video.blackNoteOn) { video.blackNoteOn = false; setFrameNote(''); }
+    else if (!show && video.blackNoteOn) { video.blackNoteOn = false; video.blackNoteText = ''; setFrameNote(''); }
   }
 
   function tick() {
@@ -2173,7 +2205,11 @@
        later the profile readout is the place it lives. */
     if (shed.note && shed.at && (Date.now() - shed.at) > 60000) shed.note = '';
     healShed(now);
-    checkBlackPicture(paintingNow);
+    /* A black picture that has STOPPED changing is still a black picture: a
+       sleeping phone and a still lock screen both send no frames at all, so
+       any "fresh frame" gate here was false exactly when the note mattered
+       most (The user's pure-black sign-in screenshot, 2026-09-13). */
+    checkBlackPicture();
     syncRailEnabled();
     renderReadouts();
     renderStatus();

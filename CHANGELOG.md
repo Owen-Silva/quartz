@@ -1082,8 +1082,8 @@ Found, and not ours to fix:
   Android keeps compositing, so the mirror carries on unchanged — the rail repeats the server's
   own "display turned off" line so you know it landed. The old Screen on key could never wake a
   dozing phone (that call sits under Android's power manager), so it is now **Wake**, which sends
-  a real wake key first. A black picture is a sleeping phone, not a hidden lock screen — the
-  sign-in screen mirrors fine once the phone is awake — and after a second of black the canvas
+  a real wake key first. A black picture is a sleeping phone or the hidden sign-in screen — the
+  sign-in screen does NOT mirror on this phone (Android 16 hides it from capture, the phone itself is lit) but keys still land, so the note says to type the password blind or unlock on the phone — and after a second of black the canvas
   says so and points at Wake. Proven on the phone over adb; the buttons themselves still await a
   live press in the browser.
 - Only adb and the scrcpy server are downloaded, on first use, into the profile's tools folder. A
