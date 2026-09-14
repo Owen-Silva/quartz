@@ -1898,11 +1898,20 @@
 
   function wakePhone() {
     var pressedAt = Date.now();
-    /* The wake key is what actually wakes a sleeping phone; the display-power
-       message covers the other case (awake, but WE powered the panel off). */
-    if (!sendControl(msgInjectKeycode(KEY_DOWN, AKEYCODE.WAKEUP, 0, 0), null)) return;
+    /* ORDER MATTERS. Once a client has turned the display off, the scrcpy
+       server remembers it (Controller.keepDisplayPowerOff) and answers any
+       later POWER or WAKEUP key-up by forcing the display off again 200 ms
+       later ("Forcing display off" in its log) — that is exactly what turned
+       The user's phone back off on 2026-09-13 when the wake key went first. Only
+       SET_DISPLAY_POWER(on) clears that memory (Controller.setDisplayPower
+       sets keepDisplayPowerOff = !on), so it goes FIRST; then the wake key is
+       what actually wakes a dozing phone (the display-power call alone sits
+       under the power manager and cannot); then one more on, after the
+       server's 200 ms window, in case the key-up still raced the first. */
+    if (!sendControl(msgSetDisplayPower(true), null)) return;
+    sendControl(msgInjectKeycode(KEY_DOWN, AKEYCODE.WAKEUP, 0, 0));
     sendControl(msgInjectKeycode(KEY_UP, AKEYCODE.WAKEUP, 0, 0));
-    sendControl(msgSetDisplayPower(true));
+    setTimeout(function () { sendControl(msgSetDisplayPower(true), null); }, 400);
     railNote('', 'asked the phone to wake…');
     setTimeout(function () {
       if (video.blackSince) {
@@ -2097,6 +2106,11 @@
 
   var BLACK_NOTE = 'the picture is black because the phone\'s screen is off — press Wake in the rail, or the phone\'s own power button. '
     + 'A sleeping Android draws nothing, so there is nothing to mirror (the lock screen and the PIN pad themselves mirror fine).';
+  /* Appended when the reason is our own doing: with "turn the phone screen off
+     while mirroring" on, the panel is powered off at every stream start and a
+     phone on battery then falls asleep at its screen timeout — every time. */
+  var BLACK_NOTE_SCREEN_OFF = ' The screen was turned off by this browser: "turn the phone screen off while mirroring" is on in '
+    + 'Settings → Phone, and a phone on battery falls asleep at its screen timeout with the panel off. Turn that setting off if this keeps happening.';
 
   function checkBlackPicture(painting) {
     var running = phone && phone.stream && phone.stream.state === 'running';
@@ -2109,7 +2123,11 @@
     }
     /* > 1 s of black, so a single dark frame between two scenes says nothing. */
     var show = !!video.blackSince && (Date.now() - video.blackSince) > 1000;
-    if (show && !video.blackNoteOn) { video.blackNoteOn = true; setFrameNote(BLACK_NOTE); }
+    if (show && !video.blackNoteOn) {
+      video.blackNoteOn = true;
+      var ours = !!(phone && phone.settings && phone.settings.screenOffWhileMirroring);
+      setFrameNote(BLACK_NOTE + (ours ? BLACK_NOTE_SCREEN_OFF : ''));
+    }
     else if (!show && video.blackNoteOn) { video.blackNoteOn = false; setFrameNote(''); }
   }
 

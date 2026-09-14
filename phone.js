@@ -524,6 +524,12 @@ function create(deps) {
   /* Everything the stream owns while it runs, in one bag so stopStream() can
      be sure it left nothing behind. */
   let live = null;
+  /* Quality keys the page turned down (or back up) for THIS session only —
+     a shed while the decoder was cold, healed later. Overlays state.settings
+     for the running stream, never persisted; a key equal to the stored
+     setting is dropped, so an empty object means "nothing temporary". */
+  let tempQuality = {};
+  function effectiveSettings() { return Object.assign({}, state.settings, tempQuality); }
 
   const guests = new Set();       // live phone.html <webview> WebContents
   const clients = new Set();      // ws clients, each { ws, dropping, drops }
@@ -1709,7 +1715,15 @@ function create(deps) {
     if (msg.type === 'ping') { sendText(client, safeJson({ type: 'pong', t: msg.t })); return; }
     if (msg.type !== 'command') return;
     const id = msg.id;
-    Promise.resolve(command(msg.name, msg.arg)).then((res) => {
+    /* A quality change asked for by the PAGE is a shed (the decoder fell
+       behind) or its heal — a reaction to this minute, not a preference. It
+       is applied to the running stream but never written to phone.json:
+       on 2026-09-13 one cold decoder left the user's stored quality at 30 fps /
+       800 px for good. Settings → Phone goes through IPC and does persist. */
+    const arg = (msg.name === 'set-settings' && msg.arg && typeof msg.arg === 'object')
+      ? Object.assign({}, msg.arg, { temporary: true })
+      : msg.arg;
+    Promise.resolve(command(msg.name, arg)).then((res) => {
       sendText(client, safeJson(Object.assign({ type: 'result', id }, res || { ok: false, reason: 'no answer' })));
     }, (err) => {
       sendText(client, safeJson({ type: 'result', id, ok: false, reason: msgOf(err) }));
@@ -1821,7 +1835,7 @@ function create(deps) {
     if (live) return { ok: true, reason: 'already ' + state.stream.state };
 
     const serial = state.device.serial;
-    const s = state.settings;
+    const s = effectiveSettings(); // the stored settings plus the page's temporary shed
     const picked = chooseBitrate();
     const scid = crypto.randomBytes(4).readUInt32BE(0) & 0x7fffffff;   // Options.java: 31-bit, parsed as hex
     const scidHex = scid.toString(16).padStart(8, '0');
@@ -1908,14 +1922,22 @@ function create(deps) {
       ];
       state.stream.reason = 'starting the scrcpy server on the phone (' + picked.why + ')…';
       pushNow();
-      live.server = spawn(state.tools.adbPath, args, { windowsHide: true });
+      /* `bag` is THIS stream's record. A restart (a quality change, a
+         reconnect) sets `live` to a new record or to null while the old
+         server child is still flushing its last lines, and on 2026-09-13
+         that flush read `live.serverLog` off null and took the whole main
+         process down with an uncaught TypeError dialog. Every handler
+         below holds `bag` and bails once `live` is no longer it. */
+      const bag = live;
+      bag.server = spawn(state.tools.adbPath, args, { windowsHide: true });
       const keep = (chunk) => {
+        if (live !== bag || !bag.serverLog) return;   // an old server, still talking
         let newest = '';
         for (const line of String(chunk).split('\n')) {
           const text = line.trim();
-          if (text) { live.serverLog.push(text); newest = text; }
+          if (text) { bag.serverLog.push(text); newest = text; }
         }
-        while (live.serverLog.length > 40) live.serverLog.shift();
+        while (bag.serverLog.length > 40) bag.serverLog.shift();
         /* The server's own words, forwarded as state. For some control messages
            this is the only answer that exists: scrcpy logs "Device display
            turned off" and sends no device message, so a page that could not see
@@ -1927,16 +1949,16 @@ function create(deps) {
           push();
         }
       };
-      live.server.stdout.on('data', keep);
-      live.server.stderr.on('data', keep);
-      live.server.on('error', (err) => {
-        if (!live || live.stopping) return;
+      bag.server.stdout.on('data', keep);
+      bag.server.stderr.on('data', keep);
+      bag.server.on('error', (err) => {
+        if (live !== bag || bag.stopping) return;
         streamError('the scrcpy server could not be started: ' + msgOf(err));
         stopStream('').catch(() => {});
       });
-      live.server.on('close', () => {
-        if (!live || live.stopping) return;
-        const last = live.serverLog.filter((l) => !/^\s*$/.test(l)).pop() || 'it exited without a message';
+      bag.server.on('close', () => {
+        if (live !== bag || bag.stopping) return;
+        const last = bag.serverLog.filter((l) => !/^\s*$/.test(l)).pop() || 'it exited without a message';
         streamError('the scrcpy server on the phone stopped: ' + last);
         stopStream('').catch(() => {});
       });
@@ -2259,14 +2281,42 @@ function create(deps) {
 
   async function setSettings(partial) {
     if (!partial || typeof partial !== 'object') return { ok: false, reason: 'nothing to change' };
+    /* The page's shed / heal: this session only, never phone.json. A value
+       equal to the stored setting cancels the override for that key. */
+    if (partial.temporary === true) {
+      const keys = ['maxFps', 'maxSize', 'profile', 'lanBitrate', 'awayBitrate', 'audio'].filter((k) => partial[k] != null);
+      if (!keys.length) return { ok: false, reason: 'nothing temporary to change' };
+      const wanted = sanitiseSettings(partial, effectiveSettings());
+      for (const k of keys) {
+        if (wanted[k] === state.settings[k]) delete tempQuality[k]; else tempQuality[k] = wanted[k];
+      }
+      const eff = effectiveSettings();
+      state.stream.profile = eff.profile;
+      state.stream.maxSize = eff.maxSize;
+      state.stream.maxFps = eff.maxFps;
+      const label = keys.map((k) => k + ' ' + eff[k]).join(', ');
+      if (live) {
+        state.stream.reason = 'restarting the stream at the page\'s temporary ' + label + '…';
+        pushNow();
+        await stopStream('restarting for a temporary quality change');
+        const res = await startStream();
+        return { ok: res.ok, reason: res.reason + ' (' + label + ', this session only, not saved)' };
+      }
+      pushNow();
+      return { ok: true, reason: label + ' applied for this session only, not saved' };
+    }
     const before = Object.assign({}, state.settings);
     Object.assign(state.settings, sanitiseSettings(partial, state.settings));
     const changed = QUALITY_KEYS.filter((key) => state.settings[key] !== before[key]);
     state.device.host = state.settings.host;
     if (state.device.state !== 'connected') state.device.port = state.settings.port;
-    state.stream.profile = state.settings.profile;
-    state.stream.maxSize = state.settings.maxSize;
-    state.stream.maxFps = state.settings.maxFps;
+    /* A setting the user wrote on purpose wins over the page's temporary
+       override for that key; the others keep their override. */
+    for (const k of Object.keys(partial)) delete tempQuality[k];
+    const eff = effectiveSettings();
+    state.stream.profile = eff.profile;
+    state.stream.maxSize = eff.maxSize;
+    state.stream.maxFps = eff.maxFps;
     if (state.stream.state === 'off') state.stream.audio = state.settings.audio;
     /* The master switch outranks everything else in the same call: turning the
        link off ends with the stream stopped, so there is nothing to restart. */

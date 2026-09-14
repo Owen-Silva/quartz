@@ -4364,6 +4364,11 @@
       !!s.screenOffWhileMirroring, function (next) {
         phoneSetSetting({ screenOffWhileMirroring: next }, 'set-screenoff');
       }));
+    /* The trap, named (The user hit it 2026-09-13): with the panel off, a phone on
+       battery still falls asleep at its own screen timeout, and a sleeping
+       phone mirrors black until Wake. Only a charging phone stays awake. */
+    field.appendChild(el('p', 'set-hint',
+      'On battery the phone still falls asleep at its screen timeout with the panel off, and the mirror goes black until you press Wake on the tab. A charging phone stays awake.'));
     var screenAnswer = phoneResultRow('set-screenoff');
     if (screenAnswer) field.appendChild(screenAnswer);
 
