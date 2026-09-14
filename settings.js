@@ -4368,7 +4368,7 @@
        battery still falls asleep at its own screen timeout, and a sleeping
        phone mirrors black until Wake. Only a charging phone stays awake. */
     field.appendChild(el('p', 'set-hint',
-      'On battery the phone still falls asleep at its screen timeout with the panel off, and the mirror goes black until you press Wake on the tab. A charging phone stays awake.'));
+      'On this phone (Android 16) the mirror goes black the moment the panel is off — Android draws nothing for a powered-off display — so this only saves the panel, it does not keep a live picture; and on battery the phone then falls asleep at its screen timeout. Wake on the tab brings both back.'));
     var screenAnswer = phoneResultRow('set-screenoff');
     if (screenAnswer) field.appendChild(screenAnswer);
 

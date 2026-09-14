@@ -1889,9 +1889,18 @@
   function screenOff() {
     var pressedAt = Date.now();
     if (!sendControl(msgSetDisplayPower(false), null)) return;
-    railNote('', 'asked the phone to turn its screen off — the mirror keeps running, so the picture here will not change');
+    /* MEASURED on the user's Android phone, Android 16, 2026-09-13: with the panel powered
+       off Android draws nothing for that display, so the mirror goes black
+       too — the "phone dark, picture live" mode scrcpy advertises does not
+       exist on this phone. Say it before he wonders, and remember it so the
+       black-picture note blames the right thing (this press, not sleep). */
+    video.screenOffByUs = pressedAt;
+    railNote('', 'asked the phone to turn its screen off — on this phone the picture goes black too until you press Wake');
     setTimeout(function () {
-      if (displayPowerSaid(false, pressedAt)) return;
+      if (displayPowerSaid(false, pressedAt)) {
+        railNote('ok', 'the phone said its display is off. On this phone (Android 16) the picture stays black while the panel is off — press Wake to bring both back');
+        return;
+      }
       railNote('error', 'asked the phone to turn its screen off, but it never said it did: scrcpy 4.1 reports this only in its own log, and nothing came back within 2 s — look at the phone');
     }, 2000);
   }
@@ -1909,6 +1918,7 @@
        under the power manager and cannot); then one more on, after the
        server's 200 ms window, in case the key-up still raced the first. */
     if (!sendControl(msgSetDisplayPower(true), null)) return;
+    video.screenOffByUs = 0; // whatever happens next is not our Screen off any more
     sendControl(msgInjectKeycode(KEY_DOWN, AKEYCODE.WAKEUP, 0, 0));
     sendControl(msgInjectKeycode(KEY_UP, AKEYCODE.WAKEUP, 0, 0));
     setTimeout(function () { sendControl(msgSetDisplayPower(true), null); }, 400);
@@ -2125,8 +2135,13 @@
     var show = !!video.blackSince && (Date.now() - video.blackSince) > 1000;
     if (show && !video.blackNoteOn) {
       video.blackNoteOn = true;
-      var ours = !!(phone && phone.settings && phone.settings.screenOffWhileMirroring);
-      setFrameNote(BLACK_NOTE + (ours ? BLACK_NOTE_SCREEN_OFF : ''));
+      if (video.screenOffByUs) {
+        setFrameNote('the picture is black because you turned the phone\'s screen off from the rail. On this phone (Android 16) '
+          + 'the mirror goes black with the panel — press Wake to bring both back.');
+      } else {
+        var ours = !!(phone && phone.settings && phone.settings.screenOffWhileMirroring);
+        setFrameNote(BLACK_NOTE + (ours ? BLACK_NOTE_SCREEN_OFF : ''));
+      }
     }
     else if (!show && video.blackNoteOn) { video.blackNoteOn = false; setFrameNote(''); }
   }
