@@ -4704,6 +4704,13 @@ function buildChip(tab) {
   close.type = 'button';
   close.setAttribute('aria-label', 'Close tab');
   close.textContent = '×';
+  // The Phone workspace's own tab has no close button at all (see
+  // ensurePhoneTab). Inline, because chrome.css gives .tab-close a display of
+  // its own on some chips; syncChipPhoneKeep() hands it back on a change.
+  if (isKeptPhoneTab(tab)) {
+    close.style.display = 'none';
+    chip.dataset.phoneKept = '1';
+  }
 
   chip.appendChild(title);
   chip.appendChild(collapse);
@@ -4722,6 +4729,7 @@ function buildChip(tab) {
 
   tab.titleEl = title;
   tab.collapseEl = collapse;
+  tab.closeEl = close;
   tab.expandEl = expand;
   // Truncation is chrome.css's job; the full string stays here for the tooltip.
   chip.title = chipTooltip(tab);
@@ -4807,7 +4815,9 @@ function chipTooltip(tab) {
     return (cwd && cwd !== tab.title) ? tab.title + ' — ' + cwd : tab.title;
   }
   const short = shortLabelFor(readCurrentUrl(tab) || tab.url);
-  const base = (!short || short === tab.title) ? tab.title : tab.title + ' — ' + short;
+  let base = (!short || short === tab.title) ? tab.title : tab.title + ' — ' + short;
+  // The Phone workspace's tab wears no close button; the hover says why.
+  if (isKeptPhoneTab(tab)) base += ' — the Phone workspace keeps this tab';
   // A sleeping chip keeps its title and its favicon, so the tooltip is the only
   // place the state is spelled out — including what waking it costs, because a
   // new tab page comes back identical and a real page comes back reloaded.
@@ -4979,8 +4989,9 @@ function setTabTitle(tab, title) {
   if (tab.chipEl) tab.chipEl.title = chipTooltip(tab);
   // Every navigation calls through here (onNavigate re-titles the tab), so
   // this is where the stand-in glyph learns that the tab is now the Phone
-  // page, or has just left it.
+  // page, or has just left it — and the close button with it.
   syncChipGlyph(tab);
+  syncChipPhoneKeep(tab);
 }
 
 /* ------------------------------------------------------------------ */
@@ -5288,6 +5299,9 @@ function setTabWorkspace(tab, id) {
  */
 function emitWorkspaceChange() {
   if (restoring) return; // one event at the end of the rebuild, not forty
+  // Every tab count, move and workspace change lands here, so this is where
+  // the Phone workspace notices it lost its phone tab — by whatever route.
+  schedulePhoneTabCheck();
   // The two pieces of chrome the workspace itself owns. Both compare before
   // they write, so the tab-count calls that also land here cost nothing.
   syncStripTint();
@@ -5312,6 +5326,234 @@ function unsplitAcrossWorkspaces() {
   }
 }
 
+/* --- the Phone workspace's one phone tab -----------------------------
+ * The Phone workspace is there to show the phone, and the phone is ONE page:
+ * phone.js relays a single scrcpy stream, so a second phone.html guest would
+ * fight the first for it. While a workspace carrying the 'phone' preset
+ * exists, then:
+ *
+ *   - it holds exactly one phone tab. Asleep or awake, a tab on phone.html
+ *     counts: a sleeping tab keeps its url, so it is never doubled for dozing;
+ *   - a missing one is put back: at boot once the restore and the seeding have
+ *     had their say, on every switch into the workspace, and on the next turn
+ *     after any model change that lost it (emitWorkspaceChange() and a
+ *     navigation on or off phone.html both schedule the check);
+ *   - it is never closed or moved out by accident. Every close route ends in
+ *     closeTab() and every move in moveTabToWorkspace(), and both refuse it
+ *     OUT LOUD. Refusing beats closing and reopening, which restarts the
+ *     stream;
+ *   - asking for phone.html again, from anywhere, goes to the one that is open.
+ *
+ * Deleting the Phone workspace ends all of it: its tabs go home as always and
+ * the phone tab is an ordinary, closable tab again. The workspace is never put
+ * back (seedWorkspacePresets() keeps a deleted preset deleted).
+ *
+ * Why (2026-09-14): the Phone workspace came back from a restart holding one
+ * New tab and no phone. The restore was not at fault — every snapshot left in
+ * the profile from the evening before already held that New tab and no phone
+ * tab — but the phone was only ever opened into an EMPTY workspace, so a single
+ * stray New tab kept it out for good.
+ */
+const PHONE_PRESET = 'phone';
+const PHONE_KEEP_NOTE = 'The Phone workspace keeps its phone tab. '
+  + 'Turn the phone link off in Settings → Phone to stop mirroring.';
+// Long enough to read a two-sentence note; the toast's own default is 1.8 s.
+const PHONE_NOTE_MS = 5000;
+
+// True while ensurePhoneTab() runs: the tabs it opens, moves and closes fire
+// the very model events that schedule it, and it must not re-enter itself.
+let phoneEnsuring = false;
+let phoneCheckTimer = null;
+
+/** The Phone workspace's record, or null when there is none (never seeded, or deleted). */
+function phoneWorkspace() {
+  return presetWorkspace(PHONE_PRESET);
+}
+
+/** True for a page tab on phone.html. A sleeping one counts: it keeps its url. */
+function isPhoneTab(tab) {
+  return !!tab && tab.kind === 'page' && isPhoneUrl(tab.url);
+}
+
+/** A phone tab the Phone workspace keeps: no close, no move out, while it exists. */
+function isKeptPhoneTab(tab) {
+  return isPhoneTab(tab) && phoneWorkspace() !== null;
+}
+
+/**
+ * The phone tab: the one inside the Phone workspace when there is one, else
+ * the first in the strip.
+ * @returns {object|null} null when phone.html is not open anywhere.
+ */
+function findPhoneTab() {
+  const list = tabs.filter(isPhoneTab);
+  if (!list.length) return null;
+  const ws = phoneWorkspace();
+  return (ws && list.find((t) => tabWorkspace(t) === ws.id)) || list[0];
+}
+
+/**
+ * Say why something did not happen to the phone tab. The toast is settings.js's
+ * and loads after this file; a window without it gets the note bar over the
+ * tab in front instead, so a refusal is never silent either way.
+ */
+function phoneTabNote(message) {
+  const toast = window.Toast;
+  if (toast && typeof toast.show === 'function') {
+    try { toast.show(message, PHONE_NOTE_MS); return; } catch (err) { /* the bar says it instead */ }
+  }
+  const tab = getActiveTab();
+  if (tab) showAppNote(tab, message, '');
+}
+
+/**
+ * The chip half of the rule: the kept phone tab has no close button and its
+ * tooltip says why. Idempotent, and run for every chip whenever the rule is
+ * checked, because deleting the workspace has to hand the button back.
+ */
+function syncChipPhoneKeep(tab) {
+  if (!tab || !tab.chipEl) return;
+  const kept = isKeptPhoneTab(tab);
+  if (tab.closeEl) {
+    const display = kept ? 'none' : '';
+    if (tab.closeEl.style.display !== display) tab.closeEl.style.display = display;
+  }
+  if ((tab.chipEl.dataset.phoneKept === '1') === kept) return;
+  if (kept) tab.chipEl.dataset.phoneKept = '1';
+  else delete tab.chipEl.dataset.phoneKept;
+  tab.chipEl.title = chipTooltip(tab);
+}
+
+/** The same for every chip in the strip. */
+function syncPhoneChips() {
+  for (const tab of tabs) syncChipPhoneKeep(tab);
+}
+
+/** One check on the next turn, however many model changes asked for one in this turn. */
+function schedulePhoneTabCheck() {
+  if (phoneCheckTimer !== null) return;
+  phoneCheckTimer = window.setTimeout(() => {
+    phoneCheckTimer = null;
+    try {
+      ensurePhoneTab();
+    } catch (err) {
+      phoneTabNote('The Phone workspace could not check its phone tab: '
+        + ((err && err.message) || String(err)));
+    }
+  }, 0);
+}
+
+/**
+ * Open the Phone workspace's tab, leading its strip. In a workspace nobody is
+ * looking at it is born ASLEEP, exactly as restoreSession() births every hidden
+ * tab (no guest, so no stream and no adb until the workspace is visited) —
+ * unless workspace sleep is off, which keeps hidden tabs awake everywhere.
+ * @returns {object|null} the tab, or null when this window cannot open one.
+ */
+function openPhoneTab(ws, raise) {
+  const onScreen = ws.id === currentWorkspaceId;
+  const tab = createTab(PHONE_URL, {
+    background: true,
+    workspace: ws.id,
+    asleep: !onScreen && workspaceSleepMode() !== 'off'
+  });
+  if (!tab) {
+    phoneTabNote('The Phone workspace has no phone tab, and this window could not open one.');
+    return null;
+  }
+  moveTabToIndex(tab.id, 0);
+  if (onScreen && raise) activateTab(tab.id);
+  // A put-back phone is what the workspace comes back to next time, not the
+  // stray tab that was remembered while it was missing.
+  else if (!onScreen) ws.lastActiveTabId = tab.id;
+  return tab;
+}
+
+/**
+ * A phone tab outside the Phone workspace (a session from before the workspace
+ * existed, or one opened while it was gone) comes home rather than a second
+ * one opening there. The tab in front stays in front: its workspace follows.
+ */
+function bringPhoneTabHome(tab, ws) {
+  unsplit(tab); // a pair cannot straddle two workspaces
+  const wasActive = tab.id === activeTabId;
+  setTabWorkspace(tab, ws.id);
+  moveTabToIndex(tab.id, 0);
+  if (wasActive) activateTab(tab.id);
+  else ws.lastActiveTabId = tab.id;
+  emitWorkspaceChange();
+  saveSession();
+}
+
+/**
+ * Make the rule true, now. Idempotent and one walk of the strip, so it is safe
+ * after anything at all; a no-op (bar the chips) without a Phone workspace.
+ *
+ * @param {{raise?:boolean}} [options] raise:true brings a phone tab this call
+ *        had to open or bring home to the front when the Phone workspace is the
+ *        one on screen — the boot and a switch into the workspace ask for that.
+ *        A repair in the background never takes the screen from the tab in front.
+ * @returns {object|null} the phone tab; null without a Phone workspace, or when
+ *          one could not be opened (which the note says).
+ */
+function ensurePhoneTab(options) {
+  syncPhoneChips(); // the close buttons follow the workspace existing, first of all
+  const ws = phoneWorkspace();
+  if (!ws) return null;
+  if (restoring || phoneEnsuring) return findPhoneTab();
+  const raise = !!(options && options.raise);
+  phoneEnsuring = true;
+  try {
+    const list = tabs.filter(isPhoneTab);
+    if (!list.length) return openPhoneTab(ws, raise);
+
+    // More than one is a bug being repaired, not a choice. The one kept is the
+    // one with a live guest (its stream is running), then the one already in
+    // the workspace, then the one in front, then the oldest.
+    const score = (t) => (t.asleep ? 0 : 4) + (tabWorkspace(t) === ws.id ? 2 : 0)
+      + (t.id === activeTabId ? 1 : 0);
+    const keep = list.slice().sort((a, b) => (score(b) - score(a)) || (a.id - b.id))[0];
+    const front = list.some((t) => t !== keep && t.id === activeTabId);
+    // Home FIRST, so closing a duplicate below can never empty the workspace
+    // (closeTab() would fill an empty one with a New tab).
+    const moved = tabWorkspace(keep) !== ws.id;
+    if (moved) bringPhoneTabHome(keep, ws);
+    if (list.length > 1) {
+      for (const extra of list) {
+        if (extra !== keep) closeTab(extra.id, { force: true });
+      }
+      phoneTabNote('A second phone tab was closed: the phone stream has room for one.');
+    }
+    if (front || (raise && moved && ws.id === currentWorkspaceId)) activateTab(keep.id);
+    syncChipPhoneKeep(keep);
+    return keep;
+  } finally {
+    phoneEnsuring = false;
+  }
+}
+
+/**
+ * phone.html was asked for again — the palette, a bookmark, a reopened tab,
+ * its address typed in. The tab already open comes forward instead, its
+ * workspace with it, because a second guest would fight the first for the
+ * stream. A background request moves nothing and says where the phone is.
+ * @returns {object} the phone tab.
+ */
+function focusPhoneTab(tab, background) {
+  if (phoneWorkspace()) ensurePhoneTab(); // a stray one comes home first
+  const target = findPhoneTab() || tab;
+  if (background || target.id === activeTabId) {
+    phoneTabNote(target.id === activeTabId
+      ? 'The phone is already open in this tab.'
+      : (phoneWorkspace()
+        ? 'The phone is already open in the Phone workspace.'
+        : 'The phone is already open in another tab.'));
+    return target;
+  }
+  activateTab(target.id);
+  return target;
+}
+
 /**
  * Raise the current workspace's last active tab, falling back to the last chip
  * in it — and open a tab when the workspace is empty, because the window must
@@ -5319,6 +5561,15 @@ function unsplitAcrossWorkspaces() {
  */
 function raiseCurrentWorkspace() {
   const ws = findWorkspace(currentWorkspaceId);
+  // The Phone workspace never comes up without its phone: a phone tab it lost
+  // is put back first and brought to the front, because showing the phone is
+  // what switching here is for. One it still has stays where the user left it.
+  if (ws && ws.preset === PHONE_PRESET) {
+    const before = activeTabId;
+    ensurePhoneTab({ raise: true });
+    const now = getActiveTab();
+    if (activeTabId !== before && now && tabWorkspace(now) === ws.id) return;
+  }
   const list = visibleTabs();
   if (!list.length) {
     // Whatever this workspace opens into: the home page everywhere but the
@@ -5520,6 +5771,14 @@ function moveTabToWorkspace(tabId, wsId) {
   const ws = findWorkspace(wsId);
   if (!tab || !ws) return false;
   if (tabWorkspace(tab) === ws.id) return true;
+  // The phone tab stays in the Phone workspace while that exists: moving it out
+  // would leave the workspace without its phone, and a second one opened there
+  // would fight this one for the stream. Refused out loud, never quietly.
+  if (isKeptPhoneTab(tab) && ws.preset !== PHONE_PRESET) {
+    phoneTabNote('The phone tab stays in the Phone workspace. '
+      + 'Turn the phone link off in Settings → Phone to stop mirroring.');
+    return false;
+  }
 
   // A pair cannot straddle two workspaces, and the tab is leaving this one.
   unsplit(tab);
@@ -6198,6 +6457,14 @@ function createTab(url, options) {
   // isNewTabUrl() is a prefix test, so the query changes nothing downstream.
   if (target === HOME_URL || target === NEWTAB_URL) {
     target = newTabUrl();
+  }
+  // phone.html is one page for the whole browser: phone.js has one stream, and
+  // a second guest would fight the first for it. Asking for it again goes to
+  // the tab already open. (restoreSession() dedupes its own entries instead:
+  // nothing may be focused halfway through a rebuild.)
+  if (!restoring && isPhoneUrl(target)) {
+    const existing = findPhoneTab();
+    if (existing) return focusPhoneTab(existing, !!opts.background);
   }
 
   const tab = {
@@ -7874,11 +8141,24 @@ function activateTab(id) {
   if (workspaceMoved) emitWorkspaceChange();
 }
 
-function closeTab(id) {
+/**
+ * @param {number} id
+ * @param {{force?:boolean}} [options] force:true is ensurePhoneTab()'s alone,
+ *        for closing a DUPLICATE phone tab. Nothing a person does passes it.
+ */
+function closeTab(id, options) {
   const index = tabs.findIndex((t) => t.id === id);
   if (index === -1) return;
 
   const tab = tabs[index];
+  // The Phone workspace's tab is not closed by accident, by ANY route: the
+  // chip, Ctrl+W, a middle-click, the menu, both sweeps and the tab search
+  // pane all end here. Refused out loud, because closing it and opening
+  // another would restart the phone stream.
+  if (isKeptPhoneTab(tab) && !(options && options.force === true)) {
+    phoneTabNote(PHONE_KEEP_NOTE);
+    return;
+  }
   const wasActive = tab.id === activeTabId;
   // Where in the STRIP the closing tab sat — the strip being this workspace's
   // chips, not the whole array, so the tab left in front is one you can see.
@@ -7970,7 +8250,9 @@ function closeActiveTab() {
 /** Open a tab and slot it straight into a position instead of at the end. */
 function openTabAt(url, at) {
   const made = createTab(url);
-  if (made) moveTabToIndex(made.id, at);
+  // phone.html comes back as the tab already open (createTab), which keeps
+  // the seat it has rather than being dragged next to whoever asked.
+  if (made && !isPhoneTab(made)) moveTabToIndex(made.id, at);
   return made;
 }
 
@@ -7998,18 +8280,31 @@ function reloadTab(tab) {
 // Both sweeps leave pinned tabs alone: pinning a tab is the user saying it
 // outlives the browsing around it. Both are also the STRIP's sweeps — another
 // workspace's tabs are not "the other tabs", they are somewhere else entirely.
-function closeOtherTabs(id) {
+// And both step round the Phone workspace's own tab, saying so once per sweep
+// rather than once per refusal.
+
+/** What a sweep may close: not pinned, and not the tab the Phone workspace keeps. */
+function sweepCloses(tab) {
+  return !tab.pinned && !isKeptPhoneTab(tab);
+}
+
+/** Close a sweep's picks; one note when the phone tab was in its path. */
+function closeSweep(candidates) {
   // Snapshot the ids first: closeTab() splices the array as it goes.
-  const doomed = visibleTabs().filter((t) => t.id !== id && !t.pinned).map((t) => t.id);
+  const doomed = candidates.filter(sweepCloses).map((t) => t.id);
+  if (candidates.some((t) => !t.pinned && isKeptPhoneTab(t))) phoneTabNote(PHONE_KEEP_NOTE);
   for (const other of doomed) closeTab(other);
+}
+
+function closeOtherTabs(id) {
+  closeSweep(visibleTabs().filter((t) => t.id !== id));
 }
 
 function closeTabsToRight(id) {
   const strip = visibleTabs();
   const index = strip.findIndex((t) => t.id === id);
   if (index === -1) return;
-  const doomed = strip.slice(index + 1).filter((t) => !t.pinned).map((t) => t.id);
-  for (const other of doomed) closeTab(other);
+  closeSweep(strip.slice(index + 1));
 }
 
 /* ------------------------------------------------------------------ */
@@ -8150,7 +8445,9 @@ function tabMenuItemsForTab(tab) {
     // The CURRENT url, not the one the tab was opened on.
     items.push({
       label: 'Duplicate',
-      run: () => openTabAt(readCurrentUrl(tab) || tab.url, stripSeat(tab) + 1)
+      run: () => openTabAt(readCurrentUrl(tab) || tab.url, stripSeat(tab) + 1),
+      // The phone stream has one viewer: there is no second phone to open.
+      disabled: isPhoneTab(tab)
     });
     items.push({
       label: tab.pinned ? 'Unpin tab' : 'Pin tab',
@@ -8248,22 +8545,26 @@ function tabMenuItemsForTab(tab) {
   items.push({
     label: 'Move to workspace…',
     run: () => { if (mover) mover(tab.id); },
-    disabled: !mover || workspaces.length < 2
+    // The phone tab stays in the Phone workspace (moveTabToWorkspace refuses it
+    // out loud for every other route; the chip's tooltip says why here).
+    disabled: !mover || workspaces.length < 2 || isKeptPhoneTab(tab)
   });
 
   items.push(null);
   // Close is the one route that still closes a pinned tab: the user asked for
   // this tab by name, so it is not the accident the middle-click guard is for.
+  // The Phone workspace's own tab is the exception: closeTab() refuses it and
+  // the note says why.
   items.push({ label: 'Close', run: () => closeTab(tab.id) });
   items.push({
     label: 'Close other tabs',
     run: () => closeOtherTabs(tab.id),
-    disabled: !visibleTabs().some((t) => t.id !== tab.id && !t.pinned)
+    disabled: !visibleTabs().some((t) => t.id !== tab.id && sweepCloses(t))
   });
   items.push({
     label: 'Close tabs to the right',
     run: () => closeTabsToRight(tab.id),
-    disabled: !visibleTabs().slice(stripSeat(tab) + 1).some((t) => !t.pinned)
+    disabled: !visibleTabs().slice(stripSeat(tab) + 1).some(sweepCloses)
   });
   items.push(null);
   items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
@@ -8788,6 +9089,16 @@ function restoreSession(snapshot) {
   const wantCurrent = validWorkspaceId(session.currentWorkspace);
   currentWorkspaceId = wantCurrent;
 
+  // ONE phone tab comes back, whatever the snapshot says: phone.js has a single
+  // stream and two phone.html guests would fight over it. The entry in the
+  // Phone workspace wins (the workspaces are already rebuilt above), then the
+  // first; any other is left out, and the boot says so below.
+  const phoneWs = phoneWorkspace();
+  const phoneRows = ordered.filter((r) => !r.entry.claude && !r.entry.native
+    && r.entry.url === SESSION_PHONE);
+  const phoneRow = (phoneWs && phoneRows.find((r) => r.entry.ws === phoneWs.id))
+    || phoneRows[0] || null;
+
   restoring = true;
   const created = [];
   const bySeat = new Map(); // stored entry index -> the tab rebuilt from it
@@ -8803,6 +9114,7 @@ function restoreSession(snapshot) {
     const sleepOthers = workspaceSleepMode() !== 'off';
     for (const row of ordered) {
       const entry = row.entry;
+      if (phoneRows.length > 1 && phoneRows.indexOf(row) !== -1 && row !== phoneRow) continue;
       // Page tabs only: a Claude chamber and a native app tab have their own
       // restore shapes and neither can be rebuilt from a url.
       const bornAsleep = sleepOthers && !entry.claude && !entry.native
@@ -8867,6 +9179,10 @@ function restoreSession(snapshot) {
   activateTab(target.id);
   emitWorkspaceChange(); // one event for the whole rebuild
   saveSession(); // one write, now that the strip is settled
+  if (phoneRows.length > 1) {
+    phoneTabNote('The saved session had ' + phoneRows.length + ' phone tabs; one came back, '
+      + 'because the phone stream has room for one.');
+  }
   return true;
 }
 
@@ -9025,7 +9341,12 @@ function wireViewEvents(tab) {
   const onNavigate = (event) => {
     if (stale()) return;
     dropNavCache(tab); // the url and the history stack both just moved
+    const wasPhone = isPhoneTab(tab);
     if (event && event.url) tab.url = event.url;
+    // On, off or around phone.html: the Phone workspace re-checks its one tab
+    // (a phone tab navigated away is a phone tab missing; one arriving
+    // somewhere else may be a second). Coalesced, so a reload costs one walk.
+    if (wasPhone || isPhoneTab(tab)) schedulePhoneTabCheck();
     // did-fail-load can land either side of the error page's own did-navigate,
     // so a navigation only clears the card when THIS load did not fail.
     if (!tab.failedThisLoad) clearTabCard(tab);
@@ -9325,10 +9646,18 @@ function navigateActiveTab(input) {
   const url = toNavigationUrl(input);
   if (!url) return;
 
+  // phone.html typed in anywhere goes to the phone tab already open, never a
+  // second guest on the one stream (and never a reload of the stream itself).
+  if (isPhoneUrl(url) && findPhoneTab()) {
+    focusPhoneTab(findPhoneTab(), false);
+    return;
+  }
+
   // A Claude tab and a hosted app both have nowhere to navigate: typing a URL
   // opens a page tab instead. (A native tab's view is a plain <div>, so the
-  // src-attribute fallback below would do nothing at all.)
-  if (isClaudeTab(tab) || isNativeTab(tab)) {
+  // src-attribute fallback below would do nothing at all.) The Phone
+  // workspace's own tab is the same: navigating it away would end the stream.
+  if (isClaudeTab(tab) || isNativeTab(tab) || isKeptPhoneTab(tab)) {
     createTab(url);
     return;
   }
@@ -10783,6 +11112,11 @@ function init() {
     // one alike: the session is what says whether they have ever been seeded,
     // and seeding before reading it would put back what the user deleted.
     seedWorkspacePresets(session);
+    // The Phone workspace's phone tab, now that the restore and the seeding
+    // have both had their say: a session that lost it (or a Phone workspace
+    // seeded just now) gets it here, in front if the Phone workspace is the
+    // one coming up on screen, asleep and remembered if it is not.
+    ensurePhoneTab({ raise: true });
     // The strip tint and the pane, for the workspace the boot landed in — and
     // one `sidepane` event whatever it decided, so a module that wants to know
     // the pane is CLOSED hears that too rather than waiting for a switch.
@@ -10932,6 +11266,10 @@ window.setWorkspacePane = setWorkspacePane;
 window.deleteWorkspace = deleteWorkspace;
 window.moveTabToWorkspace = moveTabToWorkspace;
 window.moveActiveTabToWorkspace = moveActiveTabToWorkspace;
+// The Phone workspace's one-phone-tab rule, for harnesses and the palette:
+// the tab itself (or null), and the check that makes the rule true now.
+window.findPhoneTab = findPhoneTab;
+window.ensurePhoneTab = ensurePhoneTab;
 // The current workspace's tabs, in strip order. tabsearch.js can keep reading
 // the whole `tabs` array — every item carries .workspace now, so it can group.
 window.visibleTabs = visibleTabs;
