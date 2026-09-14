@@ -1585,8 +1585,8 @@ body.claude-live #newclaude.attn .dot {
   z-index: 1;
   display: flex;
   align-items: stretch;
-  flex: 0 0 380px;          /* app.js writes the real width, min 280 / max 60% */
-  width: 380px;
+  flex: 0 0 480px;          /* app.js writes the real width, min 360 / max 60% */
+  width: 480px;
   min-width: 0;
   overflow: hidden;
   background: var(--panel-bg);
@@ -1594,7 +1594,7 @@ body.claude-live #newclaude.attn .dot {
 }
 
 /* display:flex above outranks the UA sheet's [hidden]{display:none}, so without
-   this the hidden host still took its 380px beside the well on Home and drew
+   this the hidden host still took its width beside the well on Home and drew
    an empty grey column (seen live 2026-09-12). The attribute is the switch. */
 #sidepane[hidden] { display: none; }
 

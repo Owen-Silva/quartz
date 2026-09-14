@@ -5857,8 +5857,11 @@ function syncStripTint() {
  * `sidepane` event and window.sidePane: no module here reaches into the other.
  */
 const SIDEPANE_WIDTH_KEY = 'sidepane.width';
-const SIDEPANE_WIDTH_DEFAULT = 380;
-const SIDEPANE_WIDTH_MIN = 280;
+// 480 because the School pane's notebooks carry fixed-width cards and want
+// ~305px of page width; 360 is the floor school-pane.css holds them at, so the
+// handle stops where the pane stops shrinking rather than in a dead zone below it.
+const SIDEPANE_WIDTH_DEFAULT = 480;
+const SIDEPANE_WIDTH_MIN = 360;
 const SIDEPANE_MAX_FRACTION = 0.6;  // never more than 60% of the window
 const SIDEPANE_HANDLE_W = 6;
 const SIDEPANE_KEY_STEP = 16;       // one arrow press on the focused handle
@@ -5900,7 +5903,7 @@ function readSidePaneWidth() {
 
 function writeSidePaneWidth() {
   try { window.localStorage.setItem(SIDEPANE_WIDTH_KEY, String(sidePaneWidth)); } catch (err) {
-    /* storage blocked: this run keeps the width, the next one starts at 380 */
+    /* storage blocked: this run keeps the width, the next one starts at the default */
   }
 }
 
