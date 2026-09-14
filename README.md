@@ -175,13 +175,20 @@ window must never sit empty. A chip's menu has "Move to workspace…". Ctrl+Alt+
 with wrapping, switching raises that workspace's own last active tab, and a split whose halves
 land in different workspaces is broken up.
 
-Four of them are seeded once, behind Home: **School** (forest, `Documents\notes`, and it owns the
-notes pane), **Project** (ion, `Downloads\Project`), **Club** (ocean, no folder until you set one) and
-**Trading** (ember, `trading-bot`). A workspace's folder is where a new Claude tab opens while
+Five of them are seeded once, behind Home: **School** (forest, `Documents\notes`, and it owns the
+notes pane), **Project** (ion, `Downloads\Project`), **Club** (ocean, no folder until you set one),
+**Trading** (ember, `trading-bot`) and **Phone** (midnight, no folder, and it opens into the
+phone rather than a new tab page). A workspace's folder is where a new Claude tab opens while
 it is current — the popover's Folder row picks or clears it, and a folder that has gone missing is
 named there and over the chamber rather than the terminal silently opening at home. Delete a
 preset and it stays deleted. The current workspace's colour washes the strip at 7%, and
 Ctrl+Alt+1 to 9 jumps to the nth workspace, page focus or not.
+
+Seeding is per key, not once for the set. The first four shipped together under one flag; what is
+recorded now is the list of preset keys a profile has been offered, so a preset added later — Phone
+— reaches a profile that already had the other four, exactly once, and a preset you delete still
+stays deleted. The old flag is still written beside the list, and still reads as "the original
+four", so an older build reads the same profile correctly.
 
 **Side pane.** A workspace may own a column beside the tab well (never over it): 380px by default,
 280 to 60% of the window, a 6px drag handle, width remembered. app.js shows it for the current
@@ -199,6 +206,65 @@ headless Claude Code session per class (Sonnet, no tools, `--safe-mode`, resumed
 questions) that answers a section id only — never the answer — in 3 to 6 seconds for about a cent
 a question, and pauses itself at 90% of the 5-hour limit or 95% of the week. "Paste a question"
 runs it by hand. Every failure in the chain is a line in the strip with its reason.
+
+**Phone workspace.** the user's phone on the screen, in a tab: an Android phone (2025) on Android 16, reached
+over Tailscale at `100.64.0.1` — never a cable, never the open internet, so the phone's
+Tailscale has to be on before anything below can work and every failure without it is a timeout.
+The Phone workspace opens into `phone.html` when it holds no tabs, its chip carries a phone glyph
+instead of a planet, and Ctrl+T in it still opens a new tab page, because that is what Ctrl+T
+means. Two pieces do the work: phone.js in main owns the tools, the device and the stream and
+relays the scrcpy sockets to the page over a localhost WebSocket; the page decodes and paints them.
+
+**The tools** are adb and the scrcpy v4.1 server, and nothing else is bundled. The first time a
+Phone tab says hello they are downloaded into the profile's `tools` folder — Google's platform-tools
+zip and the server jar from its GitHub release, the jar checked against the sha256 in that
+release's `SHA256SUMS.txt` and refused outright on a mismatch. The download's byte progress is
+state on the page, not a log line, and opening Settings only describes what is there.
+
+**Pairing is once.** On the phone, Wireless debugging → "Pair device with pairing code" gives a
+host, a port and six digits; Settings → Phone takes them. That pairing port is not the port you
+connect on — the phone shows both, and they differ. After the first connect the browser pins adb
+to port 5555 so later connects need no reading at all, and that pin is lost whenever the phone
+changes Wi-Fi or reboots: adbd comes back on a fresh random port, so the tab disconnects the stale
+entry, finds the new port over mDNS when it can, re-pins 5555 and comes back on the Tailscale
+address — and when it cannot, it says which port to read off the phone rather than sitting there.
+
+**Input.** The mouse is a finger: move, press and drag are touch events, the wheel scrolls,
+right-click is Back and middle-click is Home. The keyboard is captured while the screen has focus —
+keys, text and Ctrl+C / Ctrl+V for the clipboard go to the phone — and Ctrl+Alt+P hands it back;
+the `keys` readout says which side has it. Down the rail: Back, Home, Recents, Power, Vol +,
+Vol −, Rotate, Notifs, Screen off, Wake, Copy ← phone, Paste → phone, Screenshot and Mute. Every
+byte the page writes to the control socket is taken from the scrcpy v4.1 sources and its own
+serialisation tests, never from memory, and `?selftest=1` proves the encode → packet → decode →
+paint path with no phone attached.
+
+**Readouts**, down the same rail: device, battery, phone rtt, browser rtt, fps, kbps, decoder,
+decode time, decode queue, dropped, key frames asked, frame age, profile · bitrate, audio and keys.
+Measured on the real phone over Tailscale-on-LAN: about 59 fps painted with roughly 1 ms hardware
+decode and an empty queue. The page paints in the decoder's output callback rather than parking a
+frame for the next animation frame — frames arrive in bursts, and parking them binned a quarter of
+them — and a decoder that has fallen behind is asked to shed to 30 fps and then a shorter longest
+side, then asks for what it turned down back after 30 s of clean running.
+
+**Quality** lives in Settings → Phone: a profile (At home, Away, Auto), a bitrate for each of the
+first two, longest side, frame rate, phone audio, turning the phone's screen off while mirroring,
+and connecting on its own when the browser starts. Auto decides on a TCP round trip to the phone's
+adb port, not on how long adb takes to spawn — spawning adb costs about 170 ms on a 7 ms link, and
+that number chose Away for ever. At the top of the section, above everything it governs, is the
+**Phone link** switch: off stops the stream, disconnects the phone and kills the adb server, and
+nothing reconnects, downloads or spawns adb again until it is back on. The pairing is kept, so on
+is one press away, and the switch is drawn before the first state arrives so the way out never
+depends on the thing being switched off answering.
+
+**None of it fails silently.** Every state names itself, its reason and the one action that moves
+it on — download the tools, open Settings → Phone, connect, start, retry — and a refused command
+prints its reason under the button that sent it. A still screen is not a stall: scrcpy encodes only
+when the picture changes, so a phone resting on its home screen sends nothing for minutes and that
+is the stream working; once a frame has painted the picture is never covered again, silence reads
+as "still N s" beside a counting frame age, and "stalled" needs the server alive, 15 s of silence
+*and* a dead control socket. Two things are in hand rather than done: on Android 16 the screen
+off / on buttons looked like they did nothing, and a locked phone mirrors black. Both are being
+fixed in a lane of their own.
 
 **Budget pill.** The one titlebar readout: it reads the JSON that Claude Code's statusline hook
 writes (5-hour and week percentages, amber from 80%, red from 95%; the card has the countdowns,
@@ -1073,6 +1139,15 @@ The chrome is trusted and every guest is not. These are the places that line is 
 - **`shortcuts:set` is bounded.** The renderer owns the binding map and mirrors it to main, so
   main takes only a plain object of string → string with 1 to 200 entries — a real map is a few
   dozen. A payload that is empty, malformed or absurd leaves main on the map it already had.
+- **The phone relay is local and token-gated.** phone.js's WebSocket server binds 127.0.0.1 on an
+  ephemeral port with a token generated per run, never persisted and never shown in the chrome; a
+  socket whose `?t=` does not match is refused. So is one whose `Origin` is anything but absent,
+  empty, `null` or `file://` — measured, not guessed: an Electron 44 bundled guest sends
+  `Origin: file://`, and a `null`-only check refused the real Phone page. Every refusal is named in
+  the state the page renders. The phone itself is reached over Tailscale only: no cable path, and
+  nothing here goes over the open internet. The scrcpy server jar is checked against the sha256
+  published with its release before it is pushed to the phone, and a mismatch is an error with its
+  reason, never a silent retry.
 
 ## Performance
 
@@ -1129,7 +1204,7 @@ one run before and one after.
 | File | What it is |
 | --- | --- |
 | `main.js` | Electron entry. Owns the single BrowserWindow, window state, acrylic, downloads, page screenshots, permissions, guest context menus, the replayed keystrokes, forwarded guest focus, the PTY IPC bridge, the blocking engine and its counters, the folder picker, `permissions.json`, the certificate-error memory, site info and site-data clearing, `session.json`, the Spotify auto-pause IPC and the guests handed to that module, the `files:` routes behind the Files tab, the music file picker and the `media:now` / `media:control` / `spotify:set-ad-duck` bridge calls, the `disable-features=HardwareMediaKeyHandling` switch that keeps idle music out of the Windows media session, the `embed:` routes behind native app tabs and the `embed:gone` push, and the guards under Security notes (the webview attach hook, the `file:` navigation block, the download and reveal allowlists). |
-| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty (start / programs / withSkipPermissions), downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `spotify` (setAdDuck), `stats` (subscribe / unsubscribe / onSample / procIcons), `stocks` (describe / setKey / setEnabled / setSymbols — describe answers a mask, and nothing here ever returns the key), `apps` (list / launch / focus / refresh), `files` (list / places / open / reveal / icons / copyPath), `music` (chooseFiles), `media` (now / control), `embed` (find / attach / open / layout / detach / close / list / onGone), `background` (chooseVideo / clearVideo). |
+| `preload.js` | The `window.api` contextBridge surface: shortcuts, open-url, pty (start / programs / withSkipPermissions), downloads, paths, versions, `adblock`, `site` (info / setPermission / resetPermissions / clearData / onPermissionsChanged), `capture` (tab / show), `onGuestFocus`, `app` (pickFolder / dirExists), `session`, `autopause` (status / setEnabled / setConfig / doctor / onStatus), `spotify` (setAdDuck), `stats` (subscribe / unsubscribe / onSample / procIcons), `stocks` (describe / setKey / setEnabled / setSymbols — describe answers a mask, and nothing here ever returns the key), `apps` (list / launch / focus / refresh), `files` (list / places / open / reveal / icons / copyPath), `music` (chooseFiles), `media` (now / control), `embed` (find / attach / open / layout / detach / close / list / onGone), `background` (chooseVideo / clearVideo), `phone` (describe / command / onUpdate / onOpenSettings). |
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the Files tab and its `files:` console channel, `openAppTab()` and `openTerminalTab()` with the app flag they persist and the DRM note bar, the idle-music presence signals and the now-playing poll behind music.js, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
@@ -1137,6 +1212,8 @@ one run before and one after.
 | `school.js` / `school-reader.ps1` | The School brain, main-process side: the notebook scan (classes, sections, a capped per-class index), the LessonPlayer reader (CDP over the per-app WebView2 policy, then UI Automation, then Windows OCR through the persistent PowerShell child, each mode carrying its reason), subject detection, and the helper — one headless `claude -p` session per class, section id only, resumed between questions, one in flight, budget-gated. State and commands per the header; `<userData>/school.json` keeps the manual subject, helper switch, model and pin. |
 | `budget.js` | The Claude Code usage reading, main-process side: newest statusline JSON by mtime every 30s, 5-hour and week percentages with their resets, today's spend summed over the sessions touched today, stale after ten minutes and error states with reasons, pushed to the chrome on change and to every new-tab guest over the same console-line channel stocks.js uses. |
 | `pills.js` / `pills.css` | The budget pill in `#budget-slot` and its card (a child of `<body>`, positioned under the slot so no chrome row can paint over it): percentages, tones, the age suffix, the countdowns and today's spend. `window.Pills` exposes its state for harnesses. |
+| `phone.js` | The Phone workspace's brain, main-process side, and the single source of truth for its contract: the tools (adb and the sha-pinned scrcpy v4.1 server, downloaded into `<userData>/tools/` with byte progress as state), a serialised adb wrapper whose stderr is the reason, the device machine (pair, connect, disconnect, pin 5555 and re-pin after a Wi-Fi change, the TCP latency probe and the battery read, backoff reconnect), the stream (jar push, scid, `adb forward`, the v4.1 argv, the handshake, profiles, stall detection) and the relay that hands the three scrcpy sockets to the bundled page over a localhost WebSocket with a per-run token — packet-exact splitting, backpressure that drops only delta frames, and the metas re-fed to a late joiner. `settings.enabled` is the master switch: off stops the stream, disconnects, kills the adb server and refuses every command with its reason, keeping the pairing. `<userData>/phone.json` holds the host, the pairing state and the quality settings. |
+| `phone.html` / `phone-page.js` / `phone-page.css` | The Phone tab itself, a bundled preload-less `file://` guest with no `window.api`: it bootstraps on a console line, then runs on the WebSocket. Session and media packets into a WebCodecs H.264 decoder (codec string read from the SPS, config prepended to every key frame, hardware preferred with a software fallback, painted in the decoder's output callback), PCM and opus audio through WebAudio with a mute, pointer / wheel / keyboard turned into scrcpy control messages byte-for-byte from the v4.1 reference tests with Ctrl+Alt+P releasing the keyboard, the rail of hardware keys and the fifteen readouts, and a status strip that always names the state, the reason and the one action that moves it on. `?selftest=1` proves encode → packet → decode → paint with no phone attached; `?decoder=` takes `hardware`, `software` or `auto` when a decoder needs forcing for an experiment. |
 | `pty.js` | PTY session manager — spawns a program under ConPTY with a scrubbed environment, out of a static PROGRAMS table (claude, powershell, pwsh, cmd, python, node, Git Bash) with fixed arguments, a per-program argument allowlist (only claude takes `--continue`, `--resume`, `--dangerously-skip-permissions`), one-time binary resolution through `where.exe` with Store alias stubs rejected, and `listPrograms()` / `hasProgram()`. |
 | `stats.js` | System stats, main-process side: a once-a-second sampler that runs only while a renderer is subscribed. CPU from `os.cpus()` deltas, memory from `process.getSystemMemoryInfo()`, uptime from `os.uptime()`, and disk, network and GPU from one long-lived `typeperf` child whose CSV it parses, with per-process rows grouped by base name and `endTask(pids)` refusing self and a protected list. Ref-counted `stats:subscribe` / `stats:unsubscribe` per webContents, `stats:sample` pushed out; the child is killed 5s after the last unsubscribe and on quit. Its parsing is pure and exported, so it runs under plain node. |
 | `stocks.js` | Live prices, main-process side, and the only place the Finnhub key exists: the `<userData>/stocks.json` store (`stocks.enabled` / `finnhubKey` / `symbols` / `selected`), the `wss://ws.finnhub.io` trade stream with its resubscribing backoff reconnect, REST `/quote` snapshots and `/stock/candle` history with the documented free-tier 403 falling through to Yahoo's keyless chart JSON, a 60-calls-a-minute token bucket in front of every REST call, and the poll spacing that follows the market session. It puts its own `console-message` listener on each `<webview>` guest (`newtab:stocks` in, `window.__applyStocks` out, coalesced to one push per 500ms) and ref-counts subscribers per webContents, so with nothing on screen it holds no socket and no timer. `describe()` answers a mask and a boolean and there is no channel that returns the key. Its parsers, the market-session clock and the budget are pure and exported, so they run under plain node. |
@@ -1172,6 +1249,7 @@ one run before and one after.
 | `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on the CDP port from `SMOKE_PORT`, 9222 by default, and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
 | `CHANGELOG.md` | What changed and why, by area, written to be read instead of the diffs. |
+| `docs/phone-optimize-plan.md` | The ranked optimization plan for the phone mirror — what was measured live, what is already done, and what is worth doing next with its expected gain, effort, risk and the way to verify it. Read it before touching the stream. |
 
 Runtime dependencies beyond Electron: `@homebridge/node-pty-prebuilt-multiarch` (ConPTY),
 `@xterm/xterm` with `@xterm/addon-fit`, `@ghostery/adblocker-electron` with

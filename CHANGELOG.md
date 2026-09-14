@@ -910,6 +910,65 @@ Found, and not ours to fix:
   beside it for twenty minutes and was removed at the user's request; the new tab's now-playing tile
   is unchanged.)
 
+### Phone workspace (2026-09-13)
+
+- A fifth workspace, Phone (midnight), that opens into the phone itself instead of a new tab page:
+  The user's Android phone (2025) on Android 16, mirrored in a tab over Tailscale at 100.64.0.1. There is
+  no cable path and nothing goes over the open internet, so the phone's Tailscale has to be on —
+  without it every failure below is a timeout, which is the one thing no readout can work out for
+  itself, so the Settings section says it in the first line. Ctrl+T in that workspace still opens a
+  new tab page, because that is what Ctrl+T means.
+- Presets are seeded per key now, not once for the set. The first four went in under a single flag,
+  so a fifth added later would never have reached a profile that already carried it; what is
+  recorded is the list of keys a profile has been offered. A preset you delete still stays deleted.
+- Only two things are downloaded, and only on first use: adb and the scrcpy v4.1 server, into the
+  profile's tools folder, with the server jar checked against the sha256 published with its release
+  and refused on a mismatch. The download shows its bytes on the page rather than in a log, and
+  opening Settings describes what is there without fetching anything.
+- Pairing is once: Wireless debugging → "Pair device with pairing code" on the phone, and the host,
+  port and six digits into Settings → Phone. The pairing port is not the port you connect on — the
+  phone shows both and they differ. After the first connect the browser pins adb to port 5555 so
+  later connects need no reading at all.
+- That pin is lost whenever the phone changes Wi-Fi or reboots: adbd restarts on a fresh random
+  port. The reconnect now disconnects the stale entry, finds the new port over mDNS when it can,
+  re-pins 5555 and comes back on the Tailscale address — and when it cannot, it names the port to
+  read off the phone instead of retrying into nothing.
+- The mouse is a finger: move, press and drag are touch, the wheel scrolls, right-click is Back,
+  middle-click is Home. The keyboard is captured while the screen has focus, Ctrl+C and Ctrl+V
+  carry the clipboard both ways, and Ctrl+Alt+P hands the keys back to the browser; the `keys`
+  readout says which side has them. The rail has Back, Home, Recents, Power, Vol +, Vol −, Rotate,
+  Notifs, Screen off, Wake, Copy ← phone, Paste → phone, Screenshot and Mute. Every byte written to
+  the control socket comes from the scrcpy v4.1 sources and their serialisation tests, not memory.
+- Fifteen readouts beside the picture: device, battery, phone rtt, browser rtt, fps, kbps, decoder,
+  decode time, decode queue, dropped, key frames asked, frame age, profile · bitrate, audio, keys.
+  On the real phone over Tailscale-on-LAN that reads about 59 fps painted with roughly 1 ms
+  hardware decode and an empty queue.
+- Quality in Settings → Phone: a profile (At home, Away, Auto), a bitrate for each of the first
+  two, longest side, frame rate, phone audio, turning the phone's screen off while mirroring, and
+  connecting on its own at startup. Auto measures a TCP round trip to the phone's adb port rather
+  than timing adb itself — spawning adb costs about 170 ms on a 7 ms link, and that number chose
+  Away for ever.
+- At the top of that section, above everything it governs, a **Phone link** switch. Off stops the
+  stream, disconnects the phone and kills the adb server, and nothing reconnects, downloads or
+  spawns adb again until it is back on. Pairing is kept, so on is one press away, and the switch is
+  drawn before the first state arrives so the way out never depends on the thing being switched off
+  answering.
+- Nothing in it fails silently. Every state names itself, its reason and the one action that moves
+  it on — download the tools, open Settings → Phone, connect, start, retry — and a refused command
+  prints its reason under the button that sent it.
+- A still screen is not a stall. scrcpy encodes a frame only when the picture changes, so a phone
+  resting on its home screen sends nothing for minutes and that is the stream working perfectly.
+  Once a frame has painted the picture is never covered again, silence reads as "still N s" beside
+  a counting frame age, and "stalled" needs the server alive, 15 s of silence *and* a dead control
+  socket.
+- The picture path was tuned against the real phone. Frames arrive in bursts, so parking one for
+  the next animation frame binned a quarter of them: the page paints in the decoder's output
+  callback, and painted fps now tracks the relay. Hardware decode is the default with an automatic
+  software fallback, a decoder's first frame after `configure()` is no longer mistaken for falling
+  behind, and a page that shed to 30 fps and then a shorter longest side asks for what it turned
+  down back after 30 s of clean running. A dropped frame, a decoder reset, a tab coming back into
+  view or a reconnect asks the phone for a key frame at once instead of waiting up to ten seconds.
+
 ## Things to know
 
 - A forced kill can lose the last few seconds of tab state. A normal close cannot — the strip is
@@ -973,12 +1032,27 @@ Found, and not ours to fix:
 - The budget pill reads the JSON that Claude Code's statusline hook writes under
   mission-control; with no active Claude Code session the reading goes stale after ten minutes
   and the pill says so, rather than showing an old number as current.
+- The Phone workspace needs Tailscale running on the phone. There is no cable path, so with it off
+  every step times out; the tab and the Settings section both say so rather than guessing.
+- The 5555 pin does not survive a Wi-Fi change or a phone reboot. Usually the reconnect finds the
+  new port on its own; when it cannot, the tab names the port to read off the phone under Wireless
+  debugging, and one connect re-pins it.
+- Screen off does exactly what it says and nothing more: the panel goes dark on the desk while
+  Android keeps compositing, so the mirror carries on unchanged — the rail repeats the server's
+  own "display turned off" line so you know it landed. The old Screen on key could never wake a
+  dozing phone (that call sits under Android's power manager), so it is now **Wake**, which sends
+  a real wake key first. A black picture is a sleeping phone, not a hidden lock screen — the
+  sign-in screen mirrors fine once the phone is awake — and after a second of black the canvas
+  says so and points at Wake. Proven on the phone over adb; the buttons themselves still await a
+  live press in the browser.
+- Only adb and the scrcpy server are downloaded, on first use, into the profile's tools folder. A
+  cleared profile fetches them again, and that first Phone tab needs the network.
 
 ## Commits
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
-through 04:30 are the small hours after that same 11 September evening; 09:53 through 10:54 are
-12 September.
+through 04:30 are the small hours after that same 11 September evening; 09:53 through 19:55 are
+12 September; 14:19 through 16:57 are 13 September.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -1105,3 +1179,11 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 0eaf9eb | 19:11 | Now playing: the pill says "ad · quiet" while the bridge has Spotify turned down |
 | ac9b4bd | 19:48 | Side pane: a hidden host no longer draws an empty column beside the well |
 | 70d06e8 | 19:55 | Budget pill: card clears the nav row, today's spend is today's, 10 min is not stale; now-playing pill removed |
+| b2e28c5 | 14:19 | Scaffold: the Phone workspace's files and contract — phone.js carries the IPC, the state shape, the console bootstrap and the WebSocket framing, pinned to scrcpy v4.1 |
+| fb3cca0 | 14:41 | Phone workspace: a fifth preset that opens into the phone, per-key preset seeding, and a foldable Settings → Phone that prints every command's reason under the button that sent it |
+| ecf5f68 | 14:46 | Phone workspace: phone.js in full — the sha-pinned tools, the device machine, the stream and the relay, with packet-exact splitting and backpressure that drops only delta frames |
+| 61830d1 | 14:55 | Phone workspace: the page that is the phone — WebCodecs decode and paint, audio, mouse and keyboard as scrcpy control messages, the rail, the readouts, and ?selftest=1 |
+| 32f4e7e | 15:58 | Phone relay: what the first live pass taught it — a TCP round trip decides the auto profile, a still screen is not a stall, a key frame is asked for on the first drop, and a Wi-Fi change re-pins 5555 |
+| b87e772 | 16:07 | Phone page: what the first live pass taught it — silence reads as "still N s", key frames on the way back, a deeper decode queue with its own readouts, and two geometry bugs from the size probe |
+| 770b6de | 16:57 | Phone page: paint every frame in the decoder's callback, forgive a cold decoder, and ask back for what a shed turned down after 30 s of clean running |
+| 0406ef5 | 19:39 | Phone: Screen on becomes Wake, a black picture names its cause on the canvas, a refused control frame is no longer dropped silently, Settings → Phone gets the Phone link switch, the keyboard release chord moves to Ctrl+Alt+P, and the Phone workspace keeps its page across a restart |
