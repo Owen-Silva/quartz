@@ -593,6 +593,135 @@ function statsApi() {
   return api;
 }
 
+/*
+ * The process list's renderer rows, named the way the tab strip names them.
+ *
+ * Main can only ask a webContents for its title, and every new-tab page is
+ * titled "New tab" — so the expanded Electron group read as seven identical
+ * `renderer  New tab` rows with nothing to tell them apart. WHICH tab a
+ * renderer holds, and which workspace that tab lives in, is knowledge only
+ * this document has: `tabs[]` carries both, and a guest's webContents id is
+ * the key between the two halves.
+ *
+ * So stats.js sends `wcIds` with each of our renderer rows and the label is
+ * rewritten here, on the way to the guest: `<tab> · <workspace>`, three tabs
+ * per process and a count for the rest, with the page reading the list marked
+ * so it can find itself. A row this window cannot place keeps the words main
+ * gave it — never a blank, and never a name we made up.
+ */
+
+/** How much of a tab's title one process row carries before it is cut. */
+const PROC_LABEL_MAX = 28;
+/** Tabs named in one process row before the rest are counted. */
+const PROC_LABEL_TABS = 3;
+
+/**
+ * One tab -> the words its process row wears: `YouTube · Home`.
+ *
+ * The title is the chip's title (setTabTitle already fell back to
+ * shortLabelFor for a page that has none), so the row and the chip agree; a
+ * Claude chamber is named for what it is, since its "title" is a cwd.
+ */
+function procRowNameFor(tab) {
+  const space = findWorkspace(tabWorkspace(tab));
+  const where = (space && space.name) ? String(space.name) : 'Home';
+  let name = isClaudeTab(tab) ? 'Claude' : String(tab.title == null ? '' : tab.title);
+  name = name.replace(/\s+/g, ' ').trim();
+  if (!name) name = shortLabelFor(tab.url);
+  if (name.length > PROC_LABEL_MAX) {
+    name = name.slice(0, PROC_LABEL_MAX - 1).trimEnd() + '…';
+  }
+  return name + ' · ' + where;
+}
+
+/**
+ * Every live guest's webContents id -> its tab, built once per sample. The
+ * same lookup tabForWebContentsId() does one tab at a time, turned inside out
+ * because a sample can carry a dozen rows and this runs every second.
+ */
+function tabsByWebContentsId() {
+  const map = new Map();
+  for (const tab of tabs) {
+    // A Claude chamber has no guest and a sleeping tab's element is a
+    // placeholder: neither one answers getWebContentsId().
+    if (!tab || tab.asleep || !tab.viewEl) continue;
+    if (typeof tab.viewEl.getWebContentsId !== 'function') continue;
+    let id = null;
+    try { id = tab.viewEl.getWebContentsId(); } catch (err) { continue; }
+    if (Number.isFinite(id)) map.set(id, tab);
+  }
+  return map;
+}
+
+/**
+ * The webContents ids in one process -> that row's words, or '' to leave the
+ * row exactly as main wrote it.
+ *
+ * Three tabs are named and the rest counted, the way main joins the titles it
+ * can see. An id that is no tab of this window — the chrome document itself,
+ * a guest that closed between the sample and now — counts toward that tail
+ * instead of being given a name it has not got.
+ */
+function procRowLabel(wcIds, byId, receivingTab) {
+  const named = [];
+  let unplaced = 0;
+  for (const id of wcIds) {
+    const tab = byId.get(id) || null;
+    if (!tab) { unplaced += 1; continue; }
+    let text = procRowNameFor(tab);
+    // The guest reading this list is a new-tab page, so its own row is the one
+    // row it can check against what it sees.
+    if (receivingTab && tab.id === receivingTab.id) text += ' (this page)';
+    else if (tab.id === activeTabId) text += ' (this tab)';
+    named.push(text);
+  }
+  if (!named.length) return '';
+  const shown = named.slice(0, PROC_LABEL_TABS);
+  const more = (named.length - shown.length) + unplaced;
+  return shown.join(', ') + (more > 0 ? ' +' + more : '');
+}
+
+/** The renderer rows of a sample that told us which webContents they hold. */
+function statsRendererRows(sample) {
+  const groups = (sample && sample.procs && Array.isArray(sample.procs.top))
+    ? sample.procs.top : null;
+  const rows = [];
+  if (!groups) return rows;
+  for (const group of groups) {
+    if (!group || !Array.isArray(group.children)) continue;
+    for (const child of group.children) {
+      if (child && Array.isArray(child.wcIds) && child.wcIds.length) rows.push({ group, child });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Rewrite those rows' labels, in place, on the sample about to be relayed.
+ *
+ * Every label is worked out BEFORE any of them is written, so a throw half way
+ * through cannot leave the list half main's words and half ours. Nothing here
+ * ever escapes: the sample goes out either way, and a failure leaves the
+ * reason on the groups it touched (the page prints childrenNote under them)
+ * rather than letting the rows quietly keep saying "New tab".
+ */
+function nameStatsRenderers(sample, receivingTab) {
+  let rows = [];
+  try {
+    rows = statsRendererRows(sample);
+    if (!rows.length) return;
+    const byId = tabsByWebContentsId();
+    const labels = rows.map((row) => procRowLabel(row.child.wcIds, byId, receivingTab));
+    rows.forEach((row, i) => { if (labels[i]) row.child.label = labels[i]; });
+  } catch (err) {
+    const why = 'tab names unavailable: '
+      + String((err && err.message) ? err.message : err || 'no reason given').slice(0, 120);
+    try {
+      for (const row of rows) if (!row.group.childrenNote) row.group.childrenNote = why;
+    } catch (err2) { /* the sample still goes out, with main's own titles */ }
+  }
+}
+
 /**
  * Hand one sample to one open new-tab guest (no-op for anything else).
  *
@@ -603,6 +732,9 @@ function statsApi() {
 function pushStatsToTab(tab, sample) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   if (!sample || typeof sample !== 'object') return;
+  // Main's renderer rows all read "New tab"; only this document can say which
+  // tab each one is. The sample is relayed whether or not that works.
+  nameStatsRenderers(sample, tab);
   let payload = '';
   try { payload = JSON.stringify(sample); } catch (err) { return; }
   try {

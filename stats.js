@@ -49,6 +49,16 @@
 //      main) and, for OUR renderers, the tab it hosts, matched through
 //      webContents.getOSProcessId().
 //
+//      A child row's shape:
+//        { pid, cpu, memBytes, ioBps, role, label, url, wcIds? }
+//      `wcIds` is the webContents ids living in that pid, and it is there only
+//      on our own renderers. It exists because a title is all this process can
+//      see and every new tab page is titled "New tab": seven renderers read as
+//      seven identical rows. The chrome document is the only place that knows
+//      which TAB and which WORKSPACE an id is, so it joins on these ids and
+//      rewrites `label` on the way to the page (app.js, nameStatsRenderers).
+//      `label` stays the honest fallback for anything it cannot place.
+//
 //      Command lines are not in a performance counter, so they cost a
 //      PowerShell. It runs ONLY when a pid we care about is new, answers for
 //      the whole batch at once, and its answer is cached until the pid exits.
@@ -693,9 +703,21 @@ function labelForContents(type, title, url) {
 }
 
 /**
- * Every webContents -> `pid -> { label, url }`. Chromium shares one process
- * between pages of the same site, so a pid can hold several: they are joined,
- * three named and the rest counted, in the order Electron lists them.
+ * Every webContents -> `pid -> { label, url, wcIds }`. Chromium shares one
+ * process between pages of the same site, so a pid can hold several: they are
+ * joined, three named and the rest counted, in the order Electron lists them.
+ *
+ * `wcIds` is those pages' webContents ids, in the same order as the names. A
+ * title is all main can see, and EVERY new-tab page is titled "New tab" -- so
+ * a seven-renderer Electron group expanded into seven identical rows and none
+ * of them said which tab it was. Which tab, and which workspace it lives in,
+ * is knowledge only the chrome document has; the ids are the key it joins on,
+ * and app.js rewrites `label` from them before the sample reaches the page.
+ * `label` and `url` stay exactly what they always were: they are what the row
+ * falls back to when nothing in this window claims the id.
+ *
+ * A webContents with no readable `id` contributes its name and no id, which
+ * costs that one page its tab name and nothing else.
  *
  * Every call into a webContents is wrapped: this runs a second and one of
  * them being destroyed mid-loop must cost the sample nothing.
@@ -719,10 +741,16 @@ function webContentsLabels(list) {
     try { title = String(wc.getTitle()); } catch { /* an empty title is fine */ }
     try { url = String(wc.getURL()); } catch { /* so is an empty url */ }
 
+    // The id is a plain property, so it is read the same defensive way as the
+    // methods above: a destroyed webContents can lose it between two lines.
+    let id = null;
+    try { id = Number(wc.id); } catch { id = null; }
+
     let entry = seen.get(pid);
-    if (!entry) { entry = { labels: [], urls: [] }; seen.set(pid, entry); }
+    if (!entry) { entry = { labels: [], urls: [], ids: [] }; seen.set(pid, entry); }
     entry.labels.push(labelForContents(type, title, url));
     if (url) entry.urls.push(url);
+    if (Number.isFinite(id) && id > 0) entry.ids.push(id);
   }
 
   const out = new Map();
@@ -730,7 +758,11 @@ function webContentsLabels(list) {
     const names = entry.labels;
     let label = names.slice(0, 3).join(', ');
     if (names.length > 3) label += ' +' + (names.length - 3);
-    out.set(pid, { label, url: entry.urls.slice(0, 3).join('\n') });
+    out.set(pid, {
+      label,
+      url: entry.urls.slice(0, 3).join('\n'),
+      wcIds: entry.ids.slice(),
+    });
   }
   return out;
 }
@@ -757,13 +789,14 @@ function lookupIn(src) {
  * all is to find what is eating the machine right now.
  *
  * A group of more than one process also carries `children`: its own pids,
- * memory-heaviest first, each `{ pid, cpu, memBytes, ioBps, role, label, url }`.
+ * memory-heaviest first, each `{ pid, cpu, memBytes, ioBps, role, label, url }`
+ * plus `wcIds` on the rows that hold webContents of ours.
  * That is the answer to "twelve Electrons, which one is the 1.5 GB tab".
  * opts:
  *   selfPids     Set of our own pids (marks `self`, and only these get labels)
  *   cmdlines     Map pid -> command line (null = read and empty). Absent
  *                altogether means nobody asked, and every role stays ''.
- *   labels       Map pid -> { label, url } from webContentsLabels()
+ *   labels       Map pid -> { label, url, wcIds } from webContentsLabels()
  *   cmdlineNote  why the last command-line query gave nothing, in words
  */
 function groupProcesses(rows, opts) {
@@ -845,7 +878,7 @@ function attachChildren(g, rows, ctx) {
       named = ctx.label(r.pid) || { label: 'idle renderer', url: '' };
     }
 
-    return {
+    const child = {
       pid: r.pid,
       cpu: round1(clampPercent(r.cpu)) || 0,
       memBytes: Math.round(Number.isFinite(r.memBytes) ? r.memBytes : 0),
@@ -854,6 +887,15 @@ function attachChildren(g, rows, ctx) {
       label: named && named.label ? String(named.label) : '',
       url: named && named.url ? String(named.url) : '',
     };
+    // The webContents ids behind this row, so the chrome can say WHICH tab it
+    // is -- main only ever sees a title, and every new tab page is called
+    // "New tab". Only on the rows that have any: an empty array on all 24 of
+    // a group would be payload for nothing, and the per-second size of this
+    // list is the whole reason `children` is capped at all (see the header).
+    if (named && Array.isArray(named.wcIds) && named.wcIds.length) {
+      child.wcIds = named.wcIds.slice();
+    }
+    return child;
   });
 
   // A failure gets carried to the page in words. Without this the rows would
