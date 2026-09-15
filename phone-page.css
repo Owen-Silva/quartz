@@ -228,6 +228,62 @@ body {
 .rail-btn[data-on="1"] { color: var(--pp-fg); border-color: var(--pp-ion); }
 .rail-btn.wide { grid-column: 1 / -1; }
 
+/* Sound: Computer | Phone | Both — where the phone's sound plays. One
+   hairline-framed strip of three, straight under Mute. The chosen segment is
+   lit like a pressed rail key (ion hairline, no glow); a change restarts the
+   stream, so the segment being switched to is marked busy with a static
+   dashed rim and a trailing ellipsis — no looping animation while it waits. */
+.rail-sound {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: -2px;
+}
+.rail-sound-label {
+  font-size: 10px;
+  color: var(--pp-fg-3);
+  letter-spacing: 0.02em;
+}
+.rail-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--pp-line);
+  border-radius: 8px;
+  background: var(--pp-bg-2);
+}
+.rail-seg-btn {
+  min-width: 0;
+  padding: 5px 2px;
+  font: 11px/1.2 var(--pp-font);
+  color: var(--pp-fg-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 100ms steps(2, end), color 100ms steps(2, end);
+}
+.rail-seg-btn:hover:not([disabled]) { color: var(--pp-fg); background: var(--pp-panel-2); }
+.rail-seg-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pp-focus); }
+.rail-seg-btn[aria-pressed="true"] {
+  color: var(--pp-fg);
+  background: var(--pp-panel-2);
+  border-color: var(--pp-ion);
+}
+.rail-seg-btn[aria-disabled="true"] { opacity: 0.45; }
+.rail-seg-btn[disabled] { cursor: progress; }
+.rail-seg-btn[disabled]:not([data-busy="1"]) { opacity: 0.4; }
+.rail-seg-btn[data-busy="1"] {
+  color: var(--pp-fg);
+  border-color: var(--pp-ion);
+  border-style: dashed;
+}
+.rail-seg-btn[data-busy="1"]::after { content: "\2026"; }
+
 /* The one-line answer to the last rail press — including every refusal, which
    is the whole point: a button that did nothing must say why. */
 .rail-note {
@@ -238,6 +294,9 @@ body {
 }
 .rail-note[data-kind="error"] { color: var(--pp-err); }
 .rail-note[data-kind="ok"] { color: var(--pp-ok); }
+/* "warn" was already sent (the audio socket's refusal) with no colour of its
+   own; the Sound answer uses it too, for an ok stream that lost its sound. */
+.rail-note[data-kind="warn"] { color: var(--pp-warn); }
 
 .rail-read {
   margin: 0;
@@ -276,6 +335,9 @@ body {
 @media (max-width: 520px) {
   .rail { width: 150px; padding: 10px 8px 12px; }
   .rail-read { grid-template-columns: minmax(0, auto) minmax(0, 1fr); }
+  /* 134 px for three words: "Computer" gives way to an ellipsis before the
+     strip wraps; every segment keeps its full title. */
+  .rail-seg-btn { padding: 5px 1px; font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -726,13 +726,20 @@
     readout('profile', prof ? (prof + ' · ' + fmtRate(s.bitrate || 0)) : '—', '',
       prof ? (prof + ' · ' + fmtRate(s.bitrate || 0) + ' · at most ' + (s.maxSize || '?') +
         ' px and ' + (s.maxFps || '?') + ' fps') : 'no stream');
+    var soundNow = soundLive();
     readout('audio', audioSummary(),
-      (audio.unavailable || audio.blocked) ? 'warn' : (audio.packets ? 'ok' : ''),
-      audio.unavailable ? ('no audio: ' + audio.reason) : audioSummary());
+      soundNow === 'phone' ? '' : ((audio.unavailable || audio.blocked) ? 'warn' : (audio.packets ? 'ok' : '')),
+      soundNow === 'phone'
+        ? 'sound plays on the phone\'s own speaker: nothing is captured, so nothing plays here'
+        : (audio.unavailable ? ('no audio: ' + audio.reason) : audioSummary()) +
+          (soundNow === 'both' ? ' · ' + SOUND_TITLE.both : ''));
     readout('keys', input.captured ? 'phone' : 'browser', input.captured ? 'ok' : '');
   }
 
   function audioSummary() {
+    /* First: in Phone mode nothing is captured at all, so an old "none" or
+       "muted" from an earlier stream would be a lie about where sound is. */
+    if (soundLive() === 'phone') return 'on phone';
     if (audio.unavailable) return 'none: ' + audio.reason;
     if (audio.muted) return 'muted';
     if (audio.blocked) return 'click to start';
@@ -897,7 +904,11 @@
     });
   }
 
-  function sendCommand(name, arg) {
+  /* waitMs: how long to wait for the answer (default 10 s). A command that
+     restarts the stream (the Sound choice) waits longer, because phone.js
+     answers only once the new stream is up or has failed. */
+  function sendCommand(name, arg, waitMs) {
+    var wait = waitMs > 0 ? waitMs : 10000;
     return new Promise(function (resolve) {
       if (!wire.ws || wire.ws.readyState !== 1) {
         resolve({ ok: false, reason: 'not connected to the browser' });
@@ -915,8 +926,8 @@
       setTimeout(function () {
         if (!wire.pending.has(id)) return;
         wire.pending.delete(id);
-        resolve({ ok: false, reason: 'the browser did not answer "' + name + '" within 10 s' });
-      }, 10000);
+        resolve({ ok: false, reason: 'the browser did not answer "' + name + '" within ' + Math.round(wait / 1000) + ' s' });
+      }, wait);
     });
   }
 
@@ -1968,6 +1979,7 @@
       if (spec.id) els['btn_' + spec.id] = b;
       keys.appendChild(b);
     });
+    buildSound();
     syncRailEnabled();
   }
 
@@ -1978,14 +1990,23 @@
   function syncRailEnabled() {
     if (!els.railKeys) return;
     var off = linkIsOff();
+    /* Mute the same way, for its own reason: in Phone mode no sound comes to
+       this computer, so there is nothing here to mute (setMuteButton puts
+       that on its title, toggleMute in the rail note). */
+    var muteOff = soundLive() === 'phone';
     var kids = els.railKeys.children;
     for (var i = 0; i < kids.length; i++) {
-      kids[i].setAttribute('aria-disabled', off ? 'true' : 'false');
-      kids[i].style.opacity = off ? '0.45' : '';
+      var dim = off || (muteOff && kids[i] === els.btn_mute);
+      kids[i].setAttribute('aria-disabled', dim ? 'true' : 'false');
+      kids[i].style.opacity = dim ? '0.45' : '';
     }
   }
 
   function toggleMute() {
+    if (soundLive() === 'phone') {
+      railNote('error', 'nothing to mute here: sound plays on the phone, not on this computer — pick Computer or Both under Sound to hear it here');
+      return;
+    }
     if (audio.unavailable) {
       /* There is nothing to mute: say why, every time it is pressed. */
       railNote('error', 'there is no audio to mute: ' + audio.reason);
@@ -2004,6 +2025,12 @@
   function setMuteButton() {
     var b = els.btn_mute;
     if (!b) return;
+    if (soundLive() === 'phone') {
+      b.textContent = 'Mute';
+      b.title = 'sound plays on the phone, not on this computer — there is nothing to mute here (Sound: Computer or Both brings it here)';
+      b.dataset.on = '0';
+      return;
+    }
     if (audio.unavailable) {
       b.textContent = 'No audio';
       b.title = 'the phone is sending no audio: ' + audio.reason;
@@ -2013,6 +2040,181 @@
     b.textContent = audio.muted ? 'Unmute' : 'Mute';
     b.title = audio.muted ? 'audio is muted' : 'mute the phone audio';
     b.dataset.on = audio.muted ? '1' : '0';
+  }
+
+  /* --- where the phone's sound plays: Sound: Computer | Phone | Both ------ */
+  /* The user, 2026-09-15: sound from the phone played on the laptop and never on
+     the phone. scrcpy's default audio source (REMOTE_SUBMIX) silences the
+     phone's own speaker while it captures, so the choice has to be offered.
+     The setting is settings.audioOutput in phone.json and it is phone.js's to
+     apply (see the header there); this page only asks for it over the same ws
+     command path as everything else and shows what came back:
+       computer  audio=true: the sound plays here, the phone's speaker is silent
+       phone     audio=false: nothing is captured, the phone plays normally
+       both      audio_source=playback audio_dup=true: the phone keeps playing
+                 AND a copy plays here; an app that blocks capture plays on the
+                 phone only
+     A change restarts a live stream, so the control is busy (and disabled)
+     until the answer, and the answer's reason goes to the rail note — refused,
+     timed out or fine. A main whose state carries no audioOutput (an older
+     phone.js) only knows audio on/off: the page reads that as Computer/Phone,
+     asks with { audio } instead, and says why Both is not on offer. */
+  var SOUND_MODES = ['computer', 'phone', 'both'];
+  var SOUND_LABEL = { computer: 'Computer', phone: 'Phone', both: 'Both' };
+  var SOUND_WHERE = { computer: 'this computer', phone: 'the phone', both: 'the phone and this computer' };
+  var SOUND_TITLE = {
+    computer: 'plays here; the phone\'s own speaker stays silent while the stream captures it',
+    phone: 'plays on the phone only; nothing comes to this computer, so Mute has nothing to do',
+    both: 'plays on the phone and here; apps that block capture play on the phone only'
+  };
+  /* A change answers only after stopStream + startStream: adb, the server
+     push, three connects. 10 s is too tight for that on a slow link. */
+  var SOUND_WAIT_MS = 30000;
+  /* An answer can be ok (the stream came back) and still carry bad news about
+     sound — "the phone refused to play and capture sound at once: …". Those
+     words make the note a warning rather than a green "done". */
+  var SOUND_TROUBLE = /refus|could not|cannot|video only|no audio|failed/i;
+  var sound = { pending: '' };   // the mode asked for and not yet answered
+
+  function isSoundMode(v) { return SOUND_MODES.indexOf(v) !== -1; }
+
+  /* The saved choice (what the next start uses). */
+  function soundWanted() {
+    var s = phone && phone.settings;
+    if (!s) return 'computer';
+    if (isSoundMode(s.audioOutput)) return s.audioOutput;
+    return s.audio === false ? 'phone' : 'computer';
+  }
+
+  /* The running phone.js predates the Sound setting: its state has settings
+     but no audioOutput. */
+  function soundLegacy() {
+    return !!(phone && phone.settings && !isSoundMode(phone.settings.audioOutput));
+  }
+
+  /* What the RUNNING stream was started with; the saved choice while nothing
+     runs (audioOutput null) or on an older main that does not say. */
+  function soundLive() {
+    var st = phone && phone.stream;
+    if (st && isSoundMode(st.audioOutput)) return st.audioOutput;
+    return soundWanted();
+  }
+
+  function buildSound() {
+    if (els.sound || !els.railKeys || !els.railKeys.parentNode) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'rail-sound';
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Phone sound plays on');
+    var label = document.createElement('div');
+    label.className = 'rail-sound-label';
+    label.textContent = 'Sound';
+    var seg = document.createElement('div');
+    seg.className = 'rail-seg';
+    els.soundBtns = {};
+    SOUND_MODES.forEach(function (mode) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'rail-seg-btn';
+      b.dataset.mode = mode;
+      b.textContent = SOUND_LABEL[mode];
+      b.addEventListener('click', function () { chooseSound(mode); });
+      els.soundBtns[mode] = b;
+      seg.appendChild(b);
+    });
+    wrap.appendChild(label);
+    wrap.appendChild(seg);
+    /* Straight under the keys, so it sits against Mute — and outside
+       #rail-keys, so the link-off dimming there does not reach it: a Sound
+       change still saves while the link is off. */
+    els.railKeys.parentNode.insertBefore(wrap, els.railKeys.nextSibling);
+    els.sound = wrap;
+    renderSound();
+  }
+
+  function renderSound() {
+    if (els.sound) {
+      var wanted = soundWanted();
+      var live = soundLive();
+      var legacy = soundLegacy();
+      var busy = sound.pending;
+      els.sound.setAttribute('aria-busy', busy ? 'true' : 'false');
+      els.sound.dataset.busy = busy ? '1' : '0';
+      els.sound.dataset.mode = live;
+      SOUND_MODES.forEach(function (mode) {
+        var b = els.soundBtns[mode];
+        var noBoth = legacy && mode === 'both';
+        b.setAttribute('aria-pressed', mode === wanted ? 'true' : 'false');
+        b.dataset.busy = mode === busy ? '1' : '0';
+        b.disabled = !!busy;
+        /* Not `disabled`: pressed, it says why in the rail note. */
+        b.setAttribute('aria-disabled', noBoth ? 'true' : 'false');
+        b.title = mode === busy
+          ? 'switching sound to ' + SOUND_WHERE[mode] + ' — the stream restarts; the answer shows below'
+          : noBoth
+            ? 'Both needs a newer phone link: this one only knows sound on or off (its state has no audioOutput)'
+            : SOUND_TITLE[mode];
+      });
+      els.sound.title = busy
+        ? 'switching sound to ' + SOUND_WHERE[busy] + '…'
+        : (live !== wanted
+          ? 'saved for ' + SOUND_WHERE[wanted] + '; the running stream still sends sound to ' + SOUND_WHERE[live] + ' until it restarts'
+          : 'sound plays on ' + SOUND_WHERE[live] + (live === 'both' ? ' — ' + SOUND_TITLE.both : ''));
+    }
+    setMuteButton();
+    syncRailEnabled();
+  }
+
+  function chooseSound(mode) {
+    if (!isSoundMode(mode)) return;
+    if (sound.pending) {
+      railNote('', 'still switching sound to ' + SOUND_WHERE[sound.pending] + ' — wait for that answer first');
+      return;
+    }
+    if (!phone || !phone.settings) {
+      railNote('error', 'sound did not change: the browser has not sent the phone state yet');
+      return;
+    }
+    var legacy = soundLegacy();
+    if (legacy && mode === 'both') {
+      railNote('error', 'Both is not available: this browser\'s phone link only knows sound on or off (its state has no audioOutput) — pick Computer or Phone');
+      return;
+    }
+    if (mode === soundWanted() && mode === soundLive()) {
+      railNote('ok', 'sound already plays on ' + SOUND_WHERE[mode]);
+      return;
+    }
+    var st = phone.stream && phone.stream.state;
+    var restarts = st === 'running' || st === 'stalled';
+    /* The contract: { audioOutput }. An older main drops that key as unknown
+       and would answer "saved" having changed nothing, so it gets the old
+       { audio } boolean it does understand. */
+    var arg = legacy ? { audio: mode !== 'phone' } : { audioOutput: mode };
+    sound.pending = mode;
+    renderSound();
+    railNote('', 'switching sound to ' + SOUND_WHERE[mode] + '…' + (restarts ? ' (the stream restarts)' : ''));
+    sendCommand('set-settings', arg, SOUND_WAIT_MS).then(function (res) {
+      sound.pending = '';
+      var reason = (res && res.reason) || 'no reason given';
+      if (!res || !res.ok) {
+        railNote('error', 'sound did not change to ' + SOUND_WHERE[mode] + ': ' + reason);
+      } else if (soundWanted() !== mode) {
+        /* phone.js pushes its state before it answers, so by now the setting
+           must say the new mode. If it does not, "ok" changed nothing. */
+        railNote('warn', 'the browser answered "' + reason + '" but its setting still says sound plays on ' +
+          SOUND_WHERE[soundWanted()]);
+      } else {
+        var streaming = !!(phone && phone.stream && (phone.stream.state === 'running' || phone.stream.state === 'stalled'));
+        var lost = mode !== 'phone' && streaming && audio.unavailable;
+        var text = /sound|audio/i.test(reason) ? reason : 'sound on ' + SOUND_WHERE[mode] + ': ' + reason;
+        /* The audio socket's own refusal arrived (as a stream meta) just
+           before this answer and put a warning in this same note: keep it. */
+        if (lost && text.indexOf(audio.reason) === -1) text += ' — the phone sends no audio: ' + audio.reason;
+        railNote((lost || SOUND_TROUBLE.test(reason)) ? 'warn' : 'ok', text);
+      }
+      renderSound();
+      renderReadouts();
+    });
   }
 
   function screenshot() {
@@ -2236,7 +2438,18 @@
   function applyState(state) {
     if (!state) return;
     var was = (phone && phone.stream) ? phone.stream.state : '';
+    var soundWas = soundLive();
     phone = state;
+    /* Into Phone mode there is no audio socket and so no stream meta to reset
+       the audio state: forget the last stream's codec, refusal and decoder
+       here, or Computer/Both would later start from a stale "none: …". */
+    if (soundLive() === 'phone' && soundWas !== 'phone') {
+      resetAudio();
+      audio.codec = '';
+      audio.unavailable = false;
+      audio.reason = 'sound plays on the phone';
+    }
+    renderSound();
     var now = (state.stream && state.stream.state) || '';
     /* A stream that stopped leaves its last frame on the canvas. The page must
        not then call that stale picture a live, merely still one: forget the
