@@ -3918,6 +3918,42 @@
     return sha.length > 12 ? sha.slice(0, 12) + '...' : sha;
   }
 
+  /** settings.audioOutput, or its old `audio` mirror from a main that predates it. */
+  function phoneSoundMode(s) {
+    if (!s) return 'computer';
+    if (s.audioOutput === 'computer' || s.audioOutput === 'phone' || s.audioOutput === 'both') {
+      return s.audioOutput;
+    }
+    return s.audio === false ? 'phone' : 'computer';
+  }
+
+  function phoneSoundPlace(mode) {
+    if (mode === 'phone') return 'on the phone';
+    if (mode === 'both') return 'on the phone and this computer';
+    return 'on this computer';
+  }
+
+  /**
+   * Where the sound is going right now, in words. stream.audioOutput is the
+   * mode the RUNNING stream started with (null while off); stream.audio going
+   * false under a computer/both mode means the phone refused to send it, and
+   * the Stream reason above says why.
+   */
+  function phoneSoundReadout(st, settings) {
+    var saved = phoneSoundMode(settings);
+    var running = st.audioOutput === 'computer' || st.audioOutput === 'phone' || st.audioOutput === 'both';
+    if (!running) return 'will play ' + phoneSoundPlace(saved) + ' when mirroring starts';
+    var line;
+    if (st.audioOutput === 'phone') line = 'plays on the phone (nothing is sent here)';
+    else if (!st.audio) line = 'meant to play ' + phoneSoundPlace(st.audioOutput) + ', but the phone is not sending it (see Stream)';
+    else {
+      line = 'plays ' + phoneSoundPlace(st.audioOutput) + ', ' +
+        (st.audioCodec ? String(st.audioCodec) : 'no codec yet');
+    }
+    if (saved !== st.audioOutput) line += '; saved choice is ' + saved + ', used from the next start';
+    return line;
+  }
+
   function phoneAgo(at) {
     var t = Number(at);
     if (!isFinite(t) || t <= 0) return 'never';
@@ -4283,8 +4319,7 @@
       field.appendChild(phoneRow('Rate',
         (Number(st.fps) > 0 ? Math.round(st.fps) + ' fps' : '0 fps') + ', ' + phoneKbps(st.kbps * 1000)));
       field.appendChild(phoneRow('Profile in use', st.profile ? String(st.profile) : 'unknown'));
-      field.appendChild(phoneRow('Audio',
-        st.audio ? (st.audioCodec ? String(st.audioCodec) : 'on, no codec yet') : 'off'));
+      field.appendChild(phoneRow('Sound', phoneSoundReadout(st, phnState.settings)));
       var ws = phnState.ws || {};
       field.appendChild(phoneRow('Page link',
         (Number(ws.port) > 0 ? 'ws port ' + ws.port : 'no socket yet') +
@@ -4354,9 +4389,31 @@
       || phoneResultRow('set-maxsize') || phoneResultRow('set-maxfps');
     if (rateAnswer) field.appendChild(rateAnswer);
 
-    field.appendChild(switchRow('Phone audio', !!s.audio, function (next) {
-      phoneSetSetting({ audio: next }, 'set-audio');
-    }));
+    /* Where the phone's sound plays (phone.js SOUND). Three places, one
+       choice, so a segmented row, not a switch. A change restarts a live
+       stream, which takes seconds: the row is disabled while the call is out
+       and phone.js's answer (where sound now plays, or why the phone refused)
+       lands under it. */
+    var soundMode = phoneSoundMode(s);
+    var soundBusy = phnBusy === 'set-audio';
+    var soundSeg = segmented([
+      { id: 'computer', name: 'Computer' },
+      { id: 'phone',    name: 'Phone' },
+      { id: 'both',     name: 'Both' }
+    ], soundMode, function (next) {
+      if (phnBusy === 'set-audio' || next === phoneSoundMode(phnState && phnState.settings)) return;
+      phoneSetSetting({ audioOutput: next }, 'set-audio');
+    });
+    if (soundBusy) {
+      Array.prototype.forEach.call(soundSeg.children, function (b) { b.disabled = true; });
+      soundSeg.setAttribute('aria-busy', 'true');
+    }
+    field.appendChild(controlRow('Phone sound plays on', null, soundSeg));
+    field.appendChild(el('p', 'set-hint', soundBusy
+      ? 'Moving the sound — a running stream restarts for it...'
+      : 'Computer: the phone goes quiet and its sound plays here. Phone: nothing is sent here and ' +
+        'the phone plays as usual. Both: it plays on the phone and here (Android 13 and up); apps ' +
+        'that block capture play on the phone only.'));
     var audioAnswer = phoneResultRow('set-audio');
     if (audioAnswer) field.appendChild(audioAnswer);
 

@@ -28,6 +28,7 @@
  *               'start'                          push + start the scrcpy server, open the sockets, relay
  *               'stop'                           stop the stream, keep the adb connection
  *               'set-settings' { ...partial }    any of settings.* below; persisted; a running stream restarts if quality changed
+ *                                                (audioOutput included — see SOUND below; over the ws it persists too)
  *               'forget'                         drop stored host/port/pairing state (adb keys stay)
  *               'open-settings'                  ask the chrome to open Settings → Phone (send('phone:open-settings'))
  *   Push (chrome): send('phone:update', state) on every change (debounced ≤ 100 ms).
@@ -59,7 +60,10 @@
  *               codec: string|null, width: number, height: number, fps: number, kbps: number,
  *               profile: 'lan'|'away'|'auto', bitrate: number, maxSize: number, maxFps: number,
  *               audio: boolean, audioCodec: string|null, scid: string|null, since: number,
+ *               audioOutput: 'computer'|'phone'|'both'|null,
  *               lastVideoAt: number, serverLine: string, serverLineAt: number },
+ *                 // audioOutput: the sound mode the RUNNING stream was started with
+ *                 // (null while off) — settings.audioOutput is what the next start uses.
  *                 // serverLine: the newest line the scrcpy server printed on the
  *                 // phone ('' while off), serverLineAt its epoch ms. It is the
  *                 // ONLY confirmation some control messages have: scrcpy answers
@@ -75,9 +79,32 @@
  *     ws: { port: number, clients: number },
  *     settings: { enabled: boolean, host: string, port: number, pairPort: number,
  *                 profile: 'lan'|'away'|'auto',
- *                 audio: boolean, lanBitrate: number, awayBitrate: number, maxSize: number,
+ *                 audioOutput: 'computer'|'phone'|'both',
+ *                 audio: boolean,            // DERIVED: audioOutput !== 'phone' (old readers)
+ *                 lanBitrate: number, awayBitrate: number, maxSize: number,
  *                 maxFps: number, autoConnect: boolean, screenOffWhileMirroring: boolean }
  *   }
+ *
+ * SOUND (settings.audioOutput — where the phone's sound plays; default 'computer').
+ *   'computer' audio=true audio_codec=opus audio_source=output — the phone's
+ *              speaker goes SILENT (REMOTE_SUBMIX) and the sound plays here.
+ *   'phone'    audio=false — nothing captured, no audio socket, the phone plays
+ *              its own sound as if nothing were mirroring.
+ *   'both'     audio=true audio_codec=opus audio_source=playback audio_dup=true
+ *              (AudioPlaybackCapture + dup, Android 13+) — plays on the phone AND
+ *              here; apps that opt out of playback capture play on the phone only.
+ *   Migration: a phone.json with no audioOutput takes audio === false ? 'phone' :
+ *   'computer'. A caller still sending { audio: bool } gets phone (false) /
+ *   computer (true) unless the same call carries audioOutput, which wins. An
+ *   unknown audioOutput is refused with a reason, never ignored. It is a
+ *   PREFERENCE, not a shed: set-settings { audioOutput } (or { audio }) from the
+ *   page's ws is persisted like the Settings IPC, and a live stream restarts
+ *   (QUALITY_KEYS); the answer says where sound now plays ("sound now plays on
+ *   the phone (stream restarted)"). If the phone refuses 'both' (a disable code
+ *   on the audio socket, or a server line naming the audio source), video
+ *   carries on, the mode is NOT swapped for another one, and the reason names it:
+ *   "the phone refused to play and capture sound at once: <server line> — pick
+ *   Computer or Phone" (that answer is ok: false).
  *
  * DISABLED (settings.enabled === false — the master switch in Settings → Phone).
  * The phone link is OFF: the stream stops ('phone link turned off'), the probe
@@ -186,13 +213,16 @@
  *   adb forward tcp:<free local port> localabstract:scrcpy_<scid>
  *   adb shell CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process /
  *     com.genymobile.scrcpy.Server 4.1 scid=<hex> tunnel_forward=true
- *     video=true video_codec=h264 audio=<true|false> audio_codec=<opus|raw>
+ *     video=true video_codec=h264 <the SOUND args for settings.audioOutput>
  *     max_size=<n> max_fps=<n> video_bit_rate=<n> control=true cleanup=true
  *     log_level=info
  * (Options.parse: `scid` is read with Integer.parseInt(value, 16) — 8 lowercase
  * hex digits, no 0x, 31-bit — and the device socket is named scrcpy_%08x;
  * booleans are Boolean.parseBoolean, i.e. the literal "true"/"false"; `audio`
- * defaults to TRUE so turning audio off means passing audio=false; max_fps is a
+ * defaults to TRUE so turning audio off means passing audio=false; the audio
+ * source defaults to OUTPUT, `audio_source` is AudioSource.findByName (an unknown
+ * name throws "Audio source X not supported" and the server exits) and
+ * `audio_dup` is a plain boolean handed to AudioPlaybackCapture; max_fps is a
  * float in 4.1.) Then three TCP connects in order (video, audio, control); the
  * first socket yields a dummy byte then a 64-byte NUL-padded device name; each
  * media socket then yields its u32 codec id. The version argument must equal
@@ -229,6 +259,31 @@ const DEVICE_JAR = '/data/local/tmp/scrcpy-server.jar';
 /* Codec ids are the 4-byte ASCII of the name (VideoCodec.java / AudioCodec.java). */
 const VIDEO_CODECS = { 0x68323634: 'h264', 0x68323635: 'h265', 0x00617631: 'av1', 0x00767038: 'vp8', 0x00767039: 'vp9' };
 const AUDIO_CODECS = { 0x6f707573: 'opus', 0x00616163: 'aac', 0x666c6163: 'flac', 0x00726177: 'raw' };
+
+/* SOUND (see the contract): where the phone's sound plays, and the exact
+   scrcpy-server 4.1 arguments for each. Option names and values checked
+   against the pinned Options.java ("audio_source" -> AudioSource.findByName,
+   "audio_dup" -> Boolean.parseBoolean) — do not invent others. */
+const AUDIO_OUTPUTS = ['computer', 'phone', 'both'];
+
+function audioArgs(mode) {
+  if (mode === 'phone') return ['audio=false'];
+  if (mode === 'both') return ['audio=true', 'audio_codec=opus', 'audio_source=playback', 'audio_dup=true'];
+  return ['audio=true', 'audio_codec=opus', 'audio_source=output'];
+}
+
+/** "on the phone" / "on this computer" / "on the phone and this computer". */
+function soundPlace(mode) {
+  if (mode === 'phone') return 'on the phone';
+  if (mode === 'both') return 'on the phone and this computer';
+  return 'on this computer';
+}
+
+/* A server line that is about sound (audio_source, audio_dup, "Audio disabled:
+   …", playback capture), as opposed to any other line the server printed.
+   Deliberately broad: the exact 4.1 wording lives in AudioPlaybackCapture.java,
+   which is not among the pinned sources. */
+const SOUND_LINE_RE = /audio|playback/i;
 
 /* Streamer.java: the three flag bits live in the top byte of the u64 header. */
 const FLAG_SESSION = 0x80;
@@ -499,6 +554,8 @@ function create(deps) {
       maxFps: 60,
       audio: true,
       audioCodec: null,
+      /* The SOUND mode the running stream was started with; null while off. */
+      audioOutput: null,
       scid: null,
       since: 0,
       /* Epoch ms of the last video packet (0 while off). A still phone screen is
@@ -517,6 +574,9 @@ function create(deps) {
       port: 5555,
       pairPort: 0,
       profile: 'auto',
+      /* Where the phone's sound plays (SOUND in the contract above). `audio`
+         is only its derived mirror, kept for readers that predate it. */
+      audioOutput: 'computer',
       audio: true,
       lanBitrate: 8000000,
       awayBitrate: 2000000,
@@ -564,6 +624,11 @@ function create(deps) {
   /* TEST HOOK ONLY (set through _test.setAdbRunner): when set, every adb call
      goes here instead of spawning adb.exe. Nothing in the app ever sets it. */
   let adbRunner = null;
+  /* TEST HOOK ONLY (set through _test.setServerSpawner): when set, the
+     long-lived scrcpy server shell is this fn(adbPath, args) -> child-like
+     object instead of a real adb.exe, so the harness can read the exact server
+     argv (the SOUND arguments) without a phone. Nothing in the app sets it. */
+  let serverSpawner = null;
 
   function log() {
     const parts = ['[phone]'];
@@ -587,6 +652,8 @@ function create(deps) {
     try { parsed = JSON.parse(raw); } catch { return; }
     if (!parsed || typeof parsed !== 'object') return;
     if (parsed.settings && typeof parsed.settings === 'object') {
+      /* Includes the SOUND migration: a file with no audioOutput takes
+         audio === false ? 'phone' : 'computer' (see sanitiseSettings). */
       Object.assign(state.settings, sanitiseSettings(parsed.settings, state.settings));
     }
     state.device.host = state.settings.host;
@@ -631,7 +698,14 @@ function create(deps) {
     if (raw.port != null) out.port = clampInt(raw.port, 1, 65535, base.port);
     if (raw.pairPort != null) out.pairPort = clampInt(raw.pairPort, 0, 65535, base.pairPort);
     if (raw.profile === 'lan' || raw.profile === 'away' || raw.profile === 'auto') out.profile = raw.profile;
-    if (typeof raw.audio === 'boolean') out.audio = raw.audio;
+    /* SOUND: audioOutput wins; a bare legacy `audio` maps false -> phone,
+       true -> computer (this is also the phone.json migration, since a stored
+       file from before audioOutput carries only `audio`). An unknown
+       audioOutput is dropped HERE — setSettings refuses it out loud first. */
+    if (AUDIO_OUTPUTS.includes(raw.audioOutput)) out.audioOutput = raw.audioOutput;
+    else if (typeof raw.audio === 'boolean') out.audioOutput = raw.audio ? 'computer' : 'phone';
+    if (!AUDIO_OUTPUTS.includes(out.audioOutput)) out.audioOutput = 'computer';
+    out.audio = out.audioOutput !== 'phone';
     if (raw.lanBitrate != null) out.lanBitrate = clampInt(raw.lanBitrate, 200000, 50000000, base.lanBitrate);
     if (raw.awayBitrate != null) out.awayBitrate = clampInt(raw.awayBitrate, 200000, 50000000, base.awayBitrate);
     if (raw.maxSize != null) out.maxSize = clampInt(raw.maxSize, 0, 4096, base.maxSize);
@@ -1743,7 +1817,10 @@ function create(deps) {
        behind) or its heal — a reaction to this minute, not a preference. It
        is applied to the running stream but never written to phone.json:
        on 2026-09-13 one cold decoder left the user's stored quality at 30 fps /
-       800 px for good. Settings → Phone goes through IPC and does persist. */
+       800 px for good. Settings → Phone goes through IPC and does persist.
+       The SOUND keys (audioOutput, and a legacy audio) are the exception:
+       setSettings peels them off a temporary call and persists them, because
+       where sound plays is a choice the page's rail makes on the user's behalf. */
     const arg = (msg.name === 'set-settings' && msg.arg && typeof msg.arg === 'object')
       ? Object.assign({}, msg.arg, { temporary: true })
       : msg.arg;
@@ -1871,6 +1948,7 @@ function create(deps) {
     state.stream.maxSize = s.maxSize;
     state.stream.maxFps = s.maxFps;
     state.stream.audio = s.audio;
+    state.stream.audioOutput = s.audioOutput;
     state.stream.audioCodec = null;
     state.stream.codec = null;
     state.stream.width = 0;
@@ -1903,8 +1981,10 @@ function create(deps) {
       runReason: '',           // the "mirroring …" line, so the ticker can restore it
       tick: null,
       screenOff: false,
+      soundRefused: '',        // SOUND: why the phone refused this run's sound mode ('' = it did not)
       stopping: false
     };
+    const run = live;          // this start's record, for the catch below
     autoCrossings = 0;
     state.stream.lastVideoAt = 0;
 
@@ -1935,8 +2015,7 @@ function create(deps) {
         'tunnel_forward=true',
         'video=true',
         'video_codec=h264',
-        'audio=' + (s.audio ? 'true' : 'false'),
-        'audio_codec=opus',
+        ...audioArgs(s.audioOutput),       // SOUND: computer / phone / both
         'max_size=' + s.maxSize,
         'max_fps=' + s.maxFps,
         'video_bit_rate=' + picked.bitrate,
@@ -1953,7 +2032,9 @@ function create(deps) {
          process down with an uncaught TypeError dialog. Every handler
          below holds `bag` and bails once `live` is no longer it. */
       const bag = live;
-      bag.server = spawn(state.tools.adbPath, args, { windowsHide: true });
+      bag.server = serverSpawner
+        ? serverSpawner(state.tools.adbPath, args)          // TEST HOOK (harness only)
+        : spawn(state.tools.adbPath, args, { windowsHide: true });
       const keep = (chunk) => {
         if (live !== bag || !bag.serverLog) return;   // an old server, still talking
         let newest = '';
@@ -1983,16 +2064,36 @@ function create(deps) {
       bag.server.on('close', () => {
         if (live !== bag || bag.stopping) return;
         const last = bag.serverLog.filter((l) => !/^\s*$/.test(l)).pop() || 'it exited without a message';
-        streamError('the scrcpy server on the phone stopped: ' + last);
+        /* 'both' refused at argument time ("Audio source … not supported")
+           kills the server outright: name it as the sound refusal it is. */
+        const soundLine = s.audioOutput === 'both' ? bag.serverLog.filter((l) => SOUND_LINE_RE.test(l)).pop() : '';
+        streamError(soundLine
+          ? 'the phone refused to play and capture sound at once: ' + soundLine
+            + ' — pick Computer or Phone (the scrcpy server on the phone stopped)'
+          : 'the scrcpy server on the phone stopped: ' + last);
         stopStream('').catch(() => {});
       });
 
       /* 4. the three sockets, in the server's accept order */
-      await openAndRelay(live.localPort, s.audio);
+      await openAndRelay(live.localPort, s.audio, s.audioOutput);
       return { ok: true, reason: state.stream.reason };
     } catch (err) {
-      const reason = msgOf(err);
+      /* The server's own close/error handler already ended THIS run and said
+         why (live is null or a newer run now). The throw here is only the
+         fallout of that — measured 2026-09-15: "Cannot read properties of null
+         (reading 'stopping')" was overwriting the server's real last words. */
+      if (live !== run) return { ok: false, reason: state.stream.reason };
+      let reason = msgOf(err);
       const last = live && live.serverLog.length ? live.serverLog[live.serverLog.length - 1] : '';
+      /* A server that exits over its sound arguments (e.g. "Audio source …
+         not supported") cannot carry on with video: it is gone. Name it as the
+         sound refusal it is, and do NOT quietly restart in another mode. */
+      const soundLine = s.audioOutput === 'both' && live
+        ? live.serverLog.filter((l) => SOUND_LINE_RE.test(l)).pop() : '';
+      if (soundLine) {
+        reason = 'the phone refused to play and capture sound at once: ' + soundLine
+          + ' — pick Computer or Phone (' + reason + ')';
+      }
       streamError(last && !reason.includes(last) ? reason + ' (the phone said: ' + last + ')' : reason);
       await stopStream('');
       return { ok: false, reason: state.stream.reason };
@@ -2004,13 +2105,18 @@ function create(deps) {
    * then relay. Split out so the harness can drive it against a fake scrcpy
    * server on a plain TCP port without adb anywhere near it.
    */
-  async function openAndRelay(localPort, wantAudio) {
+  async function openAndRelay(localPort, wantAudio, audioOutput) {
     if (!live) {
       live = {
         meta: [], bytes: [], drops: 0, keyRequests: 0, lastKeyRequestAt: 0,
-        tier: chooseBitrate().tier, serverLog: [], lastVideoAt: 0, runReason: '', stopping: false
+        tier: chooseBitrate().tier, serverLog: [], lastVideoAt: 0, runReason: '', soundRefused: '', stopping: false
       };
     }
+    /* The SOUND mode this run asked for (the harness passes it; startStream
+       has already put it on state.stream). */
+    const soundMode = AUDIO_OUTPUTS.includes(audioOutput) ? audioOutput
+      : (AUDIO_OUTPUTS.includes(state.stream.audioOutput) ? state.stream.audioOutput : (wantAudio ? 'computer' : 'phone'));
+    state.stream.audioOutput = soundMode;
     state.stream.state = 'starting';
     state.stream.reason = 'waiting for the phone to answer on the tunnel…';
     pushNow();
@@ -2022,7 +2128,7 @@ function create(deps) {
     let videoPipe = null;
     let lastError = 'no answer';
     while (!videoPipe) {
-      if (live.stopping) throw new Error('stopped while starting');
+      if (!live || live.stopping) throw new Error('stopped while starting');
       if (Date.now() > deadline) throw new Error('the scrcpy server never answered on the tunnel (' + lastError + ')');
       let socket = null;
       try { socket = await tcpConnect(localPort, 3000); } catch (err) { lastError = msgOf(err); await delay(150); continue; }
@@ -2067,9 +2173,19 @@ function create(deps) {
       if (audioId === 0 || audioId === 1) {
         /* Streamer.writeDisableStream: 0 = could not capture, carry on with
            video; 1 = a configuration error the client must not ignore. */
-        const why = audioId === 0
+        let why = audioId === 0
           ? 'the phone could not capture audio (nothing is playing, or Android refused) — video only'
           : 'the phone reported an audio configuration error — video only';
+        if (soundMode === 'both') {
+          /* 'both' (playback capture + dup) refused. The server's own words
+             usually trail the code by a moment on the adb shell's stdout, so
+             give them up to a second to arrive; never swap in another mode. */
+          const line = await soundServerLine(1000);
+          why = 'the phone refused to play and capture sound at once: '
+            + (line || ('audio disable code ' + audioId + ', no server line'))
+            + ' — pick Computer or Phone';
+          live.soundRefused = why;
+        }
         state.stream.audioCodec = null;
         const meta = { type: 'stream', channel: CH_AUDIO, codec: null, deviceName, reason: why };
         live.meta.push(meta);
@@ -2106,7 +2222,10 @@ function create(deps) {
       streamPipe(live.audio, 'media', false, (packet, info) => broadcastPacket(CH_AUDIO, packet, info));
       live.audio.onClose = (reason) => {
         if (!live || live.stopping) return;
-        state.stream.reason = 'audio stopped: ' + reason + ' — video carries on';
+        const line = soundMode === 'both' ? (live.serverLog || []).filter((l) => SOUND_LINE_RE.test(l)).pop() : '';
+        state.stream.reason = line
+          ? 'the phone stopped playing and capturing sound at once: ' + line + ' — video carries on; pick Computer or Phone'
+          : 'audio stopped: ' + reason + ' — video carries on';
         state.stream.audioCodec = null;
         pushNow();
       };
@@ -2135,11 +2254,24 @@ function create(deps) {
     live.runReason = 'mirroring ' + (state.stream.codec || '')
       + (state.stream.bitrate ? ' at ' + Math.round(state.stream.bitrate / 100000) / 10 + ' Mb/s' : '')
       + (live.audio ? ' with ' + (state.stream.audioCodec || 'audio') : '')
-      + (audioNote ? ' — ' + audioNote : (live.audio ? '' : ' (no audio)'));
+      + (live.audio ? ', sound ' + soundPlace(soundMode) : '')
+      + (audioNote ? ' — ' + audioNote
+        : (live.audio ? '' : (soundMode === 'phone' ? ' — sound plays on the phone' : ' (no audio)')));
     state.stream.reason = live.runReason;
     startStreamTicker();
     pushNow();
     return { ok: true, reason: state.stream.reason };
+  }
+
+  /** The newest server line about sound, waiting up to `ms` for one to land. */
+  async function soundServerLine(ms) {
+    const bag = live;
+    const deadline = Date.now() + (ms || 0);
+    for (;;) {
+      const line = bag && bag.serverLog ? bag.serverLog.filter((l) => SOUND_LINE_RE.test(l)).pop() : '';
+      if (line || Date.now() >= deadline || live !== bag || (bag && bag.stopping)) return line || '';
+      await delay(50);
+    }
   }
 
   function broadcastText(payload) {
@@ -2215,6 +2347,7 @@ function create(deps) {
   async function stopStream(why) {
     const bag = live;
     if (!bag) {
+      state.stream.audioOutput = null;
       if (state.stream.state !== 'off' && state.stream.state !== 'error') {
         state.stream.state = 'off';
         state.stream.reason = why || 'not started';
@@ -2251,6 +2384,7 @@ function create(deps) {
     state.stream.fps = 0;
     state.stream.kbps = 0;
     state.stream.scid = null;
+    state.stream.audioOutput = null;   // SOUND: only a RUNNING stream has a mode
     state.stream.lastVideoAt = 0;
     /* The server is gone; its last words belonged to the run that just ended. */
     state.stream.serverLine = '';
@@ -2262,7 +2396,13 @@ function create(deps) {
 
   /* --- settings --------------------------------------------------------- */
 
-  const QUALITY_KEYS = ['profile', 'audio', 'lanBitrate', 'awayBitrate', 'maxSize', 'maxFps', 'screenOffWhileMirroring'];
+  /* A change to any of these restarts a live stream. audioOutput is here (the
+     server takes its sound arguments only at start); `audio` is its derived
+     mirror and always moves with it. */
+  const QUALITY_KEYS = ['profile', 'audioOutput', 'audio', 'lanBitrate', 'awayBitrate', 'maxSize', 'maxFps', 'screenOffWhileMirroring'];
+  /* The page's shed / heal keys (this session only). The SOUND keys are NOT
+     among them: where sound plays is a preference, never a reaction. */
+  const TEMP_KEYS = ['maxFps', 'maxSize', 'profile', 'lanBitrate', 'awayBitrate'];
 
   /* --- the master switch ------------------------------------------------- */
 
@@ -2303,13 +2443,63 @@ function create(deps) {
     return { ok: true, reason: 'phone link turned on' };
   }
 
+  /** The SOUND keys of a partial ({ audioOutput } and/or legacy { audio }), or null. */
+  function soundPart(partial) {
+    const out = {};
+    if (partial.audioOutput != null) out.audioOutput = partial.audioOutput;
+    if (typeof partial.audio === 'boolean') out.audio = partial.audio;
+    return Object.keys(out).length ? out : null;
+  }
+
+  /**
+   * The answer to a sound change that restarted the stream. It says where the
+   * sound now plays — or, when the phone refused the mode (live.soundRefused,
+   * set by openAndRelay), says THAT, with ok: false: the video carries on, but
+   * what was asked for did not happen, and no other mode was swapped in.
+   */
+  function soundRestartAnswer(res, mode) {
+    const place = soundPlace(mode);
+    if (!res.ok) {
+      return { ok: false, reason: 'sound is set to play ' + place + ', but the stream did not restart: ' + res.reason };
+    }
+    if (live && live.soundRefused) {
+      return { ok: false, reason: live.soundRefused + ' (stream restarted)' };
+    }
+    return { ok: true, reason: 'sound now plays ' + place + ' (stream restarted)' };
+  }
+
   async function setSettings(partial) {
     if (!partial || typeof partial !== 'object') return { ok: false, reason: 'nothing to change' };
+    /* SOUND: a mode we do not know is refused out loud, never quietly dropped. */
+    if (partial.audioOutput != null && !AUDIO_OUTPUTS.includes(partial.audioOutput)) {
+      return {
+        ok: false,
+        reason: 'sound can play on the computer, the phone or both — "' + String(partial.audioOutput)
+          + '" is not one of them (audioOutput: computer | phone | both)'
+      };
+    }
     /* The page's shed / heal: this session only, never phone.json. A value
        equal to the stored setting cancels the override for that key. */
     if (partial.temporary === true) {
-      const keys = ['maxFps', 'maxSize', 'profile', 'lanBitrate', 'awayBitrate', 'audio'].filter((k) => partial[k] != null);
+      const sound = soundPart(partial);
+      const keys = TEMP_KEYS.filter((k) => partial[k] != null);
+      /* Where sound plays arrives over the page's ws like a shed does, but it
+         is the user's choice, not the decoder's: persist it exactly as Settings
+         would (and restart a live stream for it). */
+      if (sound && !keys.length) return setSettings(sound);
       if (!keys.length) return { ok: false, reason: 'nothing temporary to change' };
+      /* A mixed call: save the sound choice first, without a restart of its
+         own — the temporary restart below starts the stream in the new mode. */
+      let soundNote = '';
+      if (sound) {
+        const beforeMode = state.settings.audioOutput;
+        Object.assign(state.settings, sanitiseSettings(sound, state.settings));
+        saveStore();
+        if (!live) state.stream.audio = state.settings.audio;
+        if (state.settings.audioOutput !== beforeMode) {
+          soundNote = 'sound set to play ' + soundPlace(state.settings.audioOutput) + ' (saved)';
+        }
+      }
       const wanted = sanitiseSettings(partial, effectiveSettings());
       for (const k of keys) {
         if (wanted[k] === state.settings[k]) delete tempQuality[k]; else tempQuality[k] = wanted[k];
@@ -2324,10 +2514,13 @@ function create(deps) {
         pushNow();
         await stopStream('restarting for a temporary quality change');
         const res = await startStream();
-        return { ok: res.ok, reason: res.reason + ' (' + label + ', this session only, not saved)' };
+        const tempReason = res.reason + ' (' + label + ', this session only, not saved)';
+        if (!soundNote) return { ok: res.ok, reason: tempReason };
+        const sounded = soundRestartAnswer(res, state.settings.audioOutput);
+        return { ok: sounded.ok, reason: sounded.reason + '; ' + tempReason };
       }
       pushNow();
-      return { ok: true, reason: label + ' applied for this session only, not saved' };
+      return { ok: true, reason: label + ' applied for this session only, not saved' + (soundNote ? '; ' + soundNote : '') };
     }
     const before = Object.assign({}, state.settings);
     Object.assign(state.settings, sanitiseSettings(partial, state.settings));
@@ -2352,12 +2545,24 @@ function create(deps) {
     }
     saveStore();
     pushNow();
+    const soundChanged = state.settings.audioOutput !== before.audioOutput;
     if (changed.length && live) {
-      state.stream.reason = 'restarting the stream for the new ' + changed.join(' + ') + '…';
+      /* `audio` only ever moves with audioOutput, so it is not named twice. */
+      const named = changed.filter((k) => k !== 'audio' || !soundChanged)
+        .map((k) => (k === 'audioOutput' ? 'sound output' : k));
+      state.stream.reason = 'restarting the stream for the new ' + named.join(' + ') + '…';
       pushNow();
       await stopStream('restarting for new settings');
       const res = await startStream();
+      if (soundChanged) return soundRestartAnswer(res, state.settings.audioOutput);
       return { ok: res.ok, reason: res.reason };
+    }
+    if (soundChanged || soundPart(partial)) {
+      const place = soundPlace(state.settings.audioOutput);
+      if (!soundChanged && live && state.stream.audioOutput === state.settings.audioOutput) {
+        return { ok: true, reason: 'saved — sound already plays ' + place };
+      }
+      return { ok: true, reason: 'saved — sound will play ' + place + ' when the stream starts' };
     }
     return { ok: true, reason: 'saved' };
   }
@@ -2587,7 +2792,17 @@ function create(deps) {
       /* Stand a stub in for adb.exe: fn(args, timeoutMs) -> { ok, out, err, ms }.
          Nothing in the app calls this; it is how the harness asserts argv order. */
       setAdbRunner(fn) { adbRunner = typeof fn === 'function' ? fn : null; },
-      setAdbPath(p) { state.tools.adbPath = p || null; }
+      setAdbPath(p) { state.tools.adbPath = p || null; },
+      /* Stand a fake in for the scrcpy server shell: fn(adbPath, args) -> an
+         object with stdout/stderr emitters, on('error'|'close'), kill(), exitCode. */
+      setServerSpawner(fn) { serverSpawner = typeof fn === 'function' ? fn : null; },
+      startStream,
+      setSettings,
+      onWsMessage,
+      sanitiseSettings,
+      loadStore,
+      isLive: () => !!live,
+      soundRefused: () => (live ? live.soundRefused : '')
     }
   };
 }
@@ -2603,6 +2818,9 @@ module.exports = {
     autoDecision,
     tcpRoundTrip,
     VIDEO_CODECS,
-    AUDIO_CODECS
+    AUDIO_CODECS,
+    AUDIO_OUTPUTS,
+    audioArgs,
+    soundPlace
   }
 };
