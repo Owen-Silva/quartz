@@ -21,7 +21,9 @@
  *      registered exactly ONCE at module level and routed to the handle whose
  *      current session id matches the payload.
  *
- * xterm is loaded as globals by index.html: Terminal, FitAddon.FitAddon.
+ * xterm is loaded as a global by index.html: Terminal. The fit addon it also
+ * loads is NOT used -- see proposeGrid(), which measures the host's content box
+ * instead, because the addon reads its border box and over-counts the padding.
  * contextIsolation is on -- no require(), no modules, plain browser script.
  */
 (function () {
@@ -351,14 +353,96 @@
       el.clientWidth > 0 && el.clientHeight > 0;
   }
 
+  /** One computed length in px; 0 for 'auto', '' or anything not a number. */
+  function px(value) {
+    var n = parseFloat(value);
+    return (isFinite(n) && n > 0) ? n : 0;
+  }
+
+  /**
+   * The gutter xterm's viewport keeps for its scrollbar, MEASURED rather than
+   * assumed. The viewport is overflow-y:scroll, never `auto`, so the gutter is
+   * always there -- and chrome.css styles this chamber's down to 9px where the
+   * fit addon hardcoded 14. Every pixel over-reserved is a column of text the
+   * window was wide enough to show.
+   */
+  function scrollbarWidth(viewportEl) {
+    var w = viewportEl.offsetWidth - viewportEl.clientWidth;
+    return w > 0 ? w : 0;
+  }
+
+  /**
+   * The grid this chamber can actually hold, measured off the host's CONTENT
+   * box. Null while the terminal is not measurable yet; the caller then leaves
+   * the grid alone and the ResizeObserver comes back with a better moment.
+   *
+   * This exists instead of FitAddon.fit() because the addon cannot get it right
+   * inside a padded host. It sizes the terminal from
+   * getComputedStyle(parent).height, and chrome.css puts box-sizing:border-box
+   * on every element, so that string is the chamber's OUTER height -- its
+   * 12px/14px padding included -- while the only padding it subtracts is
+   * .xterm's own, which is zero. Measured live 2026-09-15 (dpr 1.25): a 737.6px
+   * chamber whose content box is 713.6px was handed 40 rows of 18.4px = 736px,
+   * so the screen hung 22.4px below its own box and the bottom row was sliced
+   * through the middle of the glyphs by the window edge. Across, the same
+   * over-count plus the 14px scrollbar guess cost three columns of text.
+   *
+   * The host's real content box -- its rect less its own border and padding --
+   * is the whole fix, and it stays right if that padding is ever moved.
+   */
+  function proposeGrid(st) {
+    var term = st.term;
+    var el = term && term.element;
+    if (!el) return null;
+    if (!(term.cols >= 1) || !(term.rows >= 1)) return null;
+
+    var screenEl = el.querySelector('.xterm-screen');
+    var viewportEl = el.querySelector('.xterm-viewport');
+    if (!screenEl || !viewportEl) return null;
+
+    // The screen element is exactly cols x rows cells, so it reports the cell
+    // size the renderer is painting at without reaching into its privates.
+    var screenBox = screenEl.getBoundingClientRect();
+    var cellW = screenBox.width / term.cols;
+    var cellH = screenBox.height / term.rows;
+    if (!(cellW > 0) || !(cellH > 0)) return null;
+
+    var box = st.host.getBoundingClientRect();
+    var cs = window.getComputedStyle(st.host);
+    var availH = box.height
+      - px(cs.paddingTop) - px(cs.paddingBottom)
+      - px(cs.borderTopWidth) - px(cs.borderBottomWidth);
+    var availW = box.width
+      - px(cs.paddingLeft) - px(cs.paddingRight)
+      - px(cs.borderLeftWidth) - px(cs.borderRightWidth)
+      - scrollbarWidth(viewportEl);
+    if (!(availH > 0) || !(availW > 0)) return null;
+
+    // floor, never round: a row that only half fits is the bug this replaced.
+    // The 2x1 floor is the fit addon's own, so a chamber squeezed to nothing
+    // still has a legal grid to hand ConPTY.
+    return {
+      cols: Math.max(2, Math.floor(availW / cellW)),
+      rows: Math.max(1, Math.floor(availH / cellH))
+    };
+  }
+
   function safeFit(st) {
-    if (st.disposed || !st.term || !st.fitAddon) return;
+    if (st.disposed || !st.term) return;
     if (!hasSize(st.host)) return;
 
-    try {
-      st.fitAddon.fit();
-    } catch (err) {
-      return;
+    var grid = proposeGrid(st);
+    if (!grid) return;
+
+    // Only when it actually differs: resize() repaints the whole screen, and
+    // the synchronous fit every tab activation makes would otherwise repaint
+    // a terminal whose grid nothing has changed.
+    if (grid.cols !== st.term.cols || grid.rows !== st.term.rows) {
+      try {
+        st.term.resize(grid.cols, grid.rows);
+      } catch (err) {
+        return;
+      }
     }
 
     var cols = st.term.cols;
@@ -499,11 +583,10 @@
       theme: paletteFor(currentTheme)
     });
 
-    if (window.FitAddon && typeof window.FitAddon.FitAddon === 'function') {
-      st.fitAddon = new window.FitAddon.FitAddon();
-      st.term.loadAddon(st.fitAddon);
-    }
-
+    // No fit addon: proposeGrid() above does the sizing, because the addon
+    // measures the host's border box and hands a padded chamber more rows than
+    // it can paint. index.html still loads the addon script; nothing here uses
+    // it.
     st.term.open(st.host);
     safeFit(st);
 
@@ -590,7 +673,6 @@
       // Flags for the first spawn only; startPty() clears this as it uses it.
       pendingArgs: Array.isArray(options.args) ? options.args.slice() : null,
       term: null,
-      fitAddon: null,
       sessionId: null,
       // The grid the PTY was last told about. safeFit() compares against it so
       // a fit that changes nothing never reaches ConPTY. 0 means "nothing
@@ -729,7 +811,6 @@
           try { st.term.dispose(); } catch (err) {}
           st.term = null;
         }
-        st.fitAddon = null;
         st.listeners = Object.create(null);
         all.delete(st);
       }

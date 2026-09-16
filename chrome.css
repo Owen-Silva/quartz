@@ -1735,8 +1735,14 @@ body:has(> .split-scrim) #views > .split-divider {
 }
 
 /* --- Claude chamber: the deepest glass, full bleed ------------- */
-/* The fit addon measures this host's client box minus padding, so the
-   padding lives here and never on .xterm. */
+/* The padding lives HERE and never on .xterm, and terminal.js sizes the
+   grid to this host's CONTENT box for exactly that reason. It does its
+   own measuring: xterm's fit addon reads getComputedStyle(host).height,
+   which under the border-box sizing above is the OUTER height — padding
+   and all — so it proposed rows for 24px the terminal never had and the
+   bottom row came out sliced in half (fixed 2026-09-15). Anything added
+   to the box below, padding or border, has to stay measurable the same
+   way: see proposeGrid() in terminal.js. */
 #views > .claude-view {
   position: relative;
   /* A chamber is half of a split as readily as a page is: app.js seats it with
