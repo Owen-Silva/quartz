@@ -21,8 +21,8 @@
  *      registered exactly ONCE at module level and routed to the handle whose
  *      current session id matches the payload.
  *
- * xterm is loaded as a global by index.html: Terminal. The fit addon it also
- * loads is NOT used -- see proposeGrid(), which measures the host's content box
+ * xterm is loaded as a global by index.html: Terminal. Its fit addon is NOT
+ * loaded at all -- see proposeGrid(), which measures the host's content box
  * instead, because the addon reads its border box and over-counts the padding.
  * contextIsolation is on -- no require(), no modules, plain browser script.
  */
@@ -585,8 +585,7 @@
 
     // No fit addon: proposeGrid() above does the sizing, because the addon
     // measures the host's border box and hands a padded chamber more rows than
-    // it can paint. index.html still loads the addon script; nothing here uses
-    // it.
+    // it can paint. index.html no longer loads it either.
     st.term.open(st.host);
     safeFit(st);
 
