@@ -64,6 +64,30 @@ not in there: the new tab's background picture. A 2560px JPEG as base64 is about
 string that localStorage would rewrite on every unrelated settings write, so the blob lives in
 IndexedDB instead — db `browser`, store `assets`, key `newtab-bg`.
 
+## Default browser
+
+```
+powershell -ExecutionPolicy Bypass -File register-default-browser.ps1
+powershell -ExecutionPolicy Bypass -File register-default-browser.ps1 -Unregister
+```
+
+register-default-browser.ps1 writes the four HKCU keys Windows reads to know this is a browser —
+`Software\Clients\StartMenuInternet\OwenBrowser` (with its `Capabilities`: http and https →
+`OwenBrowserURL`, .htm and .html → `OwenBrowserHTML`), the two ProgId keys under
+`Software\Classes`, and the `Software\RegisteredApplications` pointer that makes Settings read
+any of it. Paths come from the script's own location, so a moved repo needs a re-run, not an
+edit; re-running is safe, and it reads every value back before it claims success. No admin, and
+nothing machine-wide.
+
+Then do the last step by hand: **Settings → Apps → Default apps → Browser → Set default.**
+Windows 11 protects that choice with a hash no application can forge, so the script does not try
+— it only puts "Browser" in the list.
+
+A clicked link arrives as a command line (`"electron.exe" "<app dir>" "%1"`). The first instance
+holds a single-instance lock, so every later copy hands its URL over and exits: the link opens as
+a foreground tab in the window that is already up, which is restored and focused. A URL on the
+command line at a cold start opens as a tab on top of the restored session.
+
 ## Keyboard shortcuts
 
 Every combo below is a *default*. shortcuts.js holds the one table both the chrome and the main

@@ -81,6 +81,26 @@ if (process.argv.includes('--test-profile')) {
   app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile' + suffix));
 }
 
+/*
+ * One process owns the profile.
+ *
+ * Windows starts a WHOLE NEW copy of the browser for every link click once it
+ * is the default browser (see register-default-browser.ps1). That copy must not
+ * open a second window on the same profile -- it hands its URL to the copy that
+ * already has the lock (the 'second-instance' handler below) and goes.
+ *
+ * The lock is keyed to userData, which the redirect above has already moved for
+ * a test run, so a --test-profile instance locks against other instances of the
+ * SAME test profile and never against the browser the user is using.
+ */
+if (!app.requestSingleInstanceLock()) {
+  // requestSingleInstanceLock() has already delivered this copy's command line
+  // to the first one, so there is nothing left to do. quit() only ASKS, and
+  // everything below this line would still register handlers and open a window.
+  app.quit();
+  process.exit(0);
+}
+
 /** id -> session handle returned by pty.createSession */
 const handles = new Map();
 
@@ -614,6 +634,8 @@ function createWindow() {
     const w = liveWin();
     if (!w) return;
     send('win:focus', { focused: w.isFocused() });
+    // …and a link that arrived before the chrome was listening (see openUrlTab).
+    flushPendingOpenUrl();
   });
 
   // F11 can also come from the OS or the page, so the chrome is told about the
@@ -678,12 +700,93 @@ function createWindow() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Links from Windows
+// ---------------------------------------------------------------------------
+
+/*
+ * Being the default browser is one command line: Windows appends the URL to the
+ * command registered under HKCU\Software\Clients\StartMenuInternet (written by
+ * register-default-browser.ps1) and starts us. A link therefore arrives either
+ * as our own argv -- the first click of the day, which starts the browser -- or,
+ * far more often, as a second instance's argv handed over by the lock above.
+ * Both ends here, and both become an ordinary foreground tab through the same
+ * 'open-url' message the context menu's "Open link in new tab" uses.
+ */
+
+/** A URL that beat the chrome to it. Flushed on the first 'did-finish-load'. */
+let pendingOpenUrl = null;
+
+/**
+ * The URL on a command line, or null. Electron's own switches and the app path
+ * are skipped: a switch starts with '-', and the app path is not an http(s) URL
+ * and does not end in .htm(l). The LAST candidate wins, which is where Windows
+ * puts the '%1' it substitutes.
+ */
+function urlFromArgv(argv) {
+  const args = Array.isArray(argv) ? argv : [];
+  for (let i = args.length - 1; i >= 0; i--) {
+    const arg = String(args[i] || '');
+    if (!arg || arg.startsWith('-')) continue;
+    if (/^https?:\/\//i.test(arg)) return arg;
+    // The .htm / .html association hands over a PATH, not a URL.
+    if (/\.html?$/i.test(arg)) {
+      try {
+        return pathToFileURL(path.resolve(arg)).href;
+      } catch (err) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Give the chrome a foreground tab for `url`, or park it until it can take one. */
+function openUrlTab(url) {
+  if (!url) return;
+  // Nothing listens for 'open-url' until index.html has finished loading, so a
+  // URL that arrives during startup waits rather than being dropped.
+  if (!canSend() || win.webContents.isLoadingMainFrame()) {
+    pendingOpenUrl = url;
+    return;
+  }
+  send('open-url', { url, background: false });
+}
+
+/** The parked URL, now that the chrome is listening. */
+function flushPendingOpenUrl() {
+  if (!pendingOpenUrl) return;
+  const url = pendingOpenUrl;
+  pendingOpenUrl = null;
+  send('open-url', { url, background: false });
+}
+
+/*
+ * The copy that kept the lock hears every copy that did not. A person just
+ * clicked a link, so this is the one place where taking the foreground is the
+ * right thing to do -- including for a bare second launch, which raises the
+ * window that already exists instead of opening another one.
+ */
+app.on('second-instance', (_event, argv) => {
+  openUrlTab(urlFromArgv(argv));
+  const w = liveWin();
+  if (!w) return;
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
+});
+
 app.whenReady().then(() => {
   // Before the handlers: a request that arrives first must already see what
   // the user decided on a previous run.
   loadPermissionDecisions();
   attachSessionHandlers();
   createWindow();
+
+  // A link that STARTED the browser: its tab goes in on top of the session the
+  // strip restores, never instead of it. No URL on the command line changes
+  // nothing at all.
+  openUrlTab(urlFromArgv(process.argv));
 
   /*
    * A KILLED session's leftovers, repaired once, here (see embed.recoverOrphans).
