@@ -31,7 +31,7 @@ $IcoRepo = Join-Path $AppDir 'assets\browser.ico'
 $ProgIdUrl  = 'OwenBrowserURL'
 $ProgIdHtml = 'OwenBrowserHTML'
 $AppKeyName = 'OwenBrowser'
-$AppName    = 'Browser'
+$AppName    = 'Quartz'
 $AppDesc    = "the user's browser - tabs, workspaces, terminal and Claude in one window."
 
 $ClientKey = "HKCU:\Software\Clients\StartMenuInternet\$AppKeyName"

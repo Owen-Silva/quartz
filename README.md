@@ -1,4 +1,11 @@
-# Browser
+# Quartz
+
+The name is display-only (2026-09-26). Everything that identifies the app to Windows or to its
+own profile still says `browser` on purpose: `package.json` `name` (so `app.getName()`, the
+`%APPDATA%\browser` profile with your logins, the single-instance lock and the taskbar's
+`electron.app.browser` grouping never move), the repo folder, and the registry ProgIds
+`OwenBrowserURL` / `OwenBrowserHTML`. Do not add a `productName`: it would silently move the
+profile to `%APPDATA%\Quartz` and log you out of everything.
 
 My own browser. Electron 44 shell, frosted-glass chrome lit from behind by an aurora, in a
 dark theme and a light one that are the same instruments in daylight. Claude Code sessions
@@ -79,9 +86,9 @@ any of it. Paths come from the script's own location, so a moved repo needs a re
 edit; re-running is safe, and it reads every value back before it claims success. No admin, and
 nothing machine-wide.
 
-Then do the last step by hand: **Settings → Apps → Default apps → Browser → Set default.**
+Then do the last step by hand: **Settings → Apps → Default apps → Quartz → Set default.**
 Windows 11 protects that choice with a hash no application can forge, so the script does not try
-— it only puts "Browser" in the list.
+— it only puts "Quartz" in the list.
 
 A clicked link arrives as a command line (`"electron.exe" "<app dir>" "%1"`). The first instance
 holds a single-instance lock, so every later copy hands its URL over and exits: the link opens as

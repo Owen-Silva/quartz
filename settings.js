@@ -4739,7 +4739,7 @@
   function buildAbout() {
     /* The one section with no fold: plain heading, always open (The user). */
     var s = plainSection('About');
-    var line = 'Browser';
+    var line = 'Quartz';
     var app = window.api && window.api.app;
     if (app && typeof app.versions === 'function') {
       try {
