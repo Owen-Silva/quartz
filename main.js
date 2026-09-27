@@ -56,7 +56,19 @@ let win = null;
  * tabs (they go to Spotify), and the Windows / new-tab now-playing tile shows
  * Spotify and other apps but never a browser tab.
  */
-app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
+/*
+ * --measure-visible (test instances only): a test window sits behind the user's
+ * windows (toback.ps1), and Windows occlusion tracking then drops its tiles and
+ * throttles it, so memory and frame numbers read far lower than the real thing.
+ * This flag keeps a test copy rendering as if it were in front. It has to ride
+ * on this same switch: a second disable-features on the command line would be
+ * overwritten by the appendSwitch below.
+ */
+const DISABLED_FEATURES = ['HardwareMediaKeyHandling'];
+if (process.argv.includes('--test-profile') && process.argv.includes('--measure-visible')) {
+  DISABLED_FEATURES.push('CalculateNativeWinOcclusion');
+}
+app.commandLine.appendSwitch('disable-features', DISABLED_FEATURES.join(','));
 
 /*
  * The User-Agent every guest sends, with this app and the framework taken out
