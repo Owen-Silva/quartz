@@ -2545,9 +2545,15 @@ body {
   to   { opacity: 1; transform: none; }
 }
 
-.stats  { animation: rise 500ms ease-out both; }
-.links  { animation: rise 500ms ease-out 80ms both; }
-.recent { animation: rise 500ms ease-out 140ms both; }
+/* backwards, not both. The last keyframe IS the resting style (opacity 1, no
+   transform), so holding it forwards changed no pixel — but an animation that
+   is still "in effect" keeps its element a composited layer for the life of
+   the page, and every tile laid over it (the chips, the dock cells) became an
+   overlap layer too. Backwards still holds the first frame through the delay,
+   and once the rise ends the column paints back into the page's own layer. */
+.stats  { animation: rise 500ms ease-out backwards; }
+.links  { animation: rise 500ms ease-out 80ms backwards; }
+.recent { animation: rise 500ms ease-out 140ms backwards; }
 
 /* --- narrow windows ------------------------------------------ */
 /* Five columns stop being readable long before the window does, so the

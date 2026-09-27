@@ -632,7 +632,17 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 
 /* --- backdrop: coloured light behind the glass ---------------- */
 .backdrop {
-  position: fixed;
+  /* absolute, not fixed. The chrome document never scrolls (html and body are
+     overflow:hidden at 100% height), so the two place it identically — but a
+     fixed element sits in the viewport's transform space, not the root
+     scroller's, and cannot share the root's layer. Fixed, the aurora was a
+     full-window layer of its own, and #well (painted after it and overlapping
+     it) was forced into a THIRD full-window layer: two extra window-sized
+     tile sets in the GPU process for pixels the root layer can hold. Measured
+     2026-09-26: chrome layers 16 -> 14, chrome tile memory 31.6 -> 24.3 MB.
+     The glass above re-blurs the same pixels; screenshots differ by at most
+     4/255 inside the frosted rows (raster rounding), nowhere else. */
+  position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;

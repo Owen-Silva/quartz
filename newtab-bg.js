@@ -1410,11 +1410,15 @@
 
     canvas.width = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
+    boardDpr = dpr;                  // restoreBitmap() re-creates at this scale
+    bitmapReleased = false;          // a fresh bitmap, whatever came before
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     board = buildBoard(w, h, cap, mods);
     drawBoard(ctx, board);
+    // Laid out while hidden (a resize, a mode change): let it go again later.
+    if (document.hidden) scheduleRelease();
 
     // Every live element points at a path from the old board.
     clearLive();
@@ -1464,8 +1468,93 @@
   let lastTick = 0;
   let watchdog = 0;
 
+  /* ------------------------------------------------------------------ */
+  /* A hidden new tab lets go of its bitmap                              */
+  /*                                                                     */
+  /* The board is one full-window 2D canvas at devicePixelRatio. It is   */
+  /* not accelerated in this guest, so it is paid for twice: the backing */
+  /* store in this renderer and the copy the GPU process composites from */
+  /* (about 6 MB each at 1600x930 device px, sometimes a recycled third). */
+  /* A new tab that is not the tab in front paints nothing, yet it kept  */
+  /* all of that for as long as it stayed open, once per new tab.        */
+  /*                                                                     */
+  /* So once a tab has been hidden for RELEASE_AFTER_MS the canvas is    */
+  /* shrunk to 0x0, which frees both copies. The board MODEL (every      */
+  /* trace, via and chip, the `board` object) is kept, so bringing it    */
+  /* back is one drawBoard() — not a re-route — done synchronously in    */
+  /* the visibilitychange that shows the page, before its first visible  */
+  /* frame. There is no blank frame to see: the page was hidden while   */
+  /* the canvas was empty, and it is full again before it is shown.      */
+  /*                                                                     */
+  /* The delay keeps quick back-and-forth tab switching free: only a tab */
+  /* left in the background pays one repaint when it comes back. Packets */
+  /* are untouched: they are paused while hidden (onVisibility) and play */
+  /* on from where they stopped, exactly as before.                      */
+  /*                                                                     */
+  /* Not silent: __boardState() reports whether the bitmap is held or    */
+  /* released, how many times it has been, and any restore that failed,  */
+  /* for the chrome's Processes view to show beside this tab.            */
+  /* ------------------------------------------------------------------ */
+
+  const RELEASE_AFTER_MS = 5000;
+  let boardDpr = 1;
+  let bitmapReleased = false;
+  let releaseTimer = 0;
+  let releaseCount = 0;
+  let restoreError = '';
+
+  function scheduleRelease() {
+    if (releaseTimer || bitmapReleased) return;
+    releaseTimer = setTimeout(releaseBitmap, RELEASE_AFTER_MS);
+  }
+
+  function cancelRelease() {
+    if (releaseTimer) clearTimeout(releaseTimer);
+    releaseTimer = 0;
+  }
+
+  function releaseBitmap() {
+    releaseTimer = 0;
+    // Only ever while hidden, and only a canvas that holds something.
+    if (!document.hidden || bitmapReleased) return;
+    if (canvas.width <= 1 && canvas.height <= 1) return;
+    canvas.width = 0;
+    canvas.height = 0;
+    bitmapReleased = true;
+    releaseCount++;
+  }
+
+  /* Idempotent; every path that can put this page in front calls it first. */
+  function restoreBitmap() {
+    cancelRelease();
+    if (!bitmapReleased) return;
+    bitmapReleased = false;
+    // No board yet, or a mode that hides the canvas: layout(true) sizes and
+    // paints it the moment the board is wanted again (applyBgMode).
+    if (!board || !boardActive()) return;
+    try {
+      canvas.width = Math.max(1, Math.round(board.w * boardDpr));
+      canvas.height = Math.max(1, Math.round(board.h * boardDpr));
+      ctx.setTransform(boardDpr, 0, 0, boardDpr, 0, 0);
+      drawBoard(ctx, board);
+      pendingRepaint = false;        // drawn with the current theme just now
+      restoreError = '';
+    } catch (err) {
+      // Fall back to a full layout, which re-creates everything; say so.
+      restoreError = String(err && err.message || err);
+      layoutStamp = '';
+      layout(true);
+    }
+  }
+
+  function onBitmapVisibility() {
+    if (document.hidden) scheduleRelease();
+    else restoreBitmap();
+  }
+
   function resumeBoard() {
     if (document.hidden) return;
+    restoreBitmap();                 // before layout(): its stamp would skip the paint
     layout();                        // covers a page that laid out hidden
     if (reducedMotion) return;       // static board: there is nothing to run
     // An overlay can outlive a tab switch: coming back visible with the
@@ -1558,6 +1647,8 @@
 
   function init() {
     window.addEventListener('resize', onResize);
+    // First, and in reduced motion too: a static board is still a bitmap.
+    document.addEventListener('visibilitychange', onBitmapVisibility);
     if (!reducedMotion) document.addEventListener('visibilitychange', onVisibility);
 
     /* pageshow covers a restored guest (the webview is reattached without a
@@ -1619,7 +1710,12 @@
       paused: chromePaused,
       hidden: !!document.hidden,
       mode: document.documentElement.getAttribute('data-bg') || 'board',
-      modules: modulesPlaced
+      modules: modulesPlaced,
+      // 'held' or 'released' (hidden tab, see restoreBitmap), how often it
+      // has been let go, and the last restore that had to fall back.
+      bitmap: bitmapReleased ? 'released' : 'held',
+      releases: releaseCount,
+      restoreError: restoreError
     };
   };
 
