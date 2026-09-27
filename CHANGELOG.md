@@ -1005,6 +1005,47 @@ Found, and not ours to fix:
 - Measured in a test instance: 6 workspaces visited leaves 2 guests instead of 6, one video decoding
   instead of five, and GPU memory flat.
 
+### Signing in to X (2026-09-21)
+
+- X (x.com and twitter.com) was the one site you could not log in to. Submitting the form answered
+  "Could not log you in now", or the form stopped responding, or a verification step arrived that
+  never completed — on username and password as well as on the social buttons, while every other
+  site signed in fine. Five things were wrong at once, and all five are fixed.
+- The browser no longer tells sites it is Electron. The User-Agent had `browser/0.1.0` and
+  `Electron/44.3.0` in front of the Chrome token; both are now cut out of Electron's own string at
+  startup, leaving a plain Chrome-on-Windows UA. It is derived from the real value and the real app
+  name, so the Chrome version and the platform stay whatever this build actually ships and a rename
+  cannot leave a stale literal behind. A strip that produced something malformed says so on the
+  console and falls back to a built string rather than shipping a broken UA quietly.
+- The client hints now say the same thing. A Chromium sends its identity twice, and the Sec-CH-UA
+  header still listed `"Electron";v="44"` beside a UA string claiming plain Chrome — which to a site
+  that cross-checks them reads worse than the original. A single request-header hook rewrites
+  Sec-CH-UA to a Chrome brand list, drops Sec-CH-UA-Full-Version-List, corrects any other header
+  still naming Electron, and passes everything else through untouched. It sits on the one webRequest
+  event the ad blocker does not own, is installed once, and cannot stall a request: the body is
+  wrapped, and on any error the original headers go through unchanged.
+- Cosmetic scriptlets are off for x.com and twitter.com, the way they already are for YouTube. This
+  is the measured cause, not a suspicion. Asked what it would inject into `https://x.com/i/flow/login`,
+  the cached engine the app actually runs answers with ten scriptlets, and seven of them monkey-patch
+  `XMLHttpRequest` for the whole page: five `json-prune-xhr-response` wrappers and two copies of
+  `prevent-xhr("/i/api/1\.1/flow/viewer\.json")`. That last one cancels, inside the page, a request
+  of X's own login flow that the network engine lets through — so nothing appears blocked while the
+  flow dead-ends, and there is no document load to reload past. It is x.com-specific: twitter.com
+  gets seven scriptlets and not that one. Network blocking and the cosmetic CSS are unchanged.
+- X's own sign-in endpoints are excepted from blocking, and only those. Measured against the cached
+  engine, the network layer was a smaller part of this than it looked: of the login URLs tested, the
+  only x.com blocks that fire are telemetry (`/i/jot`, `/i/api/1.1/jot`, `/i/csp_report`) plus three
+  exact-path `graphql/*.json` rules — `user_flow`, `viewer_context`, `app_context` — that the modern
+  client no longer calls, and `api.twitter.com/1.1/onboarding/referrer.json`, caught by a generic
+  `/referrer` regex. Those onboarding, GraphQL and OAuth2 paths sit next to X's analytics paths in
+  the privacy lists, so the exceptions are there to keep a list update from taking sign-in down
+  again. The telemetry paths above are deliberately still blocked. An exception filter the engine
+  cannot parse used to be dropped in silence; it is now named on the console instead.
+- The Storage Access API is allowed without a prompt. The twitter.com → x.com identity bridge and
+  the embedded Google and Apple sign-in frames call `document.requestStorageAccess()`, and anything
+  not on an allow-list here is denied with no prompt and no trace — a sign-in that just did not
+  work, for no visible reason.
+
 ## Things to know
 
 - A forced kill can lose the last few seconds of tab state. A normal close cannot — the strip is

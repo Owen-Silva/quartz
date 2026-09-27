@@ -58,6 +58,62 @@ let win = null;
  */
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
 
+/*
+ * The User-Agent every guest sends, with this app and the framework taken out
+ * of it.
+ *
+ * Electron's stock fallback names both:
+ *
+ *   Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
+ *   Gecko) browser/0.1.0 Chrome/152.0.7977.78 Electron/44.3.0 Safari/537.36
+ *
+ * Almost nothing cares. The exception is a site that gates SIGN-IN on what the
+ * browser calls itself, and X (x.com / twitter.com) is one: submitting the
+ * login form answers "Could not log you in now", or the form simply stops
+ * responding, or a verification step arrives that never completes -- on
+ * username+password AND on the social buttons, while every other site in the
+ * browser logs in fine. An unknown product token in front of Chrome/ is enough
+ * to land in that bucket, and `browser/0.1.0` and `Electron/44.3.0` are two.
+ *
+ * Both tokens are cut from the REAL value rather than a hand-written UA, so the
+ * Chrome version, the platform and the AppleWebKit tail always stay whatever
+ * this Electron actually ships -- there is no Chrome number to forget to bump.
+ * The app name comes from app.getName(), so renaming the app cannot leave a
+ * stale literal behind. Sec-CH-UA has to tell the same story; that half of the
+ * fix is installClientHintFix() down by the session handlers.
+ */
+function chromeOnlyUserAgent() {
+  const stock = String(app.userAgentFallback || '');
+  const name = String(app.getName() || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const stripped = stock
+    .replace(name ? new RegExp('\\s' + name + '/\\S+') : /$^/, '')
+    .replace(/\sElectron\/\S+/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // Nothing here may fail quietly: a UA that lost its Chrome/ token, or kept
+  // Electron, is a worse browser than the one we started with, so say which
+  // and why before falling back to a string we build outright.
+  if (stripped.includes(' Chrome/') && !stripped.includes('Electron')) return stripped;
+  console.error(
+    '[ua] stripped User-Agent is unusable (' +
+      (stripped.includes(' Chrome/') ? 'still names Electron' : 'no Chrome/ token left') +
+      '); using a built string instead. stock=' + stock
+  );
+  return (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/' + (process.versions.chrome || '0.0.0.0') + ' Safari/537.36'
+  );
+}
+
+app.userAgentFallback = chromeOnlyUserAgent();
+
+/** The one Chrome major the UA string and the client hints both have to claim. */
+const CHROME_MAJOR = String(
+  (app.userAgentFallback.match(/\sChrome\/(\d+)/) || [])[1] ||
+    String(process.versions.chrome || '0').split('.')[0]
+);
+
 /**
  * Windows 11 22H2 (build 22621) is the first release where DWM exposes the
  * acrylic system backdrop to apps. os.release() looks like '10.0.26200'.
@@ -1677,7 +1733,18 @@ ipcMain.on('capture:show', (_event, { path: target } = {}) => {
 // clipboard are asked about once per origin; everything else is denied.
 // ---------------------------------------------------------------------------
 
-/** Allowed with no prompt: all of these need a user gesture anyway. */
+/**
+ * Allowed with no prompt: all of these need a user gesture anyway.
+ *
+ * The two storage-access entries are the Storage Access API, and they are here
+ * because anything NOT in this set and not in PERMISSION_PHRASES below is
+ * denied outright with no prompt and no trace on screen. X needs it twice
+ * over: the twitter.com -> x.com identity bridge, and the embedded Google and
+ * Apple sign-in frames, both call document.requestStorageAccess() and both get
+ * a silent no today -- which reads as a sign-in that simply does not work.
+ * Chrome's own answer to the same call is a grant after a user gesture, which
+ * is all a click on a sign-in button is.
+ */
 const PERMISSIONS_ALWAYS_ALLOW = new Set([
   'fullscreen',
   'pointerLock',
@@ -1685,6 +1752,8 @@ const PERMISSIONS_ALWAYS_ALLOW = new Set([
   'window-placement',
   'window-management',
   'keyboardLock',
+  'storage-access',
+  'top-level-storage-access',
 ]);
 
 /** Worth interrupting for. Anything not here and not above is denied. */
@@ -1883,6 +1952,79 @@ function safeUrl(contents) {
   }
 }
 
+/** Set once installClientHintFix() has taken the one onBeforeSendHeaders slot. */
+let clientHintsFixed = false;
+
+/*
+ * The other half of the Chrome-only User-Agent (see chromeOnlyUserAgent()).
+ *
+ * A modern Chromium sends its identity TWICE: the UA string, and the
+ * Sec-CH-UA client-hint header. Electron's brand list is
+ * `"Chromium";v="152", "Electron";v="44", "Not_A Brand";v="24"` and
+ * Sec-CH-UA-Full-Version-List carries the full Electron version beside it.
+ * Rewriting only the UA string therefore makes things WORSE for a site that
+ * cross-checks the two -- the string now claims plain Chrome while the hints
+ * still say Electron, which is the signature of a spoofed client. X's login
+ * endpoints do exactly that check, so both have to agree.
+ *
+ * Electron allows ONE listener per webRequest event per session, and the
+ * Ghostery adapter already owns onBeforeRequest and onHeadersReceived (see the
+ * ad-blocking section). onBeforeSendHeaders is free and nothing else in the app
+ * touches it -- the flag above keeps it that way even if this is reached twice.
+ *
+ * Every request in the browser goes through this callback, so it is written to
+ * be incapable of stalling one: the whole body is inside a try/catch, the
+ * catch passes the ORIGINAL headers straight through, and callback() is reached
+ * on every path. Headers other than the three named here are untouched.
+ */
+function installClientHintFix(sess) {
+  if (clientHintsFixed) return;
+  const brands =
+    '"Chromium";v="' + CHROME_MAJOR + '", ' +
+    '"Google Chrome";v="' + CHROME_MAJOR + '", ' +
+    '"Not_A Brand";v="24"';
+
+  try {
+    sess.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
+      const requestHeaders = (details && details.requestHeaders) || {};
+      try {
+        for (const key of Object.keys(requestHeaders)) {
+          const lower = key.toLowerCase();
+          if (lower === 'sec-ch-ua') {
+            // Only ever REWRITTEN, never added: Chromium sends this on secure
+            // contexts only, and inventing it elsewhere is its own tell.
+            requestHeaders[key] = brands;
+            continue;
+          }
+          if (lower === 'sec-ch-ua-full-version-list') {
+            // Chrome sends it; there is no honest value for it here, and an
+            // absent hint is normal (the site can ask for it again).
+            delete requestHeaders[key];
+            continue;
+          }
+          const value = Array.isArray(requestHeaders[key])
+            ? requestHeaders[key].join(' ')
+            : String(requestHeaders[key] == null ? '' : requestHeaders[key]);
+          if (!value.includes('Electron')) continue;
+          // A UA that still names Electron gets CORRECTED rather than dropped:
+          // a request with no User-Agent at all is more suspicious, not less.
+          if (lower === 'user-agent') requestHeaders[key] = app.userAgentFallback;
+          else delete requestHeaders[key];
+        }
+      } catch (err) {
+        console.error('[ua] client-hint rewrite skipped for', (details && details.url) || '?', '-', (err && err.message) || err);
+        return callback({ requestHeaders: (details && details.requestHeaders) || {} });
+      }
+      callback({ requestHeaders });
+    });
+    clientHintsFixed = true;
+  } catch (err) {
+    // Loud on purpose: silently keeping the Electron brands means X's sign-in
+    // stays broken with nothing on screen to say why.
+    console.error('[ua] could not install the client-hint fix; Sec-CH-UA still says Electron:', (err && err.message) || err);
+  }
+}
+
 /**
  * Webviews carry no `partition` attribute, so every guest page shares
  * session.defaultSession -- the same session downloads and permissions hang
@@ -1891,6 +2033,8 @@ function safeUrl(contents) {
 function attachSessionHandlers() {
   const sess = session.defaultSession;
   if (!sess) return;
+
+  installClientHintFix(sess);
 
   sess.on('will-download', handleWillDownload);
 
@@ -2069,13 +2213,52 @@ function removeAllowRule(host) {
  * a cancelled fetch there is what leaves the player spinning until the document
  * is reloaded. Ad DELIVERY is untouched: youtube.com/pagead/, doubleclick.net
  * and the rest still block exactly as before.
+ *
+ * X (x.com / twitter.com) is the same shape and the reason sign-in failed.
+ * Its onboarding flow is a chain of POSTs to /i/api/1.1/onboarding/task.json
+ * with GraphQL calls under /i/api/graphql/ and the OAuth2 guest token from
+ * /i/api/2/oauth2/ alongside -- and in the privacy lists those paths sit right
+ * next to X's analytics paths, so a rule broad enough to catch the analytics
+ * catches the login with it. Cancel any one of them and the form answers
+ * "Could not log you in now", or just stops responding, or shows a
+ * verification step that can never finish because the call behind it never
+ * lands. abs.twimg.com is where the onboarding JS and its assets come from;
+ * api.x.com carries the same endpoints for the social sign-in popups.
+ *
+ * Only the sign-in path is excepted. X's pure telemetry -- /i/jot,
+ * /i/api/1.1/jot, /i/csp_report, /9/measurement/ -- is deliberately NOT listed
+ * and still blocks, and so does every ad host.
  */
-const UNBREAK_FILTERS = ['@@||youtube.com/youtubei/', '@@||youtube.com/api/stats/'];
+const UNBREAK_FILTERS = [
+  '@@||youtube.com/youtubei/',
+  '@@||youtube.com/api/stats/',
+  '@@||x.com/i/api/1.1/onboarding/',
+  '@@||x.com/i/api/graphql/',
+  '@@||x.com/i/api/1.1/graphql/',
+  '@@||x.com/i/api/2/oauth2/',
+  '@@||twitter.com/i/api/1.1/onboarding/',
+  '@@||api.x.com/1.1/onboarding/',
+  '@@||api.twitter.com/1.1/onboarding/',
+  '@@||abs.twimg.com/',
+  '@@||api.x.com/oauth2/',
+];
 
-/** Applied once when the engine is built; nothing in the UI turns these off. */
+/**
+ * Applied once when the engine is built; nothing in the UI turns these off.
+ *
+ * NetworkFilter.parse() answers null for anything it cannot read, and a bare
+ * .filter(Boolean) would drop that rule without a word -- leaving a site broken
+ * for a reason nothing on screen or in the log could explain. Every failure is
+ * named instead.
+ */
 function applyUnbreakRules() {
   if (!blocker) return;
-  const filters = UNBREAK_FILTERS.map((raw) => NetworkFilter.parse(raw)).filter(Boolean);
+  const filters = [];
+  for (const raw of UNBREAK_FILTERS) {
+    const parsed = NetworkFilter.parse(raw);
+    if (parsed) filters.push(parsed);
+    else console.error('[adblock] unbreak filter did not parse, so it is NOT applied:', raw);
+  }
   if (filters.length) blocker.update({ newNetworkFilters: filters });
 }
 
@@ -2105,8 +2288,19 @@ function applyUnbreakRules() {
  * Only the scriptlets go. The cosmetic CSS still hides the ad shelves and every
  * network rule still blocks, so ad DELIVERY is no less blocked than before --
  * an in-stream ad can still play, which the reload path already did too.
+ *
+ * x.com and twitter.com are here for the same failure, on the same mechanism.
+ * X's login is a same-document SPA: typing a username POSTs to
+ * /i/api/1.1/onboarding/task.json over window.fetch, reads the next step out
+ * of the JSON that comes back, and repeats for the password and for any
+ * verification step. json-prune / replace-fetch-response / prevent-xhr patch
+ * exactly that fetch and XMLHttpRequest, so an onboarding reply comes back
+ * with fields rewritten or missing and the flow dead-ends -- "Could not log
+ * you in now", a form that no longer responds, or a verification step that
+ * never completes. There is no document load to reload past, which is why X
+ * never recovered the way YouTube did.
  */
-const SCRIPTLET_FREE_HOSTS = ['youtube.com'];
+const SCRIPTLET_FREE_HOSTS = ['youtube.com', 'x.com', 'twitter.com'];
 
 function scriptletsAllowedOn(url) {
   const host = hostOfUrl(url);
