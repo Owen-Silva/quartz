@@ -1,11 +1,13 @@
 # Quartz
 
-The name is display-only (2026-09-26). Everything that identifies the app to Windows or to its
-own profile still says `browser` on purpose: `package.json` `name` (so `app.getName()`, the
-`%APPDATA%\browser` profile with your logins, the single-instance lock and the taskbar's
-`electron.app.browser` grouping never move), the repo folder, and the registry ProgIds
-`OwenBrowserURL` / `OwenBrowserHTML`. Do not add a `productName`: it would silently move the
-profile to `%APPDATA%\Quartz` and log you out of everything.
+The name is display-only for now (2026-09-26); the app id becomes Quartz in a later, separate
+step. Until then everything that identifies the app to Windows or to its own profile still says
+`browser`: `package.json` `name` (so `app.getName()`, the `%APPDATA%\browser` profile with your
+logins, the single-instance lock and the taskbar's `electron.app.browser` grouping), the repo
+folder, and the registry ProgIds `OwenBrowserURL` / `OwenBrowserHTML`. Never change the id by
+just adding a `productName`: that silently starts on an empty `%APPDATA%\Quartz` and logs you out
+of everything. The id change has to ship WITH a one-time profile move (browser → Quartz, refused
+loudly if the old folder is still locked), a re-pin, and a fresh Default apps choice.
 
 My own browser. Electron 44 shell, frosted-glass chrome lit from behind by an aurora, in a
 dark theme and a light one that are the same instruments in daylight. Claude Code sessions
