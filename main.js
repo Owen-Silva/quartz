@@ -34,6 +34,7 @@ const stocksModule = require('./stocks');
 const budgetModule = require('./budget');
 const schoolModule = require('./school');
 const phoneModule = require('./phone');
+const profileMove = require('./profilemove');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -175,6 +176,83 @@ if (process.argv.includes('--test-profile')) {
   const suffix = named ? '-' + named.slice('--profile-name='.length).replace(/[^a-z0-9-]/gi, '') : '';
   app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile' + suffix));
 }
+
+/*
+ * The one-time profile move: %APPDATA%\browser -> %APPDATA%\Quartz.
+ *
+ * Electron names the profile folder after the app (package.json productName,
+ * else name), so the start after the rename to Quartz would open a brand-new,
+ * EMPTY %APPDATA%\Quartz and quietly log the user out of everything. This runs
+ * first, before the single-instance lock (a lockfile in userData), the adblock
+ * engine, the window state or any session touches the folder, and either
+ * renames the old folder into place, starts normally, or refuses to start at
+ * all -- profilemove.js has the four branches and why each is what it is.
+ *
+ * It is inert while the app is still called `browser`: old and new are then the
+ * same folder and the decision is 'same'. That is what let this land before
+ * package.json changed, with a live copy that could be restarted at any moment.
+ *
+ * Test runs never move anything: --test-profile has already pointed userData at
+ * a temp folder above, and a test copy must not go near the real profile.
+ *
+ * newDir is appData\<name>, built by hand and NOT read from
+ * app.getPath('userData'): measured 2026-09-26 on a scratch Electron 44 app,
+ * that getter CREATES the folder (absent at the top of main, present right
+ * after the call). Asking where the new profile lives would therefore make an
+ * empty %APPDATA%\Quartz appear beside the real one, and every start would end
+ * in the "both folders exist" refusal. userData is appData\<name> exactly (same
+ * measurement), and nothing in this app overrides it outside a test run.
+ *
+ * A refusal says so in an error box and quits. dialog.showErrorBox is the one
+ * dialog Electron allows before 'ready', and on Windows it is a real modal
+ * box, not a stderr line (measured the same day: a #32770 window appeared with
+ * app.isReady() still false, and the call blocked until it was dismissed).
+ */
+/** What the profile move did at this start; Settings > About shows it. */
+let profileMoveResult = { ok: true, action: 'test', why: 'a test profile is never moved' };
+if (!process.argv.includes('--test-profile')) {
+  const appData = app.getPath('appData');
+  const oldProfileDir = path.join(appData, 'browser');
+  const newProfileDir = path.join(appData, app.getName());
+  profileMoveResult = profileMove.runProfileMove(oldProfileDir, newProfileDir);
+  if (!profileMoveResult.ok) {
+    const box = profileMove.refusalText(profileMoveResult, oldProfileDir, newProfileDir);
+    console.error('[profile] refusing to start: ' + profileMoveResult.why + ' (' + profileMoveResult.code + ')');
+    dialog.showErrorBox(box.title, box.body);
+    // Same exit as a second copy below: quit() only ASKS, and everything after
+    // this line would go on to open the (empty) profile.
+    app.quit();
+    process.exit(1);
+  }
+  if (profileMoveResult.action === 'moved') {
+    // The note is how the move stays visible after this run: About reads it on
+    // every start. Failing to write it does not undo a finished move, so it is
+    // carried along and About says the note is missing and why.
+    profileMoveResult.noteError = profileMove.writeMoveNote(newProfileDir, profileMoveResult);
+    console.log(
+      '[profile] moved ' + oldProfileDir + ' -> ' + newProfileDir + ' (attempt ' + profileMoveResult.attempts + ')' +
+        (profileMoveResult.noteError ? '; the note could not be written: ' + profileMoveResult.noteError : '')
+    );
+  } else if (profileMoveResult.action !== 'same') {
+    console.log('[profile] ' + profileMoveResult.why);
+  }
+}
+
+/*
+ * The Windows identity, set by hand rather than left to Electron.
+ *
+ * Unset, Electron derives it from the app name ('electron.app.browser' until
+ * the rename), so any future change to productName would silently move the
+ * app to a new taskbar group and orphan its notifications again. A fixed id
+ * does not follow the display name. 'com.owensilva.quartz' matches Mantle's
+ * 'com.owensilva.mantle'. relink-shortcut.ps1 stamps the SAME string on the
+ * Start Menu shortcut: Windows only shows a toast (the "Claude is waiting"
+ * notification) for an unpackaged app whose id is carried by a Start Menu
+ * shortcut, and a pin groups with its windows only when the ids match. Change
+ * one, change both.
+ */
+const APP_USER_MODEL_ID = 'com.owensilva.quartz';
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 
 /*
  * One process owns the profile.
@@ -1119,6 +1197,33 @@ ipcMain.handle('app:paths', () => ({
   home: app.getPath('home'),
   downloads: app.getPath('downloads'),
 }));
+
+/**
+ * Where the profile lives and whether it was moved to get there (Settings >
+ * About). The move to Quartz must never be silent: `thisStart` is what the
+ * startup check did in this run, `note` is the record the move left behind,
+ * so About can still say "moved from ... on ..." long after the start that did
+ * it. By now userData exists, so asking for it creates nothing.
+ */
+ipcMain.handle('app:profile', () => {
+  let userData = '';
+  try { userData = app.getPath('userData'); } catch { userData = ''; }
+  const r = profileMoveResult || {};
+  return {
+    userData,
+    test: process.argv.includes('--test-profile'),
+    thisStart: {
+      action: r.action || '',
+      why: r.why || '',
+      attempts: r.attempts || 0,
+      raced: !!r.raced,
+      noteError: r.noteError || '',
+      from: r.from || '',
+      at: r.at || '',
+    },
+    note: userData ? profileMove.readMoveNote(userData) : null,
+  };
+});
 
 /**
  * Native folder picker for "which folder should this Claude session run in".

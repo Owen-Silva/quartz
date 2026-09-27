@@ -4736,6 +4736,24 @@
     commitCombo(api, recId, combo);
   }
 
+  /** One line for About from main's app:profile answer. */
+  function profileLine(p) {
+    var where = 'Profile: ' + (p.userData || 'unknown folder');
+    if (p.test) return where + ' (test profile, never moved)';
+    var start = p.thisStart || {};
+    var note = p.note;
+    if (note && note.from) {
+      var when = new Date(note.at);
+      when = isNaN(when.getTime()) ? String(note.at) : when.toLocaleString();
+      return where + ' · moved here from ' + note.from + ' on ' + when;
+    }
+    if (start.action === 'moved') {
+      return where + ' · moved here from ' + start.from + ' at this start (its note could not be saved: ' +
+        (start.noteError || 'unknown') + ')';
+    }
+    return where;
+  }
+
   function buildAbout() {
     /* The one section with no fold: plain heading, always open (The user). */
     var s = plainSection('About');
@@ -4749,6 +4767,20 @@
       } catch (err) { /* older preload: the bare name is still true */ }
     }
     s.appendChild(el('p', 'set-about', line));
+
+    /* Where the profile lives, and the one-time move from %APPDATA%\browser
+       to %APPDATA%\Quartz when it happened. That move renames the folder with
+       every login in it, so it is said here in plain words rather than left
+       to a console line nobody reads. */
+    if (app && typeof app.profile === 'function') {
+      var prof = el('p', 'set-hint', 'Profile: asking…');
+      s.appendChild(prof);
+      Promise.resolve().then(function () { return app.profile(); }).then(function (p) {
+        prof.textContent = profileLine(p || {});
+      }).catch(function (err) {
+        prof.textContent = 'Profile: the main process did not answer (' + ((err && err.message) || err) + ')';
+      });
+    }
 
     /* Updating this browser means closing and reopening it, so here is the
        one click that does it. app.js owns the action (window.restartBrowser)

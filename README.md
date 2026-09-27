@@ -1,13 +1,22 @@
 # Quartz
 
-The name is display-only for now (2026-09-26); the app id becomes Quartz in a later, separate
-step. Until then everything that identifies the app to Windows or to its own profile still says
-`browser`: `package.json` `name` (so `app.getName()`, the `%APPDATA%\browser` profile with your
-logins, the single-instance lock and the taskbar's `electron.app.browser` grouping), the repo
-folder, and the registry ProgIds `OwenBrowserURL` / `OwenBrowserHTML`. Never change the id by
-just adding a `productName`: that silently starts on an empty `%APPDATA%\Quartz` and logs you out
-of everything. The id change has to ship WITH a one-time profile move (browser → Quartz, refused
-loudly if the old folder is still locked), a re-pin, and a fresh Default apps choice.
+The app id is Quartz (2026-09-26). `package.json` `productName` is `Quartz`, so `app.getName()`
+and the profile folder are `Quartz` (`%APPDATA%\Quartz`); the AppUserModelID is fixed at
+`com.owensilva.quartz` by `app.setAppUserModelId` in main.js, not derived from the name; the
+registry entries are `Quartz` / `QuartzURL` / `QuartzHTML`; the Start Menu entry is `Quartz.lnk`.
+Still `browser`, on purpose: the npm `name` (npm wants it lowercase and nothing reads it once
+`productName` is set), the repo folder, the `%TEMP%\browser-test-profile-*` test folders, and
+the hand-made taskbar pin `Browser.lnk` (Mantle orders its bar by that file name).
+
+The first start under the new id moves the profile once: profilemove.js renames
+`%APPDATA%\browser` to `%APPDATA%\Quartz` before anything opens a file in it (same volume, so an
+atomic rename, nothing copied). If the old folder is locked (an old copy still running), or both
+folders exist, or either path is not a folder, Quartz shows an error box naming the folders and
+the reason, and quits. It never starts on an empty profile, never merges, never deletes.
+Settings → About shows where the profile is and when it was moved (from the
+`profile-move.json` note the move leaves behind). Test runs (`--test-profile`) are never moved.
+After the move: `relink-shortcut.ps1` writes the Start Menu entry with the id, and
+`register-default-browser.ps1` (then `-RemoveOld`) re-registers for Default apps.
 
 My own browser. Electron 44 shell, frosted-glass chrome lit from behind by an aurora, in a
 dark theme and a light one that are the same instruments in daylight. Claude Code sessions
@@ -27,9 +36,12 @@ npx electron .     # same thing without the script
 Run `npm install` after pulling a change that adds a dependency; `koffi`, for the native app-tab
 engine, is the newest one.
 
-The Start Menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Browser.lnk` launches
-`electron.exe` with this project path as its argument. It is pinned to the taskbar by hand:
-Windows 11 refuses scripted pinning, so a lost pin has to be re-done from the Start Menu.
+The Start Menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Quartz.lnk` launches
+`electron.exe` with this project path as its argument and carries `System.AppUserModel.ID =
+com.owensilva.quartz`, which Windows needs before it shows the app's toasts. `relink-shortcut.ps1`
+writes it (and reads it back); re-run it after moving the repo. The taskbar pin
+(`User Pinned\TaskBar\Browser.lnk`, same target) is made by hand: Windows 11 refuses scripted
+pinning, so a lost pin has to be re-done from the Start Menu.
 
 Settings → About has a "Restart browser" button, and the command palette has a "Restart browser"
 row. Either one flushes the session and the window state, releases any Spotify auto-pause hold,
@@ -44,8 +56,9 @@ Three CLI flags:
 | `--profile-name=<x>` | Only read alongside `--test-profile`. Suffixes the test profile directory — `%TEMP%\browser-test-profile-<x>` — so two test instances never share a LevelDB or a window state. The name is stripped to letters, digits and hyphens. |
 | `--no-acrylic` | Skips the DWM acrylic backdrop and opens a flat window. Used to measure what the material costs. Acrylic is only attempted on Windows 11 22H2 (build 22621) or later, and falls back to flat by itself if `backgroundMaterial: 'acrylic'` throws. |
 
-The profile lives at `%APPDATA%\browser` (Electron's default `userData` for the app name
-`browser` in `package.json`). Inside it: `window-state.json` holds the remembered window
+The profile lives at `%APPDATA%\Quartz` (Electron's default `userData` for the app name, which
+is `productName` in `package.json`; it was `%APPDATA%\browser` until the one-time move above).
+Inside it: `profile-move.json` records that move (from, to, when), if it happened; `window-state.json` holds the remembered window
 rectangle plus `maximized`, discarded on read if it is not JSON or if the saved rect no longer
 overlaps a connected display by at least 100px on each axis; `session.json` is the durable copy
 of the tab strip; `adblock.json` holds the blocking preferences (on/off plus the per-site
@@ -76,15 +89,18 @@ IndexedDB instead — db `browser`, store `assets`, key `newtab-bg`.
 ## Default browser
 
 ```
-powershell -ExecutionPolicy Bypass -File register-default-browser.ps1
-powershell -ExecutionPolicy Bypass -File register-default-browser.ps1 -Unregister
+powershell -NoProfile -ExecutionPolicy Bypass -File register-default-browser.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File register-default-browser.ps1 -RemoveOld
+powershell -NoProfile -ExecutionPolicy Bypass -File register-default-browser.ps1 -Unregister
 ```
 
 register-default-browser.ps1 writes the four HKCU keys Windows reads to know this is a browser —
-`Software\Clients\StartMenuInternet\OwenBrowser` (with its `Capabilities`: http and https →
-`OwenBrowserURL`, .htm and .html → `OwenBrowserHTML`), the two ProgId keys under
-`Software\Classes`, and the `Software\RegisteredApplications` pointer that makes Settings read
-any of it. Paths come from the script's own location, so a moved repo needs a re-run, not an
+`Software\Clients\StartMenuInternet\Quartz` (with its `Capabilities`: http and https →
+`QuartzURL`, .htm and .html → `QuartzHTML`), the two ProgId keys under `Software\Classes` (each
+with an `Application` subkey naming Quartz and its AppUserModelID), and the
+`Software\RegisteredApplications` pointer that makes Settings read any of it. `-RemoveOld`
+deletes the pre-Quartz `OwenBrowser` / `OwenBrowserURL` / `OwenBrowserHTML` entries, but refuses
+while any http/https/.htm/.html default still names them (`-Force` overrides). Paths come from the script's own location, so a moved repo needs a re-run, not an
 edit; re-running is safe, and it reads every value back before it claims success. No admin, and
 nothing machine-wide.
 
@@ -1288,6 +1304,8 @@ one run before and one after.
 | `music.js` | The idle-music player: `shouldPlay()` and every signal behind it (the setting, a manual pause, window focus, an audible tab, the machine's own media session, the "where" setting, a ready source), the 300ms settle, the 800/400ms fades, the resume hold and the flip counter that sits the player out for 30s, and the two sinks behind one contract — the ambient engine and one `<audio>` element on `file://` with shuffle and skip-missing. Also the parsers for the new tab's `music` and `media` console lines and the now-playing change detector (position out of the hash, art re-sent only when its own hash moves). `debug()` and a `resumeHoldMs` option exist for harnesses. |
 | `webapps.js` | The web-app catalogue: 30 entries with `web:<slug>` ids, URL, host, the desktop exe they pair with and a `drm` mark, plus `findWebApp`, `webAppForHost` (exact, then longest subdomain match), `webAppForExe`, `isWebAppId`, `isTerminalId`, `terminalProgram` and `DRM_NOTE`. Loads as a module or a script tag (`window.WEBAPPS` / `window.WebApps`), and is a first-paint seed on the new tab as well as the chrome's own table. |
 | `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` in owner mode by default (the browser as `GWLP_HWNDPARENT`, `WS_POPUP`, `WS_EX_TOOLWINDOW`, positioned in screen space, no `SetParent` so the app's input queue is never joined to ours) with child mode kept as a per-call fallback, `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s poll with its gone event, title pushes and the debounced `IsHungAppWindow` hung/recovered events, the owner-chain focus check and the `AttachThreadInput` keyboard handoff, the restore when an owner is lost, the refusal of store apps, tool windows, owned windows and our own, `SW_SHOWNOACTIVATE` so nothing steals focus, per-call error handling in attach recovery and detach, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push, guards a second open on the same tab, and detaches everything on `render-process-gone`; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. app.js holds the native tab that the window is positioned over. |
+| `profilemove.js` | The one-time profile move for the app id change, pure node with fs injected: `%APPDATA%\browser` → `%APPDATA%\Quartz` by atomic rename, a short retry for a lock that is letting go, and a refusal (error box text included) for a held lock, both folders present, or anything that is not a folder. Inert while old and new are the same folder. main.js runs it before the single-instance lock. |
+| `relink-shortcut.ps1` | Writes Start Menu → `Quartz.lnk` (electron.exe + this folder, the repo icon) with `System.AppUserModel.ID = com.owensilva.quartz` through IShellLinkW + IPropertyStore compiled by Add-Type, reads it back, and only then removes an old `Browser.lnk` of ours. Leaves the taskbar pin alone. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |

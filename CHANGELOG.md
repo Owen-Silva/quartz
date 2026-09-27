@@ -1046,6 +1046,33 @@ Found, and not ours to fix:
   not on an allow-list here is denied with no prompt and no trace — a sign-in that just did not
   work, for no visible reason.
 
+### Quartz becomes the app id (2026-09-26)
+
+- The app is now Quartz to Windows and to its own profile, not only on screen. `package.json`
+  gains `productName: "Quartz"`, so the profile folder is `%APPDATA%\Quartz`. The npm `name` stays
+  `browser` (npm wants it lowercase, and nothing reads it once `productName` is set).
+- The first start under the new name moves your profile, logins and all: `%APPDATA%\browser` is
+  renamed to `%APPDATA%\Quartz` before anything opens a file in it. It is one rename on the same
+  drive, so nothing is copied and there is no half-moved state. Settings → About now says where
+  the profile is and when it was moved.
+- It never starts you on an empty profile. If an old copy is still running and holding files
+  (it gets about 2.4 s to let go, which covers Restart browser), or both folders exist, or either
+  one is not a folder, Quartz shows an error box naming the folders and the reason — "Close the
+  other window and start Quartz again" — and quits without moving, merging or deleting anything.
+  Test runs (`--test-profile`) are never moved. The code was inert until the name changed, so it
+  landed before `package.json` did.
+- The Windows identity is fixed at `com.owensilva.quartz` (it was the derived
+  `electron.app.browser`), so a future display-name change cannot move it again.
+- New `relink-shortcut.ps1` writes Start Menu → `Quartz.lnk` carrying that id, which Windows needs
+  before it shows the "Claude is waiting" toast. `register-default-browser.ps1` now registers
+  `Quartz` / `QuartzURL` / `QuartzHTML`, and `-RemoveOld` deletes the old `OwenBrowser` entries
+  once no default still points at them. Neither runs by itself; the taskbar pin keeps its
+  `Browser.lnk` file name so Mantle's bar order holds.
+- Verified with a pure-node harness on temp folders (38/38), including a folder locked the way
+  Chromium holds its `lockfile`, which is refused with the box's wording. Measured on a scratch
+  Electron 44 app: `app.getPath('userData')` creates the folder, so the move computes the path
+  instead of asking for it; and `dialog.showErrorBox` shows a real box before `ready`.
+
 ## Things to know
 
 - A forced kill can lose the last few seconds of tab state. A normal close cannot — the strip is

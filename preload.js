@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('api', {
     // instance comes back a test instance). Nothing to await -- the process is
     // gone before a reply could arrive.
     restart: () => ipcRenderer.send('app:restart'),
+    // Where the profile folder is and whether the one-time move to Quartz put
+    // it there: { userData, test, thisStart, note }. Settings > About says it.
+    profile: () => ipcRenderer.invoke('app:profile'),
     // Sync: these are already in this process, so nothing has to be awaited.
     versions: () => ({
       electron: process.versions.electron,
