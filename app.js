@@ -662,6 +662,40 @@ function tabsByWebContentsId() {
  * a guest that closed between the sample and now — counts toward that tail
  * instead of being given a name it has not got.
  */
+/*
+ * A new tab's circuit board is paused while the page is off screen, and
+ * newtab-bg.js lets go of its bitmap 5 s after that (and repaints it on the way
+ * back). Both are silent by nature, so the Processes row says which state each
+ * new tab's board is in: "board paused, bitmap released (3x)", or the restore
+ * that had to fall back. Read from the guest's __boardState() at most once per
+ * BOARD_NOTE_EVERY_MS, and only while a sample is going out (the table is open).
+ */
+const BOARD_NOTE_EVERY_MS = 5000;
+let boardNotesAt = 0;
+
+function describeBoardState(st) {
+  if (!st || typeof st !== 'object') return 'board state unavailable';
+  const parts = [st.paused ? 'board paused' : (st.running ? 'board running' : 'board still')];
+  if (st.bitmap === 'released') parts.push('bitmap released');
+  if (st.releases > 0) parts[parts.length - 1] += ' (' + st.releases + 'x)';
+  if (st.restoreError) parts.push('restore fell back: ' + String(st.restoreError).slice(0, 60));
+  return parts.join(', ');
+}
+
+function refreshBoardNotes() {
+  const now = Date.now();
+  if (now - boardNotesAt < BOARD_NOTE_EVERY_MS) return;
+  boardNotesAt = now;
+  for (const tab of tabs) {
+    if (tab.kind !== 'page' || !isViewUsable(tab) || !isNewTabUrl(tab.url)) continue;
+    try {
+      Promise.resolve(tab.viewEl.executeJavaScript('window.__boardState ? window.__boardState() : null'))
+        .then((st) => { tab.boardNote = describeBoardState(st); })
+        .catch((err) => { tab.boardNote = 'board state unreadable: ' + String((err && err.message) || err).slice(0, 60); });
+    } catch (err) { /* guest went away mid-call */ }
+  }
+}
+
 function procRowLabel(wcIds, byId, receivingTab) {
   const named = [];
   let unplaced = 0;
@@ -669,6 +703,7 @@ function procRowLabel(wcIds, byId, receivingTab) {
     const tab = byId.get(id) || null;
     if (!tab) { unplaced += 1; continue; }
     let text = procRowNameFor(tab);
+    if (tab.boardNote && isNewTabUrl(tab.url)) text += ' · ' + tab.boardNote;
     // The guest reading this list is a new-tab page, so its own row is the one
     // row it can check against what it sees.
     if (receivingTab && tab.id === receivingTab.id) text += ' (this page)';
@@ -732,6 +767,7 @@ function nameStatsRenderers(sample, receivingTab) {
 function pushStatsToTab(tab, sample) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   if (!sample || typeof sample !== 'object') return;
+  refreshBoardNotes(); // throttled; lands on the NEXT sample's labels
   // Main's renderer rows all read "New tab"; only this document can say which
   // tab each one is. The sample is relayed whether or not that works.
   nameStatsRenderers(sample, tab);
@@ -4011,14 +4047,16 @@ function anyOverlayOpen() {
   });
 }
 
+/** @returns {boolean} true when the flag actually went to the guest. */
 function pushBoardPaused(tab, paused) {
-  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
   try {
     const pending = tab.viewEl.executeJavaScript(
       'window.__boardPaused && window.__boardPaused(' + (paused ? 'true' : 'false') + ')'
     );
     if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch (err) { /* guest went away */ }
+    return true;
+  } catch (err) { return false; /* guest went away */ }
 }
 
 let windowBlurred = false;
@@ -4071,11 +4109,23 @@ function applyNativeFocus(payload) {
 
 // The board also freezes while the whole window is behind something else:
 // visible-but-unfocused is the common laptop case and the GPU cost is real.
+//
+// And a new-tab page that is not on screen freezes too. A display:none <webview>
+// still reports itself visible to its guest (Electron only hides a guest when
+// the whole window is minimised), so an inactive new tab kept spawning packets
+// and holding its tiles; measured 2026-09-26 by the RAM round's GPU lane. Each
+// guest remembers the last flag it was sent (tab.boardPausedSent), so the many
+// calls this gets -- every `hidden` flip in the document, every activateTab() --
+// only reach a guest whose state actually changes.
 function syncBoardPause() {
   const open = anyOverlayOpen() || windowBlurred;
-  if (open === overlayOpenLast) return;
   overlayOpenLast = open;
-  for (const tab of tabs) pushBoardPaused(tab, open);
+  for (const tab of tabs) {
+    if (tab.kind !== 'page' || !isNewTabUrl(tab.url)) continue;
+    const want = open || !isTabOnScreen(tab);
+    if (tab.boardPausedSent === want) continue;
+    if (pushBoardPaused(tab, want)) tab.boardPausedSent = want;
+  }
 }
 
 function wireOverlayWatch() {
@@ -4111,7 +4161,11 @@ function wireOverlayWatch() {
   // A freshly loaded new-tab guest has to learn the current state too.
   document.addEventListener('tabready', (event) => {
     const tab = tabs.find((t) => t.id === (event.detail && event.detail.id));
-    if (tab && overlayOpenLast) pushBoardPaused(tab, true);
+    if (!tab) return;
+    // A new guest starts running whatever the old one was told, so forget the
+    // memo and tell it afresh (a background new tab is born paused).
+    tab.boardPausedSent = undefined;
+    syncBoardPause();
   });
 }
 
@@ -7262,6 +7316,7 @@ function showTabAsWell(tab) {
   if (tab.viewEl) tab.viewEl.style.display = shown ? 'flex' : 'none';
   if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
   if (tab.noteEl) tab.noteEl.style.display = shown ? 'flex' : 'none';
+  syncBoardPause(); // a new tab leaving the pair goes off screen: freeze its board
 }
 
 /**
@@ -8141,8 +8196,36 @@ function activateTab(id) {
   }));
   // The machine sampler runs only while a new-tab page is the one in front.
   syncStatsSubscription();
+  // ...and only the new-tab page(s) on screen keep their board running.
+  syncBoardPause();
   if (workspaceMoved) emitWorkspaceChange();
 }
+
+/*
+ * Every <webview> this window removes (closeTab, sleepTab, a split or phone
+ * teardown) makes Electron's own disconnectedCallback throw "Invalid
+ * guestInstanceId: N": the guest is already gone by the time the element's
+ * detach call reaches main. Harmless in itself, but an uncaught error is kept
+ * by the renderer's console store (up to its 1000-message cap, DevTools open
+ * or not), and that Error's stack holds the removed <webview> as a receiver,
+ * so every closed tab stayed alive behind it: its guest element, its chip and
+ * every closure over the tab. Measured 2026-09-26 in a test instance: 8 tabs
+ * opened and closed left 84 detached nodes retained by 8 such Errors; with
+ * this listener the same churn left none, and the chrome's listener count
+ * stopped climbing (~36 more per closed tab before).
+ *
+ * Only that exact Electron message is taken off the console, nothing else:
+ * any other error still reports as it always did. The count is kept so a CDP
+ * probe can see the guard is doing its job.
+ */
+let guestDetachErrorsQuieted = 0;
+window.addEventListener('error', (event) => {
+  const err = event && event.error;
+  const message = String((err && err.message) || (event && event.message) || '');
+  if (!/Invalid guestInstanceId\b/.test(message)) return;
+  event.preventDefault(); // not reported = not stored = the old guest can go
+  guestDetachErrorsQuieted++;
+});
 
 /**
  * @param {number} id
