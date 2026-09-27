@@ -64,7 +64,34 @@ let win = null;
  * on this same switch: a second disable-features on the command line would be
  * overwritten by the appendSwitch below.
  */
-const DISABLED_FEATURES = ['HardwareMediaKeyHandling'];
+/*
+ * MediaFoundationCameraUsageMonitoring: the camera service must be able to go
+ * away again.
+ *
+ * Chromium starts a "video_capture" utility the first time any page asks
+ * about cameras -- one navigator.mediaDevices.enumerateDevices() is enough, and
+ * Gmail and Gemini both make that call on load without ever opening a camera.
+ * The service is built to exit five seconds after its last client leaves. This
+ * feature keeps it from ever doing so: it parks a Media Foundation watcher in
+ * the service (to learn when OTHER apps grab the camera), and a process that
+ * has already loaded Media Foundation and the GPU driver (igc64.dll alone is
+ * an 84 MB image) is expensive to keep for nothing. Measured 2026-09-26
+ * on a test copy (RAM round): one enumerateDevices() in a Wikipedia tab and
+ * the utility sat at 67.7 MB private for as long as we watched (minutes; the
+ * live browser had carried its 68 MB since boot). With this off, the same call
+ * still lists audioinput/videoinput/audiooutput, the utility comes up, answers
+ * and is gone within 5 s; repeat enumerations stay at 0-1 ms because the
+ * browser caches the device list (MediaDevicesSystemMonitorCaching, left on).
+ *
+ * Nothing in this app reads "the camera is busy in another app" -- that watcher
+ * is its only job -- so turning it off loses no feature. The price is on the
+ * camera path only: a page that opens the camera after the service has exited
+ * pays the service launch again (the first open of a run always paid it).
+ * Measured with Chromium's fake camera on the CPU-capped test copy: getUserMedia
+ * to first frame 122-131 ms with the service warm, 329 ms and 1344 ms cold. A
+ * real webcam spends ~0.5-1 s powering up on top of either.
+ */
+const DISABLED_FEATURES = ['HardwareMediaKeyHandling', 'MediaFoundationCameraUsageMonitoring'];
 if (process.argv.includes('--test-profile') && process.argv.includes('--measure-visible')) {
   DISABLED_FEATURES.push('CalculateNativeWinOcclusion');
 }
