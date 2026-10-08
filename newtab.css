@@ -637,7 +637,7 @@ body {
    measured, so 9 tabs becoming 10 — or 9:59 becoming 10:00 — must not move
    a pixel of it.
 
-   No backdrop-filter here, deliberately. The recents row states the reason:
+   No backdrop-filter here, deliberately. The saved row states the reason:
    every blurred surface over the drifting aurora is real CPU, and these two
    are on screen full-time. The sheen, the glass and the rim ring carry the
    material instead. */
@@ -1276,7 +1276,7 @@ body {
 }
 
 /* The fold. One grid row, 0fr closed and 1fr open: the row is what moves,
-   so the chips and the recents below are pushed down by the section's own
+   so the chips and the saved row below are pushed down by the section's own
    height and nothing has to be told what that height is. Stepped, like
    every other transition on this page — four frames, 160ms, and no
    opacity or transform anywhere in it. */
@@ -2413,11 +2413,16 @@ body {
   color: var(--fg);
 }
 
-/* --- recent sites -------------------------------------------- */
-/* The chip recipe one step quieter: shorter, smaller type, and no
-   backdrop blur — six more blurred surfaces over a drifting aurora is
-   real CPU for a difference nobody can see against a smooth gradient. */
-.recent {
+/* --- saved sites --------------------------------------------- */
+/* The browser's saved list, under the shortcuts. Its tiles are the chip
+   recipe one step quieter: shorter, smaller type, and no backdrop blur —
+   a dozen more blurred surfaces over a drifting aurora is real CPU for a
+   difference nobody can see against a smooth gradient. (.rtile is the
+   name the Recent row gave that tile; the look is unchanged.)
+
+   The row is never hidden: the caption and the "+" are always there, so
+   the column has its height from the first paint. */
+.saved {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2426,8 +2431,11 @@ body {
   margin-top: 14px;
 }
 
-/* display above would otherwise beat the UA's [hidden] rule */
-.recent[hidden] { display: none; }
+/* The amber of a request that did not happen: the chrome's --amber, which
+   this separate document never had (the budget readout declares the same
+   pair for the same reason), darker on light to clear 4.5:1 on white. */
+:root { --saved-warn: #e0a059; }
+:root[data-theme="light"] { --saved-warn: #a8650a; }
 
 /* The page's one section title, in the readout voice: sentence case,
    semi-condensed, quiet, left-aligned over the row it names, and closed by
@@ -2437,9 +2445,16 @@ body {
 
    It costs the column ~10px of height. That is a one-off: newtab-bg.js
    measures the column for its socket, and the measurement is keyed on the
-   box, so the board simply sits 10px lower. Nothing here may CHURN. */
-.recent-caption {
+   box, so the board simply sits 10px lower. Nothing here may CHURN.
+
+   Its right end holds the row's note — "already saved", or, in amber, a
+   request the browser did not answer. Same line, so a note costs no height
+   unless a narrow window makes it wrap (newtab.js tells the board then). */
+.saved-caption {
   position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
   flex: 0 0 100%;               /* own line, above the tiles */
   margin: 0 0 7px;
   padding-bottom: 5px;
@@ -2451,7 +2466,18 @@ body {
   text-align: left;
 }
 
-.recent-caption::after {
+.saved-title { flex: 0 0 auto; }
+
+.saved-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  text-align: right;
+}
+
+.saved-status[data-tone="warn"] { color: var(--saved-warn); }
+
+.saved-caption::after {
   content: '';
   position: absolute;
   left: 0;
@@ -2539,6 +2565,137 @@ body {
   color: var(--fg);
 }
 
+/* A saved tile is the link and its x side by side in one box — a button
+   may not live inside an <a> — and that box is what hover and focus wake. */
+.stile {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* Asked for and not yet answered: drawn at once, dimmed, and then either
+   solid (the chrome's push shows it) or gone again with a note. */
+.stile.is-pending .rtile {
+  opacity: .55;
+  cursor: progress;
+}
+
+/* The x: the dock's remove control at tile scale, hung on the tile's top
+   right corner so it costs the row no width. Hidden at rest, there on
+   hover and whenever focus is anywhere in the tile — so Tab from a tile
+   lands on its x, and the x is never focusable while it is invisible. */
+.stile-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 50%;
+  background: var(--proc-note);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity      120ms steps(3, end),
+    visibility   0s linear 120ms,
+    color        140ms steps(3, end),
+    border-color 140ms steps(3, end);
+}
+
+.stile:hover .stile-remove,
+.stile:focus-within .stile-remove {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+.stile-remove:hover { color: var(--fg); border-color: var(--glass-3); }
+
+.stile-remove:focus-visible {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
+/* The "+" and the fold's count are tiles too, as buttons: the same glass,
+   quieter ink, so they read as the row's controls and not as two more
+   sites. */
+.saved-add,
+.saved-more {
+  border: 0;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.saved-add {
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* .rtile's display would otherwise beat the UA's [hidden] rule */
+.saved-more[hidden],
+.saved-add[hidden],
+.saved-form[hidden],
+.saved-hint[hidden] { display: none; }
+
+/* The field the "+" turns into: the dock search's capsule at tile height,
+   so swapping one for the other moves nothing up or down. */
+.saved-form {
+  display: inline-flex;
+  margin: 0;
+}
+
+.saved-input {
+  width: 240px;
+  max-width: calc(100vw - 64px);
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-ctl);
+  background: var(--sheen), var(--glass);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+}
+
+.saved-input::placeholder { color: var(--fg-3); }
+
+.saved-input:focus {
+  outline: 1px solid var(--ion-line);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ion-soft);
+}
+
+/* What was typed is not an address: the caption says why, in amber, and
+   the field's hairline agrees. */
+.saved-input[aria-invalid="true"] { border-color: var(--saved-warn); }
+
+/* What an empty row is for, beside the "+". */
+.saved-hint {
+  padding-left: 2px;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  text-align: left;
+}
+
 /* --- launch motion: one rise, and that is all ---------------- */
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
@@ -2553,7 +2710,7 @@ body {
    and once the rise ends the column paints back into the page's own layer. */
 .stats  { animation: rise 500ms ease-out backwards; }
 .links  { animation: rise 500ms ease-out 80ms backwards; }
-.recent { animation: rise 500ms ease-out 140ms backwards; }
+.saved  { animation: rise 500ms ease-out 140ms backwards; }
 
 /* --- narrow windows ------------------------------------------ */
 /* Five columns stop being readable long before the window does, so the
@@ -2599,7 +2756,7 @@ body {
   .aurora-rim,
   .stats,
   .links,
-  .recent { animation: none; }
+  .saved { animation: none; }
 
   /* a theme flip lands instantly instead of crossfading */
   body,
@@ -2610,6 +2767,7 @@ body {
   .stats,
   .chip,
   .rtile,
+  .stile-remove,
   .mod-music-btn,
   .dock-edit,
   .dock-tile,

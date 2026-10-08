@@ -1476,6 +1476,20 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #zoom-badge:active { background: var(--sheen), var(--glass-3); }
 #zoom-badge[hidden] { display: none; }
 
+/* the save star, beside the lens: the boxed .iconbtn instrument (#theme's
+   shape and chip), so it only adds the glyph's states. Outline in --fg-2
+   while the page is not saved; filled and in the accent while it is (the
+   glyph itself is swapped by app.js, E734 -> E735). .failed is a refusal
+   being shown for a moment — amber, the reason in the tooltip and the toast.
+   No glow at rest; the focus ring is the shared :focus-visible one. */
+#save-star .glyph { font-family: var(--icon-font); }
+#save-star { transition: color 140ms steps(3, end); }
+#save-star.saved,
+#save-star.saved:hover { color: var(--ion); }
+#save-star.failed,
+#save-star.failed:hover { color: var(--amber); }
+#save-star[hidden] { display: none; }
+
 /* the pill that opens a new Claude tab */
 #newclaude {
   gap: 7px;
@@ -2046,7 +2060,7 @@ body,
   .tab.loading::after { animation: none; }
   .tab::after, .tab::before, .tab-close, .tab-collapse,
   .tab.pinned .tab-expand, .tab.collapsed .tab-expand,
-  #omnibox, #zoom-badge,
+  #omnibox, #zoom-badge, #save-star,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item, #sidepane-resize { transition: none; }

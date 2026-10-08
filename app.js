@@ -3993,43 +3993,224 @@ function openFilesTab() {
   }
   return !!createTab(filesUrl());
 }
-// How many recent sites the new-tab page is given. Its own layout decides how
-// many of them it shows.
-const RECENT_SITES = 8;
+/* ------------------------------------------------------------------ */
+/* Saved sites: the new tab's Saved row and the address bar's star     */
+/* ------------------------------------------------------------------ */
+/*
+ * SLICE-START: saved sites  (the block below is what the lane harness runs)
+ *
+ * "Saved" is not a second list. It is Settings.chips(), the one bookmarks list
+ * this browser has: Ctrl+D adds to it, the bookmarks bar shows it, Settings
+ * edits it, and now the new tab's Saved row (which replaced Recent) and the
+ * star beside the omnibox read and write it too. Every one of those writes
+ * goes through the store, the store announces 'chips', and wireSettings()
+ * re-pushes the row and repaints the star off that one signal — so the five
+ * places can never disagree about what is saved.
+ *
+ * The page cannot touch the store (it is a preload-less guest on file://), so
+ * the two directions are:
+ *   chrome -> page  window.__applySaved([{ url, label }, ...]) — the WHOLE
+ *                   list, stored order, every time.
+ *   page -> chrome  console.log('newtab:saved {json}') with
+ *                   { op: 'add', url, label? } or { op: 'remove', url }.
+ * The chrome answers a request ONLY by re-pushing the list, and always does,
+ * even when nothing changed: the page reads the fresh list to learn whether
+ * its add landed (the URL is in it) or its remove did (the URL is gone). A
+ * rejected address is answered the same way — it simply is not in the list.
+ */
+const SAVED_PREFIX = 'newtab:saved ';
+const SAVED_URL_MAX = 2048;    // longer than any address worth keeping
+const SAVED_LABEL_MAX = 200;   // a tile label, not an essay
 
 /**
- * The new-tab page cannot read the history store (it is a guest, on file://),
- * so the chrome hands it the list. history.js is optional, and a missing store
- * pushes an empty list rather than nothing: the page still clears its section.
+ * The store's own notion of "the same address" (case, and trailing slashes,
+ * do not count). An older settings.js without the export gets the same rule
+ * written out here, so the star never disagrees with addChip's duplicate check.
  */
-function recentSites(limit) {
-  const store = window.History;
-  if (!store || typeof store.recent !== 'function') return [];
-  let rows = null;
-  try { rows = store.recent(limit); } catch (err) { return []; }
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row) => ({
-    url: (row && row.url) || '',
-    title: (row && row.title) || '',
-    last: (row && row.last) || 0
-  }));
+function savedSameUrl(a, b) {
+  const settings = window.Settings;
+  if (settings && typeof settings.sameUrl === 'function') {
+    try { return !!settings.sameUrl(a, b); } catch (err) { /* fall through */ }
+  }
+  const key = (u) => String(u || '').trim().toLowerCase().replace(/\/+$/, '');
+  return key(a) === key(b);
 }
 
-/** Hand the recent list to one open new-tab guest (no-op for anything else). */
-function pushRecentToTab(tab) {
+/**
+ * The saved list as the page is given it: [{ url, label }], stored order. A
+ * never-touched list reads as the seeded defaults (chips() does that). A
+ * missing store pushes an empty list rather than nothing, so the page still
+ * settles its row instead of waiting on an answer that never comes.
+ */
+function savedSites() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.chips !== 'function') return [];
+  let rows = null;
+  try { rows = settings.chips(); } catch (err) { return []; }
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row) => row && typeof row.url === 'string' && row.url)
+    .map((row) => ({ url: String(row.url), label: String(row.label || '') }));
+}
+
+function isSavedUrl(url) {
+  if (!url) return false;
+  return savedSites().some((row) => savedSameUrl(row.url, url));
+}
+
+/**
+ * Turn what was typed, pasted or read off a tab into an address worth saving,
+ * or '' when it is not one. Bare domains are fine ("github.com" gets https://,
+ * "localhost:3000" gets http://); anything that is not http(s) once that is
+ * done — file://, javascript:, a lone word with no dot — is refused, so the
+ * row only ever holds places a tile can actually open.
+ */
+function saveableUrl(raw) {
+  if (typeof raw !== 'string') return '';
+  const text = raw.trim();
+  if (!text || text.length > SAVED_URL_MAX) return '';
+  let url = text;
+  if (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?([/?#]|$)/i.test(text)) {
+    url = 'http://' + text;       // a dev server is not on https
+  } else if (/^[a-z0-9.-]+:\d+([/?#]|$)/i.test(text)) {
+    url = 'https://' + text;      // host:port reads as a scheme to the store
+  } else {
+    const settings = window.Settings;
+    if (settings && typeof settings.normalizeUrl === 'function') {
+      try { url = String(settings.normalizeUrl(text) || ''); } catch (err) { return ''; }
+    } else if (!/^[a-z][a-z0-9+.-]*:/i.test(text)) {
+      url = 'https://' + text;
+    }
+  }
+  let parsed = null;
+  try { parsed = new URL(url); } catch (err) { return ''; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  const host = parsed.hostname;
+  if (!host) return '';
+  if (host.indexOf('.') < 0 && host !== 'localhost' && host.charAt(0) !== '[') return '';
+  return url;
+}
+
+/**
+ * Save one address. { ok, changed, reason }: ok:true + changed:false is "it
+ * was already saved", which is a success (the star fills, the tile is there).
+ * Every ok:false carries a reason in plain words for the UI that asked.
+ */
+function saveSite(rawUrl, label) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.addChip !== 'function') {
+    return { ok: false, changed: false, reason: 'Saving is unavailable: settings did not load' };
+  }
+  const url = saveableUrl(rawUrl);
+  if (!url) {
+    return { ok: false, changed: false, reason: 'Only web addresses (http or https) can be saved' };
+  }
+  const name = typeof label === 'string' ? label.trim().slice(0, SAVED_LABEL_MAX) : '';
+  let added = false;
+  try {
+    added = !!settings.addChip({ url: url, label: name });
+  } catch (err) {
+    return { ok: false, changed: false, reason: 'Could not save: ' + ((err && err.message) || 'the store refused it') };
+  }
+  if (added) return { ok: true, changed: true, reason: '' };
+  // addChip's only other false is "already there"; checked, not assumed.
+  if (isSavedUrl(url)) return { ok: true, changed: false, reason: '' };
+  return { ok: false, changed: false, reason: 'Could not save this page' };
+}
+
+/** Remove one address. Same answer shape; "was not saved" is a success too. */
+function unsaveSite(rawUrl) {
+  const settings = window.Settings;
+  if (!settings || typeof settings.removeChip !== 'function') {
+    return { ok: false, changed: false, reason: 'Removing is unavailable: settings did not load' };
+  }
+  const raw = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!raw || raw.length > SAVED_URL_MAX) {
+    return { ok: false, changed: false, reason: 'There is no address to remove' };
+  }
+  // The row hands back exactly what it was given, but a typed "github.com"
+  // is stored as https://github.com: both spellings are tried.
+  const alt = saveableUrl(raw);
+  let removed = false;
+  try {
+    removed = !!settings.removeChip(raw);
+    if (!removed && alt && alt !== raw) removed = !!settings.removeChip(alt);
+  } catch (err) {
+    return { ok: false, changed: false, reason: 'Could not remove: ' + ((err && err.message) || 'the store refused it') };
+  }
+  if (removed) return { ok: true, changed: true, reason: '' };
+  if (!isSavedUrl(raw) && !(alt && isSavedUrl(alt))) return { ok: true, changed: false, reason: '' };
+  return { ok: false, changed: false, reason: 'Could not remove this page' };
+}
+
+/**
+ * Hand the saved list to one open new-tab guest (no-op for anything else).
+ * Memoised like every other push; `force` drops the memo first, which is how
+ * an answer to the page's own request is guaranteed to arrive even when the
+ * list it carries is the one the page already had.
+ */
+function pushSavedToTab(tab, force) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
-  const payload = JSON.stringify(recentSites(RECENT_SITES));
-  // Nothing new has been visited since this page was last given the list.
-  if (pushUnchanged(tab, 'recent', payload)) return;
+  let payload = '';
+  try { payload = JSON.stringify(savedSites()); } catch (err) { return; }
+  if (force) pushFailed(tab, 'saved');
+  if (pushUnchanged(tab, 'saved', payload)) return;
   try {
     const pending = tab.viewEl.executeJavaScript(
-      'window.__applyRecent && window.__applyRecent(' + payload + ')'
+      'window.__applySaved && window.__applySaved(' + payload + ')'
     );
     if (pending && typeof pending.catch === 'function') {
-      pending.catch(() => pushFailed(tab, 'recent'));
+      pending.catch(() => pushFailed(tab, 'saved'));
     }
-  } catch (err) { pushFailed(tab, 'recent'); /* guest went away mid-call */ }
+  } catch (err) { pushFailed(tab, 'saved'); /* guest went away mid-call */ }
 }
+
+function pushSavedToAll() {
+  for (const tab of tabs) pushSavedToTab(tab, false);
+}
+
+/**
+ * Parse one console line into { op, url, label }, or null when it is not a
+ * saved-row request or not a well-formed one. Pure. A well-formed add of an
+ * address that will not be accepted still parses: it is answered (with a
+ * list that does not contain it), not ignored.
+ */
+function parseSavedLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(SAVED_PREFIX) !== 0) return null;
+  let msg = null;
+  try { msg = JSON.parse(line.slice(SAVED_PREFIX.length)); } catch (err) { return null; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
+  if (msg.op !== 'add' && msg.op !== 'remove') return null;
+  if (typeof msg.url !== 'string') return null;
+  const url = msg.url.trim();
+  if (!url || url.length > SAVED_URL_MAX) return null;
+  if (msg.op === 'remove') return { op: 'remove', url: url, label: '' };
+  const label = typeof msg.label === 'string' ? msg.label.trim().slice(0, SAVED_LABEL_MAX) : '';
+  return { op: 'add', url: url, label: label };
+}
+
+/**
+ * One console line from one guest. Honoured only for a new-tab page whose
+ * viewEl is still the one the listener was attached to, exactly like
+ * handleAppLine. Returns true when the request was acted on and answered.
+ */
+function handleSavedLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const req = parseSavedLine(text);
+  if (!req) return false;
+  try {
+    if (req.op === 'add') saveSite(req.url, req.label);
+    else unsaveSite(req.url);
+  } catch (err) { /* answered below either way */ }
+  // The answer, always — the page waits for it to confirm or roll back.
+  pushSavedToTab(tab, true);
+  return true;
+}
+
+/* SLICE-END: saved sites */
 
 // Panes with a backdrop-filter over the new-tab page make its animated board
 // re-blur every frame (+11% CPU measured). While any of them is open, the
@@ -4191,6 +4372,13 @@ function wireSettings() {
     if (!Array.isArray(keys) || keys.indexOf('chips') >= 0 || keys.indexOf('chipsSource') >= 0) {
       scheduleChipsPush();
     }
+    // The saved list moved (Ctrl+D, the star, Settings, the bookmarks bar, a
+    // new tab's x or +): every new-tab page gets the new list and the star
+    // repaints for the page in front. Both are cheap and memoised.
+    if (!Array.isArray(keys) || keys.indexOf('chips') >= 0) {
+      pushSavedToAll();
+      updateSaveStar();
+    }
   });
 }
 
@@ -4267,6 +4455,7 @@ let forwardBtn = null;
 let reloadBtn = null;
 let omniboxEl = null;
 let zoomBadgeEl = null;
+let saveStarEl = null;
 let viewsEl = null;
 // Glass-redesign chrome (index.html owns the markup; every lookup is null-guarded
 // so the browser still boots against an older index.html).
@@ -9342,7 +9531,7 @@ function wireViewEvents(tab) {
     dropPushMemo(tab);  // ...and it has none of the state the chrome pushed it
     tab.ready = true;
     // The guest only exists from here: a restored mute is re-applied to it, and
-    // the new-tab page gets the recent list it cannot read for itself.
+    // the new-tab page gets the saved list it cannot read for itself.
     syncTabMutedFromView(tab);
     // dom-ready fires for every document, so a reload lands here too — and a
     // reloaded new-tab page has re-read the params newTabUrl() froze when the
@@ -9350,7 +9539,7 @@ function wireViewEvents(tab) {
     // back over them, theme first: the accent is derived per theme.
     pushThemeToTab(tab, getTheme());
     pushSettingsToTab(tab);
-    pushRecentToTab(tab);
+    pushSavedToTab(tab, false);  // the Saved row: the bookmarks list it cannot read
     pushBackgroundToTab(tab);
     pushAppsToTab(tab);   // the app dock: pins, the installed list, running state
     pushProcIconCacheToTab(tab);  // process icons we already have, in one go
@@ -9445,6 +9634,7 @@ function wireViewEvents(tab) {
     if (tab.id === activeTabId) {
       setOmniboxValue(tab.url, false); // guarded: never clobber live typing
       updateNavState();
+      updateSaveStar();  // a new address: saved or not is a new question
     }
     saveSession(); // background tabs move too, and the debounce absorbs bursts
     historyCall('record', tab.url, tab.title);
@@ -9535,6 +9725,12 @@ function wireViewEvents(tab) {
   // `newtab:app {json}`, answered on window.__applyAppResult.
   viewEl.addEventListener('console-message', (event) => {
     handleAppLine(tab, viewEl, event && event.message);
+  });
+
+  // ...and to save or forget a site from its Saved row, `newtab:saved {json}`,
+  // answered by re-pushing the whole list on window.__applySaved.
+  viewEl.addEventListener('console-message', (event) => {
+    handleSavedLine(tab, viewEl, event && event.message);
   });
 
   // The folder browser is the third preload-less page: `files:<verb> {json}`,
@@ -9992,6 +10188,117 @@ function renderZoomBadge(level) {
   zoomBadgeEl.title = 'Zoom ' + percent + '% — click to reset';
   zoomBadgeEl.setAttribute('aria-label', 'Reset zoom, currently ' + percent + '%');
   zoomBadgeEl.hidden = false;
+}
+
+/* ------------------------------------------------------------------ */
+/* The save star                                                       */
+/* ------------------------------------------------------------------ */
+/*
+ * One click saves the page in front to the Saved list (the bookmarks list —
+ * see "Saved sites" above), another forgets it. It is a mirror of the store,
+ * never a second source of truth: whatever wrote the list (this star, Ctrl+D,
+ * Settings, the bookmarks bar, a new tab's x or +), the store announces
+ * 'chips' and the star repaints from chips() itself.
+ *
+ * Only for a page with a real web address. A new tab, a Claude chamber, a
+ * terminal, a native-app tab and our own file:// pages (history, files,
+ * phone, reader) have nothing a tile could reopen, so the star is not there
+ * at all rather than there and refusing.
+ */
+const STAR_GLYPH = '';        // Segoe Fluent FavoriteStar (outline)
+const STAR_GLYPH_FILL = '';   // ...FavoriteStarFill
+const STAR_FAIL_MS = 2600;          // how long a refusal stays on the star
+let saveStarFailTimer = 0;
+
+/** The address the star would save for this tab, or '' when it has none. */
+function starTargetUrl(tab) {
+  if (!tab || tab.kind !== 'page') return '';
+  let url = '';
+  try { url = String(readCurrentUrl(tab) || '').trim(); } catch (err) { return ''; }
+  if (!url || isNewTabUrl(url)) return '';
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+/**
+ * What the star should show for an address against a saved list. Pure, so
+ * the harness can walk every case without a DOM: { hidden, saved }.
+ */
+function saveStarState(url, list) {
+  if (!url) return { hidden: true, saved: false };
+  const rows = Array.isArray(list) ? list : [];
+  return { hidden: false, saved: rows.some((row) => row && savedSameUrl(row.url, url)) };
+}
+
+/** The tile label for a page: its title, or its host when it has none yet. */
+function starLabel(tab, url) {
+  const title = String((tab && tab.title) || '').trim();
+  if (title && title !== url) return title;
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (err) { return url; }
+}
+
+/** Paint the star for the active tab: hidden, outline, or filled + accent. */
+function updateSaveStar() {
+  if (!saveStarEl) return;
+  // Anything that repaints the star has moved on from a refusal being shown.
+  if (saveStarFailTimer) {
+    window.clearTimeout(saveStarFailTimer);
+    saveStarFailTimer = 0;
+  }
+  saveStarEl.classList.remove('failed');
+  const state = saveStarState(starTargetUrl(getActiveTab()), savedSites());
+  if (state.hidden) {
+    saveStarEl.hidden = true;
+    return;
+  }
+  saveStarEl.classList.toggle('saved', state.saved);
+  saveStarEl.setAttribute('aria-pressed', state.saved ? 'true' : 'false');
+  const tip = state.saved ? 'Remove from saved' : 'Save page (Ctrl+D)';
+  saveStarEl.title = tip;
+  saveStarEl.setAttribute('aria-label', tip);
+  const glyph = saveStarEl.querySelector('.glyph');
+  if (glyph) glyph.textContent = state.saved ? STAR_GLYPH_FILL : STAR_GLYPH;
+  saveStarEl.hidden = false;
+}
+
+/**
+ * A save or a removal that did not happen says so ON the star (amber, with the
+ * reason as its tooltip) and in the settings toast, in plain words, for a
+ * moment — then the star goes back to the truth.
+ */
+function flashSaveStarFailure(reason) {
+  const text = String(reason || 'That did not work');
+  if (saveStarEl) {
+    if (saveStarFailTimer) window.clearTimeout(saveStarFailTimer);
+    saveStarEl.classList.add('failed');
+    saveStarEl.title = text;
+    saveStarEl.setAttribute('aria-label', text);
+    saveStarFailTimer = window.setTimeout(() => {
+      saveStarFailTimer = 0;
+      updateSaveStar();
+    }, STAR_FAIL_MS);
+  }
+  const settings = window.Settings;
+  if (settings && typeof settings.toast === 'function') {
+    try { settings.toast(text, STAR_FAIL_MS); } catch (err) { /* the star still shows it */ }
+  }
+}
+
+/** The click: save the page in front, or forget it when it is already saved. */
+function toggleSaveStar() {
+  const tab = getActiveTab();
+  const url = starTargetUrl(tab);
+  if (!url) {
+    flashSaveStarFailure('There is no web page here to save');
+    return;
+  }
+  const result = isSavedUrl(url) ? unsaveSite(url) : saveSite(url, starLabel(tab, url));
+  if (!result.ok) {
+    flashSaveStarFailure(result.reason);
+    return;
+  }
+  // A real change already repainted the star through the store's 'chips'
+  // signal; "already saved" / "already gone" changed nothing, so paint here.
+  updateSaveStar();
 }
 
 /** Read the active tab's zoom and paint the badge from it. */
@@ -10639,6 +10946,8 @@ function wireChrome() {
   if (forwardBtn) forwardBtn.addEventListener('click', goForward);
   // The zoom badge is a button that only ever does one thing.
   if (zoomBadgeEl) zoomBadgeEl.addEventListener('click', resetZoom);
+  // ...and so is the star: save the page in front, or forget it.
+  if (saveStarEl) saveStarEl.addEventListener('click', toggleSaveStar);
   // Same handler for both modes: reloadActiveTab() stops a load in progress.
   if (reloadBtn) reloadBtn.addEventListener('click', reloadActiveTab);
   if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
@@ -11123,6 +11432,7 @@ function init() {
   reloadBtn = document.getElementById('reload');
   omniboxEl = document.getElementById('omnibox');
   zoomBadgeEl = document.getElementById('zoom-badge');
+  saveStarEl = document.getElementById('save-star');
   viewsEl = document.getElementById('views');
   winMinBtn = document.getElementById('win-min');
   winMaxBtn = document.getElementById('win-max');
@@ -11141,6 +11451,7 @@ function init() {
   wireWindowControls();
   wireKeyboard();
   wireSettings();
+  updateSaveStar();  // the star as the list stands at boot (tabchange repaints it after)
   // The chips follow the history store: a visit moves the counts, and the row
   // is recomposed off its signal (debounced, and only when it really moved).
   wireNewtabChips();
@@ -11153,11 +11464,12 @@ function init() {
   wireMusic();
 
   // The chrome follows its own tabchange event, exactly like find.js and the
-  // other modules do: the badge belongs to the tab you are looking at, and a
-  // new-tab page gets a fresh recent list every time you come back to it.
+  // other modules do: the badge and the save star belong to the tab you are
+  // looking at. (The Saved row needs no push here: every new-tab page is
+  // re-pushed whenever the list itself moves.)
   document.addEventListener('tabchange', () => {
     updateZoomBadge();
-    pushRecentToTab(getActiveTab());
+    updateSaveStar();
     // Cheap: the counts are already in hand and the autopause word is cached,
     // so coming back to a new tab never costs a round trip to main.
     pushReadoutToAll();

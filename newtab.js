@@ -71,6 +71,14 @@
         on `newtab:stocks {"action":"subscribe"|"unsubscribe"|"select"|
         "add"|"remove"|"refresh","symbol":…}`; see "markets" at the foot of
         this file. The key is never in the payload and never in this page.
+
+    11. window.__applySaved([{ url, label }, …]) — the browser's saved
+        list (the bookmarks, Settings.chips()), whole and in stored order,
+        drawn as the Saved row under the shortcuts. The row asks for
+        changes with `newtab:saved {"op":"add","url":…}` and
+        `newtab:saved {"op":"remove","url":…}`, and the chrome answers by
+        pushing the list again; see "saved sites". __applyRecent() is
+        still defined, as a no-op: it fed the Recent row this replaced.
    ============================================================ */
 
 'use strict';
@@ -87,10 +95,6 @@ const LINKS = [
 /* One shared favicon service; the chip falls back to its label if it 404s. */
 const FAVICON_URL = 'https://www.google.com/s2/favicons?domain=';
 
-/* Recent sites. The chrome may hand us more than we show: we accept up to
-   RECENT_ACCEPT and draw at most RECENT_LIMIT tiles under the shortcuts. */
-const RECENT_ACCEPT = 8;
-const RECENT_LIMIT = 6;
 
 /* ------------------------------------------------------------------ */
 /* URL handling — only ever validation, never navigation               */
@@ -110,10 +114,6 @@ function parseUrlOrNull(text) {
 
 /* The chip list the chrome sent (null = LINKS). */
 let chipList = null;
-
-/* Validated recents, most recent first, deduped by host. [] until the
-   chrome pushes some in with __applyRecent(). */
-let recentList = [];
 
 /** One host, compared the way a person would: case- and www-blind. */
 function hostKey(hostname) {
@@ -156,57 +156,6 @@ function currentChips() {
   return chipList || DEFAULT_CHIPS;
 }
 
-/**
- * Validate one recent list from the chrome: [{ url, title, last }, …],
- * most recent first. http(s) only, one entry per host (the first, i.e. the
- * most recent, wins), at most RECENT_ACCEPT of them. `last` is carried by
- * the chrome for its own ordering and is not read here.
- */
-function normalizeRecent(list) {
-  if (!Array.isArray(list)) return [];
-
-  const out = [];
-  const seen = new Set();
-
-  for (const item of list) {
-    if (!item || typeof item.url !== 'string') continue;
-
-    const parsed = parseUrlOrNull(item.url.trim());
-    if (!parsed) continue;
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
-
-    const key = hostKey(parsed.hostname);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-
-    const label = (typeof item.title === 'string' && item.title.trim())
-      ? item.title.trim()
-      : key;
-
-    out.push({ label: label, url: parsed.href, host: parsed.hostname, key: key });
-    if (out.length >= RECENT_ACCEPT) break;
-  }
-
-  return out;
-}
-
-/**
- * The recents worth drawing: anything already sitting in the shortcut row
- * is one click away, so it is dropped rather than shown twice.
- */
-function visibleRecent() {
-  const chipHosts = new Set(currentChips().map(function (chip) { return hostKey(chip.host); }));
-  const out = [];
-
-  for (const item of recentList) {
-    if (chipHosts.has(item.key)) continue;
-    out.push(item);
-    if (out.length >= RECENT_LIMIT) break;
-  }
-
-  return out;
-}
-
 /** ?chips=<encodeURIComponent(JSON)>. Malformed JSON is ignored, not fatal. */
 function parseChipsParam(raw) {
   if (!raw) return null;
@@ -218,10 +167,15 @@ function parseChipsParam(raw) {
   }
 }
 
+/* The Saved row below is NOT filtered against these chips, the way the old
+   Recent row was. The chips are usually the most-visited sites, so a site
+   you visit a lot and then save would vanish from the row the moment you
+   saved it — exactly a save that looks like it failed — and the row's x,
+   the only way to unsave from this page, would go with it. Showing a site
+   twice is the honest cost. */
 function setChips(list) {
   chipList = normalizeChips(list);
   renderLinks();
-  renderRecent();          // a new chip host may hide (or free) a recent tile
 }
 
 /* ------------------------------------------------------------------ */
@@ -229,15 +183,10 @@ function setChips(list) {
 /* ------------------------------------------------------------------ */
 
 const linkRow = document.getElementById('links');
-const recentRow = document.getElementById('recent');
 
 /* What the nav currently shows, so a settings push that changes nothing
    does not rebuild the row (and re-request every favicon). */
 let renderedKey = null;
-
-/* The same trick for the recent row: a repeated push leaves the DOM (and
-   its favicons) exactly where it was. */
-let renderedRecentKey = null;
 
 function faviconUrl(host) {
   return FAVICON_URL + encodeURIComponent(host) + '&sz=32';
@@ -293,50 +242,676 @@ function renderLinks() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Recent sites                                                        */
+/* Saved sites                                                         */
+/*                                                                     */
+/* The row under the shortcuts is the browser's one saved list — the    */
+/* rows the bookmarks bar draws, the ones Ctrl+D and the address bar's   */
+/* star add to (Settings.chips() in the chrome). There is no second      */
+/* list here: this page shows that one and asks for changes to it.       */
+/*                                                                     */
+/*   in    window.__applySaved([{ url, label }, …]) — the WHOLE list,    */
+/*         in stored order, on the guest's dom-ready and again on every  */
+/*         change. Safe to call any number of times.                    */
+/*   out   console.log('newtab:saved {"op":"add","url":…}')              */
+/*         console.log('newtab:saved {"op":"remove","url":…}')           */
+/*                                                                     */
+/* The chrome answers a request ONLY by pushing the list again. So every */
+/* request is drawn at once (the new tile dimmed, the removed tile gone) */
+/* and then waits SAVED_ANSWER_MS for a push that shows it done. No push */
+/* that does means the request did not happen: the tile goes back to    */
+/* where it was and the caption says so, in words — a chrome that has    */
+/* not been restarted since this row arrived reads the line and does    */
+/* nothing with it, and "restart Quartz" is the whole fix.              */
+/*                                                                     */
+/* Nothing in the row is ever rebuilt wholesale. The caption, the "+",   */
+/* its field and the hint are in the markup from the first paint (so    */
+/* the column the board measures is already the height it will wear)    */
+/* and a push only adds, moves or drops the tiles that changed, so a    */
+/* repeated push does not re-request a single favicon.                  */
+/*                                                                     */
+/* SLICE-START: saved row  (the block below is what the lane harness runs) */
 /* ------------------------------------------------------------------ */
 
-/** Build the small tile row under the shortcuts. Hidden when empty. */
-function renderRecent() {
-  if (!recentRow) return;
+/* A push is the user's own list, so it is drawn whole — this is only a
+   guard against a runaway payload. Past it the hint counts what was left
+   off rather than dropping it quietly. */
+const SAVED_ACCEPT = 500;
 
-  const list = visibleRecent();
-  const key = list.map(function (item) { return item.url; }).join('\n');
-  if (key === renderedRecentKey) return;   // same sites: leave the favicons alone
-  renderedRecentKey = key;
+/* Tiles drawn before the row folds: about two lines in the 720px column.
+   Folded, it keeps the NEWEST ones — the end of the stored list — so the
+   site you just saved is always on screen, and a button counts the older
+   ones it is holding back. */
+const SAVED_SHOWN = 12;
 
-  const frag = document.createDocumentFragment();
+/* How long a request waits for the chrome's answering push. */
+const SAVED_ANSWER_MS = 2000;
 
-  if (!list.length) {
-    recentRow.replaceChildren(frag);
-    recentRow.hidden = true;
+/* How long a fresh page waits for its first push before it says the
+   browser never sent the list. The chrome pushes on dom-ready, so this is
+   generous; a little longer than the answer wait so a slow first frame
+   never trips it. */
+const SAVED_FIRST_PUSH_MS = 2500;
+
+/* A neutral note ("already saved") clears itself after this. A failure
+   never does: it stays until the next thing you do in the row. */
+const SAVED_NOTE_MS = 4000;
+
+/* The validated list from the last push, stored order; null until the
+   chrome has pushed one. Each entry: { label, url, raw, host, key }, where
+   url is the parsed href the tile links to, raw is the string exactly as
+   the chrome stores it (what a remove sends back, so its own comparison
+   finds it) and key is savedKey(raw). */
+let savedList = null;
+
+/* Pushes seen so far, so a request that timed out can tell "no answer at
+   all" from "answered, but without the change". */
+let savedPushes = 0;
+
+/* Entries the last push skipped: not an http(s) address, or past
+   SAVED_ACCEPT. Counted so the hint can say so. */
+let savedSkipped = 0;
+let savedOverflow = 0;
+
+/* Requests still waiting for their answer, by key:
+   { item, push, timer } — push is savedPushes when it was sent. */
+const savedPendingAdd = new Map();
+const savedPendingRemove = new Map();
+
+let savedExpanded = false;       // the fold, opened by its button
+let savedAddOpen = false;        // the "+" is showing its field
+let savedStatusKind = '';        // what the caption's note is about
+let savedStatusTimer = 0;
+let savedFirstTimer = 0;
+let savedHeight = -1;            // the row's last measured height
+
+/* The row's fixed parts, looked up by wireSaved(). Null until then, and
+   every renderer checks, so a push that lands first is simply kept. */
+let savedRow = null;
+let savedCaption = null;
+let savedStatusEl = null;
+let savedMoreBtn = null;
+let savedAddBtn = null;
+let savedForm = null;
+let savedInput = null;
+let savedHintEl = null;
+
+/* The tiles on screen, by key, so a push reuses the ones it still has. */
+const savedTiles = new Map();
+
+/**
+ * The chrome's own comparison (Settings.sameUrl): trimmed, case-blind,
+ * trailing slashes ignored. Mirrored exactly, so "already saved" and "it
+ * landed" mean here what they mean in the store.
+ */
+function savedKey(url) {
+  return String(url == null ? '' : url).trim().toLowerCase().replace(/\/+$/, '');
+}
+
+/**
+ * Validate one pushed list: [{ url, label }, …] in stored order. http(s)
+ * only (the tiles are links this page can open), one tile per key, at most
+ * SAVED_ACCEPT. A missing label becomes the bare host, as the store's own
+ * fallback does. Sets savedSkipped / savedOverflow for the hint.
+ */
+function normalizeSaved(list) {
+  savedSkipped = 0;
+  savedOverflow = 0;
+  if (!Array.isArray(list)) return [];
+
+  const out = [];
+  const seen = new Set();
+
+  for (const item of list) {
+    if (!item || typeof item.url !== 'string' || !item.url.trim()) continue;
+
+    const raw = item.url.trim();
+    const parsed = parseUrlOrNull(raw);
+    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
+      savedSkipped++;
+      continue;
+    }
+
+    const key = savedKey(raw);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    if (out.length >= SAVED_ACCEPT) { savedOverflow++; continue; }
+
+    const label = (typeof item.label === 'string' && item.label.trim())
+      ? item.label.trim()
+      : hostKey(parsed.hostname);
+
+    out.push({ label: label, url: parsed.href, raw: raw, host: parsed.hostname, key: key });
+  }
+
+  return out;
+}
+
+/** localhost, 127.x and ::1 are his dashboards: they get http://. */
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase();
+  return h === 'localhost' || /\.localhost$/.test(h) || /^127(\.\d{1,3}){3}$/.test(h) ||
+    h === '[::1]' || h === '::1';
+}
+
+/**
+ * What was typed into the "+" field, as one of:
+ *   { empty: true }                    nothing there: just close
+ *   { error: 'plain sentence' }        not something this row can save
+ *   { url, host }                      the href to send
+ * A bare "github.com" is an address with the scheme left off, the way the
+ * store's own normalizeUrl reads it; "localhost:3000" is a host and a port,
+ * not a scheme called localhost.
+ */
+function parseTypedAddress(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return { empty: true };
+  if (/\s/.test(raw)) {
+    return { error: 'That is not a web address: it has a space in it.' };
+  }
+
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(raw);
+  const hostAndPort = /^[^\/?#:@]+:\d+(?:[\/?#]|$)/.test(raw);
+  let candidate = raw;
+
+  if (scheme && !hostAndPort) {
+    const name = scheme[1].toLowerCase();
+    if (name !== 'http' && name !== 'https') {
+      return { error: 'Only web addresses (http or https) can be saved here.' };
+    }
+  } else {
+    const typedHost = raw.split(/[\/?#]/)[0].replace(/^[^@]*@/, '').replace(/:\d+$/, '');
+    candidate = (isLoopbackHost(typedHost) ? 'http://' : 'https://') + raw;
+  }
+
+  const parsed = parseUrlOrNull(candidate);
+  const junk = { error: '“' + raw + '” is not a web address. Try one like github.com.' };
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return junk;
+
+  // The URL parser is forgiving ("1" is the IPv4 0.0.0.1), so the host is
+  // checked as it was TYPED: localhost, an address, or name.tld.
+  const afterScheme = candidate.replace(/^[a-z][a-z0-9+.-]*:\/*/i, '');
+  const typed = afterScheme.split(/[\/?#]/)[0].replace(/^[^@]*@/, '').replace(/:\d+$/, '').toLowerCase();
+  const plausible =
+    isLoopbackHost(typed) ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(typed) ||
+    /^\[[0-9a-f:.]+\]$/.test(typed) ||
+    (/^[^.]+(\.[^.]+)+\.?$/.test(typed) &&
+      /[a-z -￿]/.test(typed.replace(/\.$/, '').split('.').pop()) &&
+      typed.replace(/\.$/, '').split('.').pop().length >= 2);
+  if (!plausible || !parsed.hostname) return junk;
+
+  return { url: parsed.href, host: parsed.hostname };
+}
+
+/** The one way out of this row. */
+function sendSaved(msg) {
+  console.log('newtab:saved ' + JSON.stringify(msg));
+}
+
+/**
+ * The list as it should read right now: the last push, minus removals
+ * still in flight, plus adds still in flight (dimmed, at the end, where
+ * the store appends them).
+ */
+function savedDisplay() {
+  const base = savedList || [];
+  const out = [];
+  const have = new Set();
+
+  for (const item of base) {
+    have.add(item.key);
+    if (savedPendingRemove.has(item.key)) continue;
+    out.push({ item: item, pending: false });
+  }
+  savedPendingAdd.forEach(function (p, key) {
+    if (!have.has(key)) out.push({ item: p.item, pending: true });
+  });
+
+  return out;
+}
+
+/** Folded: the newest SAVED_SHOWN. Open, or short enough: all of it. */
+function savedShown(display) {
+  if (savedExpanded || display.length <= SAVED_SHOWN) return { shown: display, held: 0 };
+  const held = display.length - SAVED_SHOWN;
+  return { shown: display.slice(held), held: held };
+}
+
+/* --- the caption's note --------------------------------------------- */
+
+/**
+ * One line in the caption, right of "Saved". tone 'warn' is a failure and
+ * stays until replaced; 'note' clears itself. kind names what it is about,
+ * so a push can clear "never sent" without touching anything else.
+ */
+function setSavedStatus(text, tone, kind) {
+  if (savedStatusTimer) { clearTimeout(savedStatusTimer); savedStatusTimer = 0; }
+  savedStatusKind = text ? (kind || tone || 'note') : '';
+  if (savedStatusEl) {
+    savedStatusEl.textContent = text || '';
+    if (text && tone === 'warn') savedStatusEl.setAttribute('data-tone', 'warn');
+    else savedStatusEl.removeAttribute('data-tone');
+  }
+  if (text && tone !== 'warn') {
+    savedStatusTimer = setTimeout(function () {
+      savedStatusTimer = 0;
+      setSavedStatus('');
+    }, SAVED_NOTE_MS);
+  }
+  settleSavedHeight();
+}
+
+/** Clear the note unless it is about `keep` (still true). */
+function clearSavedStatus(keep) {
+  if (savedStatusKind && savedStatusKind === keep) return;
+  if (savedStatusKind) setSavedStatus('');
+}
+
+/* --- requests ----------------------------------------------------- */
+
+/** "+" → Enter. `parsed` is a parseTypedAddress() success. */
+function requestSavedAdd(parsed) {
+  const key = savedKey(parsed.url);
+  const label = hostKey(parsed.host);
+
+  const display = savedDisplay();
+  const at = display.findIndex(function (d) { return d.item.key === key; });
+  if (at >= 0) {
+    // Already in the list (or already on its way): say so and make sure
+    // it is on screen, rather than sending a line that changes nothing.
+    if (!savedExpanded && at < display.length - SAVED_SHOWN) savedExpanded = true;
+    setSavedStatus(label + ' is already saved.', 'note', 'dupe');
+    renderSaved();
     return;
   }
 
-  const caption = document.createElement('p');
-  caption.className = 'recent-caption';
-  caption.appendChild(document.createTextNode('Recent'));
-  frag.appendChild(caption);
+  // Re-adding something whose removal is still in flight: the add wins,
+  // and the removal stops waiting for an answer that no longer matters.
+  const racing = savedPendingRemove.get(key);
+  if (racing) { clearTimeout(racing.timer); savedPendingRemove.delete(key); }
 
-  for (const item of list) {
-    const tile = document.createElement('a');
-    tile.className = 'rtile';
-    tile.href = item.url;
-    tile.title = item.host;
+  const item = { label: label, url: parsed.url, raw: parsed.url, host: parsed.host, key: key };
+  savedPendingAdd.set(key, {
+    item: item,
+    push: savedPushes,
+    timer: setTimeout(function () { savedAddTimedOut(key); }, SAVED_ANSWER_MS)
+  });
 
-    tile.appendChild(faviconImg(item.host, 'rtile-icon'));
+  clearSavedStatus('nopush');
+  sendSaved({ op: 'add', url: parsed.url });
+  renderSaved();
+}
 
-    const label = document.createElement('span');
-    label.className = 'rtile-label';
-    label.appendChild(document.createTextNode(item.label));
-    tile.appendChild(label);
+/** A tile's x (or Delete on the tile). */
+function requestSavedRemove(item, refocus) {
+  if (savedPendingRemove.has(item.key)) return;
 
-    frag.appendChild(tile);
+  // Where focus goes once the tile is gone: the tile that slides into its
+  // place, or the "+" when it was the last. Only for the keyboard — a
+  // mouse that pressed x is already where it wants to be.
+  let nextKey = null;
+  if (refocus) {
+    const shown = savedShown(savedDisplay()).shown;
+    const at = shown.findIndex(function (d) { return d.item.key === item.key; });
+    const next = shown[at + 1] || shown[at - 1];
+    nextKey = next ? next.item.key : null;
   }
 
-  recentRow.replaceChildren(frag);
-  recentRow.hidden = false;
+  savedPendingRemove.set(item.key, {
+    item: item,
+    push: savedPushes,
+    timer: setTimeout(function () { savedRemoveTimedOut(item.key); }, SAVED_ANSWER_MS)
+  });
+
+  clearSavedStatus('nopush');
+  sendSaved({ op: 'remove', url: item.raw });
+  renderSaved();
+
+  if (refocus) {
+    const wrap = nextKey ? savedTiles.get(nextKey) : null;
+    const target = wrap ? wrap.querySelector('.rtile') : savedAddBtn;
+    if (target && typeof target.focus === 'function') target.focus();
+  }
 }
+
+function savedAddTimedOut(key) {
+  const p = savedPendingAdd.get(key);
+  if (!p) return;
+  savedPendingAdd.delete(key);
+  const name = p.item.label;
+  if (savedPushes > p.push) {
+    setSavedStatus('Quartz answered but did not save ' + name + '. It may not take that address.', 'warn', 'failed');
+  } else {
+    setSavedStatus('Quartz did not answer, so ' + name + ' was not saved. Restart Quartz, then try again.', 'warn', 'failed');
+  }
+  renderSaved();                 // the dimmed tile goes: that is the rollback
+}
+
+function savedRemoveTimedOut(key) {
+  const p = savedPendingRemove.get(key);
+  if (!p) return;
+  savedPendingRemove.delete(key);
+  const name = p.item.label;
+  if (savedPushes > p.push) {
+    setSavedStatus('Quartz answered but kept ' + name + '. Try removing it again.', 'warn', 'failed');
+  } else {
+    setSavedStatus('Quartz did not answer, so ' + name + ' is still saved. Restart Quartz, then try again.', 'warn', 'failed');
+  }
+  renderSaved();                 // the tile comes back where it was
+}
+
+/* --- the "+" field ------------------------------------------------- */
+
+function openSavedAdd() {
+  if (!savedForm || !savedInput || savedAddOpen) return;
+  savedAddOpen = true;
+  clearSavedStatus('nopush');
+  savedInput.value = '';
+  savedInput.removeAttribute('aria-invalid');
+  savedAddBtn.hidden = true;
+  savedForm.hidden = false;
+  savedInput.focus();
+  settleSavedHeight();
+}
+
+/** Escape, blur, or a successful Enter. refocus puts focus back on "+". */
+function closeSavedAdd(refocus) {
+  if (!savedAddOpen) return;
+  savedAddOpen = false;            // first: the focus move below blurs the field
+  if (savedStatusKind === 'input') setSavedStatus('');
+  savedInput.removeAttribute('aria-invalid');
+  savedForm.hidden = true;
+  savedAddBtn.hidden = false;
+  if (refocus) savedAddBtn.focus();
+  settleSavedHeight();
+}
+
+function commitSavedAdd() {
+  const parsed = parseTypedAddress(savedInput.value);
+  if (parsed.empty) { closeSavedAdd(true); return; }
+  if (parsed.error) {
+    // The field stays open with what was typed, so it can be fixed.
+    savedInput.setAttribute('aria-invalid', 'true');
+    setSavedStatus(parsed.error, 'warn', 'input');
+    return;
+  }
+  closeSavedAdd(true);
+  requestSavedAdd(parsed);
+}
+
+/* --- drawing ------------------------------------------------------ */
+
+/** One tile: the link, and beside it (not inside: no button in an <a>) its x. */
+function buildSavedTile(entry) {
+  const item = entry.item;
+
+  const wrap = document.createElement('span');
+  wrap.className = entry.pending ? 'stile is-pending' : 'stile';
+
+  const link = document.createElement('a');
+  link.className = 'rtile';
+  link.href = item.url;
+  link.title = entry.pending
+    ? 'Saving ' + item.label + '…'
+    : item.label + ' — ' + item.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  link.appendChild(faviconImg(item.host, 'rtile-icon'));
+
+  const label = document.createElement('span');
+  label.className = 'rtile-label';
+  label.appendChild(document.createTextNode(item.label));
+  link.appendChild(label);
+  wrap.appendChild(link);
+
+  if (entry.pending) {
+    link.setAttribute('aria-busy', 'true');
+    return wrap;
+  }
+
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'stile-remove';
+  x.title = 'Remove from saved';
+  x.setAttribute('aria-label', 'Remove ' + item.label + ' from saved');
+  x.appendChild(document.createTextNode('×'));
+  x.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // detail 0 is a keyboard press (Enter / Space on the focused x).
+    requestSavedRemove(item, ev.detail === 0);
+  });
+  wrap.appendChild(x);
+
+  link.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Delete') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    requestSavedRemove(item, true);
+  });
+
+  return wrap;
+}
+
+/** What a tile's DOM depends on: a change rebuilds that one tile. */
+function savedTileSig(entry) {
+  return entry.item.url + '\n' + entry.item.label + '\n' + (entry.pending ? 1 : 0);
+}
+
+/**
+ * Bring the row in line with savedDisplay(). The fixed parts are only
+ * re-labelled; tiles are reused by key, moved only when out of place (a
+ * moved node loses focus, a node left alone keeps it), and dropped when
+ * gone. Safe before wireSaved(): it does nothing until the row exists.
+ */
+function renderSaved() {
+  if (!savedRow || !savedMoreBtn) return;
+
+  const display = savedDisplay();
+  const view = savedShown(display);
+
+  // Gone first, so the pass below never steps over a tile on its way out
+  // (stepping over one would move every tile after it, focus and all).
+  const keep = new Set(view.shown.map(function (entry) { return entry.item.key; }));
+  savedTiles.forEach(function (wrap, key) {
+    if (keep.has(key)) return;
+    if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    savedTiles.delete(key);
+  });
+
+  // The tiles sit between the caption and the fold's button, in order.
+  let cursor = savedCaption.nextSibling;
+
+  for (const entry of view.shown) {
+    const key = entry.item.key;
+    const sig = savedTileSig(entry);
+    let wrap = savedTiles.get(key);
+    if (wrap && wrap.__sig !== sig) {
+      const fresh = buildSavedTile(entry);
+      fresh.__sig = sig;
+      wrap.replaceWith(fresh);
+      if (cursor === wrap) cursor = fresh;
+      wrap = fresh;
+    } else if (!wrap) {
+      wrap = buildSavedTile(entry);
+      wrap.__sig = sig;
+    }
+    savedTiles.set(key, wrap);
+
+    if (cursor === wrap) cursor = cursor.nextSibling;
+    else savedRow.insertBefore(wrap, cursor);
+  }
+
+  // The fold's button: a count of what it holds back, never silent.
+  const total = display.length;
+  if (view.held > 0) {
+    savedMoreBtn.hidden = false;
+    savedMoreBtn.textContent = '+' + view.held + ' older';
+    savedMoreBtn.setAttribute('aria-expanded', 'false');
+    savedMoreBtn.setAttribute('aria-label', 'Show ' + view.held + ' older saved site' + (view.held === 1 ? '' : 's'));
+  } else if (savedExpanded && total > SAVED_SHOWN) {
+    savedMoreBtn.hidden = false;
+    savedMoreBtn.textContent = 'Fewer';
+    savedMoreBtn.setAttribute('aria-expanded', 'true');
+    savedMoreBtn.setAttribute('aria-label', 'Show only the ' + SAVED_SHOWN + ' newest saved sites');
+  } else {
+    savedMoreBtn.hidden = true;
+  }
+
+  // The hint after the "+": what an empty row is for, and anything the
+  // push carried that is not drawn. Not before the first push — an empty
+  // list nobody has sent is not "nothing saved".
+  const notes = [];
+  if (savedList && !total) notes.push('Nothing saved yet. Use + or the star in the address bar.');
+  if (savedSkipped) {
+    notes.push(savedSkipped + ' saved item' + (savedSkipped === 1 ? ' is' : 's are') +
+      ' not a web address and ' + (savedSkipped === 1 ? 'is' : 'are') + ' not shown here.');
+  }
+  if (savedOverflow) notes.push(savedOverflow + ' more saved sites are past what this row draws.');
+  if (savedHintEl) {
+    savedHintEl.textContent = notes.join(' ');
+    savedHintEl.hidden = !notes.length;
+  }
+
+  settleSavedHeight();
+}
+
+/**
+ * The board routes around the column by its measured box. When this row
+ * changes height (a second line of tiles, a wrapped note) it has to be told,
+ * and only then: a forced relayout is a full repaint. The first measurement
+ * is before the board has drawn at all, so it only records.
+ */
+function settleSavedHeight() {
+  if (!savedRow) return;
+  const h = savedRow.offsetHeight;
+  if (h === savedHeight) return;
+  const first = savedHeight < 0;
+  savedHeight = h;
+  if (!first && typeof window.__boardRelayout === 'function') window.__boardRelayout();
+}
+
+/* --- wiring ------------------------------------------------------- */
+
+function wireSaved() {
+  savedRow = document.getElementById('saved');
+  savedCaption = savedRow ? savedRow.querySelector('.saved-caption') : null;
+  savedStatusEl = document.getElementById('saved-status');
+  savedMoreBtn = document.getElementById('saved-more');
+  savedAddBtn = document.getElementById('saved-add');
+  savedForm = document.getElementById('saved-form');
+  savedInput = document.getElementById('saved-input');
+  savedHintEl = document.getElementById('saved-hint');
+  if (!savedRow || !savedCaption || !savedStatusEl || !savedMoreBtn || !savedAddBtn ||
+      !savedForm || !savedInput || !savedHintEl) {
+    savedRow = null;
+    return;
+  }
+
+  savedAddBtn.addEventListener('click', openSavedAdd);
+
+  // Enter submits the one-field form; the page must never actually submit
+  // (a form with no action reloads this page).
+  savedForm.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    commitSavedAdd();
+  });
+  savedInput.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape' && ev.key !== 'Esc') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeSavedAdd(true);
+  });
+  // Blur cancels — when focus went somewhere else on this page. When the
+  // whole guest lost focus (a click in the address bar, Alt+Tab to copy the
+  // address being saved) the field stays, and focus comes back to it.
+  savedInput.addEventListener('blur', function () {
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+    closeSavedAdd(false);
+  });
+  savedInput.addEventListener('input', function () {
+    if (savedInput.getAttribute('aria-invalid')) savedInput.removeAttribute('aria-invalid');
+    if (savedStatusKind === 'input') setSavedStatus('');
+  });
+
+  savedMoreBtn.addEventListener('click', function () {
+    savedExpanded = !savedExpanded;
+    renderSaved();
+  });
+
+  renderSaved();
+
+  // Silence from the chrome is a state too. A push clears this.
+  if (!savedList) {
+    savedFirstTimer = setTimeout(function () {
+      savedFirstTimer = 0;
+      if (savedList) return;
+      setSavedStatus('Quartz has not sent your saved sites. Restart Quartz to load them.', 'warn', 'nopush');
+    }, SAVED_FIRST_PUSH_MS);
+  }
+}
+
+/**
+ * The chrome pushes the whole saved list here, in stored order:
+ * __applySaved([{ url, label }]). Every push is also the answer to any
+ * request still waiting: an add is done when its key is in the list, a
+ * removal when its key is not.
+ */
+window.__applySaved = function (list) {
+  savedList = normalizeSaved(list);
+  savedPushes++;
+
+  if (savedFirstTimer) { clearTimeout(savedFirstTimer); savedFirstTimer = 0; }
+  if (savedStatusKind === 'nopush') setSavedStatus('');
+
+  const have = new Set(savedList.map(function (item) { return item.key; }));
+  savedPendingAdd.forEach(function (p, key) {
+    if (!have.has(key)) return;
+    clearTimeout(p.timer);
+    savedPendingAdd.delete(key);
+  });
+  savedPendingRemove.forEach(function (p, key) {
+    if (have.has(key)) return;
+    clearTimeout(p.timer);
+    savedPendingRemove.delete(key);
+  });
+
+  renderSaved();
+};
+
+/** The saved tiles actually on screen, for tests: DOM order, as drawn. */
+window.__saved = function () {
+  if (!savedRow) return [];
+  return Array.prototype.map.call(savedRow.querySelectorAll('.stile'), function (wrap) {
+    const link = wrap.querySelector('.rtile');
+    const label = wrap.querySelector('.rtile-label');
+    return {
+      label: label ? label.textContent : '',
+      url: link ? link.href : '',
+      pending: wrap.classList.contains('is-pending'),
+      removable: !!wrap.querySelector('.stile-remove')
+    };
+  });
+};
+
+/** The rest of the row's state, for tests. */
+window.__savedState = function () {
+  return {
+    pushed: savedList !== null,
+    pushes: savedPushes,
+    count: savedList ? savedList.length : 0,
+    skipped: savedSkipped,
+    expanded: savedExpanded,
+    more: savedMoreBtn && !savedMoreBtn.hidden ? savedMoreBtn.textContent : null,
+    adding: savedAddOpen,
+    pendingAdd: Array.from(savedPendingAdd.keys()),
+    pendingRemove: Array.from(savedPendingRemove.keys()),
+    status: savedStatusEl ? savedStatusEl.textContent : '',
+    tone: savedStatusEl ? (savedStatusEl.getAttribute('data-tone') || '') : '',
+    hint: savedHintEl && !savedHintEl.hidden ? savedHintEl.textContent : ''
+  };
+};
+
+/* SLICE-END: saved row */
 
 /* ------------------------------------------------------------------ */
 /* The clock module                                                    */
@@ -3968,27 +4543,18 @@ window.__applySettings = function (settings) {
 };
 
 /**
- * The chrome pushes browsing history here the same way, up to 8 entries,
- * most recent first: __applyRecent([{ url, title, last }]). Safe to call
- * before DOMContentLoaded (the nav is parsed above this script), and safe
- * to call repeatedly — an unchanged list does not rebuild anything.
+ * Retired. This fed the Recent row, which the Saved row replaced (see
+ * "saved sites"). A chrome that has not been restarted since still pushes
+ * browsing history here on every new tab, so it stays defined — as a no-op,
+ * because an undefined function would be an error in that chrome's push,
+ * and drawing history here would put the old row back.
  */
-window.__applyRecent = function (list) {
-  recentList = normalizeRecent(list);
-  renderRecent();
-};
+window.__applyRecent = function () {};
 
 /** The chips actually on screen, for tests. */
 window.__chips = function () {
   return currentChips().map(function (item) {
     return { label: item.label, url: item.url };
-  });
-};
-
-/** The recent tiles actually on screen, for tests. */
-window.__recent = function () {
-  return visibleRecent().map(function (item) {
-    return { label: item.label, url: item.url, host: item.host };
   });
 };
 
@@ -4024,6 +4590,11 @@ function init() {
      one tile-row of height before a single pin has arrived, so the capsule
      the board is about to measure is already the height it will wear. */
   wireDock();
+
+  /* The Saved row: its caption and "+" are in the markup, so this only
+     wires them, draws whatever push already landed, and starts the wait
+     for the chrome's first list. */
+  wireSaved();
 
   /* The idle-music module, before the board measures the tile it shares
      with the readout: it is inside a [hidden] tile either way, so this

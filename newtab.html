@@ -251,7 +251,7 @@
            nothing unfolds in front of you.
 
            The wrapper is a one-row grid: 0fr closed, 1fr open, stepped
-           over 160ms. That animates the ROW, so the chips and the recents
+           over 160ms. That animates the ROW, so the chips and the saved row
            below are pushed down by the section's real height and nothing
            needs to know what that height is.
 
@@ -336,9 +336,27 @@
 
     <nav id="links" class="links" aria-label="Shortcuts"></nav>
 
-    <!-- Recent sites pushed in with window.__applyRecent(); stays hidden
-         until there is something left after the shortcut hosts are removed. -->
-    <nav id="recent" class="recent" aria-label="Recent sites" hidden></nav>
+    <!-- Saved sites: the browser's saved list, pushed in with
+         window.__applySaved() and drawn by newtab.js ("saved sites"). The
+         fixed parts are here, not built by script, so the row has its full
+         one-line height from the first paint and the board measures the
+         column once: the caption (with the note that says what went wrong,
+         when something did), then the tiles go in before the fold's button,
+         then the "+" and the field it turns into, then the hint. -->
+    <nav id="saved" class="saved" aria-label="Saved sites">
+      <p class="saved-caption"><span class="saved-title">Saved</span><span
+         id="saved-status" class="saved-status" role="status" aria-live="polite"></span></p>
+      <button id="saved-more" class="rtile saved-more" type="button"
+              aria-expanded="false" hidden></button>
+      <button id="saved-add" class="rtile saved-add" type="button"
+              title="Save a site" aria-label="Save a site">+</button>
+      <form id="saved-form" class="saved-form" autocomplete="off" hidden>
+        <input id="saved-input" class="saved-input" type="text" inputmode="url"
+               placeholder="Address to save, then Enter" spellcheck="false"
+               autocapitalize="off" aria-label="Address to save">
+      </form>
+      <span id="saved-hint" class="saved-hint" hidden></span>
+    </nav>
   </div>
 </main>
 

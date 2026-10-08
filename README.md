@@ -836,9 +836,14 @@ defaults or a short map of common hosts — else the site's name capitalised, an
 local server — and pads the row with the old defaults until the history has five hosts. Settings →
 New tab → My list hands the row back to the hand-edited list. Either way the row travels on the one
 channel the page already listens on, the `?chips` param and `window.__applySettings`, re-pushed at
-most once every 5 seconds and only when it reads differently. The page cannot read the history
-store, so the chrome pushes it 8 recent sites with `window.__applyRecent`: 6 become tiles under the
-chips, the rest feed the capsule's dropdown. Behind the capsule is the circuit
+most once every 5 seconds and only when it reads differently. Under the chips is the Saved row: the
+page cannot read the bookmarks list (`Settings.chips()`), so the chrome pushes the whole list, in
+stored order, with `window.__applySaved([{ url, label }])` on every new-tab load and whenever the
+list changes. The row's "+" field and each tile's x ask the chrome with a console line,
+`newtab:saved {"op":"add"|"remove","url"}`, and the answer is simply the next `__applySaved` push;
+no answer within 2 seconds rolls the tile back and says so in the row. The address bar's star and
+Ctrl+D write the same list. (`window.__applyRecent` is kept as a no-op for an un-restarted chrome.)
+Behind the capsule is the circuit
 board — a socket ring around it, 45-degree traces out to vias and peripheral chips.
 
 Two live glass modules sit on that board. A clock, updated once a minute rather than on a
@@ -908,7 +913,7 @@ subscribes only while the active tab is a new-tab page and the window is focused
 new-tab pages get nothing and the `typeperf` child is killed 5s after the last unsubscribe.
 
 **Processes.** Under the strip is a "Processes" expander — a chevron at the strip's right edge, and
-the strip itself is the toggle. It unfolds the list inline over 160ms, pushing the chips and Recent
+the strip itself is the toggle. It unfolds the list inline over 160ms, pushing the chips and Saved
 rows down, and whether it is open or closed is kept in `localStorage` and restored without
 animation. Rows are grouped the way Task Manager groups them, one per program with its instance
 count and a friendly name where there is one (Claude Code, Electron, Windows Explorer, Desktop

@@ -5431,6 +5431,15 @@
     removeChip: removeChip,
     updateChip: updateChip,
     moveChip: moveChip,
+    /* The list's own rules, for app.js's save star and the new tab's Saved
+       row: sameUrl is the duplicate check addChip uses (case and trailing
+       slashes do not count), normalizeUrl is what a typed "github.com"
+       becomes. Exported so the star can never disagree with the store. */
+    sameUrl: sameUrl,
+    normalizeUrl: normalizeUrl,
+    /* The chrome's one toast, for app.js to say in words why a save star
+       click did nothing (the star itself also turns amber). */
+    toast: showToast,
 
     /* The new tab's background. background() resolves to
        { kind, boardOverImage, dim, dataUrl? } for a picture and

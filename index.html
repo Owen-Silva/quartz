@@ -80,6 +80,16 @@
       <button id="zoom-badge" class="glass no-drag" type="button" hidden
               title="Reset zoom" aria-label="Reset zoom">100%</button>
 
+      <!-- Save star: saves the page in front to the Saved list (the bookmarks
+           list the new tab's Saved row shows), or forgets it. app.js shows it
+           only on a real web page, swaps the glyph to &#xE735; (filled) and
+           adds .saved while the page is saved, .failed for a moment when a
+           save or removal was refused (the tooltip then says why). -->
+      <button id="save-star" class="glass iconbtn no-drag" type="button" hidden
+              title="Save page (Ctrl+D)" aria-label="Save page (Ctrl+D)" aria-pressed="false">
+        <span class="glyph">&#xE734;</span>
+      </button>
+
       <!-- glyph swaps to &#xE706; (sun) when the light theme is on -->
       <button id="theme" class="glass iconbtn no-drag" type="button" title="Switch theme" aria-label="Switch theme">
         <span class="glyph">&#xE708;</span>
