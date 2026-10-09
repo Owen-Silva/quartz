@@ -82,7 +82,15 @@
   var IMAGE_KEY = 'newtab-bg';   // the user's picture (settings.js owns it)
   var STILL_KEY = 'bg-still';    // the cached video/GIF still (this file)
   var STILL_MAX_EDGE = 1280;     // the still is only ever blurred: small is fine
-  var STILL_TIMEOUT_MS = 15000;
+  /* A clip's still (see captureVideoStill): a read that shows no progress
+     for STALL fails, none may run past CEILING, and a seek past a black
+     first frame gets SEEK_GRACE before the first frame is used anyway.
+     A failed still is retried on RETRY_STEPS_MS, then every RETRY_EVERY_MS. */
+  var STILL_STALL_MS = 15000;
+  var STILL_CEILING_MS = 60000;
+  var SEEK_GRACE_MS = 4000;
+  var RETRY_STEPS_MS = [5000, 15000, 30000, 60000];
+  var RETRY_EVERY_MS = 120000;
 
   var layer = document.querySelector('.backdrop');
   var photoEl = layer ? layer.querySelector('.bg-photo') : null;
@@ -470,16 +478,38 @@
   /**
    * One frame of a clip, from an offscreen <video> that is never added to
    * the document and is torn down (src removed, load() to free the decoder)
-   * the moment the frame is drawn or the attempt fails.
+   * the moment the frame is drawn or the attempt ends.
+   *
+   * WHY IT WAITS ON EVENTS, NOT A CLOCK (fixed 2026-10-08). The first build
+   * gave the clip a flat 15 s. On a cold boot with the user's 80 MB 4K clip that
+   * was not enough: the Home opens the same file at the same moment, and the
+   * read came back "did not give up a frame within 15 s", leaving the window
+   * plain until the clip was picked again (which then took 512 ms). Now:
+   *   - nothing is counted while the window is hidden (Chromium defers media
+   *     loads in a hidden frame, so a clock running then measured nothing);
+   *   - the deadline is a STALL timer: it restarts on every sign of progress
+   *     (loadstart, progress, loadedmetadata, loadeddata, canplay, seeked),
+   *     so a slow but moving read is never cut off, and only a read that has
+   *     done nothing for STILL_STALL_MS fails (STILL_CEILING_MS caps it all);
+   *   - the frame taken is the cheapest one: the FIRST frame, which is a
+   *     keyframe and needs no seek at all. Only when that frame is black (a
+   *     fade-in) does it seek on to ~1 s, and if that seek has not landed
+   *     within SEEK_GRACE_MS the first frame is used anyway.
+   * ctl.cancel() ends it early (a playing Home gave up a frame first).
    */
-  function captureVideoStill(cfg) {
+  function captureVideoStill(cfg, ctl) {
     return new Promise(function (resolve, reject) {
       var v = document.createElement('video');
       var done = false;
-      var timer = 0;
+      var stall = 0;
+      var ceiling = 0;
+      var seekGrace = 0;
+      var seeking = false;
+      var EVENTS = ['loadstart', 'progress', 'loadedmetadata', 'loadeddata', 'canplay', 'seeked', 'error'];
 
       function teardown() {
-        v.onloadedmetadata = v.onseeked = v.onerror = v.onloadeddata = null;
+        for (var i = 0; i < EVENTS.length; i++) v.removeEventListener(EVENTS[i], onEvent);
+        document.removeEventListener('visibilitychange', armStall);
         try { v.pause(); } catch (err) { /* fine */ }
         v.removeAttribute('src');
         try { v.load(); } catch (err) { /* fine */ }
@@ -487,41 +517,141 @@
       function finish(err, blob) {
         if (done) return;
         done = true;
-        window.clearTimeout(timer);
+        window.clearTimeout(stall);
+        window.clearTimeout(ceiling);
+        window.clearTimeout(seekGrace);
         teardown();
         if (err) reject(err); else resolve(blob);
       }
-      function grab() {
+      if (ctl) ctl.cancel = function () { finish(fail('cancelled: a frame came from elsewhere')); };
+
+      /* The stall clock only runs while the window can be seen. */
+      function armStall() {
+        window.clearTimeout(stall);
+        if (done || document.hidden) return;
+        stall = window.setTimeout(function () {
+          finish(fail('the clip gave no sign of progress for ' + (STILL_STALL_MS / 1000) + ' s' +
+            (v.readyState >= 1 ? ' after opening' : ' while opening')));
+        }, STILL_STALL_MS);
+      }
+
+      function grab(why) {
         if (done) return;
         var w = v.videoWidth;
         var h = v.videoHeight;
         if (!w || !h) { finish(fail('the clip has no picture in it')); return; }
-        stillBlobOf(v, w, h).then(function (blob) { finish(null, blob); },
-          function (err) { finish(err); });
+        stillBlobOf(v, w, h).then(function (blob) {
+          if (ctl) ctl.frame = why;
+          finish(null, blob);
+        }, function (err) { finish(err); });
       }
 
+      /* Mean and peak brightness of a 16x16 sample: only a truly black frame
+         (a fade-in) is passed over. A dark scene is a fine still. */
+      function isBlack() {
+        try {
+          var c = canvasOf(16, 16);
+          var ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(v, 0, 0, 16, 16);
+          var d = ctx.getImageData(0, 0, 16, 16).data;
+          c.width = 0;
+          var sum = 0, peak = 0;
+          for (var i = 0; i < d.length; i += 4) {
+            var y = (d[i] * 2 + d[i + 1] * 5 + d[i + 2]) / 8;
+            sum += y;
+            if (y > peak) peak = y;
+          }
+          return sum / (d.length / 4) < 6 && peak < 24;
+        } catch (err) {
+          return false;   // cannot tell: the first frame will do
+        }
+      }
+
+      function onEvent(e) {
+        if (done) return;
+        if (e.type === 'error') {
+          var bad = fail(mediaErrorText(v.error));
+          bad.mediaError = true;   // the file itself, not the timing
+          finish(bad);
+          return;
+        }
+        armStall();
+        if (e.type === 'seeked' && seeking) { grab('seeked'); return; }
+        if (seeking || v.readyState < 2) return;
+        // The first decoded frame is on the element: take it unless it is black.
+        if (!isBlack()) { grab('first'); return; }
+        var d = v.duration;
+        var t = isFinite(d) && d > 0 ? Math.min(1, d * 0.1) : 0;
+        if (!(t > 0)) { grab('first'); return; }
+        seeking = true;
+        seekGrace = window.setTimeout(function () { grab('first (seek too slow)'); }, SEEK_GRACE_MS);
+        try { v.currentTime = t; } catch (err) { grab('first'); }
+      }
+
+      for (var i = 0; i < EVENTS.length; i++) v.addEventListener(EVENTS[i], onEvent);
+      document.addEventListener('visibilitychange', armStall);
       v.muted = true;
       v.preload = 'auto';
       v.playsInline = true;
-      v.onerror = function () { finish(fail(mediaErrorText(v.error))); };
-      v.onloadedmetadata = function () {
-        var d = v.duration;
-        var t = isFinite(d) && d > 0 ? Math.min(1, d * 0.1) : 0;
-        if (t > 0) {
-          v.onseeked = function () {
-            if (v.readyState >= 2) grab();
-            else v.onloadeddata = grab;
-          };
-          try { v.currentTime = t; } catch (err) { v.onloadeddata = grab; }
-        } else {
-          if (v.readyState >= 2) grab();
-          else v.onloadeddata = grab;
-        }
-      };
-      timer = window.setTimeout(function () {
-        finish(fail('the clip did not give up a frame within ' + (STILL_TIMEOUT_MS / 1000) + ' s'));
-      }, STILL_TIMEOUT_MS);
+      armStall();
+      ceiling = window.setTimeout(function () {
+        finish(fail('the clip did not give up a frame within ' + (STILL_CEILING_MS / 1000) + ' s'));
+      }, STILL_CEILING_MS);
       v.src = cfg.fileUrl;
+    });
+  }
+
+  /**
+   * One frame from a Home that is PLAYING the clip (app.js homeClipFrame:
+   * the guest draws its own <video>). Instant when a Home is up, and the
+   * only frame that cannot stall: the clip is already decoding there.
+   */
+  function homeStill(cfg) {
+    var ask = window.homeClipFrame;
+    if (typeof ask !== 'function') return Promise.reject(fail('this window cannot ask a new tab for a frame'));
+    return Promise.resolve().then(function () { return ask(cfg.fileUrl); }).then(function (res) {
+      if (!res || !res.ok || !res.dataUrl) throw fail((res && res.reason) || 'no new tab gave a frame');
+      return fetch(res.dataUrl).then(function (r) { return r.blob(); });
+    });
+  }
+
+  /**
+   * The still of a clip, from whichever answers first: a playing Home
+   * (asked now, and again each time a Home starts the clip:
+   * 'homeclipplaying' from app.js) or the offscreen read. A GIF is read as
+   * one image and needs neither.
+   */
+  function captureClipStill(cfg) {
+    if (isGif(cfg)) {
+      return captureGifStill(cfg).then(function (blob) { return { blob: blob, via: 'gif' }; });
+    }
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var ctl = {};
+      function cleanup() { document.removeEventListener('homeclipplaying', fromHome); }
+      function fromHome() {
+        if (settled) return;
+        homeStill(cfg).then(function (blob) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (ctl.cancel) ctl.cancel();
+          resolve({ blob: blob, via: 'home' });
+        }, function () { /* not yet: the offscreen read, or the next play, answers */ });
+      }
+      document.addEventListener('homeclipplaying', fromHome);
+      fromHome();
+      captureVideoStill(cfg, ctl).then(function (blob) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve({ blob: blob, via: 'offscreen ' + (ctl.frame || 'frame') });
+      }, function (err) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      });
     });
   }
 
@@ -532,17 +662,26 @@
     var store = assets();
 
     function capture() {
-      var grab = isGif(cfg) ? captureGifStill(cfg) : captureVideoStill(cfg);
-      return grab.then(function (blob) {
+      var t0 = Date.now();
+      source.attempt = clipRetry.attempt + 1;
+      return captureClipStill(cfg).then(function (got) {
         source.still = 'captured';
+        source.via = got.via;
+        source.captureMs = Date.now() - t0;
         var saved = store
-          ? store.put(STILL_KEY, { id: key, blob: blob, fileName: cfg.fileName || null, at: Date.now() })
+          ? store.put(STILL_KEY, { id: key, blob: got.blob, fileName: cfg.fileName || null, at: Date.now() })
             .then(function () { source.cached = true; }, function () { source.cached = false; })
           : Promise.resolve();
-        return saved.then(function () { return decodeBlob(blob); });
+        return saved.then(function () { return decodeBlob(got.blob); });
       }).then(function (bitmap) {
         return { bitmap: bitmap, source: source };
       }, function (err) {
+        source.captureMs = Date.now() - t0;
+        /* A still that could not be TAKEN is not a clip that cannot be
+           PLAYED: unless the media pipeline itself said the file is bad,
+           the Home keeps playing it (app.js backgroundPayload) and the
+           still is retried (scheduleClipRetry). */
+        source.stillPending = !(err && err.mediaError);
         throw fail(reasonOf(err), source);
       });
     }
@@ -558,6 +697,47 @@
       return capture();
     });
   }
+
+  /* --- retrying a clip's still ------------------------------------------
+     A video background never stays in fallback for good while the clip can
+     still be read: after a failed still the layer tries again on a widening
+     clock (RETRY_STEPS_MS, then every RETRY_EVERY_MS), at once when a Home
+     starts playing the clip, and at once when the window comes back into
+     view. Each try is a normal render(true); the reason and the next try
+     ride in the published state, so Settings says what is going on. Any
+     other background, or a different clip, cancels it. */
+  var clipRetry = { timer: 0, attempt: 0, sig: null, at: 0, reason: null };
+
+  function clearClipRetry(resetCount) {
+    window.clearTimeout(clipRetry.timer);
+    clipRetry.timer = 0;
+    clipRetry.at = 0;
+    if (resetCount) { clipRetry.attempt = 0; clipRetry.sig = null; clipRetry.reason = null; }
+  }
+
+  function scheduleClipRetry(sig) {
+    if (clipRetry.sig !== sig) { clipRetry.sig = sig; clipRetry.attempt = 0; }
+    clipRetry.attempt += 1;
+    var i = clipRetry.attempt - 1;
+    var wait = i < RETRY_STEPS_MS.length ? RETRY_STEPS_MS[i] : RETRY_EVERY_MS;
+    window.clearTimeout(clipRetry.timer);
+    clipRetry.at = Date.now() + wait;
+    clipRetry.timer = window.setTimeout(retryClipNow, wait);
+    return { attempt: clipRetry.attempt, inMs: wait, at: clipRetry.at };
+  }
+
+  function retryClipNow() {
+    if (!clipRetry.at) return;                 // nothing owed
+    var cfg = config();
+    if (cfg.kind !== 'video' || signature(cfg) !== clipRetry.sig) { clearClipRetry(true); return; }
+    clearClipRetry(false);
+    render(true);
+  }
+
+  /* A Home started the clip, or the window came back into view: a still
+     that is owed is tried at once rather than on the clock. */
+  document.addEventListener('homeclipplaying', function () { if (clipRetry.at) retryClipNow(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && clipRetry.at) retryClipNow(); });
 
   /* --- the render ----------------------------------------------------- */
 
@@ -575,8 +755,15 @@
       return Promise.resolve(snapshot());
     }
 
-    // The old picture stays up while the new one is prepared.
-    publish({ kind: kind, state: 'loading', reason: null, source: null });
+    // A still owed for ANOTHER clip, or any other kind now: stop retrying it.
+    if (kind !== 'video' || (clipRetry.sig !== null && clipRetry.sig !== sig)) clearClipRetry(true);
+    else clearClipRetry(false);
+
+    // The old picture stays up while the new one is prepared. A retried
+    // still keeps saying why it is being retried while it runs.
+    var again = kind === 'video' && clipRetry.attempt > 0 && clipRetry.reason
+      ? 'trying again (try ' + (clipRetry.attempt + 1) + ') after: ' + clipRetry.reason : null;
+    publish({ kind: kind, state: 'loading', reason: again, source: null });
 
     var pick = kind === 'image' ? imageSource()
       : kind === 'video' ? videoSource(cfg)
@@ -596,6 +783,7 @@
           publish({ kind: kind, state: 'fallback', reason: got.fallbackReason, source: got.source });
           return;
         }
+        if (kind === 'video') clearClipRetry(true);
         publish({ kind: kind, state: 'ok', reason: note, source: got.source });
       }, function (err) {
         throw fail(reasonOf(err), got.source);
@@ -603,7 +791,15 @@
     }).catch(function (err) {
       if (mySeq !== seq) return;
       clearPhoto();
-      publish({ kind: kind, state: 'fallback', reason: reasonOf(err), source: (err && err.source) || null });
+      var source = (err && err.source) || null;
+      /* A clip that is still chosen and still named is never given up on:
+         the next try is scheduled and published with the reason. */
+      if (kind === 'video' && cfg.fileUrl) {
+        clipRetry.reason = reasonOf(err);
+        source = source || { type: 'video', url: cfg.fileUrl, fileName: cfg.fileName || null };
+        source.retry = scheduleClipRetry(sig);
+      }
+      publish({ kind: kind, state: 'fallback', reason: reasonOf(err), source: source });
     }).then(snapshot);
   }
 

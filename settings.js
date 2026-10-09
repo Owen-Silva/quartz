@@ -2781,7 +2781,9 @@
     if (!st) {
       return 'The background layer did not start in this window, so the plain background is showing.';
     }
-    if (st.kind !== cfg.kind || st.state === 'loading') return 'Preparing the background…';
+    if (st.kind !== cfg.kind) return 'Preparing the background…';
+    /* A retried clip still says why it is being retried while it runs. */
+    if (st.state === 'loading') return 'Preparing the background…' + (st.reason ? ' (' + st.reason + ')' : '');
     var src = st.source || {};
     var why = st.reason ? String(st.reason) : 'unknown reason';
     if (st.kind === 'none') return 'Plain background: no picture behind the tabs or on the new tab.';
@@ -2811,10 +2813,22 @@
     }
     var name = src.fileName || cfg.fileName || 'the clip';
     if (st.state === 'fallback') {
-      return 'Could not read a frame from ' + name + ': ' + why + '. Showing the plain background behind the tabs.';
+      /* backdrop.js never gives up on a clip that is still chosen: it says
+         when it tries next, and a Home starting the clip tries at once. */
+      var retry = src.retry && src.retry.at ? src.retry : null;
+      var next = '';
+      if (retry) {
+        var secs = Math.max(1, Math.round((retry.at - Date.now()) / 1000));
+        next = ' Trying again in about ' + secs + ' s (try ' + (retry.attempt + 1) + '), or as soon as the clip plays on a new tab.';
+      }
+      return 'Could not read a frame from ' + name + ' yet: ' + why + '. Showing the plain background behind the tabs'
+        + (src.stillPending ? '; the clip still plays on the new tab.' : '.') + next;
     }
     return 'Behind the tabs: one blurred still of ' + name
-      + (src.still === 'cached' ? ', taken once and kept' : ', just taken') + '. It plays on the new tab.';
+      + (src.still === 'cached' ? ', taken once and kept'
+        : ', just taken' + (src.via === 'home' ? ' from the new tab' : '')
+          + (isFinite(src.captureMs) ? ' in ' + (src.captureMs < 1000 ? src.captureMs + ' ms' : (src.captureMs / 1000).toFixed(1) + ' s') : ''))
+      + '. It plays on the new tab.';
   }
 
   /** Redraw just the state line (backdrop.js fires backdropchange). */
@@ -2831,7 +2845,9 @@
   /** Dim, plus the one sentence on what it does now. */
   function appendBgDim(field, cfg) {
     field.appendChild(bgDimRow(cfg));
-    field.appendChild(el('p', 'set-hint', 'Dim darkens the picture on the new tab.'));
+    /* newtab.css lays the dim in the theme's wash colour: darker in dark
+       theme, paler in light (with a light floor so dark text stays legible). */
+    field.appendChild(el('p', 'set-hint', 'Dim softens the picture on the new tab: darker in dark theme, paler in light.'));
   }
 
   /* --- the built-in photo gallery ----------------------------------

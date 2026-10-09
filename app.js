@@ -464,6 +464,15 @@ function backgroundPayload(bg) {
   if (seen && seen.kind === kind) {
     state = seen.state || 'ok';
     if (seen.reason) reason = String(seen.reason);
+    // The chrome only failed to TAKE A STILL of the clip in time (a cold boot
+    // with a big 4K file): the clip itself was never shown to be unreadable,
+    // so the Home still plays it. That playing Home is also where
+    // backdrop.js gets its still from next (homeClipFrame). Blanking the Home
+    // here left both surfaces plain on the first boot of a video background.
+    if (kind === 'video' && state === 'fallback' && seen.source && seen.source.stillPending) {
+      state = 'ok';
+      reason = '';
+    }
   } else if (seen) {
     state = 'loading'; // the layer has not caught up with this write yet
   }
@@ -507,6 +516,54 @@ function pushBackgroundToTab(tab) {
       if (pending && typeof pending.catch === 'function') pending.catch(() => {});
     })
     .catch(() => { /* guest went away, or no storage: the page keeps its default */ });
+}
+
+/**
+ * One frame of the background clip, taken from a Home that is PLAYING it.
+ * backdrop.js asks for this when its own offscreen <video> has not given up
+ * a frame (a cold boot with a big clip: the Home and the offscreen reader
+ * both open the same 4K file at once and the reader can stall). A Home that
+ * plays the clip has a decoded frame on screen by definition, so drawing it
+ * is instant. The guest has no preload, so the draw is one executeJavaScript
+ * that returns a JPEG data: URL (1280 px on the long edge: it is only ever
+ * blurred), or { ok: false, reason } saying why not.
+ * @param {string} fileUrl  the clip the setting names (its ?query is ignored)
+ * @returns {Promise<{ok:true, dataUrl:string, tabId:number}|{ok:false, reason:string}>}
+ */
+function homeClipFrame(fileUrl) {
+  const want = String(fileUrl || '').split('?')[0];
+  const homes = tabs.filter((t) => isViewUsable(t) && isNewTabUrl(t.url));
+  if (!homes.length) return Promise.resolve({ ok: false, reason: 'no new tab is open to take it from' });
+  const code = '(function (want) {' +
+    'var v = document.getElementById("bg-video");' +
+    'if (!v || !v.classList.contains("on")) return { ok: false, reason: "the new tab is not showing the clip" };' +
+    'var src = String(v.currentSrc || v.src || "").split("?")[0];' +
+    'if (want && decodeURI(src) !== decodeURI(want)) return { ok: false, reason: "the new tab is showing another clip" };' +
+    'if (v.readyState < 2 || !v.videoWidth) return { ok: false, reason: "the new tab has not decoded a frame yet" };' +
+    'var w = v.videoWidth, h = v.videoHeight, k = Math.min(1, 1280 / Math.max(w, h));' +
+    'var c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));' +
+    'try { c.getContext("2d").drawImage(v, 0, 0, c.width, c.height); var url = c.toDataURL("image/jpeg", 0.9); c.width = 0;' +
+    '  return { ok: true, dataUrl: url }; }' +
+    'catch (err) { c.width = 0; return { ok: false, reason: "the frame could not be drawn (" + (err && err.message || err) + ")" }; }' +
+    '})(' + JSON.stringify(want) + ')';
+  let i = 0;
+  let lastReason = 'no new tab answered';
+  const next = () => {
+    if (i >= homes.length) return Promise.resolve({ ok: false, reason: lastReason });
+    const tab = homes[i++];
+    if (!isViewUsable(tab)) return next();
+    return Promise.resolve()
+      .then(() => tab.viewEl.executeJavaScript(code))
+      .then((res) => {
+        if (res && res.ok && typeof res.dataUrl === 'string') return { ok: true, dataUrl: res.dataUrl, tabId: tab.id };
+        lastReason = (res && res.reason) || lastReason;
+        return next();
+      }, (err) => {
+        lastReason = 'the new tab could not be asked (' + ((err && err.message) || err) + ')';
+        return next();
+      });
+  };
+  return next();
 }
 
 function pushSettingsToTab(tab) {
@@ -9599,6 +9656,11 @@ function wireViewEvents(tab) {
   viewEl.addEventListener('media-started-playing', () => {
     if (stale()) return;
     setTabAudible(tab, true);
+    // A Home's moving picture just started. backdrop.js may still be owed a
+    // still of that clip (a cold boot where its own offscreen read stalled),
+    // and a clip that is PLAYING on a Home is the surest frame there is: it
+    // listens for this and grabs one through homeClipFrame() below.
+    if (isNewTabUrl(tab.url)) document.dispatchEvent(new CustomEvent('homeclipplaying'));
   });
   viewEl.addEventListener('media-paused', () => {
     if (stale()) return;
