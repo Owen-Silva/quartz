@@ -1,444 +1,97 @@
+@import url("tokens.css");
+
 /* ============================================================
-   newtab.css — the browser's own new tab page.
-   Same world as chrome.css: frosted glass over an aurora,
-   near-monochrome. There is no search field here — the address
-   bar above is where this window searches — so the page is a
-   clock, an instrument strip and two rows of links, and the one
-   accent left on it is the line inside the five graphs.
+   newtab.css — Quartz's Home (the new tab page).
+
+   Helm's Home (Helm ui/shell/home.css), in Quartz: the Quartz
+   background shown CLEAR and full-bleed under a soft top scrim and
+   the user's dim wash; the Q, a search field and the Saved row down
+   the middle, then the shortcut chips and the instrument card; the
+   clock and now playing in the left rail; the session tile and the
+   markets in the right. Below 1296px the rails fold into the one
+   column.
+
+   Colours, type, radii, shadows and motion are tokens.css's (Helm's
+   names and values). The older names this file grew up with stay
+   below ONLY as aliases onto those, so the component rules further
+   down read the same; nothing here authors a colour of its own
+   except the five Home values ported as they are from home.css.
+
+   Legibility over any picture, Helm's way: the scrim, a text shadow
+   on the bare clock only (Helm's greeting shadow), and cards that are
+   near-opaque tints. Only SMALL things (the chips, the Saved tiles,
+   the search field) may blur, each its own little area, and never
+   over a moving clip, where a blur would be redone every frame. No
+   tall element ever carries a backdrop-filter (this GPU drops raster
+   tiles), nothing animates at rest, and every transition is the
+   token's 120-150ms.
    ============================================================ */
 
-/* --- tokens (mirrored from chrome.css) ----------------------- */
+/* --- aliases: the older names, onto tokens.css ---------------- */
 :root {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
+  --ink-0: var(--bg);
+  --ink-1: var(--bg);
 
-  --fg:   #eef1f8;
-  --fg-2: #b0b5bf;
-  --fg-3: #a6abb5;  /* 4.5:1 on this page's ground; mirrors chrome.css */
+  --fg:   var(--text);
+  --fg-2: var(--text-2);
+  --fg-3: var(--text-3);
 
-  --glass:   rgba(255,255,255,.055);
-  --glass-2: rgba(255,255,255,.09);
-  --glass-3: rgba(255,255,255,.14);
+  /* rest / hover fills of the controls inside a card */
+  --glass:   var(--surface-2);
+  --glass-2: var(--surface-3);
+  --glass-3: var(--surface-3);
 
-  --edge:     rgba(255,255,255,.11);
-  --specular: rgba(255,255,255,.14);
+  --edge:     var(--hairline);
+  --specular: var(--hairline-inner);
 
-  /* the fold's interior: near-opaque, so rows of numbers read over a
-     picture or a clip. Mirrors chrome.css. */
-  --panel-bg: rgba(34,37,42,.96);
+  /* the process list's interior and the dock picker: near-opaque */
+  --panel-bg:  var(--overlay);
+  --proc-note: var(--surface-solid);
 
-  /* the inline note the End task control leaves on a row: opaque, because
-     it sits over the row's own numbers for the three seconds it shows */
-  --proc-note: #24272d;
+  /* the running dot */
+  --ion-dot: var(--accent);
 
-  --ion:      #72adca;
-  --ion-soft: rgba(114,173,202,.14);
-  --ion-glow: rgba(114,173,202,.22);
-  --ion-line: rgba(114,173,202,.65);   /* focus border / focus outline */
-  /* The running dot only: on dark it is the accent itself, on light a
-     darkened step of it (see the light block). A 6px disc on near-white glass
-     needs more weight than a focus rim does. */
-  --ion-dot:  var(--ion);
+  --ui-font: var(--font);
 
-  /* the drop shadow under the one surface that floats over the page */
-  --panel-shadow: rgba(0,0,0,.50);
+  --bevel:      var(--radius-m);
+  --bevel-lg:   var(--radius-l);
+  --radius-ctl: var(--radius-s);
 
-  /* the diagonal reflection every glass surface carries */
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.035)  0%,
-    rgba(255,255,255,.035) 38%,
-    rgba(255,255,255,.035) 60%);
+  /* Bahnschrift's condensed width is gone with Bahnschrift */
+  --readout-stretch: normal;
 
-  /* the three coloured washes of the backdrop, whole gradients so a
-     theme swaps the light itself and not the geometry */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.03) 76%,
-    rgba(140,170,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.13)  0%,
-    rgba(75,34,168,.055) 45%,
-    rgba(75,34,168,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.085)  0%,
-    rgba(15,181,201,.035) 46%,
-    rgba(15,181,201,0)   78%);
-
-  --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
-
-  /* --- instrument glass (mirrored from chrome.css) ------------
-     Every one of these is built out of the tokens above through
-     var(), so this single block covers dark, light and all five
-     palettes: those blocks move --edge, --specular and the --ion
-     family, and these re-read whatever won there. No per-palette
-     copies, and the light block needs nothing added. */
-  --bevel:      10px;   /* containers: popovers, tiles, cards */
-  --bevel-lg:   14px;   /* the instrument strip and full panels */
-  --radius-ctl: 6px;    /* controls keep ordinary round corners */
-
-  /* the lit rim: specular at the top-left, powered at the bottom-right */
-  --rim: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--edge)      30%,
-    var(--edge)      62%,
-    var(--edge)     100%);
-
-  /* the same rim with the accent at full strength */
-  --rim-focus: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--ion-line)  45%,
-    var(--ion)      100%);
-
-  /* quiet tiles at rest: one lit corner, fading out before the other */
-  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
-
-  --pip-glow: none;
-
-  /* Bahnschrift semi-condensed: labels, readouts, chips */
-  --readout-stretch: 87.5%;
+  --stk-up:     var(--ok);
+  --stk-down:   var(--danger);
+  --saved-warn: var(--warn);
 }
 
-/* --- light theme --------------------------------------------- */
-/* Set by newtab-theme.js before first paint, and re-set by the
-   browser chrome whenever the user flips theme. Tokens only —
-   every rule below is written once and reads through them. */
-:root[data-theme="light"] {
-  --ink-0: #eef1f7;
-  --ink-1: #f7f8fc;
+/* --- Home's own values (Helm home.css, as they are) ---------- */
+/* --home-card is the one addition: the tiles here are taller than
+   Helm's cards and may sit over a moving clip, so instead of blurring
+   they are the opaque surface at 92% (86% let a bright photo read
+   through the instrument card, measured on the Windows wallpaper). */
+:root {
+  --home-glass: rgba(14, 15, 16, 0.5);
+  --home-glass-hover: rgba(24, 25, 27, 0.62);
+  --home-edge: rgba(255, 255, 255, 0.1);
+  --home-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 18px rgba(0, 0, 0, 0.38);
+  --home-scrim: 9 10 11;
+  --home-card: color-mix(in srgb, var(--surface-solid) 92%, transparent);
 
-  --fg:   #12162a;
-  --fg-2: #4a526b;
-  --fg-3: #656d82;  /* 4.5:1 on this page's ground; mirrors chrome.css */
-
-  --glass:   rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.72);
-  --glass-3: rgba(255,255,255,.9);
-
-  --edge:     rgba(18,22,42,.12);
-  --specular: rgba(255,255,255,.95);
-
-  --panel-bg: rgba(247,248,252,.96);
-  --proc-note: #eff1f6;
-
-  --ion:      #0b7fd6;
-  --ion-soft: rgba(11,127,214,.14);
-  --ion-glow: rgba(11,127,214,.35);
-  --ion-line: rgba(11,127,214,.75);
-  /* 79% of the accent's channels: the authored blue lands at 5.45:1 on the
-     tile where --ion itself measures 3.70:1, and because it is derived rather
-     than authored it follows a palette (Ocean 3.06 -> 4.62, Forest 3.38 ->
-     5.00) and any accent hue painted inline, instead of stranding a blue dot
-     on a red accent. */
-  --ion-dot:  color-mix(in srgb, var(--ion) 79%, #000);
-
-  --panel-shadow: rgba(18,22,42,.16);
-
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.7)  0%,
-    rgba(255,255,255,.25) 38%,
-    rgba(255,255,255,0)   60%);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,160,255,0)   50%,
-    rgba(120,160,255,.13) 76%,
-    rgba(120,160,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(185,167,255,.55)  0%,
-    rgba(185,167,255,.25) 45%,
-    rgba(185,167,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,216,.45)  0%,
-    rgba(127,224,216,.18) 46%,
-    rgba(127,224,216,0)   78%);
+  --rail-w: 352px;                 /* the markets tile's width */
 }
-
-/* --- palette presets ----------------------------------------- */
-/* data-palette on <html>, set by newtab-theme.js from ?palette= and
-   by the chrome later through window.__applyPalette. No attribute is
-   the authored aurora above.
-
-   Same convention as chrome.css: the dark block is the bare attribute
-   selector, the light one pairs it with the theme. Specificity does
-   the rest — [data-palette] (0,1,0) sits after :root (0,1,0) so it
-   wins in dark, and loses to :root[data-theme="light"] (0,2,0) so a
-   light window keeps light ink until its own (0,3,0) block lands.
-
-   Each block moves the light and nothing else: the four --ion tokens,
-   the three aurora washes (identical geometry to the defaults — only
-   the colour inside the gradients changes) and a barely-tinted ink
-   field. Foreground, glass and edge tokens stay neutral in every
-   preset, exactly as they do in chrome.css.
-
-   A user-chosen accent hue still wins over all of it: newtab-theme.js
-   writes --ion* inline on <html>, and inline beats every block here. */
-
-/* ember — rose, magenta and plum, lit coral-pink (never orange) */
-[data-palette="ember"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-
-  --ion:      hsl(345 45% 63%);
-  --ion-soft: hsl(345 45% 63% / .14);
-  --ion-glow: hsl(345 45% 63% / .22);
-  --ion-line: hsl(345 45% 63% / .65);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,155,195,0)   50%,
-    rgba(255,155,195,.03) 76%,
-    rgba(255,155,195,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(140,30,90,.13)  0%,
-    rgba(140,30,90,.055) 45%,
-    rgba(140,30,90,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(224,64,118,.085)  0%,
-    rgba(224,64,118,.035) 46%,
-    rgba(224,64,118,0)   78%);
+html[data-theme="light"] {
+  --home-glass: rgba(250, 250, 248, 0.62);
+  --home-glass-hover: rgba(255, 255, 255, 0.76);
+  --home-edge: rgba(0, 0, 0, 0.08);
+  --home-shadow: 0 1px 2px rgba(255, 255, 255, 0.7), 0 2px 18px rgba(255, 255, 255, 0.55);
+  --home-scrim: 236 236 234;
 }
-
-/* forest — deep green and teal, lit mint */
-[data-palette="forest"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-
-  --ion:      hsl(160 40% 62%);
-  --ion-soft: hsl(160 40% 62% / .14);
-  --ion-glow: hsl(160 40% 62% / .22);
-  --ion-line: hsl(160 40% 62% / .65);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,235,200,0)   50%,
-    rgba(150,235,200,.03) 76%,
-    rgba(150,235,200,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,86,64,.13)  0%,
-    rgba(16,86,64,.055) 45%,
-    rgba(16,86,64,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(20,170,150,.085)  0%,
-    rgba(20,170,150,.035) 46%,
-    rgba(20,170,150,0)   78%);
-}
-
-/* ocean — navy and teal, lit cyan */
-[data-palette="ocean"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-
-  --ion:      hsl(190 42% 62%);
-  --ion-soft: hsl(190 42% 62% / .14);
-  --ion-glow: hsl(190 42% 62% / .22);
-  --ion-line: hsl(190 42% 62% / .65);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.03) 76%,
-    rgba(130,190,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(18,58,140,.13)  0%,
-    rgba(18,58,140,.055) 45%,
-    rgba(18,58,140,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,175,190,.085)  0%,
-    rgba(15,175,190,.035) 46%,
-    rgba(15,175,190,0)   78%);
-}
-
-/* midnight — indigo and violet, lit violet */
-[data-palette="midnight"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-
-  --ion:      hsl(262 40% 66%);
-  --ion-soft: hsl(262 40% 66% / .14);
-  --ion-glow: hsl(262 40% 66% / .22);
-  --ion-line: hsl(262 40% 66% / .65);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,150,255,0)   50%,
-    rgba(150,150,255,.03) 76%,
-    rgba(150,150,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(58,30,150,.13)  0%,
-    rgba(58,30,150,.055) 45%,
-    rgba(58,30,150,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,70,220,.085)  0%,
-    rgba(120,70,220,.035) 46%,
-    rgba(120,70,220,0)   78%);
-}
-
-/* mono — graphite, lit cool off-white. The accent is deliberately
-   low-saturation; newtab-bg.js reads that saturation back off --ion
-   and scales the board's traces with it, so the circuitry goes grey
-   here instead of staying blue. */
-[data-palette="mono"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-
-  --ion:      hsl(215 12% 72%);
-  --ion-soft: hsl(215 12% 72% / .14);
-  --ion-glow: hsl(215 12% 72% / .22);
-  --ion-line: hsl(215 12% 72% / .65);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(190,200,215,0)   50%,
-    rgba(190,200,215,.03) 76%,
-    rgba(190,200,215,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(60,66,80,.13)  0%,
-    rgba(60,66,80,.055) 45%,
-    rgba(60,66,80,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,130,150,.085)  0%,
-    rgba(120,130,150,.035) 46%,
-    rgba(120,130,150,0)   78%);
-}
-
-/* --- palette presets, light theme ---------------------------- */
-/* Pale washes, and an accent dark enough to read on white glass.
-   The authored light accent is hsl(206 90% 44%); each preset holds
-   near that lightness, pulled down only where the hue is luminous
-   enough (green, off-white) that 44% would wash out against the
-   capsule. */
-
-:root[data-theme="light"][data-palette="ember"] {
-  --ink-0: #f7eef3;
-  --ink-1: #fdf7fa;
-
-  --ion:      hsl(345 84% 45%);
-  --ion-soft: hsl(345 84% 45% / .14);
-  --ion-glow: hsl(345 84% 45% / .35);
-  --ion-line: hsl(345 84% 45% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,155,195,0)   50%,
-    rgba(255,155,195,.13) 76%,
-    rgba(255,155,195,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(246,175,220,.55)  0%,
-    rgba(246,175,220,.25) 45%,
-    rgba(246,175,220,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(215,165,235,.45)  0%,
-    rgba(215,165,235,.18) 46%,
-    rgba(215,165,235,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="forest"] {
-  --ink-0: #ecf5f0;
-  --ink-1: #f6fbf8;
-
-  --ion:      hsl(160 84% 32%);
-  --ion-soft: hsl(160 84% 32% / .14);
-  --ion-glow: hsl(160 84% 32% / .35);
-  --ion-line: hsl(160 84% 32% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,235,190,0)   50%,
-    rgba(130,235,190,.13) 76%,
-    rgba(130,235,190,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(168,240,205,.55)  0%,
-    rgba(168,240,205,.25) 45%,
-    rgba(168,240,205,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(140,225,215,.45)  0%,
-    rgba(140,225,215,.18) 46%,
-    rgba(140,225,215,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="ocean"] {
-  --ink-0: #ecf2f9;
-  --ink-1: #f6fafd;
-
-  --ion:      hsl(190 96% 36%);
-  --ion-soft: hsl(190 96% 36% / .14);
-  --ion-glow: hsl(190 96% 36% / .35);
-  --ion-line: hsl(190 96% 36% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,180,255,0)   50%,
-    rgba(120,180,255,.13) 76%,
-    rgba(120,180,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(160,205,255,.55)  0%,
-    rgba(160,205,255,.25) 45%,
-    rgba(160,205,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,230,.45)  0%,
-    rgba(127,224,230,.18) 46%,
-    rgba(127,224,230,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="midnight"] {
-  --ink-0: #f0eef9;
-  --ink-1: #f9f8fd;
-
-  --ion:      hsl(262 80% 52%);
-  --ion-soft: hsl(262 80% 52% / .14);
-  --ion-glow: hsl(262 80% 52% / .35);
-  --ion-line: hsl(262 80% 52% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,155,255,0)   50%,
-    rgba(150,155,255,.13) 76%,
-    rgba(150,155,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(190,170,255,.55)  0%,
-    rgba(190,170,255,.25) 45%,
-    rgba(190,170,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(170,150,240,.45)  0%,
-    rgba(170,150,240,.18) 46%,
-    rgba(170,150,240,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="mono"] {
-  --ink-0: #f0f1f4;
-  --ink-1: #fafafc;
-
-  --ion:      hsl(215 16% 40%);
-  --ion-soft: hsl(215 16% 40% / .14);
-  --ion-glow: hsl(215 16% 40% / .35);
-  --ion-line: hsl(215 16% 40% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(170,180,200,0)   50%,
-    rgba(170,180,200,.13) 76%,
-    rgba(170,180,200,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(200,206,220,.55)  0%,
-    rgba(200,206,220,.25) 45%,
-    rgba(200,206,220,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(185,195,210,.45)  0%,
-    rgba(185,195,210,.18) 46%,
-    rgba(185,195,210,0)   78%);
+/* Over a moving clip nothing blurs (it would be redone every frame), so
+   the small glass things take the card's opacity instead. */
+:root[data-bg="video"] {
+  --home-glass: var(--home-card);
+  --home-glass-hover: var(--surface-solid);
 }
 
 /* --- page ---------------------------------------------------- */
@@ -448,101 +101,67 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--ink-0);        /* never fully transparent */
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 13px;
+  background: var(--bg);           /* the plain neutral page, and the fallback */
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   line-height: 1.4;
   overflow-x: hidden;              /* the page never scrolls sideways */
   -webkit-font-smoothing: antialiased;
-  /* a theme flip is a crossfade, not a cut — stepped, like every
-     other transition in this world */
   transition:
-    background-color 160ms steps(4, end),
-    color            160ms steps(4, end),
-    border-color     160ms steps(4, end),
-    box-shadow       160ms steps(4, end);
+    background-color var(--dur-slow) var(--ease),
+    color            var(--dur-slow) var(--ease);
 }
 
-/* --- backdrop ------------------------------------------------ */
+::selection { background: var(--ion-select); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scroll-thumb) padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+
+/* --- the background ------------------------------------------ */
+/* Fixed, inert, under everything. Each layer is empty until newtab.js
+   fills it (__applyBackground), and a layer it has not filled draws
+   nothing: the page is then the plain --bg of <body>. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  opacity: .7;                     /* stand back so the board reads */
 }
 
-.backdrop > div { position: absolute; inset: 0; }
-
-/* (a) base ink field */
-.aurora-base { background: linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%); }
-
-/* (b) light band entering from the upper-left along the -35deg axis */
-.aurora-band { background: var(--aurora-band); }
-
-/* (c) violet pool low in the window */
-.aurora-pool {
-  background: var(--aurora-pool);
-  /* steps(): nudge twice a second, not every frame. Every move re-blurs the
-     frosted capsule and chips above it; continuous drift cost real CPU for a
-     sway nobody can see happen. Mirrors chrome.css. */
-  /* Still. It drifted in 120 steps a minute once; each step re-blurred every
-     frosted surface above it, which read as a faint flicker in the panes and
-     cost real GPU time whenever a Claude tab was open. */
-}
-
-/* (d) teal-cyan rim at the bottom-right, drifting the other way */
-.aurora-rim {
-  background: var(--aurora-rim);
-}
-
-
-
-/* --- the user's own picture ----------------------------------- */
-/* newtabBackground.kind === 'image'. Two fixed layers between the aurora
-   and the board: the picture, then a flat black wash so the capsule keeps
-   its contrast over a bright photo. Both sit at z-index 0 like .backdrop
-   and win on DOM order, so the board (1) and the column (2) stay above.
-
-   The picture is an inline background-image set by __applyBackground; the
-   wash reads --bg-dim, written on <html> by the same call. */
-#bg-image,
-#bg-video,
-#bg-video-img,
-#bg-dim {
-  display: none;                   /* nothing to draw unless a picture is chosen */
-  position: fixed;
+.backdrop > * {
+  position: absolute;
   inset: 0;
-  z-index: 0;
-  pointer-events: none;
 }
 
-:root[data-bg="image"] #bg-image,
-:root[data-bg="image"] #bg-dim,
-:root[data-bg="video"] #bg-dim { display: block; }
-
+/* The still: the wallpaper copy or the user's picture, unblurred, filling
+   the window and cropping the overflow. It fades in once, after newtab.js
+   has loaded it off screen, so it never paints in strips. */
 #bg-image {
   background-position: center;
   background-repeat: no-repeat;
-  background-size: cover;          /* fill the window, crop the overflow */
+  background-size: cover;
+  opacity: 0;
 }
 
-/* --- the moving picture --------------------------------------- */
-/* newtabBackground.kind === 'video'. Same slot as the still picture, and
-   the same wash over it: a clip in the <video>, a GIF in the <img>, never
-   both. newtab.js puts .on on whichever one it filled, so a kind with no
-   file yet — or one whose file has just been cleared — draws nothing at
-   all rather than a black rectangle.
+#bg-image.on {
+  opacity: 1;
+  transition: opacity var(--dur-slow) var(--ease);
+}
 
-   object-fit: cover is background-size: cover for a replaced element: it
-   fills the window and crops the overflow instead of letterboxing. */
-:root[data-bg="video"] #bg-video.on,
-:root[data-bg="video"] #bg-video-img.on { display: block; }
-
+/* The moving picture: a clip in the <video>, a GIF in the <img>, never
+   both. object-fit: cover is background-size: cover for a replaced
+   element. */
 #bg-video,
 #bg-video-img {
+  display: none;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -552,196 +171,235 @@ body {
   -webkit-user-drag: none;
 }
 
-#bg-dim {
-  background: rgb(0 0 0 / var(--bg-dim, .25));
-  transition: background-color 180ms steps(4);
+#bg-video.on,
+#bg-video-img.on { display: block; }
+
+/* The dim wash (Settings, 0..0.6) and Helm's top scrim exist only while a
+   picture is on screen: over the plain --bg they would only tint it. The
+   wash is the theme's wash colour (Helm's --wash-rgb), so a light window
+   lightens a photo rather than darkening it under dark text. */
+#bg-dim,
+.bg-scrim { display: none; }
+
+:root:has(#bg-image.on, #bg-video.on, #bg-video-img.on) #bg-dim,
+:root:has(#bg-image.on, #bg-video.on, #bg-video-img.on) .bg-scrim { display: block; }
+
+#bg-dim { background: rgb(var(--wash-rgb) / var(--bg-dim, 0)); }
+
+.bg-scrim {
+  bottom: auto;
+  height: 96px;
+  background: linear-gradient(rgb(var(--home-scrim) / 0.5), rgb(var(--home-scrim) / 0));
 }
 
-/* A picture is the light now, so the aurora stands further back than the
-   .7 it uses behind the board. */
-:root[data-bg="image"] .backdrop,
-:root[data-bg="video"] .backdrop {
-  opacity: .25;
-  transition: opacity 180ms steps(4);
-}
-
-/* --- the board ----------------------------------------------- */
-/* Generated in newtab-bg.js: socket, traces, vias, chips, packets.
-   Sits between the aurora and the glass, and fades out at the edges. */
-#board {
+/* Why there is no picture: quiet, bottom-left, in words. */
+.bg-note {
   position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-  pointer-events: none;
-  /* The edge fade is painted into the canvas's own alpha by vignette() in
-     newtab-bg.js — the same ellipse and stops this mask-image used to carry.
-     A mask makes the layer a render surface, and the compositor was blending
-     the whole window twice for it on every frame a packet moved: 30.8% -> 27.3%
-     of a core with the board running. */
-  transition: opacity 180ms steps(4);
+  left: 16px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: min(560px, calc(100vw - 32px));
+  margin: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 
-/* Aurora-only, and image without the board: the canvas and the packet layer
-   both go. newtab-bg.js stops spawning and stops repainting on the same
-   attribute, so this hides nothing that is still costing anything. */
-:root[data-bg="aurora"] #board,
-:root[data-bg="aurora"] #board-live,
-:root[data-bg="image"] #board,
-:root[data-bg="image"] #board-live,
-:root[data-bg="video"] #board,
-:root[data-bg="video"] #board-live { display: none; }
-
-/* ...unless the picture asked for it back, at which point it is a texture
-   over the photo rather than the subject. A clip is a picture here too. */
-:root[data-bg="image"][data-bg-board="over"] #board,
-:root[data-bg="image"][data-bg-board="over"] #board-live,
-:root[data-bg="video"][data-bg-board="over"] #board,
-:root[data-bg="video"][data-bg-board="over"] #board-live {
-  display: block;
-  opacity: .55;
-}
+.bg-note[hidden] { display: none; }
 
 /* --- layout -------------------------------------------------- */
-.stage {
+/* Three tracks: a rail, the column, a rail. The rails are the same
+   width so the column stays centred; each rail's tiles hug its outer
+   edge. */
+.home {
   position: relative;
-  z-index: 2;
+  z-index: 1;
+  display: grid;
+  grid-template-columns:
+    minmax(var(--rail-w), 1fr)
+    minmax(480px, 720px)
+    minmax(var(--rail-w), 1fr);
+  column-gap: 32px;
   min-height: 100%;
+  padding: 0 24px;
+}
+
+.home-rail {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 24px 14vh;         /* bottom padding = the upward bias */
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 24px 0;
+}
+
+.home-left  { align-items: flex-start; }
+.home-right { align-items: flex-end; }
+
+.stage {
+  min-width: 0;
+  padding: clamp(28px, 11vh, 128px) 0 48px;
 }
 
 .column {
-  position: relative;
-  z-index: 2;                      /* the glass always sits above the board */
   width: 100%;
-  max-width: 720px;
   text-align: center;
 }
 
-/* --- live modules -------------------------------------------- */
-/* Three glass tiles seated on the board: the clock at the column's top-left,
-   the session readout at its top-right, and now playing under the clock in
-   the window's margin. newtab-bg.js writes left/top and
-   nothing else — it measures the socket, keeps both tiles clear of it, and
-   routes traces onto the pads it draws around them. The corner position
-   below is the default they wear until it has (and the fallback for a
-   window too short for the row above the capsule); .is-unplaced is the
-   third case, a window with no room for them at all.
-
-   All three are 208px wide by authorship rather than by content, and every line
-   in them has a fixed height: the board draws a seat around the box it
-   measured, so 9 tabs becoming 10 — or 9:59 becoming 10:00 — must not move
-   a pixel of it.
-
-   No backdrop-filter here, deliberately. The saved row states the reason:
-   every blurred surface over the drifting aurora is real CPU, and these two
-   are on screen full-time. The sheen, the glass and the rim ring carry the
-   material instead. */
-.module {
-  position: fixed;
-  top: 24px;
-  /* Above .stage, not level with it. The tiles never overlap the column —
-     the board seats them clear of the socket — so this changes no picture;
-     what it changes is hit-testing. .stage is z-index 2 and comes later in
-     the document, so at the same level it wins every point in the window,
-     and the idle-music controls below could not be clicked at all. */
-  z-index: 3;
-  width: 208px;
-  padding: 16px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  background: var(--sheen), var(--glass);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 8px 20px -12px var(--panel-shadow);
-  color: var(--fg);
-  text-align: left;
-  pointer-events: none;            /* a click anywhere lands on the page, not a tile */
-  transition:
-    background-color 160ms steps(4, end),
-    color            160ms steps(4, end),
-    box-shadow       160ms steps(4, end);
+/* --- the head: the Q and the search field ------------------- */
+.home-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
 }
 
-.module-clock   { left: 24px; }
-.module-session { right: 24px; }
+.home-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* a real shadow, so the grey bowl holds its edge over a pale photo */
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.28));
+}
 
-/* No room for a tile in this window: it goes dark rather than landing on
-   the capsule. It still has a box, so the board can measure it again the
-   moment the window grows. */
-.module.is-unplaced { visibility: hidden; }
+.search {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin: 0;
+}
+
+.search-icon {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  z-index: 1;                      /* over the field, which paints after it */
+  color: var(--text-2);
+  pointer-events: none;
+}
+
+/* Helm's input over the picture: the Home glass tint, a hairline, the
+   large radius, and the focus ring. Small, so it may blur its own area. */
+.search-input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0 16px 0 40px;
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-l);
+  background: var(--home-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+          backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-l);
+  outline: none;
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color     var(--dur) var(--ease),
+    box-shadow       var(--dur) var(--ease);
+}
+
+:root[data-bg="video"] .search-input {
+  -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+}
+
+.search-input::placeholder { color: var(--text-2); }
+
+@media (hover: hover) {
+  .search-input:hover {
+    background-color: var(--home-glass-hover);
+    border-color: var(--hairline-strong);
+  }
+}
+
+.search-input:focus {
+  background-color: var(--home-glass-hover);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring), var(--shadow-1);
+}
+
+/* --- tiles --------------------------------------------------- */
+/* The rails' cards: Helm's card shape (large radius, a hairline, the
+   panel's inset top edge, a real shadow) in the near-opaque Home card
+   tint. No backdrop-filter: they are tall, and may sit over a clip. */
+.module {
+  position: relative;
+  width: 224px;
+  padding: 14px 16px;
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-l);
+  background: var(--home-card);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
+  color: var(--text);
+  text-align: left;
+  transition:
+    background-color var(--dur-slow) var(--ease),
+    border-color     var(--dur-slow) var(--ease);
+}
 
 /* The readout before the chrome has pushed one. */
 .module[hidden] { display: none; }
 
-/* The rim as a ring on the free pseudo-element, never as a background layer
-   under translucent glass — painted into the background it bleeds through
-   the whole tile, exactly as it did on .rtile and the slot. */
-.module::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
+/* --- the clock ----------------------------------------------- */
+/* Helm's greeting voice, bare over the picture: no card, and the one
+   text shadow on the page (Helm's own, for legibility over a photo). */
+.module-clock {
+  width: auto;
+  padding: 4px 0 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 
-/* Cut on the same diagonal as the slot: these are containers, not controls. */
-@supports (corner-shape: bevel) {
-  .module,
-  .module::before { corner-shape: round bevel round bevel; }
-}
-
-/* the clock: the largest readout on the page, and the quietest weight */
 .mod-time {
   display: flex;
   align-items: baseline;
   gap: 6px;
   margin: 0;
-  height: 66px;
 }
 
 .mod-time-value {
-  color: var(--fg);
-  font-size: 64px;
-  font-weight: 300;
-  font-stretch: 75%;               /* the readout voice, one step tighter */
+  color: var(--text);
+  font: 600 44px/1.1 var(--font-display);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
-  line-height: 66px;
+  letter-spacing: -0.015em;
+  text-shadow: var(--home-shadow);
 }
 
 /* AM/PM, and empty in a 24-hour locale — newtab.js asks Intl which it is. */
 .mod-time-period {
-  color: var(--fg-2);
-  font-size: 13px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  opacity: 0.86;
+  text-shadow: var(--home-shadow);
 }
 
 .mod-date {
-  margin: 6px 0 0;
-  height: 18px;
-  line-height: 18px;
-  color: var(--fg-2);
-  font-size: 13px;
-  font-stretch: var(--readout-stretch);
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: var(--fs-l);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
+  opacity: 0.86;
+  text-shadow: var(--home-shadow);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* the session readout: a value, then what it counts */
+/* --- the session readout ------------------------------------- */
 .mod-row {
   display: flex;
   align-items: baseline;
@@ -750,84 +408,40 @@ body {
   height: 24px;
 }
 
-.mod-row + .mod-row { margin-top: 6px; }
+.mod-row + .mod-row { margin-top: 4px; }
 
 .mod-value {
   flex: 0 0 auto;
   min-width: 2ch;
-  color: var(--fg);
-  font-size: 18px;
-  font-weight: 500;
-  font-stretch: var(--readout-stretch);
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 24px;
 }
 
 .mod-label {
-  color: var(--fg-3);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-s);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* --- Claude usage -------------------------------------------- */
-/* One more row in the session tile, in the tile's own typography: the big
-   readout value and its label, plus a note line that only exists while the
-   reading is stale, partial or unreadable. The tones are the titlebar pill's
-   tones and the same two colours: amber from 80% of a limit, red from 95%.
-   The red is --stk-down, the only red in the app (see the markets tile). The
-   amber has to be declared here: --amber is a CHROME token and this page is a
-   separate document that never had one — and like the markets pair, the light
-   theme needs a darker value to clear 4.5:1 on a white ground. */
-:root { --budget-warm: #e0a059; }         /* the chrome's --amber */
-:root[data-theme="light"] { --budget-warm: #a8650a; }
-
-.mod-budget { margin-top: 8px; }
-
-#read-budget[data-tone="warm"] { color: var(--budget-warm); }
-#read-budget[data-tone="hot"]  { color: var(--stk-down); }
-
-/* A reading that is old or unreadable is a SOURCE state, never a limit
-   state: it dims rather than colours, so the two never look alike. */
-#read-budget[data-state="stale"],
-#read-budget[data-state="error"] { color: var(--fg-3); }
-
-/* The reason, in as many words as it takes. This is the one line in the tile
-   allowed to wrap and to change the tile's height — it is only there when
-   something is wrong, and a silent readout would be worse. */
-.mod-note {
-  margin: 4px 0 0;
-  color: var(--fg-3);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
+/* The media tile: the left rail's card under the clock. */
+.module-media {
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
-
-.mod-note[hidden] { display: none; }
 
 /* --- now playing --------------------------------------------- */
 /* The machine's media session, in its own tile: 48px of art, the title and
-   the artist, the position as a hairline, and the transport. The board gives
-   it the third seat (newtab-bg.js MODULE_SPEC 'flank' — the window's left
-   margin, under the clock), so unlike idle music it is a tile of its own.
+   the artist, the position as a hairline, and the transport. It is the left
+   rail's card under the clock, a tile of its own unlike idle music.
 
-   Fixed heights everywhere, the same rule the other two tiles keep: the seat
-   is drawn around the box the board measured, so nothing here may grow when a
-   track starts, when the art arrives or when a long title lands. */
-/* The default seat, worn until the board has measured: under the clock in the
-   window's left margin, which is where 'flank' puts it. */
-.module-media {
-  left: 24px;
-  top: 190px;
-  padding-top: 14px;
-  padding-bottom: 14px;
-}
+   Fixed heights everywhere, the same rule the other tiles keep: nothing here
+   may grow when a track starts, when the art arrives or when a long title
+   lands, so the rail under it never jumps. */
 
 .mod-media-body {
   display: flex;
@@ -967,8 +581,8 @@ body {
   cursor: pointer;
   pointer-events: auto;
   transition:
-    color        160ms steps(4, end),
-    border-color 160ms steps(4, end);
+    color        var(--dur-slow) var(--ease),
+    border-color var(--dur-slow) var(--ease);
 }
 
 .mod-media-btn svg {
@@ -982,8 +596,8 @@ body {
 .mod-media-btn:hover { color: var(--fg); border-color: var(--edge); }
 
 .mod-media-btn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -1005,14 +619,11 @@ body {
 /* The face of the chrome's idle player, seated under the three counts in
    the readout tile. It shares that tile rather than taking one of its own
    because it is the chrome's own player and belongs with the session it is
-   part of; the board's seats are named in newtab-bg.js MODULE_SPEC, which
-   is the contract, and the third one there is the media tile above.
+   part of.
 
-   Every box below has a fixed height and both controls a fixed width, for
-   the reason the tile itself gives: the board draws a seat around the box
-   it measured, so "Off" becoming "Slow tide" — or a long file name, or the
-   Next control appearing for the user's own tracks — must not move a pixel
-   of it. Nothing here animates and nothing here has a timer: a module
+   Every box below has a fixed height and both controls a fixed width, so
+   "Off" becoming "Slow tide" — or a long file name, or the Next control
+   appearing for the user's own tracks — never changes the tile's size. Nothing here animates and nothing here has a timer: a module
    showing "Off" costs exactly what the rest of the tile costs. */
 .mod-music { margin-top: 10px; }
 
@@ -1030,8 +641,7 @@ body {
   right: 0;
   top: 0;
   height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+  background: var(--hairline);
 }
 
 .mod-music-caption {
@@ -1103,8 +713,8 @@ body {
   cursor: pointer;
   pointer-events: auto;
   transition:
-    color        160ms steps(4, end),
-    border-color 160ms steps(4, end);
+    color        var(--dur-slow) var(--ease),
+    border-color var(--dur-slow) var(--ease);
 }
 
 .mod-music-next { width: 38px; }
@@ -1112,8 +722,8 @@ body {
 .mod-music-btn:hover { color: var(--fg); border-color: var(--edge); }
 
 .mod-music-btn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -1129,8 +739,8 @@ body {
 /* The one line in this module that never changes with the state, so it is
    the one line that may wrap: it fits the tile's 176px to the pixel here,
    and a machine whose fonts run wider gets a second line and a tile 16px
-   taller — measured by the board at layout the same way, and still the
-   same height in all four states, which is the part that matters. */
+   taller — still the same height in all four states, which is the part
+   that matters. */
 .mod-music-hint {
   margin: 4px 0 0;
   min-height: 16px;
@@ -1143,52 +753,31 @@ body {
 }
 
 /* --- the instrument strip ------------------------------------ */
-/* What the search field used to be: five readouts in one row, read at a
+/* Five readouts in one row under the chips, read at a
    glance and nothing else. It is a panel, not a control — no focus ring,
    no accent rim, nothing that lights. The one accent on this page is the
    1px line inside the five graphs.
 
-   No backdrop-filter, deliberately, for the reason the module tiles give:
-   a blurred surface over the drifting aurora is real CPU, and this one is
-   on screen full-time and twice the height the field was. The sheen, the
-   glass and the rim ring carry the material instead. */
+   No backdrop-filter, deliberately: it is the tallest thing on the page
+   (this GPU drops raster tiles under a tall blur) and over a moving clip a
+   blur is redone every frame. The Home card tint carries it instead. */
 .stats {
-  position: relative;              /* the rim ring below hangs off this box */
+  position: relative;
   display: block;
+  margin-top: 28px;
   padding: 16px 20px;
   cursor: pointer;                 /* the whole strip opens the process list */
-  border-radius: var(--bevel-lg);
-  background: var(--sheen), var(--glass);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 10px 26px -14px var(--panel-shadow);
+  /* Helm's card in the Home tint: large radius, a hairline, the panel's
+     inset top edge and a real shadow. Near-opaque rather than blurred: it
+     is the tallest thing on the page and may sit over a moving clip. */
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-l);
+  background: var(--home-card);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
   text-align: left;
   transition:
-    background-color 160ms steps(4, end),
-    color            160ms steps(4, end),
-    box-shadow       160ms steps(4, end);
-}
-
-/* The rim as a ring rather than a background layer: painted into the
-   background it would show through the translucent glass over the whole
-   panel. padding:1px + the xor mask hollows out all but that 1px strip. */
-.stats::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: var(--bevel-lg);
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-
-/* Two cut corners on the diagonal — the same axis as the sheen. */
-@supports (corner-shape: bevel) {
-  .stats,
-  .stats::after { corner-shape: round bevel round bevel; }
+    background-color var(--dur-slow) var(--ease),
+    border-color     var(--dur-slow) var(--ease);
 }
 
 /* The five readouts. The capsule holds the process list under them, so the
@@ -1201,7 +790,7 @@ body {
 
 /* One readout. Every line in it has a stated height: the strip is
    28 + 4 + 16 + 8 + 28 = 84px of content in every state, dashes or
-   numbers, so the column the board measures never changes. */
+   numbers, so the card never changes height when a sample lands. */
 .stat { min-width: 0; }
 
 .stat-value {
@@ -1283,7 +872,7 @@ body {
 .procs-wrap {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 160ms steps(4, end);
+  transition: grid-template-rows var(--dur-slow) var(--ease);
 }
 
 .stats.is-procs-open .procs-wrap { grid-template-rows: 1fr; }
@@ -1303,10 +892,6 @@ body {
   border: 1px solid var(--edge);
   border-radius: var(--bevel);
   background: var(--panel-bg);
-}
-
-@supports (corner-shape: bevel) {
-  .procs-inner { corner-shape: round bevel round bevel; }
 }
 
 /* --- the way in: a word at the strip's right edge ------------- */
@@ -1331,14 +916,14 @@ body {
   line-height: 16px;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 160ms steps(4, end);
+  transition: color var(--dur-slow) var(--ease);
 }
 
 .stats-open:hover { color: var(--fg); }
 
 .stats-open:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   border-radius: 2px;
   color: var(--fg);
 }
@@ -1361,7 +946,7 @@ body {
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 160ms steps(4, end);
+  transition: transform var(--dur-slow) var(--ease);
 }
 
 .stats.is-procs-open .stats-open-chevron::before {
@@ -1398,8 +983,7 @@ body {
   right: 0;
   bottom: 0;
   height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+  background: var(--hairline);
 }
 
 /* Name is text; CPU and Memory are the two the list can be sorted by, so
@@ -1415,14 +999,14 @@ body {
   letter-spacing: inherit;
   text-align: right;
   cursor: pointer;
-  transition: color 160ms steps(4, end);
+  transition: color var(--dur-slow) var(--ease);
 }
 
 .proc-sort:hover { color: var(--fg-2); }
 
 .proc-sort:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   border-radius: 2px;
   color: var(--fg-2);
 }
@@ -1578,7 +1162,7 @@ body {
   border-top: 3px solid transparent;
   border-bottom: 3px solid transparent;
   border-left: 4px solid currentColor;
-  transition: transform 120ms steps(3, end);
+  transition: transform var(--dur) var(--ease);
 }
 
 .proc-chev.is-open::before { transform: rotate(90deg); }
@@ -1586,8 +1170,8 @@ body {
 
 /* The same ring every other control on this page wears. */
 .proc-chev:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* Nothing under it: the column keeps its 16px, the caret goes. */
@@ -1672,9 +1256,9 @@ body {
   opacity: 0;
   pointer-events: none;
   transition:
-    color        160ms steps(4, end),
-    border-color 160ms steps(4, end),
-    opacity      160ms steps(4, end);
+    color        var(--dur-slow) var(--ease),
+    border-color var(--dur-slow) var(--ease),
+    opacity      var(--dur-slow) var(--ease);
 }
 
 .proc-row:hover .proc-end,
@@ -1687,8 +1271,8 @@ body {
 .proc-end:hover { color: var(--fg); border-color: var(--edge); }
 
 .proc-end:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -1740,14 +1324,14 @@ body {
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   cursor: pointer;
-  transition: color 160ms steps(4, end);
+  transition: color var(--dur-slow) var(--ease);
 }
 
 .procs-more:hover { color: var(--fg); }
 
 .procs-more:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   border-radius: 2px;
   color: var(--fg);
 }
@@ -1773,8 +1357,7 @@ body {
    the same neutral glass, hairlines and quiet type the strip above wears.
 
    The row is 56px tall whether it holds nothing or nine tiles, so the
-   first pin does not move the box the board measured; two rows grow it,
-   and newtab.js re-seats the board when the count crosses a row. */
+   first pin does not move the card; two rows grow it. */
 .dock {
   margin-top: 16px;
   text-align: left;
@@ -1800,8 +1383,7 @@ body {
   right: 0;
   bottom: 0;
   height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%, var(--edge) 10%, var(--edge) 90%, transparent 100%);
+  background: var(--hairline);
 }
 
 .dock-caption {
@@ -1831,14 +1413,14 @@ body {
   line-height: 20px;
   text-align: right;
   cursor: pointer;
-  transition: color 160ms steps(4, end);
+  transition: color var(--dur-slow) var(--ease);
 }
 
 .dock-edit:hover { color: var(--fg); }
 
 .dock-edit:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   border-radius: 2px;
   color: var(--fg);
 }
@@ -1877,14 +1459,14 @@ body {
   padding: 4px 3px;
   border: 0;
   border-radius: var(--radius-ctl);
-  background: var(--sheen), var(--glass);
+  background: var(--glass);
   color: var(--fg-2);
   font-family: inherit;
   cursor: pointer;
   overflow: hidden;
   transition:
-    background-color 140ms steps(3, end),
-    color            140ms steps(3, end);
+    background-color var(--dur) var(--ease),
+    color            var(--dur) var(--ease);
 }
 
 .dock-tile::before {
@@ -1893,11 +1475,7 @@ body {
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  padding: 1px;
-  background: var(--rim-soft);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
+  border: 1px solid var(--hairline);
 }
 
 .dock-tile:hover {
@@ -1906,14 +1484,13 @@ body {
 }
 
 .dock-tile:hover::before,
-.dock-tile:active::before { background: var(--rim); }
+.dock-tile:active::before { border-color: var(--hairline-strong); }
 
-.dock-tile:active { background-color: var(--glass-3); }
+.dock-tile:active { background-color: var(--glass); }
 
 .dock-tile:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -1990,7 +1567,7 @@ body {
    is also a site. It sits in its own band under the tile rather than in a
    corner — the corners are the dot's and the unpin glyph's, and nothing in
    here may cover the name. Edit mode is the only time the band exists, so
-   the row is 20px taller while it is open and the board re-seats once. */
+   the row is 20px taller while it is open. */
 .dock-where {
   position: absolute;
   left: -2px;                      /* out into the 8px gap on both sides, so
@@ -2023,8 +1600,8 @@ body {
   text-align: center;
   cursor: pointer;
   transition:
-    background-color 140ms steps(3, end),
-    color            140ms steps(3, end);
+    background-color var(--dur) var(--ease),
+    color            var(--dur) var(--ease);
 }
 
 .dock-where-opt:first-child { border-radius: 7px 0 0 7px; }
@@ -2045,8 +1622,8 @@ body {
 }
 
 .dock-where-opt:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -2078,10 +1655,9 @@ body {
 .dock-name {
   max-width: 100%;
   color: inherit;
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  line-height: 12px;
+  font-size: var(--fs-2xs);
+  /* 14px, not 12: Segoe UI's descenders (the p in "Add app") were cut at 12 */
+  line-height: 14px;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -2100,7 +1676,7 @@ body {
 
 .dock-add:hover {
   background-color: var(--glass);
-  border-color: var(--glass-3);
+  border-color: var(--hairline-strong);
   color: var(--fg);
 }
 
@@ -2154,17 +1730,17 @@ body {
   line-height: 1;
   cursor: pointer;
   transition:
-    color        140ms steps(3, end),
-    border-color 140ms steps(3, end);
+    color        var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
 }
 
 .dock.is-editing .dock-remove { display: flex; }
 
-.dock-remove:hover { color: var(--fg); border-color: var(--glass-3); }
+.dock-remove:hover { color: var(--fg); border-color: var(--hairline-strong); }
 
 .dock-remove:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -2210,10 +1786,6 @@ body {
 
 .dock-picker[hidden] { display: none; }
 
-@supports (corner-shape: bevel) {
-  .dock-picker { corner-shape: round bevel round bevel; }
-}
-
 .dock-search {
   display: block;
   width: 100%;
@@ -2232,13 +1804,12 @@ body {
 .dock-search::placeholder { color: var(--fg-3); }
 
 .dock-search:focus {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* Three groups now, so the list is bounded and scrolls inside the picker
-   rather than growing the capsule past what the board measured. */
+   rather than growing the card without end. */
 .dock-results {
   margin: 8px 0 0;
   padding: 0;
@@ -2356,7 +1927,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 /* Chips are controls, not containers: they keep ordinary round corners
@@ -2364,25 +1935,27 @@ body {
 .chip {
   display: inline-flex;
   align-items: center;
-  height: 34px;
+  height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--sheen), var(--glass);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  color: var(--fg-2);
+  /* Helm's Home chip (.hchip): the glass tint, its own hairline, a pill.
+     Small, so it may blur its own area; never over a clip (see the top). */
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-pill);
+  background: var(--home-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+          backdrop-filter: blur(14px) saturate(1.1);
+  color: var(--text);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-decoration: none;
   white-space: nowrap;
   transition:
-    background-color 160ms steps(4, end),
-    color            160ms steps(4, end),
-    border-color     160ms steps(4, end),
-    box-shadow       160ms steps(4, end);
+    background-color var(--dur-slow) var(--ease),
+    color            var(--dur-slow) var(--ease),
+    border-color     var(--dur-slow) var(--ease),
+    box-shadow       var(--dur-slow) var(--ease);
 }
 
 /* the chip's favicon. Sits before the label and touches nothing else:
@@ -2398,27 +1971,29 @@ body {
 }
 
 .chip:hover {
-  background-color: var(--glass-2);
-  border-color: var(--glass-3);
+  background-color: var(--home-glass-hover);
+  border-color: var(--hairline-strong);
   color: var(--fg);
 }
+.chip:active { background-color: var(--home-glass); }
 
-.chip:active { background-color: var(--glass-3); }
+:root[data-bg="video"] .chip {
+  -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+}
 
-/* Focus is light: a hairline of ion and a soft halo, never a slab. */
+/* Focus is Helm's ring, and nothing else lights. */
 .chip:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
 /* --- saved sites --------------------------------------------- */
-/* The browser's saved list, under the shortcuts. Its tiles are the chip
-   recipe one step quieter: shorter, smaller type, and no backdrop blur —
-   a dozen more blurred surfaces over a drifting aurora is real CPU for a
-   difference nobody can see against a smooth gradient. (.rtile is the
-   name the Recent row gave that tile; the look is unchanged.)
+/* The browser's saved list, right under the search field. Its tiles are
+   the Home chip one step quieter: smaller type, the same glass tint and
+   pill, each blurring only its own small area (never over a clip). (.rtile
+   is the name the Recent row gave that tile.)
 
    The row is never hidden: the caption and the "+" are always there, so
    the column has its height from the first paint. */
@@ -2428,14 +2003,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 32px;                /* Helm: a label opens a new group */
 }
 
 /* The amber of a request that did not happen: the chrome's --amber, which
    this separate document never had (the budget readout declares the same
    pair for the same reason), darker on light to clear 4.5:1 on white. */
-:root { --saved-warn: #e0a059; }
-:root[data-theme="light"] { --saved-warn: #a8650a; }
 
 /* The page's one section title, in the readout voice: sentence case,
    semi-condensed, quiet, left-aligned over the row it names, and closed by
@@ -2443,36 +2016,37 @@ body {
    only label left on the page — the slot above says what it is by being
    lit, and needs no caption of its own.
 
-   It costs the column ~10px of height. That is a one-off: newtab-bg.js
-   measures the column for its socket, and the measurement is keyed on the
-   box, so the board simply sits 10px lower. Nothing here may CHURN.
+   It costs the column ~10px of height, once. Nothing here may CHURN.
 
-   Its right end holds the row's note — "already saved", or, in amber, a
+   After the title comes the row's note — "already saved", or, in amber, a
    request the browser did not answer. Same line, so a note costs no height
-   unless a narrow window makes it wrap (newtab.js tells the board then). */
+   unless a narrow window makes it wrap. */
 .saved-caption {
   position: relative;
   display: flex;
   align-items: baseline;
+  justify-content: center;         /* centred over the centred tiles */
   gap: 12px;
   flex: 0 0 100%;               /* own line, above the tiles */
-  margin: 0 0 7px;
-  padding-bottom: 5px;
-  color: var(--fg-3);
-  font-size: 12px;
+  margin: 0 0 4px;
+  /* Helm's .home-label: the label sits on the picture, so it wears the
+     Home text shadow, the one other place on the page that does. */
+  color: var(--text);
+  font-size: var(--fs-s);
   font-weight: 600;
+  text-shadow: var(--home-shadow);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
-  text-align: left;
+  text-align: center;
 }
 
 .saved-title { flex: 0 0 auto; }
 
 .saved-status {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   font-weight: 500;
-  text-align: right;
+  text-align: left;
 }
 
 .saved-status[data-tone="warn"] { color: var(--saved-warn); }
@@ -2484,7 +2058,7 @@ body {
   right: 0;
   bottom: 0;
   height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
+  background: none;                /* Helm's label has no rule under it */
 }
 
 /* A tile at rest carries the soft rim — one lit corner that fades out
@@ -2495,11 +2069,13 @@ body {
   display: inline-flex;
   align-items: center;
   max-width: 180px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: var(--radius-ctl);
-  background: var(--sheen), var(--glass);
-  color: var(--fg-2);
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius-pill);
+  background: var(--home-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+          backdrop-filter: blur(14px) saturate(1.1);
+  color: var(--text);
   font-family: inherit;
   font-size: 12px;
   font-stretch: var(--readout-stretch);
@@ -2508,9 +2084,9 @@ body {
   white-space: nowrap;
   overflow: hidden;
   transition:
-    background-color 140ms steps(3, end),
-    color            140ms steps(3, end),
-    box-shadow       140ms steps(3, end);
+    background-color var(--dur) var(--ease),
+    color            var(--dur) var(--ease),
+    box-shadow       var(--dur) var(--ease);
 }
 
 /* The rim as a ring, not as a background layer under the glass: painted
@@ -2524,11 +2100,7 @@ body {
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  padding: 1px;
-  background: var(--rim-soft);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
+  border: 1px solid var(--home-edge);
 }
 
 .rtile-icon {
@@ -2549,19 +2121,23 @@ body {
 /* Pointed at, the whole rim lights: the soft gradient becomes the full
    one, so the tile reads as powered rather than merely brighter. */
 .rtile:hover {
-  background-color: var(--glass-2);
+  background-color: var(--home-glass-hover);
   color: var(--fg);
 }
 
-.rtile:hover::before,
-.rtile:active::before { background: var(--rim); }
+:root[data-bg="video"] .rtile {
+  -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+}
 
-.rtile:active { background-color: var(--glass-3); }
+.rtile:hover::before,
+.rtile:active::before { border-color: var(--hairline-strong); }
+
+.rtile:active { background-color: var(--home-glass); }
 
 .rtile:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -2606,10 +2182,10 @@ body {
   visibility: hidden;
   opacity: 0;
   transition:
-    opacity      120ms steps(3, end),
+    opacity      var(--dur) var(--ease),
     visibility   0s linear 120ms,
-    color        140ms steps(3, end),
-    border-color 140ms steps(3, end);
+    color        var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
 }
 
 .stile:hover .stile-remove,
@@ -2619,11 +2195,11 @@ body {
   transition-delay: 0s;
 }
 
-.stile-remove:hover { color: var(--fg); border-color: var(--glass-3); }
+.stile-remove:hover { color: var(--fg); border-color: var(--hairline-strong); }
 
 .stile-remove:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--fg);
 }
 
@@ -2639,7 +2215,7 @@ body {
 
 .saved-add {
   justify-content: center;
-  width: 26px;
+  width: 30px;
   padding: 0;
   font-size: 16px;
   font-weight: 500;
@@ -2662,11 +2238,11 @@ body {
 .saved-input {
   width: 240px;
   max-width: calc(100vw - 64px);
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--sheen), var(--glass);
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-pill);
+  background: var(--home-glass-hover);
   color: var(--fg);
   font-family: inherit;
   font-size: 12px;
@@ -2677,9 +2253,9 @@ body {
 .saved-input::placeholder { color: var(--fg-3); }
 
 .saved-input:focus {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 /* What was typed is not an address: the caption says why, in amber, and
@@ -2696,27 +2272,61 @@ body {
   text-align: left;
 }
 
-/* --- launch motion: one rise, and that is all ---------------- */
-@keyframes rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* backwards, not both. The last keyframe IS the resting style (opacity 1, no
-   transform), so holding it forwards changed no pixel — but an animation that
-   is still "in effect" keeps its element a composited layer for the life of
-   the page, and every tile laid over it (the chips, the dock cells) became an
-   overlap layer too. Backwards still holds the first frame through the delay,
-   and once the rise ends the column paints back into the page's own layer. */
-.stats  { animation: rise 500ms ease-out backwards; }
-.links  { animation: rise 500ms ease-out 80ms backwards; }
-.saved  { animation: rise 500ms ease-out 140ms backwards; }
+/* --- launch motion ------------------------------------------- */
+/* None. Home is simply there: nothing rises, nothing fades in except the
+   picture itself (once, 150ms), so the page costs no frames after its
+   first one. */
 
 /* --- narrow windows ------------------------------------------ */
+/* Below 1296px the two rails no longer fit beside a readable column, so
+   they fold into it: the clock on top, centred; then the column; then the
+   now-playing, session and markets cards in a wrapping row under it. The
+   rails step out of the way with display: contents, so every card keeps
+   its own rules and only its place changes. */
+@media (max-width: 1295px) {
+  .home {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
+    gap: 16px;
+    padding: 0 24px 32px;
+  }
+
+  .home-rail { display: contents; }
+
+  .module-clock {
+    order: 0;
+    flex: 0 0 100%;
+    padding-top: 24px;
+    text-align: center;
+  }
+
+  .module-clock .mod-time { justify-content: center; }
+
+  /* Full width, so it always takes a line of its own (a 720px-capped item
+     let the media card share its line at 1100px); the column inside is
+     what stays 720px and centred. */
+  .stage {
+    order: 1;
+    flex: 0 0 100%;
+    padding: 20px 0 8px;
+  }
+
+  .column {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .module-media   { order: 2; }
+  .module-session { order: 3; }
+  .module-stocks  { order: 4; margin-top: 0; }
+}
+
 /* Five columns stop being readable long before the window does, so the
    strip folds to three and then to two. Each fold is a different height,
-   which is fine: it only ever happens on a resize, and the board re-lays
-   out on resize anyway. Within one width the height never moves. */
+   which is fine: it only ever happens on a resize. Within one width the
+   height never moves. */
 @media (max-width: 620px) {
   .stats-strip { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
   .stat-value    { font-size: 18px; }
@@ -2734,8 +2344,8 @@ body {
   .proc-role { min-width: 0; margin-right: 6px; }
 
   /* Folded, the strip's last grid cell is empty — so the way in stops
-     being out of flow and simply sits in it, and the capsule still ends
-     up the height it was. */
+     being out of flow and simply sits in it, and the card still ends up
+     the height it was. */
   .stats-open {
     position: static;
     justify-self: end;
@@ -2744,31 +2354,26 @@ body {
 }
 
 @media (max-width: 460px) {
-  .stage { padding: 28px 24px 12vh; }
+  .home { padding: 0 16px 24px; }
   .stats { padding: 14px 16px; }
   .stats-strip { grid-template-columns: repeat(2, 1fr); }
   .rtile { max-width: 132px; }
+  .module-stocks { width: 100%; }
 }
 
 /* --- reduced motion ------------------------------------------ */
 @media (prefers-reduced-motion: reduce) {
-  .aurora-pool,
-  .aurora-rim,
-  .stats,
-  .links,
-  .saved { animation: none; }
-
-  /* a theme flip lands instantly instead of crossfading */
+  /* a theme flip, a hover and the picture land instantly */
   body,
-  .backdrop,
-  #bg-dim,
-  #board,
+  #bg-image.on,
+  .search-input,
   .module,
   .stats,
   .chip,
   .rtile,
   .stile-remove,
   .mod-music-btn,
+  .mod-media-btn,
   .dock-edit,
   .dock-tile,
   .dock-remove,
@@ -2778,16 +2383,11 @@ body {
   .proc-chev::before { transition: none; }
 }
 
-/* --- markets: live prices, bottom right ---------------------- */
-/* The fourth tile, and the only one that is not seated by the board: it takes
-   the bottom-right corner and holds it. Same material as the other three —
-   the sheen over the glass, the rim as a ring on ::before, the bevelled
-   corners — inherited from .module, so this block only adds what a price
-   readout needs and never re-states the tile.
-
-   It is wider than the other three (the other three are 208px by authorship;
-   a chart and a five-row table are not) and it is the one tile that takes
-   clicks, so pointer-events comes back on here.
+/* --- markets: live prices, foot of the right rail ------------- */
+/* The right rail's lower card. Same material as the other tiles, inherited
+   from .module, so this block only adds what a price readout needs and never
+   re-states the tile. It is the widest card (a chart and a five-row table
+   are), and its width is the rails' width, --rail-w.
 
    NOTHING IN HERE ANIMATES. Both canvases are repainted by newtab.js at most
    twice a second and only when a number moved; there is no transition on a
@@ -2800,28 +2400,11 @@ body {
    lightness, so the colour reads as a direction rather than as an alarm.
    Two definitions, because the light theme's ground needs the darker pair to
    clear 4.5:1 the way --fg-3 does. */
-:root {
-  --stk-up:   #7fb98f;
-  --stk-down: #c98b86;
-}
-
-:root[data-theme="light"] {
-  --stk-up:   #2f7d4f;
-  --stk-down: #b04a43;
-}
 
 .module-stocks {
-  top: auto;
-  bottom: 24px;
-  right: 24px;
-  width: 352px;
+  width: var(--rail-w);
+  margin-top: auto;                /* the foot of the right rail */
   padding: 14px 16px 12px;
-  pointer-events: auto;
-}
-
-/* No room in this window: the same rule the board's tiles keep. */
-@media (max-height: 560px), (max-width: 720px) {
-  .module-stocks { display: none; }
 }
 
 .stk-head {

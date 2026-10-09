@@ -4,13 +4,19 @@
    Loaded after chrome.css, and scoped entirely to #shield and
    #shield-panel: nothing here reaches another element.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own at the bottom of this file —
-   :root[data-theme="light"] relights all of it for free.
+   LOOK. Helm's popover: neutral ground, exact hairlines, real
+   shadow, the accent only for state (a switch that is on, the count)
+   and focus. Every rule is written against tokens.css names
+   (chrome.css @imports it), so html[data-theme="light"] relights the
+   whole file with no block of its own.
 
-   MOTION. Both panes sit on a backdrop-filter, so an animated frame
-   re-blurs everything behind it. Nothing animates continuously here:
-   every transition is stepped and none runs longer than 150ms.
+   GLASS. The panel is a small overlay that never scrolls (a number,
+   two switch rows, a status line), so it takes Helm's menu glass:
+   --overlay with a 24px blur. --overlay alone is opaque enough to
+   read over any page, so the blur is polish, not a crutch.
+
+   MOTION. Fills, colours and the switch's knob move over 120 ms;
+   nothing animates continuously.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -24,7 +30,7 @@
 /* ============================================================
    The nav-row instrument
    Shape, hover and radius come from `.iconbtn` in chrome.css; this
-   file adds only the badge and the two lit/unlit states.
+   file adds only the badge and the lit/unlit states.
    ============================================================ */
 
 #shield {
@@ -33,21 +39,23 @@
 
 #shield .glyph { font-family: var(--icon-font); }
 
-/* the panel is open: the instrument stays lit while it is */
+/* The panel is open: Helm's pressed icon button (.icon-btn.on), its
+   hairline drawn inset so the button keeps exactly its box. */
 #shield.is-open {
-  background: var(--sheen), var(--glass-3);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 /* Blocking is off globally, this site is allowlisted, or there is
    nothing to block here: the shield goes quiet rather than away. */
-#shield.is-off .glyph { color: var(--fg-3); }
+#shield.is-off .glyph { color: var(--text-3); }
 
 /* --- the count badge ------------------------------------------
-   A pill tucked into the button's lower-right corner. It sits on
-   --panel-bg so a page scrolling behind the chrome never shows
-   through the digits, and it is the one ion-coloured thing on the
-   nav row besides the omnibox's focused border. */
+   Helm's .badge.accent, shrunk to fit the button's lower-right
+   corner: a solid accent pill with --accent-text digits. Solid, so a
+   page scrolling behind the chrome never shows through the digits;
+   no halo, because glow is reserved for the focus ring. */
 #shield .shield-count {
   position: absolute;
   right: -2px;
@@ -58,27 +66,25 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--ion-line);
-  border-radius: 999px;
-  background: var(--panel-bg);
-  color: var(--ion);
-  font-family: var(--ui-font);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: var(--font);
   font-size: 9px;
-  font-stretch: var(--readout-stretch);
+  font-weight: 600;
   /* a reading, so the digits never shift the badge as a page loads */
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  letter-spacing: .01em;
-  /* status is light: the badge is a pip that happens to carry a number */
-  box-shadow: var(--pip-glow);
   pointer-events: none;
 }
 
 /* ============================================================
    The popover
-   Same ground and lip as the downloads panel, so the two read as
-   siblings. Anchored in JS to the button's right edge; the values
-   here are the fallback for the frame before that lands.
+   Same edge, radius and shadow as the downloads and site-info
+   panels, so the three read as siblings. Anchored in JS to the
+   button's right edge; the values here are the fallback for the
+   frame before that lands.
    ============================================================ */
 
 #shield-panel {
@@ -89,32 +95,15 @@
   width: 320px;
   max-width: calc(100vw - 20px);
   overflow: hidden;
-  /* The light rim: 1px of gradient in the border box, specular at the
-     top-left and ion at the bottom-right, so the pane looks lit from above
-     and powered from below. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* The chamber's ground, not the nav row's: this pane floats over
-     guest pages, and --glass alone would leave a site legible
-     through it. Opaque, so the rim only shows where it should. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 14px 34px var(--shade-drop);
-}
-
-/* two cut corners on the diagonal: the container signature, where supported */
-@supports (corner-shape: bevel) {
-  #shield-panel { corner-shape: round bevel round bevel; }
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-l);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+  backdrop-filter: blur(24px) saturate(1.05);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-3);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
 }
 
 #shield-panel .sh-body {
@@ -125,21 +114,21 @@
 }
 
 /* --- the number ------------------------------------------------
-   The reading on the instrument: large, --fg, tabular so the digits
-   do not shift the line as a page loads. */
+   The reading on the instrument: large, --text, in the display cut,
+   tabular so the digits do not shift the line as a page loads. */
 #shield-panel .sh-big {
-  color: var(--fg);
+  color: var(--text);
+  font-family: var(--font-display);
   font-size: 34px;
-  font-stretch: var(--readout-stretch);
+  font-weight: 600;
   line-height: 1.05;
   letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
 }
 
 #shield-panel .sh-sub {
-  color: var(--fg-2);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-s);
   font-variant-numeric: tabular-nums;
   margin-bottom: 10px;
   overflow: hidden;
@@ -149,8 +138,9 @@
 
 /* ============================================================
    The switch rows
-   The whole row is the control, so the hit target is the same shape
-   as the ion rail that lights along its left edge while it is on.
+   The whole row is the control (a Helm menu row: transparent, the
+   raised fill under the pointer). The switch at its end is what says
+   on or off; the 2px rail on the left repeats it in the accent.
    ============================================================ */
 
 #shield-panel .sh-row {
@@ -162,22 +152,20 @@
   width: 100%;
   min-height: 34px;
   padding: 0 9px 0 11px;
-  /* a row is a control: round corners, so the bevel stays the pane's alone */
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   background: none;
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   text-align: left;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#shield-panel .sh-row:hover { background: var(--glass); color: var(--fg); }
-#shield-panel .sh-row.is-on { color: var(--fg); }
-#shield-panel .sh-row:disabled { color: var(--fg-3); background: none; }
+#shield-panel .sh-row:hover { background: var(--surface-3); color: var(--text); }
+#shield-panel .sh-row.is-on { color: var(--text); }
+#shield-panel .sh-row:disabled { color: var(--text-3); background: none; }
 
-/* the 2px rail: the row is on */
+/* the 2px rail: the row is on. Paint, not light: no halo. */
 #shield-panel .sh-row::before {
   content: '';
   position: absolute;
@@ -186,12 +174,10 @@
   bottom: 6px;
   width: 2px;
   border-radius: 2px;
-  background: var(--ion);
-  /* the rail is light, not paint: it carries the pip's halo */
-  box-shadow: 0 0 6px var(--ion-glow);
+  background: var(--accent);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms steps(2);
+  transition: opacity var(--dur) var(--ease);
 }
 
 #shield-panel .sh-row.is-on::before { opacity: 1; }
@@ -203,18 +189,18 @@
 }
 
 /* --- the switch itself ----------------------------------------
-   A glass track with a knob that steps across it. There is no
-   switch anywhere else in the app yet, so this is the pattern:
-   --edge track, --ion when on, --specular knob. */
+   Helm's .toggle at Quartz's 30x16 size: a --surface-3 track with a
+   strong hairline and a --text-2 knob; on, the track fills with the
+   accent and the knob turns --accent-text and slides across. */
 #shield-panel .sh-switch {
   flex: 0 0 auto;
   position: relative;
   width: 30px;
   height: 16px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-  background: var(--glass);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
 #shield-panel .sh-knob {
@@ -224,30 +210,28 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--fg-3);
-  /* steps(3), not a slide: a smooth translate would re-blur the pane
-     behind this pane on every frame of the throw. */
-  transition: transform 150ms steps(3), background-color 120ms steps(2);
+  background: var(--text-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 #shield-panel .sh-row.is-on .sh-switch {
-  background: var(--ion-soft);
-  border-color: var(--ion-line);
+  background: var(--accent);
+  border-color: transparent;
 }
 
 #shield-panel .sh-row.is-on .sh-knob {
-  background: var(--ion);
-  box-shadow: var(--pip-glow);
+  background: var(--accent-text);
   transform: translateX(14px);
 }
 
 #shield-panel .sh-row:disabled .sh-switch {
-  background: var(--glass);
-  border-color: var(--edge);
+  background: var(--surface-3);
+  border-color: var(--hairline);
 }
 
 #shield-panel .sh-row:disabled .sh-knob {
-  background: var(--fg-3);
+  background: var(--text-3);
   box-shadow: none;
 }
 
@@ -255,36 +239,32 @@
 #shield-panel .sh-status {
   margin-top: 9px;
   padding: 0 2px;
-  color: var(--fg-3);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 
-/* --- nothing to block ------------------------------------------ */
+/* --- nothing to block (Helm's .empty-note) ---------------------- */
 #shield-panel .sh-empty {
   padding: 22px 14px;
-  color: var(--fg-3);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-s);
   text-align: center;
 }
 
 /* --- focus ----------------------------------------------------
-   chrome.css already rings every button; these repeat it so the
-   panel keeps its keyboard outline even if that rule moves. Focus is
-   light here too: a 1px ion line and a soft halo, never a white slab. */
+   Helm's one focus treatment: the --focus-ring box-shadow and no
+   outline. chrome.css rings every button already; these repeat it so
+   the panel keeps it even if that rule moves. The open instrument's
+   inset hairline gives way to the ring while it holds focus. */
 #shield:focus-visible,
 #shield-panel .sh-row:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- reduced motion --------------------------------------------
-   The stepped transitions already hold still between frames; with
-   motion reduced they stop moving altogether and the states simply
-   swap. */
+   With motion reduced the states simply swap. */
 @media (prefers-reduced-motion: reduce) {
   #shield-panel .sh-row,
   #shield-panel .sh-row::before,

@@ -1,15 +1,23 @@
 /* ============================================================
-   history.css — #omni-suggest, the omnibox's lens
+   history.css — #omni-suggest, the omnibox's suggestion list
 
-   One more crystal instrument: a glass pane that hangs off the
-   bottom of the omnibox capsule and lists what the browser
-   remembers. It borrows .glass for its frost and every colour
-   here resolves through a chrome.css token, so the light theme
-   re-lights it without a single rule of its own.
+   A popover that hangs off the bottom of the omnibox and lists what
+   the browser remembers. It is Helm's command palette in miniature:
+   the --overlay ground, a strong hairline, the extra-large radius,
+   the level-3 shadow, and rows that light with the raised fill.
 
-   Motion budget: the chrome already runs a backdrop-filter, so
-   the only transition in this file is a short stepped one on the
-   row highlight. Nothing here animates continuously.
+   Every rule is written against tokens.css names (chrome.css
+   @imports it), so html[data-theme="light"] relights the whole file
+   with no block of its own.
+
+   GLASS. This is a small overlay that never scrolls (it shows a fixed
+   handful of rows and clips), so it is one of the few places allowed
+   a backdrop-filter, exactly as Helm's .menu and .palette have.
+   --overlay is opaque enough to stay legible even where the blur has
+   nothing to work with.
+
+   MOTION. The only transition is a 120 ms fill on the row highlight.
+   Nothing here animates continuously.
    ============================================================ */
 
 /* --- the pane -------------------------------------------------- */
@@ -21,58 +29,41 @@
   z-index: 40;                 /* above #views (1) and .chrome-layer (3) */
   box-sizing: border-box;
   padding: 4px;
-  /* The pane is bevelled on the diagonal (see the @supports below) and
-     its 1px border is the rim gradient rather than paint: specular at
-     the top-left, accent at the bottom-right. The ground clips to the
-     padding box so the rim keeps the border strip to itself. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  font-family: var(--ui-font);
-  color: var(--fg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-l);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+  backdrop-filter: blur(24px) saturate(1.05);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-3);
+  font-family: var(--font);
+  color: var(--text);
   overflow: hidden;            /* the rows' corners never poke the radius */
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 12px 34px var(--shade-drop);
-}
-
-/* TL round, TR cut, BR round, BL cut — two cuts on the diagonal, the
-   same machined edge every floating container in the chrome wears.
-   Guarded, so a build without corner-shape keeps the plain radius. */
-@supports (corner-shape: bevel) {
-  #omni-suggest { corner-shape: round bevel round bevel; }
 }
 
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #omni-suggest[hidden] { display: none; }
 
 /* --- the "Recent" caption -------------------------------------- */
-/* A readout, not an eyebrow: sentence case, semi-condensed, barely
-   tracked, and closed by a hairline that fades out to the right — the
-   seam motif at pane scale, used instead of a solid border rule. */
+/* Helm's .menu-label: small, semibold, --text-3. Sentence case is kept
+   (Quartz's captions are never ALL-CAPS), and the rule under it is a
+   plain 1px hairline, drawn as an inset shadow inside the caption's
+   own box so the list sits exactly where it did. */
 #omni-suggest .omni-cap {
   padding: 7px 10px 5px 12px;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  /* Sentence case, like every other caption in the app. The old tracked
-     ALL-CAPS read as a different product. */
   text-transform: none;
-  background: linear-gradient(90deg, var(--edge), transparent)
-              left bottom / 100% 1px no-repeat;
+  box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
 #omni-suggest .omni-cap[hidden] { display: none; }
 
 /* --- a row ------------------------------------------------------ */
-/* The left rail is always 2px and merely changes colour, so lighting a
-   row never shifts its text sideways. */
+/* Helm's .menu-item, at Quartz's 40px two-line height. The left rail
+   is always 2px and merely changes colour, so lighting a row never
+   shifts its text sideways; lit, it is the one accent mark in the
+   list (selection is state, and state is what the accent is for). */
 #omni-suggest .omni-row {
   display: flex;
   align-items: center;
@@ -80,18 +71,16 @@
   height: 40px;
   padding: 0 10px;
   border-left: 2px solid transparent;
-  /* A menu row is a control: round corners, so the bevel stays the
-     pane's signature. */
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
-  transition: background-color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
 #omni-suggest .omni-row.is-hi {
-  background: var(--glass-2);
-  border-left-color: var(--ion);
+  background: var(--surface-3);
+  border-left-color: var(--accent);
 }
 
 /* --- the glyph column ------------------------------------------- */
@@ -100,15 +89,12 @@
   width: 16px;
   font-size: 13px;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
-/* The lit row's glyph carries the pip's halo: the highlight is light,
-   not a second kind of paint. */
-#omni-suggest .omni-row.is-hi .omni-ico {
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
-}
+/* The lit row's glyph steps up to --text-2, as Helm's active palette
+   item does. No halo: glow is reserved for the focus ring. */
+#omni-suggest .omni-row.is-hi .omni-ico { color: var(--text-2); }
 
 /* --- an app's own icon ------------------------------------------ */
 /* Same 16px slot as the glyph, so a list that mixes apps and history
@@ -118,34 +104,31 @@
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   object-fit: contain;
 }
 
 /* --- the "App" badge -------------------------------------------- */
-/* A label on the name, not a second piece of content: the quietest pill
-   that still reads, so the row says "this launches" without shouting.
-   It rides in the primary line, after the name. */
+/* Helm's chip, at its quietest: a hairline pill on --surface-2, so the
+   row says "this launches" without shouting. It rides in the primary
+   line, after the name. --surface-2 still reads on the lit row's
+   --surface-3, and the border carries it where the two meet. */
 #omni-suggest .omni-badge {
   display: inline-block;
   margin-left: 8px;
   padding: 2px 6px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-  /* A wash of the text colour, not of the glass: --glass-2 is what the lit
-     row is painted with, so a pill filled with it would vanish on hover. */
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  color: var(--fg-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
   font-size: 10.5px;
   line-height: 1;
-  font-weight: 450;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .02em;
+  font-weight: 500;
   vertical-align: middle;
 }
 
 /* The lit row brightens the label with everything else on it. */
-#omni-suggest .omni-row.is-hi .omni-badge { color: var(--fg); }
+#omni-suggest .omni-row.is-hi .omni-badge { color: var(--text); border-color: var(--hairline-strong); }
 
 /* --- the two text lines ----------------------------------------- */
 #omni-suggest .omni-body {
@@ -166,39 +149,36 @@
 }
 
 #omni-suggest .omni-primary {
-  color: var(--fg);
-  font-size: 12.5px;
+  color: var(--text);
+  font-size: var(--fs-s);
   font-weight: 400;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
 }
 
 /* The second line carries hosts, dates and counts: tabular digits keep
-   a list of them from shuffling column to column. */
+   a list of them from shuffling column to column (Helm's .menu-desc). */
 #omni-suggest .omni-secondary {
-  color: var(--fg-2);
-  font-size: 11px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
 }
 
 /* the default row's "Google search" note: a label, not content */
-#omni-suggest .omni-row--faint .omni-secondary { color: var(--fg-3); }
+#omni-suggest .omni-row--faint .omni-secondary { color: var(--text-3); }
 
 /* a row with nothing on the second line centres its one line */
 #omni-suggest .omni-row--single .omni-body { gap: 0; }
 
 /* --- the matched runs ------------------------------------------- */
-/* Ion light on the letters the query actually hit — never a bold whole
-   line, which reads as a second kind of emphasis fighting the rail. */
+/* An accent wash under the letters the query actually hit — never a
+   bold whole line, which reads as a second kind of emphasis. The text
+   keeps --text so the match stays legible on both themes. */
 #omni-suggest mark {
-  background: var(--ion-soft);
-  color: var(--ion);
+  background: var(--accent-soft);
+  color: var(--text);
   border-radius: 3px;
   padding: 0 1px;
   font: inherit;
+  box-shadow: inset 0 -1px 0 var(--accent-line);
 }
 
 /* --- reduced motion --------------------------------------------- */

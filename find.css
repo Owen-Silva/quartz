@@ -1,13 +1,16 @@
 /* ============================================================
-   find.css — the find-in-page instrument
+   find.css — the find-in-page bar
 
-   One more crystal panel, hung under the nav row at the right
-   edge, floating over the guest page. Every colour resolves
-   through a chrome.css token, so the light theme re-lights this
-   bar for free and there is no [data-theme] block below.
+   A small Helm popover hung under the nav row at the right edge,
+   floating over the guest page: Helm's .menu ground (--overlay, a
+   strong 1px hairline, the medium radius, the level-3 shadow).
+   Every rule is written against tokens.css names (chrome.css
+   @imports it), so html[data-theme="light"] relights the bar with
+   no block of its own.
 
    Everything is scoped under #findbar: .glass, .navrow, .iconbtn
    and .glyph are borrowed as-is and never re-styled globally.
+   Look only: every box below keeps the size and place it had.
    ============================================================ */
 
 /* --- the panel ------------------------------------------------ */
@@ -21,7 +24,6 @@
   right: 16px;
   z-index: 4;
   margin-top: 8px;
-
   width: 360px;
   max-width: calc(100vw - 32px);
   height: 40px;
@@ -29,72 +31,24 @@
   align-items: center;
   gap: 6px;
   padding: 0 6px 0 12px;
-
-  /* A cut edge that catches light: two corners on the diagonal are
-     bevelled (see the @supports below), and the 1px border is left
-     transparent for the rim ring below to sit in — specular at the
-     top-left, accent at the bottom-right — so the panel reads as lit
-     from above and powered from below. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  font-family: var(--ui-font);
-
-  /* Unlike every other pane, this one hangs over a <webview>, which is a
-     separate compositing surface: the host's backdrop-filter cannot be
-     relied on to blur the guest's pixels. So the glass keeps its sheen and
-     tint but gets the acrylic ground under it — the same token body uses —
-     and the query stays legible over any page. The ID outranks .glass, so
-     its `background` shorthand cannot put the tint back on its own.
-
-     No rim layer here: --panel-bg is .94 alpha, not paint, so a border-box
-     gradient underneath it still washed up through the pane. The rim is a
-     ring on ::before instead. */
-  background:
-    var(--sheen),
-    linear-gradient(var(--glass), var(--glass)),
-    linear-gradient(var(--panel-bg), var(--panel-bg));
-
-  /* the .glass recipe, with real elevation: this one floats over a page */
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 8px 24px var(--shade-drop);
-
-  /* A short stepped entrance. Never a continuous animation: a moving
-     layer under backdrop-filter re-blurs the whole pane every frame. */
-  animation: findbar-in 120ms steps(6, end) both;
-
-  /* re-lit in step with the rest of the chrome (chrome.css, 180ms) */
-  transition: background-color 180ms ease,
-              color 180ms ease,
-              border-color 180ms ease,
-              box-shadow 180ms ease;
-}
-
-/* The lit rim, as a ring laid into the transparent border rather than as a
-   background layer under the pane's own ground. inset:-1px reaches from
-   the padding box back out over that 1px border, and the xor mask keeps
-   the frame and discards the middle, so the gradient touches the edge and
-   nothing else. pointer-events:none — the buttons sit under it. */
-#findbar::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-
-/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
-   the 115deg sheen. Guarded, so a Chromium without corner-shape simply
-   keeps the plain radius above. */
-@supports (corner-shape: bevel) {
-  #findbar,
-  #findbar::before { corner-shape: round bevel round bevel; }
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-m);
+  font-family: var(--font);
+  color: var(--text);
+  /* This bar hangs over a <webview>, a separate compositing surface the
+     host cannot blur, so a backdrop-filter would only cost GPU for
+     nothing: --overlay is legible on its own. The ID outranks .glass, so
+     neither its tint nor its blur can come back through the class. */
+  background: var(--overlay);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 1px 0 var(--hairline-inner), var(--shadow-3);
+  /* One short entrance, never a loop. */
+  animation: findbar-in var(--dur) var(--ease) both;
+  /* the theme swap is a colour change, nothing more */
+  transition: background-color var(--dur-slow) var(--ease),
+              color var(--dur-slow) var(--ease),
+              border-color var(--dur-slow) var(--ease);
 }
 
 /* The reset in this app does not carry [hidden]{display:none}, and a
@@ -114,19 +68,20 @@ body.fullscreen #findbar.find-detached,
 body.page-fullscreen #findbar.find-detached { top: 8px; }
 
 @keyframes findbar-in {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: none; }
 }
 
 /* --- the lens glyph ------------------------------------------- */
 #findbar .find-lens {
   flex: 0 0 auto;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 /* --- the query field ------------------------------------------ */
-/* The same lens as #omnibox, one instrument quieter: it lives inside a
-   pane that is already lit, so it does not take the ion glow. */
+/* Helm's input, borderless at rest because it already sits inside a
+   framed popover: on focus it takes the --code-bg well, the accent
+   hairline and the one focus ring. */
 #find-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -134,80 +89,72 @@ body.page-fullscreen #findbar.find-detached { top: 8px; }
   margin: 0;
   padding: 0 8px;
   border: 1px solid transparent;
-  /* A control, not a container: round corners, so the bevel stays the
-     panel's signature. */
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   background: none;
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 13px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  font-weight: 400;
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease);
 }
 
-#find-input::placeholder { color: var(--placeholder); }
+#find-input::placeholder { color: var(--text-3); }
 
 #find-input:focus {
   outline: none;
-  background: var(--sheen), var(--glass);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--code-bg);
+  border-color: var(--accent-line);
+  color: var(--text);
 }
 
-/* The app's one focus idiom: a hairline ion ring with the pip's halo
-   behind it, keyboard focus only. Light, never a thick white outline. */
+/* Helm's one focus treatment, keyboard focus only. */
 #find-input:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-#find-input::selection { background: var(--ion-select); color: var(--fg); }
+#find-input::selection { background: var(--ion-select); color: var(--text); }
 
 /* --- the count read-out --------------------------------------- */
-/* A readout: semi-condensed, and the digits are tabular so "3 of 12"
-   does not shuffle its own width as you walk the matches. */
+/* Tabular digits, so "3 of 12" does not shuffle its own width as you
+   walk the matches. */
 #find-count {
   flex: 0 0 auto;
-  color: var(--fg-2);
-  font-size: 12px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   white-space: nowrap;
 }
 
 /* "No matches" is a quieter statement than a tally. */
-#find-count.none { color: var(--fg-3); }
+#find-count.none { color: var(--text-3); }
 
 /* --- separator ------------------------------------------------ */
-/* The seam motif at instrument scale: a lit hairline that fades out at
-   both ends rather than a solid rule butting into the panel's lips. */
+/* Helm's menu separator turned upright: one plain 1px hairline. */
 #findbar .find-sep {
   flex: 0 0 auto;
   width: 1px;
   height: 18px;
   margin: 0 2px;
-  background: linear-gradient(180deg, transparent, var(--edge) 50%, transparent);
+  background: var(--hairline);
 }
 
 /* --- the three buttons ---------------------------------------- */
-/* .iconbtn already supplies the instrument shape and its hover/active
-   glass from chrome.css. Only the size changes, and only in here. */
+/* .iconbtn supplies Helm's icon-button shape and hover fill from
+   chrome.css. Only the size changes, and only in here. */
 #findbar .iconbtn {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
 }
 
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  #findbar { animation: none; }
+  #findbar { animation: none; transition: none; }
   #find-input { transition: none; }
 }

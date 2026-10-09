@@ -1,598 +1,125 @@
-/* ============================================================
-   chrome.css — "Crystal instruments over an aurora"
-   Frosted glass panels lit from behind by a blue-violet-teal
-   aurora. Cool ion light marks what is active; one warm amber
-   light means a Claude session is live. Nothing else is colour.
+@import url("tokens.css");
 
-   THEMES. Every colour in this file resolves through a token, so
-   a theme is nothing but a second token block. The source of
-   truth is data-theme on <html>: "dark" (the default, and what an
-   absent attribute means) or "light". theme-boot.js stamps it
-   before first paint; no rule below tests the attribute itself.
+/* ============================================================
+   chrome.css — the chrome document, dressed like Helm
+   The tab strip, the toolbar and the side panes are translucent
+   neutral tints over ONE fixed, pre-blurred background layer
+   (.backdrop, painted by backdrop.css / backdrop.js). Depth comes
+   from exact 1px hairlines, a 1px inset top edge and real shadow;
+   the one desaturated accent marks STATE only (the active tab's
+   marker, focus, selection, a primary action); glow exists only as
+   the focus ring. No sheen, no gradient rim, no bevel, no aurora.
+
+   TOKENS. Every colour resolves through tokens.css (imported on the
+   first line, Helm's names and values). This file keeps the older
+   Quartz names below ONLY as aliases onto those, because every pane
+   stylesheet in this document (find, downloads, settings, ...) still
+   reads them; nothing here invents a colour. When the last reader of
+   an alias is gone, the alias can go too.
+
+   THEMES. data-theme on <html> is "dark" (the default, and what an
+   absent attribute means) or "light"; theme-boot.js stamps it before
+   first paint. tokens.css switches its values on that attribute, so
+   the aliases below re-theme by themselves; only the few entries
+   that hold a raw value (a shadow colour, the workspace hues) carry
+   a light variant here.
    ============================================================ */
 
-/* --- tokens: dark (default) ---------------------------------- */
+/* --- legacy aliases (onto tokens.css) ------------------------- */
 :root {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
+  /* base fills: the old aurora's ink field is now just the canvas */
+  --ink-0: var(--bg);
+  --ink-1: var(--surface-solid);
 
-  --fg:   #eef1f8;
-  --fg-2: #b0b5bf;
-  --fg-3: #a6abb5;                        /* 4.5:1 on --panel-bg; #5c6478 was 3.1:1 */
+  /* text */
+  --fg:   var(--text);
+  --fg-2: var(--text-2);
+  --fg-3: var(--text-3);
+  --placeholder: var(--text-3);
 
-  --glass:   rgba(255,255,255,.055);
-  --glass-2: rgba(255,255,255,.09);
-  --glass-3: rgba(255,255,255,.14);
+  /* surfaces. --glass was a control's resting fill, --glass-2 its
+     hover, --glass-3 its pressed / raised state: Helm's card, hover
+     and raised surfaces. --glass-thin was the titlebar's own tint. */
+  --glass:      var(--surface-2);
+  --glass-2:    var(--surface-3);
+  --glass-3:    var(--surface-3);
+  --glass-thin: var(--surface-0);
+  --panel-bg:   var(--surface-solid);  /* panes over a page: nothing behind them to show through */
+  --chamber-bg: var(--surface-1);      /* the Claude pane beside a page */
+  --acrylic-bg: var(--bg);             /* body with DWM acrylic on: the canvas, like any other window */
 
-  --edge:     rgba(255,255,255,.11);
-  --specular: rgba(255,255,255,.14);
+  /* edges. --edge is the hairline; --specular was the lit top lip and
+     is now Helm's inset top edge (box-shadow: inset 0 1px 0 ...). The
+     shaded lower lip is gone (Helm has none), so --shade-in is clear.
+     --shade-drop stays a real shadow colour, Helm's --shadow-2 ink. */
+  --edge:       var(--hairline);
+  --specular:   var(--panel-edge);
+  --shade-in:   transparent;
+  --shade-drop: rgba(0, 0, 0, 0.30);
 
-  --ion:      #72adca;
-  --ion-soft: rgba(114,173,202,.14);
-  --ion-glow: rgba(114,173,202,.22);
+  /* the old lit treatments, flattened. They were gradients used as
+     background LAYERS (var(--sheen), var(--glass) ...), so each stays
+     an image — a clear or one-colour gradient — never a bare colour,
+     which would void the whole background declaration it sits in. */
+  --sheen:     linear-gradient(transparent, transparent);
+  --rim:       linear-gradient(var(--hairline), var(--hairline));
+  --rim-focus: linear-gradient(var(--accent-line), var(--accent-line));
+  --rim-soft:  linear-gradient(var(--hairline), var(--hairline));
+  --seam:      linear-gradient(var(--hairline), var(--hairline));
+  --seam-v:    linear-gradient(var(--hairline), var(--hairline));
 
-  --amber:      #e0a059;
-  --amber-glow: rgba(224,160,89,.26);
+  /* warm state: "a Claude session is live / needs you" reads as Helm's
+     warn. Status is a flat dot now, never a glow, so every pip shadow
+     is none. */
+  --amber:            var(--warn);
+  --amber-glow:       var(--warn-soft);
+  --pip-glow:         none;
+  --pip-amber:        none;
+  --pip-amber-strong: none;
+  --tab-shimmer:      var(--hairline-strong);   /* the loading sweep on a tab */
 
-  /* the diagonal reflection every glass surface carries */
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.035)  0%,
-    rgba(255,255,255,.035) 38%,
-    rgba(255,255,255,.035) 60%);
+  /* shape: the bevel names now carry Helm's plain radii */
+  --bevel:      var(--radius-m);
+  --bevel-lg:   var(--radius-l);
+  --radius-ctl: var(--radius-s);
 
-  /* --- surfaces and details that are not a plain fill --------- */
-  --glass-thin:  rgba(255,255,255,.04);   /* titlebar: the lightest pane */
-  --shade-in:    rgba(0,0,0,.20);         /* the shaded lower lip of a pane */
-  --shade-drop:  rgba(0,0,0,.45);         /* the 1px shadow a pane casts */
-  --focus-ring:  rgba(255,255,255,.55);
-  --placeholder: rgba(190,195,205,.80);   /* --fg-3 vanished against the glass */
-  --scroll-thumb:       rgba(255,255,255,.18);
-  --scroll-thumb-hover: rgba(255,255,255,.28);
-  --tab-shimmer: rgba(255,255,255,.5);    /* the travelling highlight on a loading tab */
-
-  --ion-line:     rgba(114,173,202,.65);  /* omnibox border, focused */
-  --ion-select:   rgba(114,173,202,.30);
-  --seam-color:   rgba(114,173,202,.14);  /* the lit seam under the chrome */
-  --chamber-seam: rgba(114,173,202,.16);   /* the lit top edge of the chamber */
-
-  --acrylic-bg: rgba(26,28,32,.80);         /* body when DWM acrylic is on */
-  --chamber-bg: rgba(26,28,32,.62);         /* the Claude chamber's own glass */
-  --panel-bg:   rgba(34,37,42,.96);       /* panes floating over a page: nothing behind them to blur */
-
-  /* a lit seam: 1px of ion light, brightest at the centre */
-  --seam: linear-gradient(90deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
-
-  /* the three aurora layers, tokenised whole so a theme relights them */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.03) 76%,
-    rgba(140,170,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.13)  0%,
-    rgba(75,34,168,.055) 45%,
-    rgba(75,34,168,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.085)  0%,
-    rgba(15,181,201,.035) 46%,
-    rgba(15,181,201,0)   78%);
-
-  /* type + metrics */
-  --ui-font:    'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
-  --icon-font:  'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
+  /* type + metrics (heights unchanged: look only, nothing moves) */
+  --ui-font:         var(--font);
+  --readout-stretch: 100%;            /* no condensed readout type any more */
   --titlebar-h: 40px;
   --nav-h:      44px;
 
-  /* --- instrument glass -----------------------------------------
-     The glass starts behaving like a pane of an instrument: a cut
-     edge that catches light, a lit rim, status as light, type as a
-     readout. Every token below is built out of the theme tokens
-     above with var(), so the ONE definition here covers dark, light
-     and all six palettes — a palette that relights --ion / --edge /
-     --specular relights these with it. Never copy them per palette.
-
-     A container (the omnibox slot, the active chip, a popover, a
-     pane) carries --bevel with corner-shape: round bevel round
-     bevel — TL round, TR cut, BR round, BL cut. Two cuts on the
-     diagonal, echoing the 115deg sheen; four would read as a kit.
-     CONTROLS keep ordinary round corners at --radius-ctl, so the
-     bevel stays a container signature, and nothing under ~28px
-     tall is ever bevelled. */
-  --bevel:      10px;
-  --bevel-lg:   14px;                     /* full panes, the new-tab search slot */
-  --radius-ctl:  6px;                     /* buttons, chips, menu rows */
-
-  /* the 1px lit edge: specular at the top-left falling to the accent
-     at the bottom-right, so a container looks lit from above and
-     powered from below. Painted as a border-box background layer
-     under a transparent border, which is the only way to put a
-     gradient edge on translucent glass. */
-  --rim: linear-gradient(135deg,
-    var(--specular)  0%,
-    var(--edge)     30%,
-    var(--edge)     62%,
-    var(--edge)    100%);
-
-  /* the same rim with the accent at full strength: the focused slot */
-  --rim-focus: linear-gradient(135deg,
-    var(--specular) 0%,
-    var(--ion-line) 45%,
-    var(--ion) 100%);
-
-  /* a quiet row, or a tile at rest */
-  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
-
-  /* status as light. A pip is a dot that glows rather than a dot that
-     is painted. --pip-glow is the cool instrument light; the amber
-     pair is kept separate because amber resolves through --amber, not
-     --ion, and it alone means "a Claude session". The two amber
-     strengths preserve the distinction the chamber already draws:
-     live breathes, needs-you flashes brighter. */
-  --pip-glow:         none;
-  --pip-amber:        0 0 3px var(--amber-glow);
-  --pip-amber-strong: 0 0 4px var(--amber-glow);
-
-  /* the lit seam stood on end, for the split divider */
-  --seam-v: linear-gradient(180deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
-
-  /* Bahnschrift's wdth axis one notch in (75–100): labels, tab
-     titles, the omnibox, badges — type set as a readout */
-  --readout-stretch: 87.5%;
+  /* Workspace colours: fixed hues (they must stay told apart whatever
+     palette is on) at Helm's quiet strength — the palette presets' own
+     hues and saturation/lightness (tokens.css), so a workspace dot and
+     a palette swatch of the same name are the same colour. The wash is
+     the same hue at the alpha a tint takes behind the strip.
+     workspaces.css (loaded later) states the same values; keep the two
+     equal, or let one of them go. */
+  --ws-ion:      var(--accent);
+  --ws-ember:    hsl(345 31% 71%);
+  --ws-forest:   hsl(150 31% 71%);
+  --ws-ocean:    hsl(188 31% 68%);
+  --ws-midnight: hsl(255 31% 76%);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 7%, transparent);
+  --ws-ember-wash:    hsl(345 31% 71% / .07);
+  --ws-forest-wash:   hsl(150 31% 71% / .07);
+  --ws-ocean-wash:    hsl(188 31% 68% / .07);
+  --ws-midnight-wash: hsl(255 31% 76% / .07);
 }
 
-/* --- tokens: light ------------------------------------------- */
-/* Same instruments, daylight instead of night: white frosted panels
-   over a pale aurora, ink text, edges as soft ink lines, and the ion
-   accent dropped to a deeper blue so it still reads on white.
-   Nothing here but custom properties — every rule below re-themes
-   itself. Type/metric tokens are inherited from the dark block. */
-:root[data-theme="light"] {
-  --ink-0: #eef1f7;
-  --ink-1: #f7f8fc;
-
-  --fg:   #12162a;
-  --fg-2: #4a526b;                        /* ~7:1 on the glass, ~5:1 at the aurora's deepest */
-  --fg-3: #656d82;                        /* 4.7:1 on --panel-bg, the ground every
-                                             pane over a page paints on; #767e94
-                                             cleared the glass but was 3.8:1 there */
-
-  --glass:   rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.72);
-  --glass-3: rgba(255,255,255,.9);
-
-  --edge:     rgba(18,22,42,.12);
-  --specular: rgba(255,255,255,.95);
-
-  --ion:      #0b7fd6;
-  --ion-soft: rgba(11,127,214,.14);
-  --ion-glow: rgba(11,127,214,.35);
-
-  --amber:      #f08c00;
-  --amber-glow: rgba(240,140,0,.4);
-
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.7)  0%,
-    rgba(255,255,255,.25) 38%,
-    rgba(255,255,255,0)   60%);
-
-  /* surfaces and details */
-  --glass-thin:  rgba(255,255,255,.42);
-  --shade-in:    rgba(18,22,42,.07);      /* ink, not black: a shaded lip, not a bruise */
-  --shade-drop:  rgba(18,22,42,.10);
-  --focus-ring:  rgba(18,22,42,.55);
-  --placeholder: rgba(74,82,107,.7);
-  --scroll-thumb:       rgba(18,22,42,.2);
-  --scroll-thumb-hover: rgba(18,22,42,.34);
-  --tab-shimmer: rgba(255,255,255,.85);
-
-  --ion-line:     rgba(11,127,214,.75);
-  --ion-select:   rgba(11,127,214,.2);
-  --seam-color:   rgba(11,127,214,.45);
-  --chamber-seam: rgba(11,127,214,.5);
-
-  --acrylic-bg: rgba(238,241,247,.72);
-  --chamber-bg: rgba(255,255,255,.55);
-  --panel-bg:   rgba(247,248,252,.96);
-
-  /* daylight aurora: cornflower band, lilac pool, mint rim */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,160,255,0)   50%,
-    rgba(120,160,255,.13) 76%,
-    rgba(120,160,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(185,167,255,.55)  0%,
-    rgba(185,167,255,.26) 45%,
-    rgba(185,167,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,216,.45)  0%,
-    rgba(127,224,216,.18) 46%,
-    rgba(127,224,216,0)   78%);
-}
-
-/* --- tokens: palette presets --------------------------------- */
-/* A palette relights the room without redesigning it. data-palette on
-   <html> picks a colour world: the three aurora layers, and the ion
-   accent derived from it. Absent — or "aurora" — is the original look,
-   so nothing above this comment changes.
-
-   Two rules per palette, dark then light, and each selector matches
-   BOTH the root and any descendant carrying the attribute, because
-   settings paints its swatches with <button data-palette="ember">:
-     dark   [data-palette="x"]                                  (0,1,0)
-     light  :root[data-theme="light"][data-palette="x"],
-            :root[data-theme="light"] [data-palette="x"]        (0,3,0)
-   The light pair outranks both the dark palette rule and the light
-   default block, so a light window always lands on the light palette.
-
-   Every block overrides the same ten tokens — the three aurora
-   gradients, --ion / --ion-soft / --ion-glow / --ion-line /
-   --ion-select, --seam-color and --chamber-seam — plus a whisper of
-   the palette in --ink-0 / --ink-1 / --acrylic-bg, and
-   --palette-preview: the 48x32 swatch a settings button wears.
-
-   Two rules the palettes keep. The gradients reuse the default
-   geometry and alphas exactly (only the RGB triples move), so the
-   stepped pool and rim drifts animate identically. And no accent goes
-   near --amber, which is reserved for "a Claude session is live": the
-   closest any palette comes is ember at hue 345 — rose, not orange —
-   and forest's gold lives in the rim wash, never in the accent. */
-
-/* the default world, named, so an "aurora" swatch can paint itself */
-:root,
-[data-palette="aurora"] {
-  --palette-preview: linear-gradient(135deg, #212429 0%, #38236f 40%, #17737f 72%, #72adca 100%);
-}
-
-:root[data-theme="light"],
-:root[data-theme="light"] [data-palette="aurora"] {
-  --palette-preview: linear-gradient(135deg, #eef1f7 0%, #b9a7ff 40%, #7fe0d8 72%, #0b7fd6 100%);
-}
-
-/* --- ember: warm dusk ---------------------------------------- */
-/* Rose band, deep plum pool, magenta rim; the accent a coral-pink at
-   hue 345, kept off orange so it can never be read as the amber. */
-[data-palette="ember"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #cb768b;
-  --ion-soft: rgba(203,118,139,.14);
-  --ion-glow: rgba(203,118,139,.22);
-
-  --ion-line:     rgba(203,118,139,.65);
-  --ion-select:   rgba(203,118,139,.30);
-  --seam-color:   rgba(203,118,139,.14);
-  --chamber-seam: rgba(203,118,139,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,160,190,0)   50%,
-    rgba(255,160,190,.03) 76%,
-    rgba(255,160,190,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(112,26,96,.13)  0%,
-    rgba(112,26,96,.055) 45%,
-    rgba(112,26,96,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(201,35,118,.085)  0%,
-    rgba(201,35,118,.035) 46%,
-    rgba(201,35,118,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #4c1e47 40%, #7d2353 72%, #cb768b 100%);
-}
-
-:root[data-theme="light"][data-palette="ember"],
-:root[data-theme="light"] [data-palette="ember"] {
-  --ink-0: #f7edf1;
-  --ink-1: #fdf7f9;
-  --acrylic-bg: rgba(247,237,241,.72);
-
-  --ion:      #c1113d;
-  --ion-soft: rgba(193,17,61,.14);
-  --ion-glow: rgba(193,17,61,.35);
-
-  --ion-line:     rgba(193,17,61,.75);
-  --ion-select:   rgba(193,17,61,.2);
-  --seam-color:   rgba(193,17,61,.45);
-  --chamber-seam: rgba(193,17,61,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,150,185,0)   50%,
-    rgba(255,150,185,.13) 76%,
-    rgba(255,150,185,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(246,176,205,.55)  0%,
-    rgba(246,176,205,.26) 45%,
-    rgba(246,176,205,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(232,160,214,.45)  0%,
-    rgba(232,160,214,.18) 46%,
-    rgba(232,160,214,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #fdf7f9 0%, #f6b0cd 40%, #e8a0d6 72%, #c1113d 100%);
-}
-
-/* --- forest: deep green -------------------------------------- */
-/* Teal band over a forest-floor pool, with the rim carrying the one
-   hint of gold — a wash, well off the amber's saturation, and never
-   the accent. The accent is mint at hue 160. */
-[data-palette="forest"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #72caad;
-  --ion-soft: rgba(114,202,173,.14);
-  --ion-glow: rgba(114,202,173,.22);
-
-  --ion-line:     rgba(114,202,173,.65);
-  --ion-select:   rgba(114,202,173,.30);
-  --seam-color:   rgba(114,202,173,.14);
-  --chamber-seam: rgba(114,202,173,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,225,200,0)   50%,
-    rgba(120,225,200,.03) 76%,
-    rgba(120,225,200,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,84,60,.13)  0%,
-    rgba(16,84,60,.055) 45%,
-    rgba(16,84,60,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(178,166,104,.085)  0%,
-    rgba(178,166,104,.035) 46%,
-    rgba(178,166,104,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #183e33 40%, #716c4c 72%, #72caad 100%);
-}
-
-:root[data-theme="light"][data-palette="forest"],
-:root[data-theme="light"] [data-palette="forest"] {
-  --ink-0: #ecf4ef;
-  --ink-1: #f6fbf8;
-  --acrylic-bg: rgba(236,244,239,.72);
-
-  --ion:      #067a53;
-  --ion-soft: rgba(6,122,83,.14);
-  --ion-glow: rgba(6,122,83,.35);
-
-  --ion-line:     rgba(6,122,83,.75);
-  --ion-select:   rgba(6,122,83,.2);
-  --seam-color:   rgba(6,122,83,.45);
-  --chamber-seam: rgba(6,122,83,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,220,190,0)   50%,
-    rgba(120,220,190,.13) 76%,
-    rgba(120,220,190,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(158,226,190,.55)  0%,
-    rgba(158,226,190,.26) 45%,
-    rgba(158,226,190,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(226,214,148,.45)  0%,
-    rgba(226,214,148,.18) 46%,
-    rgba(226,214,148,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f6fbf8 0%, #9ee2be 40%, #e2d694 72%, #067a53 100%);
-}
-
-/* --- ocean: navy and cyan ------------------------------------ */
-/* A steel band falling into a navy pool, cyan surfacing at the rim.
-   Accent cyan at hue 190 — the default ion's neighbourhood, pushed
-   greener and hung in a much colder room. */
-[data-palette="ocean"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #72bdca;
-  --ion-soft: rgba(114,189,202,.14);
-  --ion-glow: rgba(114,189,202,.22);
-
-  --ion-line:     rgba(114,189,202,.65);
-  --ion-select:   rgba(114,189,202,.30);
-  --seam-color:   rgba(114,189,202,.14);
-  --chamber-seam: rgba(114,189,202,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.03) 76%,
-    rgba(130,190,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,44,120,.13)  0%,
-    rgba(16,44,120,.055) 45%,
-    rgba(16,44,120,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(24,190,214,.085)  0%,
-    rgba(24,190,214,.035) 46%,
-    rgba(24,190,214,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #182854 40%, #1c7988 72%, #72bdca 100%);
-}
-
-:root[data-theme="light"][data-palette="ocean"],
-:root[data-theme="light"] [data-palette="ocean"] {
-  --ink-0: #eaf1f8;
-  --ink-1: #f5f9fd;
-  --acrylic-bg: rgba(234,241,248,.72);
-
-  --ion:      #087a91;
-  --ion-soft: rgba(8,122,145,.14);
-  --ion-glow: rgba(8,122,145,.35);
-
-  --ion-line:     rgba(8,122,145,.75);
-  --ion-select:   rgba(8,122,145,.2);
-  --seam-color:   rgba(8,122,145,.45);
-  --chamber-seam: rgba(8,122,145,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,175,255,0)   50%,
-    rgba(120,175,255,.13) 76%,
-    rgba(120,175,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(150,190,250,.55)  0%,
-    rgba(150,190,250,.26) 45%,
-    rgba(150,190,250,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(126,222,238,.45)  0%,
-    rgba(126,222,238,.18) 46%,
-    rgba(126,222,238,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f5f9fd 0%, #96befa 40%, #7edeee 72%, #087a91 100%);
-}
-
-/* --- midnight: indigo and violet ----------------------------- */
-/* The darkest room here: near-black indigo ink, a violet pool, a
-   periwinkle rim. Accent violet at hue 262. */
-[data-palette="midnight"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #a281cf;
-  --ion-soft: rgba(162,129,207,.14);
-  --ion-glow: rgba(162,129,207,.22);
-
-  --ion-line:     rgba(162,129,207,.65);
-  --ion-select:   rgba(162,129,207,.30);
-  --seam-color:   rgba(162,129,207,.14);
-  --chamber-seam: rgba(162,129,207,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,130,235,0)   50%,
-    rgba(120,130,235,.03) 76%,
-    rgba(120,130,235,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(84,34,178,.13)  0%,
-    rgba(84,34,178,.055) 45%,
-    rgba(84,34,178,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(138,104,245,.085)  0%,
-    rgba(138,104,245,.035) 46%,
-    rgba(138,104,245,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #3d2374 40%, #5b4999 72%, #a281cf 100%);
-}
-
-:root[data-theme="light"][data-palette="midnight"],
-:root[data-theme="light"] [data-palette="midnight"] {
-  --ink-0: #efedf9;
-  --ink-1: #f8f7fd;
-  --acrylic-bg: rgba(239,237,249,.72);
-
-  --ion:      #6322d3;
-  --ion-soft: rgba(99,34,211,.14);
-  --ion-glow: rgba(99,34,211,.35);
-
-  --ion-line:     rgba(99,34,211,.75);
-  --ion-select:   rgba(99,34,211,.2);
-  --seam-color:   rgba(99,34,211,.45);
-  --chamber-seam: rgba(99,34,211,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,152,255,0)   50%,
-    rgba(150,152,255,.13) 76%,
-    rgba(150,152,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(198,176,255,.55)  0%,
-    rgba(198,176,255,.26) 45%,
-    rgba(198,176,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(178,158,250,.45)  0%,
-    rgba(178,158,250,.18) 46%,
-    rgba(178,158,250,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f8f7fd 0%, #c6b0ff 40%, #b29efa 72%, #6322d3 100%);
-}
-
-/* --- mono: graphite ------------------------------------------ */
-/* No chroma in the aurora at all: the three layers are pure grey, so
-   they read as luminance alone — a band of light, a pool, a rim. The
-   accent carries the only colour, and barely: a cool off-white at hue
-   215 in the dark, graphite blue-grey in daylight. */
-[data-palette="mono"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #aab0ba;
-  --ion-soft: rgba(170,176,186,.14);
-  --ion-glow: rgba(170,176,186,.22);
-
-  --ion-line:     rgba(170,176,186,.65);
-  --ion-select:   rgba(170,176,186,.30);
-  --seam-color:   rgba(170,176,186,.14);
-  --chamber-seam: rgba(170,176,186,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(214,214,214,0)   50%,
-    rgba(214,214,214,.03) 76%,
-    rgba(214,214,214,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(128,128,128,.13)  0%,
-    rgba(128,128,128,.055) 45%,
-    rgba(128,128,128,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(186,186,186,.085)  0%,
-    rgba(186,186,186,.035) 46%,
-    rgba(186,186,186,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #2f3035 40%, #5b5c61 72%, #aab0ba 100%);
-}
-
-:root[data-theme="light"][data-palette="mono"],
-:root[data-theme="light"] [data-palette="mono"] {
-  --ink-0: #eff0f2;
-  --ink-1: #f8f9fa;
-  --acrylic-bg: rgba(239,240,242,.72);
-
-  --ion:      #495565;
-  --ion-soft: rgba(73,85,101,.14);
-  --ion-glow: rgba(73,85,101,.35);
-
-  --ion-line:     rgba(73,85,101,.75);
-  --ion-select:   rgba(73,85,101,.2);
-  --seam-color:   rgba(73,85,101,.45);
-  --chamber-seam: rgba(73,85,101,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,140,140,0)   50%,
-    rgba(140,140,140,.13) 76%,
-    rgba(140,140,140,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(176,176,176,.55)  0%,
-    rgba(176,176,176,.26) 45%,
-    rgba(176,176,176,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(196,196,196,.45)  0%,
-    rgba(196,196,196,.18) 46%,
-    rgba(196,196,196,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f8f9fa 0%, #c4c4c4 40%, #8c8c8c 72%, #495565 100%);
+html[data-theme="light"] {
+  --shade-drop: rgba(0, 0, 0, 0.08);
+
+  --ws-ember:    hsl(345 26% 41%);
+  --ws-forest:   hsl(150 26% 36%);
+  --ws-ocean:    hsl(188 30% 34%);
+  --ws-midnight: hsl(255 26% 46%);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 9%, transparent);
+  --ws-ember-wash:    hsl(345 26% 41% / .09);
+  --ws-forest-wash:   hsl(150 26% 36% / .09);
+  --ws-ocean-wash:    hsl(188 30% 34% / .09);
+  --ws-midnight-wash: hsl(255 26% 46% / .09);
 }
 
 /* --- reset / window ------------------------------------------ */
@@ -607,19 +134,22 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  background: var(--ink-0);        /* never fully transparent */
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 13px;
+  background: var(--bg);           /* never fully transparent: the backdrop's fallback */
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   line-height: 1.4;
+  font-feature-settings: "ss01", "cv11";   /* Helm base.css: Segoe UI Variable's open forms */
+  -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
-/* DWM acrylic on: let the desktop read through faintly, no further. */
+/* DWM acrylic on: the canvas stays the plain base. The picture behind the
+   chrome is Quartz's own background layer (.backdrop), not the desktop read
+   through the window, so acrylic changes nothing here. */
 body.acrylic { background: var(--acrylic-bg); }
-body.acrylic .aurora-base { opacity: .45; }
 
 /* Frameless: Win11 rounds the frame itself and guest views do not clip,
    so no outer radius is added. This stays as the guard the contract asks for. */
@@ -630,7 +160,11 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 
 .spacer { flex: 1 1 auto; min-width: 0; }
 
-/* --- backdrop: coloured light behind the glass ---------------- */
+/* --- backdrop: the one pre-blurred background layer ----------- */
+/* Its children (.bg-base / .bg-photo / .bg-wash) are styled by backdrop.css
+   and painted once by backdrop.js; this file only places the box. Every
+   chrome surface above it is a translucent tint with NO backdrop-filter:
+   the blur is already in the bitmap, so nothing re-blurs at runtime. */
 .backdrop {
   /* absolute, not fixed. The chrome document never scrolls (html and body are
      overflow:hidden at 100% height), so the two place it identically — but a
@@ -640,8 +174,8 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
      it) was forced into a THIRD full-window layer: two extra window-sized
      tile sets in the GPU process for pixels the root layer can hold. Measured
      2026-09-26: chrome layers 16 -> 14, chrome tile memory 31.6 -> 24.3 MB.
-     The glass above re-blurs the same pixels; screenshots differ by at most
-     4/255 inside the frosted rows (raster rounding), nowhere else. */
+     (Measured with the old aurora; the background layer that replaced it
+     sits in the same box for the same reason.) */
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -651,39 +185,18 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 
 .backdrop > div { position: absolute; inset: 0; }
 
-/* (a) base ink field */
-.aurora-base { background: linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%); }
 
-/* (b) light band entering from the upper-left along the -35deg axis */
-.aurora-band { background: var(--aurora-band); }
-
-/* (c) violet pool low in the window, under the Claude chamber */
-.aurora-pool {
-  background: var(--aurora-pool);
-  /* steps(): the pool nudges twice a second instead of every frame. Each move
-     makes every frosted panel above it re-blur, so continuous motion cost a
-     quarter of a CPU core for a sway nobody can see happen. */
-  /* Still. It drifted in 120 steps a minute once; each step re-blurred every
-     frosted surface above it, which read as a faint flicker in the panes and
-     cost real GPU time whenever a Claude tab was open. */
-}
-
-/* (d) teal-cyan rim at the bottom-right, drifting the other way */
-.aurora-rim {
-  background: var(--aurora-rim);
-}
-
-
-
-/* --- glass recipe -------------------------------------------- */
+/* --- the tint recipe (class .glass, kept for its many users) -- */
+/* What used to be frosted glass is now Helm's window-chrome tint: a
+   translucent neutral over the background layer, a 1px inset top edge,
+   and NO backdrop-filter — the layer underneath is blurred once, in a
+   bitmap, so a bar never re-blurs it (and full-width blurred bars are
+   what made this GPU drop raster tiles). Panes that float over a web
+   page override the fill with --surface-solid / --overlay in their own
+   sheets: there is nothing behind them to show through. */
 .glass {
-  background: var(--sheen), var(--glass);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 1px 0 var(--shade-drop);
+  background: var(--surface-0);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
 /* --- chrome layer + launch entrance --------------------------- */
@@ -693,27 +206,27 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
   flex: 0 0 auto;
 }
 
+/* The entrance is a short fade and a 2px settle — Helm's 150ms ceiling,
+   no blur (a filter on the whole chrome would have to be rasterised
+   twice for a flourish nobody waits for). */
 body:not(.booted) .chrome-layer {
   opacity: 0;
-  filter: blur(6px);
-  transform: translateY(-4px);
+  transform: translateY(-2px);
 }
 
 body.booted .chrome-layer {
   opacity: 1;
-  filter: none;                    /* back to none so child backdrop-filters work */
   transform: none;
-  /* the entrance, plus the 180ms theme tempo (see "theme transition") */
-  transition: opacity 600ms ease-out, filter 600ms ease-out, transform 600ms ease-out,
-              background-color 180ms ease, color 180ms ease,
-              border-color 180ms ease, box-shadow 180ms ease;
+  /* the entrance, plus the theme tempo (see "theme transition") */
+  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease),
+              background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 
-body:not(.booted) .navrow { opacity: 0; transform: translateY(-3px); }
+body:not(.booted) .navrow { opacity: 0; }
 body.booted .navrow {
   opacity: 1;
-  transform: none;
-  transition: opacity 520ms ease-out 120ms, transform 520ms ease-out 120ms;
+  transition: opacity var(--dur-slow) var(--ease);
 }
 
 /* --- icon glyphs --------------------------------------------- */
@@ -731,38 +244,31 @@ button {
   padding: 0;
   border: none;
   background: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   font: inherit;
   cursor: default;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 
-button:disabled { color: var(--fg-3); }
+button:disabled { color: var(--text-3); }
 
-/* Focus is light, not paint: a 1px accent ring with the pip's halo
-   sized up behind it, never a thick white outline. */
+/* Focus is Helm's ring and nothing else: a 1px gap in the base colour,
+   then 2px of the accent at half strength (tokens.css --focus-ring is a
+   whole box-shadow value). It REPLACES any resting shadow while it
+   shows — a ring added to an inset edge would need every control to
+   restate its edge here. Never an outline, never a glow. */
 button:focus-visible,
 .tab:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-/* A glass control keeps its lit lip and its shaded underside while it
-   is focused; the halo is simply added to them. Said after, and one
-   class heavier, so it beats the rule above rather than erasing it. */
-button.glass:focus-visible {
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 1px 0 var(--shade-drop),
-    0 0 0 3px var(--ion-soft);
-}
-
-/* --- titlebar: the thinnest, lightest pane -------------------- */
+/* --- titlebar (the tab strip's row) --------------------------- */
 #titlebar {
   position: relative;
   display: flex;
@@ -770,23 +276,23 @@ button.glass:focus-visible {
   gap: 4px;
   height: var(--titlebar-h);
   padding-left: 8px;
-  border-bottom: 1px solid var(--edge);
-  background: var(--sheen), var(--glass-thin);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-0);
+  box-shadow: none;              /* the top edge of the window is the frame's own */
   -webkit-app-region: drag;
 }
 
 /* --- the strip tint: which workspace you are in, very faintly ---
    app.js stamps data-ws-colour on the titlebar (the row the tab strip lives
-   in) with the current workspace's colour; the five values are workspaces.css
-   tokens, the same ones the dots wear, at 7% — enough to tell two workspaces
-   apart out of the corner of the eye, not enough to be a colour scheme. Home
-   has no colour, so it carries no attribute and this never applies to it. */
+   in) with the current workspace's colour; the five values are the
+   workspace tokens (alias block above), the same ones the dots wear, at
+   7% — enough to tell two workspaces apart out of the corner of the eye,
+   not enough to be a colour scheme. Home has no colour, so it carries no
+   attribute and this never applies to it. */
 #titlebar[data-ws-colour] {
   background:
     linear-gradient(var(--ws-tint), var(--ws-tint)),
-    var(--sheen), var(--glass-thin);
+    var(--surface-0);
 }
 
 #titlebar[data-ws-colour="ion"]      { --ws-tint: var(--ws-ion-wash); }
@@ -806,16 +312,22 @@ button.glass:focus-visible {
   overflow-y: hidden;
 }
 
+/* the + after the strip: Helm's ghost icon button */
 #newtab {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
 }
 
-#newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#newtab:active { background: var(--sheen), var(--glass-3); }
+#newtab:hover { background: var(--surface-3); color: var(--text); }
+#newtab:active { background: var(--surface-2); }
 
 /* --- tabs (chips injected at runtime) ------------------------- */
+/* Helm's tab (ui/shell/tabs.css): quiet at rest, a faint fill on hover,
+   and the active one a raised panel — --surface-1, a hairline, the inset
+   top edge and the small shadow. The accent is only the short marker
+   under the active title (::after), never a fill or a rim. */
 .tab {
   position: relative;
   display: flex;
@@ -832,66 +344,46 @@ button.glass:focus-visible {
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
-  border-radius: var(--bevel);
+  border-radius: var(--radius-m);
   background: transparent;
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* the title is a readout: Bahnschrift a notch narrower, opened up a
-     hair, and figures in a host or a count line up column to column */
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  line-height: 1;
   white-space: nowrap;
   cursor: default;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 
 .tab:hover {
-  background: var(--sheen), var(--glass-2);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--surface-0);
+  color: var(--text);
 }
 
-/* The active chip is the one segment of the strip that is a container:
-   it takes the cut corners (in the @supports block near the end) and
-   the lit rim, so it reads as a pane seated in the strip rather than a
-   chip tinted a shade lighter. Inactive chips stay quiet — hover is
-   still nothing but a lighter glass and a hairline.
-
-   The rim is a border-box layer under a transparent border, and the
-   interior above it has to be OPAQUE or the gradient shows through the
-   whole chip instead of sitting on its edge — that bleed is what turned
-   the chip into a grey blob. A chip cannot take the ring-on-a-pseudo
-   treatment: ::after is the ion line (and the loading shimmer) and
-   ::before is the workspace bar, so both are spoken for. So this is the
-   addendum's opaque-interior variant — --panel-bg under the glass tint,
-   which keeps the chip reading lighter than its neighbours while the
-   rim stops at the border. */
 .tab.active {
-  border-color: transparent;
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 6px 14px -8px var(--shade-drop);
+  background: var(--surface-1);
+  border-color: var(--hairline);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
 }
 
-/* the ion line under the active chip */
+/* keyboard focus on a chip: the ring, plus the active chip's own edge */
+.tab.active:focus-visible { box-shadow: var(--focus-ring), var(--shadow-1); }
+
+/* the accent marker under the active chip: short, centred, flat */
 .tab::after {
   content: '';
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--ion), transparent);
+  left: 50%;
+  bottom: 2px;
+  width: 14px;
+  height: 2px;
+  margin-left: -7px;
+  border-radius: 2px;
+  background: var(--accent);
   opacity: 0;
-  transition: opacity 140ms steps(3, end);
+  transition: opacity var(--dur) var(--ease);
   pointer-events: none;
 }
 
@@ -910,23 +402,6 @@ button.glass:focus-visible {
    told apart from each other whatever palette is on. */
 .tab[hidden] { display: none; }
 
-:root {
-  --ws-ion:      var(--ion);
-  --ws-ember:    hsl(345 100% 72%);
-  --ws-forest:   hsl(160 84% 68%);
-  --ws-ocean:    hsl(190 100% 70%);
-  --ws-midnight: hsl(262 92% 76%);
-}
-
-/* Light: the same hues, dropped to 44% so they read on a pale strip. */
-:root[data-theme="light"] {
-  --ws-ion:      var(--ion);
-  --ws-ember:    hsl(345 100% 44%);
-  --ws-forest:   hsl(160 84% 44%);
-  --ws-ocean:    hsl(190 100% 44%);
-  --ws-midnight: hsl(262 92% 44%);
-}
-
 .tab[data-ws-colour="ion"]      { --ws-colour: var(--ws-ion); }
 .tab[data-ws-colour="ember"]    { --ws-colour: var(--ws-ember); }
 .tab[data-ws-colour="forest"]   { --ws-colour: var(--ws-forest); }
@@ -943,7 +418,7 @@ button.glass:focus-visible {
   border-radius: 2px;
   background: var(--ws-colour);
   opacity: .45;
-  transition: opacity 140ms steps(3, end);
+  transition: opacity var(--dur) var(--ease);
   pointer-events: none;
 }
 
@@ -951,7 +426,7 @@ button.glass:focus-visible {
 .tab[data-ws-colour].active::before { opacity: .9; }
 
 /* out of the workspace bar's way */
-.tab[data-ws-colour]::after { bottom: 2px; }
+.tab[data-ws-colour]::after { bottom: 4px; }
 
 /* The switcher UI's slot, left of the strip. app.js inserts it empty and
    workspaces.css styles whatever goes in; zero-width until it does. */
@@ -975,12 +450,12 @@ button.glass:focus-visible {
 .tab-close {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 10px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 /* collapse-to-icon: the close button's twin, one slot to its left. Same box,
@@ -989,12 +464,12 @@ button.glass:focus-visible {
 .tab-collapse {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 9px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .tab:hover .tab-close,
@@ -1002,8 +477,8 @@ button.glass:focus-visible {
 .tab:hover .tab-collapse,
 .tab.active .tab-collapse { opacity: 1; }
 
-.tab-close:hover { background: var(--glass-3); color: var(--fg); }
-.tab-collapse:hover { background: var(--glass-3); color: var(--fg); }
+.tab-close:hover { background: var(--surface-3); color: var(--text); }
+.tab-collapse:hover { background: var(--surface-3); color: var(--text); }
 
 /* --- tab chip states (classes set by app.js) ------------------ */
 
@@ -1022,15 +497,22 @@ img.tab-icon:not([src]),
 img.tab-icon[src=""],
 .tab.claude img.tab-icon { display: none; }
 
-/* loading: a highlight travels the ion line under the chip. The line
-   itself is still only visible while the tab is active. */
-.tab.loading::after {
+/* loading: the active chip's marker widens into a track and a short
+   accent highlight travels it until the page is in. Only the ACTIVE chip
+   shows (and so runs) it — a marker at opacity 0 would still tick the
+   compositor on every background tab — and only while loading, so it is
+   never an always-running animation. steps() keeps it to 20 paints a
+   second rather than every frame. */
+.tab.active.loading::after {
+  left: 10px;
+  right: 10px;
+  width: auto;
+  margin-left: 0;
   background:
-    linear-gradient(90deg, transparent 0%, var(--tab-shimmer) 50%, transparent 100%),
-    linear-gradient(90deg, transparent, var(--ion), transparent);
+    linear-gradient(90deg, transparent 0%, var(--accent) 50%, transparent 100%) no-repeat,
+    var(--tab-shimmer);
   background-size: 40% 100%, 100% 100%;
-  background-repeat: no-repeat, no-repeat;
-  animation: tab-shimmer 1.2s steps(24) infinite;  /* same reason as live-pulse */
+  animation: tab-shimmer 1.2s steps(24) infinite;
 }
 
 @keyframes tab-shimmer {
@@ -1039,7 +521,7 @@ img.tab-icon[src=""],
 }
 
 /* broken: the page crashed or never loaded. The chip trades its favicon for a
-   warning glyph in --fg-3 — never amber, which means a live Claude session. */
+   warning glyph in --text-3 — quiet grey, never the warn colour of a pane that needs you. */
 .tab .tab-warn { display: none; }
 
 .tab.broken .tab-warn {
@@ -1050,20 +532,20 @@ img.tab-icon[src=""],
   font-size: 11px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .tab.broken img.tab-icon { display: none; }
 
 /* asleep: the tab gave its renderer back. Deliberately quiet — no badge, no
    glyph, nothing that changes the chip's width — because the strip must not
-   reshuffle when a tab sleeps or wakes. The title drops to --fg-3 and the
+   reshuffle when a tab sleeps or wakes. The title drops to --text-3 and the
    favicon dims; hovering brings the title back up, so the chip still answers. */
-.tab.asleep .tab-title { color: var(--fg-3); }
+.tab.asleep .tab-title { color: var(--text-3); }
 
 .tab.asleep img.tab-icon { opacity: .55; }
 
-.tab.asleep:hover .tab-title { color: var(--fg-2); }
+.tab.asleep:hover .tab-title { color: var(--text-2); }
 
 /* ...and one mark, so a dim chip is not the only tell — a workspace can come
    back from a restart with every chip in it asleep, and "dim" needs something
@@ -1076,7 +558,7 @@ img.tab-icon[src=""],
   top: 50%;
   transform: translateY(-50%);
   display: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: 10px;
   line-height: 1;
   pointer-events: none;
@@ -1105,22 +587,21 @@ img.tab-icon[src=""],
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 11px;
   line-height: 1;
-  color: var(--fg-2);
+  color: var(--text-2);
 }
 
-.tab-audio:hover { background: var(--glass-3); color: var(--fg); }
+.tab-audio:hover { background: var(--surface-3); color: var(--text); }
 
 /* It is a control, but it is also a status: sound coming out of the tab
-   is shown by the glyph itself (E767 speaker vs E74F muted); the pip token
-   now resolves to none, so nothing here glows at rest. */
-.tab-audio:not(.is-muted) { text-shadow: var(--pip-glow); }
+   is shown by the glyph itself (E767 speaker vs E74F muted), and nothing
+   about it glows: no text-shadow, playing or not. */
 
-/* muted is the quiet state in every sense: --fg-3, like the broken glyph */
-.tab-audio.is-muted { color: var(--fg-3); }
+/* muted is the quiet state in every sense: --text-3, like the broken glyph */
+.tab-audio.is-muted { color: var(--text-3); }
 
 /* .glyph sets display:inline-block, so hidden has to be said louder */
 .tab-audio[hidden] { display: none; }
@@ -1181,13 +662,14 @@ img.tab-icon[src=""],
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--glass-3);
-  color: var(--fg);
+  background: var(--overlay);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--hairline-strong);
   font-family: var(--icon-font);
   font-size: 8px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .tab.pinned:hover .tab-expand,
@@ -1205,7 +687,7 @@ img.tab-icon[src=""],
   font-size: 12px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-2);
+  color: var(--text-2);
 }
 
 .tab.pinned.has-icon .tab-globe,
@@ -1226,7 +708,7 @@ img.tab-icon[src=""],
   font-size: 11px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 /* an icon-only chip has no room for the mark: it would crowd out the favicon */
@@ -1235,29 +717,21 @@ img.tab-icon[src=""],
 
 /* --- drag to reorder (app.js sets the classes and the transforms) ---
    The lifted chip tracks the pointer exactly, so it carries NO transform
-   transition; the chips stepping aside carry a stepped one, because the
-   strip sits on a backdrop-filter and a smooth slide re-blurs every frame. */
+   transition; the chips stepping aside slide in Helm's 150ms. (They used to
+   step, because the strip was a backdrop-filter and a smooth slide re-blurred
+   it every frame; the strip is a plain tint now, so a slide costs nothing.)
+   Raised look as Helm's lifted tab: a near-opaque fill, so the chips it
+   passes over do not show through, a stronger hairline and the small shadow. */
 .tab.dragging {
   z-index: 4;
-  border-color: transparent;
-  /* opaque interior under the tint, for the same reason .tab.active
-     carries one: both of a chip's pseudo-elements are already in use, so
-     the rim stays a border-box layer and --panel-bg is what stops it
-     bleeding across the chip. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 10px 20px -10px var(--shade-drop),
-    0 0 0 1px var(--ion-soft);
+  background: var(--overlay);
+  border-color: var(--hairline-strong);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
   transition: none;
 }
 
-.tab.drag-shift { transition: transform 140ms steps(4, end); }
+.tab.drag-shift { transition: transform var(--dur-slow) var(--ease); }
 
 /* No close buttons anywhere in the strip while a chip is in the air. Three
    classes deep and after it, so it beats the .tab:hover rule above. */
@@ -1281,14 +755,17 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 
 #win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
 
-#win-min:hover, #win-max:hover { background: var(--glass-2); color: var(--fg); }
-#win-min:active, #win-max:active { background: var(--glass-3); }
+#win-min:hover, #win-max:hover { background: var(--surface-3); color: var(--text); }
+#win-min:active, #win-max:active { background: var(--surface-2); }
 
 /* the one earned exception to monochrome: the Windows close convention */
 #win-close:hover { background: rgba(232,17,35,.9); color: #ffffff; }
 #win-close:active { background: rgba(232,17,35,.7); color: #ffffff; }
 
 /* --- nav row -------------------------------------------------- */
+/* The toolbar: the same --surface-0 tint as the strip (it wears .glass),
+   closed by one hairline. No inset top edge here — the strip's hairline is
+   directly above, and two 1px lines stacked read as a groove. */
 .navrow {
   position: relative;
   display: flex;
@@ -1296,59 +773,41 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   gap: 6px;
   height: var(--nav-h);
   padding: 0 10px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: none;
 }
 
-/* The lit seam under the chrome. It rides ::before rather than ::after so
-   that ::after is free for the omnibox's rim ring further down: an anchored
-   element has to come AFTER its anchor in tree order, and ::before is
-   generated ahead of #omnibox. Nothing else about the seam changes — it is
-   pinned by its own left/right/bottom and never needed an anchor. */
-.navrow::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: var(--seam);
-  pointer-events: none;
-}
-
-/* .iconbtn is the same instrument shape, for nav buttons added later
-   (#theme carries it, and .glass, so it reads as a chip when idle). */
-/* Controls, not containers: round corners at --radius-ctl, no bevel.
-   What they gain is the light focus — the ring is in the shared
-   :focus-visible rule, so nothing is repeated here. */
+/* .iconbtn is the same shape, for nav buttons added later (#theme,
+   the save star, downloads, reader and picture-in-picture carry it).
+   Helm's ghost icon button: no fill at rest, --surface-3 on hover,
+   --surface-2 pressed. The ring is the shared :focus-visible one. The
+   .glass several of them also carry is cancelled here: a control sits
+   ON the bar's tint, it does not add a second one. */
 #back, #forward, #reload, .iconbtn {
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
 }
 
-#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--glass-2); color: var(--fg); }
-#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--glass-3); }
-#back:disabled, #forward:disabled { background: none; color: var(--fg-3); }
+.iconbtn.glass { background: transparent; box-shadow: none; }
+.iconbtn.glass:focus-visible { box-shadow: var(--focus-ring); }
+
+#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--surface-3); color: var(--text); }
+#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--surface-2); }
+#back:disabled, #forward:disabled { background: none; color: var(--text-3); }
 
 /* the theme toggle: glyph swapped by app.js (moon in dark, sun in light) */
 #theme .glyph { font-family: var(--icon-font); }
 
 /* the reload button in its "stop loading" state. app.js swaps the glyph
-   to &#xE711; and adds this class; the instrument itself does not change. */
+   to &#xE711; and adds this class; the button itself does not change. */
 #reload.stop { /* documented state — no visual override by design */ }
 
-/* The omnibox sits in the middle of the row as the lit instrument
-   slot: the one bevelled container in the nav row, wearing the rim
-   (specular top-left, accent bottom-right) so it looks seated and
-   powered even before it is touched. The pill went with the round
-   corners — a slot is cut, not moulded. Its text is the readout.
-
-   The background here is nothing but the ordinary glass recipe. Running
-   the rim as a border-box layer under it washed the whole slot in a
-   grey-to-cyan gradient and took the placeholder with it, because the
-   glass above it is translucent. The rim is a RING now, anchored to this
-   input from .navrow::after (see below); the 1px border stays
-   transparent so the ring has its own lane to sit in. */
+/* The omnibox: Helm's text input (components.css .input), at the slot's
+   own 34px. A sunken --code-bg field with a 1px hairline; hover firms the
+   hairline, focus turns it to the accent line and adds the focus ring.
+   It is a plain bordered box now, so the anchored rim ring that used to
+   ride .navrow::after (and its no-anchor fallback) is gone. */
 #omnibox {
   flex: 1 1 auto;
   min-width: 0;
@@ -1356,138 +815,67 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   margin: 0 auto;
   height: 34px;
   padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background: var(--sheen), var(--glass);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 13.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--code-bg);
+  box-shadow: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
-  /* stepped and short, like every other state change in the chrome —
-     a smooth fade here re-blurs the whole frosted row every frame.
-     background-color stays on the 180ms theme tempo so a theme switch
-     re-lights the lens in step with the row around it. */
-  transition: box-shadow 140ms steps(3, end), border-color 140ms steps(3, end),
-              color 140ms steps(3, end), background-color 180ms ease;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
 
-#omnibox::placeholder { color: var(--placeholder); }
+#omnibox::placeholder { color: var(--text-3); }
 
-/* hover lifts the glass a shade; the ring is unchanged */
-#omnibox:hover { background: var(--sheen), var(--glass-2); }
+#omnibox:hover { border-color: var(--hairline-strong); }
 
-/* the one place the chrome lights up: the glass lifts and the ring goes
-   to full accent (the ring itself is switched on .navrow::after, below) */
 #omnibox:focus {
   outline: none;
-  background: var(--sheen), var(--glass-2);
-  border-color: transparent;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
+  box-shadow: var(--focus-ring);
 }
 
-#omnibox::selection { background: var(--ion-select); color: var(--fg); }
+#omnibox::selection { background: var(--ion-select); color: var(--text); }
 
-/* --- the omnibox rim, as a ring -------------------------------------
-   An <input> cannot carry a pseudo-element, so the rim is anchored to the
-   omnibox from the row around it: anchor(top/right/bottom/left) resolves
-   to the omnibox's border box, 1px of padding plus the xor mask leaves
-   nothing but that 1px edge, and pointer-events: none keeps the whole
-   slot clickable. The ring takes .navrow::after and the lit seam has moved
-   to ::before, because an anchored element must come after its anchor in
-   tree order. Chromium 152 has anchor positioning; the @supports below is
-   what everything else lands on. */
-@supports (anchor-name: --a) {
-  #omnibox { anchor-name: --omni; }
-
-  .navrow::after {
-    content: '';
-    position: absolute;
-    position-anchor: --omni;
-    inset: anchor(top) anchor(right) anchor(bottom) anchor(left);
-    pointer-events: none;
-    padding: 1px;
-    border-radius: var(--bevel);
-    background: var(--rim);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-            mask-composite: exclude;
-  }
-
-  .navrow:has(#omnibox:focus)::after { background: var(--rim-focus); }
-}
-
-/* No anchor positioning: back to the two-layer trick, over an OPAQUE
-   interior — the one form of it that cannot bleed through the glass. */
-@supports not (anchor-name: --a) {
-  #omnibox {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
-  }
-
-  #omnibox:hover {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
-  }
-
-  #omnibox:focus {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim-focus) border-box;
-  }
-}
-
-/* the zoom readout, riding at the right-hand end of the lens. app.js hides it
-   at 100%, so the nav row only grows an instrument while the setting is
-   unusual — and [hidden] has to beat the button display:inline-flex reset. */
+/* the zoom readout, riding at the right-hand end of the field. app.js hides
+   it at 100%, so the nav row only grows a chip while the setting is
+   unusual — and [hidden] has to beat the button display:inline-flex reset.
+   Helm's small button: hairline, quiet fill on hover. */
 #zoom-badge {
   flex: 0 0 auto;
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  transition: color 140ms steps(3, end), background-color 180ms ease;
 }
 
-#zoom-badge:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#zoom-badge:active { background: var(--sheen), var(--glass-3); }
+#zoom-badge:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
+#zoom-badge:active { background: var(--surface-2); }
+#zoom-badge:focus-visible { box-shadow: var(--focus-ring); }
 #zoom-badge[hidden] { display: none; }
 
-/* the save star, beside the lens: the boxed .iconbtn instrument (#theme's
-   shape and chip), so it only adds the glyph's states. Outline in --fg-2
-   while the page is not saved; filled and in the accent while it is (the
-   glyph itself is swapped by app.js, E734 -> E735). .failed is a refusal
-   being shown for a moment — amber, the reason in the tooltip and the toast.
-   No glow at rest; the focus ring is the shared :focus-visible one. */
+/* the save star, beside the field: an .iconbtn, so it only adds the
+   glyph's states. Outline in --text-2 while the page is not saved; filled
+   and in the accent while it is (the glyph itself is swapped by app.js,
+   E734 -> E735). .failed is a refusal being shown for a moment — --warn,
+   the reason in the tooltip and the toast. No glow, ever. */
 #save-star .glyph { font-family: var(--icon-font); }
-#save-star { transition: color 140ms steps(3, end); }
 #save-star.saved,
-#save-star.saved:hover { color: var(--ion); }
+#save-star.saved:hover { color: var(--accent); }
 #save-star.failed,
-#save-star.failed:hover { color: var(--amber); }
+#save-star.failed:hover { color: var(--warn); }
 #save-star[hidden] { display: none; }
 
 /* the pill that opens a new Claude tab */
@@ -1507,12 +895,15 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #newclaude:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
 #newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
 
-/* --- session light (the only warm colour) --------------------- */
-/* Every status mark in the chrome is a pip: a lamp, not a painted
-   dot. At rest it carries the faintest wash of the room's own light
-   (--ion-soft, alpha .16) so it reads as an instrument that is
-   powered and idle; the moment a session is live it goes amber, and
-   amber is the only thing in the window that does. */
+/* --- session light --------------------------------------------- */
+/* Every status mark in the chrome is Helm's status dot: a flat 7px disc,
+   never a glow. Idle is --st-idle; a live session is --st-working (the
+   accent); a session that needs you is --st-waiting (warn). Nothing pulses
+   — Helm dropped its CSS pulse because even a stepped infinite animation
+   kept the compositor drawing ~60 frames a second for one dot, and an
+   always-running animation is off the table here too. The difference
+   between live and needs-you is the colour, the glyph beside the title
+   and the chip's waiting tint below. */
 .tab .dot,
 #newclaude .dot {
   flex: 0 0 auto;
@@ -1520,64 +911,54 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--fg-3);
+  background: var(--st-idle);
   box-shadow: none;
-  transition: background 140ms steps(3, end), box-shadow 140ms steps(3, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
 .tab .dot { margin-right: 8px; }
 
 .tab.live .dot,
 body.claude-live #newclaude .dot {
-  background: var(--amber);
-  box-shadow: var(--pip-amber);
-  /* steps(): the dot lives inside a frosted row, so every frame it changes
-     re-blurs the whole row. A few updates a second reads as the same breathe. */
-  animation: live-pulse 2.4s steps(8) infinite;
-  /* ...and will-change lifts the pip onto its own compositor layer, so a step
-     re-blends one 8px dot instead of repainting the frosted row it sits in.
-     Measured with one idle Claude tab: 20.3% of a core -> 16.2% (3.38 ->
-     2.70 CPU-ms per frame); stopping the pulse outright would be 12.5%, so
-     this is half the cost of the breathe for none of its look. */
-  will-change: opacity;
-}
-
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: .62; }
+  background: var(--st-working);
+  box-shadow: none;
+  animation: none;
 }
 
 /* --- "Claude needs you" --------------------------------------- */
-/* A chamber that went quiet while he was elsewhere. Brighter and quicker
-   than the live breathe so the two never read as the same light — and
-   still stepped, for the same reason live-pulse is: three repaints a
-   second through the frosted row instead of sixty. */
+/* A pane that went quiet while he was elsewhere: Helm's waiting state.
+   The dot turns --st-waiting, the chip takes the warn wash and its title
+   the warn ink (Helm tabs.css .tab.st-waiting), and the active chip keeps
+   its raised fill with the hairline tinted instead. */
 .tab.claude.needs-you .dot,
 #newclaude.attn .dot,
 body.claude-live #newclaude.attn .dot {
-  background: var(--amber);
-  box-shadow: var(--pip-amber-strong);
-  animation: attn-pulse 1.2s steps(3) infinite;
-  will-change: opacity;            /* own layer, same reason as live-pulse */
+  background: var(--st-waiting);
+  box-shadow: none;
+  animation: none;
 }
 
-@keyframes attn-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: .3; }
+.tab.claude.needs-you { background: var(--warn-soft); }
+.tab.claude.needs-you .tab-title { color: var(--warn); }
+.tab.claude.needs-you:not(.active):hover { background: color-mix(in srgb, var(--st-waiting) 20%, transparent); }
+.tab.claude.needs-you.active {
+  background: var(--surface-1);
+  border-color: color-mix(in srgb, var(--st-waiting) 45%, transparent);
 }
 
 /* The dot is small and it is at the far left; the glyph puts the same
-   amber right against the title, where the eye is already reading. */
+   warn colour right against the title, where the eye is already reading. */
 .tab-attn {
   flex: 0 0 auto;
-  color: var(--amber);
+  color: var(--warn);
   font-size: 8px;
   line-height: 1;
 }
 
 /* --- tab well ------------------------------------------------- */
 /* No radius, no overflow clipping: guest views do not clip reliably.
-   No ground of its own, so the aurora reaches the glass chamber. */
+   No ground of its own, so the background layer shows through to the
+   Claude pane's tint and the side pane's. */
 /* The well ROW: the tab well, and the side pane beside it when a workspace
    asks for one. The row carries what #views used to carry — the seat under
    the chrome and the hairline along its top — so with the pane hidden the
@@ -1588,7 +969,7 @@ body.claude-live #newclaude.attn .dot {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  border-top: 1px solid var(--edge);
+  border-top: 1px solid var(--hairline);
 }
 
 #views {
@@ -1600,9 +981,11 @@ body.claude-live #newclaude.attn .dot {
 }
 
 /* --- the side pane: a column BESIDE the well ------------------ */
-/* Opaque, not glass: it stands next to a <webview>, and a guest page is not
-   in this document's compositing tree — there is nothing behind the pane to
-   blur, exactly as find.css and settings.css say of their own panes. One
+/* A docked panel: Helm's --surface-1 tint over the background layer. It
+   stands BESIDE a <webview>, never over one, so what shows through it is
+   the pre-blurred background, as under the strip — and since that layer is
+   blurred once in a bitmap, the pane takes no backdrop-filter of its own
+   (a tall blurred element is what dropped raster tiles on this GPU). One
    hairline on its left edge, no glow: it is furniture, not an alert. */
 #sidepane {
   position: relative;
@@ -1613,8 +996,9 @@ body.claude-live #newclaude.attn .dot {
   width: 480px;
   min-width: 0;
   overflow: hidden;
-  background: var(--panel-bg);
-  border-left: 1px solid var(--edge);
+  background: var(--surface-1);
+  border-left: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
 /* display:flex above outranks the UA sheet's [hidden]{display:none}, so without
@@ -1630,28 +1014,29 @@ body.claude-live #newclaude.attn .dot {
 }
 
 /* The 6px grab strip on the pane's left edge. It is INSIDE the pane's width,
-   so it can never drift out of line with the edge it moves. Stepped hover,
-   like every other control in the chrome; nothing animates while dragging. */
+   so it can never drift out of line with the edge it moves. A quiet fill on
+   hover; nothing animates while dragging. Its focus ring is drawn INSIDE
+   (the pane clips its overflow, so an outer ring would be cut off). */
 #sidepane-resize {
   flex: 0 0 6px;
   align-self: stretch;
   cursor: col-resize;
   background: transparent;
-  transition: background-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease);
   touch-action: none;       /* the pointer events are ours, not the scroller's */
 }
 
-#sidepane-resize:hover { background: var(--glass-2); }
+#sidepane-resize:hover { background: var(--surface-3); }
 #sidepane-resize:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 /* While the handle is held: no transition anywhere in the row, and no text
    selection anywhere in the window. */
 body.sidepane-dragging { cursor: col-resize; }
-body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition: none; }
+body.sidepane-dragging #sidepane-resize { background: var(--accent-soft); transition: none; }
 
 #views webview {
   flex: 1 1 auto;
@@ -1691,14 +1076,14 @@ body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition
    `flex-basis` — the ratio is one number, not a relayout — and leaves
    everything else in #views display:none. */
 
-/* which half the omnibox is describing: two pixels of the same ion
-   line the omnibox itself is bordered with, laid along its top edge.
+/* which half the omnibox is describing: two pixels of the accent line
+   (the colour the focused omnibox is bordered with), along its top edge.
    A webview cannot carry a ::before, so the mark is its own element,
    parked over the focused view's measured rect by app.js. */
 #views > .split-focus {
   position: absolute;
   height: 2px;
-  background: var(--ion-line);
+  background: var(--accent-line);
   /* Never a click target: the mark lies over whichever half is live, and a
      press there has to reach the page or the terminal underneath it. */
   pointer-events: none;
@@ -1708,43 +1093,33 @@ body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition
   z-index: 3;
 }
 
-/* the grab handle between the halves: an --edge line either side of a
-   glass strip wide enough to catch a pointer. One per window, built
-   into #views on the first split and hidden (inline) the rest of the
-   time, so a split never adds a sibling next to a live guest. */
+/* the grab handle between the halves: a hairline either side of a strip
+   of the chrome's own tint, wide enough to catch a pointer. One per window,
+   built into #views on the first split and hidden (inline) the rest of the
+   time, so a split never adds a sibling next to a live guest. It sits over
+   the background layer like the strip does, so the same --surface-0 reads
+   on either theme (the old white glass vanished between two white pages). */
 #views > .split-divider {
   order: 2;
   flex: 0 0 6px;
   align-self: stretch;
-  border-left: 1px solid var(--edge);
-  border-right: 1px solid var(--edge);
-  background: var(--glass-2);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  background: var(--surface-0);
   cursor: col-resize;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-/* Touched, the handle becomes the lit seam stood on end — the same
-   line that runs under the chrome, --seam-v, brightest at the middle
-   and fading out at both ends. It is the one moment the divider is an
-   instrument rather than a gap. The seam itself is one token in both
-   themes; only the glass behind it is re-lit below, the same swap the
-   handle's resting state already makes.
+/* Touched, the handle takes the accent as STATE: its soft wash, edged in
+   the accent line, flat (no lit seam, no glow).
    body:has(> .split-scrim) is the drag: app.js lays that scrim over
-   the window for exactly as long as the pointer is down, so the seam
-   stays lit through a drag that has left the handle behind. No class
-   was added anywhere to make this work. */
+   the window for exactly as long as the pointer is down, so the handle
+   stays marked through a drag that has left it behind. No class was
+   added anywhere to make this work. */
 #views > .split-divider:hover,
 body:has(> .split-scrim) #views > .split-divider {
-  background: var(--seam-v), var(--glass-3);
-}
-
-/* The glass tokens are white overlays: they lift a strip off a dark page and
-   vanish on a light one, so in light the handle between two white halves read
-   as a gap rather than something to grab. --edge is the hairline that reads on
-   either ground, and the accent's soft wash is the hover. */
-:root[data-theme="light"] #views > .split-divider { background: var(--edge); }
-:root[data-theme="light"] #views > .split-divider:hover,
-:root[data-theme="light"] body:has(> .split-scrim) #views > .split-divider {
-  background: var(--seam-v), var(--ion-soft);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 /* A press that lands on a guest page belongs to the guest, which would
@@ -1781,25 +1156,25 @@ body:has(> .split-scrim) #views > .split-divider {
   display: flex;
   flex-direction: column;
   padding: 12px 14px;
-  background: var(--chamber-bg);
-  backdrop-filter: blur(28px) saturate(120%);
-  -webkit-backdrop-filter: blur(28px) saturate(120%);
-  box-shadow: inset 0 1px 0 var(--specular);
+  /* The frame is Helm's .panel: the --surface-1 tint over the background
+     layer, a 1px hairline, the large radius, the inset top edge and
+     the panel shadow. No backdrop-filter: the layer behind is
+     blurred once already, and a tall blurred element drops raster tiles
+     on this GPU. The 1px border is measured: proposeGrid() in terminal.js
+     subtracts border widths as well as padding. */
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-l);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-2);
   -webkit-user-select: text;
   user-select: text;
 }
 
-/* the chamber's lit top edge */
+/* The old lit top seam rode this pseudo-element. The inset top edge is in
+   the box-shadow above now (it follows the radius, a pseudo-element would
+   not), so the hook stays but paints nothing. */
 .claude-view::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--chamber-seam) 50%, transparent 100%);
-  pointer-events: none;
-  z-index: 1;
+  content: none;
 }
 
 .claude-view > .xterm { flex: 1 1 auto; min-height: 0; }
@@ -1822,84 +1197,73 @@ body:has(> .split-scrim) #views > .split-divider {
 }
 
 /* --- tab context menu (#tabmenu, rows written by app.js) ------- */
-/* Same recipe as the omnibox lens in history.css: a --panel-bg pane
-   (it can hang over a <webview>, where there is nothing to blur), rows
-   whose 2px rail only changes colour so lighting one shifts no text. */
+/* Helm's menu (components.css .menu): the near-opaque --overlay, a
+   stronger hairline, the medium radius and the deepest shadow. It hangs
+   over a <webview>, so it has to be legible on its own — --overlay is
+   93-95% opaque — and as a SMALL overlay it may take Helm's light blur
+   for the last few percent (never a tall or full-width element). */
 #tabmenu {
   position: fixed;
   z-index: 45;                 /* above #omni-suggest (40), .chrome-layer (3), #views (1) */
   box-sizing: border-box;
   min-width: 212px;
   padding: 4px;
-  /* a container, so: the cut corners (in the @supports block below)
-     and the lit rim. --panel-bg replaces --glass in the padding-box
-     layer because this pane hangs over a <webview> and paints its own
-     ground rather than borrowing one. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  /* --panel-bg keeps 4% of the page, and every other pane over a page blurs
-     that 4% away. This menu was the one that did not, so in light the page's
-     headline and links read straight through it. Same recipe as
-     #omni-suggest, the dropdown it sits next to. */
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-m);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+          backdrop-filter: blur(24px) saturate(1.05);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   outline: none;               /* it is focused on open; the pane is the ring */
   overflow: hidden;            /* the rows' corners never poke the radius */
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 12px 34px var(--shade-drop);
+  box-shadow: var(--shadow-3);
 }
 
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #tabmenu[hidden] { display: none; }
 
+/* Rows keep their 32px and their 2px left lane (transparent now), so the
+   text sits exactly where it did; the highlight is Helm's plain fill. */
 #tabmenu .menu-item {
   display: flex;
   align-items: center;
   height: 32px;
   padding: 0 12px;
   border-left: 2px solid transparent;
-  border-radius: var(--radius-ctl);   /* a menu row is a control, never bevelled */
+  border-radius: var(--radius-s);
   white-space: nowrap;
   cursor: default;
-  transition: background-color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
 #tabmenu .menu-item.is-hi {
-  background: var(--glass-2);
-  border-left-color: var(--ion);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* dimmed and inert: nothing to click on an item that cannot run */
 #tabmenu .menu-item.is-off {
-  color: var(--fg-3);
+  color: var(--text);          /* Helm dims a disabled row by opacity alone */
+  opacity: 0.45;
   pointer-events: none;
 }
 
-/* A rule that fades out to the right instead of ruling all the way
-   across: the seam motif at the scale of a list. Every divider in the
-   skin is this, never a solid --edge line. */
+/* Helm's menu separator: one plain hairline, inset from the edges */
 #tabmenu .menu-sep {
   height: 1px;
-  margin: 4px 8px;
-  background: linear-gradient(90deg, var(--edge), transparent);
+  margin: 4px 6px;
+  background: var(--hairline);
 }
 
 /* --- crash + load-failure cards (.tab-card, built by app.js) --- */
 /* A dead guest paints nothing, so the chrome covers the well rather
    than replacing the tab. app.js shows the card for the active tab
-   alone, in the same loop that shows its view. */
+   alone, in the same loop that shows its view. It lies OVER the guest,
+   so its ground is the opaque --surface-solid. No radius on the card
+   itself: it is inset 0 over the whole well, the well's ground for as
+   long as the guest is dead, not a container floating in it. */
 .tab-card {
   position: absolute;
   inset: 0;
@@ -1910,126 +1274,72 @@ body:has(> .split-scrim) #views > .split-divider {
   justify-content: center;
   gap: 10px;
   padding: 24px;
-  background: var(--panel-bg);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  /* the card is read like a panel readout, dead host and all */
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  background: var(--surface-solid);
+  color: var(--text);
+  font-family: var(--font);
   text-align: center;
 }
-
-/* No bevel and no rim on the card itself: it is inset 0 over the whole
-   well, so it is the well's ground for as long as the guest is dead,
-   not a container floating in it — cut corners there would open two
-   triangles onto the blank guest behind. The treatment lands on what
-   is inside instead. */
 
 .tab-card .card-glyph {
   font-size: 30px;
   line-height: 1;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .tab-card .card-head {
-  font-size: 16px;
-  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  color: var(--text);
 }
 
 .tab-card .card-line {
   max-width: 440px;
-  color: var(--fg-2);
-  font-size: 12.5px;
+  color: var(--text-2);
+  font-size: var(--fs-s);
   font-variant-numeric: tabular-nums;   /* hosts, ports, error codes */
   overflow-wrap: anywhere;     /* a long host must not widen the card */
 }
 
-/* the one control on the card: round corners, and the lit rim, so the
-   thing you are meant to press is the thing carrying light. Its hover and
-   press states tint the glass, so the rim cannot be a background layer
-   under them — it is a ring on the button's own ::before (both of its
-   pseudo-elements were free), sitting on the transparent 1px border. */
+/* the one control on the card: Helm's button (components.css .btn) — a
+   card-surface fill, a hairline, the inset top edge; hover firms both. */
 .tab-card .card-btn {
   position: relative;
   margin-top: 6px;
   height: 30px;
   padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
-  background: var(--panel-bg);
-  color: var(--fg);
-  font-size: 12.5px;
-  transition: background-color 140ms steps(3, end);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  color: var(--text);
+  font-size: var(--fs-s);
+  font-weight: 500;
 }
 
-.tab-card .card-btn::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  corner-shape: inherit;
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-
-.tab-card .card-btn:hover { background: var(--sheen), var(--glass-2); }
-.tab-card .card-btn:active { background: var(--sheen), var(--glass-3); }
-
-.tab-card .card-btn:hover::before,
-.tab-card .card-btn:active::before { background: var(--rim-focus); }
-
-/* --- the bevel ------------------------------------------------- */
-/* The one memorable thing, kept in one place so it can be read at a
-   glance: which corners in the chrome are cut, and nothing else.
-   round bevel round bevel = TL round, TR cut, BR round, BL cut — two
-   cuts on the diagonal, along the same axis as the sheen. The whole
-   section is behind @supports, so anywhere corner-shape is missing
-   every one of these simply keeps the plain round radius it already
-   declares. No clip-path: it would take the borders and the shadows
-   with it, and the rim IS a border.
-   Controls are deliberately absent — buttons, badges, menu rows and
-   the pills keep --radius-ctl, which is what makes a cut corner mean
-   "this is a container". */
-@supports (corner-shape: bevel) {
-  /* the lit instrument slot, and the ring anchored over it: the ring is
-     a separate box, so it is cut here too or it would square off the
-     slot's two cut corners. */
-  #omnibox,
-  .navrow::after { corner-shape: round bevel round bevel; }
-
-  /* the active chip, and the chip while it is in the air */
-  .tab.active,
-  .tab.dragging { corner-shape: round bevel round bevel; }
-
-  /* the popover that hangs over a page */
-  #tabmenu { corner-shape: round bevel round bevel; }
-}
+.tab-card .card-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+.tab-card .card-btn:active { background: var(--surface-2); }
+.tab-card .card-btn:focus-visible { box-shadow: var(--focus-ring); }
 
 /* --- scrollbars (chrome only) --------------------------------- */
+/* Helm base.css: thin and quiet, a 4px thumb floating in a 10px gutter. */
 #tabstrip::-webkit-scrollbar { height: 0; width: 0; }
 
-body ::-webkit-scrollbar { width: 9px; height: 9px; }
+body ::-webkit-scrollbar { width: 10px; height: 10px; }
 body ::-webkit-scrollbar-track { background: transparent; }
 body ::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 10px;
 }
-body ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+body ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 body ::-webkit-scrollbar-corner { background: transparent; }
 
 /* --- theme transition ----------------------------------------- */
-/* Flipping data-theme should read as the glass being re-lit, not as a
-   snap. Only the lit surfaces carry it; <html> itself never animates,
-   so the very first paint after theme-boot.js is instant.
-   (#omnibox carries background-color in its own rule, above, to keep
-   its 200ms ease-out focus glow.) */
+/* Flipping data-theme re-tints the surfaces in Helm's short tempo rather
+   than snapping. <html> itself never animates, so the very first paint
+   after theme-boot.js is instant. */
 html { transition: none; }
 
 body,
@@ -2038,29 +1348,27 @@ body,
 .navrow,
 .tab,
 .claude-view {
-  transition: background-color 180ms ease,
-              color 180ms ease,
-              border-color 180ms ease,
-              box-shadow 180ms ease;
+  transition: background-color var(--dur) var(--ease),
+              color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
 
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .aurora-pool, .aurora-rim { animation: none; }
-  body:not(.booted) .chrome-layer { opacity: 1; filter: none; transform: none; }
-  body:not(.booted) .navrow { opacity: 1; transform: none; }
+  body:not(.booted) .chrome-layer { opacity: 1; transform: none; }
+  body:not(.booted) .navrow { opacity: 1; }
   body.booted .chrome-layer { transition: none; }
   body.booted .navrow { transition: none; }
   .tab.live .dot,
   body.claude-live #newclaude .dot { animation: none; will-change: auto; }
-  /* The waiting mark stays amber and stays put; only the pulse goes. */
   .tab.claude.needs-you .dot,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; will-change: auto; }
-  .tab.loading::after { animation: none; }
-  .tab::after, .tab::before, .tab-close, .tab-collapse,
+  .tab.active.loading::after { animation: none; }
+  .tab::after, .tab::before, .tab-close, .tab-collapse, .tab-audio,
   .tab.pinned .tab-expand, .tab.collapsed .tab-expand,
-  #omnibox, #zoom-badge, #save-star,
+  button, #omnibox, #zoom-badge, #save-star, #views > .split-divider,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item, #sidepane-resize { transition: none; }

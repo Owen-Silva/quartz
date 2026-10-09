@@ -1,0 +1,67 @@
+/* ============================================================
+   backdrop.css — the one background layer behind the chrome.
+
+   Quartz wears Helm's glass: the tab strip, the toolbar and the side
+   panes are translucent tints (--surface-*) over ONE fixed picture
+   that was blurred once, ahead of time. This file styles the three
+   layers inside index.html's .backdrop:
+
+     .bg-base   the neutral ground (--bg). Always there; it is all
+                you see for 'Plain', while the picture is still being
+                prepared, and whenever the picture could not be read.
+     .bg-photo  the picture, ALREADY BLURRED. backdrop.js decodes the
+                source once, blurs it into a small canvas (about a
+                third of the screen) with a little overscan so the
+                edges never fade to grey, and sets the result as this
+                element's background-image. There is deliberately no
+                CSS `filter: blur()` here: a filter on a full-window
+                layer is re-rasterised on every resize and on every
+                repaint of whatever sits over it, and this GPU drops
+                raster tiles under big filters. A bitmap scaled with
+                background-size: cover costs nothing to resize.
+     .bg-wash   Helm's wash, rgb(var(--wash-rgb) / var(--bg-dim)): the
+                same tint per theme Helm uses (tokens.css), so text on
+                the panels stays legible over any picture. It only
+                shows when there IS a picture; over the plain --bg it
+                would just shift the neutral ground.
+
+   Positioning (absolute, inset 0, z-index) belongs to chrome.css
+   (.backdrop and .backdrop > div). This file only paints.
+   ============================================================ */
+
+.backdrop > .bg-base {
+  background: var(--bg);
+}
+
+.backdrop > .bg-photo {
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  opacity: 0;
+  /* One short fade when a new picture lands, never a running animation. */
+  transition: opacity var(--dur-slow) var(--ease);
+}
+
+/* backdrop.js sets data-ready only once the blurred bitmap has decoded,
+   so the layer never flashes half-drawn. */
+.backdrop > .bg-photo[data-ready] {
+  opacity: 1;
+}
+
+.backdrop > .bg-wash {
+  background: rgb(var(--wash-rgb) / var(--bg-dim));
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+
+.backdrop > .bg-photo[data-ready] ~ .bg-wash {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop > .bg-photo,
+  .backdrop > .bg-wash {
+    transition: none;
+  }
+}

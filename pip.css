@@ -5,13 +5,12 @@
    here reaches another element. The floating window itself is the
    compositor's, not ours — there is nothing of it to style.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own — :root[data-theme="light"]
-   relights all of it for free.
+   LOOK. Helm's icon button. Every rule is written against tokens.css
+   names (chrome.css @imports it), so html[data-theme="light"]
+   relights it with no block of its own.
 
-   MOTION. The nav row sits on a backdrop-filter, so an animated
-   frame re-blurs the page behind it. Every transition here is
-   stepped and none runs longer than 150ms.
+   MOTION. Colour and fill change over 120 ms; nothing animates
+   continuously.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -21,59 +20,41 @@
    housekeeping. */
 #pip[hidden] { display: none; }
 
-/* Shape, hover, radius and glass all come from `.iconbtn` in
-   chrome.css. This file adds only the icon font and the two states
-   chrome.css cannot know about. */
+/* Shape, hover fill and radius all come from `.iconbtn` in chrome.css.
+   This file adds only the icon font and the one state chrome.css
+   cannot know about. Hover is .iconbtn's own (raised fill, --text):
+   no halo, glow is reserved for the focus ring. */
 #pip .glyph {
   font-family: var(--icon-font);
   font-size: 15px;
   line-height: 1;
-  transition: color 120ms steps(3, end), text-shadow 120ms steps(3, end);
-}
-
-/* The glyph is the only thing that lights on hover: the button keeps
-   the same glass as every other instrument in the row. Lighting is the
-   pip's halo, so this state reads the same as every other live
-   indicator in the chrome. */
-#pip:hover .glyph {
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
+  transition: color var(--dur) var(--ease);
 }
 
 /* --- floating right now ----------------------------------------
    A video is out of the page and over the desktop, and the page it
-   came from may not even be on screen. The instrument stays lit for
-   as long as that is true, because it is the only way back. */
+   came from may not even be on screen. The instrument stays pressed
+   for as long as that is true, because it is the only way back:
+   Helm's .icon-btn.on (raised fill, hairline drawn inset so the box
+   does not grow), with the glyph in the accent because "on" is state. */
 #pip.is-on {
-  background: var(--sheen), var(--glass-3);
-  color: var(--fg);
-  transition: background 150ms steps(2, end);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background-color var(--dur) var(--ease);
 }
 
-#pip.is-on .glyph {
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
-}
+#pip.is-on .glyph,
+#pip.is-on:hover .glyph { color: var(--accent); }
 
-/* Lit already: hovering must not read as a second, brighter state. */
-#pip.is-on:hover .glyph {
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
-}
-
-/* Focus is light: a hairline ion ring instead of a thick white outline.
-   The halo stays an outline-offset rather than a box-shadow — this
-   button wears .glass, whose inset shadows a box-shadow here would
-   replace for as long as it held focus. */
+/* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #pip:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- reduced motion --------------------------------------------
-   The stepped transitions already hold still between frames; with
-   motion reduced they stop moving altogether and the states simply
-   swap. */
+   With motion reduced the states simply swap. */
 @media (prefers-reduced-motion: reduce) {
   #pip .glyph,
   #pip.is-on {

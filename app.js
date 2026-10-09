@@ -354,10 +354,13 @@ function newTabUrl() {
       const chips = newtabChips();
       if (Array.isArray(chips)) params.set('chips', JSON.stringify(chips));
       if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
-      // Image users should never see the board flash before the picture (or
-      // the clip, which arrives the same way) lands.
-      const bgKind = (all.newtabBackground && all.newtabBackground.kind) || 'board';
-      if (bgKind === 'aurora' || bgKind === 'image' || bgKind === 'video') params.set('bg', bgKind);
+      // The first-paint hint: which kind of background is coming, so the page
+      // paints its plain --bg ground (never a different picture) until the
+      // push lands. Older builds stored 'board'/'aurora'; settings.js migrates
+      // them, and anything unknown reads as the default, the wallpaper.
+      const storedKind = all.newtabBackground && all.newtabBackground.kind;
+      const bgKind = ['wallpaper', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'wallpaper';
+      params.set('bg', bgKind);
     } catch (err) { /* defaults are fine */ }
   }
   return NEWTAB_URL + '?' + params.toString();
@@ -433,6 +436,53 @@ function pushHistoryToAll() {
   for (const tab of tabs) pushHistoryToTab(tab);
 }
 
+/**
+ * What the new tab guest's __applyBackground() gets (the background contract):
+ *   { kind: 'wallpaper'|'image'|'video'|'none', dim, url?, fileName?, state, reason? }
+ * url is the file:// URL of main's wallpaper copy, the picture's data: URL, or
+ * the file:// URL of main's copy of the clip (fileName lets the page pick
+ * <video> over <img> for a GIF). state/reason come from backdrop.js, which has
+ * already tried to read the same source for the chrome: when it could not
+ * ('fallback'), the guest gets no url and the reason, and paints the plain
+ * --bg instead of a broken picture. The legacy dataUrl / fileUrl names ride
+ * along for a guest from before the rename. Never in the query string.
+ */
+function backgroundPayload(bg) {
+  const kind = bg.kind;
+  const payload = { kind, dim: bg.dim };
+  let url = typeof bg.url === 'string' && bg.url ? bg.url : '';
+  if (!url && kind === 'image' && typeof bg.dataUrl === 'string') url = bg.dataUrl;
+  if (!url && kind === 'video' && typeof bg.fileUrl === 'string') url = bg.fileUrl;
+  if (kind === 'none') url = '';
+
+  let state = 'ok';
+  let reason = typeof bg.reason === 'string' && bg.reason ? bg.reason : '';
+  const layer = window.Backdrop;
+  let seen = null;
+  try { seen = layer && typeof layer.state === 'function' ? layer.state() : null; } catch (err) { seen = null; }
+  if (seen && seen.kind === kind) {
+    state = seen.state || 'ok';
+    if (seen.reason) reason = String(seen.reason);
+  } else if (seen) {
+    state = 'loading'; // the layer has not caught up with this write yet
+  }
+  if (kind !== 'none' && !url) {
+    state = 'fallback';
+    if (!reason) reason = kind === 'wallpaper' ? 'the Windows wallpaper could not be copied' : 'no picture is chosen yet';
+  }
+  if (state === 'fallback') url = '';
+
+  payload.state = state;
+  if (reason) payload.reason = reason;
+  if (url) {
+    payload.url = url;
+    if (kind === 'image') payload.dataUrl = url;
+    if (kind === 'video') payload.fileUrl = url;
+  }
+  if (typeof bg.fileName === 'string' && bg.fileName && kind !== 'image' && kind !== 'none') payload.fileName = bg.fileName;
+  return payload;
+}
+
 function pushBackgroundToTab(tab) {
   const settings = window.Settings;
   if (!settings || typeof settings.background !== 'function') return;
@@ -441,16 +491,7 @@ function pushBackgroundToTab(tab) {
     .then(() => settings.background())
     .then((bg) => {
       if (!bg || !isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
-      /* Exactly the fields the guest reads, and nothing else: the picture as a
-         data URL, or the moving picture as the file:// URL of main's copy in
-         <userData>/backgrounds/ (the name only so the page can pick <video>
-         over <img> by extension). Never in the query string -- it is pushed. */
-      const payload = { kind: bg.kind, boardOverImage: bg.boardOverImage, dim: bg.dim };
-      if (typeof bg.dataUrl === 'string' && bg.dataUrl) payload.dataUrl = bg.dataUrl;
-      if (bg.kind === 'video') {
-        if (typeof bg.fileUrl === 'string' && bg.fileUrl) payload.fileUrl = bg.fileUrl;
-        if (typeof bg.fileName === 'string' && bg.fileName) payload.fileName = bg.fileName;
-      }
+      const payload = backgroundPayload(bg);
       const pending = tab.viewEl.executeJavaScript(
         'window.__applyBackground && window.__applyBackground(' + JSON.stringify(payload) + ')'
       );
@@ -675,7 +716,10 @@ const BOARD_NOTE_EVERY_MS = 5000;
 let boardNotesAt = 0;
 
 function describeBoardState(st) {
-  if (!st || typeof st !== 'object') return 'board state unavailable';
+  // The circuit board is gone (the new tab is a Helm-style Home now) and its
+  // guest stub answers null, so null means "no board", not "unreadable": no
+  // note at all rather than a false "board state unavailable" on every row.
+  if (!st || typeof st !== 'object') return '';
   const parts = [st.paused ? 'board paused' : (st.running ? 'board running' : 'board still')];
   if (st.bitmap === 'released') parts.push('bitmap released');
   if (st.releases > 0) parts[parts.length - 1] += ' (' + st.releases + 'x)';
@@ -4367,6 +4411,15 @@ function wireSettings() {
   const settings = window.Settings;
   if (!settings || typeof settings.on !== 'function') return;
   pushClaudeSkipToPreload(); // the switch as it stands at boot
+  // backdrop.js settles each background change after the write that caused
+  // it (or after a "Copy again from Windows", which writes nothing): tell the
+  // new tabs its verdict, so a source the chrome could not read is not shown
+  // there either, and a fresh wallpaper copy reaches them. 'loading' is
+  // skipped: the write itself already pushed the picture.
+  document.addEventListener('backdropchange', (e) => {
+    if (e && e.detail && e.detail.state === 'loading') return;
+    for (const tab of tabs) pushBackgroundToTab(tab);
+  });
   settings.on((all, keys) => {
     pushClaudeSkipToPreload(); // ...and after any write, including that switch
     for (const tab of tabs) {

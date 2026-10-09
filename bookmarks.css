@@ -4,18 +4,19 @@
    Loaded after chrome.css, and scoped entirely to #bookmarks-bar
    and #bm-overflow: nothing here reaches another element.
 
-   THE SHELF. The nav row is an instrument panel; this is the shelf
-   under it. Same glass, one step quieter: --glass-thin instead of
-   --glass, and no sheen, so the row of favicons reads as content
-   sitting on the chrome rather than as another control surface.
+   THE SHELF. The bar is window chrome, welded under the toolbar, so
+   it wears the same thing the toolbar does: Helm's --surface-0 tint
+   over the one pre-blurred background layer, closed by a 1px
+   hairline. A full-width bar never takes a backdrop-filter (this GPU
+   drops raster tiles under one); the blur is already baked into the
+   background layer behind it.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own at the bottom of this file —
-   :root[data-theme="light"] relights all of it for free.
+   THEMES. Every rule is written against tokens.css names (chrome.css
+   @imports it), so html[data-theme="light"] relights all of it with
+   no block of its own.
 
-   MOTION. Both panes sit on a backdrop-filter, so an animated frame
-   re-blurs everything behind them. Nothing animates continuously
-   here: every transition is stepped and none runs longer than 150ms.
+   MOTION. Fills and colours change over 120 ms; nothing animates
+   continuously.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -44,26 +45,18 @@
   gap: 2px;
   height: 30px;
   padding: 0 8px;
-  border-bottom: 1px solid var(--edge);
-
-  /* the .navrow recipe, one step lighter: the thin pane, and no sheen */
-  background: var(--glass-thin);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-  box-shadow: inset 0 -1px 0 var(--shade-in);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-0);
+  color: var(--text-2);
+  font-family: var(--font);
 
   /* The drag region is the titlebar's alone; the shelf under it is not
      something the window should move by. */
   -webkit-app-region: no-drag;
 
-  /* Colour only — the theme swap, and genuinely stepped: a smooth fade under
-     a backdrop-filter re-blurs the page behind the shelf on every frame.
-     The bar is a shelf, not a container: no bevel and no rim here — those
-     belong to things that float, and this one is welded to the chrome. */
-  transition: background-color 150ms steps(3, end),
-              color 150ms steps(3, end),
-              border-color 150ms steps(3, end),
-              box-shadow 150ms steps(3, end);
+  /* the theme swap: a colour change, nothing more */
+  transition: background-color var(--dur-slow) var(--ease),
+              border-color var(--dur-slow) var(--ease);
 }
 
 /* The strip of bookmarks. It clips: what does not fit is hidden by
@@ -81,6 +74,8 @@
 
 /* ============================================================
    One bookmark
+   Helm's ghost button: transparent at rest, the raised fill under
+   the pointer, --text-2 brightening to --text.
    ============================================================ */
 
 #bookmarks-bar .bm,
@@ -91,33 +86,29 @@
   flex: 0 0 auto;
   height: 22px;
   padding: 0 7px;
-  /* an item on the shelf is a control: round corners at the control radius */
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 400;
   text-decoration: none;
   white-space: nowrap;
   cursor: default;
   -webkit-app-region: no-drag;
-  transition: background-color 120ms steps(3, end), color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 #bookmarks-bar .bm:hover,
-#bm-overflow .bm:hover { background: var(--glass-2); color: var(--fg); }
+#bm-overflow .bm:hover { background: var(--surface-3); color: var(--text); }
 
 #bookmarks-bar .bm:active,
-#bm-overflow .bm:active { background: var(--glass-3); }
+#bm-overflow .bm:active { background: var(--surface-2); }
 
-/* focus is light: a 1px ion line and a soft halo, never a white slab */
+/* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #bookmarks-bar .bm:focus-visible,
 #bm-overflow .bm:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* The favicon, and the globe that takes its place when the service is
@@ -136,7 +127,7 @@
   flex: 0 0 auto;
   font-size: 13px;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 #bookmarks-bar .bm-label,
@@ -147,43 +138,49 @@
   white-space: nowrap;
 }
 
-/* No chips yet. Quiet, and it says what to press. */
+/* No chips yet. Quiet, and it says what to press (Helm's .hint). */
 #bookmarks-bar .bm-empty {
   padding: 0 4px;
-  color: var(--fg-3);
-  font-size: 12px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 
 /* ============================================================
    The "…" button
-   Shown only when something did not fit.
+   Shown only when something did not fit. Helm's icon button; open,
+   it is the pressed one (.icon-btn.on), its hairline drawn inset so
+   the box does not grow.
    ============================================================ */
 
 #bookmarks-bar .bm-more {
   flex: 0 0 auto;
   width: 24px;
   height: 22px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
   -webkit-app-region: no-drag;
-  transition: background-color 120ms steps(3, end), color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 #bookmarks-bar .bm-more .glyph { font-family: var(--icon-font); }
-#bookmarks-bar .bm-more:hover { background: var(--glass-2); color: var(--fg); }
-#bookmarks-bar .bm-more:active { background: var(--glass-3); }
-#bookmarks-bar .bm-more[aria-expanded="true"] { background: var(--glass-3); color: var(--fg); }
+#bookmarks-bar .bm-more:hover { background: var(--surface-3); color: var(--text); }
+#bookmarks-bar .bm-more:active { background: var(--surface-2); }
+#bookmarks-bar .bm-more[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+#bookmarks-bar .bm-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ============================================================
    The overflow popover
    A child of <body>, placed by the script under the "…" button, so
    it hangs over a guest page instead of being clipped by the bar.
-   Nothing blurs usefully behind a pane that floats over a webview,
-   so it takes --panel-bg rather than glass.
+   Helm's .menu: --overlay, a strong hairline, the medium radius,
+   the level-3 shadow. It is small and never scrolls, so it may take
+   the menu's blur; --overlay stays legible where there is nothing
+   behind it worth blurring.
    ============================================================ */
 
 #bm-overflow {
@@ -197,27 +194,23 @@
   min-width: 160px;
   max-width: 280px;
   padding: 4px;
-  /* This one floats, so it is a container: the light rim in the border box,
-     an opaque --panel-bg padding layer over it, and the bevelled corners. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  box-shadow: 0 10px 30px var(--shade-drop);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-m);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+  backdrop-filter: blur(24px) saturate(1.05);
+  box-shadow: var(--shadow-3);
+  color: var(--text);
+  font-family: var(--font);
 }
 
-/* two cut corners on the diagonal, where the property exists */
-@supports (corner-shape: bevel) {
-  #bm-overflow { corner-shape: round bevel round bevel; }
-}
-
-/* In the list, an item is a full-width row rather than a chip — still a
-   control, so still round. */
+/* In the list, an item is a full-width menu row rather than a chip. */
 #bm-overflow .bm {
   width: 100%;
   height: 26px;
-  border-radius: var(--radius-ctl);
+  color: var(--text);
+  font-size: var(--fs-s);
+  border-radius: var(--radius-s);
 }
 
 #bm-overflow .bm-label { max-width: 220px; }

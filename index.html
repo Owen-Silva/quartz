@@ -8,6 +8,7 @@
   <title>Quartz</title>
   <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="chrome.css">
+  <link rel="stylesheet" href="backdrop.css">
   <link rel="stylesheet" href="find.css">
   <link rel="stylesheet" href="downloads.css">
   <link rel="stylesheet" href="shield.css">
@@ -24,12 +25,13 @@
 </head>
 <body>
 
-  <!-- Ambient light field. All colour in the app lives here, behind the glass. -->
+  <!-- The one background layer: the neutral ground, the picture (blurred ONCE
+       by backdrop.js into a small bitmap) and Helm's wash over it. The tab
+       strip, toolbar and panes are translucent tints over this. -->
   <div class="backdrop" aria-hidden="true">
-    <div class="aurora-base"></div>
-    <div class="aurora-band"></div>
-    <div class="aurora-pool"></div>
-    <div class="aurora-rim"></div>
+    <div class="bg-base"></div>
+    <div class="bg-photo"></div>
+    <div class="bg-wash"></div>
   </div>
 
   <!-- Chrome layer: condenses in one frame after boot (body.booted). -->
@@ -152,6 +154,7 @@
   <script src="history.js"></script>
   <script src="sitestyles.js"></script>
   <script src="settings.js"></script>
+  <script src="backdrop.js"></script>
   <script src="userstyle.js"></script>
   <script src="bookmarks.js"></script>
   <script src="terminal.js"></script>

@@ -1,11 +1,13 @@
 /* ============================================================
    newtab-theme.js — the first thing this page runs.
 
-   Loaded in <head> BEFORE newtab.css so the right palette is in
-   place for the very first paint: a light window never flashes
-   dark, and a custom accent hue never flashes ice-cyan. The
-   single source of truth for the whole page — the stylesheet and
-   the board script both — is the data-theme attribute on <html>.
+   Loaded in <head> BEFORE the page's stylesheet so the right palette
+   is in place for the very first paint: a light window never flashes
+   dark, and a custom accent hue never flashes the default steel blue.
+   The single source of truth for the whole page is the data-theme
+   attribute on <html>. The new tab, the history page, the files page
+   and the reader all load this file; tokens.css (imported first by
+   each of their stylesheets) holds the colours it switches between.
 
    Resolution order for the theme:
      1. ?theme=light / ?theme=dark, appended by the browser chrome
@@ -13,14 +15,14 @@
 
    The palette preset comes from ?palette=<name> and lands as
    data-palette on <html>, the same way and for the same reason:
-   the stylesheet carries a block per preset per theme, so the
-   right aurora and the right accent are in place for the first
+   tokens.css carries a block per preset per theme (a palette is an
+   accent only now), so the right accent is in place for the first
    paint. No palette (or "aurora") = no attribute = the default.
 
    The accent comes from ?hue=<0-360>, painted over the authored
    --ion* tokens as inline custom properties on <html> (inline
    beats both :root blocks, so one pass covers either theme).
-   No hue = no inline properties = the stylesheet's own ice-cyan.
+   No hue = no inline properties = tokens.css's own accent.
 
    No localStorage: this page is loaded from file://, where storage
    is unreliable, and the chrome owns the preference anyway. When
@@ -54,7 +56,7 @@
 
   /* --- palette preset ---------------------------------------- */
 
-  /* The five presets chrome.css and newtab.css both carry. Anything
+  /* The five presets tokens.css carries. Anything
      else — no param, 'aurora', junk — means the authored default,
      which is the absence of the attribute rather than a value. */
   var PALETTES = ['ember', 'forest', 'ocean', 'midnight', 'mono'];
@@ -74,20 +76,26 @@
 
   /* --- accent ------------------------------------------------ */
 
-  /* Every --ion* token newtab.css defines, with the alpha it is authored
-     at. The chrome derives its own accent with the same formula, so one
-     hue lands identically on both surfaces. */
+  /* The accent family tokens.css defines (the --ion* names; --accent*
+     follow them), with the alpha each is authored at per theme. The chrome
+     derives its own accent with the same formula, so one hue lands
+     identically on the chrome and on these pages. Values: tokens.css. */
   var ION_TOKENS = [
-    ['--ion',      null],
-    ['--ion-soft', 0.14],
-    ['--ion-glow', 0.22],
-    ['--ion-line', 0.65]
+    //  name             dark   light
+    ['--ion',            null,  null],
+    ['--ion-soft',       0.14,  0.11],
+    ['--ion-glow',       0.22,  0.22],
+    ['--ion-line',       0.42,  0.40],
+    ['--ion-select',     0.30,  0.20],
+    ['--seam-color',     0.14,  0.14],
+    ['--chamber-seam',   0.16,  0.16]
   ];
 
-  // Dark wants a muted light that reads as an instrument rather than a
-  // neon tube; light wants a darker one that still reads against white glass.
+  // Helm's accent strength: the default steel blue is hsl(212 31% 71%) on
+  // dark and hsl(212 26% 41%) on light, and a custom hue keeps exactly that
+  // saturation and lightness, so only the hue moves (the palettes do too).
   function baseFor(themeName) {
-    return themeName === 'light' ? { s: 90, l: 44 } : { s: 45, l: 62 };
+    return themeName === 'light' ? { s: 26, l: 41 } : { s: 31, l: 71 };
   }
 
   // Kept so a data-theme flip can re-derive the same hue on the new base.
@@ -117,11 +125,12 @@
       return;
     }
 
-    var base = baseFor(root.getAttribute('data-theme'));
+    var light = root.getAttribute('data-theme') === 'light';
+    var base = baseFor(light ? 'light' : 'dark');
     var head = h + ' ' + base.s + '% ' + base.l + '%';
 
     for (i = 0; i < ION_TOKENS.length; i++) {
-      var alpha = ION_TOKENS[i][1];
+      var alpha = ION_TOKENS[i][light ? 2 : 1];
       style.setProperty(
         ION_TOKENS[i][0],
         'hsl(' + head + (alpha === null ? '' : ' / ' + alpha) + ')'
