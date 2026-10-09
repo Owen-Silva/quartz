@@ -205,10 +205,10 @@ html[data-theme="light"] #bg-dim {
 /* Why there is no picture: quiet, bottom-left, in words. */
 .bg-note {
   position: fixed;
-  left: 16px;
+  left: 52px;                      /* right of the Home's Edit pencil */
   bottom: 12px;
   z-index: 2;
-  max-width: min(560px, calc(100vw - 32px));
+  max-width: min(560px, calc(100vw - 68px));
   margin: 0;
   padding: 5px 12px;
   border: 1px solid var(--hairline);
@@ -260,12 +260,12 @@ html[data-theme="light"] #bg-dim {
 }
 
 /* --- the head: the Q and the search field ------------------- */
-.home-head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-}
+/* Two pieces now, each movable on its own, so the old <header> that held
+   them (a centred flex column with an 18px gap) is gone and the column
+   says the same thing directly: the Q centred, the field 18px under it
+   and centred at its 640px. Identical boxes, one wrapper fewer. */
+.column > .home-logo { margin: 0 auto; }
+.column > .search    { margin: 18px auto 0; }
 
 .home-logo {
   display: block;
@@ -339,6 +339,383 @@ html[data-theme="light"] #bg-dim {
   border-color: var(--accent-line);
   box-shadow: var(--focus-ring), var(--shadow-1);
 }
+
+/* --- the pieces: any piece, in any column --------------------- */
+/* Every piece of the Home carries data-piece (its id) and data-kind:
+   'card' for the rails' tiles (fixed widths: the clock, now playing,
+   session, markets) and 'wide' for the centre column's rows (they fill
+   whatever column they are in). newtab.js moves the elements themselves
+   between the three columns; nothing wraps them, so the default layout is
+   the same boxes under the same rules it always was, and these rules only
+   say what a piece does AWAY from its home column.
+
+   The centre column: rows keep their own top margins (search 18, Saved 32,
+   shortcuts 20, stats 28), a rail card dropped in gets the stats' 28 and is
+   centred, and whatever is first gets none: the stage's padding is the gap
+   above the first piece, as it always was above the Q. The placeholder is
+   always the column's first child (hidden unless the column is empty), so
+   "first piece" is the one right after it. */
+.column > .col-empty + [data-piece] { margin-top: 0; }
+.column > .module { margin: 28px auto 0; }
+.column > .module-clock { text-align: center; }
+.column > .module-clock .mod-time { justify-content: center; }
+
+/* The rails: the flex gap is the only space between pieces, so a centre
+   row's own top margin is dropped there. A wide piece takes the rail's
+   full width (a stats strip that shrank to its content would be useless),
+   and the two chip rows hug the rail's outer edge like the cards do. */
+.home .home-rail > [data-piece] { margin-top: 0; }   /* over .dock.is-alone too */
+.home-rail > [data-kind="wide"] { align-self: stretch; }
+.home-rail > .home-logo { align-self: auto; }
+.home-left  > .saved, .home-left  > .links { justify-content: flex-start; }
+.home-right > .saved, .home-right > .links { justify-content: flex-end; }
+.home-right > .module-clock { text-align: right; }
+.home-right > .module-clock .mod-time { justify-content: flex-end; }
+
+/* Markets sits at the foot of the right rail, as it always has, when it is
+   the last piece there. Anywhere else it stacks like everything else: what
+   the drop line showed is where it lands. */
+.home .home-right > .module-stocks:last-child { margin-top: auto; }
+
+/* The app dock away from the stats card: the same card, on its own. When
+   it follows the stats in the same column it is drawn INSIDE the stats
+   card, exactly as it always was (newtab.js puts it there). */
+.dock.is-alone {
+  margin-top: 28px;
+  padding: 16px 20px;
+  border: 1px solid var(--home-edge);
+  border-radius: var(--radius-l);
+  background: var(--home-card);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
+}
+
+/* Switched-off pieces wait here, never drawn. */
+.home-shelf,
+.home-shelf[hidden] { display: none; }
+
+/* An empty column in edit mode: somewhere to drop into. */
+.col-empty { display: none; }
+
+.home.is-editing .col-empty:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: 96px;
+  margin: 0;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--radius-l);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* --- edit mode ------------------------------------------------ */
+/* In edit mode the pieces themselves take no input at all (no accidental
+   press on a chip or a tile while moving things), and a layer of boxes
+   over them does: one per piece, sized to it by newtab.js, carrying the
+   piece's name (also the grip, and the keyboard's way to move it) and
+   an x. The boxes live in an absolute layer inside .home, so they scroll
+   with the page, and are only there while editing: outside edit mode the
+   Home has no drag affordance at all. */
+.home.is-editing [data-piece] {
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.home-box {
+  position: absolute;
+  pointer-events: auto;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--radius-m);
+  cursor: grab;
+  touch-action: none;
+  transition:
+    border-color     var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
+}
+
+.home-box:hover {
+  border-style: solid;
+  background-color: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* The one being carried: the accent is the state. */
+.home-box.is-dragging {
+  border-style: solid;
+  border-color: var(--accent-line);
+  background-color: var(--accent-soft);
+  cursor: grabbing;
+}
+
+.home.is-dragging,
+.home.is-dragging .home-box { cursor: grabbing; }
+
+[data-piece].is-lifted { opacity: 0.35; }
+
+.home-box-tag,
+.home-box-x {
+  position: absolute;
+  top: -11px;
+  height: 22px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-solid);
+  color: var(--text-2);
+  box-shadow: var(--shadow-1);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  transition:
+    color        var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.home-box-tag {
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 40px);
+  padding: 0 9px 0 6px;
+  border-radius: var(--radius-pill);
+  cursor: grab;
+  white-space: nowrap;
+}
+
+.home-box-grip {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 10px;
+  color: var(--text-3);
+}
+
+.home-box-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-box-x {
+  right: -11px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.home-box:hover .home-box-tag,
+.home-box-tag:hover,
+.home-box-x:hover {
+  color: var(--text);
+  border-color: var(--hairline-strong);
+}
+
+.home-box-tag:focus-visible,
+.home-box-x:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring), var(--shadow-1);
+}
+
+/* Where the piece will land: one accent line, 2px, never animated. */
+.home-drop {
+  position: fixed;
+  z-index: 20;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.home-drop[hidden] { display: none; }
+
+/* The carried piece's name, under the pointer. */
+.home-ghost {
+  position: fixed;
+  z-index: 21;
+  padding: 5px 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(14px, 14px);
+}
+
+.home-ghost[hidden] { display: none; }
+
+/* --- the Edit control, the tray and the note ------------------ */
+/* Bottom-left: the one corner no piece uses by default. A column of three
+   from the bottom up: the pencil, the tray over it, the note over that. */
+.home-edit {
+  position: fixed;
+  left: 16px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.home-edit > * { pointer-events: auto; }
+
+.home-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition:
+    color            var(--dur) var(--ease),
+    border-color     var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
+}
+
+.home-edit-btn:hover { color: var(--text); border-color: var(--hairline-strong); }
+
+.home-edit-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.home-edit-btn[disabled] { opacity: 0.5; cursor: default; }
+
+.home-edit-icon { width: 14px; height: 14px; }
+.home-edit-done { display: none; }
+
+.home-edit-btn[aria-pressed="true"] {
+  padding: 0 14px;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.home-edit-btn[aria-pressed="true"] .home-edit-icon { display: none; }
+.home-edit-btn[aria-pressed="true"] .home-edit-done { display: inline; }
+
+.home-tray {
+  width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-l);
+  background: var(--overlay);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  text-align: left;
+}
+
+.home-tray[hidden] { display: none; }
+
+.home-tray-title {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.home-tray-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-tray-list:empty { display: none; }
+
+.home-tray-add {
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.home-tray-add:hover { border-color: var(--hairline-strong); }
+
+.home-tray-add:focus-visible,
+.home-tray-reset:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.home-tray-empty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.home-tray-empty[hidden] { display: none; }
+
+.home-tray-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.home-tray-reset {
+  padding: 2px 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.home-tray-reset:hover { color: var(--text); }
+.home-tray-reset[disabled] { color: var(--text-3); cursor: default; }
+
+.home-tray-hint {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+/* Said in words when a change did not stick, and why. */
+.home-note {
+  max-width: min(340px, calc(100vw - 32px));
+  margin: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.home-note[data-tone="warn"] { color: var(--warn); }
+.home-note[hidden] { display: none; }
 
 /* --- tiles --------------------------------------------------- */
 /* The rails' cards: Helm's card shape (large radius, a hairline, the
@@ -2290,7 +2667,8 @@ html[data-theme="light"] #bg-dim {
 /* --- narrow windows ------------------------------------------ */
 /* Below 1296px the two rails no longer fit beside a readable column, so
    they fold into it: the clock on top, centred; then the column; then the
-   now-playing, session and markets cards in a wrapping row under it. The
+   now-playing, session and markets cards in a wrapping row under it (for
+   a customised Home: the rails' pieces, left then right; see the foot). The
    rails step out of the way with display: contents, so every card keeps
    its own rules and only its place changes. */
 @media (max-width: 1295px) {
@@ -2328,9 +2706,21 @@ html[data-theme="light"] #bg-dim {
     margin: 0 auto;
   }
 
-  .module-media   { order: 2; }
-  .module-session { order: 3; }
-  .module-stocks  { order: 4; margin-top: 0; }
+  /* A customised Home folds by the same rule. The clock, from whichever
+     rail it is in, stays the line on top (it is the page's greeting); then
+     the centre column, because the search, the saved sites and the stats
+     are what a narrow window is opened for; then the left rail's pieces
+     and the right rail's, each in its saved order, wrapping in a row. For
+     the default layout that is exactly the old fold: clock, column, now
+     playing, session, markets. A wide piece that lives in a rail takes a
+     line of its own at the column's width, like the column's rows. */
+  .home-left  > [data-piece], .home-left  > .col-empty { order: 2; }
+  .home-right > [data-piece], .home-right > .col-empty { order: 3; }
+  .home-rail > .module-clock { order: 0; text-align: center; }
+  .home-rail > .module-clock .mod-time { justify-content: center; }
+  .home-rail > [data-kind="wide"] { flex: 0 0 100%; max-width: 720px; }
+  .home-rail > .home-logo { object-fit: contain; max-width: none; height: 56px; }
+  .home.is-editing .home-rail > .col-empty:not([hidden]) { flex: 0 0 224px; }
 }
 
 /* Five columns stop being readable long before the window does, so the
@@ -2369,6 +2759,29 @@ html[data-theme="light"] #bg-dim {
   .stats-strip { grid-template-columns: repeat(2, 1fr); }
   .rtile { max-width: 132px; }
   .module-stocks { width: 100%; }
+}
+
+/* --- a stats card in a rail ---------------------------------- */
+/* After the strip's own rules, so the fold below wins over them the way
+   the 620px query does. */
+/* A rail is 352 to ~550px wide, which is the strip's own narrow-window
+   case: the same three-column fold the 620px query below gives a narrow
+   window, keyed to the rail instead. The rails are grid items sized by
+   their track (minmax(--rail-w, 1fr)), never by their content, so the
+   containment changes nothing about the default layout. */
+.home-rail { container-type: inline-size; }
+
+@container (max-width: 600px) {
+  .stats-strip { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
+  .stat-value    { font-size: 18px; }
+  .stat-value-sm { font-size: 15px; }
+  .procs { --proc-grid: minmax(0, 1fr) 48px 72px 76px; }
+  .proc-io { display: none; }
+  .stats-open {
+    position: static;
+    justify-self: end;
+    align-self: center;
+  }
 }
 
 /* --- reduced motion ------------------------------------------ */

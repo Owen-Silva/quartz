@@ -51,11 +51,17 @@
 
 <!-- Left of the column: the clock, then what the machine is playing. Below
      the breakpoint in newtab.css both rails fold into the page's one column. -->
-<aside class="home-rail home-left" aria-label="Clock and now playing">
+<aside class="home-rail home-left" data-column="left" aria-label="Left column">
+
+<!-- Shown only in edit mode, and only while its column has no piece: a
+     column must stay somewhere to drop into after its last piece leaves.
+     First in its column so :last-child still means the last piece. -->
+<p class="col-empty" data-col-empty="left" hidden>Drop a piece here</p>
 
 <!-- The clock, Helm's greeting voice: large, bare, over the picture. It ticks
      on a minute-aligned timeout in newtab.js, never per second. -->
-<section id="mod-clock" class="module module-clock" aria-label="Clock">
+<section id="mod-clock" class="module module-clock" aria-label="Clock"
+         data-piece="clock" data-kind="card">
   <p class="mod-time">
     <span id="clock-time" class="mod-time-value">--:--</span>
     <span id="clock-period" class="mod-time-period"></span>
@@ -73,7 +79,7 @@
      going away for a station, never moves the rail under it.
      Content is newtab.js's: __applyMedia() in, `newtab:media` out. -->
 <section id="mod-media" class="module module-media" aria-label="Now playing"
-         data-media="none" hidden>
+         data-piece="media" data-kind="card" data-media="none" hidden>
   <div class="mod-media-body">
     <span class="mod-media-art">
       <!-- The art arrives as base64 JPEG on the push; src is set once per
@@ -128,20 +134,23 @@
   </p>
 </section>
 
+
 </aside>
 
 <main class="stage">
-  <div class="column">
+  <div class="column" data-column="centre">
+    <p class="col-empty" data-col-empty="centre" hidden>Drop a piece here</p>
     <!-- The head of the Home column: the Q, and a search field in Helm's
-         input look. It never takes the caret on its own: a new tab puts the
+         input look, as two pieces of their own (either can be hidden or
+         moved; newtab.css gives the field the 18px the old head's gap did). It never takes the caret on its own: a new tab puts the
          caret in the ADDRESS BAR (the chrome, ea1ffe9), so typing straight
          after Ctrl+T searches up there; this field is for a click. Enter
          searches with the engine Settings picked (or opens what looks like
          an address), by navigating this tab, the way a chip does. -->
-    <header class="home-head">
-      <img class="home-logo" src="assets/quartz-logo.svg" alt="Quartz"
-           width="56" height="56" draggable="false">
-      <form id="search" class="search" role="search" autocomplete="off">
+    <img class="home-logo" src="assets/quartz-logo.svg" alt="Quartz"
+         width="56" height="56" draggable="false" data-piece="logo" data-kind="wide">
+    <form id="search" class="search" role="search" autocomplete="off"
+          data-piece="search" data-kind="wide">
         <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M10.4 10.4 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -150,8 +159,7 @@
                enterkeyhint="search" spellcheck="false" autocapitalize="off"
                placeholder="Search Google or type a URL"
                aria-label="Search Google or type a URL">
-      </form>
-    </header>
+    </form>
 
     <!-- Saved sites: the browser's saved list, pushed in with
          window.__applySaved() and drawn by newtab.js ("saved sites"). The
@@ -160,7 +168,7 @@
          that says what went wrong, when something did), then the tiles go in
          before the fold's button, then the "+" and the field it turns into,
          then the hint. -->
-    <nav id="saved" class="saved" aria-label="Saved sites">
+    <nav id="saved" class="saved" aria-label="Saved sites" data-piece="saved" data-kind="wide">
       <p class="saved-caption"><span class="saved-title">Saved</span><span
          id="saved-status" class="saved-status" role="status" aria-live="polite"></span></p>
       <button id="saved-more" class="rtile saved-more" type="button"
@@ -176,14 +184,14 @@
     </nav>
 
     <!-- The shortcut chips: the chrome's chip list, or this page's own. -->
-    <nav id="links" class="links" aria-label="Shortcuts"></nav>
+    <nav id="links" class="links" aria-label="Shortcuts" data-piece="links" data-kind="wide"></nav>
 
     <!-- The instrument strip: five readouts the chrome pushes in every
          second with __applyStats(). Every box below is sized by CSS and not
          by its content, so the strip wears its final height from the first
          paint: the dashes it shows before the first sample occupy exactly
          the room the numbers will, and nothing jumps when they land. -->
-    <section id="stats" class="stats" aria-label="System">
+    <section id="stats" class="stats" aria-label="System" data-piece="stats" data-kind="wide">
      <div class="stats-strip">
       <div class="stat">
         <p class="stat-value"><span id="st-cpu">&#8212;</span></p>
@@ -292,7 +300,7 @@
 
            The row keeps one tile-row of height whether it holds nothing or
            nine, so the card does not jump when the first pin lands. -->
-      <section id="dock" class="dock" aria-label="Apps">
+      <section id="dock" class="dock" aria-label="Apps" data-piece="apps" data-kind="wide">
         <div class="dock-head">
           <p class="dock-caption">Apps</p>
           <button id="dock-edit" class="dock-edit" type="button" aria-pressed="false">Edit</button>
@@ -315,14 +323,18 @@
         </div>
       </section>
     </section>
+
   </div>
 </main>
 
 <!-- Right of the column: the session readout (with idle music), then the
      markets tile at the foot of the rail. -->
-<aside class="home-rail home-right" aria-label="Session and markets">
+<aside class="home-rail home-right" data-column="right" aria-label="Right column">
 
-<section id="mod-session" class="module module-session" aria-label="Session" hidden>
+<p class="col-empty" data-col-empty="right" hidden>Drop a piece here</p>
+
+<section id="mod-session" class="module module-session" aria-label="Session"
+         data-piece="session" data-kind="card" hidden>
   <!-- The two counts stay hidden until __applyReadout: an idle-music push
        can be the thing that reveals the tile, and dashes are worse than no
        readout. -->
@@ -368,7 +380,7 @@
      Both canvases are drawn by newtab.js at most twice a second and only
      when a number actually moved. Nothing here animates. -->
 <section id="mod-stocks" class="module module-stocks" aria-label="Markets"
-         data-state="loading" hidden>
+         data-piece="markets" data-kind="card" data-state="loading" hidden>
   <div class="stk-head">
     <p class="stk-caption">Markets</p>
     <span id="stk-market" class="stk-market" data-market="closed">Closed</span>
@@ -401,14 +413,55 @@
   </div>
 </section>
 
+
 </aside>
 
 </div>
+
+<!-- Pieces switched off live here: out of every column (so a column's
+     first piece really is :first-child), still in the document (so every
+     handle newtab.js holds on them stays good), and never drawn. -->
+<div id="home-shelf" class="home-shelf" hidden></div>
+
+<!-- Customising the Home. A quiet pencil in the bottom-left corner (the
+     one corner no piece uses by default); pressed, it turns into Done and
+     the page goes into edit mode: every piece gets a box with its name, a
+     grip and an x, and the tray above the button lists what is hidden.
+     Esc leaves too. The note says, in words, when a change did not stick.
+     All of it is drawn by newtab.js ("Home layout and edit mode"). -->
+<div id="home-edit" class="home-edit">
+  <p id="home-note" class="home-note" role="status" aria-live="polite" hidden></p>
+  <section id="home-tray" class="home-tray" aria-label="Add to Home" hidden>
+    <p class="home-tray-title">Add to Home</p>
+    <ul id="home-tray-list" class="home-tray-list"></ul>
+    <p id="home-tray-empty" class="home-tray-empty">Every piece is on the page</p>
+    <div class="home-tray-foot">
+      <button id="home-tray-reset" class="home-tray-reset" type="button">Reset layout</button>
+      <span class="home-tray-hint">Drag to move. Esc when done.</span>
+    </div>
+  </section>
+  <button id="home-edit-btn" class="home-edit-btn" type="button" aria-pressed="false"
+          aria-controls="home-tray" title="Customize Home" aria-label="Customize Home">
+    <svg class="home-edit-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M10.6 2.6 13.4 5.4 5.6 13.2 2.4 13.6 2.8 10.4Z" fill="none" stroke="currentColor"
+            stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M9.2 4 12 6.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </svg>
+    <span class="home-edit-done">Done</span>
+  </button>
+</div>
+
+<!-- The edit layer's moving parts, outside .home so nothing they do can
+     shift a piece: the drop line and the name that follows the pointer. -->
+<div id="home-drop" class="home-drop" hidden></div>
+<div id="home-ghost" class="home-ghost" hidden></div>
 
 <!-- The web-app catalogue, so a 'web:' pin has a name and a host to draw
      from the first paint. The chrome's push is still the authority — it is
      the only side that knows which of these apps is also installed. -->
 <script src="webapps.js"></script>
+<!-- The Home's layout rules, shared with the chrome (see homelayout.js). -->
+<script src="homelayout.js"></script>
 <script src="newtab.js"></script>
 </body>
 </html>
