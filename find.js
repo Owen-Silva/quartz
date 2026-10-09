@@ -198,6 +198,9 @@
     inputEl.type = 'text';
     inputEl.placeholder = 'Find in page';
     inputEl.spellcheck = false;
+    // Autocorrect still fixes a finished word here, on the address bar's
+    // search-only rule (spell-preload.js); no squiggles, never on Enter.
+    inputEl.setAttribute('data-autocorrect', 'search');
     inputEl.autocomplete = 'off';
     inputEl.setAttribute('autocapitalize', 'off');
     inputEl.setAttribute('aria-label', 'Find in page');

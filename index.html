@@ -69,8 +69,14 @@
         <span class="glyph">&#xE72C;</span>
       </button>
 
+      <!-- spellcheck stays off (no squiggles under addresses); data-autocorrect
+           ="search" lets spell-preload.js fix finished SEARCH words only: it
+           leaves the whole field alone when the first word looks like an
+           address, path, email or command, and never fixes on Enter, so what
+           the omnibox navigates to is never changed. -->
       <input id="omnibox" class="glass" type="text" spellcheck="false" autocomplete="off"
-             autocapitalize="off" placeholder="Search or enter address" aria-label="Address bar">
+             autocapitalize="off" data-autocorrect="search"
+             placeholder="Search or enter address" aria-label="Address bar">
 
       <!-- Zoom readout, at the omnibox's right edge. app.js writes the text and
            unhides it only while the page is off 100%, so the row does not move

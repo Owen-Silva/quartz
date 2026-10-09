@@ -3764,7 +3764,7 @@
       trouble = 'Your typing settings could not be read: ' + spReadErr + '.';
     } else if (st && !st.available) {
       trouble = 'Autocorrect and the spelling underline are unavailable right now: ' +
-        (st.reason || 'the browser did not say why') + '.';
+        String(st.reason || 'the browser did not say why').replace(/[.\s]+$/, '') + '.';
     }
     if (trouble) {
       var notice = el('p', 'set-typing-notice', trouble);
