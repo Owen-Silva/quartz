@@ -90,32 +90,36 @@
   --nav-h:      44px;
 
   /* Workspace colours: fixed hues (they must stay told apart whatever
-     palette is on) at Helm's quiet strength. The wash is the same hue
-     at the alpha a tint takes behind the strip. */
-  --ws-ion:      var(--ion);
-  --ws-ember:    hsl(345 35% 70%);
-  --ws-forest:   hsl(160 35% 70%);
-  --ws-ocean:    hsl(190 35% 70%);
-  --ws-midnight: hsl(262 35% 70%);
-  --ws-ion-wash:      color-mix(in srgb, var(--ion) 7%, transparent);
-  --ws-ember-wash:    hsl(345 35% 70% / .07);
-  --ws-forest-wash:   hsl(160 35% 70% / .07);
-  --ws-ocean-wash:    hsl(190 35% 70% / .07);
-  --ws-midnight-wash: hsl(262 35% 70% / .07);
+     palette is on) at Helm's quiet strength — the palette presets' own
+     hues and saturation/lightness (tokens.css), so a workspace dot and
+     a palette swatch of the same name are the same colour. The wash is
+     the same hue at the alpha a tint takes behind the strip.
+     workspaces.css (loaded later) states the same values; keep the two
+     equal, or let one of them go. */
+  --ws-ion:      var(--accent);
+  --ws-ember:    hsl(345 31% 71%);
+  --ws-forest:   hsl(150 31% 71%);
+  --ws-ocean:    hsl(188 31% 68%);
+  --ws-midnight: hsl(255 31% 76%);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 7%, transparent);
+  --ws-ember-wash:    hsl(345 31% 71% / .07);
+  --ws-forest-wash:   hsl(150 31% 71% / .07);
+  --ws-ocean-wash:    hsl(188 31% 68% / .07);
+  --ws-midnight-wash: hsl(255 31% 76% / .07);
 }
 
 html[data-theme="light"] {
   --shade-drop: rgba(0, 0, 0, 0.08);
 
-  --ws-ember:    hsl(345 40% 40%);
-  --ws-forest:   hsl(160 40% 40%);
-  --ws-ocean:    hsl(190 40% 40%);
-  --ws-midnight: hsl(262 40% 40%);
-  --ws-ion-wash:      color-mix(in srgb, var(--ion) 9%, transparent);
-  --ws-ember-wash:    hsl(345 40% 40% / .09);
-  --ws-forest-wash:   hsl(160 40% 40% / .09);
-  --ws-ocean-wash:    hsl(190 40% 40% / .09);
-  --ws-midnight-wash: hsl(262 40% 40% / .09);
+  --ws-ember:    hsl(345 26% 41%);
+  --ws-forest:   hsl(150 26% 36%);
+  --ws-ocean:    hsl(188 30% 34%);
+  --ws-midnight: hsl(255 26% 46%);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 9%, transparent);
+  --ws-ember-wash:    hsl(345 26% 41% / .09);
+  --ws-forest-wash:   hsl(150 26% 36% / .09);
+  --ws-ocean-wash:    hsl(188 30% 34% / .09);
+  --ws-midnight-wash: hsl(255 26% 46% / .09);
 }
 
 /* --- reset / window ------------------------------------------ */
