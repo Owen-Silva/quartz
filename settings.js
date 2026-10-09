@@ -19,7 +19,7 @@
  *     chipsSource:  'visited' | 'list',      // where the new tab's five come from
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // Claude pane's folder; null = home
- *     claudeResume: true | false,           // --continue on a restored pane
+ *     claudeResume: true | false,           // --continue on a restored beside pane
  *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions
  *     claudeNotify: true | false,           // toast when a pane goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
@@ -2067,16 +2067,22 @@
     if (!field) return;
     field.textContent = '';
 
+    /* Still live: standalone Claude tabs are gone, but a pane open beside a
+       page when Quartz closed is saved with the session and comes back on
+       restore as its own tab (app.js restore -> createClaudeTab with
+       resume). This switch decides whether that tab runs --continue. The
+       words say "pane beside a page" because that is the only Claude
+       surface left. */
     field.appendChild(switchRow(
-      'Resume the last conversation when tabs are restored',
+      'Continue the last conversation in a restored Claude pane',
       get('claudeResume') !== false,
       function (next) { set({ claudeResume: next }); }
     ));
 
     var hint = el('p', 'set-hint');
-    hint.appendChild(document.createTextNode('Restored Claude panes run '));
+    hint.appendChild(document.createTextNode('A Claude pane that was open beside a page when Quartz closed comes back as its own tab running '));
     hint.appendChild(el('code', 'set-code', 'claude --continue'));
-    hint.appendChild(document.createTextNode(' in their folder. Turn off to start fresh every time.'));
+    hint.appendChild(document.createTextNode(' in its folder. Turn off to start it fresh.'));
     field.appendChild(hint);
   }
 
