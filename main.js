@@ -339,17 +339,12 @@ const stocks = stocksModule.create({
 });
 
 /**
- * The Claude Code budget readout (titlebar pill + new-tab row) and the School
- * workspace's reader/helper. Both register their own IPC; main only hands them
- * the gate, the push function and each other.
+ * The School workspace's reader/helper, and the Claude Code budget reader
+ * behind its guard (budget.js: no IPC, no UI; the helper asks it before every
+ * `claude -p` call and parks itself near the limits). School registers its own
+ * IPC; main only hands it the gate, the push function and the budget reader.
  */
-const budget = budgetModule.create({
-  app,
-  ipcMain,
-  isChromeSender: (event) => isChromeSender(event),
-  isBundledPage: (url) => isBundledPageUrl(url),
-  send: (channel, payload) => send(channel, payload),
-});
+const budget = budgetModule.create({ app });
 const school = schoolModule.create({
   app,
   ipcMain,

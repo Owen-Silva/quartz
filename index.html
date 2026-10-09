@@ -42,9 +42,6 @@
         <span class="glyph">&#xE710;</span>
       </button>
       <div class="spacer"></div>
-      <!-- Titlebar readout, filled by pills.js: the Claude budget pill. An empty
-           slot takes no space. -->
-      <div id="budget-slot"></div>
       <div class="wincontrols">
         <button id="win-min" type="button" title="Minimize" aria-label="Minimize">
           <span class="glyph">&#xE921;</span>
@@ -148,8 +145,7 @@
   <script src="siteinfo.js"></script>
   <script src="tabsearch.js"></script>
   <script src="workspaces.js"></script>
-  <!-- The budget pill and the School pane. Both read window.api only. -->
-  <script src="pills.js"></script>
+  <!-- The School pane. It reads window.api only. -->
   <script src="school-pane.js"></script>
   <!-- node_modules/@mozilla/readability/Readability.js is deliberately NOT
        here: reader.js is the only thing that uses it and injects it itself the

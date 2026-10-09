@@ -402,18 +402,6 @@ contextBridge.exposeInMainWorld('api', {
     // Upper-case tickers; main normalises, de-duplicates and caps the list.
     setSymbols: (list) => ipcRenderer.invoke('stocks:set-symbols', Array.isArray(list) ? list : [])
   },
-  // Claude Code usage: 5-hour and weekly percentages, resets and today's cost,
-  // read by main from the statusLine hook's JSON. describe() answers the
-  // snapshot shape documented in budget.js; onUpdate fires on every change and
-  // returns a function that removes the listener.
-  budget: {
-    describe: () => ipcRenderer.invoke('budget:describe'),
-    onUpdate: (cb) => {
-      const handler = (_event, payload) => cb(payload);
-      ipcRenderer.on('budget:update', handler);
-      return () => ipcRenderer.removeListener('budget:update', handler);
-    }
-  },
   // The School workspace: classes, the current subject, the LessonPlayer reader,
   // the headless-Claude helper and its match. State shape and command names
   // are documented in school.js. Every call resolves; a refused or failing
