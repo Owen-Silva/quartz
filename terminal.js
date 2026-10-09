@@ -36,57 +36,64 @@
   var seq = 0;
 
   // --------------------------------------------------------------- themes --
-  // The background is fully transparent in BOTH palettes ON PURPOSE: the glass
-  // chamber painted by chrome.css is the terminal's ground, so xterm must never
-  // paint over it. Only the ink changes between themes.
+  // The background is fully transparent in BOTH palettes ON PURPOSE: the
+  // chamber chrome.css paints (Helm's .panel: --surface-1 over the one
+  // pre-blurred background layer) is the terminal's ground, so xterm must
+  // never paint over it. The chamber sits in #views beside a page, over the
+  // chrome's own background layer and never over a web page, so there is
+  // always a calm, blurred ground behind the text.
+  //
+  // The ink is Helm's palette: neutral greys, the desaturated steel-blue
+  // accent as cursor and selection, muted (never neon) ANSI hues, so
+  // claude's output reads like Helm's own terminal. Light keeps the same
+  // hue order, darkened to hold contrast on the pale chamber.
 
   var DARK_THEME = {
-    background: 'rgba(5,6,10,0)',
-    foreground: '#eef1f8',
-    cursor: '#ffab4c',
-    cursorAccent: '#05060a',
-    selectionBackground: 'rgba(125,211,255,.22)',
-    black: '#1a1d27',
-    red: '#ff6b7a',
-    green: '#7ee8a2',
-    yellow: '#ffd479',
-    blue: '#8ab4ff',
-    magenta: '#d7a3ff',
-    cyan: '#7fe3ff',
-    white: '#d5dae6',
-    brightBlack: '#2a2e3d',
-    brightRed: '#ff8a96',
-    brightGreen: '#9df0b8',
-    brightYellow: '#ffe0a0',
-    brightBlue: '#a9c6ff',
-    brightMagenta: '#e4bcff',
-    brightCyan: '#a3ecff',
-    brightWhite: '#eef1f8'
+    background: 'rgba(0,0,0,0)',
+    foreground: '#ececea',
+    cursor: '#9fb4cc',
+    cursorAccent: '#141516',
+    selectionBackground: 'rgba(159,180,204,0.30)',
+    black: '#2a2b2d',
+    red: '#e0877c',
+    green: '#8fbf9b',
+    yellow: '#d6b874',
+    blue: '#9fb4cc',
+    magenta: '#b9a3c9',
+    cyan: '#8fc0c4',
+    white: '#c9cac7',
+    brightBlack: '#75767a',
+    brightRed: '#eaa198',
+    brightGreen: '#a8d0b2',
+    brightYellow: '#e3cb93',
+    brightBlue: '#b8c9dc',
+    brightMagenta: '#cbb8d8',
+    brightCyan: '#a9d0d3',
+    brightWhite: '#ececea'
   };
 
-  // Tuned for the pale frosted chamber (~#f2f4fa behind the text).
   var LIGHT_THEME = {
-    background: 'rgba(5,6,10,0)',
-    foreground: '#12162a',
-    cursor: '#f08c00',
-    cursorAccent: '#ffffff',
-    selectionBackground: 'rgba(11,127,214,.22)',
-    black: '#3b4256',
-    red: '#c8283f',
-    green: '#137a4a',
-    yellow: '#9a6a00',
-    blue: '#0b5fd6',
-    magenta: '#7c3aed',
-    cyan: '#0a7f94',
-    white: '#5c6478',
-    brightBlack: '#8a92a8',
-    brightRed: '#e0304a',
-    brightGreen: '#178f56',
-    brightYellow: '#b07a00',
-    brightBlue: '#0b7fd6',
-    brightMagenta: '#8b5cf6',
-    brightCyan: '#0e94ab',
-    brightWhite: '#12162a'
+    background: 'rgba(0,0,0,0)',
+    foreground: '#1b1c1d',
+    cursor: '#4d6784',
+    cursorAccent: '#f6f6f4',
+    selectionBackground: 'rgba(77,103,132,0.20)',
+    black: '#3a3b3d',
+    red: '#b4483c',
+    green: '#3f7d51',
+    yellow: '#93701f',
+    blue: '#4d6784',
+    magenta: '#7a5a8c',
+    cyan: '#3d7a80',
+    white: '#55575a',
+    brightBlack: '#717376',
+    brightRed: '#c65a4e',
+    brightGreen: '#4c9161',
+    brightYellow: '#a8822a',
+    brightBlue: '#5f7b9a',
+    brightMagenta: '#8e6ba1',
+    brightCyan: '#4b8d94',
+    brightWhite: '#1b1c1d'
   };
 
   var currentTheme = 'dark';
@@ -570,7 +577,7 @@
     if (typeof window.Terminal !== 'function') return false;
     if (!hasSize(st.host)) return false;
 
-    // The background is fully transparent ON PURPOSE: the glass chamber painted
+    // The background is fully transparent ON PURPOSE: the chamber painted
     // by chrome.css is the terminal's ground, so xterm must not paint over it.
     st.term = new window.Terminal({
       allowTransparency: true,
