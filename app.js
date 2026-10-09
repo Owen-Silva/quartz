@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * app.js — tab strip, <webview> lifecycle, omnibox, navigation, Claude tabs.
+ * app.js — tab strip, <webview> lifecycle, omnibox, navigation, the Claude pane.
  *
  * The renderer runs with contextIsolation ON and nodeIntegration OFF, so this is
  * plain browser script: no require(), no import, no bundler.
@@ -12,7 +12,9 @@
  *                   driven by window.ClaudeTerminal (terminal.js, loaded AFTER
  *                   this file, so it is only ever touched from handlers). Each
  *                   one runs in a folder (tab.cwd), which is what names its chip
- *                   and what the session store rebuilds it from.
+ *                   and what the session store rebuilds it from. Claude only
+ *                   opens as the pane BESIDE a page (openClaudeBesideTab); the
+ *                   same chamber also hosts the shells (openTerminalTab).
  * Exactly one child of #views is visible at a time; switching is a display swap,
  * never a teardown, so page state and live sessions both survive.
  *
@@ -21,9 +23,9 @@
  * own search field.
  *
  * Owned ids (agent D writes index.html):
- *   #tabstrip #newtab #newclaude #back #forward #reload #omnibox #zoom-badge
+ *   #tabstrip #newtab #back #forward #reload #omnibox #zoom-badge
  *   #views #win-min #win-max #win-close #theme #titlebar #tabmenu
- * Body classes owned here: booted, maximized, acrylic, claude-live, tab-dragging.
+ * Body classes owned here: booted, maximized, acrylic, tab-dragging.
  * Chip classes owned here: active, claude, live, loading, dragging, drag-shift,
  * broken, pinned, collapsed, has-icon, split. Runtime panes owned here:
  * #tabmenu rows,
@@ -484,8 +486,8 @@ function pushSettingsToTab(tab) {
 /* ------------------------------------------------------------------ */
 
 /*
- * The little live line on the new-tab page: how many tabs are open, how many
- * Claude chambers are live, and what Spotify auto-pause is doing right now.
+ * The little live line on the new-tab page: how many tabs are open and what
+ * Spotify auto-pause is doing right now.
  * The page is a guest on file:// and can see none of that for itself, so the
  * chrome pushes it — same shape, and the same two guards, as every other push
  * above.
@@ -506,18 +508,17 @@ function autopauseWord(status) {
 }
 
 function readoutSnapshot() {
-  let claude = 0;
-  for (const tab of tabs) if (isClaudeProgramTab(tab) && tab.live) claude += 1;
   // Every open tab, in every workspace: the page is describing the browser,
-  // not the strip in front of it.
-  return { tabs: tabs.length, claude: claude, autopause: autopauseReadout };
+  // not the strip in front of it. There is no Claude session count any more:
+  // Claude only opens as a pane beside a page, and the page lost that row.
+  return { tabs: tabs.length, autopause: autopauseReadout };
 }
 
 /** Hand the readout to one open new-tab guest (no-op for anything else). */
 function pushReadoutToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   const payload = JSON.stringify(readoutSnapshot());
-  // Same three numbers as last time: the page is already showing them.
+  // Same readout as last time: the page is already showing it.
   if (pushUnchanged(tab, 'readout', payload)) return;
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -1859,6 +1860,9 @@ function appsPayload() {
     // A catalogue app or a terminal program is pinned by an id the installed
     // index has never heard of, so its row is drawn from the catalogue instead.
     if (isWebAppId(id) || isTerminalAppId(id)) {
+      // An old 'term:claude' pin: Claude only opens beside a page now, so the
+      // dock draws no tile for it (the pin stays in settings, harmless).
+      if (terminalProgramName(id) === CLAUDE_PROGRAM) continue;
       const entry = isWebAppId(id) ? findWebAppEntry(id) : null;
       const name = entry ? entry.name : (isTerminalAppId(id) ? ptyProgramTitle(id) : '');
       if (!name) continue; // a slug this build's catalogue does not have
@@ -2843,6 +2847,12 @@ function tabForProgram(program) {
 function openTerminalTab(program, options) {
   const name = terminalProgramName(program);
   if (!name) return Promise.resolve(null);
+  // Claude is not a terminal tab any more: it only opens beside a page. A dock
+  // pin or palette row an older build saved for it says so instead of opening.
+  if (name === CLAUDE_PROGRAM) {
+    claudeToast('Claude opens beside a page now: right-click the page');
+    return Promise.resolve(null);
+  }
   // A press on the dock tile means "show me the one that is already open",
   // exactly as it does for a catalogue app: the tile is drawn as open, and the
   // tooltip says so. The palette's row is spelled "New <program> tab", so it
@@ -2895,6 +2905,8 @@ function webAppsPayload() {
 function ptyProgramsPayload() {
   const out = [];
   for (const row of ptyProgramsList()) {
+    // Claude is left out: it only opens beside a page (openTerminalTab refuses it).
+    if (row.id === CLAUDE_PROGRAM) continue;
     out.push({ id: terminalAppId(row.id), name: row.title, available: !!row.available });
   }
   return out;
@@ -4449,7 +4461,6 @@ let nextWorkspaceSeq = 1;
 let titlebarEl = null;
 let tabstripEl = null;
 let newTabBtn = null;
-let newClaudeBtn = null;
 let backBtn = null;
 let forwardBtn = null;
 let reloadBtn = null;
@@ -7728,9 +7739,30 @@ function toggleSplit() {
  */
 function openClaudeBesideTab(tab) {
   if (!tab || tab.kind !== 'page') return false;
-  const claude = createClaudeTab({ background: true });
+  const claude = createClaudeTab({ background: true, beside: true });
   if (!claude) return false;
   return splitTabs(tab, claude);
+}
+
+/**
+ * The page's own context menu: "Open Claude beside this page". The menu can
+ * fire on a page that is on screen but not the active half of a split, so the
+ * url names the page (askSourceTab). A page already standing next to a chamber
+ * gets that chamber raised rather than a second one; the chip menu only offers
+ * the row on a page that is not split, so it calls openClaudeBesideTab() direct.
+ */
+function openClaudeBesideFromMenu(payload) {
+  const page = askSourceTab(String((payload && payload.url) || ''));
+  if (!page) {
+    claudeToast(MSG_NO_PAGE);
+    return false;
+  }
+  const partner = splitPartner(page);
+  if (isClaudeTab(partner)) {
+    activateTab(partner.id);
+    return true;
+  }
+  return openClaudeBesideTab(page);
 }
 
 /** Chip menu on a chamber: stand it beside the page you were last on. */
@@ -7799,15 +7831,6 @@ function onGuestFocused(payload) {
 /* ------------------------------------------------------------------ */
 /* Claude tabs                                                         */
 /* ------------------------------------------------------------------ */
-
-/** body.claude-live is true while ANY Claude tab still has a live session. */
-function recomputeClaudeLive() {
-  const any = tabs.some((t) => isClaudeProgramTab(t) && t.live);
-  document.body.classList.toggle('claude-live', any);
-  // A session coming up or ending moves the new-tab readout's Claude count;
-  // this is the one place every such change already passes through.
-  pushReadoutToAll();
-}
 
 /* ------------------------------------------------------------------ */
 /* "Claude needs you"                                                  */
@@ -7896,7 +7919,6 @@ function markClaudeNeedsYou(tab) {
     }
     tab.chipEl.title = chipTooltip(tab);
   }
-  recomputeClaudeAttn();
   notifyClaudeWaiting(tab);
 }
 
@@ -7913,13 +7935,6 @@ function clearClaudeNeedsYou(tab) {
     try { tab.attnEl.remove(); } catch (err) { /* already detached */ }
     tab.attnEl = null;
   }
-  recomputeClaudeAttn();
-}
-
-/** The strip's own light: the pill pulses while ANY chamber is waiting. */
-function recomputeClaudeAttn() {
-  const any = tabs.some((t) => isClaudeTab(t) && t.needsYou);
-  if (newClaudeBtn) newClaudeBtn.classList.toggle('attn', any);
 }
 
 /** Every waiting chamber that is on screen now has been seen. */
@@ -7956,7 +7971,7 @@ function homeDir() {
 }
 
 /**
- * The folder a new Claude tab opens in: the workspace on screen has the first
+ * The folder a new Claude pane opens in: the workspace on screen has the first
  * word (that is what a workspace folder IS), then the one settings names, then
  * home. Whether it still exists cannot be checked from here without waiting,
  * so the path is passed through as written — pty.js falls back to home on a
@@ -7987,108 +8002,10 @@ function folderBaseName(path) {
   return /^[A-Za-z]:$/.test(base) ? '' : base;
 }
 
-/* ---- recent Claude folders ---------------------------------------------
- * The user works across several projects at once, so the folders a chamber has
- * actually opened in are worth keeping: the strip menu and the palette each
- * offer them as one click, with no folder picker in the way. localStorage,
- * so the list is there synchronously at boot and survives a relaunch.
- */
-const CLAUDE_RECENT_KEY = 'claudeRecent';
-const CLAUDE_RECENT_MAX = 8;
-
-/** One spelling for storage and for comparison: forward slashes, no trailing one. */
-function normaliseClaudeFolder(cwd) {
-  let text = String(cwd == null ? '' : cwd).trim().replace(/\\/g, '/').replace(/\/+$/, '');
-  if (/^[A-Za-z]:$/.test(text)) text += '/'; // a drive root keeps its slash
-  return text;
-}
-
-/** Windows: two spellings of one folder are one folder. */
-function sameClaudeFolder(a, b) {
-  const left = normaliseClaudeFolder(a).toLowerCase();
-  return !!left && left === normaliseClaudeFolder(b).toLowerCase();
-}
-
-/** The stored list exactly as written — nothing merged in, nothing implied. */
-function storedClaudeFolders() {
-  let raw = null;
-  try { raw = window.localStorage.getItem(CLAUDE_RECENT_KEY); } catch (err) { return []; }
-  if (!raw) return [];
-  let parsed = null;
-  try { parsed = JSON.parse(raw); } catch (err) { return []; } // a corrupt list is no list
-  if (!Array.isArray(parsed)) return [];
-  const out = [];
-  for (const entry of parsed) {
-    const cwd = normaliseClaudeFolder(entry);
-    if (!cwd) continue;
-    if (out.some((seen) => sameClaudeFolder(seen, cwd))) continue;
-    out.push(cwd);
-    if (out.length >= CLAUDE_RECENT_MAX) break;
-  }
-  return out;
-}
-
-function writeClaudeFolders(list) {
-  try {
-    window.localStorage.setItem(
-      CLAUDE_RECENT_KEY, JSON.stringify(list.slice(0, CLAUDE_RECENT_MAX)));
-  } catch (err) { /* storage blocked or full: the list is only a convenience */ }
-}
-
-/**
- * Most recent first. The folder Settings names is merged in at the front when
- * it is set and has not been opened yet, so a fresh profile still gets the one
- * row that matters. Read-time only: it is never written into the store.
- */
-function claudeRecentFolders() {
-  const list = storedClaudeFolders();
-  const setting = normaliseClaudeFolder(settingGet('claudeDir'));
-  if (setting && !list.some((seen) => sameClaudeFolder(seen, setting))) list.unshift(setting);
-  return list.slice(0, CLAUDE_RECENT_MAX);
-}
-
-/** Called once a chamber has actually spawned in `cwd`. Empty is not a folder. */
-function rememberClaudeFolder(cwd) {
-  const folder = normaliseClaudeFolder(cwd);
-  if (!folder) return claudeRecentFolders();
-  const list = storedClaudeFolders().filter((seen) => !sameClaudeFolder(seen, folder));
-  list.unshift(folder);
-  writeClaudeFolders(list);
-  return claudeRecentFolders();
-}
-
-/** Drop one folder from the list. Returns what is left. */
-function forgetClaudeFolder(cwd) {
-  const folder = normaliseClaudeFolder(cwd);
-  if (!folder) return claudeRecentFolders();
-  writeClaudeFolders(storedClaudeFolders().filter((seen) => !sameClaudeFolder(seen, folder)));
-  return claudeRecentFolders();
-}
-
-/** What the recent rows call: a chamber in that folder, options passed through. */
-function createClaudeTabIn(cwd, options) {
-  const opts = options || {};
-  return createClaudeTab({ cwd: cwd, resume: opts.resume, background: opts.background });
-}
-
-/**
- * The strip menu's recent rows. Labels are basenames, and basenames collide
- * across projects ("browser" in Downloads and in home), so a duplicate wears
- * its parent folder too. The full path rides along as the row's tooltip.
- */
-function claudeRecentMenuItems(limit) {
-  const folders = claudeRecentFolders().slice(0, limit || 5);
-  const names = folders.map((cwd) => folderBaseName(cwd) || cwd);
-  return folders.map((cwd, at) => {
-    let name = names[at];
-    const clash = names.some((other, i) => i !== at && other.toLowerCase() === name.toLowerCase());
-    if (clash) {
-      const parent = folderBaseName(cwd.replace(/\/[^/]*$/, ''));
-      if (parent) name = name + ' (' + parent + ')';
-    }
-    return { label: 'Claude in ' + name, title: cwd, run: () => createClaudeTabIn(cwd) };
-  });
-}
+// The "recent Claude folders" list fed the "Claude in <folder>" rows, which
+// went with Claude tabs. Its localStorage key is cleared once per boot so a
+// profile does not carry the list forever; nothing reads it any more.
+try { window.localStorage.removeItem('claudeRecent'); } catch (err) { /* storage blocked: nothing to clear */ }
 
 /**
  * A Claude chip's title before the session names itself: the folder it runs in,
@@ -8121,18 +8038,16 @@ function claudeSkipPermissions() {
 /**
  * The one place a `resume` option becomes claude.exe flags.
  *
- * 'pick' -> `--resume` with no id, which is the CLI's own picker of past
- * conversations in that folder; true -> `--continue`, the latest one without
- * asking. pty.js allows exactly these, bare, and drops the rest.
+ * true -> `--continue`, that folder's latest conversation without asking (a
+ * restored pane only). pty.js allows exactly that, bare, and drops the rest.
  *
  * The skip-permissions flag is PREPENDED, so it is on the command line for a
- * plain new tab as well as for either resume spelling.
+ * fresh pane as well as for a restored one.
  */
 function claudeStartArgs(resume) {
   const args = [];
   if (claudeSkipPermissions()) args.push(CLAUDE_SKIP_ARG);
-  if (resume === 'pick') args.push('--resume');
-  else if (resume) args.push('--continue');
+  if (resume === true) args.push('--continue');
   return args;
 }
 
@@ -8153,19 +8068,25 @@ function pushClaudeSkipToPreload() {
  * so the host element already has a size when ClaudeTerminal.create() measures
  * it. terminal.js is loaded after this file, hence the typeof guard.
  *
- * @param {{cwd?:string, resume?:boolean|'pick', background?:boolean,
- *          workspace?:string, program?:string}} [options]
+ * Claude itself only opens BESIDE a page (openClaudeBesideTab, and a restored
+ * pane): there is no Claude tab of its own any more. The same chamber still
+ * hosts the shells (openTerminalTab), which are tabs like any other.
+ *
+ * @param {{cwd?:string, resume?:boolean, background?:boolean,
+ *          workspace?:string, program?:string, beside?:boolean}} [options]
  *        cwd: the folder to run in, defaulting to settings / home.
  *        program: a pty.js program id — 'claude' (the default) or one of the
  *        shells. Everything else about the tab is the same; the program only
  *        decides what is spawned in it, what the chip is called, and that a
- *        shell is never treated as a Claude session (no "needs you", no live
- *        count on the pill, and not restored across a restart).
+ *        shell is never treated as a Claude session (no "needs you", and not
+ *        restored across a restart).
  *        workspace: restoreSession() only; otherwise the one on screen.
  *        resume: true continues that folder's last conversation outright
- *        (restoreSession() only — a tab the user opens starts clean);
- *        'pick' hands the user Claude Code's own list of past conversations
- *        in that folder. Anything else starts clean. See claudeStartArgs().
+ *        (restoreSession() only — a pane the user opens starts clean).
+ *        Anything else starts clean. See claudeStartArgs().
+ *        beside: this is the pane beside a page. It is written into the
+ *        session (sessionSnapshot) so a restart can tell it from a Claude
+ *        TAB saved by an older build, which restoreSession() drops.
  *        background: build it behind the current tab. The host is hidden while
  *        the session starts, so activateTab() fits it on first raise.
  */
@@ -8230,6 +8151,8 @@ function createClaudeTab(options) {
     lastActive: 0,
     workspace: validWorkspaceId(opts.workspace || currentWorkspaceId),
     termOff: [],
+    // The pane beside a page (see the doc above): what the session file keeps.
+    beside: isClaude && !!opts.beside,
     // "Claude needs you": set while this chamber has gone quiet off screen.
     needsYou: false,
     needsYouNotified: false,
@@ -8287,55 +8210,8 @@ function createClaudeTab(options) {
     return tab;
   }
 
-  // A folder is only "recent" once a chamber has actually started in it: the
-  // two failure paths above return before here, and so never pollute the list.
-  // Only Claude's own folder list — a shell opened in home is not a project.
-  if (isClaude) rememberClaudeFolder(cwd);
-
   wireTermEvents(tab);
   return tab;
-}
-
-/**
- * Shift+click on the Claude pill, Ctrl+Shift+` and the strip menu item: pick a
- * folder, then open a chamber there. Cancelling the dialog opens nothing.
- */
-function newClaudeTabInFolder() {
-  const app = (window.api && window.api.app) ? window.api.app : null;
-  if (!app || typeof app.pickFolder !== 'function') {
-    createClaudeTab(); // preload predates the picker: the default folder is all we have
-    return;
-  }
-  let pending = null;
-  try { pending = app.pickFolder(defaultClaudeCwd()); } catch (err) { return; }
-  if (!pending || typeof pending.then !== 'function') return;
-  pending.then((dir) => {
-    if (typeof dir === 'string' && dir) createClaudeTab({ cwd: dir });
-  }, () => { /* dialog failed: same as a cancel */ });
-}
-
-/**
- * Ctrl+click on the Claude pill, the strip menu and the palette: a chamber in
- * the default folder that opens on Claude Code's own list of past
- * conversations there. The picking happens inside the CLI, not in the chrome,
- * so there is nothing to cancel on this side — Escape in the picker just
- * leaves the session sitting at a fresh prompt.
- */
-function resumeClaudeConversation() {
-  return createClaudeTab({ resume: 'pick' });
-}
-
-/**
- * The Claude chip menu's resume row. Same folder as the chamber it was asked
- * from, and seated immediately after that chip rather than at the end of the
- * strip: the two sessions on one folder belong next to each other.
- */
-function resumeClaudeBesideTab(tab) {
-  if (!tab) return null;
-  const seat = stripSeat(tab);
-  const made = createClaudeTab({ cwd: tab.cwd, resume: 'pick' });
-  if (made && seat !== -1) moveTabToIndex(made.id, seat + 1);
-  return made;
 }
 
 function wireTermEvents(tab) {
@@ -8353,7 +8229,6 @@ function wireTermEvents(tab) {
     const live = !!on;
     tab.live = live;
     if (tab.chipEl) tab.chipEl.classList.toggle('live', live);
-    recomputeClaudeLive();
     // Only relabel a tab the session never got round to naming.
     if (!live && tab.title === claudeDefaultTitle(tab)) {
       setTabTitle(tab, claudeDefaultTitle(tab) + ' (ended)');
@@ -8596,8 +8471,6 @@ function closeTab(id, options) {
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
   pushAppRunningUpdate(); // an app tab or a terminal just stopped being open
-  recomputeClaudeLive();
-  recomputeClaudeAttn(); // the pill must not keep pulsing for a closed chamber
   emitWorkspaceChange(); // a tab count moved
   pushReadoutToAll();    // ...so every open new-tab page says so
   // The tab that just went may have been the new-tab page holding the sampler
@@ -8889,17 +8762,6 @@ function tabMenuItemsForTab(tab) {
         title: tab.title || ''
       })
     });
-    // ...and the same thing with the article's words: only offered when the
-    // reader probe has not already said there is nothing to read here.
-    if (readerSaysArticle(tab) !== false) {
-      items.push({
-        label: 'Ask Claude about this article',
-        run: () => askClaudeAboutArticle({
-          url: readCurrentUrl(tab) || tab.url || '',
-          title: tab.title || ''
-        })
-      });
-    }
     items.push({ label: 'Print…', run: () => printTab(tab) });
     // Sleeping is reversible and costs nothing to offer, so the row is always
     // there: disabled on a tab that is not allowed to sleep right now.
@@ -8907,19 +8769,10 @@ function tabMenuItemsForTab(tab) {
       ? { label: 'Wake tab', run: () => wakeTab(tab) }
       : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) });
   } else {
-    // Same folder, fresh session — the chamber already running is untouched.
-    // Duplicate is deliberately not offered: a PTY cannot be copied.
-    items.push({
-      label: 'Open folder in new Claude tab',
-      run: () => createClaudeTab({ cwd: tab.cwd })
-    });
-    // ...and the same folder's history: the CLI's picker, in a tab seated
-    // right after this one.
-    items.push({
-      label: 'Resume another conversation here',
-      run: () => resumeClaudeBesideTab(tab)
-    });
-    // A chamber splits like anything else now: broken from either chip, and
+    // A chamber (the Claude pane, or a shell). Claude no longer opens as a
+    // tab of its own, so there is no "another one in this folder" row here,
+    // and Duplicate is not offered either: a PTY cannot be copied.
+    // A chamber splits like anything else: broken from either chip, and
     // paired with whichever page the user was reading before they came here.
     if (splitPartner(tab)) {
       items.push({ label: 'Unsplit', run: () => unsplit(tab) });
@@ -8967,19 +8820,13 @@ function tabMenuItemsForTab(tab) {
 }
 
 /**
- * Right-click on bare strip: there is no tab to act on, so only these five —
- * plus a row per recent Claude folder, which is nothing at all on a profile
- * that has never opened one.
+ * Right-click on bare strip: there is no tab to act on, so only these three.
+ * Claude opens beside a page (that page's own menus), never from here.
  */
 function tabMenuItemsForStrip() {
   const items = [
-    { label: 'New tab', run: () => createTab(HOME_URL) },
-    { label: 'New Claude tab in folder…', run: newClaudeTabInFolder },
-    // The default folder, opened straight onto its past conversations.
-    { label: 'Resume a Claude conversation…', run: resumeClaudeConversation }
+    { label: 'New tab', run: () => createTab(HOME_URL) }
   ];
-  // The folders chambers have actually run in: the picker, already answered.
-  for (const row of claudeRecentMenuItems(5)) items.push(row);
   // The manual version of the idle sweep: the tab in front is never touched.
   items.push({ label: 'Sleep other tabs', run: sleepOtherTabs, disabled: !tabs.some(canSleepNow) });
   items.push({ label: 'Reopen closed tab', run: reopenClosedTab, disabled: !hasClosedTabs() });
@@ -9051,10 +8898,12 @@ function wireTabMenu() {
 /*
  * Both kinds of tab are persisted, in one list that keeps the strip's order:
  *   a page tab   — { url, pinned?, muted? }, the flags written only when true.
- *   a Claude tab — { claude: true, cwd }. The PTY itself cannot be saved, so
- *                  what is stored is the folder; the chamber is respawned there
- *                  on boot, resuming that folder's last conversation when
- *                  settings say so.
+ *   the Claude pane beside a page — { claude: true, beside: true, cwd }. The
+ *                  PTY itself cannot be saved, so what is stored is the
+ *                  folder; the chamber is respawned there on boot (as its own
+ *                  chip, not re-paired), resuming that folder's last
+ *                  conversation when settings say so. An entry with no
+ *                  `beside` is a Claude TAB from an older build: dropped.
  * `active` is an index into that single list, so it follows either kind.
  *
  * The snapshot is written twice: to localStorage (synchronous, authoritative in
@@ -9131,9 +8980,13 @@ function sessionSnapshot() {
       // A shell chamber is not restored: coming back up into a dead prompt
       // says nothing, and the flags a Claude tab is rebuilt with are its own.
       if (tabProgram(tab) !== CLAUDE_PROGRAM) continue;
+      // Claude only opens beside a page now, and `beside` is how the next
+      // boot tells that pane from a Claude TAB an older build saved (which
+      // sanitiseSession() drops). A chamber without the mark is not written.
+      if (!tab.beside) continue;
       const cwd = (typeof tab.cwd === 'string' && tab.cwd) ? tab.cwd : '';
       if (!cwd) continue; // nothing to respawn into: it would be dropped on read
-      entry = { claude: true, cwd: cwd };
+      entry = { claude: true, beside: true, cwd: cwd };
     } else if (isNativeTab(tab)) {
       // The app id alone. The app itself is NOT relaunched on the next boot —
       // restoreSession() brings the tab back with a "Start <app>" button — so
@@ -9298,15 +9151,25 @@ function sanitiseSession(parsed) {
   }
 
   const entries = [];
+  // Where each stored index would land in `entries`, recorded before it is
+  // judged: a kept entry lands exactly there, a dropped one leaves the next
+  // kept entry in its seat. Read back below so `active` and each workspace's
+  // lastActive still name the same tab after a drop instead of the one after.
+  const seatOf = [];
   for (const entry of parsed.tabs) {
+    seatOf.push(entries.length);
     // An unknown workspace is not a reason to drop a tab: it comes home.
     const ws = (entry && typeof entry.ws === 'string' && wsSeen.has(entry.ws))
       ? entry.ws : DEFAULT_WORKSPACE_ID;
     if (entry && entry.claude) {
+      // Claude no longer opens as a tab of its own. Only the pane beside a
+      // page is written with `beside`; a Claude tab an older build saved has
+      // no mark and goes quietly here — the rest of the strip is untouched.
+      if (entry.beside !== true) continue;
       const cwd = (typeof entry.cwd === 'string') ? entry.cwd.trim() : '';
       if (!cwd) continue; // a chamber with no folder cannot be rebuilt
       entries.push({
-        claude: true, cwd: cwd, url: '', pinned: false, muted: false,
+        claude: true, beside: true, cwd: cwd, url: '', pinned: false, muted: false,
         collapsed: !!(entry && entry.collapsed), ws: ws, app: '', native: '', title: ''
       });
       if (entries.length >= SESSION_MAX_TABS) break;
@@ -9350,16 +9213,23 @@ function sanitiseSession(parsed) {
   }
   if (!entries.length) return null;
 
-  // Entries can be dropped above, so every stored index is clamped to what is
-  // actually left — the same latitude the top-level `active` has always had.
+  // Entries can be dropped above, so every stored index is moved to where its
+  // tab landed. A tab that was dropped: a workspace forgets which one it was
+  // on (-1, as for any index past the end), and the top-level `active` takes
+  // the tab that now sits in its seat, clamped to the last one.
+  const keptAt = (at) => at < seatOf.length
+    && (at + 1 < seatOf.length ? seatOf[at + 1] : entries.length) > seatOf[at];
   for (const ws of wsList) {
-    if (ws.lastActive >= entries.length) ws.lastActive = -1;
+    const at = ws.lastActive;
+    ws.lastActive = (at >= 0 && keptAt(at)) ? seatOf[at] : -1;
   }
   const current = (typeof parsed.currentWorkspace === 'string' && wsSeen.has(parsed.currentWorkspace))
     ? parsed.currentWorkspace : DEFAULT_WORKSPACE_ID;
 
-  const active = Number(parsed.active);
-  const inRange = isFinite(active) && active >= 0 && active < entries.length;
+  const stored = Number(parsed.active);
+  const active = (isFinite(stored) && stored >= 0 && Math.floor(stored) < seatOf.length)
+    ? Math.min(seatOf[Math.floor(stored)], entries.length - 1) : -1;
+  const inRange = active >= 0;
   const savedAt = Number(parsed.savedAt);
   return {
     entries: entries,
@@ -9520,7 +9390,9 @@ function restoreSession(snapshot) {
       const tab = entry.native
         ? createNativeTab(entry.native, { background: true, workspace: entry.ws })
         : (entry.claude
-          ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws })
+          // Only the pane beside a page gets this far (sanitiseSession), and
+          // it comes back as it always has: its own chip, not re-paired.
+          ? createClaudeTab({ cwd: entry.cwd, resume: resume, background: true, workspace: entry.ws, beside: true })
           : createTab(entry.url === SESSION_NEWTAB ? HOME_URL
             : (entry.url === SESSION_PHONE ? PHONE_URL : entry.url), {
             background: true,
@@ -10437,7 +10309,7 @@ function updateZoomBadge() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Claude toggle                                                       */
+/* Most recent tab of a kind                                           */
 /* ------------------------------------------------------------------ */
 
 /** The most recently raised tab of a kind IN THE WORKSPACE ON SCREEN. */
@@ -10448,25 +10320,6 @@ function mostRecentTabOfKind(kind) {
     if (!best || (tab.lastActive || 0) > (best.lastActive || 0)) best = tab;
   }
   return best;
-}
-
-/**
- * Ctrl+` bounces between the last page you were on and the last Claude session,
- * spawning whichever side does not exist yet. It never closes anything.
- */
-function toggleClaude() {
-  const active = getActiveTab();
-
-  if (isClaudeTab(active)) {
-    const page = mostRecentTabOfKind('page');
-    if (page) activateTab(page.id);
-    else createTab(HOME_URL);
-    return;
-  }
-
-  const claude = mostRecentTabOfKind('claude');
-  if (claude) activateTab(claude.id);
-  else createClaudeTab();
 }
 
 /* ------------------------------------------------------------------ */
@@ -10533,7 +10386,9 @@ function askSourceTab(url) {
 /**
  * The chamber this page should be talking to. In order: the one it is already
  * split with, a free chamber stood beside it, a new one beside it, and — if
- * the page cannot be split at all — whatever chamber exists, else a new one.
+ * the page cannot be split at all — whatever chamber exists, else null.
+ * Claude only ever opens BESIDE a page now, so with no page to stand next to
+ * nothing new is made: the caller says so (MSG_NO_PAGE) instead.
  */
 function claudeChamberFor(page) {
   const partner = page ? splitPartner(page) : null;
@@ -10547,8 +10402,11 @@ function claudeChamberFor(page) {
       if (isClaudeTab(made)) return made;
     }
   }
-  return mostRecentTabOfKind('claude') || createClaudeTab({ background: true });
+  return mostRecentTabOfKind('claude');
 }
+
+/** What a hand-off with no page to stand beside says, instead of nothing. */
+const MSG_NO_PAGE = 'No page to open Claude beside';
 
 /** terminal.js queues this until the PTY is live, so a brand-new chamber works. */
 function pasteIntoChamber(tab, text) {
@@ -10574,7 +10432,10 @@ function askClaude(payload) {
   const prompt = askPromptText(url || (page ? readCurrentUrl(page) : ''), title, info.selection);
 
   const claude = claudeChamberFor(page);
-  if (!claude) return false;
+  if (!claude) {
+    claudeToast(MSG_NO_PAGE);
+    return false;
+  }
   // The chamber takes the front so the keystrokes that follow land in the
   // terminal, not in the page; activateTab() focuses xterm on the next frame.
   activateTab(claude.id);
@@ -10606,7 +10467,12 @@ function askClaudeAboutTab(tab) {
 }
 
 function askClaudeAboutActiveTab() {
-  return askClaudeAboutTab(askSourceTab(''));
+  const page = askSourceTab('');
+  if (!page) {
+    claudeToast(MSG_NO_PAGE);
+    return false;
+  }
+  return askClaudeAboutTab(page);
 }
 
 /* ------------------------------------------------------------------ */
@@ -10698,173 +10564,15 @@ function showClaudeThisPage(payload) {
     const title = String(info.title == null ? '' : info.title) || (page ? page.title : '');
 
     const claude = claudeChamberFor(page);
-    if (!claude) return false;
+    if (!claude) {
+      claudeToast(MSG_NO_PAGE);
+      return false;
+    }
     // Same as askClaude(): the chamber takes the front so what is typed next
     // lands in the terminal rather than in the page.
     activateTab(claude.id);
     return pasteIntoChamber(claude, showPromptText(shot.path, url, title));
   });
-}
-
-/* ------------------------------------------------------------------ */
-/* Ask Claude about this article                                       */
-/* ------------------------------------------------------------------ */
-
-/*
- * Ask hands over a link, Show hands over a picture; this hands over the WORDS.
- * reader.js already knows how to lift an article out of a page, so the text it
- * would have laid out in the reading page is quoted straight into the chamber
- * instead — a session that cannot browse can still summarise or answer from it.
- *
- * Everything else is Ask's machinery unchanged: the same chamber beside the
- * same page, the same INPUT, and no Enter sent from here either.
- */
-
-/** Long enough for a feature-length piece, short enough not to fill a context. */
-const ASK_ARTICLE_MAX = 12000;
-
-const MSG_NO_ARTICLE = 'No article here, sending the link';
-
-/**
- * Readability's textContent, made safe to read in a terminal: every run of
- * spaces, tabs and non-breaking spaces becomes one space, and a run of line
- * breaks becomes one blank line — so the paragraphs the article had survive
- * and the ragged indentation of the source HTML does not.
- */
-function articleBodyText(raw) {
-  return String(raw == null ? '' : raw)
-    .replace(/\r\n?/g, '\n')
-    .replace(/[^\S\n]+/g, ' ')   // inline whitespace, however much of it
-    .replace(/ ?\n ?/g, '\n')    // nothing hugging a break
-    .replace(/\n{2,}/g, '\n\n')  // a gap of any height is one paragraph break
-    .trim();
-}
-
-/** A quote, not an attachment: a long article is cut with a note saying so. */
-function askArticleBody(text) {
-  const body = articleBodyText(text);
-  if (body.length <= ASK_ARTICLE_MAX) return body;
-  return body.slice(0, ASK_ARTICLE_MAX) +
-    '\n… (article truncated at ' + ASK_ARTICLE_MAX.toLocaleString('en-US') + ' characters)';
-}
-
-/**
- * Where it came from, what it is called, who wrote it, then the article
- * between triple quotes. Ends on a blank line like askPromptText() does: the
- * question is the only thing left to write.
- */
-function askArticlePromptText(article) {
-  const info = article || {};
-  const url = String(info.url == null ? '' : info.url).trim();
-  const title = String(info.title == null ? '' : info.title).trim();
-  const byline = String(info.byline == null ? '' : info.byline).trim();
-  return 'From ' + url + ' — "' + title + '"' + (byline ? ' by ' + byline : '') +
-    '\n\n"""\n' + askArticleBody(info.textContent) + '\n"""\n\n';
-}
-
-/** reader.js is a sibling instrument, not a dependency: feature-detected. */
-function readArticleOf(tab) {
-  const reader = window.Reader;
-  if (!reader || typeof reader.extract !== 'function') return Promise.resolve(null);
-  let pending = null;
-  try { pending = reader.extract(tab); } catch (err) { return Promise.resolve(null); }
-  return Promise.resolve(pending).then((article) => article || null, () => null);
-}
-
-/**
- * The reader probe's cached verdict for a tab: true, false, or null when it
- * has not been asked. Only a hard false hides the menu row — an unprobed tab
- * still offers it, because the fallback below is a perfectly good outcome.
- */
-function readerSaysArticle(tab) {
-  const reader = window.Reader;
-  if (!reader || typeof reader.readableNow !== 'function') return null;
-  try { return reader.readableNow(tab); } catch (err) { return null; }
-}
-
-/**
- * @param {{url?:string, title?:string}} [payload] the page the request names;
- *   omitted (a shortcut, the palette) means whichever page is in front.
- * @returns {Promise<string>} the text pasted, '' when nothing was — a page
- *   with no article in it says so in a toast and falls back to Ask, which
- *   sends the link instead.
- */
-function askClaudeAboutArticle(payload) {
-  const info = payload || {};
-  const want = String(info.url == null ? '' : info.url);
-  const page = askSourceTab(want);
-
-  return readArticleOf(page).then((article) => {
-    if (!article) {
-      claudeToast(MSG_NO_ARTICLE);
-      // askClaudeAboutActiveTab()'s own path, with the page already resolved.
-      if (page) askClaudeAboutTab(page);
-      else askClaudeAboutActiveTab();
-      return '';
-    }
-
-    const prompt = askArticlePromptText({
-      url: article.url || want || (page ? readCurrentUrl(page) : ''),
-      title: article.title || String(info.title == null ? '' : info.title) ||
-        (page ? page.title : ''),
-      byline: article.byline,
-      textContent: article.textContent
-    });
-
-    const claude = claudeChamberFor(page);
-    if (!claude) return '';
-    // Same as askClaude(): the chamber takes the front so what is typed next
-    // lands in the terminal rather than in the page.
-    activateTab(claude.id);
-    return pasteIntoChamber(claude, prompt) ? prompt : '';
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* Ask Claude about a file on disk                                     */
-/* ------------------------------------------------------------------ */
-
-/*
- * Ask hands over a link, Show a picture, Article the words — this hands over a
- * FILE. Claude Code opens files and images by path, so the path is the whole
- * attachment: a finished download can be read, summarised or described without
- * anything being uploaded anywhere.
- */
-
-const MSG_FILE_MISSING = "That file has no path yet";
-
-/** Same forward-slash rule as screenshotPathText(); Claude Code takes either. */
-function filePromptText(target) {
-  return 'Look at the file ' + screenshotPathText(target) + ' and ';
-}
-
-/**
- * @param {string} path the file on disk, in either slash.
- * @param {{name?:string}} [options] display name, used only to name the file
- *   in the toast when there is no path to hand over.
- * @returns {boolean} true once the prompt is in (or queued for) a chamber.
- */
-function askClaudeAboutFile(path, options) {
-  const target = String(path == null ? '' : path).trim();
-  const opts = options || {};
-  const name = String(opts.name == null ? '' : opts.name).trim();
-  if (!target) {
-    claudeToast(name ? "No path for " + name : MSG_FILE_MISSING);
-    return false;
-  }
-
-  // The request comes from a popover over the chrome, so there is no subject
-  // page to infer: the tab in front is the one to stand the chamber beside,
-  // and anything else (a chamber, the new tab) falls through to claudeChamberFor.
-  const active = getActiveTab();
-  const page = active && active.kind === 'page' ? active : null;
-
-  const claude = claudeChamberFor(page);
-  if (!claude) return false;
-  // Same as askClaude(): the chamber takes the front so what is typed next
-  // lands in the terminal rather than in the page.
-  activateTab(claude.id);
-  return pasteIntoChamber(claude, filePromptText(target));
 }
 
 /* ------------------------------------------------------------------ */
@@ -10965,8 +10673,12 @@ function wireWindowControls() {
     window.api.onAskClaude((payload) => {
       // "Show Claude this page" comes down the same channel, marked.
       if (payload && payload.mode === 'screenshot') showClaudeThisPage(payload);
-      // "Ask Claude about this article" comes down it marked too.
-      else if (payload && payload.mode === 'article') askClaudeAboutArticle(payload);
+      // "Open Claude beside this page" comes down it marked too: the pane
+      // alone, nothing typed into it.
+      else if (payload && payload.mode === 'beside') openClaudeBesideFromMenu(payload);
+      // Any other mode (an older main's "article", say) is a removed hand-off:
+      // nothing is opened for it rather than guessing which one was meant.
+      else if (payload && payload.mode) claudeToast('That Claude action is no longer in this browser');
       else askClaude(payload);
     });
   }
@@ -11018,24 +10730,6 @@ function wireChrome() {
   if (newTabBtn) {
     newTabBtn.addEventListener('click', () => createTab(HOME_URL));
   }
-  if (newClaudeBtn) {
-    // Plain click opens the default folder; Shift+click asks which one;
-    // Ctrl+click opens the default folder on its past conversations;
-    // Alt+click is the button's spelling of Ctrl+Shift+\ — Claude beside
-    // whatever is in front (and a second Alt+click puts it away again).
-    // The tooltip is set here rather than left to index.html so the three
-    // modifiers are documented wherever this handler goes.
-    newClaudeBtn.title =
-      'New Claude tab (Shift+click to pick a folder, '
-      + 'Ctrl+click to resume a conversation, Alt+click to open it beside this page)';
-    newClaudeBtn.addEventListener('click', (event) => {
-      if (event && event.altKey) toggleClaudeSplit();
-      else if (event && event.shiftKey) newClaudeTabInFolder();
-      else if (event && (event.ctrlKey || event.metaKey)) resumeClaudeConversation();
-      else createClaudeTab();
-    });
-  }
-
   // Coming back to the window answers whatever chamber is already in front of
   // him. Anything still in the background keeps its mark until he switches to
   // it — that is the whole point of the mark.
@@ -11185,8 +10879,6 @@ function setPageFullscreen(on) {
  * from inside a page, so they are listed for that path.
  */
 const ACTIONS = {
-  'toggle-terminal': toggleClaude,
-  'claude-folder': newClaudeTabInFolder,
   'new-tab': () => createTab(HOME_URL),
   'close-tab': closeActiveTab,
   'reopen-tab': reopenClosedTab,
@@ -11222,11 +10914,8 @@ const ACTIONS = {
   'claude-split': toggleClaudeSplit,
   // Carries no payload: the selection is read back off the guest here.
   'ask-claude': askClaudeAboutActiveTab,
-  // The same hand-off with a screenshot attached. shortcuts.js does not name
-  // this id yet; the moment it does, every chrome-side path is already wired.
+  // The same hand-off with a screenshot attached (Ctrl+Alt+K by default).
   'show-claude': () => showClaudeThisPage(),
-  // ...and the same hand-off with the article's TEXT, read by reader.js.
-  'ask-article': () => askClaudeAboutArticle(),
   // Module actions. Each module decides for itself whether the action is its
   // own; moduleShortcut() returns false when none of them took it.
   'find': () => moduleShortcut('find'),
@@ -11535,14 +11224,6 @@ function legacyKeydown(event) {
     printActiveTab(); // no-op on a Claude tab
     return;
   }
-  // Shift turns event.key into '~', so the physical key is what is tested.
-  // Ctrl+Shift+` opens a chamber in a folder you pick; main.js does not
-  // replay it, so it only fires while the chrome has focus.
-  if (key === '`' || event.code === 'Backquote') {
-    event.preventDefault();
-    if (event.shiftKey) newClaudeTabInFolder();
-    else toggleClaude(); // same path as the shortcut action and the Claude button
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -11553,7 +11234,6 @@ function init() {
   titlebarEl = document.getElementById('titlebar');
   tabstripEl = document.getElementById('tabstrip');
   newTabBtn = document.getElementById('newtab');
-  newClaudeBtn = document.getElementById('newclaude');
   backBtn = document.getElementById('back');
   forwardBtn = document.getElementById('forward');
   reloadBtn = document.getElementById('reload');
@@ -11694,10 +11374,6 @@ window.askClaudeAboutActiveTab = askClaudeAboutActiveTab;
 window.askPromptText = askPromptText;
 window.showClaudeThisPage = showClaudeThisPage;
 window.showPromptText = showPromptText;
-window.askClaudeAboutArticle = askClaudeAboutArticle;
-window.askArticlePromptText = askArticlePromptText;
-window.askClaudeAboutFile = askClaudeAboutFile;
-window.filePromptText = filePromptText;
 window.clearClaudeNeedsYou = clearClaudeNeedsYou;
 
 // The stats sampler's one entry point, said out loud for the harness: calling

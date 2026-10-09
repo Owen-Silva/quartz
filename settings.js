@@ -18,10 +18,10 @@
  *     chips:        null | [{ label, url }, ...],
  *     chipsSource:  'visited' | 'list',      // where the new tab's five come from
  *     homepage:     'newtab',
- *     claudeDir:    null | absolute path,   // null means the home folder
- *     claudeResume: true | false,           // --continue on a restored tab
+ *     claudeDir:    null | absolute path,   // Claude pane's folder; null = home
+ *     claudeResume: true | false,           // --continue on a restored pane
  *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions
- *     claudeNotify: true | false,           // toast when a tab goes quiet
+ *     claudeNotify: true | false,           // toast when a pane goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
  *                                           // you are not looking at
@@ -103,11 +103,11 @@
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
-    /* Every Claude tab starts with --dangerously-skip-permissions. On by
+    /* Every Claude pane starts with --dangerously-skip-permissions. On by
        default on purpose: these chambers run on the user's own machine, and a
-       session sitting on a confirmation nobody is watching is a stuck tab. */
+       session sitting on a confirmation nobody is watching is a stuck pane. */
     claudeSkipPermissions: true,
-    /* A quiet Windows notification when a background Claude tab stops working
+    /* A quiet Windows notification when a background Claude pane stops working
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
     tabSleepMinutes: 30,
@@ -264,8 +264,6 @@
     ['Ctrl+D', 'Add this page to your new tab'],
     ['Ctrl+Shift+B', 'Bookmarks bar'],
     ['Ctrl+,', 'Settings'],
-    ['Ctrl+`', 'Claude tab'],
-    ['Ctrl+Shift+`', 'Claude tab in a chosen folder'],
     ['Ctrl+= / Ctrl+- / Ctrl+0', 'Zoom in, out, reset'],
     ['F5', 'Reload'],
     ['F11', 'Fullscreen'],
@@ -1825,7 +1823,7 @@
 
   /* ============================================================
      Claude
-     The folder a new Claude tab opens in, and whether a restored one
+     The folder the Claude pane beside a page opens in, and whether a restored one
      picks the conversation back up. app.js reads both from the store.
      ============================================================ */
 
@@ -1869,7 +1867,7 @@
     var app = (window.api && window.api.app) || null;
     var home = (window.api && window.api.homeDir) || '';
 
-    var label = el('label', 'set-label', 'Start new Claude tabs in');
+    var label = el('label', 'set-label', 'Start the Claude pane in');
     label.setAttribute('for', 'set-claude-dir');
     field.appendChild(label);
 
@@ -1961,7 +1959,7 @@
     ));
 
     var hint = el('p', 'set-hint');
-    hint.appendChild(document.createTextNode('Restored Claude tabs run '));
+    hint.appendChild(document.createTextNode('Restored Claude panes run '));
     hint.appendChild(el('code', 'set-code', 'claude --continue'));
     hint.appendChild(document.createTextNode(' in their folder. Turn off to start fresh every time.'));
     field.appendChild(hint);
@@ -1979,7 +1977,7 @@
     ));
 
     var hint = el('p', 'set-hint');
-    hint.appendChild(document.createTextNode('Every Claude tab starts with '));
+    hint.appendChild(document.createTextNode('Every Claude pane starts with '));
     hint.appendChild(el('code', 'set-code', 'claude --dangerously-skip-permissions'));
     hint.appendChild(document.createTextNode(', so nothing waits on a confirmation.'));
     field.appendChild(hint);
@@ -1991,7 +1989,7 @@
     field.textContent = '';
 
     field.appendChild(switchRow(
-      'Notify me when a Claude tab is waiting',
+      'Notify me when a Claude pane is waiting',
       get('claudeNotify') !== false,
       function (next) { set({ claudeNotify: next }); }
     ));
@@ -2060,7 +2058,7 @@
     } else if (mode === 'all') {
       hint = 'Sleep every page in a workspace you have been away from that long '
         + '(pages reload when you return; new tab pages come back fresh). '
-        + 'Claude tabs and app tabs never sleep.';
+        + 'Claude panes and app tabs never sleep.';
     }
     field.appendChild(el('p', 'set-hint', hint));
   }

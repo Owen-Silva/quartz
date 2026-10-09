@@ -25,20 +25,20 @@ const DEFAULT_CWD = 'C:\\Users\\you';
 // trusted side of this bridge and argv is the one place a string it supplies
 // would change how the CLI behaves.
 //
-// `--continue` resumes that folder's most recent conversation outright.
-// `--resume` is allowed BARE only: with no id after it the CLI draws its own
-// picker of past conversations, which is the whole point here. A session id
-// (or any other token) is not on this list, so it is dropped like anything
-// else -- there is no way to spell `--resume <id>` through this bridge.
+// `--continue` resumes that folder's most recent conversation outright (a
+// restored Claude pane). `--resume` is NOT on the list any more: it fed the
+// "Resume a Claude conversation" picker, which went with Claude tabs, so it
+// is dropped like any other token -- and a session id never had a way in.
 // `--dangerously-skip-permissions` is how every chamber is meant to start:
 // the tab is the user's own machine, and a session that stops to ask for a
 // confirmation is a session nobody is watching. The Settings switch
 // "Skip permission prompts" turns it off; the flag still has to be on this
 // list for the renderer to be able to ask for it at all.
-const ALLOWED_ARGS = new Set(['--continue', '--resume', '--dangerously-skip-permissions']);
+const ALLOWED_ARGS = new Set(['--continue', '--dangerously-skip-permissions']);
 
 // Two ways to say "not a fresh session". Passing both is a CLI error, so the
-// first one asked for wins and the other is dropped.
+// first one asked for wins and the other is dropped. Only `--continue` can
+// pass the allowlist now; the guard stays so re-allowing `--resume` is safe.
 const RESUME_ARGS = new Set(['--continue', '--resume']);
 
 // ---------------------------------------------------------------------------
@@ -312,7 +312,7 @@ function suppressConsoleListHelper(p) {
  * @param {number} [opts.cols]    initial column count
  * @param {number} [opts.rows]    initial row count
  * @param {string[]} [opts.args]  extra flags; claude keeps a bare `--continue`
- *                                / `--resume` / skip-permissions, the shells
+ *                                / skip-permissions, the shells
  *                                take none
  * @param {(data: string) => void} [opts.onData]
  * @param {(exitCode: number) => void} [opts.onExit]

@@ -49,10 +49,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('open-url', handler);
   },
   // A page's context menu asked for what is on screen to be handed to a Claude
-  // chamber: { url, title, selection }. `selection` is '' for the whole-page
-  // item, and is Chromium's already-truncated selectionText for the other one.
-  // The renderer composes the prompt and pastes it into the session's INPUT --
-  // nothing here ever runs anything.
+  // chamber: { url, title, selection, mode? }. `selection` is '' for the
+  // whole-page items, and is Chromium's already-truncated selectionText for the
+  // selection one. `mode` is 'beside' (just open the chamber beside the page),
+  // 'screenshot' (paste a PNG path) or absent (quote the page). The renderer
+  // composes any prompt and pastes it into the session's INPUT -- nothing here
+  // ever runs anything.
   onAskClaude: (cb) => {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on('ask-claude', handler);

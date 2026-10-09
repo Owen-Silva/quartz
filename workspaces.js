@@ -20,7 +20,7 @@
  *                                   their renderer back (0 on a build that
  *                                   predates workspace sleep)
  *                           colour in null|'ion'|'ember'|'forest'|'ocean'|'midnight'
- *                           folder: the Claude folder for the workspace, or null
+ *                           folder: the Claude pane's folder for the workspace, or null
  *                           pane:   null | 'school' (the side pane it wants)
  *                           preset: null | 'school' | 'project' | 'club' | 'trading' | 'phone'
  *                                   (a key this panel only ever passes through)
@@ -300,7 +300,7 @@
       pick.classList.add('is-unset');
       pick.textContent = canPick ? 'Choose…' : 'Not set';
       pick.title = canPick
-        ? 'Choose the folder a Claude tab opens in here'
+        ? 'Choose the folder the Claude pane opens in here'
         : 'This build cannot open a folder picker';
     }
     pick.disabled = !canPick || !fnFolder();

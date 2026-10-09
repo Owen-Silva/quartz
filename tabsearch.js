@@ -441,36 +441,6 @@
     } catch (err) { /* no bridge in this build; nothing to open */ }
   }
 
-  /** The last segment of a path, whichever separator it was written with. */
-  function folderBase(cwd) {
-    var text = String(cwd == null ? '' : cwd).replace(/[\\/]+$/, '');
-    if (!text) return '';
-    var at = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
-    return at === -1 ? text : text.slice(at + 1);
-  }
-
-  /** app.js's recent Claude folders, or nothing when that store is not there. */
-  function claudeRecentList() {
-    var fn = globalRef(function () { return claudeRecentFolders; });
-    if (typeof fn !== 'function') return [];
-    var list = null;
-    try { list = fn(); } catch (err) { return []; }
-    return Array.isArray(list) ? list : [];
-  }
-
-  /** One recent folder as a verb: short name on the row, full path as the hint. */
-  function claudeRecentCommand(cwd, index) {
-    return {
-      id: 'claude-recent-' + index,
-      glyph: GLYPH.folder,
-      label: 'Claude in ' + (folderBase(cwd) || cwd),
-      hint: cwd,
-      run: function () {
-        callGlobal(function () { return createClaudeTabIn; }, cwd);
-      }
-    };
-  }
-
   /* --- the installed native apps --------------------------------- */
 
   /*
@@ -877,8 +847,9 @@
   }
 
   /**
-   * One row per AVAILABLE program. Claude is left out on purpose: "New Claude
-   * tab" is already a verb of its own up there, with its keys on it.
+   * One row per AVAILABLE program. Claude is left out on purpose: Claude only
+   * opens as the pane beside a page ("Claude beside this page" up there), never
+   * as a tab of its own, so it is not a terminal program to offer here.
    */
   function termCommands(query) {
     var words = tokenize(query);
@@ -1104,7 +1075,7 @@
       }
 
       // Exactly what termCommands() lists: the available programs, and never
-      // Claude (a Claude tab is its own verb, with its own keys on it).
+      // Claude (Claude only opens as the pane beside a page, never as a tab).
       var progs = programRows();
       for (i = 0; i < progs.length && hits.length < 400; i++) {
         entry = progs[i];
@@ -1200,36 +1171,11 @@
       run: function () { doCreate(globalRef(function () { return HOME_URL; })); }
     });
     list.push({
-      id: 'new-claude-tab', glyph: GLYPH.claude, label: 'New Claude tab', keys: ['Ctrl', '`'],
-      action: 'toggle-terminal',
-      run: function () { callGlobal(function () { return createClaudeTab; }); }
-    });
-    list.push({
-      id: 'claude-folder', glyph: GLYPH.folder, label: 'Claude tab in a folder…',
-      hint: 'Pick the working directory first', keys: ['Ctrl', 'Shift', '`'],
-      action: 'claude-folder',
-      run: function () { callGlobal(function () { return newClaudeTabInFolder; }); }
-    });
-    list.push({
-      id: 'claude-resume', glyph: GLYPH.history, label: 'Resume a Claude conversation…',
-      hint: 'Claude Code lists the past sessions in that folder',
-      run: function () {
-        callGlobal(function () { return createClaudeTab; }, { resume: 'pick' });
-      }
-    });
-    list.push({
       id: 'claude-beside', glyph: GLYPH.beside, label: 'Claude beside this page',
       hint: 'A session in the other half', keys: ['Ctrl', 'Shift', '\\'],
       action: 'claude-split',
       run: function () { callGlobal(function () { return toggleClaudeSplit; }); }
     });
-    /* One row per folder a chamber has actually opened in, read fresh on every
-       render so a session started a minute ago is already at the top. An app
-       without the store (an older app.js) simply contributes no rows. */
-    var recent = claudeRecentList();
-    for (var r = 0; r < recent.length; r++) {
-      list.push(claudeRecentCommand(recent[r], r));
-    }
     list.push({
       id: 'ask-claude', glyph: GLYPH.claude, label: 'Ask Claude about this page',
       hint: 'Hands the page to a Claude session', action: 'ask-claude',
@@ -1240,11 +1186,6 @@
       id: 'show-claude', glyph: GLYPH.claude, label: 'Show Claude this page',
       hint: 'Screenshots it and hands the file over', action: 'show-claude',
       run: function () { callGlobal(function () { return showClaudeThisPage; }); }
-    });
-    list.push({
-      id: 'ask-article', glyph: GLYPH.claude, label: 'Ask Claude about this article',
-      hint: 'Quotes the readable text, not just the link', action: 'ask-article',
-      run: function () { callGlobal(function () { return askClaudeAboutArticle; }); }
     });
     list.push({
       id: 'split', glyph: GLYPH.split,

@@ -3132,11 +3132,17 @@ function guestMenuTemplate(contents, params) {
 
   // The gesture this browser exists for: hand what you are looking at to a
   // Claude Code session standing next to it. Main only carries the facts --
-  // app.js composes the prompt and pastes it into the chamber's INPUT, where
-  // it waits for the user's own question. Nothing is ever executed from here.
+  // app.js opens the chamber and, for the "Ask"/"Show" items, composes the
+  // prompt and pastes it into the chamber's INPUT, where it waits for the
+  // user's own question. Nothing is ever executed from here.
   const askUrl = params.pageURL || safeUrlOf(contents);
   const askTitle = safeTitleOf(contents);
   const ask = [];
+  // Just the chamber, split beside the page this menu was raised on; no prompt.
+  ask.push({
+    label: 'Open Claude beside this page',
+    click: () => send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'beside' }),
+  });
   if (selected) {
     ask.push({
       label: 'Ask Claude about "' + selectionLabel(selected) + '"',
@@ -3154,14 +3160,6 @@ function guestMenuTemplate(contents, params) {
     label: 'Show Claude this page',
     click: () =>
       send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'screenshot' }),
-  });
-  // ...and with the article's TEXT attached: the renderer reads the page back
-  // through reader.js and quotes it, so a session that cannot browse can still
-  // answer from it. Main carries no page content either way.
-  ask.push({
-    label: 'Ask Claude about this article',
-    click: () =>
-      send('ask-claude', { url: askUrl, title: askTitle, selection: '', mode: 'article' }),
   });
 
   const editing = [];
