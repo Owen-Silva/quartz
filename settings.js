@@ -3522,6 +3522,409 @@
       'It pauses when a tab or Spotify plays sound.'));
   }
 
+  /* ============================================================
+     Typing — autocorrect, the red underline, and what they leave alone
+
+     LIKE STOCKS, NOTHING HERE IS IN localStorage. Main owns the spelling
+     state (it is the process that holds the dictionary and answers every
+     tab), so this section draws whatever window.api.spell last said and
+     sends every change back over it. Every call answers the whole
+     SpellState, so one taker draws all three fields.
+
+     LIVE WHILE THE PANE IS OPEN. "Add to dictionary" and "Autocorrect off on
+     this site" happen in a PAGE's right-click menu, i.e. somewhere else; the
+     list here has to grow while you watch, not on the next open. So
+     openPanel() takes one onChanged subscription plus one state() read and
+     closePanel() gives the subscription back, the same as the Phone rows.
+
+     A PUSH MUST NOT MOVE YOU. Every render empties and refills the three
+     fields, which would take focus (and a half-typed word) with it. So each
+     focusable thing carries a data-spell-key; the render remembers which one
+     had focus and hands it back, and the add field's text lives in spDraft
+     rather than in the DOM. The fold is never touched: only the field bodies
+     are rebuilt, the section and its heading stay put.
+
+     NEVER SILENT. No bridge, a state() that rejects, a write that fails, or
+     main saying the dictionary is unavailable: each one puts a sentence IN
+     the section saying what is wrong and why, not only a toast or a log.
+     ============================================================ */
+
+  var spState = null;         // the last SpellState main sent, or null before the first
+  var spReadErr = '';         // why state() could not be read, in plain words
+  var spWriteErr = '';        // why the last change did not stick, until one does
+  var spDraft = '';           // the add-a-word field, kept across re-renders
+  var spOff = null;           // the onChanged unsubscribe, while the pane is open
+  var spWatching = false;
+  var spFocus = null;         // a key to hand focus to after the next render
+  var spAddErr = '';          // why the add field refused what was typed
+
+  /** The preload bridge, or null on a build without one. */
+  function spellApi() {
+    try {
+      var api = window.api && window.api.spell;
+      return api && typeof api.state === 'function' ? api : null;
+    } catch (err) { return null; }
+  }
+
+  /** An Error, a string or nothing, as one short readable clause. */
+  function spellWhy(err) {
+    var msg = err && (err.message || (typeof err === 'string' ? err : ''));
+    msg = String(msg || '').replace(/^Error invoking remote method '[^']*': /, '').trim();
+    return msg || 'no reason was given';
+  }
+
+  /**
+   * Main's answer, checked field by field: a list that is not a list is
+   * drawn as empty rather than throwing half-way through a render.
+   */
+  function spellNormalise(st) {
+    function strings(a) {
+      return Array.isArray(a) ? a.filter(function (x) { return typeof x === 'string' && !!x; }) : [];
+    }
+    return {
+      autocorrect: st.autocorrect !== false,
+      underline: st.underline !== false,
+      sitesOff: strings(st.sitesOff),
+      words: strings(st.words),
+      available: st.available !== false,
+      reason: typeof st.reason === 'string' ? st.reason : '',
+      languages: strings(st.languages)
+    };
+  }
+
+  function spellTake(answer) {
+    if (!answer || typeof answer !== 'object') return;
+    spState = spellNormalise(answer);
+    spReadErr = '';
+    renderTyping();
+    refreshFilter();
+  }
+
+  /** One state() when the pane opens. A failure is drawn, not swallowed. */
+  function spellRefresh() {
+    var api = spellApi();
+    if (!api) { renderTyping(); return; }
+    var answer;
+    try { answer = api.state(); }
+    catch (err) { spReadErr = spellWhy(err); renderTyping(); return; }
+    Promise.resolve(answer).then(function (value) {
+      if (value && typeof value === 'object') spellTake(value);
+      else { spReadErr = 'main answered with nothing'; renderTyping(); }
+    }, function (err) {
+      spReadErr = spellWhy(err);
+      renderTyping();
+    });
+  }
+
+  function spellWatch() {
+    if (spWatching) return;                    // opened twice is still one of each
+    spWatching = true;
+    var api = spellApi();
+    if (api && typeof api.onChanged === 'function') {
+      try {
+        var off = api.onChanged(function (st) { spellTake(st); });
+        if (typeof off === 'function') spOff = off;
+      } catch (err) { spOff = null; }
+    }
+    spellRefresh();
+  }
+
+  /** Closed: nothing of this section is left listening. */
+  function spellRelease() {
+    spWatching = false;
+    if (spOff) {
+      try { spOff(); } catch (err) { /* the channel is already gone */ }
+    }
+    spOff = null;
+  }
+
+  /**
+   * The write path, shaped like stocksWrite(): guess so the control moves
+   * under the finger, send, and let main's answer replace the guess. On a
+   * failure the reason goes into the section and a fresh state() puts the
+   * truth back, so a switch never sits in a position main did not take.
+   */
+  function spellWrite(method, args, guess, failed) {
+    var api = spellApi();
+    if (!api || typeof api[method] !== 'function') {
+      spWriteErr = failed + ': this window has no way to ask for it.';
+      renderTyping();
+      return;
+    }
+    if (spState && typeof guess === 'function') {
+      guess(spState);
+      renderTyping();
+    }
+    var fail = function (err) {
+      spWriteErr = failed + ': ' + spellWhy(err) + '.';
+      showToast(failed);
+      spellRefresh();
+    };
+    var answer;
+    try { answer = api[method].apply(api, args); }
+    catch (err) { fail(err); return; }
+    Promise.resolve(answer).then(function (value) {
+      if (value && typeof value === 'object') {
+        spWriteErr = '';
+        spellTake(value);
+      } else {
+        fail('main answered with nothing');
+      }
+    }, fail);
+  }
+
+  function buildTyping() {
+    var s = section('Typing');
+    s.setAttribute('data-section', 'typing');
+
+    var main = el('div', 'set-field');
+    main.setAttribute('data-field', 'typing');
+    s.appendChild(main);
+
+    var sites = el('div', 'set-field');
+    sites.setAttribute('data-field', 'typingsites');
+    s.appendChild(sites);
+
+    var words = el('div', 'set-field');
+    words.setAttribute('data-field', 'typingwords');
+    s.appendChild(words);
+    return s;
+  }
+
+  /**
+   * What has focus inside this section, by key, so a render can give it back.
+   * The fold heading has no key and is never rebuilt, so it is left alone.
+   */
+  function typingFocusNow() {
+    var a = document.activeElement;
+    var sec = bodyEl && bodyEl.querySelector('[data-section="typing"]');
+    if (!a || !sec || !sec.contains(a) || !a.getAttribute) return null;
+    var key = a.getAttribute('data-spell-key');
+    if (!key) return null;
+    var at = { key: key, list: a.getAttribute('data-spell-list') || '',
+      index: Number(a.getAttribute('data-spell-index')) || 0, start: -1, end: -1 };
+    if (a.tagName === 'INPUT') {
+      try { at.start = a.selectionStart; at.end = a.selectionEnd; } catch (err) { /* no caret */ }
+    }
+    return at;
+  }
+
+  /**
+   * Put focus back. A row that is gone (you just removed it) hands focus to
+   * whatever now sits at its index, then the list's last row, then the
+   * section's own heading: never to <body>, where Escape stops closing the pane.
+   */
+  function typingFocusBack(at) {
+    var sec = bodyEl && bodyEl.querySelector('[data-section="typing"]');
+    if (!at || !sec) return;
+    var all = sec.querySelectorAll('[data-spell-key]');
+    var target = null;
+    var i;
+    for (i = 0; i < all.length; i++) {
+      if (all[i].getAttribute('data-spell-key') === at.key) { target = all[i]; break; }
+    }
+    if (!target && at.list) {
+      var rows = sec.querySelectorAll('[data-spell-list="' + at.list + '"]');
+      if (rows.length) target = rows[Math.min(at.index, rows.length - 1)];
+    }
+    if (!target) target = sec.querySelector('.set-h-toggle');
+    if (!target || target.disabled) return;
+    try { target.focus({ preventScroll: true }); } catch (err) { /* re-rendered away */ }
+    if (target.tagName === 'INPUT' && at.start >= 0 && at.key === target.getAttribute('data-spell-key')) {
+      try { target.setSelectionRange(at.start, at.end); } catch (err) { /* no caret */ }
+    }
+  }
+
+  function renderTyping() {
+    var at = spFocus || typingFocusNow();
+    spFocus = null;
+    renderTypingMain();
+    renderTypingSites();
+    renderTypingWords();
+    if (at) typingFocusBack(at);
+  }
+
+  /**
+   * The state line, then the two switches. Anything that stops this section
+   * working is said here, first, in a boxed line rather than the grey hint
+   * type, because it explains why everything under it is greyed out.
+   */
+  function renderTypingMain() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="typing"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var api = spellApi();
+    var st = spState;
+    var trouble = '';
+    if (!api) {
+      trouble = 'Autocorrect and the spelling underline cannot be set here: this ' +
+        'window has no spelling channel. Restarting the browser usually brings it back.';
+    } else if (!st && spReadErr) {
+      trouble = 'Your typing settings could not be read: ' + spReadErr + '.';
+    } else if (st && !st.available) {
+      trouble = 'Autocorrect and the spelling underline are unavailable right now: ' +
+        (st.reason || 'the browser did not say why') + '.';
+    }
+    if (trouble) {
+      var notice = el('p', 'set-typing-notice', trouble);
+      notice.setAttribute('role', 'status');
+      field.appendChild(notice);
+    }
+    if (spWriteErr) field.appendChild(el('p', 'set-note', spWriteErr));
+
+    if (!api || (!st && spReadErr)) return;
+    if (!st) {
+      field.appendChild(el('p', 'set-hint', 'Reading your typing settings…'));
+      return;
+    }
+
+    var live = st.available;
+    var ac = switchRow('Autocorrect', st.autocorrect, function (next) {
+      spellWrite('set', [{ autocorrect: next }], function (cur) { cur.autocorrect = next; },
+        next ? 'Autocorrect could not be turned on' : 'Autocorrect could not be turned off');
+    });
+    ac.setAttribute('data-spell-key', 'autocorrect');
+    if (!live) ac.disabled = true;
+    field.appendChild(ac);
+    field.appendChild(el('p', 'set-hint',
+      'Fixes a misspelled word when you finish it. Press Backspace straight ' +
+      'after to put back what you typed. Addresses, passwords and code boxes ' +
+      'are never touched.'));
+
+    var ul = switchRow('Underline misspellings', st.underline, function (next) {
+      spellWrite('set', [{ underline: next }], function (cur) { cur.underline = next; },
+        next ? 'The underline could not be turned on' : 'The underline could not be turned off');
+    });
+    ul.setAttribute('data-spell-key', 'underline');
+    if (!live) ul.disabled = true;
+    field.appendChild(ul);
+    field.appendChild(el('p', 'set-hint',
+      'A red line under words the dictionary does not know. Right-click one ' +
+      'for suggestions.' +
+      (st.languages.length ? ' Dictionary: ' + st.languages.join(', ') + '.' : '')));
+
+    if (api && typeof api.onChanged !== 'function') {
+      field.appendChild(el('p', 'set-note',
+        'Changes made from a page’s right-click menu show up here the next time Settings opens.'));
+    }
+  }
+
+  /**
+   * One removable row in either list. The text is a plain span in the chip
+   * cell's type, not an input: a host or a word is removed and re-added,
+   * never edited in place.
+   */
+  function typingRow(list, text, index, removeLabel, onRemove) {
+    var row = el('div', 'set-chip');
+    var texts = el('div', 'set-chip-texts');
+    var cell = el('span', 'set-chip-text set-typing-item', text);
+    cell.title = text;
+    texts.appendChild(cell);
+    row.appendChild(texts);
+    var acts = el('div', 'set-chip-acts');
+    var rm = iconButton(GLYPH_DELETE, removeLabel, 'set-act', onRemove);
+    rm.setAttribute('data-spell-key', list + ':' + text);
+    rm.setAttribute('data-spell-list', list);
+    rm.setAttribute('data-spell-index', String(index));
+    acts.appendChild(rm);
+    row.appendChild(acts);
+    return row;
+  }
+
+  function renderTypingSites() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="typingsites"]');
+    if (!field) return;
+    field.textContent = '';
+    if (!spellApi() || !spState) return;
+
+    field.appendChild(el('p', 'set-label', 'Autocorrect is off on these sites'));
+    var rows = el('div', 'set-chips');
+    rows.setAttribute('data-spell-rows', 'sites');
+    if (!spState.sitesOff.length) {
+      rows.appendChild(el('p', 'set-empty',
+        'None. To turn it off for one site, right-click in a text box on that ' +
+        'site and choose to turn autocorrect off there.'));
+    }
+    spState.sitesOff.forEach(function (host, i) {
+      rows.appendChild(typingRow('site', host, i, 'Turn autocorrect back on for ' + host, function () {
+        spellWrite('siteOff', [host, false], function (cur) {
+          cur.sitesOff = cur.sitesOff.filter(function (h) { return h !== host; });
+        }, 'Autocorrect could not be turned back on for ' + host);
+      }));
+    });
+    field.appendChild(rows);
+  }
+
+  function renderTypingWords() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="typingwords"]');
+    if (!field) return;
+    field.textContent = '';
+    if (!spellApi() || !spState) return;
+
+    var label = el('label', 'set-label', 'Personal dictionary');
+    label.setAttribute('for', 'set-spell-add');
+    field.appendChild(label);
+
+    var rows = el('div', 'set-chips');
+    rows.setAttribute('data-spell-rows', 'words');
+    if (!spState.words.length) {
+      rows.appendChild(el('p', 'set-empty', 'Words you add from the right-click menu land here.'));
+    }
+    spState.words.forEach(function (word, i) {
+      rows.appendChild(typingRow('word', word, i, 'Remove ' + word + ' from the dictionary', function () {
+        spellWrite('removeWord', [word], function (cur) {
+          cur.words = cur.words.filter(function (w) { return w !== word; });
+        }, word + ' could not be removed');
+      }));
+    });
+    field.appendChild(rows);
+
+    /* The add row. spellcheck stays off on purpose: this is where a word the
+       dictionary does not know is typed, so underlining or "fixing" it would
+       be the browser arguing with the very thing it is being taught. */
+    var add = el('div', 'set-chip set-chip-add');
+    var addTexts = el('div', 'set-chip-texts');
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'set-spell-add';
+    input.className = 'set-chip-text';
+    input.placeholder = 'Add a word';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('data-spell-key', 'add');
+    input.value = spDraft;
+    input.addEventListener('input', function () { spDraft = input.value; });
+    addTexts.appendChild(input);
+    add.appendChild(addTexts);
+
+    function commitAdd() {
+      var word = input.value.trim();
+      if (!word) { input.focus(); return; }
+      if (/\s/.test(word)) {
+        spAddErr = 'The dictionary takes one word at a time, with no spaces.';
+        spFocus = { key: 'add', list: '', index: 0, start: -1, end: -1 };
+        renderTyping();
+        return;
+      }
+      spDraft = '';
+      spAddErr = '';
+      spFocus = { key: 'add', list: '', index: 0, start: -1, end: -1 };
+      spellWrite('addWord', [word], function (cur) {
+        if (cur.words.indexOf(word) < 0) cur.words = cur.words.concat([word]).sort();
+      }, word + ' could not be added');
+    }
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(); }
+    });
+    var plus = iconButton(GLYPH_ADD, 'Add to the dictionary', 'set-act', commitAdd);
+    plus.setAttribute('data-spell-key', 'addbtn');
+    add.appendChild(plus);
+    field.appendChild(add);
+    if (spAddErr) field.appendChild(el('p', 'set-note', spAddErr));
+  }
+
   function buildPrivacy() {
     var s = section('Privacy');
     var field = el('div', 'set-field');
@@ -5765,6 +6168,7 @@
     bodyEl.appendChild(buildTabs());
     bodyEl.appendChild(buildDownloads());
     bodyEl.appendChild(buildSearch());
+    bodyEl.appendChild(buildTyping());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildUserStyle());
@@ -5795,6 +6199,7 @@
     renderWorkspaceSleep();
     renderDownloads();
     renderSearch();
+    renderTyping();
     renderSites();
     renderSiteStyles();
     renderUserStyle();
@@ -5847,6 +6252,9 @@
        So it takes a subscription as well as one describe(), and gives both
        back in closePanel() - nothing of this section is left running. */
     phoneWatch();
+    /* And the Typing section: main owns it and a page's right-click menu
+       changes it, so it is live while the pane is, like Phone. */
+    spellWatch();
     position();
     if (buttonEl) {
       buttonEl.classList.add('is-open');
@@ -5879,6 +6287,7 @@
     open_ = false;
     autopauseRelease();
     phoneRelease();
+    spellRelease();
     if (buttonEl) {
       buttonEl.classList.remove('is-open');
       buttonEl.setAttribute('aria-expanded', 'false');
