@@ -84,9 +84,9 @@
         still defined, as a no-op: it fed the Recent row this replaced.
 
     12. window.__applyHomeLayout(layout, meta) — which pieces are on the
-        Home and in which column, whole, from the chrome (rules in
+        Home and where each one was put, whole, from the chrome (rules in
         homelayout.js). Edit mode asks for changes with `newtab:home
-        {"op":"hide"|"show"|"move"|"reset",…,"seq":n}` and the chrome
+        {"op":"hide"|"show"|"place"|"reset",…,"seq":n}` and the chrome
         answers with the layout and meta { ack, ok, reason }; see "Home
         layout and edit mode". ?home=<JSON> is the first-paint copy.
    ============================================================ */
@@ -4561,17 +4561,19 @@ window.__chips = function () {
 /* ------------------------------------------------------------------ */
 
 /*
- * Every piece of this page can be switched off, put back, and dragged to a
- * place in the left rail, the centre column or the right rail. The rules
- * (what a layout is, how a change applies) are homelayout.js, shared with
- * the chrome; this section draws a layout and runs edit mode.
+ * Every piece of this page can be switched off, put back, and dragged to
+ * ANY spot: lower, higher, any corner, anywhere in between, as long as it
+ * does not sit on another piece or hang off the page. The rules (what a
+ * layout is, how a change applies, and the geometry: anchors, the nearest
+ * free spot, a whole-page arrange) are homelayout.js, shared with the
+ * chrome; this section draws a layout and runs edit mode.
  *
  *   in   window.__applyHomeLayout(layout, meta) — the WHOLE layout, every
  *        time: on load, after any change made anywhere (Settings -> Home,
  *        another new tab), and as the answer to this page's own request,
  *        when meta is { ack: <seq>, ok, reason }.
- *   out  console.log('newtab:home {"op":…,"id":…,"column":…,"before":…,"seq":n}')
- *        one line per change: hide | show | move | reset.
+ *   out  console.log('newtab:home {"op":…,"id":…,"at":{…},"seq":n}')
+ *        one line per change: hide | show | place | reset.
  *   first paint: ?home=<layout JSON> when the stored layout is not the
  *        default (absent = the markup's own arrangement, which IS the
  *        default, so a Home nobody customised never moves a node).
@@ -4582,15 +4584,31 @@ window.__chips = function () {
  * layout the chrome confirmed, with a note that says so. The page never
  * stores anything itself.
  *
- * Drawing a layout moves the piece ELEMENTS between the three columns (no
- * wrappers: a piece in its home column is exactly the box it always was).
+ * TWO WAYS TO DRAW. A Home nobody has moved anything on is the plain flow
+ * it always was: the three columns, folding into one below 1296px, every
+ * node where the markup put it. A Home with a piece moved (and every Home
+ * in edit mode, so a drag has a canvas to land on) is FREE: each piece is
+ * absolutely placed on the page, the window is the page, nothing scrolls.
+ * A free draw starts from the flow anyway: the flow is laid out (unfolded,
+ * three columns, whatever the width) and measured, every piece never moved
+ * keeps the rect the flow gave it, every piece moved goes where its anchor
+ * says at today's window size, and HomeLayout.arrange() settles the lot so
+ * nothing overlaps and nothing is off the page. If it cannot (the window
+ * is too small for the arrangement), the page draws the flow instead and
+ * says so: a fold, never an overlap. All of it happens inside one task, so
+ * the measuring pass is never painted.
+ *
+ * Moving a piece never moves the pieces you did not move: they keep their
+ * default rects, measured with the moved piece still counted in its old
+ * slot. Hiding one does let the never-moved ones close up, as it always
+ * did in the flow.
+ *
  * A switched-off piece goes to #home-shelf, which is never drawn, and its
  * work stops: the clock's timer, the now-playing hairline, the markets
  * socket (the tile unsubscribes) — and in the chrome, which reads the same
  * stored layout, the stats sampler, the media poll and the session pushes.
- * The app dock is drawn inside the stats card when it comes straight after
- * the stats in the same column (today's look), and as its own card
- * anywhere else.
+ * The app dock rides inside the stats card (today's look) until it is
+ * moved on its own; after that it is its own card.
  */
 
 var HL = (window.HomeLayout && typeof window.HomeLayout.sanitize === 'function')
@@ -4604,8 +4622,26 @@ var HOME_NOTE_MS = 10000;
    turns a press into a drag (a click on a box is not a move). */
 var HOME_BOX_PAD = 6;
 var HOME_DRAG_SLOP = 5;
-/* The same breakpoint as newtab.css's fold. */
-var HOME_FOLD_QUERY = '(max-width: 1295px)';
+/* Snapping: how close an edge has to come to a guide to stick to it, the
+   page margin the guides mark (the default arrangement's own 24px), and
+   the gap a piece snaps to beside another one (the rails' own 16px). */
+var HOME_SNAP = 7;
+var HOME_EDGE = 24;
+var HOME_SNAP_GAP = 16;
+/* Arrow keys in edit mode: a step, Shift for a big one, Alt for one px. */
+var HOME_STEP = 8;
+var HOME_STEP_BIG = 64;
+/* A burst of arrow presses is ONE request, sent this long after the last. */
+var HOME_KEY_SEND_MS = 350;
+/* A piece put down this close to another one (above, below or beside
+   it, and overlapping it the other way) takes that piece's anchor, so a
+   stack built by hand keeps together when the window changes size. */
+var HOME_KIN = 40;
+/* The glide from where a piece was let go to where it lands. */
+var HOME_GLIDE_MS = 120;
+/* The Edit control in the bottom-left corner is kept clear: no piece may
+   sit on it, so it is always there to press. Wide enough for "Done". */
+var HOME_EDIT_RESERVE = { left: 16, bottom: 12, width: 72, height: 28 };
 
 var homeConfirmed = null;   // the layout the chrome last pushed (or ?home=)
 var homeDrawn = null;       // the layout on screen; null before the first draw
@@ -4613,12 +4649,24 @@ var homeSeq = 0;            // this page's request counter
 var homeWaitSeq = 0;        // the request still waiting for its answer, or 0
 var homeWaitTimer = 0;
 var homeNoteTimer = 0;
+var homeSticky = '';        // the note that stays while it is true (the fold)
 var homeEditing = false;
 var homeDrag = null;
 var homeBoxes = Object.create(null);
 var homeLayerEl = null;
+var homeGuideX = null;
+var homeGuideY = null;
 var homeObserver = null;
-var homePlaceFrame = 0;
+var homeLayoutFrame = 0;
+var homeFree = false;       // pieces absolutely placed right now
+var homeFolded = false;     // free was wanted but did not fit: the flow is drawn
+var homeRects = Object.create(null);   // id -> rect on the page, as drawn free
+var homePage = null;        // { width, height } the free rects are on
+var homeFlow = Object.create(null);    // id -> the rect the flow gives it (its default)
+var homeWatching = false;
+var homeYield = [];         // pieces just shown: they make room, not take it
+var homeKeyTimer = 0;
+var homeKeyOp = null;
 
 /** The element of one piece, wherever it is (a column, the stats card, the shelf). */
 function homePieceEl(id) {
@@ -4627,10 +4675,6 @@ function homePieceEl(id) {
 
 function homeColumnEl(name) {
   return document.querySelector('.home [data-column="' + name + '"]');
-}
-
-function homeEmptyEl(name) {
-  return document.querySelector('.home [data-col-empty="' + name + '"]');
 }
 
 /**
@@ -4643,45 +4687,44 @@ function homePieceVisible(id) {
   return homeDrawn.hidden.indexOf(id) < 0;
 }
 
-/** Visible ids of one column, in order, optionally leaving one out. */
-function homeVisibleIn(layout, name, skip) {
-  return layout.columns[name].filter(function (id) {
-    return layout.hidden.indexOf(id) < 0 && id !== skip;
-  });
+function homeIsPlaced(layout, id) {
+  return !!layout && layout.place.some(function (p) { return p.id === id; });
+}
+
+/** The dock rides inside the stats card until it is moved on its own. */
+function homeDockInside(layout) {
+  return layout.hidden.indexOf('stats') < 0 && !homeIsPlaced(layout, 'apps');
 }
 
 /**
- * Put every element where `layout` says. Moves only what is out of place,
- * so a push that changes one piece leaves every other node (and whatever
- * has the keyboard inside it) alone.
+ * Put every element in its own place in the document: its default column,
+ * in default order, the dock inside the stats card or right after it, and
+ * a hidden piece on the shelf. Moves only what is out of place, so a push
+ * that changes one piece leaves every other node (and whatever has the
+ * keyboard inside it) alone. WHERE a piece shows on a free page is not the
+ * document's business: that is layoutHome().
  */
 function placeHomePieces(layout) {
   const shelf = document.getElementById('home-shelf');
   const statsEl = homePieceEl('stats');
+  const inside = homeDockInside(layout);
   for (const name of HL.COLUMNS) {
     const col = homeColumnEl(name);
     if (!col) continue;
-    // The column's placeholder is its first child; each piece goes right
-    // after the one before it.
-    let last = homeEmptyEl(name);
-    let prev = null;
-    for (const id of layout.columns[name]) {
-      if (layout.hidden.indexOf(id) >= 0) continue;
-      const el = homePieceEl(id);
+    let last = null;
+    for (const p of HL.PIECES) {
+      if (p.column !== name || layout.hidden.indexOf(p.id) >= 0) continue;
+      const el = homePieceEl(p.id);
       if (!el) continue;
-      if (id === 'apps' && prev === 'stats' && statsEl) {
-        // Straight after the stats: inside the card, at its foot.
+      if (p.id === 'apps' && inside && statsEl) {
         if (el.parentNode !== statsEl || statsEl.lastElementChild !== el) statsEl.appendChild(el);
         el.classList.remove('is-alone');
-      } else {
-        if (el.parentNode !== col || el.previousElementSibling !== last) {
-          if (last && last.parentNode === col) col.insertBefore(el, last.nextSibling);
-          else col.insertBefore(el, col.firstChild);
-        }
-        if (id === 'apps') el.classList.add('is-alone');
-        last = el;
+        continue;
       }
-      prev = id;
+      const want = last ? last.nextElementSibling : col.firstElementChild;
+      if (el.parentNode !== col || want !== el) col.insertBefore(el, want);
+      if (p.id === 'apps') el.classList.add('is-alone');
+      last = el;
     }
   }
   if (shelf) {
@@ -4716,7 +4759,14 @@ function renderHome(layout) {
       try { focused.focus({ preventScroll: true }); } catch (err) { /* gone */ }
     }
   }
+  // A piece that has just come back makes room rather than taking it:
+  // whatever was put there while it was away keeps its spot.
+  if (!firstDraw) {
+    homeYield = before.hidden.filter(function (id) { return next.hidden.indexOf(id) < 0; });
+  }
   homeDrawn = next;
+  if (!same) layoutHome();
+  homeYield = [];
 
   for (const p of HL.PIECES) {
     const was = before.hidden.indexOf(p.id) < 0;
@@ -4742,26 +4792,257 @@ function homePieceMoved(id, visible) {
   }
 }
 
+/* --- free placement --------------------------------------------- */
+
+/** The pieces a free draw lays out: every one that is on and has a size. */
+function homeFreeIds(layout) {
+  const inside = homeDockInside(layout);
+  return HL.priority(layout).filter(function (id) {
+    if (layout.hidden.indexOf(id) >= 0) return false;
+    if (id === 'apps' && inside) return false;   // it is part of the stats card
+    return true;
+  });
+}
+
+/** A rect relative to the .home box (the page the free rects are on). */
+function homeRel(r, h) {
+  return { left: r.left - h.left, top: r.top - h.top, width: r.width, height: r.height };
+}
+
+/**
+ * The height a piece takes up on a free page. The stats card's process
+ * list unfolds over whatever is under it rather than shoving the page
+ * around (and a long list may run past the window: the page scrolls then,
+ * as it always did); so the card counts at its folded height.
+ */
+function homeRestHeight(id, el, r) {
+  if (id !== 'stats' || !el.classList.contains('is-procs-open')) return r.height;
+  const procs = el.querySelector('#procs');
+  if (!procs || !procs.getClientRects().length) return r.height;
+  return Math.max(0, r.height - procs.getBoundingClientRect().height);
+}
+
+/**
+ * Lay the flow out unfolded and measure it: the size of every piece and
+ * the rect a never-moved piece has. Leaves the page IN the flow (the
+ * caller puts it back the same task, so this is never painted).
+ */
+function homeMeasure(ids) {
+  const home = document.querySelector('.home');
+  const root = document.documentElement;
+  if (!home) return null;
+  root.classList.add('home-measure');      // no scrollbar while measuring
+  document.body.classList.add('home-unfold');
+  home.classList.remove('is-free');
+  for (const p of HL.PIECES) {
+    const el = homePieceEl(p.id);
+    // Its own width, not the last one pinned; and no left/top, which a
+    // piece that is position: relative in the flow (.module) would wear.
+    if (el) { el.style.width = ''; el.style.left = ''; el.style.top = ''; }
+  }
+  const h = home.getBoundingClientRect();
+  const page = { width: root.clientWidth, height: root.clientHeight };
+  const out = Object.create(null);
+  for (const id of ids) {
+    const el = homePieceEl(id);
+    if (!el || !el.getClientRects().length) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) continue;     // on, but nothing to draw yet
+    const rel = homeRel(r, h);
+    rel.height = homeRestHeight(id, el, r);
+    out[id] = rel;
+  }
+  return { page: page, rects: out };
+}
+
+/** Back to the plain flow: no pinned piece, the fold free to fold. */
+function homeUnfree() {
+  const home = document.querySelector('.home');
+  if (home) home.classList.remove('is-free');
+  document.body.classList.remove('home-unfold');
+  document.documentElement.classList.remove('home-measure');
+  for (const p of HL.PIECES) {
+    const el = homePieceEl(p.id);
+    if (!el || !el.classList.contains('is-free-piece')) continue;
+    el.classList.remove('is-free-piece');
+    el.style.left = '';
+    el.style.top = '';
+    el.style.width = '';
+  }
+  homeFree = false;
+  homeRects = Object.create(null);
+  homePage = null;
+}
+
+/** The Edit control's corner, which no piece may cover. */
+function homeEditReserve(page) {
+  const r = HOME_EDIT_RESERVE;
+  return { left: r.left, top: page.height - r.bottom - r.height, width: r.width, height: r.height };
+}
+
+/**
+ * Where every piece goes on a free page, from a measure. Returns arrange()'s
+ * answer ({ ok, rects, nudged, stuck }), the edit corner included as '_edit'.
+ */
+function homeArrange(layout, m, yieldIds) {
+  const order = homeFreeIds(layout).filter(function (id) { return !!m.rects[id]; });
+  const late = order.filter(function (id) { return yieldIds.indexOf(id) >= 0; });
+  const items = [];
+  const reserve = homeEditReserve(m.page);
+  items.push({ id: '_edit', width: reserve.width, height: reserve.height, fixed: true,
+               want: { left: reserve.left, top: reserve.top } });
+  order.filter(function (id) { return late.indexOf(id) < 0; }).concat(late).forEach(function (id) {
+    const r = m.rects[id];
+    const at = HL.placeOf(layout, id);
+    let size = { width: r.width, height: r.height };
+    const want = at ? HL.rectAt(at, size, m.page) : r;
+    items.push({ id: id, width: size.width, height: size.height,
+                 want: { left: want.left, top: want.top } });
+  });
+  return HL.arrange(items, m.page, { reach: HL.REACH });
+}
+
+/**
+ * Draw the layout on screen free, or as the flow: see the head of this
+ * section. Synchronous, so a caller can read homeRects straight after.
+ */
+function layoutHome() {
+  if (!HL || !homeDrawn) return;
+  const home = document.querySelector('.home');
+  if (!home) return;
+  const wantFree = homeDrawn.place.length > 0 || homeEditing;
+  if (!wantFree) {
+    if (homeFree || homeFolded) homeUnfree();
+    homeSetFolded(false);
+    homeWatch();
+    return;
+  }
+  // A guest in the background is 0 x 0: there is no page to place on yet.
+  // The resize when it is shown brings it back here.
+  if (!window.innerWidth || !window.innerHeight) return;
+
+  const ids = homeFreeIds(homeDrawn);
+  const m = homeMeasure(ids);
+  if (!m) { homeUnfree(); return; }
+  homeFlow = m.rects;
+  const res = homeArrange(homeDrawn, m, homeYield);
+  if (!res.ok) {
+    homeUnfree();
+    homeSetFolded(true);
+    homeWatch();
+    return;
+  }
+  for (const id of ids) {
+    const el = homePieceEl(id);
+    const r = res.rects[id];
+    if (!el || !r) continue;
+    el.classList.add('is-free-piece');
+    // Exact, not rounded: a never-moved piece must land on the very
+    // sub-pixel box the flow gave it, or its text could wrap differently.
+    el.style.left = r.left + 'px';
+    el.style.top = r.top + 'px';
+    el.style.width = r.width + 'px';
+  }
+  home.classList.add('is-free');
+  document.documentElement.classList.remove('home-measure');
+  homeFree = true;
+  homeRects = Object.create(null);
+  for (const id of ids) if (res.rects[id]) homeRects[id] = res.rects[id];
+  homePage = m.page;
+  homeSetFolded(false);
+  homeWatch();
+}
+
+/** The fold, said in words for as long as it lasts (never silently). */
+function homeSetFolded(on) {
+  homeFolded = !!on;
+  const text = on
+    ? (homeEditing
+      ? 'This window is too small to move pieces: make it larger, or hide some'
+      : 'Your Home layout needs a larger window, so it is in its usual order for now')
+    : '';
+  if (text === homeSticky) return;
+  homeSticky = text;
+  if (!homeNoteTimer) homeSay('', null);
+}
+
+function scheduleHomeLayout() {
+  if (homeLayoutFrame) return;
+  homeLayoutFrame = requestAnimationFrame(function () {
+    homeLayoutFrame = 0;
+    if (homeDrag && homeDrag.active) return;   // never re-lay the page under a drag
+    layoutHome();
+    if (homeEditing) placeHomeBoxes();
+  });
+}
+
+/**
+ * Sizes are watched only while something depends on them: a free page (a
+ * card that grows may need its neighbours to make room) or edit mode (the
+ * boxes follow their pieces). The default Home watches nothing.
+ */
+function homeWatch() {
+  const want = homeFree || homeFolded || homeEditing;
+  if (want === homeWatching) return;
+  if (!homeObserver) {
+    if (typeof ResizeObserver !== 'function') return;
+    homeObserver = new ResizeObserver(scheduleHomeLayout);
+  }
+  homeWatching = want;
+  if (!want) { homeObserver.disconnect(); return; }
+  // Every piece, on or off, once: observe() reports each element straight
+  // away, so re-observing on every draw would re-draw forever. A hidden
+  // piece reports 0 x 0 and then its size when it comes back.
+  for (const p of HL.PIECES) {
+    const el = homePieceEl(p.id);
+    if (el) homeObserver.observe(el);
+  }
+}
+
 /* --- the channel ------------------------------------------------ */
 
 /**
  * Ask for one change: drawn at once, sent to the chrome, and rolled back if
- * no answer comes. Returns true when a request went out.
+ * no answer comes. Returns true when a request went out. `base` is the
+ * layout the change applies to (the one on screen unless said).
  */
-function homeAsk(op) {
+function homeAsk(op, base) {
   if (!HL) return false;
-  const base = homeDrawn || HL.defaults();
+  const from = base || homeDrawn || HL.defaults();
   const clean = HL.parseOp(op);
-  const r = HL.apply(base, clean);
+  const r = HL.apply(from, clean);
   if (!r.ok) { homeSay(r.reason, 'warn'); return false; }
-  if (HL.same(r.layout, base)) return false;      // nothing would move
+  if (HL.same(r.layout, from)) return false;      // nothing would move
+  homeSendNow();                                   // a waiting arrow burst goes first
   homeSeq += 1;
   homeWaitSeq = homeSeq;
-  renderHome(r.layout);
+  if (!HL.same(r.layout, homeDrawn)) renderHome(r.layout);
   console.log('newtab:home ' + JSON.stringify(Object.assign({}, clean, { seq: homeSeq })));
   if (homeWaitTimer) clearTimeout(homeWaitTimer);
   homeWaitTimer = setTimeout(homeNoAnswer, HOME_ANSWER_MS);
   return true;
+}
+
+/**
+ * The arrow keys' change: drawn at once, sent once the presses stop, so a
+ * held key is one request rather than thirty a second.
+ */
+function homeAskSoon(op) {
+  const r = HL.apply(homeDrawn, op);
+  if (!r.ok || HL.same(r.layout, homeDrawn)) return;
+  if (homeKeyOp && homeKeyOp.op.id !== op.id) homeSendNow();   // one request per piece
+  if (!homeKeyOp) homeKeyOp = { base: homeDrawn };
+  homeKeyOp.op = op;
+  renderHome(r.layout);
+  if (homeKeyTimer) clearTimeout(homeKeyTimer);
+  homeKeyTimer = setTimeout(homeSendNow, HOME_KEY_SEND_MS);
+}
+
+function homeSendNow() {
+  if (homeKeyTimer) { clearTimeout(homeKeyTimer); homeKeyTimer = 0; }
+  const pending = homeKeyOp;
+  homeKeyOp = null;
+  if (pending) homeAsk(pending.op, pending.base);
 }
 
 function homeNoAnswer() {
@@ -4790,16 +5071,26 @@ window.__applyHomeLayout = function (layout, meta) {
       homeSay('Not saved: ' + (meta.reason || 'the browser refused the change'), 'warn');
     }
   }
+  if (homeKeyOp) return;   // an arrow burst is still being drawn; its answer redraws
   renderHome(next);
 };
 
 /** The layout on screen, for tests. */
 window.__home = function () {
+  const rects = {};
+  for (const id in homeRects) {
+    const r = homeRects[id];
+    rects[id] = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+  }
   return {
     drawn: homeDrawn,
     confirmed: homeConfirmed,
     waiting: homeWaitSeq,
     editing: homeEditing,
+    free: homeFree,
+    folded: homeFolded,
+    page: homePage,
+    rects: rects,
     rules: !!HL
   };
 };
@@ -4809,15 +5100,17 @@ function homeSay(text, tone) {
   const note = document.getElementById('home-note');
   if (!note) return;
   if (homeNoteTimer) { clearTimeout(homeNoteTimer); homeNoteTimer = 0; }
-  note.textContent = text || '';
-  note.hidden = !text;
-  if (tone) note.setAttribute('data-tone', tone);
+  const shown = text || homeSticky;
+  note.textContent = shown || '';
+  note.hidden = !shown;
+  // The standing note is a state, not an error: it is said in the quiet tone.
+  const t = text ? tone : null;
+  if (t) note.setAttribute('data-tone', t);
   else note.removeAttribute('data-tone');
   if (text) {
     homeNoteTimer = setTimeout(function () {
       homeNoteTimer = 0;
-      note.hidden = true;
-      note.textContent = '';
+      homeSay('', null);   // back to the standing note, if there is one
     }, HOME_NOTE_MS);
   }
 }
@@ -4831,6 +5124,7 @@ function setHomeEditing(on) {
   }
   on = !!on;
   if (on === homeEditing) return;
+  homeSendNow();
   homeEditing = on;
   const home = document.querySelector('.home');
   const btn = document.getElementById('home-edit-btn');
@@ -4845,17 +5139,9 @@ function setHomeEditing(on) {
   if (!on) endHomeDrag(false);
   ensureHomeLayer();
   if (homeLayerEl) homeLayerEl.hidden = !on;
-  // Sizes are only watched while there is something to keep in place.
-  if (homeObserver) {
-    homeObserver.disconnect();
-    if (on) {
-      homeObserver.observe(home);
-      for (const p of HL.PIECES) {
-        const el = homePieceEl(p.id);
-        if (el) homeObserver.observe(el);
-      }
-    }
-  }
+  // Edit mode is always a free page (when it fits), so a drag has a canvas
+  // to land on; leaving it with nothing moved gives the flow back.
+  layoutHome();
   refreshHomeEdit();
 }
 
@@ -4876,8 +5162,9 @@ function ensureHomeLayer() {
     const tag = document.createElement('button');
     tag.type = 'button';
     tag.className = 'home-box-tag';
-    tag.title = 'Drag to move ' + p.label + ' (or arrow keys)';
-    tag.setAttribute('aria-label', 'Move ' + p.label + ': arrow keys move it, Delete hides it');
+    tag.title = 'Drag to move ' + p.label + ' anywhere (arrow keys too; hold Alt to skip snapping)';
+    tag.setAttribute('aria-label',
+      'Move ' + p.label + ': arrow keys move it, Shift for big steps, Alt for one pixel, Delete hides it');
     tag.innerHTML =
       '<svg class="home-box-grip" viewBox="0 0 8 10" aria-hidden="true" focusable="false">' +
       '<circle cx="2" cy="2" r="1" fill="currentColor"/><circle cx="6" cy="2" r="1" fill="currentColor"/>' +
@@ -4911,18 +5198,22 @@ function ensureHomeLayer() {
     homeBoxes[p.id] = box;
   }
   home.appendChild(homeLayerEl);
-  if (typeof ResizeObserver === 'function') {
-    homeObserver = new ResizeObserver(scheduleHomeBoxes);
-  }
+
+  // The snapping guides: one hairline across the page each way, shown only
+  // while a drag is stuck to one. Fixed, like the landing outline.
+  homeGuideX = document.createElement('div');
+  homeGuideX.className = 'home-guide home-guide-x';
+  homeGuideX.hidden = true;
+  homeGuideY = document.createElement('div');
+  homeGuideY.className = 'home-guide home-guide-y';
+  homeGuideY.hidden = true;
+  document.body.appendChild(homeGuideX);
+  document.body.appendChild(homeGuideY);
 }
 
-/** The tray, the empty-column targets and the boxes, after any change. */
+/** The tray and the boxes, after any change. */
 function refreshHomeEdit() {
   if (!HL || !homeDrawn) return;
-  for (const name of HL.COLUMNS) {
-    const empty = homeEmptyEl(name);
-    if (empty) empty.hidden = homeVisibleIn(homeDrawn, name, null).length > 0;
-  }
   const list = document.getElementById('home-tray-list');
   const none = document.getElementById('home-tray-empty');
   const reset = document.getElementById('home-tray-reset');
@@ -4935,8 +5226,8 @@ function refreshHomeEdit() {
       b.type = 'button';
       b.className = 'home-tray-add';
       b.textContent = '+ ' + p.label;
-      b.title = p.hint + ' (comes back where it was)';
-      b.addEventListener('click', function () { homeAsk({ op: 'show', id: p.id }); });
+      b.title = p.hint + ' (comes back where it was, or the nearest free spot)';
+      b.addEventListener('click', function () { homeShowPiece(p.id); });
       li.appendChild(b);
       list.appendChild(li);
     }
@@ -4944,14 +5235,70 @@ function refreshHomeEdit() {
   if (none) none.hidden = homeDrawn.hidden.length > 0;
   if (reset) reset.disabled = HL.isDefault(homeDrawn);
   if (homeEditing) placeHomeBoxes();
+  placeHomeEditControl();
+}
+
+/**
+ * The tray opens above the Done button, in the bottom-left corner — which
+ * is now a corner a piece may be put in. When the tray would cover a
+ * piece there, it opens to the right of the button instead (whichever of
+ * the two covers less), so a piece in that corner can still be grabbed.
+ */
+function placeHomeEditControl() {
+  const ctl = document.getElementById('home-edit');
+  const tray = document.getElementById('home-tray');
+  const home = document.querySelector('.home');
+  if (!ctl) return;
+  ctl.classList.remove('is-side');
+  if (!homeEditing || !homeFree || !tray || tray.hidden || !home) return;
+  const h = home.getBoundingClientRect();
+  const covered = function () {
+    const t = tray.getBoundingClientRect();
+    let area = 0;
+    for (const id in homeRects) {
+      const r = homeRects[id];
+      const l = Math.max(t.left, h.left + r.left - HOME_BOX_PAD);
+      const rr = Math.min(t.right, h.left + r.left + r.width + HOME_BOX_PAD);
+      const tp = Math.max(t.top, h.top + r.top - HOME_BOX_PAD);
+      const b = Math.min(t.bottom, h.top + r.top + r.height + HOME_BOX_PAD);
+      if (rr > l && b > tp) area += (rr - l) * (b - tp);
+    }
+    return area;
+  };
+  const above = covered();
+  if (!above) return;
+  ctl.classList.add('is-side');
+  if (covered() >= above) ctl.classList.remove('is-side');
+}
+
+/**
+ * Put a piece back from the tray: where it last was, or its default spot,
+ * or the free spot nearest to that. The page is the only side that can
+ * see where there is room, so it works the spot out (by drawing the piece
+ * with it yielding to everything already there) and asks for exactly that.
+ */
+function homeShowPiece(id) {
+  if (!homeDrawn) return;
+  const base = homeDrawn;
+  const trial = HL.apply(base, { op: 'show', id: id });
+  if (!trial.ok) { homeSay(trial.reason, 'warn'); return; }
+  renderHome(trial.layout);            // lays it out yielding (renderHome sees it come back)
+  const r = homeFree ? homeRects[id] : null;
+  const had = HL.placeOf(base, id);
+  const op = { op: 'show', id: id };
+  if (r && homePage) {
+    // A never-moved piece that got its own default spot stays never-moved
+    // (it keeps following the default arrangement); anything else is
+    // pinned where it actually landed.
+    const m = homeFlow[id];
+    const atDefault = !had && m && Math.abs(m.left - r.left) < 1 && Math.abs(m.top - r.top) < 1;
+    if (!atDefault) op.at = homeAnchor(id, r);
+  }
+  homeAsk(op, base);
 }
 
 function scheduleHomeBoxes() {
-  if (homePlaceFrame || !homeEditing) return;
-  homePlaceFrame = requestAnimationFrame(function () {
-    homePlaceFrame = 0;
-    placeHomeBoxes();
-  });
+  scheduleHomeLayout();
 }
 
 /** The rect a piece answers to: the stats card stops where the dock in it starts. */
@@ -4979,13 +5326,13 @@ function placeHomeBoxes() {
   for (const p of HL.PIECES) {
     const box = homeBoxes[p.id];
     if (!box) continue;
-    const el = homePieceEl(p.id);
-    const r = (homePieceVisible(p.id) && el && el.getClientRects().length)
-      ? el.getBoundingClientRect() : null;
+    if (homeDrag && homeDrag.id === p.id && homeDrag.active) continue;   // it follows the pointer
+    const r = homePieceVisible(p.id) ? homePieceRect(p.id) : null;
     // A piece that is on but has nothing to draw yet (session before its
     // first readout) has no box; its switch in Settings still reaches it.
-    if (!r || (!r.width && !r.height)) { box.hidden = true; continue; }
+    if (!r) { box.hidden = true; continue; }
     box.hidden = false;
+    box.style.transform = '';
     box.style.left = Math.round(r.left - h.left - HOME_BOX_PAD) + 'px';
     box.style.top = Math.round(r.top - h.top - HOME_BOX_PAD) + 'px';
     box.style.width = Math.round(r.width + HOME_BOX_PAD * 2) + 'px';
@@ -4995,14 +5342,140 @@ function placeHomeBoxes() {
 
 /* --- dragging --------------------------------------------------- */
 
+/**
+ * The rect a piece occupies on the free page right now, and the size it
+ * will have once placed. The dock inside the stats card is the one piece
+ * that changes size when it moves: on its own it is a card, as wide as
+ * the stats card and with the card's padding.
+ */
+function homeDragStart(id) {
+  const home = document.querySelector('.home');
+  if (!home || !homeFree || !homePage) return null;
+  const h = home.getBoundingClientRect();
+  if (homeRects[id]) {
+    const r = homeRects[id];
+    return { from: { left: r.left, top: r.top, width: r.width, height: r.height }, size: { width: r.width, height: r.height } };
+  }
+  if (id === 'apps') {
+    const el = homePieceEl('apps');
+    const st = homeRects.stats;
+    if (!el || !st || !el.getClientRects().length) return null;
+    const d = homeRel(el.getBoundingClientRect(), h);
+    return { from: d, size: { width: st.width, height: d.height + 34 } };
+  }
+  return null;
+}
+
+/**
+ * The anchor to store for a piece put down at `r`: the one it is nearest
+ * to, unless it was put down against another piece, in which case it
+ * shares that piece's anchor on that axis (a search box dropped under the
+ * Q follows the Q; a card dropped beside another follows it).
+ */
+function homeAnchor(id, r) {
+  const page = homePage;
+  let nearV = null;
+  let nearH = null;
+  for (const other in homeRects) {
+    if (other === id) continue;
+    const o = homeRects[other];
+    const overX = Math.min(r.left + r.width, o.left + o.width) - Math.max(r.left, o.left);
+    const overY = Math.min(r.top + r.height, o.top + o.height) - Math.max(r.top, o.top);
+    const gapY = Math.max(o.top - (r.top + r.height), r.top - (o.top + o.height));
+    const gapX = Math.max(o.left - (r.left + r.width), r.left - (o.left + o.width));
+    if (overX > 0 && gapY >= 0 && gapY <= HOME_KIN && (!nearV || gapY < nearV.gap)) nearV = { gap: gapY, id: other };
+    if (overY > 0 && gapX >= 0 && gapX <= HOME_KIN && (!nearH || gapX < nearH.gap)) nearH = { gap: gapX, id: other };
+  }
+  const anchorOfPiece = function (other) {
+    return HL.placeOf(homeDrawn, other) || HL.anchorOf(homeRects[other], page);
+  };
+  return HL.anchorOf(r, page, nearH ? anchorOfPiece(nearH.id).h : null,
+                     nearV ? anchorOfPiece(nearV.id).v : null);
+}
+
+/** Everything a dragged piece must keep clear of. */
+function homeObstacles(id) {
+  const out = [homeEditReserve(homePage)];
+  for (const other in homeRects) {
+    if (other !== id) out.push(homeRects[other]);
+  }
+  return out;
+}
+
+/**
+ * Snap a rect to the guides: the page's centre lines and 24px margins,
+ * and every other piece's edges and centres (and a 16px gap beside it).
+ * Returns { left, top, gx, gy } where gx/gy is the guide stuck to, or null.
+ */
+function homeSnap(r, others, page) {
+  const xs = [{ v: page.width / 2, k: 'any' }, { v: HOME_EDGE, k: 'lead' }, { v: page.width - HOME_EDGE, k: 'trail' }];
+  const ys = [{ v: page.height / 2, k: 'any' }, { v: HOME_EDGE, k: 'lead' }, { v: page.height - HOME_EDGE, k: 'trail' }];
+  for (const o of others) {
+    xs.push({ v: o.left, k: 'any' }, { v: o.left + o.width / 2, k: 'any' }, { v: o.left + o.width, k: 'any' },
+            { v: o.left + o.width + HOME_SNAP_GAP, k: 'lead' }, { v: o.left - HOME_SNAP_GAP, k: 'trail' });
+    ys.push({ v: o.top, k: 'any' }, { v: o.top + o.height / 2, k: 'any' }, { v: o.top + o.height, k: 'any' },
+            { v: o.top + o.height + HOME_SNAP_GAP, k: 'lead' }, { v: o.top - HOME_SNAP_GAP, k: 'trail' });
+  }
+  const pick = function (start, size, lines) {
+    const pts = [{ off: 0, k: 'lead' }, { off: size / 2, k: 'mid' }, { off: size, k: 'trail' }];
+    let best = null;
+    for (const g of lines) {
+      for (const p of pts) {
+        if (g.k !== 'any' && g.k !== p.k) continue;
+        const d = g.v - (start + p.off);
+        if (Math.abs(d) <= HOME_SNAP && (!best || Math.abs(d) < Math.abs(best.d))) best = { d: d, v: g.v };
+      }
+    }
+    return best;
+  };
+  const bx = pick(r.left, r.width, xs);
+  const by = pick(r.top, r.height, ys);
+  return {
+    left: r.left + (bx ? bx.d : 0),
+    top: r.top + (by ? by.d : 0),
+    gx: bx ? bx.v : null,
+    gy: by ? by.v : null
+  };
+}
+
+/**
+ * Where a drag would land: snapped (unless Alt), pulled inside the page,
+ * and moved to the nearest free spot within reach when its own is taken.
+ * { rect, ok, gx, gy }: ok false means there is no room there at all.
+ */
+function homeLanding(d, left, top, free) {
+  const page = homePage;
+  let r = { left: left, top: top, width: d.size.width, height: d.size.height };
+  let gx = null;
+  let gy = null;
+  if (!free) {
+    const s = homeSnap(r, d.others, page);
+    r.left = s.left; r.top = s.top; gx = s.gx; gy = s.gy;
+  }
+  if (!HL.fitsPage(r, page)) return { rect: r, ok: false, gx: null, gy: null };
+  const c = HL.clampRect(r, page);
+  if (c.left !== r.left) gx = null;
+  if (c.top !== r.top) gy = null;
+  r = c;
+  if (HL.hitsAny(r, d.others)) {
+    const n = HL.nearestFree(r, d.others, page, { reach: HL.REACH });
+    if (!n) return { rect: r, ok: false, gx: null, gy: null };
+    if (n.left !== r.left) gx = null;
+    if (n.top !== r.top) gy = null;
+    r = n;
+  }
+  return { rect: r, ok: true, gx: gx, gy: gy };
+}
+
 function onHomeBoxDown(ev) {
   if (!homeEditing || ev.button !== 0) return;
   if (ev.target && ev.target.closest && ev.target.closest('.home-box-x')) return;
   const box = ev.currentTarget;
   const id = box.getAttribute('data-for');
   if (!HL.isPiece(id)) return;
+  homeSendNow();
   homeDrag = { id: id, box: box, pointerId: ev.pointerId, x0: ev.clientX, y0: ev.clientY,
-               active: false, target: null };
+               active: false, start: null, landing: null };
   try { box.setPointerCapture(ev.pointerId); } catch (err) { /* no capture: still works inside the box */ }
   ev.preventDefault();
 }
@@ -5012,149 +5485,136 @@ function onHomeBoxMove(ev) {
   if (!d || ev.pointerId !== d.pointerId) return;
   if (!d.active) {
     if (Math.abs(ev.clientX - d.x0) + Math.abs(ev.clientY - d.y0) < HOME_DRAG_SLOP) return;
+    const s = homeDragStart(d.id);
+    if (!s) {
+      // No free page (the window is too small for one): nothing to move on.
+      homeSay(homeFolded ? homeSticky : 'This piece cannot be moved right now', 'warn');
+      endHomeDrag(false);
+      return;
+    }
     d.active = true;
+    d.start = s.from;
+    d.size = s.size;
+    d.others = homeObstacles(d.id);
     d.box.classList.add('is-dragging');
     const el = homePieceEl(d.id);
     if (el) el.classList.add('is-lifted');
     const home = document.querySelector('.home');
     if (home) home.classList.add('is-dragging');
-    const ghost = document.getElementById('home-ghost');
-    if (ghost) { ghost.textContent = HL.label(d.id); ghost.hidden = false; }
   }
-  const ghost = document.getElementById('home-ghost');
-  if (ghost) {
-    ghost.style.left = ev.clientX + 'px';
-    ghost.style.top = ev.clientY + 'px';
-  }
-  d.target = homeDropTarget(ev.clientX, ev.clientY, d.id);
-  drawHomeDrop(d.target);
+  const dx = ev.clientX - d.x0;
+  const dy = ev.clientY - d.y0;
+  // The piece itself follows the pointer; the outline shows where it lands.
+  const el = homePieceEl(d.id);
+  if (el) el.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+  d.box.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+  d.landing = homeLanding(d, d.start.left + dx, d.start.top + dy, ev.altKey);
+  drawHomeLanding(d.landing);
 }
 
 function onHomeBoxUp(ev) {
   const d = homeDrag;
   if (!d || ev.pointerId !== d.pointerId) return;
-  const t = d.active ? d.target : null;
-  endHomeDrag(false);
-  if (t) homeAsk({ op: 'move', id: d.id, column: t.column, before: t.before });
+  const landing = d.active ? d.landing : null;
+  const id = d.id;
+  const el = homePieceEl(id);
+  // Where the piece is on screen right now (start + the pointer's travel).
+  const seen = el && d.active ? el.getBoundingClientRect() : null;
+  endHomeDrag(false, true);
+  if (!d.active) return;
+  if (!landing || !landing.ok) {
+    if (el && seen) homeGlideFrom(el, seen);
+    homeSay('No room there: a piece cannot sit on another one or off the page', 'warn');
+    return;
+  }
+  const at = homeAnchor(id, landing.rect);
+  if (el) el.style.transform = '';
+  homeAsk({ op: 'place', id: id, at: at });
+  if (el && seen) homeGlideFrom(el, seen);
+}
+
+/**
+ * Glide a piece from where it was seen to where it is now: the two are
+ * different boxes for one frame, then the piece slides the difference.
+ * Under HOME_GLIDE_MS, and not at all with reduced motion.
+ */
+function homeGlideFrom(el, seen) {
+  el.style.transition = 'none';
+  el.style.transform = '';
+  let reduce = false;
+  try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (err) { reduce = false; }
+  const now = el.getBoundingClientRect();
+  const dx = seen.left - now.left;
+  const dy = seen.top - now.top;
+  if (reduce || (Math.abs(dx) < 1 && Math.abs(dy) < 1)) { el.style.transition = ''; return; }
+  el.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+  void el.offsetWidth;   // the start of the glide is this frame's box
+  el.style.transition = 'transform ' + HOME_GLIDE_MS + 'ms var(--ease)';
+  el.style.transform = '';
+  setTimeout(function () { el.style.transition = ''; scheduleHomeLayout(); }, HOME_GLIDE_MS + 40);
 }
 
 /** Put everything a drag changed back. `cancelled` only matters for the note. */
-function endHomeDrag(cancelled) {
+function endHomeDrag(cancelled, keepPiece) {
   const d = homeDrag;
   homeDrag = null;
-  const drop = document.getElementById('home-drop');
-  const ghost = document.getElementById('home-ghost');
-  if (drop) drop.hidden = true;
-  if (ghost) ghost.hidden = true;
+  drawHomeLanding(null);
   const home = document.querySelector('.home');
   if (home) home.classList.remove('is-dragging');
   if (!d) return;
   d.box.classList.remove('is-dragging');
+  d.box.style.transform = '';
   const el = homePieceEl(d.id);
-  if (el) el.classList.remove('is-lifted');
-  try { d.box.releasePointerCapture(d.pointerId); } catch (err) { /* already released */ }
-  if (cancelled && d.active) homeSay('Move cancelled');
-}
-
-function homeDropTarget(x, y, dragId) {
-  if (!homeDrawn) return null;
-  let fold = false;
-  try { fold = window.matchMedia(HOME_FOLD_QUERY).matches; } catch (err) { fold = false; }
-  return fold ? homeDropFolded(x, y, dragId) : homeDropColumns(x, y, dragId);
-}
-
-/**
- * Three columns side by side: the column is the one under the pointer (or
- * the nearest), and the place in it is in front of the first piece whose
- * middle is below the pointer.
- */
-function homeDropColumns(x, y, dragId) {
-  let best = null;
-  for (const name of HL.COLUMNS) {
-    const col = homeColumnEl(name);
-    if (!col) continue;
-    const r = col.getBoundingClientRect();
-    const dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
-    if (!best || dx < best.dx) best = { name: name, rect: r, dx: dx };
-  }
-  if (!best) return null;
-  const ids = homeVisibleIn(homeDrawn, best.name, dragId);
-  const rects = ids.map(homePieceRect);
-  let at = ids.length;
-  for (let i = 0; i < ids.length; i++) {
-    const r = rects[i];
-    if (r && y < r.top + r.height / 2) { at = i; break; }
-  }
-  let lineY;
-  const prev = at > 0 ? rects[at - 1] : null;
-  const next = at < ids.length ? rects[at] : null;
-  if (prev && next) lineY = (prev.bottom + next.top) / 2;
-  else if (next) lineY = next.top - 8;
-  else if (prev) lineY = prev.bottom + 8;
-  else {
-    const empty = homeEmptyEl(best.name);
-    const er = empty && empty.getClientRects().length ? empty.getBoundingClientRect() : null;
-    lineY = er ? er.top + er.height / 2 : best.rect.top + 24;
-  }
-  return {
-    column: best.name,
-    before: at < ids.length ? ids[at] : null,
-    line: { x: best.rect.left, y: lineY - 1, w: best.rect.width, h: 2 }
-  };
-}
-
-/**
- * One folded column: the place is next to the piece under (or nearest to)
- * the pointer, in that piece's own column. Cards that share a line are
- * placed left or right of; everything else above or below.
- */
-function homeDropFolded(x, y, dragId) {
-  const home = document.querySelector('.home');
-  const hw = home ? home.getBoundingClientRect().width : window.innerWidth;
-  let best = null;
-  const consider = function (item, r) {
-    if (!r) return;
-    const dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
-    const dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
-    const dist = dx * dx + dy * dy;
-    if (!best || dist < best.dist) best = { item: item, r: r, dist: dist };
-  };
-  for (const name of HL.COLUMNS) {
-    for (const id of homeVisibleIn(homeDrawn, name, dragId)) consider({ id: id, column: name }, homePieceRect(id));
-    const empty = homeEmptyEl(name);
-    if (empty && !empty.hidden && empty.getClientRects().length) {
-      consider({ id: null, column: name }, empty.getBoundingClientRect());
+  if (el) {
+    el.classList.remove('is-lifted');
+    if (!keepPiece) {
+      if (d.active && cancelled) {
+        const seen = el.getBoundingClientRect();
+        homeGlideFrom(el, seen);
+      } else {
+        el.style.transform = '';
+      }
     }
   }
-  if (!best) return null;
-  const r = best.r;
-  const col = best.item.column;
-  if (!best.item.id) {
-    return { column: col, before: null, line: { x: r.left, y: r.top + r.height / 2 - 1, w: r.width, h: 2 } };
-  }
-  const row = r.width < hw * 0.6;
-  const after = row ? x > r.left + r.width / 2 : y > r.top + r.height / 2;
-  const ids = homeVisibleIn(homeDrawn, col, dragId);
-  const i = ids.indexOf(best.item.id);
-  const before = after ? (ids[i + 1] || null) : best.item.id;
-  const line = row
-    ? { x: after ? r.right + 6 : r.left - 8, y: r.top, w: 2, h: r.height }
-    : { x: r.left, y: after ? r.bottom + 6 : r.top - 8, w: r.width, h: 2 };
-  return { column: col, before: before, line: line };
+  try { d.box.releasePointerCapture(d.pointerId); } catch (err) { /* already released */ }
+  if (cancelled && d.active) homeSay('Move cancelled');
+  placeHomeBoxes();
 }
 
-function drawHomeDrop(t) {
+/** The landing outline and the guides: fixed, in window coordinates. */
+function drawHomeLanding(t) {
   const drop = document.getElementById('home-drop');
-  if (!drop) return;
-  if (!t || !t.line) { drop.hidden = true; return; }
-  drop.style.left = Math.round(t.line.x) + 'px';
-  drop.style.top = Math.round(t.line.y) + 'px';
-  drop.style.width = Math.max(2, Math.round(t.line.w)) + 'px';
-  drop.style.height = Math.max(2, Math.round(t.line.h)) + 'px';
-  drop.hidden = false;
+  const home = document.querySelector('.home');
+  const h = home ? home.getBoundingClientRect() : { left: 0, top: 0 };
+  if (drop) {
+    if (!t) {
+      drop.hidden = true;
+    } else {
+      drop.style.left = Math.round(h.left + t.rect.left) + 'px';
+      drop.style.top = Math.round(h.top + t.rect.top) + 'px';
+      drop.style.width = Math.round(t.rect.width) + 'px';
+      drop.style.height = Math.round(t.rect.height) + 'px';
+      drop.setAttribute('data-state', t.ok ? 'ok' : 'no');
+      drop.hidden = false;
+    }
+  }
+  if (homeGuideX) {
+    const on = !!(t && t.ok && t.gx != null);
+    homeGuideX.hidden = !on;
+    if (on) homeGuideX.style.left = Math.round(h.left + t.gx) + 'px';
+  }
+  if (homeGuideY) {
+    const on = !!(t && t.ok && t.gy != null);
+    homeGuideY.hidden = !on;
+    if (on) homeGuideY.style.top = Math.round(h.top + t.gy) + 'px';
+  }
 }
 
-/** The keyboard's move: the grip's arrows, and Delete to hide. */
+/**
+ * The keyboard's move: arrows nudge (Shift for a big step, Alt for one
+ * pixel), straight over a piece in the way to the first room past it;
+ * Delete hides.
+ */
 function homeKey(id, ev) {
   if (!homeEditing || !homeDrawn) return;
   const key = ev.key;
@@ -5163,25 +5623,49 @@ function homeKey(id, ev) {
     homeAsk({ op: 'hide', id: id });
     return;
   }
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(key) < 0) return;
+  const dir = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[key];
+  if (!dir) return;
   ev.preventDefault();
-  const col = HL.columnOf(homeDrawn, id);
-  const vis = homeVisibleIn(homeDrawn, col, null);
-  const i = vis.indexOf(id);
-  let op = null;
-  if (key === 'ArrowUp' && i > 0) {
-    op = { op: 'move', id: id, column: col, before: vis[i - 1] };
-  } else if (key === 'ArrowDown' && i >= 0 && i < vis.length - 1) {
-    op = { op: 'move', id: id, column: col, before: vis[i + 2] || null };
-  } else if (key === 'ArrowLeft' || key === 'ArrowRight') {
-    const ci = HL.COLUMNS.indexOf(col) + (key === 'ArrowLeft' ? -1 : 1);
-    if (ci >= 0 && ci < HL.COLUMNS.length) {
-      const target = HL.COLUMNS[ci];
-      const there = homeVisibleIn(homeDrawn, target, id);
-      op = { op: 'move', id: id, column: target, before: there[Math.max(0, i)] || null };
+  const s = homeDragStart(id);
+  if (!s) { homeSay(homeFolded ? homeSticky : 'This piece cannot be moved right now', 'warn'); return; }
+  const step = ev.shiftKey ? HOME_STEP_BIG : (ev.altKey ? 1 : HOME_STEP);
+  const page = homePage;
+  const others = homeObstacles(id);
+  const r = { left: s.from.left, top: s.from.top, width: s.size.width, height: s.size.height };
+  const next = HL.clampRect({ left: r.left + dir[0] * step, top: r.top + dir[1] * step,
+                              width: r.width, height: r.height }, page);
+  let landed = HL.hitsAny(next, others) ? null : next;
+  if (!landed) {
+    // Past whatever is in the way: the first spot along this line that is free.
+    const along = [];
+    for (const o of others) {
+      if (dir[0] > 0) along.push(o.left + o.width + HL.GAP);
+      if (dir[0] < 0) along.push(o.left - HL.GAP - r.width);
+      if (dir[1] > 0) along.push(o.top + o.height + HL.GAP);
+      if (dir[1] < 0) along.push(o.top - HL.GAP - r.height);
     }
+    const cur = dir[0] ? next.left : next.top;
+    along.filter(function (v) { return dir[0] + dir[1] > 0 ? v > cur : v < cur; })
+      .sort(function (a, b) { return dir[0] + dir[1] > 0 ? a - b : b - a; })
+      .some(function (v) {
+        const c = HL.clampRect({ left: dir[0] ? v : next.left, top: dir[1] ? v : next.top,
+                                 width: r.width, height: r.height }, page);
+        if ((dir[0] ? c.left : c.top) !== v || HL.hitsAny(c, others)) return false;
+        landed = c;
+        return true;
+      });
   }
-  if (op) homeAsk(op);
+  if (!landed || (Math.abs(landed.left - r.left) < 0.5 && Math.abs(landed.top - r.top) < 0.5)) {
+    homeSay('No room further that way', 'warn');
+    return;
+  }
+  homeAskSoon({ op: 'place', id: id, at: homeAnchor(id, landed) });
+  // The grip keeps the keyboard across the redraw.
+  const box = homeBoxes[id];
+  const tag = box && box.querySelector('.home-box-tag');
+  if (tag && document.activeElement !== tag) {
+    try { tag.focus({ preventScroll: true }); } catch (err) { /* gone */ }
+  }
 }
 
 /** Wire the pencil, the tray and Esc, and draw the first layout. */
@@ -5209,8 +5693,12 @@ function initHome(params) {
     setHomeEditing(false);
   });
 
-  // The columns' widths move with the window: the boxes follow.
-  window.addEventListener('resize', scheduleHomeBoxes);
+  // The window is the page: a free Home re-lays itself on every resize
+  // (the anchors hold, and it folds when there is no room). The flow needs
+  // nothing, so a default Home does nothing here.
+  window.addEventListener('resize', function () {
+    if (homeFree || homeFolded || homeEditing) scheduleHomeLayout();
+  });
 }
 
 function readParams() {

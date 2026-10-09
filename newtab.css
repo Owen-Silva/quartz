@@ -352,10 +352,9 @@ html[data-theme="light"] #bg-dim {
    The centre column: rows keep their own top margins (search 18, Saved 32,
    shortcuts 20, stats 28), a rail card dropped in gets the stats' 28 and is
    centred, and whatever is first gets none: the stage's padding is the gap
-   above the first piece, as it always was above the Q. The placeholder is
-   always the column's first child (hidden unless the column is empty), so
-   "first piece" is the one right after it. */
-.column > .col-empty + [data-piece] { margin-top: 0; }
+   above the first piece, as it always was above the Q (a hidden piece is
+   on the shelf, out of the column, so the first one shown is first). */
+.column > [data-piece]:first-child { margin-top: 0; }
 /* The Q has no margin of its own (it was always first); under another
    piece (the clock dropped on top of the column) it needs one. */
 .column > [data-piece] + .home-logo { margin-top: 24px; }
@@ -396,21 +395,23 @@ html[data-theme="light"] #bg-dim {
 .home-shelf,
 .home-shelf[hidden] { display: none; }
 
-/* An empty column in edit mode: somewhere to drop into. */
-.col-empty { display: none; }
-
-.home.is-editing .col-empty:not([hidden]) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
-  min-height: 96px;
-  margin: 0;
-  border: 1px dashed var(--hairline-strong);
-  border-radius: var(--radius-l);
-  color: var(--text-3);
-  font-size: var(--fs-xs);
+/* --- free placement ------------------------------------------ */
+/* A Home with a piece moved by hand (and any Home in edit mode) is free:
+   newtab.js measures the flow, works out every piece's rect on the page
+   (homelayout.js: anchors, no overlap, nothing off the page) and pins each
+   piece there with left/top/width. The piece stays in its own column in
+   the document, so every rule it wears in the flow still applies; only
+   its margins go, because a pinned box's place is its left/top. The rails
+   and the column are still laid out (empty), which keeps the rails'
+   container queries answering the way they did when it was measured.
+   html.home-measure only exists inside one task while measuring, so the
+   flow is measured without a scrollbar it would never paint. */
+.home.is-free .is-free-piece {
+  position: absolute;
+  margin: 0 !important;
 }
+
+html.home-measure { overflow: hidden; }
 
 /* --- edit mode ------------------------------------------------ */
 /* In edit mode the pieces themselves take no input at all (no accidental
@@ -460,7 +461,10 @@ html[data-theme="light"] #bg-dim {
 .home.is-dragging,
 .home.is-dragging .home-box { cursor: grabbing; }
 
-[data-piece].is-lifted { opacity: 0.35; }
+/* The carried piece follows the pointer (a transform, set by newtab.js),
+   over everything else on the page. */
+[data-piece].is-lifted { opacity: 0.85; z-index: 3; }
+.dock.is-lifted:not(.is-free-piece) { position: relative; }
 
 .home-box-tag,
 .home-box-x {
@@ -527,34 +531,39 @@ html[data-theme="light"] #bg-dim {
   box-shadow: var(--focus-ring), var(--shadow-1);
 }
 
-/* Where the piece will land: one accent line, 2px, never animated. */
+/* Where the carried piece will land: its exact box, snapped and moved to
+   the nearest free spot, as an accent hairline. Never animated. When there
+   is no room there at all it turns into an amber dashed hairline, and
+   letting go puts the piece back where it was. */
 .home-drop {
   position: fixed;
   z-index: 20;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-m);
+  background: var(--accent-soft);
   pointer-events: none;
+}
+
+.home-drop[data-state="no"] {
+  border-style: dashed;
+  border-color: var(--warn);
+  background: transparent;
 }
 
 .home-drop[hidden] { display: none; }
 
-/* The carried piece's name, under the pointer. */
-.home-ghost {
+/* The guide a drag is snapped to: one hairline across the window. Hold
+   Alt to drag without snapping. */
+.home-guide {
   position: fixed;
-  z-index: 21;
-  padding: 5px 10px;
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-solid);
-  box-shadow: var(--shadow-2);
-  color: var(--text);
-  font-size: var(--fs-xs);
-  white-space: nowrap;
+  z-index: 19;
+  background: var(--accent-line);
   pointer-events: none;
-  transform: translate(14px, 14px);
 }
 
-.home-ghost[hidden] { display: none; }
+.home-guide-x { top: 0; bottom: 0; width: 1px; }
+.home-guide-y { left: 0; right: 0; height: 1px; }
+.home-guide[hidden] { display: none; }
 
 /* --- the Edit control, the tray and the note ------------------ */
 /* Bottom-left: the one corner no piece uses by default. A column of three
@@ -573,6 +582,13 @@ html[data-theme="light"] #bg-dim {
 }
 
 .home-edit > * { pointer-events: auto; }
+
+/* A piece sits in the bottom-left corner: the tray opens to the right of
+   the button instead of over it (newtab.js placeHomeEditControl). */
+.home-edit.is-side {
+  flex-direction: row-reverse;
+  align-items: flex-end;
+}
 
 .home-edit-btn {
   display: inline-flex;
@@ -2674,8 +2690,25 @@ html[data-theme="light"] #bg-dim {
    now-playing, session and markets cards in a wrapping row under it (for
    a customised Home: the rails' pieces, left then right; see the foot). The
    rails step out of the way with display: contents, so every card keeps
-   its own rules and only its place changes. */
+   its own rules and only its place changes.
+
+   The fold is a STYLE query on --home-fold rather than the media query
+   itself, so a free Home (newtab.js "free placement") can switch it off
+   with one class on <body>: it measures, and is drawn from, the three
+   columns at any width, and only folds when its pieces do not fit. Same
+   width, same rules, same order as the media query had; with no class
+   the two are the same thing. Unfolded below 1296px the rails give way
+   to a 480px column, as the grid's own minimums cannot fit. */
 @media (max-width: 1295px) {
+  body { --home-fold: 1; }
+  body.home-unfold .home {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr);
+  }
+}
+
+body.home-unfold { --home-fold: 0; }
+
+@container style(--home-fold: 1) {
   .home {
     display: flex;
     flex-wrap: wrap;
@@ -2718,13 +2751,12 @@ html[data-theme="light"] #bg-dim {
      the default layout that is exactly the old fold: clock, column, now
      playing, session, markets. A wide piece that lives in a rail takes a
      line of its own at the column's width, like the column's rows. */
-  .home-left  > [data-piece], .home-left  > .col-empty { order: 2; }
-  .home-right > [data-piece], .home-right > .col-empty { order: 3; }
+  .home-left  > [data-piece] { order: 2; }
+  .home-right > [data-piece] { order: 3; }
   .home-rail > .module-clock { order: 0; text-align: center; }
   .home-rail > .module-clock .mod-time { justify-content: center; }
   .home-rail > [data-kind="wide"] { flex: 0 0 100%; max-width: 720px; }
   .home-rail > .home-logo { object-fit: contain; max-width: none; height: 56px; }
-  .home.is-editing .home-rail > .col-empty:not([hidden]) { flex: 0 0 224px; }
 }
 
 /* Five columns stop being readable long before the window does, so the

@@ -53,10 +53,6 @@
      the breakpoint in newtab.css both rails fold into the page's one column. -->
 <aside class="home-rail home-left" data-column="left" aria-label="Left column">
 
-<!-- Shown only in edit mode, and only while its column has no piece: a
-     column must stay somewhere to drop into after its last piece leaves.
-     First in its column so :last-child still means the last piece. -->
-<p class="col-empty" data-col-empty="left" hidden>Drop a piece here</p>
 
 <!-- The clock, Helm's greeting voice: large, bare, over the picture. It ticks
      on a minute-aligned timeout in newtab.js, never per second. -->
@@ -139,7 +135,6 @@
 
 <main class="stage">
   <div class="column" data-column="centre">
-    <p class="col-empty" data-col-empty="centre" hidden>Drop a piece here</p>
     <!-- The head of the Home column: the Q, and a search field in Helm's
          input look, as two pieces of their own (either can be hidden or
          moved; newtab.css gives the field the 18px the old head's gap did). It never takes the caret on its own: a new tab puts the
@@ -331,7 +326,6 @@
      markets tile at the foot of the rail. -->
 <aside class="home-rail home-right" data-column="right" aria-label="Right column">
 
-<p class="col-empty" data-col-empty="right" hidden>Drop a piece here</p>
 
 <section id="mod-session" class="module module-session" aria-label="Session"
          data-piece="session" data-kind="card" hidden>
@@ -437,7 +431,7 @@
     <p id="home-tray-empty" class="home-tray-empty">Every piece is on the page</p>
     <div class="home-tray-foot">
       <button id="home-tray-reset" class="home-tray-reset" type="button">Reset layout</button>
-      <span class="home-tray-hint">Drag to move. Esc when done.</span>
+      <span class="home-tray-hint">Drag anywhere (Alt: no snapping). Esc when done.</span>
     </div>
   </section>
   <button id="home-edit-btn" class="home-edit-btn" type="button" aria-pressed="false"
@@ -451,10 +445,9 @@
   </button>
 </div>
 
-<!-- The edit layer's moving parts, outside .home so nothing they do can
-     shift a piece: the drop line and the name that follows the pointer. -->
+<!-- The edit layer's moving part, outside .home so nothing it does can
+     shift a piece: the outline of where a dragged piece will land. -->
 <div id="home-drop" class="home-drop" hidden></div>
-<div id="home-ghost" class="home-ghost" hidden></div>
 
 <!-- The web-app catalogue, so a 'web:' pin has a name and a host to draw
      from the first paint. The chrome's push is still the authority — it is
