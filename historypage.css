@@ -1,438 +1,29 @@
+@import url("tokens.css");
 /* ============================================================
    historypage.css — the history page.
 
-   Same world as newtab.css and reader-page.css: frosted glass over a
-   still aurora, near-monochrome, one ion light. The token block below
-   is copied verbatim from newtab.css lines 1-388 rather than @imported,
-   because newtab.css also lays out the new-tab page (body, .column, the
-   field) and those rules would fight this list. Tokens only: if a token
-   changes there, change it here.
+   Dressed like Helm: a plain neutral --bg canvas (this is a file://
+   tab with no blurred picture behind it), one opaque bar, the list as
+   Helm list rows, the clear menu as Helm's .menu, and the accent only
+   on state (the keyboard row, a search hit, focus).
+
+   TOKENS come from tokens.css (imported above, Helm's names). This
+   page used to carry its own copy of the old glass palette and the
+   five palette blocks; those are gone: tokens.css answers
+   html[data-theme] and html[data-palette] for every Quartz page, and
+   newtab-theme.js still stamps both (and a custom hue on --ion*,
+   which --accent follows) before first paint. Every rule below reads
+   tokens.css names directly, so no alias is left to keep.
+   Old -> new, for anyone porting a rule from git history:
+   --ink-0/-1 -> --bg, --fg/-2/-3 -> --text/-2/-3,
+   --glass/-2/-3 -> --surface-2/-3, --edge -> --hairline,
+   --ion -> --accent, --ion-soft -> --accent-soft, --ion-line ->
+   --accent-line, --radius-ctl -> --radius-s, --bevel -> --radius-m;
+   the aurora, sheen, seam, rim and title-rule gradients have no
+   successor.
+
+   Look only: every box keeps the size and place it had.
    ============================================================ */
-
-/* --- tokens (mirrored from chrome.css) ----------------------- */
-:root {
-  --ink-0: #05060a;
-  --ink-1: #0c0f18;
-
-  --fg:   #eef1f8;
-  --fg-2: #9aa3b8;
-  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
-
-  --glass:   rgba(255,255,255,.08);
-  --glass-2: rgba(255,255,255,.13);
-  --glass-3: rgba(255,255,255,.18);
-
-  --edge:     rgba(255,255,255,.22);
-  --specular: rgba(255,255,255,.55);
-
-  --ion:      #7dd3ff;
-  --ion-soft: rgba(125,211,255,.16);
-  --ion-glow: rgba(125,211,255,.45);
-  --ion-line: rgba(125,211,255,.75);   /* focus border / focus outline */
-
-  /* the drop shadow under the one surface that floats over the page */
-  --panel-shadow: rgba(0,0,0,.45);
-
-  /* the diagonal reflection every glass surface carries */
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.10)  0%,
-    rgba(255,255,255,.03) 38%,
-    rgba(255,255,255,0)   60%);
-
-  /* the three coloured washes of the backdrop, whole gradients so a
-     theme swaps the light itself and not the geometry */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.09) 76%,
-    rgba(140,170,255,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.48)  0%,
-    rgba(75,34,168,.22) 45%,
-    rgba(75,34,168,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.28)  0%,
-    rgba(15,181,201,.11) 46%,
-    rgba(15,181,201,0)   78%);
-
-  --ui-font: 'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
-
-  /* --- instrument glass (mirrored from chrome.css) ------------
-     Every one of these is built out of the tokens above through
-     var(), so this single block covers dark, light and all five
-     palettes: those blocks move --edge, --specular and the --ion
-     family, and these re-read whatever won there. No per-palette
-     copies, and the light block needs nothing added. */
-  --bevel:      10px;   /* containers: popovers, tiles, cards */
-  --bevel-lg:   14px;   /* full panels */
-  --radius-ctl: 6px;    /* controls keep ordinary round corners */
-
-  /* the lit rim: specular at the top-left, powered at the bottom-right */
-  --rim: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--edge)      28%,
-    var(--edge)      62%,
-    var(--ion-glow) 100%);
-
-  /* the same rim with the accent at full strength */
-  --rim-focus: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--ion-line)  45%,
-    var(--ion)      100%);
-
-  /* quiet rows and tiles at rest */
-  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
-
-  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
-
-  /* Bahnschrift semi-condensed: labels, readouts, counts */
-  --readout-stretch: 87.5%;
-
-  /* The lit seam under the bar. chrome.css owns --seam for the window
-     chrome; this page is inside a <webview> and cannot see it, so the
-     same line is named here out of the tokens above. */
-  --seam: linear-gradient(90deg,
-    transparent      0%,
-    var(--ion-glow) 18%,
-    var(--ion-glow) 82%,
-    transparent    100%);
-
-  /* the section-title rule: a hairline that fades out to the right */
-  --title-rule: linear-gradient(90deg, var(--edge), transparent);
-}
-
-/* --- light theme --------------------------------------------- */
-/* Set by newtab-theme.js before first paint, and re-set by the
-   browser chrome whenever the user flips theme. Tokens only —
-   every rule below is written once and reads through them. */
-:root[data-theme="light"] {
-  --ink-0: #eef1f7;
-  --ink-1: #f7f8fc;
-
-  --fg:   #12162a;
-  --fg-2: #4a526b;
-  --fg-3: #656d82;  /* 4.5:1 on this page's ground; mirrors chrome.css */
-
-  --glass:   rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.72);
-  --glass-3: rgba(255,255,255,.9);
-
-  --edge:     rgba(18,22,42,.12);
-  --specular: rgba(255,255,255,.95);
-
-  --ion:      #0b7fd6;
-  --ion-soft: rgba(11,127,214,.14);
-  --ion-glow: rgba(11,127,214,.35);
-  --ion-line: rgba(11,127,214,.75);
-
-  --panel-shadow: rgba(18,22,42,.16);
-
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.7)  0%,
-    rgba(255,255,255,.25) 38%,
-    rgba(255,255,255,0)   60%);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,160,255,0)   50%,
-    rgba(120,160,255,.13) 76%,
-    rgba(120,160,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(185,167,255,.55)  0%,
-    rgba(185,167,255,.25) 45%,
-    rgba(185,167,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,216,.45)  0%,
-    rgba(127,224,216,.18) 46%,
-    rgba(127,224,216,0)   78%);
-}
-
-/* --- palette presets ----------------------------------------- */
-/* data-palette on <html>, set by newtab-theme.js from ?palette= and
-   by the chrome later through window.__applyPalette. No attribute is
-   the authored aurora above.
-
-   Same convention as chrome.css: the dark block is the bare attribute
-   selector, the light one pairs it with the theme. Specificity does
-   the rest — [data-palette] (0,1,0) sits after :root (0,1,0) so it
-   wins in dark, and loses to :root[data-theme="light"] (0,2,0) so a
-   light window keeps light ink until its own (0,3,0) block lands.
-
-   Each block moves the light and nothing else: the four --ion tokens,
-   the three aurora washes (identical geometry to the defaults — only
-   the colour inside the gradients changes) and a barely-tinted ink
-   field. Foreground, glass and edge tokens stay neutral in every
-   preset, exactly as they do in chrome.css.
-
-   A user-chosen accent hue still wins over all of it: newtab-theme.js
-   writes --ion* inline on <html>, and inline beats every block here. */
-
-/* ember — rose, magenta and plum, lit coral-pink (never orange) */
-[data-palette="ember"] {
-  --ink-0: #0a0508;
-  --ink-1: #150c14;
-
-  --ion:      hsl(345 100% 72%);
-  --ion-soft: hsl(345 100% 72% / .16);
-  --ion-glow: hsl(345 100% 72% / .45);
-  --ion-line: hsl(345 100% 72% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,155,195,0)   50%,
-    rgba(255,155,195,.09) 76%,
-    rgba(255,155,195,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(140,30,90,.48)  0%,
-    rgba(140,30,90,.22) 45%,
-    rgba(140,30,90,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(224,64,118,.28)  0%,
-    rgba(224,64,118,.11) 46%,
-    rgba(224,64,118,0)   78%);
-}
-
-/* forest — deep green and teal, lit mint */
-[data-palette="forest"] {
-  --ink-0: #040907;
-  --ink-1: #0a1410;
-
-  --ion:      hsl(160 84% 68%);
-  --ion-soft: hsl(160 84% 68% / .16);
-  --ion-glow: hsl(160 84% 68% / .45);
-  --ion-line: hsl(160 84% 68% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,235,200,0)   50%,
-    rgba(150,235,200,.09) 76%,
-    rgba(150,235,200,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,86,64,.48)  0%,
-    rgba(16,86,64,.22) 45%,
-    rgba(16,86,64,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(20,170,150,.28)  0%,
-    rgba(20,170,150,.11) 46%,
-    rgba(20,170,150,0)   78%);
-}
-
-/* ocean — navy and teal, lit cyan */
-[data-palette="ocean"] {
-  --ink-0: #04070c;
-  --ink-1: #0a1119;
-
-  --ion:      hsl(190 100% 70%);
-  --ion-soft: hsl(190 100% 70% / .16);
-  --ion-glow: hsl(190 100% 70% / .45);
-  --ion-line: hsl(190 100% 70% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.09) 76%,
-    rgba(130,190,255,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(18,58,140,.48)  0%,
-    rgba(18,58,140,.22) 45%,
-    rgba(18,58,140,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,175,190,.28)  0%,
-    rgba(15,175,190,.11) 46%,
-    rgba(15,175,190,0)   78%);
-}
-
-/* midnight — indigo and violet, lit violet */
-[data-palette="midnight"] {
-  --ink-0: #06050c;
-  --ink-1: #100c1c;
-
-  --ion:      hsl(262 92% 76%);
-  --ion-soft: hsl(262 92% 76% / .16);
-  --ion-glow: hsl(262 92% 76% / .45);
-  --ion-line: hsl(262 92% 76% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,150,255,0)   50%,
-    rgba(150,150,255,.09) 76%,
-    rgba(150,150,255,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(58,30,150,.48)  0%,
-    rgba(58,30,150,.22) 45%,
-    rgba(58,30,150,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,70,220,.28)  0%,
-    rgba(120,70,220,.11) 46%,
-    rgba(120,70,220,0)   78%);
-}
-
-/* mono — graphite, lit cool off-white. The accent is deliberately
-   low-saturation; newtab-bg.js reads that saturation back off --ion
-   and scales the board's traces with it, so the circuitry goes grey
-   here instead of staying blue. */
-[data-palette="mono"] {
-  --ink-0: #07080a;
-  --ink-1: #101218;
-
-  --ion:      hsl(215 25% 88%);
-  --ion-soft: hsl(215 25% 88% / .16);
-  --ion-glow: hsl(215 25% 88% / .45);
-  --ion-line: hsl(215 25% 88% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(190,200,215,0)   50%,
-    rgba(190,200,215,.09) 76%,
-    rgba(190,200,215,.20) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(60,66,80,.48)  0%,
-    rgba(60,66,80,.22) 45%,
-    rgba(60,66,80,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(120,130,150,.28)  0%,
-    rgba(120,130,150,.11) 46%,
-    rgba(120,130,150,0)   78%);
-}
-
-/* --- palette presets, light theme ---------------------------- */
-/* Pale washes, and an accent dark enough to read on white glass.
-   The authored light accent is hsl(206 90% 44%); each preset holds
-   near that lightness, pulled down only where the hue is luminous
-   enough (green, off-white) that 44% would wash out against the
-   capsule. */
-
-:root[data-theme="light"][data-palette="ember"] {
-  --ink-0: #f7eef3;
-  --ink-1: #fdf7fa;
-
-  --ion:      hsl(345 84% 45%);
-  --ion-soft: hsl(345 84% 45% / .14);
-  --ion-glow: hsl(345 84% 45% / .35);
-  --ion-line: hsl(345 84% 45% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,155,195,0)   50%,
-    rgba(255,155,195,.13) 76%,
-    rgba(255,155,195,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(246,175,220,.55)  0%,
-    rgba(246,175,220,.25) 45%,
-    rgba(246,175,220,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(215,165,235,.45)  0%,
-    rgba(215,165,235,.18) 46%,
-    rgba(215,165,235,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="forest"] {
-  --ink-0: #ecf5f0;
-  --ink-1: #f6fbf8;
-
-  --ion:      hsl(160 84% 32%);
-  --ion-soft: hsl(160 84% 32% / .14);
-  --ion-glow: hsl(160 84% 32% / .35);
-  --ion-line: hsl(160 84% 32% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,235,190,0)   50%,
-    rgba(130,235,190,.13) 76%,
-    rgba(130,235,190,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(168,240,205,.55)  0%,
-    rgba(168,240,205,.25) 45%,
-    rgba(168,240,205,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(140,225,215,.45)  0%,
-    rgba(140,225,215,.18) 46%,
-    rgba(140,225,215,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="ocean"] {
-  --ink-0: #ecf2f9;
-  --ink-1: #f6fafd;
-
-  --ion:      hsl(190 96% 36%);
-  --ion-soft: hsl(190 96% 36% / .14);
-  --ion-glow: hsl(190 96% 36% / .35);
-  --ion-line: hsl(190 96% 36% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,180,255,0)   50%,
-    rgba(120,180,255,.13) 76%,
-    rgba(120,180,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(160,205,255,.55)  0%,
-    rgba(160,205,255,.25) 45%,
-    rgba(160,205,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,230,.45)  0%,
-    rgba(127,224,230,.18) 46%,
-    rgba(127,224,230,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="midnight"] {
-  --ink-0: #f0eef9;
-  --ink-1: #f9f8fd;
-
-  --ion:      hsl(262 80% 52%);
-  --ion-soft: hsl(262 80% 52% / .14);
-  --ion-glow: hsl(262 80% 52% / .35);
-  --ion-line: hsl(262 80% 52% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,155,255,0)   50%,
-    rgba(150,155,255,.13) 76%,
-    rgba(150,155,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(190,170,255,.55)  0%,
-    rgba(190,170,255,.25) 45%,
-    rgba(190,170,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(170,150,240,.45)  0%,
-    rgba(170,150,240,.18) 46%,
-    rgba(170,150,240,0)   78%);
-}
-
-:root[data-theme="light"][data-palette="mono"] {
-  --ink-0: #f0f1f4;
-  --ink-1: #fafafc;
-
-  --ion:      hsl(215 16% 40%);
-  --ion-soft: hsl(215 16% 40% / .14);
-  --ion-glow: hsl(215 16% 40% / .35);
-  --ion-line: hsl(215 16% 40% / .75);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(170,180,200,0)   50%,
-    rgba(170,180,200,.13) 76%,
-    rgba(170,180,200,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(200,206,220,.55)  0%,
-    rgba(200,206,220,.25) 45%,
-    rgba(200,206,220,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(185,195,210,.45)  0%,
-    rgba(185,195,210,.18) 46%,
-    rgba(185,195,210,0)   78%);
-}
 
 /* --- page ---------------------------------------------------- */
 * { box-sizing: border-box; }
@@ -441,38 +32,40 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--ink-0);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-m);
   -webkit-font-smoothing: antialiased;
+  /* a theme flip is a short crossfade, not a cut */
+  transition: background-color var(--dur-slow) var(--ease), color var(--dur-slow) var(--ease);
 }
 
+::selection { background: var(--ion-select); }
+
 /* --- backdrop ------------------------------------------------ */
-/* The same three washes the new tab carries, but fixed and still:
-   this is a page to read down, not a page to watch. */
+/* The element stays (historypage.html places it) but paints nothing of
+   its own any more: the plain --bg canvas IS the background. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background-color: var(--ink-1);
-  background-image: var(--aurora-band), var(--aurora-pool), var(--aurora-rim);
-  background-repeat: no-repeat;
+  background: var(--bg);
 }
 
 /* --- the bar ------------------------------------------------- */
 
+/* .glass is worn by the bar and the clear menu; each sets its own ground
+   below. No backdrop-filter here: the bar is a full-width sticky strip
+   (this GPU drops raster tiles under one) and the canvas has nothing to
+   blur anyway. */
 .glass {
-  background-color: var(--glass);
-  background-image: var(--sheen);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  background-color: var(--surface-solid);
 }
 
-/* The bar is edge to edge, so it is not a floating container and takes no
-   bevel. What it gets is the signature line: the lit seam, laid along the
-   bottom of the padding box just above the hairline border. */
+/* Edge to edge and sticky, so the rows scroll under it: opaque, closed by
+   one plain 1px hairline, like Helm's header. */
 .topbar {
   position: sticky;
   top: 0;
@@ -481,21 +74,17 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--edge);
-  background-image: var(--seam), var(--sheen);
-  background-repeat: no-repeat, no-repeat;
-  background-size: 100% 1px, auto;
-  background-position: 0 100%, 0 0;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
 }
 
 .wordmark {
   margin: 0;
-  font-size: 12px;
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
   text-transform: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   white-space: nowrap;
 }
 
@@ -505,40 +94,31 @@ body {
   max-width: 520px;
 }
 
-/* The filter is this page's instrument slot: a control, so round, but
-   rimmed with light and lit at full accent while it is focused.
-
-   A bare <input> cannot carry a pseudo-element to hang the ring off, so
-   this one keeps the two-layer trick and takes the opaque-interior
-   fallback instead: --ink-1, the page's own ground, sits under the glass
-   tint and stops the border-box gradient washing through the slot. */
+/* Helm's input: the --code-bg well and a 1px hairline, the accent
+   hairline and the one focus ring while it has the caret. */
 .search {
   width: 100%;
   height: 34px;
   padding: 0 12px;
-  border-radius: var(--radius-ctl);
-  border: 1px solid transparent;
-  background:
-    linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
-    var(--rim) border-box;
-  color: var(--fg);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--hairline);
+  background: var(--code-bg);
+  color: var(--text);
   font-family: inherit;
-  font-size: 13.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  font-size: var(--fs-s);
   outline: none;
-  transition: box-shadow .12s steps(2, end);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
-.search::placeholder { color: var(--fg-3); }
+.search::placeholder { color: var(--text-3); }
+
+@media (hover: hover) {
+  .search:hover { border-color: var(--hairline-strong); }
+}
 
 .search:focus {
-  background:
-    linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-    linear-gradient(var(--ink-1), var(--ink-1)) padding-box,
-    var(--rim-focus) border-box;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 .search::-webkit-search-cancel-button { display: none; }
@@ -546,38 +126,40 @@ body {
 .count {
   margin: 0;
   flex: 0 0 auto;
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  font-size: var(--fs-s);
   font-variant-numeric: tabular-nums;   /* a count that does not jitter */
-  letter-spacing: .01em;
-  color: var(--fg-3);
+  color: var(--text-3);
   white-space: nowrap;
 }
 
 /* --- buttons and the clear menu ------------------------------ */
 
+/* Helm's .btn: --surface-2, a 1px hairline, the inner top edge. */
 .barbtn {
   height: 30px;
   padding: 0 12px;
-  border-radius: var(--radius-ctl);
-  border: 1px solid var(--edge);
-  background: var(--glass-2);
-  color: var(--fg-2);
+  border-radius: var(--radius-s);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  color: var(--text);
   font-family: inherit;
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  font-size: var(--fs-s);
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color .1s steps(2, end), color .1s steps(2, end);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-.barbtn:hover { background: var(--glass-3); color: var(--fg); }
+@media (hover: hover) {
+  .barbtn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+}
+.barbtn:active { background: var(--surface-2); }
 
 .clearwrap { position: relative; flex: 0 0 auto; }
 
-/* A popover is a container: bevelled on the diagonal, rimmed with light.
-   The sheen comes from .glass in the markup, so it is named again here —
-   the shorthand below would otherwise reset it. */
+/* Helm's .menu: --overlay, a strong hairline, the medium radius, the
+   level-3 shadow. Small and never scrolling, so it may take the menu's
+   blur; --overlay stays legible where there is nothing to blur. */
 .clearmenu {
   position: absolute;
   right: 0;
@@ -587,68 +169,44 @@ body {
   gap: 2px;
   min-width: 156px;
   padding: 6px;
-  border-radius: var(--bevel);
-  border: 1px solid transparent;
-  background: var(--sheen), var(--glass-3);
-  box-shadow: 0 18px 40px var(--panel-shadow);
-}
-
-/* The rim as a ring on the border strip. Painted as a background layer it
-   sat UNDER the translucent glass and tinted the whole popover, so the
-   three choices read off a gradient instead of off glass. inset:-1px
-   reaches back out over the transparent border; the xor mask keeps the
-   1px frame and throws the middle away. */
-.clearmenu::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-
-@supports (corner-shape: bevel) {
-  .clearmenu,
-  .clearmenu::before { corner-shape: round bevel round bevel; }
+  border-radius: var(--radius-m);
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+  backdrop-filter: blur(24px) saturate(1.05);
+  box-shadow: var(--shadow-3);
 }
 
 /* display:grid above would otherwise beat the UA's [hidden] rule. */
 .clearmenu[hidden] { display: none; }
 
-/* Menu rows are controls: round, no cut. */
+/* Helm's .menu-item: transparent, the raised fill under the pointer. */
 .clearopt {
   padding: 8px 10px;
   border: 0;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   background: transparent;
-  color: var(--fg);
+  color: var(--text);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-s);
   text-align: left;
   cursor: pointer;
-  transition: background-color .1s steps(2, end);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-.clearopt:hover { background: var(--ion-soft); }
+.clearopt:hover { background: var(--surface-3); }
 
-/* The separator is the fading rule, not a solid hairline. It is painted
-   as a background layer so the hover colour still lands underneath it. */
+/* "Everything" is Helm's danger menu item, set off by the menu separator:
+   one plain hairline in the pixel the border already held, so the row
+   does not move. */
 .clearopt.danger {
   margin-top: 4px;
-  border-top: 1px solid transparent;
-  border-radius: 0 0 var(--radius-ctl) var(--radius-ctl);
-  background-image: var(--title-rule);
-  background-repeat: no-repeat;
-  background-size: 100% 1px;
-  background-position: 0 0;
-  color: var(--fg-2);
+  border-top: 1px solid var(--hairline);
+  border-radius: 0 0 var(--radius-s) var(--radius-s);
+  color: var(--danger);
 }
 
-.clearopt.danger:hover { color: var(--fg); }
+.clearopt.danger:hover { background: var(--danger-soft); color: var(--danger); }
 
 /* --- the list ------------------------------------------------ */
 
@@ -660,20 +218,18 @@ body {
   padding: 14px 16px 72px;
 }
 
-/* A section title in the readout voice, followed by the fading rule —
-   the seam motif at list scale. The rule is painted into the title's own
-   box at its bottom edge, so no row moves by a pixel. */
+/* A group label, as Helm writes one, closed by a plain 1px hairline drawn
+   into the title's own box at its bottom edge, so no row moves by a
+   pixel. */
 .daybar {
   margin: 22px 0 6px;
   padding: 0 10px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
-  font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;   /* the dated headings */
-  letter-spacing: .01em;
   text-transform: none;
-  color: var(--fg-3);
-  background-image: var(--title-rule);
+  color: var(--text-3);
+  background-image: linear-gradient(var(--hairline), var(--hairline));
   background-repeat: no-repeat;
   background-size: 100% 1px;
   background-position: 0 100%;
@@ -689,19 +245,18 @@ body {
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   cursor: pointer;
-  transition: background-color .1s steps(2, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
-.row:hover { background: var(--glass); }
+.row:hover { background: var(--surface-2); }
 
-/* the keyboard mark: a lit outline, not a painted one */
+/* The keyboard mark: Helm's selected row, the raised fill with the accent
+   hairline drawn inset (state, so the accent; no glow). */
 .row.hi {
-  background: var(--glass-2);
-  box-shadow:
-    inset 0 0 0 1px var(--ion-line),
-    inset 0 0 18px -10px var(--ion-glow);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .favbox {
@@ -716,22 +271,18 @@ body {
   border-radius: 3px;
 }
 
-/* A clock is a readout, not code: the UI face on tabular figures, which
-   line up as evenly as the monospace did and stay in the same voice as
-   the rest of the page. */
+/* A clock is a readout, not code: the UI face on tabular figures. */
 .time {
   font-family: inherit;
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .title {
   min-width: 0;
-  font-size: 13.5px;
-  color: var(--fg);
+  font-size: var(--fs-s);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -740,38 +291,40 @@ body {
 .host {
   min-width: 0;
   justify-self: start;
-  font-size: 12.5px;
-  color: var(--fg-2);
+  font-size: var(--fs-s);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Helm's small icon button. */
 .rm {
   width: 22px;
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
   font-size: 15px;
   line-height: 1;
   opacity: 0;
   cursor: pointer;
-  transition: opacity .1s steps(2, end), background-color .1s steps(2, end), color .1s steps(2, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .row:hover .rm,
 .row.hi .rm,
 .rm:focus-visible { opacity: 1; }
 
-.rm:hover { background: var(--glass-3); color: var(--fg); }
+.rm:hover { background: var(--surface-3); color: var(--text); }
 
+/* a search hit: the accent's soft tint, the text untouched */
 mark {
-  background: var(--ion-soft);
-  color: var(--fg);
+  background: var(--accent-soft);
+  color: var(--text);
   border-radius: 3px;
   padding: 0 1px;
 }
@@ -780,17 +333,16 @@ mark {
   margin: 0;
   padding: 72px 0;
   text-align: center;
-  font-size: 14px;
-  color: var(--fg-3);
+  font-size: var(--fs-m);
+  color: var(--text-3);
 }
 
 /* --- focus --------------------------------------------------- */
-/* Light, not paint: a hairline of ion with a soft halo around it. */
+/* Helm's one focus treatment, the only glow on the page. */
 
 :focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- narrow windows ------------------------------------------ */
@@ -809,28 +361,17 @@ mark {
 }
 
 /* --- scrollbar ------------------------------------------------ */
-/* Same treatment reader-page.css gives its own: without it this page fell
-   back to the OS scrollbar, a wide light-grey column with stepper arrows
-   down the side of a dark glass page. The glass tokens only read on the
-   dark ground, so light gets the hairline token instead. */
+/* Helm's thin thumb, from tokens.css in both themes; without these the
+   page falls back to the wide OS scrollbar with stepper arrows. */
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--glass-3);
+  background: var(--scroll-thumb);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 6px;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--specular); background-clip: content-box; }
-
-:root[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: var(--fg-3);
-  background-clip: content-box;
-}
-:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--fg-2);
-  background-clip: content-box;
-}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* --- reduced motion ------------------------------------------ */
 
