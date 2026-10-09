@@ -163,6 +163,13 @@
        leaves room for the rest of the group later. There is no UI for this
        in the pane: the page manages its own dock. */
     apps: { pins: [] },
+    /* The new tab Home's layout: which of its pieces show, and in which of
+       the three columns, in what order. null means THE default (today's
+       arrangement), and a layout equal to the default is stored as null
+       again — so a reset follows whatever a later build's default becomes
+       rather than freezing this build's. homelayout.js owns the shape and
+       the rules; homeLayout() below always answers a complete layout. */
+    homeLayout: null,
     /* Quiet lobby music while nothing else is making a sound. The tracks are
        referenced, never copied: only a path and the name a row shows. See the
        Idle music block below for what each key means. */
@@ -1152,6 +1159,56 @@
     patch.pins = next;
     set({ apps: patch });
     return appPins();
+  }
+
+  /* ============================================================
+     Home layout — the new tab Home's pieces, shown or hidden, by column
+     ============================================================ */
+
+  /* homelayout.js is loaded by index.html before this file; feature-detected
+     anyway, because a page without it must still open its panel. */
+  function homeRules() {
+    var h = window.HomeLayout;
+    return h && typeof h.sanitize === 'function' && typeof h.apply === 'function' ? h : null;
+  }
+
+  /**
+   * The layout as it is now: always complete and sanitised (a stored value
+   * from another build, or a hand-edited file, is cleaned on the way out).
+   * null only when the rules did not load — callers read that as "everything
+   * shown, in its default place", which is exactly what the page does then.
+   */
+  function homeLayout() {
+    var rules = homeRules();
+    if (!rules) return null;
+    return rules.sanitize(get('homeLayout'));
+  }
+
+  /** Store a layout. A layout equal to the default is stored as null. */
+  function setHomeLayout(layout) {
+    var rules = homeRules();
+    if (!rules) return null;
+    set({ homeLayout: rules.toStored(layout) });
+    return homeLayout();
+  }
+
+  /**
+   * One edit, from the Home's own Edit mode (through app.js) or from the
+   * switches below. Always answers { ok, reason, layout }: a refusal carries
+   * its reason in words, and layout is what is stored now either way, so the
+   * caller can put the page back in step.
+   */
+  function applyHomeOp(op) {
+    var rules = homeRules();
+    if (!rules) return { ok: false, reason: 'Home layout rules did not load', layout: null };
+    var r = rules.apply(homeLayout(), op);
+    if (r.ok) setHomeLayout(r.layout);
+    return { ok: !!r.ok, reason: r.reason || '', layout: homeLayout() };
+  }
+
+  function resetHomeLayout() {
+    set({ homeLayout: null });
+    return homeLayout();
   }
 
   /**
@@ -2740,6 +2797,91 @@
     field.setAttribute('data-field', 'chips');
     s.appendChild(field);
     return s;
+  }
+
+  /* The Home: one switch per piece of the new tab page. The arranging itself
+     (drag between columns) lives on the page, where you can see it; this is
+     the plain list for switching a piece off or back on, and the reset. */
+  function buildHome() {
+    var s = section('Home');
+    var field = el('div', 'set-field');
+    field.setAttribute('data-field', 'home');
+    s.appendChild(field);
+    return s;
+  }
+
+  function renderHome() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="home"]');
+    if (!field) return;
+    field.textContent = '';
+
+    var rules = homeRules();
+    var layout = homeLayout();
+    if (!rules || !layout) {
+      // No silent failure: say why the switches are missing.
+      field.appendChild(el('p', 'set-note',
+        'Home layout rules did not load, so every piece shows in its usual place.'));
+      return;
+    }
+
+    field.appendChild(el('p', 'set-hint',
+      'You can also edit the Home on the page itself: the pencil at the bottom left. ' +
+      'Drag a piece to move it, × to hide it, Add to put it back. ' +
+      'A hidden piece stops its own updates.'));
+
+    rules.PIECES.forEach(function (p) {
+      var shown = layout.hidden.indexOf(p.id) < 0;
+      field.appendChild(switchRow(p.label, shown, function (next) {
+        var r = applyHomeOp({ op: next ? 'show' : 'hide', id: p.id });
+        // An ok answer re-renders through the store listener; a refusal
+        // changed nothing, so say why and redraw here to put the switch back.
+        if (r.ok) return;
+        showToast(r.reason || 'That change was not saved');
+        renderHome();
+        refreshFilter();
+      }));
+      // Apps is the one switch whose cost is not obvious: the dock's running
+      // lights come from the same system sampler as System stats, so the
+      // sampler keeps going while either piece is shown.
+      if (p.id === 'apps') {
+        field.appendChild(el('p', 'set-hint',
+          'Its running lights keep the system sampler on while Apps is shown.'));
+      }
+    });
+
+    field.appendChild(el('p', 'set-hint',
+      'A piece switched back on returns to its place.'));
+
+    /* Two presses, like the user style's Reset: a custom arrangement is
+       work to redo. The arming press only relabels its own button; a store
+       change re-renders the field and so disarms it, which is right. */
+    var isDefault = rules.isDefault(layout);
+    var armed = false;
+    var armTimer = 0;
+    var reset = textButton('Reset Home layout', 'set-text set-keys-resetall', function () {
+      if (!armed) {
+        armed = true;
+        reset.textContent = 'Press again to reset the Home';
+        reset.classList.add('is-armed');
+        window.clearTimeout(armTimer);
+        armTimer = window.setTimeout(function () {
+          if (!armed) return;
+          armed = false;
+          reset.textContent = 'Reset Home layout';
+          reset.classList.remove('is-armed');
+        }, 4000);
+        return;
+      }
+      armed = false;
+      window.clearTimeout(armTimer);
+      resetHomeLayout();
+      showToast('Home layout reset');
+    });
+    // Already the default: nothing to reset, and the button says so by
+    // being disabled rather than by doing nothing when pressed.
+    reset.disabled = isDefault;
+    if (isDefault) reset.title = 'The Home is already in its default layout';
+    field.appendChild(reset);
   }
 
   /** The black behind the picture or the clip — the same control for both. */
@@ -5627,6 +5769,7 @@
     bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
+    bodyEl.appendChild(buildHome());
     bodyEl.appendChild(buildMusic());
     bodyEl.appendChild(buildPrivacy());
     bodyEl.appendChild(buildSpotify());
@@ -5657,6 +5800,7 @@
     renderUserStyle();
     renderNewtabBg();
     renderChips();
+    renderHome();
     renderMusic();
     renderPrivacy();
     renderSpotify();
@@ -5839,6 +5983,9 @@
       if (keys.indexOf('chips') >= 0 || keys.indexOf('chipsSource') >= 0) renderChips();
       if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
       if (keys.indexOf('newtabBackground') >= 0) renderNewtabBg();
+      // The Home's own Edit mode writes here too, so a drag on the page
+      // flips the switches live.
+      if (keys.indexOf('homeLayout') >= 0) renderHome();
       refreshFilter();            // those renders replaced indexed text
     });
 
@@ -5931,6 +6078,16 @@
        builtinBackground(id) -> { ok, item } | { ok: false, reason }. */
     builtinBackgrounds: builtinBackgrounds,
     builtinBackground: builtinBackground,
+
+    /* The new tab Home layout (homelayout.js has the shape and the rules).
+       homeLayout() is always complete, or null if the rules did not load;
+       applyHomeOp(op) -> { ok, reason, layout } for one page or switch edit;
+       setHomeLayout stores null for the default; every change announces
+       'homeLayout' to listeners, which is how app.js re-pushes the page. */
+    homeLayout: homeLayout,
+    setHomeLayout: setHomeLayout,
+    applyHomeOp: applyHomeOp,
+    resetHomeLayout: resetHomeLayout,
 
     /* The new tab's app dock, in the order the page shows it: an installed
        app's id, a 'web:<slug>' or a 'term:<program>', each either as a bare

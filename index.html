@@ -128,6 +128,11 @@
   <!-- The catalogue of sites the browser presents as apps. A lookup table only;
        app.js and tabsearch.js read window.WebApps. -->
   <script src="webapps.js"></script>
+  <!-- The new tab Home's layout rules (which pieces show, in which column).
+       The page loads the same file, so both sides apply one set of rules;
+       settings.js stores the layout through it and app.js answers the page's
+       edits and gates each hidden piece's feed with it. Pure, no DOM. -->
+  <script src="homelayout.js"></script>
   <!-- Idle music: the generative engine, then the player that decides when it
        may sound. Both cost nothing but their parse until the music is turned
        on — no AudioContext, no <audio> element, no timer — and app.js reads
