@@ -186,6 +186,16 @@ body {
 
 #bg-dim { background: rgb(var(--wash-rgb) / var(--bg-dim, 0)); }
 
+/* Light theme lays a fixed light floor under the user's dim. Dark ink on a
+   photo needs a pale ground, and Quartz's dim default (0.25) left the photo
+   almost clear behind the Saved caption and chips; Helm's light Home is the
+   same photo under its wash at 0.45. The floor is 0.2, so Quartz's default
+   lands exactly on Helm's 0.45, the slider still moves the wash across its
+   whole range (0 -> 0.2, 0.6 -> 0.8), and dark theme is untouched. */
+html[data-theme="light"] #bg-dim {
+  background: rgb(var(--wash-rgb) / calc(var(--bg-dim, 0) + 0.2));
+}
+
 .bg-scrim {
   bottom: auto;
   height: 96px;
