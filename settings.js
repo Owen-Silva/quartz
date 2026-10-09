@@ -1869,7 +1869,7 @@
       paletteField.textContent = '';
       paletteField.appendChild(paletteSwatches(paletteName(get('palette')), pickPalette));
       paletteField.appendChild(el('p', 'set-hint',
-        'The aurora and the accent change together. Pick your own accent below to override the palette’s.'));
+        'A palette sets the accent colour only; the greys stay neutral. Pick your own accent below to override the palette’s.'));
       /* A pick rebuilt this row out from under the keyboard; put it back. */
       if (paletteFocus) {
         var picked = paletteField.querySelector('.set-swatch.is-on');

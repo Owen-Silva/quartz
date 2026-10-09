@@ -1444,6 +1444,12 @@
   box-shadow: var(--focus-ring);
 }
 
+/* The panel itself (tabindex -1) is focused on open so keys land in it.
+   Without this Chromium paints its own orange UA outline round the whole
+   pane, which is no part of Helm's look; the controls inside carry the
+   ring, the pane does not. */
+#settings-panel:focus { outline: none; }
+
 /* Helm's one focus treatment everywhere in the panel, the palette chips
    included: while a chip has keyboard focus the focus ring stands in for
    its "worn" ring, which is the same accent. */
