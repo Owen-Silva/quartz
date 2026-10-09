@@ -1345,6 +1345,18 @@ ipcMain.handle('background:recopy-wallpaper', (event) => {
   return wallpaperCopy(true);
 });
 
+// The built-in photos (Helm's gallery, in <app>/assets/backgrounds/). Read
+// once per run: they ship with the build and cannot change under it. Resolves
+// bgfiles.readBuiltins()'s { ok, reason, items } and never rejects.
+let builtinsCache = null;
+ipcMain.handle('background:builtins', (event) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused', items: [] };
+  if (!builtinsCache || !builtinsCache.ok) {
+    builtinsCache = bgFiles.readBuiltins(path.join(__dirname, 'assets', 'backgrounds'));
+  }
+  return builtinsCache;
+});
+
 // ---------------------------------------------------------------------------
 // Idle music: the user's own tracks
 //

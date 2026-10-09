@@ -288,7 +288,83 @@ function copyWallpaper(opts) {
     : { ok: false, reason: 'the copy was written but cannot be found again' });
 }
 
+/* ---------------------------------------------------------------------------
+ * The built-in photos: Helm's gallery, shipped in the app folder
+ *
+ * assets/backgrounds/ holds the same 23 Unsplash photos Helm offers (2560px
+ * JPEGs), a 400px thumb of each in thumbs/, and Helm's catalog.json
+ * ([{ file, title, category, credit, url }]) unchanged, so a photo added to
+ * one app's catalog drops into the other's by copying the folder. Settings
+ * stores only { kind: 'builtin', id } where id is the file name without its
+ * extension ('forest' for forest.jpg): a short, stable key that survives a
+ * re-encode to another format.
+ *
+ * Read here, in main, rather than fetched by the renderer: Chromium's fetch()
+ * refuses file:, and main can also stat every photo, so a catalog line whose
+ * file is gone comes back with a reason instead of as a broken tile.
+ * ------------------------------------------------------------------------- */
+
+/** A catalog file name we will turn into a URL: plain name, picture extension. */
+const BUILTIN_FILE = /^[a-z0-9][a-z0-9._-]*\.(?:jpe?g|png|webp)$/i;
+
+/** 'forest.jpg' -> 'forest'. */
+function builtinIdOf(file) {
+  return String(file).replace(/\.[^.]+$/, '');
+}
+
+function isFileThere(file) {
+  try { const s = fs.statSync(file); return s.isFile() && s.size > 0; } catch { return false; }
+}
+
+/**
+ * The catalog, checked against the disk.
+ * @param {string} dir  the assets/backgrounds folder
+ * @returns {{ ok: boolean, reason: string|null, items: Array<{ id, file, title,
+ *   category, credit, url, fileUrl, thumbUrl, missing }> }}
+ *   missing is null, or why the photo cannot be shown (its tile says so).
+ *   thumbUrl is null when only the thumb is gone (the tile uses the photo).
+ *   Never throws: a missing or broken catalog is { ok: false, reason, items: [] }.
+ */
+function readBuiltins(dir) {
+  let list;
+  try {
+    list = JSON.parse(fs.readFileSync(path.join(dir, 'catalog.json'), 'utf8'));
+  } catch (err) {
+    const reason = err && err.code === 'ENOENT'
+      ? 'the built-in photo list (assets/backgrounds/catalog.json) is missing from this build'
+      : 'the built-in photo list could not be read: ' + ((err && err.message) || 'unknown error');
+    return { ok: false, reason, items: [] };
+  }
+  if (!Array.isArray(list)) return { ok: false, reason: 'the built-in photo list is not a list', items: [] };
+  const seen = new Set();
+  const items = [];
+  for (const x of list) {
+    if (!x || typeof x.file !== 'string' || !BUILTIN_FILE.test(x.file)) continue;
+    const id = builtinIdOf(x.file);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const full = path.join(dir, x.file);
+    const thumb = path.join(dir, 'thumbs', x.file);
+    const there = isFileThere(full);
+    items.push({
+      id,
+      file: x.file,
+      title: String(x.title || id),
+      category: x.category ? String(x.category) : '',
+      credit: x.credit ? String(x.credit) : '',
+      url: /^https?:\/\//.test(x.url || '') ? x.url : '',
+      fileUrl: pathToFileURL(full).href,
+      thumbUrl: isFileThere(thumb) ? pathToFileURL(thumb).href : null,
+      missing: there ? null : x.file + ' is missing from assets/backgrounds'
+    });
+  }
+  return { ok: true, reason: null, items };
+}
+
 module.exports = {
+  BUILTIN_FILE,
+  builtinIdOf,
+  readBuiltins,
   VIDEO_EXTS,
   MAX_BYTES,
   BASENAME,

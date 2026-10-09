@@ -26,8 +26,8 @@
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
  *                                           // you are not looking at
  *     workspaceSleepMinutes: 0|5|10|30|60,  // 'all' only: minutes away first
- *     newtabBackground: { kind: 'wallpaper'|'image'|'video'|'none',
- *                         dim: 0..0.6, fileUrl?, fileName?,
+ *     newtabBackground: { kind: 'wallpaper'|'builtin'|'image'|'video'|'none',
+ *                         dim: 0..0.6, id?, fileUrl?, fileName?,
  *                         clipRev?, imageRev?, rev },
  *                   // THE Quartz background: the whole window's (behind
  *                   // the tabs, toolbar and panes, see backdrop.js) AND
@@ -140,6 +140,11 @@
          { kind: 'wallpaper', dim }        a copy of the Windows wallpaper
                                            (main copies it once into
                                            <userData>/backgrounds/)
+         { kind: 'builtin', id, dim }      one of Helm's photos, shipped in
+                                           assets/backgrounds/ (id = the file
+                                           name without extension, 'forest').
+                                           An id this build does not have
+                                           shows the wallpaper, reason said
          { kind: 'image', dim, imageRev }  the user's own picture
          { kind: 'video', fileUrl, fileName, clipRev, dim }
                                            a muted moving loop or GIF; the
@@ -179,6 +184,7 @@
   /* The backgrounds, as the select offers them. The first is the default. */
   var NEWTAB_BACKGROUNDS = [
     { value: 'wallpaper', name: 'Windows wallpaper' },
+    { value: 'builtin', name: 'Built-in photo' },
     { value: 'image', name: 'Your image' },
     { value: 'video', name: 'Moving picture (video or GIF)' },
     { value: 'none', name: 'Plain (no picture)' }
@@ -193,6 +199,8 @@
   var BG_JPEG_QUALITY = 0.86;
   var BG_DIM_DEFAULT = 0.25;
   var BG_DIM_MAX = 0.6;
+  /* A built-in photo's id: its file name without the extension. */
+  var BUILTIN_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
   var BG_REJECT = 'Pick a JPG, PNG or WebP';
 
   /* IndexedDB, in this renderer: db 'browser', store 'assets', one key. */
@@ -465,6 +473,10 @@
        kind is, so switching to the wallpaper and back does not lose the pick. */
     if (typeof v.fileUrl === 'string' && v.fileUrl) out.fileUrl = v.fileUrl;
     if (typeof v.fileName === 'string' && v.fileName) out.fileName = v.fileName;
+    /* The built-in photo's id rides along the same way. Only its shape is
+       checked here (sync, no catalog): whether the build HAS that photo is
+       backdrop.js's question, and an unknown one is said, never dropped. */
+    if (typeof v.id === 'string' && BUILTIN_ID.test(v.id)) out.id = v.id;
     /* Source stamps (see the header): backdrop.js keys its re-blur and the
        clip's cached still on these, not on `rev`, which a dim change bumps. */
     if (isFinite(v.clipRev) && v.clipRev > 0) out.clipRev = Number(v.clipRev);
@@ -509,6 +521,10 @@
       if (patch.dim !== undefined) next.dim = normalizeBackground({ dim: patch.dim }).dim;
       if (patch.clipRev !== undefined) next.clipRev = Number(patch.clipRev) || 0;
       if (patch.imageRev !== undefined) next.imageRev = Number(patch.imageRev) || 0;
+      if (patch.id !== undefined) {
+        if (typeof patch.id === 'string' && BUILTIN_ID.test(patch.id)) next.id = patch.id;
+        else delete next.id;
+      }
       /* null (or '') clears the clip; a string replaces it. */
       if (patch.fileUrl !== undefined) {
         if (typeof patch.fileUrl === 'string' && patch.fileUrl) next.fileUrl = patch.fileUrl;
@@ -787,9 +803,73 @@
    *   { kind: 'none', dim }
    * The legacy dataUrl / fileUrl names ride along for older guests.
    */
+  /* --- the built-in photos (Helm's gallery) ---------------------
+     main reads assets/backgrounds/catalog.json and stats every photo
+     (bgfiles.readBuiltins); the answer is asked once per window and kept,
+     since the photos ship with the build. A failed ask is NOT kept, so the
+     next one tries again. Always resolves { ok, reason, items }. */
+  var builtinsAsk = null;
+  var builtinsList = null;            // the last good answer, sync, for the gallery
+
+  function builtinBackgrounds() {
+    if (builtinsAsk) return builtinsAsk;
+    var api = window.api && window.api.background;
+    if (!api || typeof api.builtins !== 'function') {
+      return Promise.resolve({ ok: false, items: [],
+        reason: 'this window was started before the built-in photos existed; restart the browser' });
+    }
+    builtinsAsk = Promise.resolve().then(function () { return api.builtins(); }).then(function (res) {
+      var out = res && typeof res === 'object' && Array.isArray(res.items)
+        ? res : { ok: false, items: [], reason: (res && res.reason) || 'no answer from the browser' };
+      if (out.ok) builtinsList = out; else builtinsAsk = null;
+      return out;
+    }, function (err) {
+      builtinsAsk = null;
+      return { ok: false, items: [], reason: (err && err.message) || 'the photo list could not be read' };
+    });
+    return builtinsAsk;
+  }
+
+  /**
+   * One built-in photo by id: { ok: true, item } or { ok: false, reason }.
+   * The reason is the sentence Settings and the new tab show, so it says
+   * what is wrong in words (an id from a newer build, a deleted file).
+   */
+  function builtinBackground(id) {
+    return builtinBackgrounds().then(function (res) {
+      if (!res.ok) return { ok: false, reason: res.reason || 'the built-in photos could not be listed' };
+      if (!id) return { ok: false, reason: 'no built-in photo is picked yet' };
+      for (var i = 0; i < res.items.length; i++) {
+        var item = res.items[i];
+        if (item.id !== id) continue;
+        if (item.missing) return { ok: false, reason: item.missing, item: item };
+        return { ok: true, item: item };
+      }
+      return { ok: false, reason: 'this build has no built-in photo called "' + id + '"' };
+    });
+  }
+
   function background() {
     var cfg = normalizeBackground(get('newtabBackground'));
     var out = { kind: cfg.kind, dim: cfg.dim };
+    if (cfg.kind === 'builtin') {
+      /* A known photo: its file:// URL, exactly like the wallpaper copy. An
+         unknown one: no url, the reason, and fallbackUrl = the wallpaper
+         copy, which is what backdrop.js shows behind the chrome too. */
+      if (cfg.id) out.id = cfg.id;
+      return builtinBackground(cfg.id).then(function (res) {
+        if (res.ok) {
+          out.url = res.item.fileUrl;
+          out.fileName = res.item.file;
+          return out;
+        }
+        out.reason = res.reason;
+        return wallpaperCopy().then(function (w) {
+          if (w && typeof w.fileUrl === 'string' && w.fileUrl) out.fallbackUrl = w.fileUrl;
+          return out;
+        });
+      });
+    }
     if (cfg.kind === 'video') {
       if (cfg.fileUrl) { out.url = cfg.fileUrl; out.fileUrl = cfg.fileUrl; }
       if (cfg.fileName) out.fileName = cfg.fileName;
@@ -2715,6 +2795,16 @@
       return 'Showing a copy of your Windows wallpaper' + (when ? ' (copied ' + when + ')' : '') + '.'
         + (st.reason ? ' ' + st.reason + '.' : '');
     }
+    if (st.kind === 'builtin') {
+      if (st.state === 'fallback') {
+        /* backdrop.js falls back to the wallpaper for a photo this build
+           does not have; only when that fails too is the ground plain. */
+        return 'Could not show the built-in photo: ' + why + '. Showing '
+          + (src.type === 'wallpaper' && src.shown ? 'your Windows wallpaper' : 'the plain background') + ' instead.';
+      }
+      var bi = builtinItemOf(src.id || cfg.id);
+      return 'Showing the built-in photo ' + (bi ? '"' + bi.title + '"' : (src.id || cfg.id || '')) + '.';
+    }
     if (st.kind === 'image') {
       if (st.state === 'fallback') return 'Could not show your image: ' + why + '. Showing the plain background.';
       return 'Showing your image.';
@@ -2744,6 +2834,158 @@
     field.appendChild(el('p', 'set-hint', 'Dim darkens the picture on the new tab.'));
   }
 
+  /* --- the built-in photo gallery ----------------------------------
+     Helm's Settings gallery, in this panel's plain-DOM voice: category
+     chips (All first), Shuffle, a grid of thumbnails, and a credit line
+     under it. Picking a tile makes it THE background (kind 'builtin'); the
+     tile of the current one wears the accent border and a check, as Helm's
+     does. The gallery shows whatever kind is picked, so the photos are one
+     click away from the wallpaper, a picture or a clip. */
+  var galFilter = 'all';              // the chip, kept across redraws
+  var galAskFailed = null;            // the last failed list ask's reason
+
+  var GAL_CHECK_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" ' +
+    'aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  /** An Unsplash credit opens as a tab (the panel has no links of its own). */
+  function openCreditUrl(url) {
+    if (!/^https:\/\//.test(url || '')) return;
+    if (typeof window.createTab === 'function') window.createTab(url);
+    else showToast('Could not open the photo page: no tab strip in this window');
+  }
+
+  /** Pick a built-in photo: the gallery's tiles, Shuffle, and the select. */
+  function pickBuiltin(id) {
+    setBackground({ kind: 'builtin', id: id });
+  }
+
+  function builtinItemOf(id) {
+    var items = builtinsList ? builtinsList.items : [];
+    for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i];
+    return null;
+  }
+
+  function galTile(item, on) {
+    var b = el('button', 'set-gal-opt' + (on ? ' is-on' : '') + (item.missing ? ' is-missing' : ''));
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.setAttribute('data-builtin-id', item.id);
+    b.title = item.missing
+      ? item.title + ': cannot be used, ' + item.missing
+      : item.title + (item.credit ? ' · Photo by ' + item.credit : '');
+    if (item.missing) b.disabled = true;
+    var tile = el('span', 'set-gal-tile');
+    var img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.draggable = false;
+    /* A lost thumb falls back to the photo itself; a lost photo hides the
+       broken-image glyph and leaves the title saying which one it was. */
+    img.addEventListener('error', function () {
+      if (!img.dataset.fb && item.thumbUrl) { img.dataset.fb = '1'; img.src = item.fileUrl; }
+      else img.style.visibility = 'hidden';
+    });
+    img.src = item.thumbUrl || item.fileUrl;
+    tile.appendChild(img);
+    if (on) {
+      var check = el('span', 'set-gal-check');
+      check.innerHTML = GAL_CHECK_SVG;
+      tile.appendChild(check);
+    }
+    b.appendChild(tile);
+    b.appendChild(el('span', 'set-gal-name', item.missing ? item.title + ' (missing)' : item.title));
+    b.addEventListener('click', function () { if (!on) pickBuiltin(item.id); });
+    return b;
+  }
+
+  /** The line under the grid: the picked photo's title and photographer. */
+  function galCredit(cfg) {
+    var p = el('p', 'set-gal-credit');
+    var item = cfg.kind === 'builtin' ? builtinItemOf(cfg.id) : null;
+    if (!item) {
+      p.appendChild(document.createTextNode('Photos from Unsplash, free under the Unsplash License. ' +
+        'Pick one to use it; its photographer is credited here.'));
+      return p;
+    }
+    p.appendChild(el('span', 'set-gal-credit-title', item.title));
+    if (item.credit) {
+      p.appendChild(document.createTextNode(' · '));
+      if (item.url) {
+        var a = el('a', 'set-gal-link', 'Photo by ' + item.credit);
+        a.href = item.url;
+        a.title = item.url;
+        a.addEventListener('click', function (e) { e.preventDefault(); openCreditUrl(item.url); });
+        p.appendChild(a);
+      } else {
+        p.appendChild(document.createTextNode('Photo by ' + item.credit));
+      }
+      p.appendChild(document.createTextNode(' on Unsplash'));
+    }
+    return p;
+  }
+
+  function builtinGallery(cfg) {
+    var wrap = el('div', 'set-gal');
+    wrap.setAttribute('data-bg-gallery', '');
+
+    if (!builtinsList) {
+      /* Not asked yet in this window, or the last ask failed: say which, and
+         redraw once when the answer lands (a failure is not retried in a loop). */
+      wrap.appendChild(el('p', galAskFailed ? 'set-note' : 'set-hint',
+        galAskFailed ? 'Built-in photos unavailable: ' + galAskFailed + '.' : 'Loading the built-in photos…'));
+      if (!galAskFailed) {
+        builtinBackgrounds().then(function (res) {
+          if (!res.ok) galAskFailed = res.reason || 'unknown reason';
+          renderNewtabBg();
+        });
+      }
+      return wrap;
+    }
+
+    var items = builtinsList.items;
+    var cats = [];
+    items.forEach(function (x) { if (x.category && cats.indexOf(x.category) < 0) cats.push(x.category); });
+    if (galFilter !== 'all' && cats.indexOf(galFilter) < 0) galFilter = 'all';
+    var shown = galFilter === 'all' ? items : items.filter(function (x) { return x.category === galFilter; });
+    var picked = cfg.kind === 'builtin' ? cfg.id : null;
+
+    var bar = el('div', 'set-gal-bar');
+    var chips = el('div', 'set-gal-chips');
+    chips.setAttribute('role', 'group');
+    chips.setAttribute('aria-label', 'Filter built-in photos');
+    ['all'].concat(cats).forEach(function (c) {
+      var chip = textButton(c === 'all' ? 'All' : c, 'set-gal-chip', function () {
+        galFilter = c;
+        renderNewtabBg();
+      });
+      chip.setAttribute('aria-pressed', galFilter === c ? 'true' : 'false');
+      chips.appendChild(chip);
+    });
+    bar.appendChild(chips);
+    var shuffle = textButton('Shuffle', 'set-btn set-gal-shuffle', function () {
+      var pool = shown.filter(function (x) { return !x.missing && x.id !== picked; });
+      if (!pool.length) pool = items.filter(function (x) { return !x.missing && x.id !== picked; });
+      if (pool.length) pickBuiltin(pool[Math.floor(Math.random() * pool.length)].id);
+    });
+    shuffle.title = 'Use a random built-in photo';
+    bar.appendChild(shuffle);
+    wrap.appendChild(bar);
+
+    var grid = el('div', 'set-gal-grid');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', 'Built-in photo');
+    shown.forEach(function (item) { grid.appendChild(galTile(item, item.id === picked)); });
+    wrap.appendChild(grid);
+
+    var foot = el('div', 'set-gal-foot');
+    foot.appendChild(galCredit(cfg));
+    wrap.appendChild(foot);
+    return wrap;
+  }
+
   /** The background picker: one select, the state line, and the picture's controls under it. */
   function renderNewtabBg() {
     var field = bodyEl && bodyEl.querySelector('[data-field="newtabbg"]');
@@ -2754,6 +2996,12 @@
 
     field.appendChild(controlRow('Background', 'set-newtab-bg',
       glassSelect('set-newtab-bg', NEWTAB_BACKGROUNDS, cfg.kind, function (value) {
+        /* "Built-in photo" with none picked before starts on the first one,
+           so the select alone never lands on an empty choice. */
+        if (value === 'builtin' && !cfg.id && builtinsList && builtinsList.items.length) {
+          setBackground({ kind: value, id: builtinsList.items[0].id });
+          return;
+        }
         setBackground({ kind: value });
       })));
     field.appendChild(el('p', 'set-hint',
@@ -2763,8 +3011,14 @@
     stateLine.setAttribute('role', 'status');
     field.appendChild(stateLine);
     renderBgState();
+    field.appendChild(builtinGallery(cfg));
 
     if (cfg.kind === 'none') return;
+
+    if (cfg.kind === 'builtin') {
+      appendBgDim(field, cfg);
+      return;
+    }
 
     if (cfg.kind === 'wallpaper') {
       var wrow = el('div', 'set-bg-row');
@@ -5657,6 +5911,10 @@
     setBackground: setBackground,
     assets: assetStore,
     recopyWallpaper: recopyWallpaper,
+    /* Helm's built-in photos: builtinBackgrounds() -> { ok, reason, items },
+       builtinBackground(id) -> { ok, item } | { ok: false, reason }. */
+    builtinBackgrounds: builtinBackgrounds,
+    builtinBackground: builtinBackground,
 
     /* The new tab's app dock, in the order the page shows it: an installed
        app's id, a 'web:<slug>' or a 'term:<program>', each either as a bare
