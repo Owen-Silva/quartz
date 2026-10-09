@@ -1,50 +1,49 @@
 /* ============================================================
    tabsearch.css — #tabsearch-btn and #tabsearch, the tab palette
 
-   One more crystal instrument: a glass pane that hangs in the
-   upper third of the window listing every open tab and the ones
-   just closed. It borrows chrome.css's .glass frost and the row
-   recipe from #omni-suggest — a 2px rail of ion light, never a
-   moving background — and every colour here resolves through a
-   chrome.css token, so the light theme re-lights it without a
-   single rule of its own.
+   Helm's command palette: a pane that hangs in the upper third of
+   the window listing every open tab and the ones just closed. The
+   --overlay ground, a strong 1px hairline, the large radius and the
+   level-3 shadow; rows light with the raised fill, the accent only
+   marks state. Every rule is written against tokens.css names
+   (chrome.css @imports it), so html[data-theme="light"] relights it
+   without a single rule of its own.
 
-   Motion budget: the chrome already runs a backdrop-filter, so
-   every transition in this file is a short stepped one. Nothing
-   here animates continuously.
+   Motion: 120 ms colour changes. Nothing here animates continuously.
    ============================================================ */
 
 /* --- the titlebar instrument ---------------------------------- */
 /* #newtab's shape exactly — 28px, the control radius — one slot to its right,
    so the pair reads as one control group rather than two sizes. A control is
-   round; the bevel is the container's signature, not a button's. */
+   Helm's icon button: transparent at rest, the raised fill on hover. */
 #tabsearch-btn {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-ctl);
-  transition: background-color 120ms steps(3, end), color 120ms steps(3, end);
+  border-radius: var(--radius-s);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#tabsearch-btn:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#tabsearch-btn:active { background: var(--sheen), var(--glass-3); }
+#tabsearch-btn:hover { background: var(--surface-3); color: var(--text); }
+#tabsearch-btn:active { background: var(--surface-2); }
 
 /* while the pane is open the button stays lit, so it reads as the thing
    holding it open rather than a button that did nothing */
 #tabsearch-btn.is-on {
-  background: var(--sheen), var(--glass-3);
-  color: var(--ion);
+  background: var(--surface-3);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
-/* focus is light, not a thick white outline: a 1px ion line and a soft halo */
+/* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #tabsearch-btn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- the pane -------------------------------------------------- */
-/* Fixed and centred in its own column: it floats over the page, and there
-   is nothing behind it worth blurring, so --panel-bg is near-opaque. */
+/* Fixed and centred in its own column: it floats over the page, where a
+   <webview> gives a blur nothing to work with, so it takes --overlay (legible
+   on its own) and no backdrop-filter. */
 #tabsearch {
   position: fixed;
   top: 14vh;
@@ -55,28 +54,15 @@
   width: 560px;
   max-width: calc(100vw - 32px);
   padding: 0;
-  /* The light rim: one pixel of gradient in the border box — specular at the
-     top-left, ion at the bottom-right — under an opaque --panel-bg padding
-     layer, so the rim reads as a cut edge catching light rather than a wash. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  font-family: var(--ui-font);
-  color: var(--fg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-l);
+  background: var(--overlay);
+  font-family: var(--font);
+  color: var(--text);
   overflow: hidden;            /* the rows' corners never poke the radius */
   box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 18px 46px var(--shade-drop);
-}
-
-/* Two cut corners on the diagonal — top-right and bottom-left — so the pane
-   reads as machined stock. Round everywhere the property is missing. */
-@supports (corner-shape: bevel) {
-  #tabsearch { corner-shape: round bevel round bevel; }
+    inset 0 1px 0 var(--panel-edge),
+    var(--shadow-3);
 }
 
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
@@ -90,28 +76,16 @@
   gap: 10px;
   height: 46px;
   padding: 0 14px;
-  /* the pixel stays, the paint moves to ::after: a rule that fades out to the
-     right instead of a solid line across the pane */
-  border-bottom: 1px solid transparent;
-}
-
-#tabsearch .ts-field::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
-  pointer-events: none;
+  /* Helm's palette input: one plain hairline under the field */
+  border-bottom: 1px solid var(--hairline);
 }
 
 #tabsearch .ts-field-ico {
   flex: 0 0 auto;
   width: 16px;
-  font-size: 13px;
+  font-size: var(--fs-s);
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 #tabsearch-input {
@@ -121,29 +95,26 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 13.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  font-weight: 400;
   -webkit-user-select: text;
   user-select: text;
 }
 
-#tabsearch-input::placeholder { color: var(--placeholder); }
+#tabsearch-input::placeholder { color: var(--text-3); }
 #tabsearch-input:focus { outline: none; }
 
 #tabsearch-input:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 3px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* The outline follows the element's radius, and this input had none — so the
    ring came out as a hard-cornered rectangle inside a pane where nothing else
    has a square corner. A field is a control: the control radius. */
-#tabsearch-input { border-radius: var(--radius-ctl); }
+#tabsearch-input { border-radius: var(--radius-s); }
 
 /* --- the list -------------------------------------------------- */
 #tabsearch .ts-list {
@@ -165,30 +136,20 @@
 #tabsearch .ts-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* --- the "Recently closed" caption ------------------------------ */
-/* A section title in this system is a readout: 12px, 600, --fg-3, sentence
-   case, never tracked out, and followed by a rule that fades to the right. */
+/* A section title, as Helm writes a group label: 12px, 600, --text-3,
+   sentence case, never tracked out. */
 #tabsearch .ts-cap {
   position: relative;
   padding: 10px 10px 5px 12px;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
   /* Sentence case, matching the history page's .daybar. */
   text-transform: none;
 }
 
-#tabsearch .ts-cap::after {
-  content: '';
-  position: absolute;
-  left: 12px;
-  right: 10px;
-  bottom: 1px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
-  pointer-events: none;
-}
+/* Helm's group captions carry no rule: the caption's own type separates
+   the groups. */
 
 /* --- a row ------------------------------------------------------ */
 /* The left rail is always 2px and merely changes colour, so lighting a
@@ -201,22 +162,18 @@
   height: 46px;
   padding: 0 8px 0 10px;
   border-left: 2px solid transparent;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
-  transition: background-color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
-/* The selected row is an edge that has been lit, not a block of paint: the
-   2px rail carries --rim-focus in the border box, and the interior is the
-   pane's own ground under one step of ion light. */
+/* The selected row is Helm's highlighted menu item: the raised fill, with
+   the 2px rail taking the accent, because the highlight is state. */
 #tabsearch .ts-row.is-hi {
-  border-left-color: transparent;
-  background:
-    linear-gradient(var(--ion-soft), var(--ion-soft)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim-focus) border-box;
+  border-left-color: var(--accent);
+  background: var(--surface-3);
 }
 
 /* --- the icon column -------------------------------------------- */
@@ -226,11 +183,11 @@
   align-items: center;
   justify-content: center;
   width: 16px;
-  font-size: 13px;
-  color: var(--fg-3);
+  font-size: var(--fs-s);
+  color: var(--text-3);
 }
 
-#tabsearch .ts-row.is-hi .ts-ico { color: var(--ion); }
+#tabsearch .ts-row.is-hi .ts-ico { color: var(--accent); }
 
 #tabsearch img.ts-favicon {
   width: 14px;
@@ -246,8 +203,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--amber);
-  box-shadow: var(--pip-amber);
+  background: var(--warn);
 }
 
 /* --- the two text lines ----------------------------------------- */
@@ -271,23 +227,19 @@
 
 /* a tab title is a readout: the semi-condensed width, set once here */
 #tabsearch .ts-primary {
-  color: var(--fg);
-  font-size: 12.5px;
+  color: var(--text);
+  font-size: var(--fs-s);
   font-weight: 400;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
 }
 
 #tabsearch .ts-secondary {
-  color: var(--fg-2);
-  font-size: 11px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
 }
 
 /* a closed row's second line is the whole url: a note, not content */
-#tabsearch .ts-row--closed .ts-secondary { color: var(--fg-3); }
+#tabsearch .ts-row--closed .ts-secondary { color: var(--text-3); }
 
 /* --- the state tags --------------------------------------------- */
 /* Pinned, muted, playing, sleeping, current: a word each, dimmer than the
@@ -297,11 +249,9 @@
   align-items: center;
   gap: 3px;
   margin-left: 8px;
-  color: var(--fg-3);
-  font-size: 10.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
 }
 
 #tabsearch .ts-tag-ico { font-size: 10px; }
@@ -313,11 +263,11 @@
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-3);
+  border-radius: var(--radius-s);
+  color: var(--text-3);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms steps(3, end), background-color 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 #tabsearch .ts-row:hover .ts-close,
@@ -327,35 +277,31 @@
   pointer-events: auto;
 }
 
-#tabsearch .ts-close:hover { background: var(--glass-3); color: var(--fg); }
-#tabsearch .ts-close:active { background: var(--glass-2); }
+#tabsearch .ts-close:hover { background: var(--surface-3); color: var(--text); }
+#tabsearch .ts-close:active { background: var(--surface-3); }
 
 #tabsearch .ts-close:focus-visible {
   opacity: 1;
   pointer-events: auto;
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- the overflow count and the empty note ---------------------- */
 #tabsearch .ts-more {
   padding: 6px 12px 8px;
-  color: var(--fg-3);
-  font-size: 11px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
   /* a count, so the digits hold their column as the list changes */
   font-variant-numeric: tabular-nums;
 }
 
 #tabsearch .ts-empty {
   padding: 16px 12px;
-  color: var(--fg-2);
-  font-size: 12.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-s);
+  font-weight: 400;
 }
 
 /* ============================================================
@@ -373,10 +319,10 @@
 
 /* The mark is the only thing in that column — no favicon to defer to —
    so it reads one step brighter than a tab's globe. */
-#tabsearch .ts-ico--cmd { color: var(--fg-2); }
+#tabsearch .ts-ico--cmd { color: var(--text-2); }
 
 /* A hint is a gloss on the label, never content: dimmer than a host. */
-#tabsearch .ts-cmd-hint { color: var(--fg-3); }
+#tabsearch .ts-cmd-hint { color: var(--text-3); }
 
 /* --- the keycaps ------------------------------------------------ */
 /* #settings-panel's .set-key recipe, one size down: the same cap, read
@@ -393,32 +339,30 @@
 #tabsearch .ts-key {
   min-width: 17px;
   padding: 1px 5px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--sheen), var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
   /* The cap carries its own lighter ground, so --fg-3 landed at 4.4:1 on it.
      One step up clears 4.5:1 on the cap in both themes. */
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 10.5px;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-2xs);
   font-weight: 400;
-  font-stretch: var(--readout-stretch);
   /* a cap is a legend: digits hold one column width */
   font-variant-numeric: tabular-nums;
   line-height: 14px;
   text-align: center;
-  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+  box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
 /* under the highlight the caps lift with the row, not past it */
 /* The lit row lifts its own ground, so the caps go a step brighter with it. */
-#tabsearch .ts-row.is-hi .ts-key { color: var(--fg); }
+#tabsearch .ts-row.is-hi .ts-key { color: var(--text); }
 
-/* the palette being worn: the one ion mark in the list, lit like a pip */
+/* the palette being worn: the one accent mark in the list (Helm's menu check) */
 #tabsearch .ts-check {
-  font-size: 12px;
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
+  font-size: var(--fs-xs);
+  color: var(--accent);
 }
 
 /* --- narrow windows --------------------------------------------- */
