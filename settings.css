@@ -1000,7 +1000,7 @@
    at the three columns Helm drops to on a narrow pane, which is what this
    440px panel is. Neutral tiles on one hairline; the accent marks only the
    picked one (border, outline ring, check), nothing glows at rest. */
-#settings-panel .set-gal { margin-top: 10px; }
+#settings-panel .set-gal { margin: 10px 0 14px; }
 
 #settings-panel .set-gal-bar {
   display: flex;
