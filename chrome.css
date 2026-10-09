@@ -199,6 +199,20 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
   box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
+/* Dark glass is half see-through (one ~50% tint, tokens.css). Over a bright
+   picture the resting tab titles, the toolbar icons and the pane's quieter
+   lines (--text-2, #a9aaa7) fell to ~2:1, so on the glass the two quiet
+   greys each move up one step: --text-2 is 3:1 at the brightest composite
+   backdrop.js allows (luminance .13), and --text-3 (asleep tabs, hints,
+   disabled arrows) takes the old --text-2 so it stays visible, ~2.5:1 at
+   that worst case. Still three plain steps below --text. Menus and popovers
+   inside these rows are opaque (--overlay) and read fine either way. Light
+   is unchanged. */
+html:not([data-theme="light"]) :is(#titlebar, .navrow, #sidepane, #views > .claude-view) {
+  --text-2: #c0c1be;
+  --text-3: #a9aaa7;
+}
+
 /* --- chrome layer + launch entrance --------------------------- */
 .chrome-layer {
   position: relative;

@@ -59,6 +59,17 @@
   opacity: 1;
 }
 
+/* Dark: no wash behind the chrome. The --surface-0 / --surface-1 tint
+   (rgba .50, tokens.css) is the ONE layer between the blurred picture and
+   the strip, toolbar and panes, the way Mantle's and Helm's dark glass is
+   one ~50% layer. Washing under a 50% surface stacked to ~73% dark (75-80%
+   under the panes), which read as opaque. Light keeps its wash. The new
+   tab Home paints its own picture and its own Dim (newtab.css #bg-dim), so
+   it is unchanged. */
+html:not([data-theme="light"]) .backdrop > .bg-wash {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .backdrop > .bg-photo,
   .backdrop > .bg-wash {

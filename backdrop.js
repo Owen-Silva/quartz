@@ -188,13 +188,14 @@
   function clearPhoto() {
     if (!photoEl) return;
     photoEl.removeAttribute('data-ready');
+    applyGlass(null);
     photoEl.style.backgroundImage = '';
     revokeLater(shownUrl);
     shownUrl = null;
   }
 
   /** Put a blurred blob on the layer once it has decoded (no half frame). */
-  function showBlob(blob, mySeq) {
+  function showBlob(blob, mySeq, glass) {
     var url = URL.createObjectURL(blob);
     var img = new Image();
     img.src = url;
@@ -203,6 +204,7 @@
       if (mySeq !== seq || !photoEl) { revokeLater(url); return false; }
       photoEl.style.backgroundImage = 'url("' + url + '")';
       photoEl.setAttribute('data-ready', '');
+      applyGlass(glass);
       var old = shownUrl;
       shownUrl = url;
       revokeLater(old);
@@ -288,6 +290,78 @@
     if (bm && typeof bm.close === 'function') { try { bm.close(); } catch (err) { /* fine */ } }
   }
 
+  /* --- how see-through the dark glass can be ------------------------ */
+
+  /*
+   * In dark the chrome's tint (--surface-0 / --surface-1, tokens.css) is the
+   * ONE layer over this picture, at Helm's and Mantle's 50%. Over most
+   * pictures that is it. Over a bright one (misty-woods, foggy-cliffs, stone,
+   * cloud-peaks: a pale sky right where the tab strip sits) 50% of a dark
+   * grey leaves the strip mid-grey and the tab titles under 4.5:1, so the
+   * glass darkens JUST enough to keep the composite at or under GLASS_MAX_L
+   * (relative luminance), measured on the blurred bitmap itself: the
+   * brightest block of the band under the strip and toolbar, and of the
+   * right-hand column where the side pane opens. Never below 50%, never
+   * above the old pane's 66%. Light theme does not read the variable.
+   */
+  var GLASS_FLOOR = 0.5;
+  var GLASS_CEIL = 0.66;
+  var GLASS_MAX_L = 0.13;        // --text 4.9:1, the glass's --text-2 3.2:1 (chrome.css), with margin for a bright patch inside a block
+  var GLASS_FILL = 22;           // the lighter of the two tints (--surface-1), so both pass
+
+  function linear(v) {
+    v /= 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
+
+  function lumOver(rgb, a) {
+    var c = rgb.map(function (p) { return linear(p * (1 - a) + GLASS_FILL * a); });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function glassAlphaFor(ctx, W, H) {
+    var blocks = [];
+    var band = Math.max(2, Math.round(H * 0.11));   // strip + toolbar, ~84 of 836 px
+    var half = Math.ceil(band / 2);                  // the strip, then the toolbar
+    var cols = 16;                                    // small blocks: a bright patch is not averaged away
+    for (var i = 0; i < cols; i++) {
+      blocks.push([Math.floor(W * i / cols), 0, Math.ceil(W / cols), half]);
+      blocks.push([Math.floor(W * i / cols), half, Math.ceil(W / cols), band - half]);
+    }
+    var paneX = Math.floor(W * 0.68);                 // a 480 px pane on a 1536 px window
+    var paneW = Math.ceil((W - paneX) / 3);
+    var rows = 8;
+    for (var j = 0; j < rows; j++) {
+      for (var k = 0; k < 3; k++) {
+        blocks.push([paneX + k * paneW, band + Math.floor((H - band) * j / rows), paneW, Math.ceil((H - band) / rows)]);
+      }
+    }
+    var worst = [0, 0, 0];
+    var worstL = -1;
+    try {
+      blocks.forEach(function (bk) {
+        var d = ctx.getImageData(bk[0], bk[1], Math.max(1, bk[2]), Math.max(1, bk[3])).data;
+        var s = [0, 0, 0];
+        var n = d.length / 4;
+        for (var k = 0; k < d.length; k += 4) { s[0] += d[k]; s[1] += d[k + 1]; s[2] += d[k + 2]; }
+        var mean = [s[0] / n, s[1] / n, s[2] / n];
+        var l = lumOver(mean, 0);
+        if (l > worstL) { worstL = l; worst = mean; }
+      });
+    } catch (err) {
+      return { alpha: GLASS_FLOOR, brightest: null };   // unreadable: Helm's 50%
+    }
+    var a = GLASS_FLOOR;
+    while (a < GLASS_CEIL && lumOver(worst, a) > GLASS_MAX_L) a = Math.round((a + 0.01) * 100) / 100;
+    return { alpha: a, brightest: Math.round(worstL * 1000) / 1000 };
+  }
+
+  function applyGlass(alpha) {
+    var root = document.documentElement;
+    if (alpha == null) root.style.removeProperty('--chrome-glass-a');
+    else root.style.setProperty('--chrome-glass-a', String(alpha));
+  }
+
   /** Draw src to fill w x h, cropping the long side (CSS cover). */
   function drawCover(ctx, src, w, h) {
     var sw = src.width || src.videoWidth;
@@ -346,11 +420,13 @@
 
     var corner = null;
     try { corner = ctx.getImageData(0, 0, 1, 1).data[3]; } catch (err) { corner = null; }
-    lastRender = { width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner };
+    var glass = glassAlphaFor(ctx, W, H);
+    lastRender = { width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner,
+                   glassAlpha: glass.alpha, glassBrightest: glass.brightest };
     big.width = 0;                 // drop the big bitmap now, not at GC
     return toBlob(out, OUT_TYPE, OUT_QUALITY).then(function (blob) {
       out.width = 0;
-      return blob;
+      return { blob: blob, glass: glass.alpha };
     });
   }
 
@@ -772,8 +848,8 @@
 
     return pick.then(function (got) {
       if (mySeq !== seq) { closeBitmap(got.bitmap); return null; }
-      return blurToBlob(got.bitmap).then(function (blob) {
-        return showBlob(blob, mySeq);
+      return blurToBlob(got.bitmap).then(function (out) {
+        return showBlob(out.blob, mySeq, out.glass);
       }).then(function (shown) {
         if (!shown || mySeq !== seq) return;
         var note = null;
