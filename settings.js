@@ -26,8 +26,13 @@
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
  *                                           // you are not looking at
  *     workspaceSleepMinutes: 0|5|10|30|60,  // 'all' only: minutes away first
- *     newtabBackground: { kind: 'board'|'aurora'|'image',
- *                         boardOverImage: bool, dim: 0..0.6, rev },
+ *     newtabBackground: { kind: 'wallpaper'|'image'|'video'|'none',
+ *                         dim: 0..0.6, fileUrl?, fileName?,
+ *                         clipRev?, imageRev?, rev },
+ *                   // THE Quartz background: the whole window's (behind
+ *                   // the tabs, toolbar and panes, see backdrop.js) AND
+ *                   // the new tab's. The key keeps its old name so stored
+ *                   // prefs survive; 'board'/'aurora' read as 'wallpaper'.
  *     music:        { enabled, source: 'ambient'|'files',
  *                     where: 'newtab'|'anywhere', volume: 0..1,
  *                     files: [{ path, name }], shuffle } }
@@ -36,8 +41,11 @@
  * 2560px JPEG as base64 is about a megabyte of string that localStorage would
  * rewrite on every unrelated write. The blob lives in IndexedDB instead —
  * db 'browser', store 'assets', key 'newtab-bg' — and Settings.background()
- * hands app.js the pair as { kind, boardOverImage, dim, dataUrl? }. `rev` is
+ * hands app.js the pair as { kind, dim, url?, fileName?, ... }. `rev` is
  * a stamp, so replacing the picture still counts as a change worth pushing.
+ * imageRev / clipRev change only when the picture / the clip itself changes,
+ * so backdrop.js re-blurs (and re-captures a clip's still) only then, never
+ * for a dim change.
  *
  * THE PALETTE IS MIRRORED. `palette` also lives under its own localStorage
  * key ('palette', absent for the default aurora) because theme-boot.js has to
@@ -125,16 +133,24 @@
        no prompt, which is what every browser does. downloads.js pushes this
        to main, which is the only process that can act on it. */
     downloadsAskWhere: false,
-    /* What the new tab paints behind the search field:
-         { kind: 'board' }                          the circuit board
-         { kind: 'aurora' }                         the aurora alone
-         { kind: 'image', boardOverImage, dim }     the user's own picture
-         { kind: 'video', fileUrl, fileName, boardOverImage, dim }
-                                                    a muted moving loop
-       The picture itself is NOT in here — see the asset store below. The clip
-       is not either: main copies it into <userData>/backgrounds/ and only its
-       file:// URL is stored. */
-    newtabBackground: { kind: 'board' },
+    /* THE Quartz background: what sits behind the whole window (backdrop.js
+       blurs it once and the tab strip, toolbar and panes are tints over it)
+       AND what the new tab shows. The key keeps its old name so stored
+       prefs survive.
+         { kind: 'wallpaper', dim }        a copy of the Windows wallpaper
+                                           (main copies it once into
+                                           <userData>/backgrounds/)
+         { kind: 'image', dim, imageRev }  the user's own picture
+         { kind: 'video', fileUrl, fileName, clipRev, dim }
+                                           a muted moving loop or GIF; the
+                                           new tab plays it, the chrome shows
+                                           one blurred still of it
+         { kind: 'none' }                  plain: no picture at all
+       Older builds stored 'board' (the circuit board) or 'aurora'; both read
+       as 'wallpaper' now. The picture itself is NOT in here — see the asset
+       store below. The clip is not either: main copies it into
+       <userData>/backgrounds/ and only its file:// URL is stored. */
+    newtabBackground: { kind: 'wallpaper' },
     /* The apps pinned to the new tab page's dock: apps.js ids, webapps.js
        'web:<slug>' ids and 'term:<program>' ids — names, icons and running
        state are NOT stored, they are looked up against the installed index
@@ -160,13 +176,16 @@
   /* An id is a hash from apps.js; anything longer is not one. */
   var APP_ID_MAX = 200;
 
-  /* The backgrounds, as the select offers them. */
+  /* The backgrounds, as the select offers them. The first is the default. */
   var NEWTAB_BACKGROUNDS = [
-    { value: 'board', name: 'Circuit board' },
-    { value: 'aurora', name: 'Aurora only' },
+    { value: 'wallpaper', name: 'Windows wallpaper' },
     { value: 'image', name: 'Your image' },
-    { value: 'video', name: 'Moving picture' }
+    { value: 'video', name: 'Moving picture (video or GIF)' },
+    { value: 'none', name: 'Plain (no picture)' }
   ];
+  /* Kinds older builds stored, and what they read as now. The circuit board
+     and the aurora are gone; their users get the new default. */
+  var LEGACY_BACKGROUNDS = { board: 'wallpaper', aurora: 'wallpaper' };
 
   /* The picture: never bigger than this on its long edge, always re-encoded
      as a JPEG, and always behind this much black so the capsule stays legible. */
@@ -273,18 +292,22 @@
     ['Alt+Left / Alt+Right', 'Back, forward']
   ];
 
-  /* The accent formula, shared verbatim with the new tab page:
-     dark  -> hsl(H 45% 62%)    light -> hsl(H 90% 44%)
-     and the derived tokens are the same hue at the alphas chrome.css
-     authors for that theme (the dark ones were calmed in 8229844). */
+  /* The accent formula: Helm's accent strength with the user's hue,
+       dark  -> hsl(H 31% 71%)    light -> hsl(H 26% 41%)
+     the saturation and lightness of Helm's own steel blue (tokens.css:
+     #9fb4cc / #4d6784), so a custom hue sits at the same quiet strength
+     as the default and every palette preset. The derived tokens are that
+     hue at the alphas tokens.css authors for each theme. The new tab
+     page's newtab-theme.js has to run this same formula. */
+  var ACCENT_SL = { dark: [31, 71], light: [26, 41] };
   var ACCENT_TOKENS = [
     ['--ion', null],
-    ['--ion-soft', 0.14, 0.14],
-    ['--ion-glow', 0.22, 0.35],
-    ['--ion-line', 0.65, 0.75],
+    ['--ion-soft', 0.14, 0.11],
+    ['--ion-glow', 0.22, 0.22],
+    ['--ion-line', 0.42, 0.40],
     ['--ion-select', 0.30, 0.2],
-    ['--seam-color', 0.14, 0.45],
-    ['--chamber-seam', 0.16, 0.5]
+    ['--seam-color', 0.14, 0.14],
+    ['--chamber-seam', 0.16, 0.16]
   ];                            /* [token, dark alpha, light alpha] */
 
   /* --- state ---------------------------------------------------- */
@@ -413,34 +436,64 @@
   }
 
   /* ============================================================
-     New tab background
+     The background (the whole window's, and the new tab's)
 
      The choice lives in the settings JSON; the picture does not. A 2560px
      JPEG as base64 is around a megabyte of string, and localStorage would
      have to rewrite all of it on every unrelated settings write — so the
      blob goes in IndexedDB and only the tiny descriptor is stored here.
 
-     app.js reads the pair back through Settings.background(), which hands
-     over { kind, boardOverImage, dim, dataUrl? } for the new tab guest.
+     Two readers: backdrop.js (the blurred layer behind the chrome) reads
+     backgroundConfig() and the asset store directly; app.js reads
+     Settings.background(), which resolves { kind, dim, url?, fileName?, ... }
+     for the new tab guest.
      ============================================================ */
 
   /** Anything stored (or pushed) read as a complete, in-range descriptor. */
   function normalizeBackground(value) {
     var v = value && typeof value === 'object' ? value : {};
-    var kind = 'board';
+    var kind = NEWTAB_BACKGROUNDS[0].value;
+    var asked = Object.prototype.hasOwnProperty.call(LEGACY_BACKGROUNDS, v.kind)
+      ? LEGACY_BACKGROUNDS[v.kind] : v.kind;
     for (var i = 0; i < NEWTAB_BACKGROUNDS.length; i++) {
-      if (NEWTAB_BACKGROUNDS[i].value === v.kind) kind = v.kind;
+      if (NEWTAB_BACKGROUNDS[i].value === asked) kind = asked;
     }
     var dim = (v.dim === null || v.dim === undefined || v.dim === '')
       ? BG_DIM_DEFAULT : Number(v.dim);
     if (!isFinite(dim)) dim = BG_DIM_DEFAULT;
     dim = Math.min(BG_DIM_MAX, Math.max(0, dim));
-    var out = { kind: kind, boardOverImage: v.boardOverImage === true, dim: dim };
+    var out = { kind: kind, dim: dim };
     /* The clip's file:// URL and its original name ride along whatever the
-       kind is, so switching to the board and back does not lose the pick. */
+       kind is, so switching to the wallpaper and back does not lose the pick. */
     if (typeof v.fileUrl === 'string' && v.fileUrl) out.fileUrl = v.fileUrl;
     if (typeof v.fileName === 'string' && v.fileName) out.fileName = v.fileName;
+    /* Source stamps (see the header): backdrop.js keys its re-blur and the
+       clip's cached still on these, not on `rev`, which a dim change bumps. */
+    if (isFinite(v.clipRev) && v.clipRev > 0) out.clipRev = Number(v.clipRev);
+    if (isFinite(v.imageRev) && v.imageRev > 0) out.imageRev = Number(v.imageRev);
     return out;
+  }
+
+  /** The descriptor as it stands, normalised (sync; backdrop.js reads this). */
+  function backgroundConfig() {
+    return normalizeBackground(get('newtabBackground'));
+  }
+
+  /**
+   * One-time migration: a stored 'board' / 'aurora' (or the retired
+   * boardOverImage switch) is written back as the new descriptor, so every
+   * raw reader of the key — the new tab's first-paint hint included — sees
+   * a kind that still exists. Runs at load; a clean store is left alone.
+   */
+  function migrateBackground() {
+    var raw = load().newtabBackground;
+    if (!raw || typeof raw !== 'object') return;
+    var legacy = Object.prototype.hasOwnProperty.call(LEGACY_BACKGROUNDS, raw.kind)
+      || Object.prototype.hasOwnProperty.call(raw, 'boardOverImage');
+    if (!legacy) return;
+    var next = normalizeBackground(raw);
+    if (raw.rev) next.rev = raw.rev;
+    set({ newtabBackground: next });
   }
 
   /**
@@ -455,8 +508,9 @@
     var next = normalizeBackground(get('newtabBackground'));
     if (patch && typeof patch === 'object') {
       if (patch.kind !== undefined) next.kind = normalizeBackground({ kind: patch.kind }).kind;
-      if (patch.boardOverImage !== undefined) next.boardOverImage = patch.boardOverImage === true;
       if (patch.dim !== undefined) next.dim = normalizeBackground({ dim: patch.dim }).dim;
+      if (patch.clipRev !== undefined) next.clipRev = Number(patch.clipRev) || 0;
+      if (patch.imageRev !== undefined) next.imageRev = Number(patch.imageRev) || 0;
       /* null (or '') clears the clip; a string replaces it. */
       if (patch.fileUrl !== undefined) {
         if (typeof patch.fileUrl === 'string' && patch.fileUrl) next.fileUrl = patch.fileUrl;
@@ -611,15 +665,17 @@
         revokePreview();
         bgPreviewBlob = blob;
         bgPreviewLoaded = true;
-        setBackground({ kind: 'image' });
+        // imageRev tells backdrop.js this is a different picture to blur.
+        setBackground({ kind: 'image', imageRev: Date.now() });
         return blob;
       });
     });
   }
 
   /**
-   * Drop the picture. The kind goes back to the board with it: leaving it on
-   * 'image' would leave the new tab dimming a background that isn't there.
+   * Drop the picture. The kind goes back to the default (the Windows
+   * wallpaper) with it: leaving it on 'image' would leave the window
+   * showing a background that isn't there.
    */
   function removeBackgroundImage() {
     return assetStore['delete'](BG_ASSET_KEY).catch(function () { /* already gone */ })
@@ -628,7 +684,7 @@
         revokePreview();
         bgPreviewBlob = null;
         bgPreviewLoaded = true;
-        setBackground({ kind: 'board' });
+        setBackground({ kind: NEWTAB_BACKGROUNDS[0].value, imageRev: Date.now() });
       });
   }
 
@@ -661,7 +717,9 @@
         if (!res || res.ok !== true || typeof res.fileUrl !== 'string' || !res.fileUrl) {
           return { ok: false, reason: (res && res.reason) || 'cancelled' };
         }
-        setBackground({ kind: 'video', fileUrl: res.fileUrl, fileName: res.fileName || '' });
+        // The copy always has the same name (newtab-bg.<ext>), so clipRev is
+        // what tells backdrop.js this is a new clip whose still to capture.
+        setBackground({ kind: 'video', fileUrl: res.fileUrl, fileName: res.fileName || '', clipRev: Date.now() });
         renderNewtabBg();
         return { ok: true, fileName: res.fileName || '' };
       })
@@ -671,8 +729,9 @@
   }
 
   /**
-   * Drop the clip. The kind goes back to the board with it, exactly as
-   * removing the picture does: 'video' with nothing to play is just a dim.
+   * Drop the clip. The kind goes back to the default (the Windows wallpaper)
+   * with it, exactly as removing the picture does. Main's clear removes the
+   * clip only; the wallpaper copy beside it is never touched (bgfiles.js).
    */
   function removeBackgroundVideo() {
     var api = bgVideoApi();
@@ -680,28 +739,78 @@
       ? Promise.resolve().then(function () { return api.clearVideo(); }).catch(function () { })
       : Promise.resolve();
     return done.then(function () {
-      setBackground({ kind: 'board', fileUrl: null, fileName: null });
+      setBackground({ kind: NEWTAB_BACKGROUNDS[0].value, fileUrl: null, fileName: null, clipRev: Date.now() });
       renderNewtabBg();
     });
   }
 
+  /* --- the Windows wallpaper copy --------------------------------
+     Main copies %APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper into
+     <userData>/backgrounds/wallpaper.<ext> once, the first time anything asks,
+     and again only on "Copy again from Windows". Both resolve
+     { ok, fileUrl, fileName, copiedAt, reason } and never reject. */
+
+  function wallpaperApi() {
+    var api = (typeof window !== 'undefined') ? window.api : null;
+    return (api && api.background && typeof api.background.wallpaper === 'function')
+      ? api.background : null;
+  }
+
+  function wallpaperCopy() {
+    var api = wallpaperApi();
+    if (!api) return Promise.resolve({ ok: false, reason: 'this window was started before the wallpaper copy existed; restart the browser' });
+    return Promise.resolve().then(function () { return api.wallpaper(); })
+      .then(function (res) { return res || { ok: false, reason: 'no answer from the browser' }; })
+      .catch(function (err) { return { ok: false, reason: (err && err.message) || 'the copy failed' }; });
+  }
+
+  /** "Copy again from Windows": through the layer when it is there, so it re-blurs. */
+  function recopyWallpaper() {
+    var layer = window.Backdrop;
+    if (layer && typeof layer.recopyWallpaper === 'function') return layer.recopyWallpaper();
+    var api = wallpaperApi();
+    if (!api || typeof api.recopyWallpaper !== 'function') {
+      return Promise.resolve({ ok: false, reason: 'this window was started before the wallpaper copy existed; restart the browser' });
+    }
+    return Promise.resolve().then(function () { return api.recopyWallpaper(); })
+      .catch(function (err) { return { ok: false, reason: (err && err.message) || 'the copy failed' }; });
+  }
+
   /**
-   * What app.js pushes into the new tab guest:
-   *   { kind, boardOverImage, dim, dataUrl? }      for kind 'image'
-   *   { kind, boardOverImage, dim, fileUrl?, fileName? }  for kind 'video'
-   * dataUrl is only present for kind 'image' with a picture actually stored,
-   * and is read out of IndexedDB once and then kept in memory.
+   * What app.js pushes into the new tab guest, before it adds the layer's
+   * state and reason:
+   *   { kind: 'wallpaper', dim, url?, fileName?, copiedAt?, reason? }
+   *       url = the file:// URL of main's wallpaper copy
+   *   { kind: 'image', dim, url?, dataUrl? }
+   *       url (= dataUrl) is only there with a picture actually stored; it
+   *       is read out of IndexedDB once and then kept in memory
+   *   { kind: 'video', dim, url?, fileUrl?, fileName? }
+   *       url (= fileUrl) is the file:// URL of main's copy of the clip
+   *   { kind: 'none', dim }
+   * The legacy dataUrl / fileUrl names ride along for older guests.
    */
   function background() {
     var cfg = normalizeBackground(get('newtabBackground'));
-    var out = { kind: cfg.kind, boardOverImage: cfg.boardOverImage, dim: cfg.dim };
+    var out = { kind: cfg.kind, dim: cfg.dim };
     if (cfg.kind === 'video') {
-      if (cfg.fileUrl) out.fileUrl = cfg.fileUrl;
+      if (cfg.fileUrl) { out.url = cfg.fileUrl; out.fileUrl = cfg.fileUrl; }
       if (cfg.fileName) out.fileName = cfg.fileName;
       return Promise.resolve(out);
     }
+    if (cfg.kind === 'wallpaper') {
+      return wallpaperCopy().then(function (res) {
+        if (res && typeof res.fileUrl === 'string' && res.fileUrl) {
+          out.url = res.fileUrl;
+          if (res.fileName) out.fileName = res.fileName;
+          if (res.copiedAt) out.copiedAt = res.copiedAt;
+        }
+        if (res && !res.ok && res.reason) out.reason = res.reason;
+        return out;
+      });
+    }
     if (cfg.kind !== 'image') return Promise.resolve(out);
     if (bgDataUrl) {
+      out.url = bgDataUrl;
       out.dataUrl = bgDataUrl;
       return Promise.resolve(out);
     }
@@ -709,10 +818,11 @@
       if (!blob) return out;              // chosen, but nothing stored yet
       return blobToDataUrl(blob).then(function (url) {
         bgDataUrl = url;
+        out.url = url;
         out.dataUrl = url;
         return out;
       });
-    }).catch(function () { return out; });  // no db: the dim alone, never a throw
+    }).catch(function () { return out; });  // no db: the plain ground, never a throw
   }
 
   /* ============================================================
@@ -1243,8 +1353,9 @@
     }
     var h = ((n % 360) + 360) % 360;
     var light = isLight();
-    var s = light ? 90 : 45;
-    var l = light ? 44 : 62;
+    var sl = light ? ACCENT_SL.light : ACCENT_SL.dark;
+    var s = sl[0];
+    var l = sl[1];
     for (i = 0; i < ACCENT_TOKENS.length; i++) {
       var name = ACCENT_TOKENS[i][0];
       var alpha = ACCENT_TOKENS[i][1] === null ? null : ACCENT_TOKENS[i][light ? 2 : 1];
@@ -1255,9 +1366,13 @@
     }
   }
 
-  /** The hue the slider should sit on when nothing is chosen: the authored one. */
+  /**
+   * The hue the slider should sit on when nothing is chosen: the authored
+   * one. Helm's steel blue is hue 212 in both themes (tokens.css: dark
+   * hsl(212 31% 71%), light hsl(212 26% 41%)), so there is one answer.
+   */
   function authoredHue() {
-    return isLight() ? 206 : 203;
+    return 212;
   }
 
   /* ============================================================
@@ -2564,7 +2679,68 @@
     return controlRow('Dim', 'set-bg-dim', dim);
   }
 
-  /** The background picker: one select, and the picture's controls under it. */
+  /** "8 Oct" for a copy's timestamp ('' when there is none). */
+  function bgShortDate(ms) {
+    if (!ms || !isFinite(ms)) return '';
+    try {
+      return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    } catch (err) { return ''; }
+  }
+
+  /**
+   * The sentence under the picker: what the window is actually showing, and
+   * when it is not what was picked, why. Read from backdrop.js's state, so a
+   * missing wallpaper, a deleted clip or a picture that will not decode is
+   * said here in words instead of just quietly turning plain.
+   */
+  function bgStateText(st, cfg) {
+    if (!st) {
+      return 'The background layer did not start in this window, so the plain background is showing.';
+    }
+    if (st.kind !== cfg.kind || st.state === 'loading') return 'Preparing the background…';
+    var src = st.source || {};
+    var why = st.reason ? String(st.reason) : 'unknown reason';
+    if (st.kind === 'none') return 'Plain background: no picture behind the tabs or on the new tab.';
+    if (st.kind === 'wallpaper') {
+      if (st.state === 'fallback') {
+        return (src.phase === 'read'
+          ? 'Could not read the copy of your Windows wallpaper: '
+          : 'Could not copy the Windows wallpaper: ') + why + '. Showing the plain background.';
+      }
+      var when = bgShortDate(src.copiedAt);
+      return 'Showing a copy of your Windows wallpaper' + (when ? ' (copied ' + when + ')' : '') + '.'
+        + (st.reason ? ' ' + st.reason + '.' : '');
+    }
+    if (st.kind === 'image') {
+      if (st.state === 'fallback') return 'Could not show your image: ' + why + '. Showing the plain background.';
+      return 'Showing your image.';
+    }
+    var name = src.fileName || cfg.fileName || 'the clip';
+    if (st.state === 'fallback') {
+      return 'Could not read a frame from ' + name + ': ' + why + '. Showing the plain background behind the tabs.';
+    }
+    return 'Behind the tabs: one blurred still of ' + name
+      + (src.still === 'cached' ? ', taken once and kept' : ', just taken') + '. It plays on the new tab.';
+  }
+
+  /** Redraw just the state line (backdrop.js fires backdropchange). */
+  function renderBgState() {
+    var line = bodyEl && bodyEl.querySelector('[data-bg-state-line]');
+    if (!line) return;
+    var layer = window.Backdrop;
+    var st = (layer && typeof layer.state === 'function') ? layer.state() : null;
+    var bad = !st || st.state === 'fallback';
+    line.className = (bad ? 'set-note' : 'set-hint') + ' set-bg-state' + (bad ? ' is-fallback' : '');
+    line.textContent = bgStateText(st, backgroundConfig());
+  }
+
+  /** Dim, plus the one sentence on what it does now. */
+  function appendBgDim(field, cfg) {
+    field.appendChild(bgDimRow(cfg));
+    field.appendChild(el('p', 'set-hint', 'Dim darkens the picture on the new tab.'));
+  }
+
+  /** The background picker: one select, the state line, and the picture's controls under it. */
   function renderNewtabBg() {
     var field = bodyEl && bodyEl.querySelector('[data-field="newtabbg"]');
     if (!field) return;
@@ -2576,6 +2752,34 @@
       glassSelect('set-newtab-bg', NEWTAB_BACKGROUNDS, cfg.kind, function (value) {
         setBackground({ kind: value });
       })));
+    field.appendChild(el('p', 'set-hint',
+      "The whole window's background: behind the tabs, the address bar and the side panes, and on the new tab."));
+    var stateLine = el('p', 'set-hint set-bg-state');
+    stateLine.setAttribute('data-bg-state-line', '');
+    stateLine.setAttribute('role', 'status');
+    field.appendChild(stateLine);
+    renderBgState();
+
+    if (cfg.kind === 'none') return;
+
+    if (cfg.kind === 'wallpaper') {
+      var wrow = el('div', 'set-bg-row');
+      var recopy = textButton('Copy again from Windows', 'set-btn set-bg-recopy', function () {
+        recopy.disabled = true;
+        recopyWallpaper().then(function (res) {
+          recopy.disabled = false;
+          if (res && res.ok) showToast('Copied your Windows wallpaper again');
+          else showToast('Could not copy the wallpaper: ' + ((res && res.reason) || 'unknown reason'));
+          renderBgState();
+        });
+      });
+      wrow.appendChild(recopy);
+      field.appendChild(wrow);
+      field.appendChild(el('p', 'set-hint',
+        'A copy, taken once: changing the Windows wallpaper later does not change it until you copy again.'));
+      appendBgDim(field, cfg);
+      return;
+    }
 
     if (cfg.kind === 'video') {
       /* No hidden <input type="file"> here: the renderer could read the clip,
@@ -2586,7 +2790,7 @@
         cfg.fileUrl ? (cfg.fileName || 'Chosen clip') : 'No file chosen'));
       vrow.appendChild(textButton('Choose file…', 'set-btn set-bg-pick', function () {
         chooseBackgroundVideo().then(function (res) {
-          if (res && res.ok) { showToast('New tab background set'); return; }
+          if (res && res.ok) { showToast('Background set'); return; }
           var why = res && res.reason;
           if (!why || why === 'cancelled') return;     // he changed his mind
           showToast(why === 'too-large' ? 'That clip is over 512 MB' : why);
@@ -2599,22 +2803,14 @@
       }
       field.appendChild(vrow);
 
-      field.appendChild(switchRow('Show circuit board over the video', cfg.boardOverImage,
-        function (next) { setBackground({ boardOverImage: next }); }));
-      field.appendChild(bgDimRow(cfg));
+      appendBgDim(field, cfg);
       field.appendChild(el('p', 'set-hint',
-        "A muted loop behind the board's tiles. It pauses whenever the page is not in front."));
+        'A muted loop on the new tab; it pauses whenever the page is not in front. ' +
+        'Behind the tabs sits one blurred still of it, taken once.'));
       if (!canChooseVideo()) {
         field.appendChild(el('p', 'set-hint',
           'Restart the browser to pick a clip — this window was started before moving pictures existed.'));
       }
-      return;
-    }
-
-    if (cfg.kind !== 'image') {
-      field.appendChild(el('p', 'set-hint', cfg.kind === 'aurora'
-        ? 'The aurora on its own. The circuit board stops drawing entirely.'
-        : 'The circuit board, drawn around your search field.'));
       return;
     }
 
@@ -2633,7 +2829,7 @@
       picker.value = '';                  // picking the same file again still fires
       if (!file) return;
       chooseBackgroundImage(file).then(function () {
-        showToast('New tab background set');
+        showToast('Background set');
       }).catch(function (err) {
         showToast((err && err.message) || BG_REJECT);
       });
@@ -2665,13 +2861,10 @@
     }
     field.appendChild(row);
 
-    field.appendChild(switchRow('Show circuit board over the image', cfg.boardOverImage,
-      function (next) { setBackground({ boardOverImage: next }); }));
-
-    field.appendChild(bgDimRow(cfg));
+    appendBgDim(field, cfg);
 
     if (!bgPreviewBlob) {
-      field.appendChild(el('p', 'set-hint', 'No picture chosen yet — the new tab dims the aurora until you pick one.'));
+      field.appendChild(el('p', 'set-hint', 'No picture chosen yet — the window stays plain until you pick one.'));
     }
   }
 
@@ -5396,7 +5589,14 @@
     injectButton();
     buildPanel();
     wire();
+    // backdrop.js says when the window's background is ready, or why it is
+    // not; the line under the picker repeats it in words.
+    document.addEventListener('backdropchange', renderBgState);
   }
+
+  /* A stored circuit board / aurora becomes the wallpaper before anything
+     reads the key (app.js builds the first new tab URL from it). */
+  migrateBackground();
 
   /* Accent and site theme are applied at script load, not at DOMContentLoaded:
      the boot should paint in the chosen colour, not swap into it. */
@@ -5441,12 +5641,18 @@
        click did nothing (the star itself also turns amber). */
     toast: showToast,
 
-    /* The new tab's background. background() resolves to
-       { kind, boardOverImage, dim, dataUrl? } for a picture and
-       { kind, boardOverImage, dim, fileUrl?, fileName? } for a moving one —
-       what app.js pushes into the guest with __applyBackground(). */
+    /* THE background (the whole window's and the new tab's). background()
+       resolves { kind, dim, url?, fileName?, ... } — see its comment — for
+       app.js to push into the guest with __applyBackground().
+       backgroundConfig() is the normalised descriptor, sync, for
+       backdrop.js; assets is the IndexedDB store (db 'browser', store
+       'assets') the picture lives in and backdrop.js caches a clip's still
+       in; recopyWallpaper() re-copies the Windows wallpaper. */
     background: background,
+    backgroundConfig: backgroundConfig,
     setBackground: setBackground,
+    assets: assetStore,
+    recopyWallpaper: recopyWallpaper,
 
     /* The new tab's app dock, in the order the page shows it: an installed
        app's id, a 'web:<slug>' or a 'term:<program>', each either as a bare
