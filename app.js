@@ -715,7 +715,10 @@ const BOARD_NOTE_EVERY_MS = 5000;
 let boardNotesAt = 0;
 
 function describeBoardState(st) {
-  if (!st || typeof st !== 'object') return 'board state unavailable';
+  // The circuit board is gone (the new tab is a Helm-style Home now) and its
+  // guest stub answers null, so null means "no board", not "unreadable": no
+  // note at all rather than a false "board state unavailable" on every row.
+  if (!st || typeof st !== 'object') return '';
   const parts = [st.paused ? 'board paused' : (st.running ? 'board running' : 'board still')];
   if (st.bitmap === 'released') parts.push('bitmap released');
   if (st.releases > 0) parts[parts.length - 1] += ' (' + st.releases + 'x)';
