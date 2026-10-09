@@ -5,16 +5,21 @@
    #settings-panel and #settings-toast: nothing here reaches
    another element.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own at the bottom of this file —
-   :root[data-theme="light"] relights all of it for free. The one
+   LOOK. Helm's Settings: the pane is an opaque Helm panel, each
+   section a Helm card, controls are Helm's buttons, inputs, switches,
+   segmented controls and chips. Every rule is written against
+   tokens.css names (chrome.css @imports it), so html[data-theme=
+   "light"] relights all of it with no block of its own. The one
    literal is the hue slider's rainbow, which is the value being
    chosen rather than a colour of the interface.
 
-   MOTION. The panel sits on a backdrop-filter, so an animated frame
-   re-blurs everything behind it. Nothing here animates continuously:
-   hover and focus transitions are stepped, and the toast steps in
-   and out over four frames and then holds still.
+   NO BLUR. The pane is tall and scrolls, and it floats over a
+   webview the host cannot sample, so it is opaque --surface-solid
+   with no backdrop-filter (this GPU drops raster tiles under one on
+   tall elements). Only the small toast keeps the overlay blur.
+
+   MOTION. Colour changes over 120 ms; the toast fades in and out
+   over 150 ms and then holds still. Nothing animates continuously.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -33,8 +38,8 @@
 #settings .glyph { font-family: var(--icon-font); }
 
 #settings.is-open {
-  background: var(--sheen), var(--glass-3);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* ============================================================
@@ -52,51 +57,30 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* A machined pane: bevelled on the diagonal (see the @supports below)
-     and edged with the rim gradient rather than a painted border —
-     specular at the top-left, accent at the bottom-right, so the pane
-     reads as lit from above and powered from below. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* The chamber's ground, not the nav row's: this pane floats over
-     guest pages, and --glass alone would leave a site legible
-     through it. Same recipe the downloads popover uses; the ground
-     clips to the padding box so the rim keeps the border strip. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  /* Helm's panel edge: one strong 1px hairline, the large radius. */
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-l);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  /* Opaque: it floats over guest pages, which would read through a tint,
+     and a webview gives a blur nothing to sample. No backdrop-filter:
+     the pane is tall and scrolls. */
+  background: var(--surface-solid);
   box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 14px 34px var(--shade-drop);
+    inset 0 1px 0 var(--panel-edge),
+    var(--shadow-3);
 }
 
-/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
-   the sheen's angle. Guarded, so a build without corner-shape keeps the
-   plain radius above. */
-@supports (corner-shape: bevel) {
-  #settings-panel { corner-shape: round bevel round bevel; }
-}
-
-/* Title row and filter, stacked: the head is a column now. The rule
-   under it is the seam motif rather than a border — a hairline fading
-   out to the right. The border stays, transparent, so the box model is
-   what it was and the gradient has a strip to paint in. */
+/* Title row and filter, stacked: the head is a column now, closed by one
+   plain 1px hairline. */
 #settings-panel .set-head {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
   padding: 0 14px 10px;
-  border-bottom: 1px solid transparent;
-  background: linear-gradient(90deg, var(--edge), transparent)
-              left bottom / 100% 1px no-repeat border-box;
+  border-bottom: 1px solid var(--hairline);
 }
 
 #settings-panel .set-head-top {
@@ -121,9 +105,9 @@
 #settings-panel .set-filter-glyph {
   position: absolute;
   left: 9px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: var(--icon-font);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 1;
   pointer-events: none;
 }
@@ -131,53 +115,47 @@
 #settings-panel .set-filter {
   width: 100%;
   padding: 6px 9px 6px 28px;
-  border: 1px solid var(--edge);
-  /* a control: round corners, so the bevel stays a container signature */
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline);
+  /* Helm's input: the --code-bg well and a 1px hairline */
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   line-height: 1.4;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#settings-panel .set-filter::placeholder { color: var(--placeholder); }
-#settings-panel .set-filter:hover { background: var(--glass-2); }
+#settings-panel .set-filter::placeholder { color: var(--text-3); }
+#settings-panel .set-filter:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-filter:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
-#settings-panel .set-filter::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-filter::selection { background: var(--ion-select); color: var(--text); }
 
 /* The lit word. Background only — the type must not move under it. */
 #settings-panel mark {
   border-radius: 3px;
   padding: 0 1px;
-  background: var(--ion-soft);
+  background: var(--accent-soft);
   color: inherit;
 }
 
 #settings-panel .set-none {
   margin: 16px 2px 6px;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
 }
 
 #settings-panel .set-title {
   flex: 1 1 auto;
-  color: var(--fg);
-  font-size: 13px;
+  color: var(--text);
+  font-size: var(--fs-s);
   font-weight: 500;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
 }
 
 #settings-panel .set-body {
@@ -192,47 +170,20 @@
    Sections
    ============================================================ */
 
-/* A section is the pane's natural container, so it is the thing that
-   gets bevelled: a quiet card on the panel's ground, edged with the
-   soft rim rather than separated by a rule. The negative inline margin
-   cancels the card's own gutter, so every heading and control stays on
-   exactly the column it was on before. */
-/* The card's ground is its own glass again, plus one quiet wash from the
-   top-left so it still reads as lit from above. The rim is NOT painted with
-   the two-layer background trick here: over a translucent padding box the
-   border-box gradient shows through the whole card and washes it grey. It
-   is a ring on ::before instead — inset -1px with a 1px padding band,
-   masked so only that band paints, which lands it exactly on the
-   transparent border. Nothing in a section is absolutely positioned
-   against anything further out, so `position: relative` costs nothing. */
+/* A section is a Helm card on the panel's ground: --surface-2, a 1px
+   hairline, the medium radius, the inner top edge and the level-1
+   shadow. The negative inline margin cancels the card's own gutter, so
+   every heading and control stays on exactly the column it was on
+   before. The 1px border sits where the transparent one did, so no box
+   moved. */
 #settings-panel .set-section {
   position: relative;
   margin: 0 -12px 10px;
   padding: 12px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
-    var(--glass);
-}
-
-#settings-panel .set-section::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim-soft);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-
-@supports (corner-shape: bevel) {
-  #settings-panel .set-section { corner-shape: round bevel round bevel; }
-  #settings-panel .set-section::before { corner-shape: inherit; }
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner), var(--shadow-1);
 }
 
 /* last-of-type, not last-child: the "No settings match" line is the body's
@@ -240,23 +191,20 @@
    card's bottom edge) and only the margin under it goes. */
 #settings-panel .set-section:last-of-type { margin-bottom: 0; }
 
-/* A readout, not a heading: sentence case, semi-condensed, quiet, and
-   closed by a hairline that fades out to the right — the seam motif at
-   section scale, used instead of a solid rule. The padding it needs for
-   that line comes back out of the margin, so nothing below moves. */
+/* A section heading, closed by a plain 1px hairline (Helm's card-head
+   rule). The padding it needs for that line comes back out of the
+   margin, so nothing below moves. */
 #settings-panel .set-h {
   /* Section names read as headings, not labels: full text colour, a step
      larger and bold, so the eye finds each section at a glance (The user:
      "make the settings section names bold or something so it's more
-     obvious where each section is"). The fading rule underneath stays. */
+     obvious where each section is"). The hairline underneath stays. */
   margin: 0 0 8px;
   padding-bottom: 6px;
-  color: var(--fg);
-  font-size: 13.5px;
+  color: var(--text);
+  font-size: var(--fs-s);
   font-weight: 700;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  background: linear-gradient(90deg, var(--edge), transparent)
+  background: linear-gradient(var(--hairline), var(--hairline))
               left bottom / 100% 1px no-repeat;
 }
 
@@ -295,7 +243,7 @@
 
 #settings-panel .set-h-chev {
   margin-left: auto;         /* out at the right edge */
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: 15px;
   line-height: 1;
   transform: rotate(0deg);   /* '›' points along the fold while closed */
@@ -303,7 +251,7 @@
 }
 
 #settings-panel .set-foldable.is-open .set-h-chev { transform: rotate(90deg); }
-#settings-panel .set-h-toggle:hover .set-h-chev { color: var(--fg-2); }
+#settings-panel .set-h-toggle:hover .set-h-chev { color: var(--text-2); }
 
 /* The body is out of the tree while folded (the attribute is what settings.js
    sets); this only makes sure no later display rule outvotes it. */
@@ -311,8 +259,8 @@
 
 #settings-panel .set-hint {
   margin: 7px 0 0;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   line-height: 1.45;
 }
 
@@ -326,33 +274,30 @@
 #settings-panel .set-seg {
   display: inline-flex;
   padding: 2px;
-  border: 1px solid var(--edge);
-  /* a control housing a control: round, one step outside the inner
-     radius, so the bevel stays the container signature */
-  border-radius: calc(var(--radius-ctl) + 3px);
-  background: var(--glass);
-  box-shadow: inset 0 1px 0 var(--specular);
+  border: 1px solid var(--hairline);
+  /* Helm's .seg: a --code-bg well, one step outside the inner radius */
+  border-radius: calc(var(--radius-s) + 3px);
+  background: var(--code-bg);
 }
 
 #settings-panel .set-seg-opt {
   min-width: 76px;
   height: 26px;
   padding: 0 12px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-seg-opt:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-seg-opt:hover { color: var(--text); }
 
+/* the chosen half is raised out of the well, as Helm's pressed segment */
 #settings-panel .set-seg-opt.is-on {
-  background: var(--ion-soft);
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--ion-line);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hairline-inner);
 }
 
 /* a vertical list of options, each with its own lit bead */
@@ -367,43 +312,41 @@
   gap: 9px;
   height: 28px;
   padding: 0 9px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   text-align: left;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-opt:hover { background: var(--glass); color: var(--fg); }
-#settings-panel .set-opt.is-on { color: var(--fg); }
+#settings-panel .set-opt:hover { background: var(--surface-3); color: var(--text); }
+#settings-panel .set-opt.is-on { color: var(--text); }
 
 #settings-panel .set-dot {
   flex: 0 0 auto;
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  border: 1px solid var(--edge);
-  background: var(--glass);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
 }
 
-/* The chosen bead is a pip: light rather than paint, so it reads the
-   same as every other live indicator in the chrome. */
+/* The chosen bead is filled with the accent (state), with a ring of the
+   card's ground inside it, like a radio button. No glow. */
 #settings-panel .set-opt.is-on .set-dot {
-  border-color: var(--ion-line);
-  background: var(--ion);
-  box-shadow: 0 0 0 3px var(--ion-soft), var(--pip-glow);
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--surface-solid);
 }
 
 /* --- the palette swatches ------------------------------------
-   Six chips, each painted in the palette it offers. chrome.css
+   Six chips, each painted in the palette it offers. tokens.css
    authors --palette-preview once per palette, with selectors that
    match any element carrying the attribute — so a button with
    data-palette="ember" paints itself in Ember, and the default chip,
    which carries no attribute, shows the root's own preview.
-   The ring is --ion, the accent in force, so it recolours with
+   The ring is --accent, the accent in force, so it recolours with
    whatever palette is being worn. */
 #settings-panel .set-swatches {
   display: grid;
@@ -419,51 +362,47 @@
   width: 100%;
   height: 32px;
   padding: 0;
-  border: 1px solid var(--edge);
-  border-radius: 8px;
-  background: var(--palette-preview, var(--glass-2));
-  box-shadow: inset 0 1px 0 var(--specular);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--palette-preview, var(--surface-3));
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
   cursor: default;
-  transition: box-shadow 120ms steps(2), border-color 120ms steps(2);
+  transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#settings-panel .set-swatch:hover { border-color: var(--ion-line); }
+#settings-panel .set-swatch:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-swatch.is-on {
   box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 0 0 2px var(--ion),
-    0 0 12px var(--ion-glow);
+    inset 0 1px 0 var(--hairline-inner),
+    0 0 0 2px var(--accent);
 }
 
-/* The mark reads over whatever the chip is painted with, so it carries
-   its own shadow rather than trusting the ground underneath. */
+/* The mark sits on the chip's neutral half (the upper-left of the
+   preview is the theme's own solid ground), so --text reads on it. */
 #settings-panel .set-swatch-check {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--fg);
+  color: var(--text);
   font-family: var(--icon-font);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   opacity: 0;
-  text-shadow: 0 0 4px var(--shade-drop), 0 1px 2px var(--shade-drop);
-  transition: opacity 120ms steps(2);
+  transition: opacity var(--dur) var(--ease);
 }
 
 #settings-panel .set-swatch.is-on .set-swatch-check { opacity: 1; }
 
 #settings-panel .set-swatch-name {
-  color: var(--fg-3);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   line-height: 1.25;
   text-align: center;
-  letter-spacing: .01em;
 }
 
-#settings-panel .set-swatch.is-on + .set-swatch-name { color: var(--fg-2); }
+#settings-panel .set-swatch.is-on + .set-swatch-name { color: var(--text-2); }
 
 /* --- the accent slider ---------------------------------------
    The track is the value itself: a full turn of hue. It is the one
@@ -490,15 +429,15 @@
 #settings-panel .set-hue::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--hairline);
   background: linear-gradient(to right,
     hsl(0 42% 52%), hsl(60 42% 52%), hsl(120 42% 52%),
     hsl(180 42% 52%), hsl(240 42% 52%), hsl(300 42% 52%), hsl(360 42% 52%));
-  box-shadow: inset 0 1px 0 var(--shade-in);
 }
 
-/* A glass ring around a bead of the accent itself: --ion is repainted on
-   every slider frame, so the thumb is the colour being chosen. */
+/* A ring of the pane's ground around a bead of the accent itself: --ion is
+   repainted on every slider frame, so the thumb is the colour being chosen.
+   Real shadow for lift, no glow. */
 #settings-panel .set-hue::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -506,37 +445,32 @@
   height: 17px;
   margin-top: -6px;
   border-radius: 50%;
-  border: 2px solid var(--glass-3);
-  background: var(--ion);
+  border: 2px solid var(--surface-solid);
+  background: var(--accent);
   box-shadow:
-    0 0 0 1px var(--edge),
-    0 0 10px var(--ion-glow),
-    0 1px 4px var(--shade-drop);
+    0 0 0 1px var(--hairline-strong),
+    var(--shadow-1);
 }
 
-/* Focus is light: a hairline ion ring and the pip's halo, not a white
-   band around the bead. */
+/* Helm's range focus: the ring on the thumb, not on the track. */
+#settings-panel .set-hue:focus-visible { outline: none; box-shadow: none; }
 #settings-panel .set-hue:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 1px var(--ion-line),
-    0 0 0 3px var(--ion-soft);
+  box-shadow: var(--focus-ring);
 }
 
 /* --- plain buttons -------------------------------------------- */
 #settings-panel .set-text {
   height: 24px;
   padding: 0 8px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-text:hover { background: var(--glass-2); color: var(--fg); }
-#settings-panel .set-text:disabled { color: var(--fg-3); background: none; }
+#settings-panel .set-text:hover { background: var(--surface-3); color: var(--text); }
+#settings-panel .set-text:disabled { color: var(--text-3); background: none; }
 
 /* the privacy actions sit side by side and wrap in a narrow window */
 #settings-panel .set-field[data-field="privacy"] {
@@ -552,38 +486,37 @@
   height: 28px;
   margin-top: 8px;
   padding: 0 12px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-btn:hover { background: var(--glass-2); color: var(--fg); }
-#settings-panel .set-btn:active { background: var(--glass-3); }
-#settings-panel .set-btn:disabled { color: var(--fg-3); background: var(--glass); }
+#settings-panel .set-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
+#settings-panel .set-btn:active { background: var(--surface-2); }
+#settings-panel .set-btn:disabled { color: var(--text-3); background: var(--surface-2); }
 
 /* the small icon buttons: close, move, remove, add */
 #settings-panel .set-act {
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-act:hover { background: var(--glass-2); color: var(--fg); }
-#settings-panel .set-act:active { background: var(--glass-3); }
-#settings-panel .set-act:disabled { color: var(--fg-3); background: none; }
+#settings-panel .set-act:hover { background: var(--surface-3); color: var(--text); }
+#settings-panel .set-act:active { background: var(--surface-2); }
+#settings-panel .set-act:disabled { color: var(--text-3); background: none; }
 
 #settings-panel .set-act .glyph {
   font-family: var(--icon-font);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
 }
 
 /* ============================================================
@@ -594,10 +527,8 @@
 #settings-panel .set-label {
   display: block;
   margin: 0 0 6px;
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   line-height: 1.35;
 }
 
@@ -615,30 +546,26 @@
   min-width: 0;
   height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   text-overflow: ellipsis;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#settings-panel .set-path::placeholder { color: var(--placeholder); }
-#settings-panel .set-path:hover { background: var(--glass-2); }
+#settings-panel .set-path::placeholder { color: var(--text-3); }
+#settings-panel .set-path:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-path:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
-#settings-panel .set-path::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-path::selection { background: var(--ion-select); color: var(--text); }
 
 /* the buttons sit on the field's line, not under it */
 #settings-panel .set-path-row .set-btn { margin-top: 0; }
@@ -655,10 +582,8 @@
 #settings-panel .set-ctl-label {
   flex: 1 1 150px;
   min-width: 0;
-  color: var(--fg-2);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-s);
   line-height: 1.35;
 }
 
@@ -678,7 +603,7 @@
   top: 50%;
   right: 9px;
   transform: translateY(-50%);
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: var(--icon-font);
   font-size: 9px;
   line-height: 1;
@@ -690,38 +615,34 @@
   appearance: none;
   height: 28px;
   padding: 0 26px 0 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   cursor: pointer;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#settings-panel .set-sel:hover { background: var(--glass-2); }
+#settings-panel .set-sel:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-sel:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 /* the open list is drawn by the OS: hand it opaque ground, not glass */
 #settings-panel .set-sel option {
-  background: var(--ink-1);
-  color: var(--fg);
+  background: var(--surface-solid);
+  color: var(--text);
 }
 
 #settings-panel .set-note {
   margin: 6px 0 0;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   line-height: 1.45;
 }
 
@@ -740,22 +661,20 @@
   width: calc(100% + 16px);
   margin-inline: -8px;
   padding: 6px 8px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   text-align: left;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#settings-panel .set-row:hover { background: var(--glass); color: var(--fg); }
-#settings-panel .set-row.is-on { color: var(--fg); }
+#settings-panel .set-row:hover { background: var(--surface-3); color: var(--text); }
+#settings-panel .set-row.is-on { color: var(--text); }
 
 /* a row whose control is not there to throw */
-#settings-panel .set-row:disabled { color: var(--fg-3); }
-#settings-panel .set-row:disabled:hover { background: none; color: var(--fg-3); }
+#settings-panel .set-row:disabled { color: var(--text-3); }
+#settings-panel .set-row:disabled:hover { background: none; color: var(--text-3); }
 
 /* The label names its own colour rather than inheriting the row's.
    .set-row transitions `color`, and --fg is one of the tokens the theme
@@ -771,16 +690,16 @@
 #settings-panel .set-row-label {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--fg-2);
+  color: var(--text-2);
   line-height: 1.35;
 }
 
-#settings-panel .set-row:hover .set-row-label { color: var(--fg); }
-#settings-panel .set-row.is-on .set-row-label { color: var(--fg); }
+#settings-panel .set-row:hover .set-row-label { color: var(--text); }
+#settings-panel .set-row.is-on .set-row-label { color: var(--text); }
 
 /* last, so an "on" row that cannot be thrown still reads as unavailable */
 #settings-panel .set-row:disabled .set-row-label,
-#settings-panel .set-row:disabled:hover .set-row-label { color: var(--fg-3); }
+#settings-panel .set-row:disabled:hover .set-row-label { color: var(--text-3); }
 
 #settings-panel .set-switch {
   position: relative;
@@ -788,11 +707,10 @@
   flex: 0 0 auto;
   width: 34px;
   height: 18px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-  background: var(--glass);
-  box-shadow: inset 0 1px 0 var(--shade-in);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
 #settings-panel .set-switch-knob {
@@ -802,35 +720,35 @@
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--fg-3);
-  transition: transform 120ms steps(2), background-color 120ms steps(2);
+  background: var(--text-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
+/* Helm's toggle when on: the track takes the accent, the knob the text
+   colour that sits on an accent fill. */
 #settings-panel .set-row.is-on .set-switch {
-  border-color: var(--ion-line);
-  background: var(--ion-soft);
+  border-color: transparent;
+  background: var(--accent);
 }
 
-/* lit, like every other active thing in the chrome: the knob is a pip,
-   so "on" is light rather than a second colour of paint */
 #settings-panel .set-row.is-on .set-switch-knob {
   transform: translateX(16px);
-  background: var(--ion);
-  box-shadow: var(--pip-glow);
+  background: var(--accent-text);
 }
 
 /* a command, keycapped the way the shortcuts table caps a key */
 #settings-panel .set-code {
   padding: 1px 5px;
-  border: 1px solid var(--edge);
-  border-radius: 5px;
-  background: var(--sheen), var(--glass);
-  color: var(--fg-2);
-  font-family: 'Cascadia Mono', Consolas, 'Segoe UI', monospace;
-  font-size: 10.5px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+  box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
 /* ============================================================
@@ -840,8 +758,8 @@
 /* a build without the module says so, quietly */
 #settings-panel .set-na {
   margin: 0;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   line-height: 1.45;
 }
 
@@ -853,12 +771,12 @@
 }
 
 #settings-panel .set-site {
-  border-radius: var(--radius-ctl);
-  transition: background-color 120ms steps(2);
+  border-radius: var(--radius-s);
+  transition: background-color var(--dur) var(--ease);
 }
 
 #settings-panel .set-site:hover,
-#settings-panel .set-site:focus-within { background: var(--glass); }
+#settings-panel .set-site:focus-within { background: var(--surface-3); }
 
 #settings-panel .set-site-head {
   display: flex;
@@ -870,10 +788,8 @@
 #settings-panel .set-site-host {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--fg);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-size: var(--fs-s);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -886,11 +802,11 @@
   margin-inline: 0;
   gap: 7px;
   padding: 4px 7px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
 }
 
 #settings-panel .set-row.is-inline .set-row-label { flex: 0 0 auto; }
-#settings-panel .set-row.is-inline:hover { background: var(--glass-2); }
+#settings-panel .set-row.is-inline:hover { background: var(--surface-3); }
 
 #settings-panel .set-site-editor { padding: 2px 7px 8px; }
 
@@ -901,36 +817,34 @@
   width: 100%;
   min-height: 120px;
   padding: 8px 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
   font-family: Consolas, 'Cascadia Mono', monospace;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   resize: vertical;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
 /* the script field is the same instrument, one line shorter */
 #settings-panel .set-js { min-height: 100px; }
 
 #settings-panel .set-css::placeholder,
-#settings-panel .set-js::placeholder { color: var(--placeholder); }
+#settings-panel .set-js::placeholder { color: var(--text-3); }
 #settings-panel .set-css:hover,
-#settings-panel .set-js:hover { background: var(--glass-2); }
+#settings-panel .set-js:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-css:focus,
 #settings-panel .set-js:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 #settings-panel .set-css::selection,
-#settings-panel .set-js::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-js::selection { background: var(--ion-select); color: var(--text); }
 
 #settings-panel .set-site-acts {
   display: flex;
@@ -941,8 +855,8 @@
 }
 
 #settings-panel .set-site-acts .set-btn { margin-top: 0; }
-#settings-panel .set-site-remove { color: var(--fg-3); }
-#settings-panel .set-site-remove:hover { color: var(--fg); }
+#settings-panel .set-site-remove { color: var(--text-3); }
+#settings-panel .set-site-remove:hover { color: var(--text); }
 
 #settings-panel .set-site-add { margin-top: 8px; }
 
@@ -957,11 +871,11 @@
 /* Reset is a quiet second action next to Apply, until it is armed —
    then it lights the way the reset-all button in Shortcuts does, so
    "press again" reads as a state and not as a new button. */
-#settings-panel .set-userstyle-reset { color: var(--fg-3); }
-#settings-panel .set-userstyle-reset:hover { color: var(--fg); }
+#settings-panel .set-userstyle-reset { color: var(--text-3); }
+#settings-panel .set-userstyle-reset:hover { color: var(--text); }
 #settings-panel .set-userstyle-reset.is-armed {
-  background: var(--glass-2);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* The token crib sheet: shut by default, and never more than a hint's
@@ -973,29 +887,26 @@
   align-items: center;
   height: 22px;
   padding: 0 7px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   list-style: none;
   cursor: default;
   user-select: none;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 #settings-panel .set-tokens-sum::-webkit-details-marker { display: none; }
 #settings-panel .set-tokens-sum::before {
   margin-right: 6px;
-  color: var(--fg-3);
+  color: var(--text-3);
   content: '+';
 }
 #settings-panel .set-tokens[open] .set-tokens-sum::before { content: '\2212'; }
-#settings-panel .set-tokens-sum:hover { background: var(--glass-2); color: var(--fg); }
+#settings-panel .set-tokens-sum:hover { background: var(--surface-3); color: var(--text); }
 #settings-panel .set-tokens-sum:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* name and meaning on one line each, the names in the code type the
@@ -1007,48 +918,25 @@
   gap: 3px 10px;
   margin: 7px 0 0;
   padding: 8px 9px;
-  /* a container, not a control: the bevel and the soft rim. The rim is a
-     ring on ::before for the same reason the section's is — the two-layer
-     trick bleeds through translucent glass. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
-    var(--glass);
-}
-
-#settings-panel .set-tokens-list::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--rim-soft);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-
-@supports (corner-shape: bevel) {
-  #settings-panel .set-tokens-list { corner-shape: round bevel round bevel; }
-  #settings-panel .set-tokens-list::before { corner-shape: inherit; }
+  /* a reference block inside the card: Helm's code well, one hairline */
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--code-bg);
 }
 
 #settings-panel .set-token-name {
   margin: 0;
-  color: var(--ion);
-  font-family: Consolas, 'Cascadia Mono', monospace;
-  font-size: 11.5px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   line-height: 1.5;
   white-space: nowrap;
 }
 
 #settings-panel .set-token-what {
   margin: 0;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   line-height: 1.5;
 }
 
@@ -1069,33 +957,26 @@
 
 /* 96x54 — the window's own proportion, so the crop the new tab will make is
    the crop shown here. */
-/* A tile, so it takes the container's bevel — the picture is clipped to
-   the same machined edge the panes wear. */
+/* A tile: Helm's gallery tile, the medium radius and one hairline. */
 #settings-panel .set-bg-preview {
   flex: 0 0 auto;
   width: 96px;
   height: 54px;
-  border: 1px solid var(--edge);
-  border-radius: var(--bevel);
-  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
   object-fit: cover;
-  box-shadow: inset 0 1px 0 var(--specular);
-}
-
-@supports (corner-shape: bevel) {
-  #settings-panel .set-bg-preview { corner-shape: round bevel round bevel; }
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
 }
 
 /* Nothing stored yet: the same box, empty, so the row never jumps. */
 #settings-panel .set-bg-preview.is-empty {
   display: inline-block;
-  background:
-    linear-gradient(135deg, var(--glass-2) 0%, transparent 55%),
-    var(--glass);
+  background: var(--code-bg);
 }
 
-#settings-panel .set-bg-drop { color: var(--fg-3); }
-#settings-panel .set-bg-drop:hover { color: var(--fg); }
+#settings-panel .set-bg-drop { color: var(--text-3); }
+#settings-panel .set-bg-drop:hover { color: var(--text); }
 
 /* The dim slider and its readout share the select's slot on the row. */
 #settings-panel .set-bg-dim {
@@ -1109,16 +990,16 @@
 #settings-panel .set-bg-dim-value {
   flex: 0 0 auto;
   min-width: 30px;
-  color: var(--fg-3);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   text-align: right;
 }
 
-/* A plain track in the panel's own colours — the hue slider's rainbow is the
-   one place a spectrum means anything. */
+/* Helm's range: a plain --surface-3 track and a --text thumb with real
+   shadow. The hue slider's rainbow is the one place a spectrum means
+   anything. Generic: the background picker's dim slider wears it, and so
+   may any other range settings.js builds with this class. */
 #settings-panel .set-range {
   flex: 1 1 auto;
   min-width: 0;
@@ -1134,9 +1015,8 @@
 #settings-panel .set-range::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
-  border: 1px solid var(--edge);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--shade-in);
+  border: 1px solid var(--hairline);
+  background: var(--surface-3);
 }
 
 #settings-panel .set-range::-webkit-slider-thumb {
@@ -1146,19 +1026,17 @@
   height: 17px;
   margin-top: -6px;
   border-radius: 50%;
-  border: 2px solid var(--glass-3);
-  background: var(--ion);
+  border: 2px solid var(--surface-solid);
+  background: var(--text);
   box-shadow:
-    0 0 0 1px var(--edge),
-    0 0 10px var(--ion-glow),
-    0 1px 4px var(--shade-drop);
+    0 0 0 1px var(--hairline-strong),
+    var(--shadow-1);
 }
 
-/* the same light ring the hue slider takes */
+/* the same ring the hue slider takes: on the thumb, not the track */
+#settings-panel .set-range:focus-visible { outline: none; box-shadow: none; }
 #settings-panel .set-range:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 1px var(--ion-line),
-    0 0 0 3px var(--ion-soft);
+  box-shadow: var(--focus-ring);
 }
 
 #settings-panel .set-chips {
@@ -1179,12 +1057,12 @@
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 6px;
-  border-radius: var(--radius-ctl);
-  transition: background-color 120ms steps(2);
+  border-radius: var(--radius-s);
+  transition: background-color var(--dur) var(--ease);
 }
 
 #settings-panel .set-chip:hover,
-#settings-panel .set-chip:focus-within { background: var(--glass); }
+#settings-panel .set-chip:focus-within { background: var(--surface-3); }
 
 #settings-panel .set-chip-texts {
   flex: 1 1 auto;
@@ -1201,40 +1079,38 @@
   height: 21px;
   padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   background: none;
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
   text-overflow: ellipsis;
-  transition: border-color 120ms steps(2), background-color 120ms steps(2);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 #settings-panel .set-chip-text.is-url {
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
 }
 
-#settings-panel .set-chip-text::placeholder { color: var(--placeholder); }
+#settings-panel .set-chip-text::placeholder { color: var(--text-3); }
 
 #settings-panel .set-chip-text:hover {
-  border-color: var(--edge);
+  border-color: var(--hairline);
 }
 
 #settings-panel .set-chip-text:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass);
-  color: var(--fg);
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  background: var(--code-bg);
+  color: var(--text);
+  box-shadow: var(--focus-ring);
 }
 
-#settings-panel .set-chip-text::selection { background: var(--ion-select); color: var(--fg); }
+#settings-panel .set-chip-text::selection { background: var(--ion-select); color: var(--text); }
 
 #settings-panel .set-chip-acts {
   flex: 0 0 auto;
@@ -1244,14 +1120,14 @@
 
 #settings-panel .set-chip-add {
   margin-top: 6px;
-  border: 1px dashed var(--edge);
+  border: 1px dashed var(--hairline);
 }
 
 #settings-panel .set-empty {
   margin: 0 0 2px;
   padding: 8px 6px;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
 }
 
 /* ============================================================
@@ -1271,11 +1147,9 @@
   align-items: flex-start;
   gap: 8px;
   margin: 7px 0 0;
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 1.45;
 }
 
@@ -1289,30 +1163,26 @@
   height: 6px;
   margin-top: 5px;
   border-radius: 50%;
-  background: var(--fg-3);
+  background: var(--text-3);
   opacity: .55;
 }
 
 #settings-panel .set-pip.is-live {
-  background: var(--ion);
-  box-shadow: var(--pip-glow);
+  background: var(--accent);
   opacity: 1;
 }
 
 #settings-panel .set-pip.is-hold {
-  background: var(--amber);
-  box-shadow: var(--pip-amber);
+  background: var(--warn);
   opacity: 1;
 }
 
 /* the count of playing tabs: a number, so tabular */
 #settings-panel .set-count {
   margin: 7px 0 0;
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 1.45;
 }
 
@@ -1324,33 +1194,29 @@
   min-height: 86px;
   margin-top: 2px;
   padding: 7px 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 1.6;
   resize: vertical;
-  box-shadow: inset 0 1px 0 var(--specular);
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#settings-panel .set-hosts::placeholder { color: var(--placeholder); }
-#settings-panel .set-hosts:hover { background: var(--glass-2); }
+#settings-panel .set-hosts::placeholder { color: var(--text-3); }
+#settings-panel .set-hosts:hover { border-color: var(--hairline-strong); }
 
 #settings-panel .set-hosts:focus {
   outline: none;
-  border-color: var(--ion-line);
-  background: var(--glass-2);
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
-#settings-panel .set-hosts::selection { background: var(--ion-select); color: var(--fg); }
-#settings-panel .set-hosts:disabled { color: var(--fg-3); }
+#settings-panel .set-hosts::selection { background: var(--ion-select); color: var(--text); }
+#settings-panel .set-hosts:disabled { color: var(--text-3); }
 
 /* the check sits at the top of its field, like the privacy actions do */
 #settings-panel .set-field[data-field="autopausehealth"] .set-btn { margin-top: 0; }
@@ -1362,7 +1228,7 @@
 
 /* Something is wrong: the words say so, and an amber pip marks the row.
    Amber as type would be 2.2:1 on the light pane, so it stays light. */
-#settings-panel .set-tokens-sum.is-wrong { color: var(--fg); }
+#settings-panel .set-tokens-sum.is-wrong { color: var(--text); }
 
 #settings-panel .set-tokens-sum.is-wrong::after {
   content: '';
@@ -1370,23 +1236,20 @@
   height: 6px;
   margin-left: 7px;
   border-radius: 50%;
-  background: var(--amber);
-  box-shadow: var(--pip-amber);
+  background: var(--warn);
 }
 
 #settings-panel .set-health-text {
   max-height: 210px;
   margin: 7px 0 0;
   padding: 8px 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1417,34 +1280,30 @@
 #settings-panel .set-key {
   min-width: 18px;
   padding: 1px 5px;
-  border: 1px solid var(--edge);
-  border-radius: 5px;
-  background: var(--sheen), var(--glass);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   line-height: 15px;
   text-align: center;
-  box-shadow: inset 0 1px 0 var(--specular), 0 1px 0 var(--shade-drop);
+  box-shadow: inset 0 -1px 0 var(--hairline);
 }
 
 #settings-panel .set-keyplus,
 #settings-panel .set-keysep {
-  color: var(--fg-3);
-  font-size: 10.5px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
 }
 
 #settings-panel .set-keysep { padding: 0 2px; }
 
 #settings-panel .set-keydesc {
   min-width: 0;
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   line-height: 1.35;
 }
 
@@ -1453,10 +1312,8 @@
 /* A quiet caption over each group; the first one sits flush with the head. */
 #settings-panel .set-group {
   margin: 12px 0 4px;
-  color: var(--fg-3);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   line-height: 1.3;
 }
 
@@ -1474,10 +1331,8 @@
 #settings-panel .set-shortcut-label {
   flex: 1 1 120px;
   min-width: 0;
-  color: var(--fg);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-size: var(--fs-xs);
   line-height: 1.35;
 }
 
@@ -1495,38 +1350,35 @@
 
 #settings-panel .set-keynone,
 #settings-panel .set-keynote {
-  color: var(--fg-3);
-  font-size: 11px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   line-height: 15px;
 }
 
 #settings-panel .set-keynote { margin-left: 2px; }
 
-/* The live pill: the accent rail says the next keystroke is being read,
-   and it glows like a pip while it is listening — status as light. */
+/* The live pill: Helm's recording keys (accent-soft fill, accent hairline)
+   say the next keystroke is being read. State, so the accent; no glow. */
 #settings-panel .set-rec {
   display: inline-flex;
   align-items: center;
   height: 19px;
   padding: 0 8px;
-  border: 1px solid var(--ion-line);
-  border-radius: var(--radius-ctl);
-  background: var(--ion-soft);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-s);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-2xs);
   line-height: 17px;
-  box-shadow: 0 0 0 3px var(--ion-soft), var(--pip-glow);
-  transition: background-color 150ms steps(2), border-color 150ms steps(2);
+  transition: background-color var(--dur-slow) var(--ease), border-color var(--dur-slow) var(--ease);
 }
 
 #settings-panel .set-keys-resetall { margin-top: 12px; }
 
 #settings-panel .set-keys-resetall.is-armed {
-  background: var(--glass-2);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* ============================================================
@@ -1537,16 +1389,15 @@
    than as prose. */
 #settings-panel .set-about {
   margin: 0;
-  color: var(--fg-3);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
 }
 
 /* ============================================================
    Toast
-   A glass pill that steps up over the page, holds, and steps out.
+   A small Helm overlay pill that fades up over the page, holds, and
+   fades out. The one blurred thing in this file: it is small.
    ============================================================ */
 
 #settings-toast {
@@ -1556,35 +1407,25 @@
   z-index: 30;
   max-width: calc(100vw - 40px);
   padding: 8px 16px;
-  /* The one pill in the pass: a bevel at a 999px radius would cut the
-     thing in half, so the shape stays round and only the edge changes —
-     the rim gradient instead of a painted border. */
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+  backdrop-filter: blur(24px) saturate(1.05);
   box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 10px 26px var(--shade-drop);
+    inset 0 1px 0 var(--panel-edge),
+    var(--shadow-2);
   opacity: 0;
   transform: translate(-50%, 6px);
-  /* four frames in, four out: enough to read as arriving, and the
-     backdrop behind it is re-blurred four times rather than sixty. */
-  transition: opacity 160ms steps(4), transform 160ms steps(4);
+  /* 150 ms in, 150 ms out, then it holds still */
+  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease);
 }
 
 #settings-toast.is-up {
@@ -1599,16 +1440,13 @@
    ============================================================ */
 #settings:focus-visible,
 #settings-panel button:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-/* The halo behind the ring — focus is light, not a thick white outline.
-   Kept off the nav instrument, which wears .glass's inset shadows, and
-   off the palette chips, whose own ring says which one is worn. */
-#settings-panel button:focus-visible:not(.set-swatch) {
-  box-shadow: inset 0 1px 0 var(--specular), 0 0 0 3px var(--ion-soft);
-}
+/* Helm's one focus treatment everywhere in the panel, the palette chips
+   included: while a chip has keyboard focus the focus ring stands in for
+   its "worn" ring, which is the same accent. */
 
 /* ============================================================
    Reduced motion
