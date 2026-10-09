@@ -2304,11 +2304,18 @@ body {
 
   .module-clock .mod-time { justify-content: center; }
 
+  /* Full width, so it always takes a line of its own (a 720px-capped item
+     let the media card share its line at 1100px); the column inside is
+     what stays 720px and centred. */
   .stage {
     order: 1;
     flex: 0 0 100%;
-    max-width: 720px;
     padding: 20px 0 8px;
+  }
+
+  .column {
+    max-width: 720px;
+    margin: 0 auto;
   }
 
   .module-media   { order: 2; }
