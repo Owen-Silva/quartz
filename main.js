@@ -35,6 +35,7 @@ const budgetModule = require('./budget');
 const schoolModule = require('./school');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
+const spellModule = require('./spell');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -336,6 +337,23 @@ const stocks = stocksModule.create({
   ipcMain,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
+});
+
+/**
+ * Autocorrect and spelling (spell.js + spell-preload.js). The engine runs as a
+ * session preload in every frame; this hands it the chrome gate for the
+ * Settings channels, the push function for live updates, and the same host
+ * normaliser the ad-block allowlist uses, so "off on this site" keys match.
+ * Function declarations below are hoisted, so passing them here is safe.
+ */
+const spell = spellModule.create({
+  app,
+  ipcMain,
+  session,
+  webContents,
+  isChromeSender: (event) => isChromeSender(event),
+  send: (channel, payload) => send(channel, payload),
+  normaliseHost: (value) => normaliseHost(value),
 });
 
 /**
@@ -825,16 +843,14 @@ function createWindow() {
   // This IS the focused window, so the built-in roles are the right wiring.
   win.webContents.on('context-menu', (_event, params) => {
     if (!params || !params.isEditable) return;
-    const menu = Menu.buildFromTemplate([
-      { role: 'undo' },
-      { role: 'redo' },
-      { type: 'separator' },
-      { role: 'cut' },
-      { role: 'copy' },
-      { role: 'paste' },
-      { type: 'separator' },
-      { role: 'selectAll' },
+    const template = joinMenuGroups([
+      spellingMenuItems(win.webContents, params),
+      [{ role: 'undo' }, { role: 'redo' }],
+      [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }],
+      [{ role: 'selectAll' }],
     ]);
+    if (dumpMenu('chrome', template)) return;
+    const menu = Menu.buildFromTemplate(template);
     const w = liveWin();
     menu.popup(w ? { window: w } : {});
   });
@@ -949,6 +965,9 @@ app.whenReady().then(() => {
   // the user decided on a previous run.
   loadPermissionDecisions();
   attachSessionHandlers();
+  // Before the first window: a session preload only reaches frames created
+  // after it is registered, and the chrome's own document is one of them.
+  spell.start();
   createWindow();
 
   // A link that STARTED the browser: its tab goes in on top of the session the
@@ -3212,6 +3231,16 @@ function guestMenuTemplate(contents, params) {
   const editing = [];
   if (params.isEditable) {
     const flags = params.editFlags || {};
+    // Autocorrect per site, where the user is typing. Keyed on the PAGE's
+    // host, so a reply box in an iframe follows the site it sits on.
+    const siteHost = normaliseHost(hostOfUrl(params.pageURL || safeUrlOf(contents)) || '');
+    if (siteHost) {
+      const off = spell.isSiteOff(siteHost);
+      editing.push({
+        label: off ? 'Turn autocorrect back on for ' + siteHost : 'Turn off autocorrect on ' + siteHost,
+        click: () => spell.setSiteOff(siteHost, !off),
+      });
+    }
     editing.push(
       { label: 'Undo', enabled: flags.canUndo !== false, click: () => contents.undo() },
       { label: 'Redo', enabled: flags.canRedo !== false, click: () => contents.redo() },
@@ -3237,7 +3266,47 @@ function guestMenuTemplate(contents, params) {
 
   // Selection items sit above editing ones so Copy-the-selection is not buried
   // under the edit block in a textarea.
-  return joinMenuGroups([navigation, link, image, selection, ask, editing, inspect]);
+  return joinMenuGroups([spellingMenuItems(contents, params), navigation, link, image, selection, ask, editing, inspect]);
+}
+
+/**
+ * The spelling block on top of a right-click on an underlined word: up to five
+ * suggestions (replaceMisspelling swaps the word under the caret through the
+ * page's own editing path, so editors see it as an edit), then Add to
+ * dictionary (kept, in spell.json and Chromium's own list) and Ignore (this
+ * run only). Empty when the word under the pointer is not flagged.
+ */
+function spellingMenuItems(contents, params) {
+  const word = params && typeof params.misspelledWord === 'string' ? params.misspelledWord.trim() : '';
+  if (!word) return [];
+  const items = [];
+  const suggestions = Array.isArray(params.dictionarySuggestions) ? params.dictionarySuggestions.slice(0, 5) : [];
+  for (const s of suggestions) {
+    items.push({ label: s, click: () => contents.replaceMisspelling(s) });
+  }
+  if (!suggestions.length) items.push({ label: 'No suggestions', enabled: false });
+  items.push({ type: 'separator' });
+  items.push({ label: 'Add "' + selectionLabel(word) + '" to dictionary', click: () => spell.addWord(word) });
+  items.push({ label: 'Ignore', click: () => spell.ignoreWord(word) });
+  return items;
+}
+
+/**
+ * TEST RUNS ONLY (--test-profile AND --menu-dump): write the menu that would
+ * have opened to userData/menu-dump.json instead of popping it, so a check can
+ * prove what is in it without ever putting a native menu on the user's screen.
+ * Returns true when it dumped (the caller then does not pop anything).
+ */
+const MENU_DUMP = process.argv.includes('--test-profile') && process.argv.includes('--menu-dump');
+function dumpMenu(where, template) {
+  if (!MENU_DUMP) return false;
+  const flat = template.map((item) => (item.type === 'separator' ? '---' : (item.label || item.role || '?') + (item.enabled === false ? ' (disabled)' : '')));
+  try {
+    fs.writeFileSync(path.join(app.getPath('userData'), 'menu-dump.json'), JSON.stringify({ where, at: Date.now(), items: flat }, null, 2));
+  } catch (err) {
+    console.error('[menu-dump] could not write:', err.message);
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -4888,7 +4957,9 @@ app.on('web-contents-created', (_event, contents) => {
   });
 
   contents.on('context-menu', (_e, params) => {
-    const menu = Menu.buildFromTemplate(guestMenuTemplate(contents, params));
+    const template = guestMenuTemplate(contents, params);
+    if (dumpMenu('guest', template)) return;
+    const menu = Menu.buildFromTemplate(template);
     const w = liveWin();
     menu.popup(w ? { window: w } : {});
   });
@@ -4933,6 +5004,8 @@ app.on('before-quit', (event) => {
   // left to protect, and a snapshot that never reached disk is a lost session.
   // (app:restart goes through app.quit(), so a restart lands here too.)
   flushSessionSync();
+  // A word added from the menu a moment ago must not be lost to the quit.
+  try { spell.flush(); } catch { /* best effort */ }
   killAll();
   handles.clear();
   for (const id of Array.from(ptyOut.keys())) ptyFlushFinal(id);

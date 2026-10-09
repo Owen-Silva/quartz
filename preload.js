@@ -209,6 +209,32 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('adblock:state-changed', handler);
     }
   },
+  // Autocorrect and spelling. The typing engine itself is spell-preload.js,
+  // which main registers as a SESSION preload so it runs in every frame (the
+  // chrome included) in the isolated world; this is only the Settings side.
+  // Every call resolves to the same SpellState:
+  //   { autocorrect, underline, sitesOff: string[], words: string[],
+  //     available, reason, languages: string[] }
+  // `available` false means the spellchecker cannot answer in this build or on
+  // this machine, and `reason` says why in plain English for Settings to show.
+  spell: {
+    state: () => ipcRenderer.invoke('spell:state'),
+    // { autocorrect?: bool, underline?: bool }
+    set: (patch) => ipcRenderer.invoke('spell:set', {
+      autocorrect: patch && typeof patch.autocorrect === 'boolean' ? patch.autocorrect : undefined,
+      underline: patch && typeof patch.underline === 'boolean' ? patch.underline : undefined,
+    }),
+    // host is normalised in main: lowercased, `www.` stripped.
+    siteOff: (host, off) => ipcRenderer.invoke('spell:site-off', { host: String(host || ''), off: !!off }),
+    addWord: (word) => ipcRenderer.invoke('spell:add-word', { word: String(word || '') }),
+    removeWord: (word) => ipcRenderer.invoke('spell:remove-word', { word: String(word || '') }),
+    // Pushed whenever any of it changes, from Settings or a page's menu.
+    onChanged: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('spell:changed', handler);
+      return () => ipcRenderer.removeListener('spell:changed', handler);
+    }
+  },
   // Everything behind the padlock for one page: how the connection is secured,
   // the explicit permission decisions for its origin, and the two destructive
   // actions. Every call resolves -- a failure comes back as { error: string }
