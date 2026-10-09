@@ -1162,7 +1162,7 @@
   }
 
   /* ============================================================
-     Home layout — the new tab Home's pieces, shown or hidden, by column
+     Home layout — the new tab Home's pieces, shown or hidden, and where each was put
      ============================================================ */
 
   /* homelayout.js is loaded by index.html before this file; feature-detected

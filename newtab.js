@@ -5361,7 +5361,10 @@ function homeDragStart(id) {
     const st = homeRects.stats;
     if (!el || !st || !el.getClientRects().length) return null;
     const d = homeRel(el.getBoundingClientRect(), h);
-    return { from: d, size: { width: st.width, height: d.height + 34 } };
+    // Lifted out, it is a card as wide as the stats card and lined up with
+    // it, so it starts from there rather than from its inset in the card.
+    const size = { width: st.width, height: d.height + 34 };
+    return { from: { left: st.left, top: d.top, width: size.width, height: size.height }, size: size };
   }
   return null;
 }

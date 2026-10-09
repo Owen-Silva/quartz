@@ -598,7 +598,7 @@ function pushSettingsToTab(tab) {
 /* ------------------------------------------------------------------ */
 
 /*
- * The Home's pieces can be hidden and moved between its three columns. The
+ * The Home's pieces can be hidden and placed anywhere on the page. The
  * layout lives in Settings (one 'homeLayout' key; homelayout.js has the
  * rules both sides share). The chrome does three things with it here:
  *

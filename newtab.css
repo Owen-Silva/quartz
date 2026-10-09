@@ -411,7 +411,21 @@ html[data-theme="light"] #bg-dim {
   margin: 0 !important;
 }
 
-html.home-measure { overflow: hidden; }
+/* Both: with the root's overflow set, body's own overflow-x: hidden stops
+   being the viewport's and makes body a scroller of its own, whose bar
+   would take 10px off the width being measured. */
+html.home-measure,
+html.home-measure body { overflow: hidden; }
+
+/* Measured one window tall: a piece at the foot of a rail (Markets) sits
+   at the window's foot, not under a centre column that an open process
+   list made taller than the window. When everything fits, the row was
+   already exactly this tall (.home's min-height), so nothing moves. */
+html.home-measure .home { grid-template-rows: 100vh; }
+
+/* The process list unfolds over whatever was put under the stats card
+   (the card is laid out at its folded height), so it is drawn on top. */
+.home.is-free .stats.is-procs-open { z-index: 2; }
 
 /* --- edit mode ------------------------------------------------ */
 /* In edit mode the pieces themselves take no input at all (no accidental
