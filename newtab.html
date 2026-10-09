@@ -6,55 +6,55 @@
 <title>New tab</title>
 <!-- Sets data-theme on <html> and paints ?hue= over the --ion* tokens.
      Must stay the first script, and must stay above the stylesheet, or a
-     light window flashes dark (and a custom accent flashes cyan) on load. -->
+     light window flashes dark (and a custom accent flashes the default) on load. -->
 <script src="newtab-theme.js"></script>
 <link rel="stylesheet" href="newtab.css">
 </head>
 <body>
 
-<!-- Coloured light behind the glass. Fixed, inert, always the bottom layer. -->
+<!-- The Quartz background, Helm's Home treatment (Helm ui/shell/home.css,
+     "wallpaper: the unblurred copy"): the picture CLEAR and full-bleed here,
+     where the chrome around the page shows a blurred copy of the same one.
+     Fixed, inert, always the bottom layer, and every layer starts empty:
+     window.__applyBackground() (newtab.js "Background") is the only thing that
+     ever fills one.
+
+     #bg-image   a still: the Windows wallpaper copy (file://) or the user's
+                 own picture (a data: URL out of IndexedDB), as an inline
+                 background-image.
+     #bg-video   a real clip (mp4/webm/mov/m4v), decoded by the GPU.
+     #bg-video-img  a GIF, which animates itself and cannot be decoded by a
+                 media element. Exactly one of the two is ever .on. Muted and
+                 playsinline so it may autoplay at all, loop so it never ends,
+                 and no picture-in-picture button on a background.
+     #bg-dim     the dim wash the user set (0..0.6), so text reads over a
+                 bright photo.
+     .bg-scrim   Helm's soft scrim along the top edge, where the page meets
+                 the toolbar.
+     With no picture (kind 'none', or a picture that failed) nothing is
+     drawn and the page is the plain neutral --bg of <body>. -->
 <div class="backdrop" aria-hidden="true">
-  <div class="aurora-base"></div>
-  <div class="aurora-band"></div>
-  <div class="aurora-pool"></div>
-  <div class="aurora-rim"></div>
+  <div id="bg-image"></div>
+  <video id="bg-video" muted loop autoplay playsinline
+         preload="auto" disablepictureinpicture tabindex="-1"></video>
+  <img id="bg-video-img" alt="">
+  <div id="bg-dim"></div>
+  <div class="bg-scrim"></div>
 </div>
 
-<!-- The user's own picture, for newtabBackground.kind === 'image'. Both layers
-     stay display:none until <html data-bg="image">, and the picture itself is
-     only ever set by window.__applyBackground() as an inline background-image
-     (a data: URL the chrome read out of IndexedDB). -->
-<div id="bg-image" aria-hidden="true"></div>
+<!-- Why the picture is not there, when it is not (the push's state was
+     'fallback', or the file would not decode here). Quiet, but in words: a
+     plain grey page with no reason is a silent failure. -->
+<p id="bg-note" class="bg-note" role="status" aria-live="polite" hidden></p>
 
-<!-- The moving picture, for newtabBackground.kind === 'video'. The chrome
-     copies the chosen clip into its own folder and pushes the file:// URL
-     through the same __applyBackground() call; this page never knows the
-     path until then, so both layers start empty and display:none.
+<div class="home">
 
-     Two layers because two kinds of file: a real clip (mp4/webm/mov/m4v)
-     plays in the <video>, and a GIF — which animates itself and cannot be
-     decoded by a media element — lands in the <img>. Exactly one of them
-     is ever .on. Muted and playsinline so it may autoplay at all, loop so
-     it never ends, and no picture-in-picture button on a background. -->
-<video id="bg-video" aria-hidden="true" muted loop autoplay playsinline
-       preload="auto" disablepictureinpicture tabindex="-1"></video>
-<img id="bg-video-img" aria-hidden="true" alt="">
+<!-- Left of the column: the clock, then what the machine is playing. Below
+     the breakpoint in newtab.css both rails fold into the page's one column. -->
+<aside class="home-rail home-left" aria-label="Clock and now playing">
 
-<div id="bg-dim" aria-hidden="true"></div>
-
-<!-- The board: a circuit around the column, drawn in JS. Inert, above the aurora.
-     Hidden by CSS for data-bg="aurora", and for data-bg="image" unless the
-     picture asked for it back (data-bg-board="over"). -->
-<canvas id="board" aria-hidden="true"></canvas>
-
-<!-- The live modules, seated on the board where its biggest chips used
-     to sit. newtab-bg.js owns nothing but their left/top: it measures the
-     socket, keeps each tile clear of it, marks the cells underneath so no
-     trace runs below one, and routes traces onto the pads around it. The
-     CSS default (the window's top corners) is what they wear until it has
-     measured, so a board that never starts still leaves them somewhere
-     sensible. Content is newtab.js's: the clock ticks on a minute-aligned
-     timeout, and the readout stays [hidden] until __applyReadout. -->
+<!-- The clock, Helm's greeting voice: large, bare, over the picture. It ticks
+     on a minute-aligned timeout in newtab.js, never per second. -->
 <section id="mod-clock" class="module module-clock" aria-label="Clock">
   <p class="mod-time">
     <span id="clock-time" class="mod-time-value">--:--</span>
@@ -63,70 +63,14 @@
   <p id="clock-date" class="mod-date"></p>
 </section>
 
-<section id="mod-session" class="module module-session" aria-label="Session" hidden>
-  <!-- The three counts stay hidden until __applyReadout, the same way the
-       tile itself used to: an idle-music push can now be the thing that
-       reveals the tile, and three dashes are still worse than no readout. -->
-  <div id="session-rows" hidden>
-    <p class="mod-row">
-      <span id="read-tabs" class="mod-value">--</span>
-      <span id="read-tabs-label" class="mod-label">tabs open</span>
-    </p>
-    <p class="mod-row">
-      <span id="read-claude" class="mod-value">--</span>
-      <span id="read-claude-label" class="mod-label">Claude sessions</span>
-    </p>
-    <p class="mod-row">
-      <span id="read-autopause" class="mod-value">--</span>
-      <span class="mod-label">Spotify auto-pause</span>
-    </p>
-  </div>
-
-  <!-- Claude usage, pushed by budget.js in MAIN (newtab:budget on the console,
-       window.__applyBudget back) rather than by the chrome. Its own block
-       instead of a fourth row inside #session-rows, so a budget reading can
-       reveal itself without revealing three dashes the chrome has not pushed
-       yet. The note line only appears when the reading is stale, partial or
-       unreadable — an empty readout would say nothing about why. -->
-  <div id="mod-budget" class="mod-budget" hidden>
-    <p class="mod-row">
-      <span id="read-budget" class="mod-value">--</span>
-      <span id="read-budget-label" class="mod-label">Claude 5H / week</span>
-    </p>
-    <p id="read-budget-note" class="mod-note" hidden></p>
-  </div>
-
-  <!-- Idle music. The player itself lives in the chrome so it survives tab
-       switches; this is only its face and its two controls. Every state
-       ("Off", "Paused", a mood name, a file name) is one fixed-height line
-       and both controls are a fixed box, so the tile the board measured
-       does not change size when the music starts, stops or changes track.
-       Content is newtab.js's: __applyMusic() in, `newtab:music` out. -->
-  <div id="mod-music" class="mod-music" data-music="off">
-    <p class="mod-music-head">
-      <span class="mod-music-caption">Idle music</span>
-    </p>
-    <p class="mod-music-row">
-      <span id="music-state" class="mod-music-state">Off</span>
-      <span class="mod-music-ctls">
-        <button id="music-next" type="button" class="mod-music-btn mod-music-next"
-                disabled aria-hidden="true">Next</button>
-        <button id="music-toggle" type="button" class="mod-music-btn">Turn on</button>
-      </span>
-    </p>
-    <p class="mod-music-hint">Plays while nothing else is playing</p>
-  </div>
-</section>
-
 <!-- What is playing on the MACHINE, with its transport. A readout and three
      controls, never a player: nothing plays in this page (no Widevine in a
      tab). The chrome polls the user's Spotify auto-pause bridge, which already
      holds a Windows media session, and pushes the state in.
 
-     Every box here has a fixed height and the two controls a fixed box, for
-     the reason the tile itself gives: the board draws a seat around the box
-     it measured, so "Nothing playing" becoming a track with art — or a long
-     title, or Next going away for a station — must not move a pixel of it.
+     Every box here has a fixed height and the controls a fixed box, so
+     "Nothing playing" becoming a track with art, or a long title, or Next
+     going away for a station, never moves the rail under it.
      Content is newtab.js's: __applyMedia() in, `newtab:media` out. -->
 <section id="mod-media" class="module module-media" aria-label="Now playing"
          data-media="none" hidden>
@@ -184,18 +128,61 @@
   </p>
 </section>
 
+</aside>
+
 <main class="stage">
   <div class="column">
-    <!-- The instrument strip, where the search field used to be: five
-         readouts the chrome pushes in every second with __applyStats().
-         There is no search box here on purpose — the address bar above
-         is where this window searches.
+    <!-- The head of the Home column: the Q, and a search field in Helm's
+         input look. It never takes the caret on its own: a new tab puts the
+         caret in the ADDRESS BAR (the chrome, ea1ffe9), so typing straight
+         after Ctrl+T searches up there; this field is for a click. Enter
+         searches with the engine Settings picked (or opens what looks like
+         an address), by navigating this tab, the way a chip does. -->
+    <header class="home-head">
+      <img class="home-logo" src="assets/quartz-logo.svg" alt="Quartz"
+           width="56" height="56" draggable="false">
+      <form id="search" class="search" role="search" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10.4 10.4 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <input id="search-input" class="search-input" type="text" name="q"
+               enterkeyhint="search" spellcheck="false" autocapitalize="off"
+               placeholder="Search Google or type a URL"
+               aria-label="Search Google or type a URL">
+      </form>
+    </header>
 
-         Every box below is sized by CSS and not by its content, so the
-         strip wears its final height from the first paint: the dashes
-         it shows before the first sample occupy exactly the room the
-         numbers will, and nothing jumps when they land. newtab-bg.js
-         measures this column for its socket, so that matters twice. -->
+    <!-- Saved sites: the browser's saved list, pushed in with
+         window.__applySaved() and drawn by newtab.js ("saved sites"). The
+         fixed parts are here, not built by script, so the row has its full
+         one-line height from the first paint: the caption (with the note
+         that says what went wrong, when something did), then the tiles go in
+         before the fold's button, then the "+" and the field it turns into,
+         then the hint. -->
+    <nav id="saved" class="saved" aria-label="Saved sites">
+      <p class="saved-caption"><span class="saved-title">Saved</span><span
+         id="saved-status" class="saved-status" role="status" aria-live="polite"></span></p>
+      <button id="saved-more" class="rtile saved-more" type="button"
+              aria-expanded="false" hidden></button>
+      <button id="saved-add" class="rtile saved-add" type="button"
+              title="Save a site" aria-label="Save a site">+</button>
+      <form id="saved-form" class="saved-form" autocomplete="off" hidden>
+        <input id="saved-input" class="saved-input" type="text" inputmode="url"
+               placeholder="Address to save, then Enter" spellcheck="false"
+               autocapitalize="off" aria-label="Address to save">
+      </form>
+      <span id="saved-hint" class="saved-hint" hidden></span>
+    </nav>
+
+    <!-- The shortcut chips: the chrome's chip list, or this page's own. -->
+    <nav id="links" class="links" aria-label="Shortcuts"></nav>
+
+    <!-- The instrument strip: five readouts the chrome pushes in every
+         second with __applyStats(). Every box below is sized by CSS and not
+         by its content, so the strip wears its final height from the first
+         paint: the dashes it shows before the first sample occupy exactly
+         the room the numbers will, and nothing jumps when they land. -->
     <section id="stats" class="stats" aria-label="System">
      <div class="stats-strip">
       <div class="stat">
@@ -234,9 +221,8 @@
       <!-- The one thing in the strip you can press: it unfolds the process
            list underneath. Out of flow at full width (the strip's five
            columns are full), and a grid cell of its own once the strip
-           folds and the last cell is empty — either way the closed capsule
-           is exactly as tall as it was before it existed, which is what
-           the board measured. -->
+           folds and the last cell is empty: either way the closed card is
+           exactly as tall as it was before it existed. -->
       <button id="procs-open" class="stats-open" type="button"
               aria-expanded="false" aria-controls="procs">
         <span>Processes</span>
@@ -245,23 +231,21 @@
      </div>
 
       <!-- The process list: what Task Manager's Processes tab shows,
-           grouped by program, folded into the capsule under the strip.
+           grouped by program, folded into the card under the strip.
            Closed on a first run; after that it wears whatever the last
            tab left in localStorage, restored before the first paint so
            nothing unfolds in front of you.
 
-           The wrapper is a one-row grid: 0fr closed, 1fr open, stepped
-           over 160ms. That animates the ROW, so the chips and the saved row
-           below are pushed down by the section's real height and nothing
-           needs to know what that height is.
+           The wrapper is a one-row grid: 0fr closed, 1fr open. That
+           animates the ROW, so the dock below is pushed down by the
+           section's real height and nothing needs to know what that
+           height is.
 
-           Its interior is the only near-opaque surface on the page: rows
-           of numbers have to be read over whatever the user chose as a
-           background, so it takes --panel-bg and a hairline instead of
-           glass. Nothing in it is ever rebuilt: a sample writes into text
-           nodes of rows that already exist and moves the nodes when the
-           order changes. While it is closed, samples are kept and not
-           drawn.
+           Its interior is near-opaque (--overlay): rows of numbers have to
+           be read over whatever the user chose as a background. Nothing in
+           it is ever rebuilt: a sample writes into text nodes of rows that
+           already exist and moves the nodes when the order changes. While it
+           is closed, samples are kept and not drawn.
 
            Every row wears a 16px icon slot left of its name, filled by
            window.__applyProcIcons() with the real executable's icon when
@@ -295,7 +279,7 @@
       <!-- The app dock: what this machine opens — installed programs, web
            apps ('web:' pins, drawn with the site's favicon) and terminal
            programs ('term:' pins, a monospace >_ plate) — pinned into the
-           capsule above the web chips. The chrome pushes them in with
+           card under the strip. The chrome pushes them in with
            window.__applyApps({ pins, installed, webapps, programs }) and
            keeps the running lights current with
            window.__applyAppsRunning(map) — dots only, never a rebuild,
@@ -307,9 +291,7 @@
            with window.__applyAppResult().
 
            The row keeps one tile-row of height whether it holds nothing or
-           nine, so the capsule the board measured does not move when the
-           first pin lands; more than one row grows it, and newtab.js
-           re-seats the board when it does. -->
+           nine, so the card does not jump when the first pin lands. -->
       <section id="dock" class="dock" aria-label="Apps">
         <div class="dock-head">
           <p class="dock-caption">Apps</p>
@@ -333,43 +315,55 @@
         </div>
       </section>
     </section>
-
-    <nav id="links" class="links" aria-label="Shortcuts"></nav>
-
-    <!-- Saved sites: the browser's saved list, pushed in with
-         window.__applySaved() and drawn by newtab.js ("saved sites"). The
-         fixed parts are here, not built by script, so the row has its full
-         one-line height from the first paint and the board measures the
-         column once: the caption (with the note that says what went wrong,
-         when something did), then the tiles go in before the fold's button,
-         then the "+" and the field it turns into, then the hint. -->
-    <nav id="saved" class="saved" aria-label="Saved sites">
-      <p class="saved-caption"><span class="saved-title">Saved</span><span
-         id="saved-status" class="saved-status" role="status" aria-live="polite"></span></p>
-      <button id="saved-more" class="rtile saved-more" type="button"
-              aria-expanded="false" hidden></button>
-      <button id="saved-add" class="rtile saved-add" type="button"
-              title="Save a site" aria-label="Save a site">+</button>
-      <form id="saved-form" class="saved-form" autocomplete="off" hidden>
-        <input id="saved-input" class="saved-input" type="text" inputmode="url"
-               placeholder="Address to save, then Enter" spellcheck="false"
-               autocapitalize="off" aria-label="Address to save">
-      </form>
-      <span id="saved-hint" class="saved-hint" hidden></span>
-    </nav>
   </div>
 </main>
 
-<!-- Live prices, bottom right. The only tile on this page the board does not
-     seat: newtab-bg.js's MODULE_SPEC names three ids and this is not one of
-     them, so it keeps the corner CSS gives it and the traces simply run
-     under it (the glass is opaque enough that they do not read through).
+<!-- Right of the column: the session readout (with idle music), then the
+     markets tile at the foot of the rail. -->
+<aside class="home-rail home-right" aria-label="Session and markets">
 
-     Its data is main's, not the chrome's: stocks.js puts a listener on this
-     guest and answers `newtab:stocks {json}` lines — subscribe, unsubscribe,
-     select, add, remove — with window.__applyStocks(). The Finnhub key is
-     never part of that, in either direction; the page is only ever told
-     whether one is set.
+<section id="mod-session" class="module module-session" aria-label="Session" hidden>
+  <!-- The two counts stay hidden until __applyReadout: an idle-music push
+       can be the thing that reveals the tile, and dashes are worse than no
+       readout. -->
+  <div id="session-rows" hidden>
+    <p class="mod-row">
+      <span id="read-tabs" class="mod-value">--</span>
+      <span id="read-tabs-label" class="mod-label">tabs open</span>
+    </p>
+    <p class="mod-row">
+      <span id="read-autopause" class="mod-value">--</span>
+      <span class="mod-label">Spotify auto-pause</span>
+    </p>
+  </div>
+
+  <!-- Idle music. The player itself lives in the chrome so it survives tab
+       switches; this is only its face and its two controls. Every state
+       ("Off", "Paused", a mood name, a file name) is one fixed-height line
+       and both controls are a fixed box, so the tile does not change size
+       when the music starts, stops or changes track.
+       Content is newtab.js's: __applyMusic() in, `newtab:music` out. -->
+  <div id="mod-music" class="mod-music" data-music="off">
+    <p class="mod-music-head">
+      <span class="mod-music-caption">Idle music</span>
+    </p>
+    <p class="mod-music-row">
+      <span id="music-state" class="mod-music-state">Off</span>
+      <span class="mod-music-ctls">
+        <button id="music-next" type="button" class="mod-music-btn mod-music-next"
+                disabled aria-hidden="true">Next</button>
+        <button id="music-toggle" type="button" class="mod-music-btn">Turn on</button>
+      </span>
+    </p>
+    <p class="mod-music-hint">Plays while nothing else is playing</p>
+  </div>
+</section>
+
+<!-- Live prices. Its data is main's, not the chrome's: stocks.js puts a
+     listener on this guest and answers `newtab:stocks {json}` lines —
+     subscribe, unsubscribe, select, add, remove — with window.__applyStocks().
+     The Finnhub key is never part of that, in either direction; the page is
+     only ever told whether one is set.
 
      Both canvases are drawn by newtab.js at most twice a second and only
      when a number actually moved. Nothing here animates. -->
@@ -407,7 +401,10 @@
   </div>
 </section>
 
-<script src="newtab-bg.js"></script>
+</aside>
+
+</div>
+
 <!-- The web-app catalogue, so a 'web:' pin has a name and a host to draw
      from the first paint. The chrome's push is still the authority — it is
      the only side that knows which of these apps is also installed. -->

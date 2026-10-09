@@ -1,10 +1,12 @@
 /* ============================================================
    newtab.js — the new tab page's own behaviour.
 
-   There is no search field on this page: the window's address bar
-   is where it searches. What sits in the field's old place is the
-   instrument strip, five readouts the chrome pushes in every two
-   seconds through window.__applyStats().
+   Quartz's Home, in Helm's Home manner: the Quartz background clear
+   and full-bleed, the Q, a search field, the Saved row, the shortcut
+   chips and the instrument strip down the middle; the clock and now
+   playing in the left rail, the session tile and markets in the right.
+   The caret still lands in the address bar on a new tab (the chrome
+   does that); the field here is for a click.
 
    This page runs inside a <webview> guest as a plain file:// page:
    no Electron, no preload, no window.api, no require. Everything
@@ -13,18 +15,19 @@
    The browser's settings reach it two ways:
 
      1. query params, for the first paint —
-        ?theme=dark&palette=ocean&hue=300&chips=<JSON>&bg=image
+        ?theme=dark&palette=ocean&hue=300&engine=bing&chips=<JSON>&bg=image
         (every param optional; theme, palette and hue are handled
         earlier, in newtab-theme.js, so colour never flashes)
 
-     2. window.__applySettings({ accentHue, palette, chips })
+     2. window.__applySettings({ accentHue, palette, searchEngine, chips })
         pushed later with executeJavaScript. A null or missing
-        field means "back to this page's own default". searchEngine
-        may still arrive and is ignored: nothing here searches.
+        field means "back to this page's own default".
 
-     3. window.__applyBackground({ kind, boardOverImage, dim, dataUrl })
-        pushed the same way, because the picture is a data: URL far too
-        big to hang off the URL.
+     3. window.__applyBackground({ kind, dim, url, fileName, state, reason })
+        pushed the same way, because the picture is a data: URL (or a
+        file:// URL of main's copy) and never belongs on the URL; see
+        "Background". window.__boardPaused(flag) is the chrome's pause
+        hook: it stops the clip while an overlay is over this page.
 
      4. window.__applyStats(sample) every second while this guest is
         the one on screen — see "the instrument strip" below. The
@@ -265,7 +268,7 @@ function renderLinks() {
 /*                                                                     */
 /* Nothing in the row is ever rebuilt wholesale. The caption, the "+",   */
 /* its field and the hint are in the markup from the first paint (so    */
-/* the column the board measures is already the height it will wear)    */
+/* the row already wears its one-line height before the first push)     */
 /* and a push only adds, moves or drops the tiles that changed, so a    */
 /* repeated push does not re-request a single favicon.                  */
 /*                                                                     */
@@ -322,7 +325,6 @@ let savedAddOpen = false;        // the "+" is showing its field
 let savedStatusKind = '';        // what the caption's note is about
 let savedStatusTimer = 0;
 let savedFirstTimer = 0;
-let savedHeight = -1;            // the row's last measured height
 
 /* The row's fixed parts, looked up by wireSaved(). Null until then, and
    every renderer checks, so a push that lands first is simply kept. */
@@ -499,7 +501,6 @@ function setSavedStatus(text, tone, kind) {
       setSavedStatus('');
     }, SAVED_NOTE_MS);
   }
-  settleSavedHeight();
 }
 
 /** Clear the note unless it is about `keep` (still true). */
@@ -612,7 +613,6 @@ function openSavedAdd() {
   savedAddBtn.hidden = true;
   savedForm.hidden = false;
   savedInput.focus();
-  settleSavedHeight();
 }
 
 /** Escape, blur, or a successful Enter. refocus puts focus back on "+". */
@@ -624,7 +624,6 @@ function closeSavedAdd(refocus) {
   savedForm.hidden = true;
   savedAddBtn.hidden = false;
   if (refocus) savedAddBtn.focus();
-  settleSavedHeight();
 }
 
 function commitSavedAdd() {
@@ -772,23 +771,8 @@ function renderSaved() {
     savedHintEl.hidden = !notes.length;
   }
 
-  settleSavedHeight();
 }
 
-/**
- * The board routes around the column by its measured box. When this row
- * changes height (a second line of tiles, a wrapped note) it has to be told,
- * and only then: a forced relayout is a full repaint. The first measurement
- * is before the board has drawn at all, so it only records.
- */
-function settleSavedHeight() {
-  if (!savedRow) return;
-  const h = savedRow.offsetHeight;
-  if (h === savedHeight) return;
-  const first = savedHeight < 0;
-  savedHeight = h;
-  if (!first && typeof window.__boardRelayout === 'function') window.__boardRelayout();
-}
 
 /* --- wiring ------------------------------------------------------- */
 
@@ -1006,32 +990,30 @@ function refreshClock() {
 /*                                                                     */
 /* The chrome pushes it in on every tab change and every status change: */
 /*                                                                     */
-/*   window.__applyReadout({ tabs, claude, autopause })                 */
+/*   window.__applyReadout({ tabs, autopause })                         */
 /*     tabs       number of open tabs                                   */
-/*     claude     number of live Claude sessions                        */
 /*     autopause  'off' | 'on' | 'holding' | 'unknown'                  */
 /*                                                                     */
+/* A chrome that still sends `claude` (the Claude session count this   */
+/* tile used to show) is ignored: that row is gone from Home.           */
+/*                                                                     */
 /* The tile is [hidden] until the first call, because a readout of      */
-/* three dashes is worse than no readout — and because a hidden tile    */
-/* has no box, which is exactly what the board needs to know. Showing   */
-/* it therefore re-seats it on the board (see __boardRelayout).         */
+/* dashes is worse than no readout.                                     */
 /* ------------------------------------------------------------------ */
 
 const sessionModule = document.getElementById('mod-session');
-/* The three counts, so they can stay hidden while the tile is on screen:
+/* The two counts, so they can stay hidden while the tile is on screen:
    the idle-music module below shares this tile and can be the thing that
-   reveals it, and three dashes are still worse than no readout. */
+   reveals it, and dashes are still worse than no readout. */
 const sessionRows = document.getElementById('session-rows');
 const readTabs = document.getElementById('read-tabs');
 const readTabsLabel = document.getElementById('read-tabs-label');
-const readClaude = document.getElementById('read-claude');
-const readClaudeLabel = document.getElementById('read-claude-label');
 const readAutopause = document.getElementById('read-autopause');
 
 /* Sentence case, and the only four states the bridge can be in. */
 const AUTOPAUSE_TEXT = { off: 'Off', on: 'On', holding: 'Holding', unknown: '--' };
 
-let readoutState = { tabs: null, claude: null, autopause: 'unknown' };
+let readoutState = { tabs: null, autopause: 'unknown' };
 
 /** A count, or null for "the chrome did not say". Never negative. */
 function readoutCount(value) {
@@ -1043,12 +1025,9 @@ function readoutCount(value) {
 
 function paintReadout() {
   const tabs = readoutState.tabs;
-  const claude = readoutState.claude;
 
   setText(readTabs, tabs === null ? '--' : String(tabs));
   setText(readTabsLabel, tabs === 1 ? 'tab open' : 'tabs open');
-  setText(readClaude, claude === null ? '--' : String(claude));
-  setText(readClaudeLabel, claude === 1 ? 'Claude session' : 'Claude sessions');
   setText(readAutopause, AUTOPAUSE_TEXT[readoutState.autopause]);
 }
 
@@ -1058,40 +1037,28 @@ window.__applyReadout = function (data) {
 
   readoutState = {
     tabs: readoutCount(next.tabs),
-    claude: readoutCount(next.claude),
     autopause: Object.prototype.hasOwnProperty.call(AUTOPAUSE_TEXT, mode) ? mode : 'unknown'
   };
   paintReadout();
 
-  const grew = revealSession(sessionRows && sessionRows.hidden);
+  revealSession();
   if (sessionRows) sessionRows.hidden = false;
-  if (grew) {
-    // It has a box now: the board has to seat it and route around it.
-    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
-  }
 
   return window.__readout();
 };
 
 /**
- * Show the tile these two modules share, and say whether its box changed.
- * Both pushes go through here: whichever lands first is what puts the tile
- * on screen, and only a real change of size costs a board relayout.
+ * Show the tile these two modules share. Both pushes go through here:
+ * whichever lands first is what puts the tile on screen.
  */
-function revealSession(alsoGrowing) {
-  let changed = !!alsoGrowing;
-  if (sessionModule && sessionModule.hidden) {
-    sessionModule.hidden = false;
-    changed = true;
-  }
-  return changed;
+function revealSession() {
+  if (sessionModule && sessionModule.hidden) sessionModule.hidden = false;
 }
 
 /** What the readout actually shows, for tests. */
 window.__readout = function () {
   return {
     tabs: readoutState.tabs,
-    claude: readoutState.claude,
     autopause: readoutState.autopause,
     /* The counts, not the tile: idle music can have the tile on screen
        before a readout has ever landed. */
@@ -1100,145 +1067,26 @@ window.__readout = function () {
   };
 };
 
-/* ------------------------------------------------------------------ */
-/* Claude usage                                                        */
-/*                                                                     */
-/* The other readout whose data comes straight from MAIN, and it comes */
-/* the same way the markets tile's does: budget.js puts a              */
-/* console-message listener on this guest and answers the line below,  */
-/* so the chrome is not in the path at all.                            */
-/*                                                                     */
-/*   out   console.log('newtab:budget {"action":"subscribe"}')         */
-/*   in    window.__applyBudget(snapshot)   — budget.js's snapshot()   */
-/*                                                                     */
-/* The wording and the two tones are the titlebar pill's, deliberately: */
-/* one reading must not read as two different things in two places.    */
-/* The block is [hidden] until the first push, and it reveals itself    */
-/* rather than the three session counts — those are the chrome's to     */
-/* reveal, and three dashes are still worse than no readout.           */
-/* ------------------------------------------------------------------ */
-
-(function () {
-  /* main marks a reading stale at ten minutes; this clock keeps that true
-     between pushes instead of waiting for the next one. */
-  var STALE_MS = 600000;
-
-  var budgetBlock = document.getElementById('mod-budget');
-  var budgetValue = document.getElementById('read-budget');
-  var budgetLabel = document.getElementById('read-budget-label');
-  var budgetNote = document.getElementById('read-budget-note');
-  if (!budgetBlock || !budgetValue || !budgetLabel || !budgetNote) return;
-
-  var snap = null;
-  var watching = false;
-
-  /* --- the channel --------------------------------------------- */
-
-  function say(action) {
-    console.log('newtab:budget ' + JSON.stringify({ action: action }));
-  }
-
-  function watch() { if (watching) return; watching = true; say('subscribe'); }
-  function unwatch() { if (!watching) return; watching = false; say('unsubscribe'); }
-
-  /* A hidden tab is a tab main should not be pushing at. Same rule as the
-     clock, the clip and the markets tile. */
-  function syncWatch() {
-    if (document.hidden) unwatch();
-    else watch();
-  }
-
-  /* --- words --------------------------------------------------- */
-
-  function shortSpan(ms) {
-    var n = Math.max(0, Math.round(ms / 60000));
-    if (n < 60) return Math.max(1, n) + ' m';
-    var h = Math.floor(n / 60);
-    var m = n % 60;
-    return m ? h + ' h ' + m + ' m' : h + ' h';
-  }
-
-  function pctOf(win) {
-    return win ? Math.round(win.pct) + '%' : '--';
-  }
-
-  /** neutral under 80%, amber from 80, red from 95 — on the HIGHER limit. */
-  function toneOf(data) {
-    var top = -1;
-    if (data.fiveHour) top = Math.max(top, data.fiveHour.pct);
-    if (data.week) top = Math.max(top, data.week.pct);
-    if (top < 0) return 'none';
-    if (top >= 95) return 'hot';
-    if (top >= 80) return 'warm';
-    return 'cool';
-  }
-
-  function paintBudget() {
-    if (!snap) return;
-    var state = snap.state === 'ok' || snap.state === 'stale' ? snap.state : 'error';
-    var age = snap.source ? Math.max(0, Date.now() - snap.source.receivedAt) : null;
-    if (state === 'ok' && age !== null && age > STALE_MS) state = 'stale';
-
-    var numbers = (snap.fiveHour || snap.week)
-      ? pctOf(snap.fiveHour) + ' / ' + pctOf(snap.week)
-      : '--';
-
-    setText(budgetValue, numbers);
-    budgetValue.setAttribute('data-state', state);
-    budgetValue.setAttribute('data-tone', state === 'error' ? 'none' : toneOf(snap));
-    setText(budgetLabel, 'Claude 5H / week');
-
-    /* The note is the honest half: why the numbers are old, what could not
-       be read, or that there is nothing to read at all. */
-    var note = '';
-    if (state === 'stale') {
-      note = 'Stale ' + shortSpan(age === null ? 0 : age) + ' — ' +
-        (snap.reason || 'Claude Code only writes this while a session is running');
-    } else if (state === 'error') {
-      note = snap.reason || 'the reading could not be taken';
-    } else if (snap.reason) {
-      note = snap.reason;
-    }
-    setText(budgetNote, note);
-    budgetNote.hidden = !note;
-  }
-
-  window.__applyBudget = function (data) {
-    if (!data || typeof data !== 'object') return window.__budget();
-    snap = data;
-    paintBudget();
-
-    var grew = false;
-    if (budgetBlock.hidden) { budgetBlock.hidden = false; grew = true; }
-    if (sessionModule && sessionModule.hidden) { sessionModule.hidden = false; grew = true; }
-    if (grew && typeof window.__boardRelayout === 'function') window.__boardRelayout();
-    return window.__budget();
-  };
-
-  /** What the row actually shows, for tests. */
-  window.__budget = function () {
-    return {
-      value: budgetValue.textContent,
-      label: budgetLabel.textContent,
-      tone: budgetValue.getAttribute('data-tone'),
-      state: budgetValue.getAttribute('data-state'),
-      note: budgetNote.hidden ? '' : budgetNote.textContent,
-      shown: !budgetBlock.hidden
-    };
-  };
-
-  document.addEventListener('visibilitychange', syncWatch);
-  window.addEventListener('pageshow', syncWatch);
-  syncWatch();
-})();
+/* Retired guest hooks. The Claude usage readout (budget.js in MAIN pushed
+   it here) and the circuit board (newtab-bg.js) are gone from this page; a
+   main process or a chrome that still calls in must not throw, so each name
+   stays defined and does nothing. The integration pass removes the callers:
+     __applyBudget(snapshot)  budget.js, on a newtab:budget subscribe line this
+                              page no longer sends, so it is never pushed
+     __boardRelayout()        was this page's own call to the board
+     __boardState()           app.js refreshBoardNotes(): null reads there as
+                              "board state unavailable"
+   __boardPaused stays REAL (see "Background"): it now pauses the clip. */
+window.__applyBudget = function () { return null; };
+window.__boardRelayout = function () {};
+window.__boardState = function () { return null; };
 
 /* ------------------------------------------------------------------ */
 /* Idle music                                                          */
 /*                                                                     */
 /* Quiet music while nothing else on the machine is playing. The player */
 /* itself lives in the CHROME so it survives tab switches; this module  */
-/* is only its face, and it shares the readout tile because the board   */
-/* seats exactly two tiles (newtab-bg.js MODULE_SPEC is the contract).  */
+/* is only its face, and it shares the session tile in the right rail.  */
 /*                                                                     */
 /* In, on every state change and when this guest loads:                 */
 /*                                                                     */
@@ -1383,11 +1231,9 @@ window.__applyMusic = function (data) {
   paintMusic();
 
   /* An idle-music push can be the first thing that lands, so it reveals
-     the tile the same way a readout does — with the three counts still
-     hidden until the chrome has actually counted something. */
-  if (revealSession(false)) {
-    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
-  }
+     the tile the same way a readout does — with the counts still hidden
+     until the chrome has actually counted something. */
+  revealSession();
 
   return window.__music();
 };
@@ -1638,12 +1484,8 @@ window.__applyMedia = function (data) {
   scheduleMediaTick();
 
   /* The tile is [hidden] until the chrome pushes for the first time: a
-     machine with no bridge never gets a tile at all. Showing it gives it a
-     box, which is the one thing the board has to know. */
-  if (mediaModule && mediaModule.hidden) {
-    mediaModule.hidden = false;
-    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
-  }
+     machine with no bridge never gets a tile at all. */
+  if (mediaModule && mediaModule.hidden) mediaModule.hidden = false;
 
   return window.__media();
 };
@@ -1959,7 +1801,7 @@ window.__stats = function () {
 /*    pid exactly the way a group row is kept by key.                    */
 /*  - The list is folded into the capsule under the strip. Closed, the   */
 /*    capsule is the height it always was; open, it grows by the fold    */
-/*    and the board re-seats its traces around the new box. The state    */
+/*    and pushes the dock below it down. The state                       */
 /*    is remembered — he opens this all the time — and restored          */
 /*    without animation.                                                 */
 /*  - A sample that lands while it is closed is KEPT and not drawn. The  */
@@ -1977,7 +1819,6 @@ const PROC_CONFIRM_MS = 3000;    // an armed End task disarms itself
 const PROC_NOTE_MS = 3000;       // and the answer it got fades
 
 const PROC_OPEN_STORE = 'newtab.procs.open';
-const PROC_FOLD_MS = 160;        // the fold's own transition, mirrored here
 
 const PROC_CHILD_STORE = 'procsExpandedKeys';  // which groups are unfolded
 const PROC_CHILD_MAX = 24;       // what the sampler sends, mirrored here
@@ -2472,7 +2313,7 @@ function toggleChildren(rec) {
 
   writeProcChildOpen();
   // The body is a fixed height that scrolls, so unfolding changes nothing
-  // outside it — no board relayout, unlike "Show more".
+  // outside it.
   renderProcs();
 }
 
@@ -2815,22 +2656,6 @@ function writeProcOpen(open) {
   }
 }
 
-let procFoldTimer = 0;
-
-/**
- * The capsule changed height, so the board's socket and every trace it
- * routed around it are wrong. One forced re-layout AFTER the fold has
- * finished moving — the transition is stepped, and re-seating on each of
- * its four frames would be four board rebuilds for one result.
- */
-function relayoutBoard() {
-  if (procFoldTimer) clearTimeout(procFoldTimer);
-  procFoldTimer = setTimeout(function () {
-    procFoldTimer = 0;
-    if (typeof window.__boardRelayout === 'function') window.__boardRelayout();
-  }, PROC_FOLD_MS + 30);
-}
-
 /**
  * Open or close the fold. `animate === false` is the restore on load: the
  * page wears last session's state from the first frame instead of
@@ -2874,10 +2699,7 @@ function setProcsOpen(open, animate) {
     });
   }
 
-  if (changed) {
-    writeProcOpen(next);
-    relayoutBoard();
-  }
+  if (changed) writeProcOpen(next);
 }
 
 function toggleProcs() {
@@ -3042,7 +2864,6 @@ function wireProcs() {
       if (!procExpanded) procsBody.scrollTop = 0;
       if (procsPanel) procsPanel.classList.toggle('is-expanded', procExpanded);
       renderProcs();
-      relayoutBoard();           // thirty rows is a taller capsule
     });
   }
 
@@ -3112,7 +2933,7 @@ function wireProcs() {
 /*                                                                     */
 /*   window.__applyAppsRunning({ id: { running, pids, tab } })  arrives */
 /*       once a second while this guest is on screen. It touches the    */
-/*       dots and nothing else: no rebuild, no measurement, no board.   */
+/*       dots and nothing else: no rebuild, no measurement.            */
 /*       An open tab (`tab: true`, which is how a web app, a terminal   */
 /*       or a program re-parented into a tab is ever "running") lights  */
 /*       the identical dot.                                             */
@@ -3160,7 +2981,6 @@ const dockWebByDesktop = new Map();
 const dockProgById = new Map();
 
 let dockKey = null;              // identity of the row that is built
-let dockHeight = -1;             // its last measured height, for the board
 let dockEditing = false;
 let dockPickerOpen = false;
 let dockMatches = [];            // what the picker is showing
@@ -3670,18 +3490,6 @@ function syncDockRunning() {
   }
 }
 
-/**
- * The capsule is what the board measured, so a dock that grew a row — or
- * opened its picker — has to say so. Only ever called from the paths that
- * can change the box: never from a running-state push.
- */
-function settleDockHeight() {
-  if (!dockSection) return;
-  const h = dockSection.offsetHeight;
-  if (dockHeight >= 0 && h !== dockHeight) relayoutBoard();
-  dockHeight = h;
-}
-
 function renderDock() {
   if (!dockRow) return;
 
@@ -3694,7 +3502,6 @@ function renderDock() {
   syncDockAdd();
   syncDockRunning();
   if (dockPickerOpen) renderDockResults();
-  settleDockHeight();
 }
 
 function setDockPins(list) {
@@ -3773,7 +3580,6 @@ function pinApp(app) {
   // presses, not three trips through edit mode.
   if (dockSearch) dockSearch.value = '';
   renderDockResults();
-  settleDockHeight();
 }
 
 function setDockEditing(on) {
@@ -3787,7 +3593,6 @@ function setDockEditing(on) {
   }
   if (!next && dockPickerOpen) setPickerOpen(false);
   syncDockAdd();
-  settleDockHeight();
 }
 
 /* --- the picker --------------------------------------------------- */
@@ -4014,7 +3819,6 @@ function setPickerOpen(open) {
   // before the box is measured — closing the picker over a filled row is
   // what takes the tile away again.
   syncDockAdd();
-  settleDockHeight();
 }
 
 /* --- what came back ----------------------------------------------- */
@@ -4080,8 +3884,8 @@ window.__applyApps = function (data) {
 };
 
 /**
- * Running state only, once a second. Dots in place: no tile is rebuilt, no
- * box is measured and the board is never told anything.
+ * Running state only, once a second. Dots in place: no tile is rebuilt and
+ * no box is measured.
  *
  * An entry may also say `native: true` — a program whose own window is in a
  * tab. That lights the identical dot, and it is deliberately not read as a
@@ -4243,10 +4047,6 @@ function wireDock() {
     dockSearch.addEventListener('input', function () {
       dockActive = 0;
       renderDockResults();
-      // Eight rows or one "No matches" is a different capsule height, and the
-      // board routed its traces around the old one. Debounced in relayoutBoard,
-      // so a typed word is one re-seat and not one per letter.
-      settleDockHeight();
     });
 
     dockSearch.addEventListener('keydown', function (event) {
@@ -4290,30 +4090,120 @@ function watchTheme() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Background                                                          */
+/* Search                                                              */
 /*                                                                     */
-/* Four backgrounds, chosen in Settings and pushed in by the chrome:    */
-/*                                                                     */
-/*   board   the circuit board — this page's own default               */
-/*   aurora  the aurora alone; newtab-bg.js then does nothing at all    */
-/*   image   the user's picture, dimmed, with the board optional        */
-/*   video   a moving picture, same slot and same options as image      */
-/*                                                                     */
-/* The picture never travels on the URL: the chrome keeps the blob in   */
-/* IndexedDB and hands it over as a data: URL inside the push. ?bg= is  */
-/* only a first-paint hint, so an image user never watches the board    */
-/* draw itself and then disappear.                                      */
-/*                                                                     */
-/* A clip is too big for either, so the chrome copies the chosen file   */
-/* into its own folder and pushes the file:// URL instead (fileUrl).    */
+/* The field under the Q. It never takes the caret by itself: a new tab */
+/* puts the caret in the ADDRESS BAR (the chrome, ea1ffe9), so typing   */
+/* straight after Ctrl+T searches up there. This field is for a click.  */
+/* Enter opens what looks like an address and searches anything else,   */
+/* with the engine Settings picked (?engine= for the first paint,       */
+/* searchEngine on the settings push), by navigating this tab — the     */
+/* same way a chip opens its site.                                     */
 /* ------------------------------------------------------------------ */
 
-const BG_KINDS = ['board', 'aurora', 'image', 'video'];
+/* Mirrors settings.js ENGINES (the chrome's list). Unknown means Google. */
+const SEARCH_ENGINES = {
+  google:     { name: 'Google',     url: 'https://www.google.com/search?q=' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
+  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=' },
+  brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=' },
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/do/search?q=' }
+};
+
+let searchEngineKey = 'google';
+
+function searchEngine() {
+  return SEARCH_ENGINES[searchEngineKey] || SEARCH_ENGINES.google;
+}
+
+/** The engine's name belongs in the field's own prompt. */
+function setSearchEngine(key) {
+  const name = String(key == null ? '' : key).toLowerCase();
+  searchEngineKey = Object.prototype.hasOwnProperty.call(SEARCH_ENGINES, name) ? name : 'google';
+  const input = document.getElementById('search-input');
+  if (!input) return;
+  const prompt = 'Search ' + searchEngine().name + ' or type a URL';
+  if (input.placeholder !== prompt) input.placeholder = prompt;
+  input.setAttribute('aria-label', prompt);
+}
+
+/**
+ * Where Enter goes. What the Saved field would take as a web address
+ * (parseTypedAddress: a scheme, name.tld, localhost, an IP) opens as one;
+ * any other text is a search. '' for nothing to do.
+ */
+function searchTarget(text) {
+  const q = String(text || '').trim();
+  if (!q) return '';
+  const typed = parseTypedAddress(q);
+  if (typed && typed.url) return typed.url;
+  return searchEngine().url + encodeURIComponent(q);
+}
+
+function wireSearch(engineParam) {
+  setSearchEngine(engineParam);
+  const form = document.getElementById('search');
+  const input = document.getElementById('search-input');
+  if (!form || !input) return;
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const target = searchTarget(input.value);
+    if (target) window.location.assign(target);
+  });
+  input.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' || event.key === 'Esc') {
+      input.value = '';
+      input.blur();
+    }
+  });
+}
+
+/** The field's state, for tests. */
+window.__search = function (text) {
+  const input = document.getElementById('search-input');
+  return {
+    engine: searchEngineKey,
+    placeholder: input ? input.placeholder : '',
+    focused: !!input && document.activeElement === input,
+    target: typeof text === 'string' ? searchTarget(text) : null
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* Background                                                          */
+/*                                                                     */
+/* The Quartz background (Settings, key newtabBackground), shown here   */
+/* CLEAR and full-bleed: Helm's Home treatment, while the chrome around */
+/* this page wears a blurred still of the same picture. The chrome     */
+/* pushes it in on dom-ready and on every change:                      */
+/*                                                                     */
+/*   window.__applyBackground({ kind, dim, url, fileName, state, reason }) */
+/*     kind      'wallpaper' | 'image' | 'video' | 'none'              */
+/*               (a stored 'board' or 'aurora' reads as 'wallpaper')   */
+/*     dim       0..0.6, the wash over the picture                     */
+/*     url       wallpaper: file:// URL of main's copy of the Windows   */
+/*               wallpaper; image: the data: URL out of IndexedDB;     */
+/*               video: file:// URL of main's copy of the clip         */
+/*               (legacy dataUrl / fileUrl are read in its place)      */
+/*     fileName  for video: decides <video> (a clip) or <img> (a GIF)  */
+/*     state     'loading' | 'ok' | 'fallback'                         */
+/*     reason    why, when state is 'fallback'                         */
+/*                                                                     */
+/* ?bg=<kind> on this page's URL is only a first-paint hint: it paints  */
+/* the plain --bg (never a wrong picture) until the push arrives.       */
+/*                                                                     */
+/* No silent failures: a 'fallback' push, or a picture that will not   */
+/* load or decode HERE, leaves the plain --bg and says why in #bg-note. */
+/* ------------------------------------------------------------------ */
+
+const BG_KINDS = ['wallpaper', 'image', 'video', 'none'];
 const BG_DIM_DEFAULT = 0.25;
 const BG_DIM_MAX = 0.6;
 
+/** Unknown, missing and the retired 'board' / 'aurora' all mean the wallpaper. */
 function bgKind(value) {
-  return BG_KINDS.indexOf(String(value)) >= 0 ? String(value) : 'board';
+  const k = String(value == null ? '' : value);
+  return BG_KINDS.indexOf(k) >= 0 ? k : 'wallpaper';
 }
 
 /** 0..0.6, with anything unreadable falling back to the default wash. */
@@ -4324,20 +4214,20 @@ function bgDim(value) {
   return Math.min(BG_DIM_MAX, Math.max(0, n));
 }
 
-/** A still picture and a moving one wear the same wash and the same board. */
-function bgIsPicture(kind) {
-  return kind === 'image' || kind === 'video';
+/** A push without a state is a chrome from before the contract: take it as ok. */
+function bgPushState(value) {
+  return value === 'ok' || value === 'fallback' || value === 'loading' ? value : 'ok';
 }
 
-/* Which element the chosen file belongs in. A real clip is decoded by the
-   <video> — on this hardware, by the GPU — and a GIF cannot be: it goes in
-   the <img>, where it animates itself. Anything else an <img> can decode
-   ends up there too, which is the right answer for a still frame as well. */
+/* Which element a clip belongs in. A real clip is decoded by the <video> —
+   on this hardware, by the GPU — and a GIF cannot be: it goes in the <img>,
+   where it animates itself. Anything else an <img> can decode ends up there
+   too, which is the right answer for a still frame as well. */
 const BG_CLIP_EXT = /\.(?:mp4|webm|mov|m4v)$/i;
 
-/* file: is what the chrome sends once it has copied the file into its own
-   folder; the rest are here so a test can hand one over directly. */
-const BG_CLIP_PROTO = /^(?:file|blob|data|https?):/i;
+/* file: is what the chrome sends (main's copies); data: is the user's own
+   picture; the rest are here so a test can hand one over directly. */
+const BG_URL_PROTO = /^(?:file|blob|data|https?):/i;
 
 /** The path part of a URL, so an extension test never reads a query. */
 function bgUrlPath(url) {
@@ -4345,52 +4235,144 @@ function bgUrlPath(url) {
 }
 
 /** '' for anything this page will not put in a layer. */
-function bgClipUrl(value) {
+function bgUrl(value) {
   if (typeof value !== 'string' || value === '') return '';
-  return BG_CLIP_PROTO.test(value) ? value : '';
+  return BG_URL_PROTO.test(value) ? value : '';
 }
 
 /** 'video' for a clip, 'img' for a GIF (or any other image), '' for neither. */
-function bgClipLayer(url) {
+function bgClipLayer(url, fileName) {
   if (!url) return '';
   if (/^data:video\//i.test(url)) return 'video';
   if (/^data:image\//i.test(url)) return 'img';
-  return BG_CLIP_EXT.test(bgUrlPath(url)) ? 'video' : 'img';
+  const name = typeof fileName === 'string' && fileName ? fileName : bgUrlPath(url);
+  return BG_CLIP_EXT.test(name) ? 'video' : 'img';
+}
+
+/** A URL made safe to sit inside url("...") in an inline style. */
+function bgCssUrl(url) {
+  return 'url("' + String(url).replace(/["\\\n\r]/g, function (c) {
+    return encodeURIComponent(c);
+  }) + '")';
+}
+
+/** What a picture is called in a note: its file name when the push had one. */
+function bgWhat(kind, fileName) {
+  if (kind === 'wallpaper') return 'The copy of the Windows wallpaper';
+  const name = typeof fileName === 'string' && fileName ? ' (' + fileName + ')' : '';
+  if (kind === 'video') return 'The background clip' + name;
+  return 'The background picture' + name;
 }
 
 let bgState = {
-  kind: 'board', boardOverImage: false, dim: 0, hasImage: false,
-  clipUrl: '', clipLayer: ''
+  kind: 'wallpaper', dim: 0, state: 'loading', reason: '',
+  url: '', fileName: '', stillShown: false, clipLayer: '', localError: ''
 };
 
-/* The chrome's __boardPaused(true): an overlay with a backdrop-filter is
-   open over this page, or the window went behind. The clip stops on it for
-   the same reason the board does — everything under a blurred panel is
-   re-composited on every frame it moves. */
+/* Bumped by every push, so a still that finishes loading after a newer push
+   arrived never paints over it. */
+let bgSeq = 0;
+
+/* The chrome's __boardPaused(true): an overlay is open over this page, or
+   the window went behind. The clip stops on it: a frame nobody is looking
+   at is a decoder and a compositor pass for nothing. */
 let bgChromePaused = false;
 
 let bgClipWired = false;
 
-/* A clip that cannot be decoded — the file was moved, or the chrome copied
-   something this build has no decoder for — falls back to the board rather
-   than to a black window, and says nothing about it: the setting is still
-   the user's choice, and the next push tries it again. */
+/** The quiet line that says why there is no picture. Empty hides it. */
+function paintBgNote() {
+  const note = document.getElementById('bg-note');
+  if (!note) return;
+  let text = '';
+  if (bgState.localError) text = bgState.localError;
+  else if (bgState.state === 'fallback') {
+    text = 'Background unavailable' + (bgState.reason ? ': ' + bgState.reason : '');
+  }
+  if (note.textContent !== text) note.textContent = text;
+  note.hidden = !text;
+}
+
+function paintBgRoot() {
+  const root = document.documentElement;
+  root.setAttribute('data-bg', bgState.kind);
+  /* What is actually on screen, which a failure here can make 'fallback'
+     even when the push said 'ok'. */
+  root.setAttribute('data-bg-state', bgState.localError ? 'fallback' : bgState.state);
+  root.style.setProperty('--bg-dim', String(bgState.dim));
+}
+
+/* A file that cannot be shown here (moved since the chrome copied it, a
+   format this build has no decoder for) leaves the plain --bg and says so.
+   The setting stays the user's choice; the next push tries it again. */
+function bgLocalFailure(text) {
+  bgState.localError = text;
+  bgState.stillShown = false;
+  setStill('');
+  setClipLayers('', '');
+  paintBgRoot();
+  paintBgNote();
+}
+
 function onClipError() {
-  if (bgState.kind !== 'video') return;
-  applyBackground({ kind: 'board' });
+  if (bgState.kind !== 'video' || !bgState.url || bgState.clipLayer !== 'video') return;
+  const video = document.getElementById('bg-video');
+  const code = video && video.error ? video.error.code : 0;
+  let why = 'could not be opened (moved, or a format this build cannot decode)';
+  if (code === 2) why = 'could not be read';
+  else if (code === 3) why = 'could not be decoded';
+  bgLocalFailure(bgWhat('video', bgState.fileName) + ' ' + why + '.');
+}
+
+function onGifError() {
+  if (bgState.kind !== 'video' || !bgState.url || bgState.clipLayer !== 'img') return;
+  bgLocalFailure(bgWhat('video', bgState.fileName) + ' could not be opened.');
 }
 
 function wireClipLayers(video, img) {
   if (bgClipWired) return;
   bgClipWired = true;
   if (video) video.addEventListener('error', onClipError);
-  if (img) img.addEventListener('error', onClipError);
+  if (img) img.addEventListener('error', onGifError);
+}
+
+/** Put a still in #bg-image, or take it away (''). */
+function setStill(url) {
+  const layer = document.getElementById('bg-image');
+  if (!layer) return;
+  if (url) {
+    layer.style.setProperty('background-image', bgCssUrl(url));
+    layer.classList.add('on');
+  } else {
+    layer.classList.remove('on');
+    layer.style.removeProperty('background-image');
+  }
+}
+
+/**
+ * Load a still off screen first, so a file that is missing or not a picture
+ * is caught (a CSS background-image fails silently) and the layer fades in
+ * once, already decoded, rather than painting in strips.
+ */
+function loadStill(url, seq) {
+  const probe = new Image();
+  probe.decoding = 'async';
+  probe.onload = function () {
+    if (seq !== bgSeq) return;
+    bgState.stillShown = true;
+    setStill(url);
+  };
+  probe.onerror = function () {
+    if (seq !== bgSeq) return;
+    bgLocalFailure(bgWhat(bgState.kind, bgState.fileName) + ' could not be loaded.');
+  };
+  probe.src = url;
 }
 
 /**
  * Fill (or empty) the two moving-picture layers. Exactly one of them ever
  * carries .on, so a 'video' background with no file yet draws nothing at
- * all rather than a black rectangle over the aurora.
+ * all rather than a black rectangle.
  */
 function setClipLayers(layer, url) {
   const video = document.getElementById('bg-video');
@@ -4407,7 +4389,7 @@ function setClipLayers(layer, url) {
     } else {
       video.classList.remove('on');
       /* Pause before clearing: a media element holding a source it is no
-         longer showing still holds a decoder and a network job. Removing
+         longer showing still holds a decoder and a file handle. Removing
          the attribute and reloading is the only way to give both back. */
       video.pause();
       if (video.hasAttribute('src')) {
@@ -4431,14 +4413,13 @@ function setClipLayers(layer, url) {
 /** Only while this page is the one a person is looking at. */
 function clipShouldRun() {
   return bgState.kind === 'video' && bgState.clipLayer === 'video' &&
-    !bgChromePaused && !document.hidden;
+    !bgState.localError && !bgChromePaused && !document.hidden;
 }
 
 /**
  * Start or stop the clip. Idempotent, and cheap enough to hang off every
- * signal that means "in front again" — the same three the board resumes on.
- * A paused <video> costs nothing; the element is never torn down, so coming
- * back is one call and no reload.
+ * signal that means "in front again". A paused <video> costs nothing; the
+ * element is never torn down, so coming back is one call and no reload.
  */
 function syncClip() {
   const video = document.getElementById('bg-video');
@@ -4447,7 +4428,7 @@ function syncClip() {
     if (video.paused) {
       const started = video.play();
       /* The autoplay promise rejects when the source went away mid-call.
-         Nothing to report: the error handler above owns the fallback. */
+         Nothing to report here: the error handler above owns the failure. */
       if (started && typeof started.catch === 'function') started.catch(function () {});
     }
     return;
@@ -4458,83 +4439,87 @@ function syncClip() {
 function applyBackground(bg) {
   const next = bg && typeof bg === 'object' ? bg : {};
   const kind = bgKind(next.kind);
-  const picture = bgIsPicture(kind);
-  const over = picture && next.boardOverImage === true;
-  const dim = picture ? bgDim(next.dim) : 0;
-  /* Only a data: image URL is ever written into the stylesheet. */
-  const url = kind === 'image' && typeof next.dataUrl === 'string' &&
-    /^data:image\//i.test(next.dataUrl) ? next.dataUrl : '';
-  /* The clip travels as a URL, not as bytes: the chrome copied the file. */
-  const clipUrl = kind === 'video' ? bgClipUrl(next.fileUrl) : '';
-  const clipLayer = bgClipLayer(clipUrl);
+  const raw = bgUrl(next.url) || bgUrl(next.dataUrl) || bgUrl(next.fileUrl);
+  const fileName = typeof next.fileName === 'string' ? next.fileName : '';
+  let url = kind === 'none' ? '' : raw;
+  /* A still is only ever a picture: no data:video in the stylesheet. */
+  if ((kind === 'wallpaper' || kind === 'image') && /^data:(?!image\/)/i.test(url)) url = '';
+  const clipLayer = kind === 'video' ? bgClipLayer(url, fileName) : '';
 
-  const root = document.documentElement;
-  root.setAttribute('data-bg', kind);
-  if (over) root.setAttribute('data-bg-board', 'over');
-  else root.removeAttribute('data-bg-board');
-  /* Only ever inline for a picture: the token has its own default in the
-     stylesheet, and <html>'s inline style is otherwise the accent's alone. */
-  if (picture) root.style.setProperty('--bg-dim', String(dim));
-  else root.style.removeProperty('--bg-dim');
+  const sameStill = (kind === 'wallpaper' || kind === 'image') &&
+    url === bgState.url && kind === bgState.kind && bgState.stillShown && !bgState.localError;
 
-  const layer = document.getElementById('bg-image');
-  if (layer) {
-    if (url) layer.style.setProperty('background-image', 'url("' + url + '")');
-    else layer.style.removeProperty('background-image');
+  bgSeq += 1;
+  bgState = {
+    kind: kind,
+    dim: kind === 'none' ? 0 : bgDim(next.dim),
+    state: bgPushState(next.state),
+    reason: typeof next.reason === 'string' ? next.reason : '',
+    url: url,
+    fileName: fileName,
+    stillShown: sameStill,
+    clipLayer: clipLayer,
+    localError: ''
+  };
+
+  /* The still: kept as it is when the push repeats it, so a settings push
+     that changed only the dim does not blink the picture. */
+  if ((kind === 'wallpaper' || kind === 'image') && url) {
+    if (!sameStill) {
+      setStill('');
+      loadStill(url, bgSeq);
+    }
+  } else {
+    setStill('');
   }
 
-  bgState = {
-    kind: kind, boardOverImage: over, dim: dim, hasImage: !!url,
-    clipUrl: clipUrl, clipLayer: clipLayer
-  };
   /* Leaving 'video' therefore pauses and clears; arriving sets and plays. */
-  setClipLayers(clipLayer, clipUrl);
+  setClipLayers(clipLayer, url);
+  paintBgRoot();
+  paintBgNote();
   syncClip();
-  return bgState;
+  return window.__background();
 }
 
 /**
- * The chrome pushes the background in on dom-ready and on every settings
- * change: __applyBackground({ kind, boardOverImage, dim, dataUrl, fileUrl }).
- * Anything missing means this page's own default.
+ * The chrome pushes the background in on dom-ready and on every change. The
+ * payload is described at the top of this section.
  */
 window.__applyBackground = function (bg) {
   return applyBackground(bg);
 };
 
-/* The chrome's pause reaches the board through newtab-bg.js, which is loaded
-   above this file. Wrap its handler rather than asking the chrome for a
-   second call: the clip and the board then stop on exactly the same signal,
-   in the same order, and a chrome that knows nothing about video still
-   pauses one. */
-(function wrapBoardPaused() {
-  const board = typeof window.__boardPaused === 'function' ? window.__boardPaused : null;
-  window.__boardPaused = function (flag) {
-    bgChromePaused = !!flag;
-    syncClip();
-    if (board) return board.apply(window, arguments);
-    return undefined;
-  };
-})();
+/* The chrome's pause hook, kept under its old name so the chrome as it is
+   reaches it: app.js pushBoardPaused() calls it while an overlay is open
+   over this page or the window is behind. It stops the clip, and starts it
+   again on false when nothing else vetoes. */
+window.__boardPaused = function (flag) {
+  bgChromePaused = !!flag;
+  syncClip();
+};
 
 /** The background actually on screen, for tests. */
 window.__background = function () {
   const video = document.getElementById('bg-video');
+  const note = document.getElementById('bg-note');
   return {
     kind: bgState.kind,
-    boardOverImage: bgState.boardOverImage,
     dim: bgState.dim,
-    hasImage: bgState.hasImage,
+    state: bgState.localError ? 'fallback' : bgState.state,
+    reason: bgState.reason,
+    hasImage: bgState.stillShown,
     clipLayer: bgState.clipLayer,
-    hasClip: !!bgState.clipUrl,
-    clipPlaying: !!(video && bgState.clipLayer === 'video' && !video.paused)
+    hasClip: !!(bgState.kind === 'video' && bgState.url && !bgState.localError),
+    clipPlaying: !!(video && bgState.clipLayer === 'video' && !video.paused),
+    chromePaused: bgChromePaused,
+    note: note && !note.hidden ? note.textContent : ''
   };
 };
 
 /** The chrome pushes settings here with executeJavaScript. */
 window.__applySettings = function (settings) {
   const next = settings || {};
-  // next.searchEngine is deliberately ignored: this page has no field.
+  setSearchEngine(next.searchEngine);
   setChips(next.chips);
   // Palette first: it authors the accent the hue is then painted over, so
   // a push that clears the hue lands on the new preset's own colour.
@@ -4569,16 +4554,17 @@ function readParams() {
 function init() {
   const params = readParams();
   setChips(params ? parseChipsParam(params.get('chips')) : null);
-  /* Before newtab-bg.js draws anything: its first paint is in a rAF after
-     this handler, so ?bg=aurora|image means the board is never drawn. */
-  applyBackground({ kind: params ? params.get('bg') : null });
+  /* ?bg= is a first-paint hint only: the kind, painted as the plain --bg
+     until the chrome's push brings the picture itself (never a URL here). */
+  applyBackground({ kind: params ? params.get('bg') : null, state: 'loading' });
   watchTheme();
+  wireSearch(params ? params.get('engine') : null);
 
   /* The empty instrument: the baseline hairlines, drawn once so a page
      nobody has pushed a sample to still reads as an instrument rather
      than as five blank rectangles. The strip is already at its full
      height either way — the boxes are sized in CSS — so this changes
-     no geometry and the board's measurement stands. */
+     no geometry. */
   paintStats();
 
   /* The process list in the same state: ten dashed rows at the height the
@@ -4587,8 +4573,8 @@ function init() {
   wireProcs();
 
   /* The app dock, in the same state and for the same reason: the row keeps
-     one tile-row of height before a single pin has arrived, so the capsule
-     the board is about to measure is already the height it will wear. */
+     one tile-row of height before a single pin has arrived, so the card
+     already wears the height it will keep. */
   wireDock();
 
   /* The Saved row: its caption and "+" are in the markup, so this only
@@ -4596,9 +4582,8 @@ function init() {
      for the chrome's first list. */
   wireSaved();
 
-  /* The idle-music module, before the board measures the tile it shares
-     with the readout: it is inside a [hidden] tile either way, so this
-     changes no geometry — it only makes the Off state the module's own
+  /* The idle-music module: it is inside a [hidden] tile until a push, so
+     this changes no geometry — it only makes the Off state the module's own
      rather than the markup's, and hangs the two controls. */
   wireMusic();
 
@@ -4612,10 +4597,9 @@ function init() {
      is wrong after a resize. One repaint, no rAF: nothing here animates. */
   window.addEventListener('resize', paintStats);
 
-  /* The clock, before the board measures the tile it sits in: newtab-bg.js
-     seats the tiles in a rAF after this handler, and an empty face would be
-     the wrong size. The three listeners are the same "back on screen"
-     signals the board resumes on, for the same reason. */
+  /* The clock, painted before the first frame so it never shows dashes.
+     The three listeners are the "back on screen" signals: a hidden page's
+     timer was throttled, so coming back repaints and re-aligns. */
   paintClock();
   scheduleClock();
   document.addEventListener('visibilitychange', refreshClock);
