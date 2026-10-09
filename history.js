@@ -1134,6 +1134,15 @@
   function onFocus() {
     if (blurTimer !== null) { clearTimeout(blurTimer); blurTimer = null; }
     typedValue = String(omniboxEl.value || '');
+    // A new tab puts the caret here by itself (app.js focusOmniboxForNewTab)
+    // and marks that one focus quiet: the recent list would otherwise cover
+    // the new-tab page on every Ctrl+T. One-shot, and consumed here even when
+    // the event comes late (a focus() in a window that is not in front fires
+    // when the window is next activated). Typing or ArrowDown still opens it.
+    if (omniboxEl.dataset && omniboxEl.dataset.quietFocus) {
+      delete omniboxEl.dataset.quietFocus;
+      return;
+    }
     open();
   }
 

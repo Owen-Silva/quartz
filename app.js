@@ -4754,6 +4754,88 @@ function omniboxHasFocus() {
   return !!omniboxEl && document.activeElement === omniboxEl;
 }
 
+/*
+ * The caret on a new tab. The new-tab page gave up its own search field
+ * (b9f5ca2, the user: "i can just search up above"), so the address bar IS the
+ * search box there: a new tab puts the caret in it, and Ctrl+T, typing and
+ * Enter runs a search with no click in between. Before this, the chrome still
+ * focused the guest page as if it had a field to type into, so the first
+ * keystrokes went to a page with nothing to catch them.
+ *
+ * Quiet on purpose: an empty omnibox focus normally drops the recent-history
+ * list (history.js), and that would cover the new-tab page on every Ctrl+T.
+ * The list still comes up the moment the user types, and ArrowDown opens it.
+ * The marker is one-shot and the focus event that consumes it may come late:
+ * a focus() while the window is not the foreground one fires its event only
+ * when the window is next activated (measured on a test instance).
+ *
+ * element.focus() can never raise the window or take the keyboard from
+ * another app; at most it decides where the caret is when Quartz is next in
+ * front, which is exactly what a new tab should do.
+ */
+
+/** True while the omnibox holds a caret a new-tab page put there, untouched by a blur since. */
+let newTabCaret = false;
+/** Focus attempts that did not land, and why the last one did not: a CDP probe reads these. */
+let newTabCaretMisses = 0;
+let newTabCaretMissReason = '';
+
+/**
+ * Put the caret in the address bar for a new-tab page. Never throws. Returns
+ * whether the omnibox holds focus afterwards; the caller decides the fallback.
+ */
+function focusOmniboxForNewTab() {
+  if (!omniboxEl) {
+    newTabCaretMisses++;
+    newTabCaretMissReason = 'no omnibox';
+    return false;
+  }
+  try {
+    if (document.activeElement !== omniboxEl) {
+      omniboxEl.dataset.quietFocus = '1';   // history.js: no recent list for this focus
+      omniboxEl.focus();
+    }
+    // Already focused (Ctrl+T while typing in the bar): the recent list, if it
+    // is up, was built for text the forced value below has just wiped.
+    if (window.History && typeof window.History.close === 'function') window.History.close();
+  } catch (err) {
+    newTabCaretMissReason = 'threw: ' + ((err && err.message) || String(err));
+  }
+  newTabCaret = document.activeElement === omniboxEl;
+  if (!newTabCaret) {
+    // Hidden or disabled bar: nothing took focus, so no focus event is coming
+    // to consume the marker, and a stale one would swallow the next real
+    // click's recent list.
+    delete omniboxEl.dataset.quietFocus;
+    newTabCaretMisses++;
+    if (!newTabCaretMissReason) newTabCaretMissReason = 'omnibox would not take focus';
+  } else {
+    newTabCaretMissReason = '';
+  }
+  return newTabCaret;
+}
+
+/**
+ * Where the caret goes when a new-tab page comes to the front. The address
+ * bar, unless the user has already put focus inside this page (a dock search, the
+ * Saved field...): then the page gets it back, as it always did. Skipped while
+ * restoreSession() rebuilds: it raises the first tab it makes on the way, and
+ * its own final activateTab() is the one that decides.
+ */
+function focusForNewTab(tab) {
+  if (restoring || !tab) return;
+  // The page already holds the keyboard: a click into a split's other half
+  // activates its tab, and that click is where the caret belongs.
+  if (tab.viewEl && document.activeElement === tab.viewEl) return;
+  if (tab.pageFocused) {
+    focusViewSoon(tab);
+    return;
+  }
+  // The page is the fallback when the bar cannot take it: a focused page at
+  // least still answers Escape and the shortcuts.
+  if (!focusOmniboxForNewTab()) focusViewSoon(tab);
+}
+
 /**
  * Never stomp on text the user is in the middle of typing. `force` is only used
  * by deliberate user actions (opening or switching tabs), not by page events.
@@ -6713,6 +6795,19 @@ function createTab(url, options) {
     if (existing) return focusPhoneTab(existing, !!opts.background);
   }
 
+  // A new tab that is about to come to the front takes the caret into the
+  // address bar NOW, before its guest and chip are built. Ctrl+T pressed
+  // inside a page reaches here over IPC while the old page still holds the
+  // keyboard, and every key typed until the focus moves goes to that page:
+  // building the tab below is ~15 ms warm and was 159 ms cold on a test
+  // instance, long enough to lose the first letter of a fast typist. The
+  // focus is the first thing done instead. activateTab() repeats it as a
+  // no-op. A background tab (the same test as at the end) never takes it.
+  if (!restoring && !opts.asleep && isNewTabUrl(target)
+      && !(opts.background && activeTabId !== null)) {
+    focusOmniboxForNewTab();
+  }
+
   const tab = {
     id: nextTabId++,
     kind: 'page',
@@ -6745,6 +6840,10 @@ function createTab(url, options) {
     collapsed: false,
     globeEl: null,
     asleep: false,
+    // Whether this tab's page held the keyboard when the user last left the tab
+    // (activateTab() records it on the way out). A new-tab page coming back
+    // gives the caret to its page if so, and to the address bar if not.
+    pageFocused: false,
     // Split view: the partner's id while this tab is half of a pair, and that
     // pair's divider position. No elements — a split is layout on the view
     // that is already in #views, never a re-parent. Never persisted.
@@ -7688,6 +7787,9 @@ function tabForWebContentsId(wcId) {
  */
 function onGuestFocused(payload) {
   const tab = tabForWebContentsId(payload && payload.wcId);
+  // A page has the keyboard, so the address bar does not: a quiet-focus marker
+  // still waiting for its focus event (focusOmniboxForNewTab) is stale.
+  if (omniboxEl && omniboxEl.dataset.quietFocus) delete omniboxEl.dataset.quietFocus;
   if (!tab || tab.id === activeTabId) return;
   const other = splitPartner(tab);
   if (!other || other.id !== activeTabId) return;
@@ -8301,6 +8403,14 @@ function activateTab(id) {
   const target = tabs.find((t) => t.id === id);
   if (!target) return;
 
+  // Where the keyboard was in the tab being left, read before anything moves
+  // it: Chrome's rule. A new-tab page the user had clicked into gets its page back
+  // when it returns (focusForNewTab); one he never touched gets the address bar.
+  const outgoing = getActiveTab();
+  if (outgoing && outgoing !== target) {
+    outgoing.pageFocused = !!outgoing.viewEl && document.activeElement === outgoing.viewEl;
+  }
+
   // Synchronously, before the display swap: the tab in front is never asleep,
   // so everything below — and everything that reads getActiveTab().viewEl —
   // is looking at a real <webview> again.
@@ -8358,9 +8468,19 @@ function activateTab(id) {
       try { if (typeof term.focus === 'function') term.focus(); } catch (err) { /* not open yet */ }
     });
   } else if (isNewTabUrl(readCurrentUrl(target))) {
-    // The new-tab page autofocuses its own search box, so the guest gets focus
-    // rather than the omnibox. dom-ready repeats this for a tab still loading.
-    focusViewSoon(target);
+    // The new-tab page has no search field of its own any more: the caret goes
+    // to the address bar, synchronously, so it does not wait on the guest.
+    focusForNewTab(target);
+  } else if (newTabCaret && omniboxHasFocus()) {
+    // Leaving a new tab whose caret was never used (Ctrl+T then Ctrl+W, or
+    // Ctrl+Tab away): without this the bar would keep it over a real page and
+    // Space or the arrows would edit the address instead of scrolling. The
+    // forced value below has already replaced anything typed into it. A quiet
+    // marker still waiting (the window was not in front, so no focus event
+    // came to consume it) would otherwise eat the next real focus's list.
+    omniboxEl.blur();
+    delete omniboxEl.dataset.quietFocus;
+    if (target.kind === 'page') focusViewSoon(target);
   }
 
   // The pair's order and flex-basis, the divider, and the mark on whichever
@@ -9559,9 +9679,10 @@ function wireViewEvents(tab) {
     if (tab.id === activeTabId) {
       syncOmniboxFromActive(false);
       updateNavState();
-      // The very first tab is activated before its guest exists; hand the
-      // new-tab page focus now so its autofocused search field gets the keys.
-      if (isNewTabUrl(readCurrentUrl(tab))) focusViewSoon(tab);
+      // No focus is handed out here. This used to give a new-tab page the
+      // keyboard for its search field; the field is gone, and the caret now
+      // goes to the address bar at activation, which never waits on the guest.
+      // A focus here would land after the user may already be typing or clicking.
     }
     // Per-document, once the guest exists: this is the only point where the
     // page is there to take CSS and is not yet on screen.
@@ -10987,6 +11108,12 @@ function wireChrome() {
     });
     omniboxEl.addEventListener('blur', () => {
       selectOnMouseUp = false;
+      // The new-tab caret has been used or moved on, unless this blur is only
+      // the window going behind another one (Alt+Tab): the bar gets it back
+      // on return, and it is still the caret the new tab put there. A true
+      // left behind by a blur this test misreads is harmless: activateTab()
+      // only reads the flag while the omnibox really has focus.
+      if (document.hasFocus()) newTabCaret = false;
     });
   }
 }
