@@ -150,8 +150,11 @@
           <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M10.4 10.4 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
+        <!-- data-autocorrect="search": same rule as the address bar (search
+             words only, never an address, never on Enter). -->
         <input id="search-input" class="search-input" type="text" name="q"
                enterkeyhint="search" spellcheck="false" autocapitalize="off"
+               data-autocorrect="search"
                placeholder="Search Google or type a URL"
                aria-label="Search Google or type a URL">
     </form>

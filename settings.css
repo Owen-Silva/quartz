@@ -1284,6 +1284,37 @@
 }
 
 /* ============================================================
+   Typing
+   The host and word lists reuse the shortcut rows. A row's text is a
+   plain span in the chip cell's type, not an input: a host or a word is
+   removed and re-added, never edited in place, so it must not invite a
+   click with the editable cell's hover frame.
+   ============================================================ */
+
+#settings-panel .set-typing-item {
+  display: block;
+  line-height: 19px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: default;
+}
+
+#settings-panel .set-typing-item:hover { border-color: transparent; }
+
+/* Why the section cannot work right now. Boxed with a hairline and in the
+   body grey rather than the hint grey, because it explains why the
+   switches under it are greyed out; no colour, nothing glows. */
+#settings-panel .set-typing-notice {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+/* ============================================================
    Spotify — the auto-pause helper
 
    One switch for the whole computer, one for this browser's own

@@ -1573,6 +1573,9 @@
     inputEl.setAttribute('aria-label', 'Search tabs');
     inputEl.setAttribute('autocomplete', 'off');
     inputEl.setAttribute('spellcheck', 'false');
+    // Autocorrect on the address bar's search-only rule (spell-preload.js):
+    // a finished word is fixed, anything that looks like a URL is not.
+    inputEl.setAttribute('data-autocorrect', 'search');
     inputEl.setAttribute('role', 'combobox');
     inputEl.setAttribute('aria-expanded', 'true');
     inputEl.setAttribute('aria-controls', 'ts-list');
