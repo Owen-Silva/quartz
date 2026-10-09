@@ -164,7 +164,10 @@ contextBridge.exposeInMainWorld('api', {
     // it once if there is no copy yet; recopyWallpaper() re-reads it from
     // Windows. Both resolve { ok, fileUrl, fileName, copiedAt, reason }.
     wallpaper: () => ipcRenderer.invoke('background:wallpaper'),
-    recopyWallpaper: () => ipcRenderer.invoke('background:recopy-wallpaper')
+    recopyWallpaper: () => ipcRenderer.invoke('background:recopy-wallpaper'),
+    // The built-in photos (Helm's gallery): { ok, reason, items: [{ id, file,
+    // title, category, credit, url, fileUrl, thumbUrl, missing }] }.
+    builtins: () => ipcRenderer.invoke('background:builtins')
   },
   // The idle music player's own tracks. Nothing is copied: main runs the picker
   // and hands back descriptors, and the chrome plays each file where it lies
