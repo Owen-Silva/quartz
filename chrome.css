@@ -759,6 +759,9 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #win-close:active { background: rgba(232,17,35,.7); color: #ffffff; }
 
 /* --- nav row -------------------------------------------------- */
+/* The toolbar: the same --surface-0 tint as the strip (it wears .glass),
+   closed by one hairline. No inset top edge here — the strip's hairline is
+   directly above, and two 1px lines stacked read as a groove. */
 .navrow {
   position: relative;
   display: flex;
@@ -766,59 +769,41 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   gap: 6px;
   height: var(--nav-h);
   padding: 0 10px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: none;
 }
 
-/* The lit seam under the chrome. It rides ::before rather than ::after so
-   that ::after is free for the omnibox's rim ring further down: an anchored
-   element has to come AFTER its anchor in tree order, and ::before is
-   generated ahead of #omnibox. Nothing else about the seam changes — it is
-   pinned by its own left/right/bottom and never needed an anchor. */
-.navrow::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: var(--seam);
-  pointer-events: none;
-}
-
-/* .iconbtn is the same instrument shape, for nav buttons added later
-   (#theme carries it, and .glass, so it reads as a chip when idle). */
-/* Controls, not containers: round corners at --radius-ctl, no bevel.
-   What they gain is the light focus — the ring is in the shared
-   :focus-visible rule, so nothing is repeated here. */
+/* .iconbtn is the same shape, for nav buttons added later (#theme,
+   the save star, downloads, reader and picture-in-picture carry it).
+   Helm's ghost icon button: no fill at rest, --surface-3 on hover,
+   --surface-2 pressed. The ring is the shared :focus-visible one. The
+   .glass several of them also carry is cancelled here: a control sits
+   ON the bar's tint, it does not add a second one. */
 #back, #forward, #reload, .iconbtn {
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
 }
 
-#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--glass-2); color: var(--fg); }
-#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--glass-3); }
-#back:disabled, #forward:disabled { background: none; color: var(--fg-3); }
+.iconbtn.glass { background: transparent; box-shadow: none; }
+.iconbtn.glass:focus-visible { box-shadow: var(--focus-ring); }
+
+#back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--surface-3); color: var(--text); }
+#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--surface-2); }
+#back:disabled, #forward:disabled { background: none; color: var(--text-3); }
 
 /* the theme toggle: glyph swapped by app.js (moon in dark, sun in light) */
 #theme .glyph { font-family: var(--icon-font); }
 
 /* the reload button in its "stop loading" state. app.js swaps the glyph
-   to &#xE711; and adds this class; the instrument itself does not change. */
+   to &#xE711; and adds this class; the button itself does not change. */
 #reload.stop { /* documented state — no visual override by design */ }
 
-/* The omnibox sits in the middle of the row as the lit instrument
-   slot: the one bevelled container in the nav row, wearing the rim
-   (specular top-left, accent bottom-right) so it looks seated and
-   powered even before it is touched. The pill went with the round
-   corners — a slot is cut, not moulded. Its text is the readout.
-
-   The background here is nothing but the ordinary glass recipe. Running
-   the rim as a border-box layer under it washed the whole slot in a
-   grey-to-cyan gradient and took the placeholder with it, because the
-   glass above it is translucent. The rim is a RING now, anchored to this
-   input from .navrow::after (see below); the 1px border stays
-   transparent so the ring has its own lane to sit in. */
+/* The omnibox: Helm's text input (components.css .input), at the slot's
+   own 34px. A sunken --code-bg field with a 1px hairline; hover firms the
+   hairline, focus turns it to the accent line and adds the focus ring.
+   It is a plain bordered box now, so the anchored rim ring that used to
+   ride .navrow::after (and its no-anchor fallback) is gone. */
 #omnibox {
   flex: 1 1 auto;
   min-width: 0;
@@ -826,138 +811,67 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   margin: 0 auto;
   height: 34px;
   padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background: var(--sheen), var(--glass);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 13.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--code-bg);
+  box-shadow: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
-  /* stepped and short, like every other state change in the chrome —
-     a smooth fade here re-blurs the whole frosted row every frame.
-     background-color stays on the 180ms theme tempo so a theme switch
-     re-lights the lens in step with the row around it. */
-  transition: box-shadow 140ms steps(3, end), border-color 140ms steps(3, end),
-              color 140ms steps(3, end), background-color 180ms ease;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
 
-#omnibox::placeholder { color: var(--placeholder); }
+#omnibox::placeholder { color: var(--text-3); }
 
-/* hover lifts the glass a shade; the ring is unchanged */
-#omnibox:hover { background: var(--sheen), var(--glass-2); }
+#omnibox:hover { border-color: var(--hairline-strong); }
 
-/* the one place the chrome lights up: the glass lifts and the ring goes
-   to full accent (the ring itself is switched on .navrow::after, below) */
 #omnibox:focus {
   outline: none;
-  background: var(--sheen), var(--glass-2);
-  border-color: transparent;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 0 0 3px var(--ion-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
+  box-shadow: var(--focus-ring);
 }
 
-#omnibox::selection { background: var(--ion-select); color: var(--fg); }
+#omnibox::selection { background: var(--ion-select); color: var(--text); }
 
-/* --- the omnibox rim, as a ring -------------------------------------
-   An <input> cannot carry a pseudo-element, so the rim is anchored to the
-   omnibox from the row around it: anchor(top/right/bottom/left) resolves
-   to the omnibox's border box, 1px of padding plus the xor mask leaves
-   nothing but that 1px edge, and pointer-events: none keeps the whole
-   slot clickable. The ring takes .navrow::after and the lit seam has moved
-   to ::before, because an anchored element must come after its anchor in
-   tree order. Chromium 152 has anchor positioning; the @supports below is
-   what everything else lands on. */
-@supports (anchor-name: --a) {
-  #omnibox { anchor-name: --omni; }
-
-  .navrow::after {
-    content: '';
-    position: absolute;
-    position-anchor: --omni;
-    inset: anchor(top) anchor(right) anchor(bottom) anchor(left);
-    pointer-events: none;
-    padding: 1px;
-    border-radius: var(--bevel);
-    background: var(--rim);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-            mask-composite: exclude;
-  }
-
-  .navrow:has(#omnibox:focus)::after { background: var(--rim-focus); }
-}
-
-/* No anchor positioning: back to the two-layer trick, over an OPAQUE
-   interior — the one form of it that cannot bleed through the glass. */
-@supports not (anchor-name: --a) {
-  #omnibox {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
-  }
-
-  #omnibox:hover {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim) border-box;
-  }
-
-  #omnibox:focus {
-    background:
-      var(--sheen) padding-box,
-      linear-gradient(var(--glass-2), var(--glass-2)) padding-box,
-      linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-      var(--rim-focus) border-box;
-  }
-}
-
-/* the zoom readout, riding at the right-hand end of the lens. app.js hides it
-   at 100%, so the nav row only grows an instrument while the setting is
-   unusual — and [hidden] has to beat the button display:inline-flex reset. */
+/* the zoom readout, riding at the right-hand end of the field. app.js hides
+   it at 100%, so the nav row only grows a chip while the setting is
+   unusual — and [hidden] has to beat the button display:inline-flex reset.
+   Helm's small button: hairline, quiet fill on hover. */
 #zoom-badge {
   flex: 0 0 auto;
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-weight: 350;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  transition: color 140ms steps(3, end), background-color 180ms ease;
 }
 
-#zoom-badge:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#zoom-badge:active { background: var(--sheen), var(--glass-3); }
+#zoom-badge:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
+#zoom-badge:active { background: var(--surface-2); }
+#zoom-badge:focus-visible { box-shadow: var(--focus-ring); }
 #zoom-badge[hidden] { display: none; }
 
-/* the save star, beside the lens: the boxed .iconbtn instrument (#theme's
-   shape and chip), so it only adds the glyph's states. Outline in --fg-2
-   while the page is not saved; filled and in the accent while it is (the
-   glyph itself is swapped by app.js, E734 -> E735). .failed is a refusal
-   being shown for a moment — amber, the reason in the tooltip and the toast.
-   No glow at rest; the focus ring is the shared :focus-visible one. */
+/* the save star, beside the field: an .iconbtn, so it only adds the
+   glyph's states. Outline in --text-2 while the page is not saved; filled
+   and in the accent while it is (the glyph itself is swapped by app.js,
+   E734 -> E735). .failed is a refusal being shown for a moment — --warn,
+   the reason in the tooltip and the toast. No glow, ever. */
 #save-star .glyph { font-family: var(--icon-font); }
-#save-star { transition: color 140ms steps(3, end); }
 #save-star.saved,
-#save-star.saved:hover { color: var(--ion); }
+#save-star.saved:hover { color: var(--accent); }
 #save-star.failed,
-#save-star.failed:hover { color: var(--amber); }
+#save-star.failed:hover { color: var(--warn); }
 #save-star[hidden] { display: none; }
 
 /* the pill that opens a new Claude tab */
@@ -977,12 +891,15 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #newclaude:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
 #newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
 
-/* --- session light (the only warm colour) --------------------- */
-/* Every status mark in the chrome is a pip: a lamp, not a painted
-   dot. At rest it carries the faintest wash of the room's own light
-   (--ion-soft, alpha .16) so it reads as an instrument that is
-   powered and idle; the moment a session is live it goes amber, and
-   amber is the only thing in the window that does. */
+/* --- session light --------------------------------------------- */
+/* Every status mark in the chrome is Helm's status dot: a flat 7px disc,
+   never a glow. Idle is --st-idle; a live session is --st-working (the
+   accent); a session that needs you is --st-waiting (warn). Nothing pulses
+   — Helm dropped its CSS pulse because even a stepped infinite animation
+   kept the compositor drawing ~60 frames a second for one dot, and an
+   always-running animation is off the table here too. The difference
+   between live and needs-you is the colour, the glyph beside the title
+   and the chip's waiting tint below. */
 .tab .dot,
 #newclaude .dot {
   flex: 0 0 auto;
@@ -990,57 +907,46 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--fg-3);
+  background: var(--st-idle);
   box-shadow: none;
-  transition: background 140ms steps(3, end), box-shadow 140ms steps(3, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
 .tab .dot { margin-right: 8px; }
 
 .tab.live .dot,
 body.claude-live #newclaude .dot {
-  background: var(--amber);
-  box-shadow: var(--pip-amber);
-  /* steps(): the dot lives inside a frosted row, so every frame it changes
-     re-blurs the whole row. A few updates a second reads as the same breathe. */
-  animation: live-pulse 2.4s steps(8) infinite;
-  /* ...and will-change lifts the pip onto its own compositor layer, so a step
-     re-blends one 8px dot instead of repainting the frosted row it sits in.
-     Measured with one idle Claude tab: 20.3% of a core -> 16.2% (3.38 ->
-     2.70 CPU-ms per frame); stopping the pulse outright would be 12.5%, so
-     this is half the cost of the breathe for none of its look. */
-  will-change: opacity;
-}
-
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: .62; }
+  background: var(--st-working);
+  box-shadow: none;
+  animation: none;
 }
 
 /* --- "Claude needs you" --------------------------------------- */
-/* A chamber that went quiet while he was elsewhere. Brighter and quicker
-   than the live breathe so the two never read as the same light — and
-   still stepped, for the same reason live-pulse is: three repaints a
-   second through the frosted row instead of sixty. */
+/* A pane that went quiet while he was elsewhere: Helm's waiting state.
+   The dot turns --st-waiting, the chip takes the warn wash and its title
+   the warn ink (Helm tabs.css .tab.st-waiting), and the active chip keeps
+   its raised fill with the hairline tinted instead. */
 .tab.claude.needs-you .dot,
 #newclaude.attn .dot,
 body.claude-live #newclaude.attn .dot {
-  background: var(--amber);
-  box-shadow: var(--pip-amber-strong);
-  animation: attn-pulse 1.2s steps(3) infinite;
-  will-change: opacity;            /* own layer, same reason as live-pulse */
+  background: var(--st-waiting);
+  box-shadow: none;
+  animation: none;
 }
 
-@keyframes attn-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: .3; }
+.tab.claude.needs-you { background: var(--warn-soft); }
+.tab.claude.needs-you .tab-title { color: var(--warn); }
+.tab.claude.needs-you:not(.active):hover { background: color-mix(in srgb, var(--st-waiting) 20%, transparent); }
+.tab.claude.needs-you.active {
+  background: var(--surface-1);
+  border-color: color-mix(in srgb, var(--st-waiting) 45%, transparent);
 }
 
 /* The dot is small and it is at the far left; the glyph puts the same
-   amber right against the title, where the eye is already reading. */
+   warn colour right against the title, where the eye is already reading. */
 .tab-attn {
   flex: 0 0 auto;
-  color: var(--amber);
+  color: var(--warn);
   font-size: 8px;
   line-height: 1;
 }
