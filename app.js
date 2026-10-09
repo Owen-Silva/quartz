@@ -361,6 +361,11 @@ function newTabUrl() {
       const storedKind = all.newtabBackground && all.newtabBackground.kind;
       const bgKind = ['wallpaper', 'builtin', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'wallpaper';
       params.set('bg', bgKind);
+      // The Home's layout, so a customised page paints its pieces where they
+      // belong from the first frame instead of jumping when the push lands.
+      // Only when it differs from the default: absent means default.
+      const homeParam = homeLayoutParam(all.homeLayout);
+      if (homeParam) params.set('home', homeParam);
     } catch (err) { /* defaults are fine */ }
   }
   return NEWTAB_URL + '?' + params.toString();
@@ -589,6 +594,157 @@ function pushSettingsToTab(tab) {
 }
 
 /* ------------------------------------------------------------------ */
+/* The new-tab Home layout                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The Home's pieces can be hidden and moved between its three columns. The
+ * layout lives in Settings (one 'homeLayout' key; homelayout.js has the
+ * rules both sides share). The chrome does three things with it here:
+ *
+ *   - hands it to the page: in the first-paint URL when it is not the
+ *     default, then pushed on dom-ready and on every change;
+ *   - answers the page's own edits (`newtab:home {json}`, one console line
+ *     per request) through the store, ALWAYS replying, because the page has
+ *     already moved the piece and rolls it back if no answer comes;
+ *   - gates each hidden piece's feed (the stats sampler, the media poll, the
+ *     session tile's pushes), so a piece you switched off stops costing.
+ *
+ * Every gate fails OPEN: no Settings, no rules, a store that throws — the
+ * piece counts as shown, which is how the page behaved before any of this.
+ */
+
+const HOME_PREFIX = 'newtab:home ';
+
+/** The stored layout, complete and sanitised; null when it cannot be read. */
+function homeLayoutNow() {
+  const settings = window.Settings;
+  if (!settings || typeof settings.homeLayout !== 'function') return null;
+  try { return settings.homeLayout() || null; } catch (err) { return null; }
+}
+
+/**
+ * Is this piece on the Home? Called on every stats sample and media push, so
+ * the usual case — nothing customised, the stored value is null — answers
+ * without building a layout at all.
+ */
+function homeShown(id) {
+  const settings = window.Settings;
+  try {
+    if (settings && typeof settings.get === 'function' && settings.get('homeLayout') == null) return true;
+  } catch (err) { return true; }
+  const layout = homeLayoutNow();
+  if (!layout || !Array.isArray(layout.hidden)) return true;
+  return layout.hidden.indexOf(id) < 0;
+}
+
+/** The `home` first-paint param: the layout JSON, or '' for the default. */
+function homeLayoutParam(stored) {
+  const rules = window.HomeLayout;
+  if (stored == null || !rules || typeof rules.isDefault !== 'function') return '';
+  try {
+    if (rules.isDefault(stored)) return '';
+    return JSON.stringify(rules.sanitize(stored));
+  } catch (err) { return ''; }
+}
+
+/**
+ * Hand the layout to one open new-tab guest. `meta` is the answer to one of
+ * the page's own requests ({ ack, ok, reason }) or null for a plain push.
+ * The memo covers the layout only; an answer passes force, because the page
+ * is waiting for it even when the layout did not move (a refused edit).
+ */
+function pushHomeToTab(tab, force, meta) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  const rules = window.HomeLayout;
+  let layout = homeLayoutNow();
+  if (!layout && rules && typeof rules.defaults === 'function') {
+    try { layout = rules.defaults(); } catch (err) { layout = null; }
+  }
+  // Without the rules there is nothing to say — except to a page waiting
+  // on an answer, which still gets one (with a null layout it keeps its own).
+  if (!layout && !meta) return;
+  let payload = '';
+  let metaJson = 'null';
+  try {
+    payload = JSON.stringify(layout);
+    if (meta) metaJson = JSON.stringify(meta);
+  } catch (err) { return; }
+  if (force) pushFailed(tab, 'home');
+  if (pushUnchanged(tab, 'home', payload)) return;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyHomeLayout && window.__applyHomeLayout(' + payload + ', ' + metaJson + ')'
+    );
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => pushFailed(tab, 'home'));
+    }
+  } catch (err) { pushFailed(tab, 'home'); /* guest went away mid-call */ }
+}
+
+function pushHomeToAll() {
+  for (const tab of tabs) pushHomeToTab(tab, false, null);
+}
+
+/**
+ * Parse one console line into { seq, op }, or null when it is not a Home
+ * request or carries no usable seq (it could not be answered, so it is
+ * ignored). Pure apart from the shared rules. An op the rules do not accept
+ * still parses, as op: null — that request IS answered, with a refusal.
+ */
+function parseHomeLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(HOME_PREFIX) !== 0) return null;
+  let msg = null;
+  try { msg = JSON.parse(line.slice(HOME_PREFIX.length)); } catch (err) { return null; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
+  const seq = msg.seq;
+  if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 1 || seq > 1e9) return null;
+  const rules = (typeof window !== 'undefined' && window) ? window.HomeLayout : null;
+  let op = null;
+  if (rules && typeof rules.parseOp === 'function') {
+    try { op = rules.parseOp(msg); } catch (err) { op = null; }
+  }
+  return { seq: seq, op: op };
+}
+
+/**
+ * One console line from one guest. Honoured only for a new-tab page whose
+ * viewEl is still the one the listener was attached to, exactly like
+ * handleSavedLine. Returns true when the request was answered.
+ */
+function handleHomeLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
+  const req = parseHomeLine(text);
+  if (!req) return false;
+  let ok = false;
+  let reason = '';
+  const settings = window.Settings;
+  if (!req.op) {
+    reason = 'That change was not understood';
+  } else if (!settings || typeof settings.applyHomeOp !== 'function') {
+    reason = 'Settings did not load, so the Home layout cannot be saved';
+  } else {
+    try {
+      const r = settings.applyHomeOp(req.op) || {};
+      ok = !!r.ok;
+      reason = ok ? '' : String(r.reason || 'The change was not saved');
+    } catch (err) {
+      ok = false;
+      reason = 'The change was not saved (' + ((err && err.message) || err) + ')';
+    }
+  }
+  // The answer, always — the page has already moved the piece and puts it
+  // back with a visible note if this does not arrive. A successful edit has
+  // also reached every tab through the store listener; this tab is forced so
+  // it hears its ack even though that push already carried the layout.
+  pushHomeToTab(tab, true, { ack: req.seq, ok: ok, reason: reason });
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
 /* The new-tab readout                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -624,6 +780,9 @@ function readoutSnapshot() {
 /** Hand the readout to one open new-tab guest (no-op for anything else). */
 function pushReadoutToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  // The readout is the Session piece's: a hidden Session is not fed (before
+  // the memo, so showing it again re-sends whatever moved meanwhile).
+  if (!homeShown('session')) return;
   const payload = JSON.stringify(readoutSnapshot());
   // Same readout as last time: the page is already showing it.
   if (pushUnchanged(tab, 'readout', payload)) return;
@@ -858,7 +1017,12 @@ function statsTabEligible(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return false;
   // Only a page that said so OUT LOUD opts out; an older guest, or one whose
   // answer has not come back yet, is treated as wanting them.
-  return tab.statsWanted !== false;
+  if (tab.statsWanted === false) return false;
+  // A Home with both System stats AND Apps hidden needs no sampler at all.
+  // Either one shown keeps it: the dock's running lights are computed from
+  // the very same sample (syncAppsRunning in wireStats), so hiding only the
+  // stats must not put the Apps lights out.
+  return homeShown('stats') || homeShown('apps');
 }
 
 /**
@@ -925,6 +1089,9 @@ function wireStats() {
       syncAppsRunning(sample);
       const tab = getActiveTab();
       if (!tab || !isNewTabUrl(tab.url)) return;
+      // The sampler may be running for the Apps lights alone (above): with
+      // System stats hidden, the numbers and the process icons are not sent.
+      if (!homeShown('stats')) return;
       pushStatsToTab(tab, sample);
       // The icons for this sample's rows, if any of them are new to us.
       requestProcIcons(sample);
@@ -1097,6 +1264,10 @@ function musicOffState() {
 /** One state object to one new-tab guest, memoised like every other push. */
 function pushMusicToTab(tab) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  // The music tile is part of the Session piece: hidden, it is not fed. The
+  // return comes before the memo, so the memo still holds what the page last
+  // got, and the next push after Session is shown again carries any change.
+  if (!homeShown('session')) return;
   const state = musicPlayer ? musicPlayer.state() : musicOffState();
   let payload = '';
   try { payload = JSON.stringify(state); } catch (err) { return; }
@@ -1171,7 +1342,10 @@ function wireMusic() {
 function mediaPollWanted() {
   if (!mediaApi()) return false;
   if (!musicFocused()) return false;
-  if (activeIsNewTab()) return true;
+  // The new tab's reason to poll is its Now playing card; hidden, that reason
+  // is gone. The idle music's own need below stays: it is the player's veto
+  // (something else is playing), not the card's.
+  if (activeIsNewTab() && homeShown('media')) return true;
   const group = musicSettings();
   return !!(group && group.enabled && group.where === 'anywhere');
 }
@@ -1248,6 +1422,11 @@ function freshMediaPayload() {
 function pushMediaToTab(tab, payload) {
   if (!payload) return;
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+  // Now playing hidden: not fed. Returned before the memo, so it still holds
+  // what the page last got; when the card is shown again, syncIdlePresence
+  // sends freshMediaPayload(), which carries the art we hold, and the memo
+  // lets it through whenever anything moved while the card was away.
+  if (!homeShown('media')) return;
   let text = '';
   try { text = JSON.stringify(payload); } catch (err) { return; }
   if (pushUnchanged(tab, 'media', text)) return;
@@ -4470,6 +4649,20 @@ function wireSettings() {
     if (!Array.isArray(keys) || keys.indexOf('chips') >= 0) {
       pushSavedToAll();
       updateSaveStar();
+    }
+    // The Home's layout moved (its own Edit mode, or the switches in
+    // Settings): every new tab redraws, the sampler and the media poll are
+    // re-decided for the pieces now shown (syncStatsSubscription also runs
+    // syncIdlePresence), and a piece switched back on is filled at once
+    // rather than on its next change. All of these are memoised and gated.
+    if (!Array.isArray(keys) || keys.indexOf('homeLayout') >= 0) {
+      pushHomeToAll();
+      syncStatsSubscription();
+      for (const tab of tabs) {
+        pushReadoutToTab(tab);
+        pushMusicToTab(tab);
+        pushMediaToTab(tab, freshMediaPayload());
+      }
     }
   });
 }
@@ -9611,6 +9804,7 @@ function wireViewEvents(tab) {
     // back over them, theme first: the accent is derived per theme.
     pushThemeToTab(tab, getTheme());
     pushSettingsToTab(tab);
+    pushHomeToTab(tab, false, null);  // the Home's layout: which pieces, where
     pushSavedToTab(tab, false);  // the Saved row: the bookmarks list it cannot read
     pushBackgroundToTab(tab);
     pushAppsToTab(tab);   // the app dock: pins, the installed list, running state
@@ -9809,6 +10003,12 @@ function wireViewEvents(tab) {
   // answered by re-pushing the whole list on window.__applySaved.
   viewEl.addEventListener('console-message', (event) => {
     handleSavedLine(tab, viewEl, event && event.message);
+  });
+
+  // ...and to hide, show or move a piece of its Home, `newtab:home {json}`,
+  // answered on window.__applyHomeLayout with the stored layout and an ack.
+  viewEl.addEventListener('console-message', (event) => {
+    handleHomeLine(tab, viewEl, event && event.message);
   });
 
   // The folder browser is the third preload-less page: `files:<verb> {json}`,
