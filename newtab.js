@@ -1067,20 +1067,6 @@ window.__readout = function () {
   };
 };
 
-/* Retired guest hooks. The Claude usage readout (budget.js in MAIN pushed
-   it here) and the circuit board (newtab-bg.js) are gone from this page; a
-   main process or a chrome that still calls in must not throw, so each name
-   stays defined and does nothing. The integration pass removes the callers:
-     __applyBudget(snapshot)  budget.js, on a newtab:budget subscribe line this
-                              page no longer sends, so it is never pushed
-     __boardRelayout()        was this page's own call to the board
-     __boardState()           app.js refreshBoardNotes(): null reads there as
-                              "board state unavailable"
-   __boardPaused stays REAL (see "Background"): it now pauses the clip. */
-window.__applyBudget = function () { return null; };
-window.__boardRelayout = function () {};
-window.__boardState = function () { return null; };
-
 /* ------------------------------------------------------------------ */
 /* Idle music                                                          */
 /*                                                                     */

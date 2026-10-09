@@ -878,23 +878,6 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #save-star.failed:hover { color: var(--warn); }
 #save-star[hidden] { display: none; }
 
-/* the pill that opens a new Claude tab */
-#newclaude {
-  gap: 7px;
-  height: 30px;
-  padding: 0 13px 0 11px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-}
-
-#newclaude:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#newclaude:active { background: var(--sheen), var(--glass-3); color: var(--fg); }
-
 /* --- session light --------------------------------------------- */
 /* Every status mark in the chrome is Helm's status dot: a flat 7px disc,
    never a glow. Idle is --st-idle; a live session is --st-working (the
@@ -904,8 +887,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
    always-running animation is off the table here too. The difference
    between live and needs-you is the colour, the glyph beside the title
    and the chip's waiting tint below. */
-.tab .dot,
-#newclaude .dot {
+.tab .dot {
   flex: 0 0 auto;
   display: inline-block;
   width: 7px;
@@ -918,8 +900,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 
 .tab .dot { margin-right: 8px; }
 
-.tab.live .dot,
-body.claude-live #newclaude .dot {
+.tab.live .dot {
   background: var(--st-working);
   box-shadow: none;
   animation: none;
@@ -930,9 +911,7 @@ body.claude-live #newclaude .dot {
    The dot turns --st-waiting, the chip takes the warn wash and its title
    the warn ink (Helm tabs.css .tab.st-waiting), and the active chip keeps
    its raised fill with the hairline tinted instead. */
-.tab.claude.needs-you .dot,
-#newclaude.attn .dot,
-body.claude-live #newclaude.attn .dot {
+.tab.claude.needs-you .dot {
   background: var(--st-waiting);
   box-shadow: none;
   animation: none;
@@ -1360,16 +1339,13 @@ body,
   body:not(.booted) .navrow { opacity: 1; }
   body.booted .chrome-layer { transition: none; }
   body.booted .navrow { transition: none; }
-  .tab.live .dot,
-  body.claude-live #newclaude .dot { animation: none; will-change: auto; }
-  .tab.claude.needs-you .dot,
-  #newclaude.attn .dot,
-  body.claude-live #newclaude.attn .dot { animation: none; will-change: auto; }
+  .tab.live .dot { animation: none; will-change: auto; }
+  .tab.claude.needs-you .dot { animation: none; will-change: auto; }
   .tab.active.loading::after { animation: none; }
   .tab::after, .tab::before, .tab-close, .tab-collapse, .tab-audio,
   .tab.pinned .tab-expand, .tab.collapsed .tab-expand,
   button, #omnibox, #zoom-badge, #save-star, #views > .split-divider,
-  .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
+  .tab .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item, #sidepane-resize { transition: none; }
   /* the theme still switches, it just arrives all at once */

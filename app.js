@@ -704,43 +704,6 @@ function tabsByWebContentsId() {
  * a guest that closed between the sample and now — counts toward that tail
  * instead of being given a name it has not got.
  */
-/*
- * A new tab's circuit board is paused while the page is off screen, and
- * newtab-bg.js lets go of its bitmap 5 s after that (and repaints it on the way
- * back). Both are silent by nature, so the Processes row says which state each
- * new tab's board is in: "board paused, bitmap released (3x)", or the restore
- * that had to fall back. Read from the guest's __boardState() at most once per
- * BOARD_NOTE_EVERY_MS, and only while a sample is going out (the table is open).
- */
-const BOARD_NOTE_EVERY_MS = 5000;
-let boardNotesAt = 0;
-
-function describeBoardState(st) {
-  // The circuit board is gone (the new tab is a Helm-style Home now) and its
-  // guest stub answers null, so null means "no board", not "unreadable": no
-  // note at all rather than a false "board state unavailable" on every row.
-  if (!st || typeof st !== 'object') return '';
-  const parts = [st.paused ? 'board paused' : (st.running ? 'board running' : 'board still')];
-  if (st.bitmap === 'released') parts.push('bitmap released');
-  if (st.releases > 0) parts[parts.length - 1] += ' (' + st.releases + 'x)';
-  if (st.restoreError) parts.push('restore fell back: ' + String(st.restoreError).slice(0, 60));
-  return parts.join(', ');
-}
-
-function refreshBoardNotes() {
-  const now = Date.now();
-  if (now - boardNotesAt < BOARD_NOTE_EVERY_MS) return;
-  boardNotesAt = now;
-  for (const tab of tabs) {
-    if (tab.kind !== 'page' || !isViewUsable(tab) || !isNewTabUrl(tab.url)) continue;
-    try {
-      Promise.resolve(tab.viewEl.executeJavaScript('window.__boardState ? window.__boardState() : null'))
-        .then((st) => { tab.boardNote = describeBoardState(st); })
-        .catch((err) => { tab.boardNote = 'board state unreadable: ' + String((err && err.message) || err).slice(0, 60); });
-    } catch (err) { /* guest went away mid-call */ }
-  }
-}
-
 function procRowLabel(wcIds, byId, receivingTab) {
   const named = [];
   let unplaced = 0;
@@ -748,7 +711,6 @@ function procRowLabel(wcIds, byId, receivingTab) {
     const tab = byId.get(id) || null;
     if (!tab) { unplaced += 1; continue; }
     let text = procRowNameFor(tab);
-    if (tab.boardNote && isNewTabUrl(tab.url)) text += ' · ' + tab.boardNote;
     // The guest reading this list is a new-tab page, so its own row is the one
     // row it can check against what it sees.
     if (receivingTab && tab.id === receivingTab.id) text += ' (this page)';
@@ -812,7 +774,6 @@ function nameStatsRenderers(sample, receivingTab) {
 function pushStatsToTab(tab, sample) {
   if (!isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
   if (!sample || typeof sample !== 'object') return;
-  refreshBoardNotes(); // throttled; lands on the NEXT sample's labels
   // Main's renderer rows all read "New tab"; only this document can say which
   // tab each one is. The sample is relayed whether or not that works.
   nameStatsRenderers(sample, tab);

@@ -327,14 +327,6 @@
 #downloads-panel .dl-act:hover { background: var(--hairline-strong); color: var(--text); }
 #downloads-panel .dl-act:active { background: var(--hairline); }
 
-/* Ask Claude is a word among glyphs on a finished row: it never wraps, and
-   the filename column (min-width: 0) gives up the space, not this. */
-#downloads-panel .dl-ask {
-  flex: 0 0 auto;
-  margin-left: 2px;
-  white-space: nowrap;
-}
-
 #downloads-panel .dl-act .glyph {
   font-family: var(--icon-font);
   font-size: 11px;
