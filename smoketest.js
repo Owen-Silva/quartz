@@ -17,7 +17,6 @@ const electron = require('electron'); // path to electron.exe
 const REQUIRED_IDS = [
   'tabstrip', 'newtab', 'back', 'forward', 'reload', 'omnibox', 'views',
   'titlebar', 'win-min', 'win-max', 'win-close',
-  'newclaude', // opens a Claude session as a tab (the old bottom pane is gone)
   'theme',     // light/dark toggle
 ];
 
@@ -141,7 +140,7 @@ const evaluate = async (c, expr) => {
   say('BODY FLAGS: ' + flags.value);
   if (!/"booted":true/.test(String(flags.value))) say('FAIL: body.booted never set, launch animation would stay stuck');
 
-  // A restored session may already hold Claude tabs (they come back as fresh
+  // A restored session may already hold Claude panes (they come back as fresh
   // sessions now). Close them so step 3 below measures the one it opens.
   await evaluate(c, `(() => { for (const t of tabs.filter((x) => x.kind === 'claude')) closeTab(t.id); return tabs.length; })()`);
 
@@ -153,24 +152,43 @@ const evaluate = async (c, expr) => {
   })()`);
   say('TAB: ' + tab.value);
 
-  // --- 3. open a Claude session as a tab ---
-  await evaluate(c, `document.getElementById('newclaude').click()`);
+  // --- 3. open the Claude pane beside the page (the only way a chamber opens) ---
+  // The chamber is still a tab of kind 'claude' in the strip, but only ever as
+  // one half of a split with the page it was opened beside.
+  const opened = await evaluate(c, `(() => {
+    const page = getActiveTab();
+    if (!page || page.kind !== 'page') return 'NO_PAGE';
+    return String(openClaudeBesideTab(page));
+  })()`);
+  say('OPEN BESIDE: ' + opened.value);
   await sleep(1500);
   const tabState = await evaluate(c, `JSON.stringify({
     chips: document.querySelectorAll('#tabstrip .tab').length,
     claudeChip: !!document.querySelector('#tabstrip .tab.claude'),
-    chipActive: !!document.querySelector('#tabstrip .tab.claude.active'),
     view: !!document.querySelector('#views .claude-view'),
     viewShown: (() => { const v = document.querySelector('#views .claude-view'); return !!v && getComputedStyle(v).display !== 'none'; })(),
-    pageHidden: (() => { const w = document.querySelector('#views webview'); return !!w && getComputedStyle(w).display === 'none'; })(),
+    // The partner's own webview, not just the first one: a restored session
+    // can hold other page tabs whose views are rightly hidden.
+    pageShown: (() => {
+      const chamber = tabs.find((t) => t.kind === 'claude');
+      const partner = chamber ? splitPartner(chamber) : null;
+      const w = partner && partner.viewEl;
+      return !!w && getComputedStyle(w).display !== 'none';
+    })(),
+    split: (() => {
+      const chamber = tabs.find((t) => t.kind === 'claude');
+      const partner = chamber ? splitPartner(chamber) : null;
+      return !!partner && partner.kind === 'page';
+    })(),
   })`);
-  say('CLAUDE TAB: ' + tabState.value);
-  const ok3 = /"claudeChip":true/.test(tabState.value) && /"viewShown":true/.test(tabState.value) && /"pageHidden":true/.test(tabState.value);
-  say(ok3 ? 'OK: Claude tab created, active, and the page tab is hidden behind it'
-          : 'FAIL: Claude tab did not open as a tab');
+  say('CLAUDE PANE: ' + tabState.value);
+  const ok3 = /"claudeChip":true/.test(tabState.value) && /"viewShown":true/.test(tabState.value)
+    && /"pageShown":true/.test(tabState.value) && /"split":true/.test(tabState.value);
+  say(ok3 ? 'OK: Claude pane opened, split with the page, both halves on screen'
+          : 'FAIL: Claude pane did not open beside the page');
 
   const xterm = await evaluate(c, `!!document.querySelector('#views .claude-view .xterm')`);
-  say(xterm.value === true ? 'OK: xterm.js instance attached inside the Claude tab'
+  say(xterm.value === true ? 'OK: xterm.js instance attached inside the Claude pane'
                            : 'FAIL: xterm never attached');
 
   // --- 4. the money check: did claude.exe actually boot and render? ---
@@ -178,7 +196,6 @@ const evaluate = async (c, expr) => {
   await sleep(20000);
   const live = await evaluate(c, `JSON.stringify({
     chipLive: !!document.querySelector('#tabstrip .tab.claude.live'),
-    bodyLive: document.body.classList.contains('claude-live'),
   })`);
   say('LIVE FLAGS: ' + live.value);
   const buf = await evaluate(c, `(() => {
@@ -207,7 +224,7 @@ const evaluate = async (c, expr) => {
 
   ws.close();
   if (KEEP) {
-    say('KEEP: app left running with the Claude tab open');
+    say('KEEP: app left running with the Claude pane open');
     proc.unref();
   } else {
     proc.kill();
