@@ -517,7 +517,7 @@ img.tab-icon[src=""],
 }
 
 /* broken: the page crashed or never loaded. The chip trades its favicon for a
-   warning glyph in --fg-3 — never amber, which means a live Claude session. */
+   warning glyph in --text-3 — quiet grey, never the warn colour of a pane that needs you. */
 .tab .tab-warn { display: none; }
 
 .tab.broken .tab-warn {
@@ -528,20 +528,20 @@ img.tab-icon[src=""],
   font-size: 11px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .tab.broken img.tab-icon { display: none; }
 
 /* asleep: the tab gave its renderer back. Deliberately quiet — no badge, no
    glyph, nothing that changes the chip's width — because the strip must not
-   reshuffle when a tab sleeps or wakes. The title drops to --fg-3 and the
+   reshuffle when a tab sleeps or wakes. The title drops to --text-3 and the
    favicon dims; hovering brings the title back up, so the chip still answers. */
-.tab.asleep .tab-title { color: var(--fg-3); }
+.tab.asleep .tab-title { color: var(--text-3); }
 
 .tab.asleep img.tab-icon { opacity: .55; }
 
-.tab.asleep:hover .tab-title { color: var(--fg-2); }
+.tab.asleep:hover .tab-title { color: var(--text-2); }
 
 /* ...and one mark, so a dim chip is not the only tell — a workspace can come
    back from a restart with every chip in it asleep, and "dim" needs something
@@ -554,7 +554,7 @@ img.tab-icon[src=""],
   top: 50%;
   transform: translateY(-50%);
   display: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: 10px;
   line-height: 1;
   pointer-events: none;
@@ -596,7 +596,7 @@ img.tab-icon[src=""],
    is shown by the glyph itself (E767 speaker vs E74F muted), and nothing
    about it glows: no text-shadow, playing or not. */
 
-/* muted is the quiet state in every sense: --fg-3, like the broken glyph */
+/* muted is the quiet state in every sense: --text-3, like the broken glyph */
 .tab-audio.is-muted { color: var(--text-3); }
 
 /* .glyph sets display:inline-block, so hidden has to be said louder */
@@ -953,7 +953,8 @@ body.claude-live #newclaude.attn .dot {
 
 /* --- tab well ------------------------------------------------- */
 /* No radius, no overflow clipping: guest views do not clip reliably.
-   No ground of its own, so the aurora reaches the glass chamber. */
+   No ground of its own, so the background layer shows through to the
+   Claude pane's tint and the side pane's. */
 /* The well ROW: the tab well, and the side pane beside it when a workspace
    asks for one. The row carries what #views used to carry — the seat under
    the chrome and the hairline along its top — so with the pane hidden the
@@ -964,7 +965,7 @@ body.claude-live #newclaude.attn .dot {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  border-top: 1px solid var(--edge);
+  border-top: 1px solid var(--hairline);
 }
 
 #views {
@@ -976,9 +977,11 @@ body.claude-live #newclaude.attn .dot {
 }
 
 /* --- the side pane: a column BESIDE the well ------------------ */
-/* Opaque, not glass: it stands next to a <webview>, and a guest page is not
-   in this document's compositing tree — there is nothing behind the pane to
-   blur, exactly as find.css and settings.css say of their own panes. One
+/* A docked panel: Helm's --surface-1 tint over the background layer. It
+   stands BESIDE a <webview>, never over one, so what shows through it is
+   the pre-blurred background, as under the strip — and since that layer is
+   blurred once in a bitmap, the pane takes no backdrop-filter of its own
+   (a tall blurred element is what dropped raster tiles on this GPU). One
    hairline on its left edge, no glow: it is furniture, not an alert. */
 #sidepane {
   position: relative;
@@ -989,8 +992,9 @@ body.claude-live #newclaude.attn .dot {
   width: 480px;
   min-width: 0;
   overflow: hidden;
-  background: var(--panel-bg);
-  border-left: 1px solid var(--edge);
+  background: var(--surface-1);
+  border-left: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
 /* display:flex above outranks the UA sheet's [hidden]{display:none}, so without
@@ -1006,28 +1010,29 @@ body.claude-live #newclaude.attn .dot {
 }
 
 /* The 6px grab strip on the pane's left edge. It is INSIDE the pane's width,
-   so it can never drift out of line with the edge it moves. Stepped hover,
-   like every other control in the chrome; nothing animates while dragging. */
+   so it can never drift out of line with the edge it moves. A quiet fill on
+   hover; nothing animates while dragging. Its focus ring is drawn INSIDE
+   (the pane clips its overflow, so an outer ring would be cut off). */
 #sidepane-resize {
   flex: 0 0 6px;
   align-self: stretch;
   cursor: col-resize;
   background: transparent;
-  transition: background-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease);
   touch-action: none;       /* the pointer events are ours, not the scroller's */
 }
 
-#sidepane-resize:hover { background: var(--glass-2); }
+#sidepane-resize:hover { background: var(--surface-3); }
 #sidepane-resize:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 /* While the handle is held: no transition anywhere in the row, and no text
    selection anywhere in the window. */
 body.sidepane-dragging { cursor: col-resize; }
-body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition: none; }
+body.sidepane-dragging #sidepane-resize { background: var(--accent-soft); transition: none; }
 
 #views webview {
   flex: 1 1 auto;
@@ -1067,14 +1072,14 @@ body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition
    `flex-basis` — the ratio is one number, not a relayout — and leaves
    everything else in #views display:none. */
 
-/* which half the omnibox is describing: two pixels of the same ion
-   line the omnibox itself is bordered with, laid along its top edge.
+/* which half the omnibox is describing: two pixels of the accent line
+   (the colour the focused omnibox is bordered with), along its top edge.
    A webview cannot carry a ::before, so the mark is its own element,
    parked over the focused view's measured rect by app.js. */
 #views > .split-focus {
   position: absolute;
   height: 2px;
-  background: var(--ion-line);
+  background: var(--accent-line);
   /* Never a click target: the mark lies over whichever half is live, and a
      press there has to reach the page or the terminal underneath it. */
   pointer-events: none;
@@ -1084,43 +1089,33 @@ body.sidepane-dragging #sidepane-resize { background: var(--glass-3); transition
   z-index: 3;
 }
 
-/* the grab handle between the halves: an --edge line either side of a
-   glass strip wide enough to catch a pointer. One per window, built
-   into #views on the first split and hidden (inline) the rest of the
-   time, so a split never adds a sibling next to a live guest. */
+/* the grab handle between the halves: a hairline either side of a strip
+   of the chrome's own tint, wide enough to catch a pointer. One per window,
+   built into #views on the first split and hidden (inline) the rest of the
+   time, so a split never adds a sibling next to a live guest. It sits over
+   the background layer like the strip does, so the same --surface-0 reads
+   on either theme (the old white glass vanished between two white pages). */
 #views > .split-divider {
   order: 2;
   flex: 0 0 6px;
   align-self: stretch;
-  border-left: 1px solid var(--edge);
-  border-right: 1px solid var(--edge);
-  background: var(--glass-2);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  background: var(--surface-0);
   cursor: col-resize;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-/* Touched, the handle becomes the lit seam stood on end — the same
-   line that runs under the chrome, --seam-v, brightest at the middle
-   and fading out at both ends. It is the one moment the divider is an
-   instrument rather than a gap. The seam itself is one token in both
-   themes; only the glass behind it is re-lit below, the same swap the
-   handle's resting state already makes.
+/* Touched, the handle takes the accent as STATE: its soft wash, edged in
+   the accent line, flat (no lit seam, no glow).
    body:has(> .split-scrim) is the drag: app.js lays that scrim over
-   the window for exactly as long as the pointer is down, so the seam
-   stays lit through a drag that has left the handle behind. No class
-   was added anywhere to make this work. */
+   the window for exactly as long as the pointer is down, so the handle
+   stays marked through a drag that has left it behind. No class was
+   added anywhere to make this work. */
 #views > .split-divider:hover,
 body:has(> .split-scrim) #views > .split-divider {
-  background: var(--seam-v), var(--glass-3);
-}
-
-/* The glass tokens are white overlays: they lift a strip off a dark page and
-   vanish on a light one, so in light the handle between two white halves read
-   as a gap rather than something to grab. --edge is the hairline that reads on
-   either ground, and the accent's soft wash is the hover. */
-:root[data-theme="light"] #views > .split-divider { background: var(--edge); }
-:root[data-theme="light"] #views > .split-divider:hover,
-:root[data-theme="light"] body:has(> .split-scrim) #views > .split-divider {
-  background: var(--seam-v), var(--ion-soft);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 /* A press that lands on a guest page belongs to the guest, which would
@@ -1157,25 +1152,25 @@ body:has(> .split-scrim) #views > .split-divider {
   display: flex;
   flex-direction: column;
   padding: 12px 14px;
-  background: var(--chamber-bg);
-  backdrop-filter: blur(28px) saturate(120%);
-  -webkit-backdrop-filter: blur(28px) saturate(120%);
-  box-shadow: inset 0 1px 0 var(--specular);
+  /* The frame is Helm's .panel: the --surface-1 tint over the background
+     layer, a 1px hairline, the large radius, the inset top edge and
+     the panel shadow. No backdrop-filter: the layer behind is
+     blurred once already, and a tall blurred element drops raster tiles
+     on this GPU. The 1px border is measured: proposeGrid() in terminal.js
+     subtracts border widths as well as padding. */
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-l);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-2);
   -webkit-user-select: text;
   user-select: text;
 }
 
-/* the chamber's lit top edge */
+/* The old lit top seam rode this pseudo-element. The inset top edge is in
+   the box-shadow above now (it follows the radius, a pseudo-element would
+   not), so the hook stays but paints nothing. */
 .claude-view::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--chamber-seam) 50%, transparent 100%);
-  pointer-events: none;
-  z-index: 1;
+  content: none;
 }
 
 .claude-view > .xterm { flex: 1 1 auto; min-height: 0; }
@@ -1198,84 +1193,73 @@ body:has(> .split-scrim) #views > .split-divider {
 }
 
 /* --- tab context menu (#tabmenu, rows written by app.js) ------- */
-/* Same recipe as the omnibox lens in history.css: a --panel-bg pane
-   (it can hang over a <webview>, where there is nothing to blur), rows
-   whose 2px rail only changes colour so lighting one shifts no text. */
+/* Helm's menu (components.css .menu): the near-opaque --overlay, a
+   stronger hairline, the medium radius and the deepest shadow. It hangs
+   over a <webview>, so it has to be legible on its own — --overlay is
+   93-95% opaque — and as a SMALL overlay it may take Helm's light blur
+   for the last few percent (never a tall or full-width element). */
 #tabmenu {
   position: fixed;
   z-index: 45;                 /* above #omni-suggest (40), .chrome-layer (3), #views (1) */
   box-sizing: border-box;
   min-width: 212px;
   padding: 4px;
-  /* a container, so: the cut corners (in the @supports block below)
-     and the lit rim. --panel-bg replaces --glass in the padding-box
-     layer because this pane hangs over a <webview> and paints its own
-     ground rather than borrowing one. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  /* --panel-bg keeps 4% of the page, and every other pane over a page blurs
-     that 4% away. This menu was the one that did not, so in light the page's
-     headline and links read straight through it. Same recipe as
-     #omni-suggest, the dropdown it sits next to. */
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-m);
+  background: var(--overlay);
+  -webkit-backdrop-filter: blur(24px) saturate(1.05);
+          backdrop-filter: blur(24px) saturate(1.05);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   outline: none;               /* it is focused on open; the pane is the ring */
   overflow: hidden;            /* the rows' corners never poke the radius */
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 12px 34px var(--shade-drop);
+  box-shadow: var(--shadow-3);
 }
 
 /* There is no CSS reset in this app, so [hidden] is spelled out. */
 #tabmenu[hidden] { display: none; }
 
+/* Rows keep their 32px and their 2px left lane (transparent now), so the
+   text sits exactly where it did; the highlight is Helm's plain fill. */
 #tabmenu .menu-item {
   display: flex;
   align-items: center;
   height: 32px;
   padding: 0 12px;
   border-left: 2px solid transparent;
-  border-radius: var(--radius-ctl);   /* a menu row is a control, never bevelled */
+  border-radius: var(--radius-s);
   white-space: nowrap;
   cursor: default;
-  transition: background-color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease);
 }
 
 #tabmenu .menu-item.is-hi {
-  background: var(--glass-2);
-  border-left-color: var(--ion);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* dimmed and inert: nothing to click on an item that cannot run */
 #tabmenu .menu-item.is-off {
-  color: var(--fg-3);
+  color: var(--text-3);
+  opacity: 0.45;
   pointer-events: none;
 }
 
-/* A rule that fades out to the right instead of ruling all the way
-   across: the seam motif at the scale of a list. Every divider in the
-   skin is this, never a solid --edge line. */
+/* Helm's menu separator: one plain hairline, inset from the edges */
 #tabmenu .menu-sep {
   height: 1px;
-  margin: 4px 8px;
-  background: linear-gradient(90deg, var(--edge), transparent);
+  margin: 4px 6px;
+  background: var(--hairline);
 }
 
 /* --- crash + load-failure cards (.tab-card, built by app.js) --- */
 /* A dead guest paints nothing, so the chrome covers the well rather
    than replacing the tab. app.js shows the card for the active tab
-   alone, in the same loop that shows its view. */
+   alone, in the same loop that shows its view. It lies OVER the guest,
+   so its ground is the opaque --surface-solid. No radius on the card
+   itself: it is inset 0 over the whole well, the well's ground for as
+   long as the guest is dead, not a container floating in it. */
 .tab-card {
   position: absolute;
   inset: 0;
@@ -1286,126 +1270,72 @@ body:has(> .split-scrim) #views > .split-divider {
   justify-content: center;
   gap: 10px;
   padding: 24px;
-  background: var(--panel-bg);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  /* the card is read like a panel readout, dead host and all */
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  background: var(--surface-solid);
+  color: var(--text);
+  font-family: var(--font);
   text-align: center;
 }
-
-/* No bevel and no rim on the card itself: it is inset 0 over the whole
-   well, so it is the well's ground for as long as the guest is dead,
-   not a container floating in it — cut corners there would open two
-   triangles onto the blank guest behind. The treatment lands on what
-   is inside instead. */
 
 .tab-card .card-glyph {
   font-size: 30px;
   line-height: 1;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .tab-card .card-head {
-  font-size: 16px;
-  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  color: var(--text);
 }
 
 .tab-card .card-line {
   max-width: 440px;
-  color: var(--fg-2);
-  font-size: 12.5px;
+  color: var(--text-2);
+  font-size: var(--fs-s);
   font-variant-numeric: tabular-nums;   /* hosts, ports, error codes */
   overflow-wrap: anywhere;     /* a long host must not widen the card */
 }
 
-/* the one control on the card: round corners, and the lit rim, so the
-   thing you are meant to press is the thing carrying light. Its hover and
-   press states tint the glass, so the rim cannot be a background layer
-   under them — it is a ring on the button's own ::before (both of its
-   pseudo-elements were free), sitting on the transparent 1px border. */
+/* the one control on the card: Helm's button (components.css .btn) — a
+   card-surface fill, a hairline, the inset top edge; hover firms both. */
 .tab-card .card-btn {
   position: relative;
   margin-top: 6px;
   height: 30px;
   padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
-  background: var(--panel-bg);
-  color: var(--fg);
-  font-size: 12.5px;
-  transition: background-color 140ms steps(3, end);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  color: var(--text);
+  font-size: var(--fs-s);
+  font-weight: 500;
 }
 
-.tab-card .card-btn::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  corner-shape: inherit;
-  padding: 1px;
-  background: var(--rim);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-
-.tab-card .card-btn:hover { background: var(--sheen), var(--glass-2); }
-.tab-card .card-btn:active { background: var(--sheen), var(--glass-3); }
-
-.tab-card .card-btn:hover::before,
-.tab-card .card-btn:active::before { background: var(--rim-focus); }
-
-/* --- the bevel ------------------------------------------------- */
-/* The one memorable thing, kept in one place so it can be read at a
-   glance: which corners in the chrome are cut, and nothing else.
-   round bevel round bevel = TL round, TR cut, BR round, BL cut — two
-   cuts on the diagonal, along the same axis as the sheen. The whole
-   section is behind @supports, so anywhere corner-shape is missing
-   every one of these simply keeps the plain round radius it already
-   declares. No clip-path: it would take the borders and the shadows
-   with it, and the rim IS a border.
-   Controls are deliberately absent — buttons, badges, menu rows and
-   the pills keep --radius-ctl, which is what makes a cut corner mean
-   "this is a container". */
-@supports (corner-shape: bevel) {
-  /* the lit instrument slot, and the ring anchored over it: the ring is
-     a separate box, so it is cut here too or it would square off the
-     slot's two cut corners. */
-  #omnibox,
-  .navrow::after { corner-shape: round bevel round bevel; }
-
-  /* the active chip, and the chip while it is in the air */
-  .tab.active,
-  .tab.dragging { corner-shape: round bevel round bevel; }
-
-  /* the popover that hangs over a page */
-  #tabmenu { corner-shape: round bevel round bevel; }
-}
+.tab-card .card-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+.tab-card .card-btn:active { background: var(--surface-2); }
+.tab-card .card-btn:focus-visible { box-shadow: var(--focus-ring); }
 
 /* --- scrollbars (chrome only) --------------------------------- */
+/* Helm base.css: thin and quiet, a 4px thumb floating in a 10px gutter. */
 #tabstrip::-webkit-scrollbar { height: 0; width: 0; }
 
-body ::-webkit-scrollbar { width: 9px; height: 9px; }
+body ::-webkit-scrollbar { width: 10px; height: 10px; }
 body ::-webkit-scrollbar-track { background: transparent; }
 body ::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 10px;
 }
-body ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+body ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 body ::-webkit-scrollbar-corner { background: transparent; }
 
 /* --- theme transition ----------------------------------------- */
-/* Flipping data-theme should read as the glass being re-lit, not as a
-   snap. Only the lit surfaces carry it; <html> itself never animates,
-   so the very first paint after theme-boot.js is instant.
-   (#omnibox carries background-color in its own rule, above, to keep
-   its 200ms ease-out focus glow.) */
+/* Flipping data-theme re-tints the surfaces in Helm's short tempo rather
+   than snapping. <html> itself never animates, so the very first paint
+   after theme-boot.js is instant. */
 html { transition: none; }
 
 body,
@@ -1414,29 +1344,27 @@ body,
 .navrow,
 .tab,
 .claude-view {
-  transition: background-color 180ms ease,
-              color 180ms ease,
-              border-color 180ms ease,
-              box-shadow 180ms ease;
+  transition: background-color var(--dur) var(--ease),
+              color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
 
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .aurora-pool, .aurora-rim { animation: none; }
-  body:not(.booted) .chrome-layer { opacity: 1; filter: none; transform: none; }
-  body:not(.booted) .navrow { opacity: 1; transform: none; }
+  body:not(.booted) .chrome-layer { opacity: 1; transform: none; }
+  body:not(.booted) .navrow { opacity: 1; }
   body.booted .chrome-layer { transition: none; }
   body.booted .navrow { transition: none; }
   .tab.live .dot,
   body.claude-live #newclaude .dot { animation: none; will-change: auto; }
-  /* The waiting mark stays amber and stays put; only the pulse goes. */
   .tab.claude.needs-you .dot,
   #newclaude.attn .dot,
   body.claude-live #newclaude.attn .dot { animation: none; will-change: auto; }
-  .tab.loading::after { animation: none; }
-  .tab::after, .tab::before, .tab-close, .tab-collapse,
+  .tab.active.loading::after { animation: none; }
+  .tab::after, .tab::before, .tab-close, .tab-collapse, .tab-audio,
   .tab.pinned .tab-expand, .tab.collapsed .tab-expand,
-  #omnibox, #zoom-badge, #save-star,
+  button, #omnibox, #zoom-badge, #save-star, #views > .split-divider,
   .tab .dot, #newclaude .dot, .tab-card .card-btn { transition: none; }
   /* the drop slot still opens, it just arrives all at once */
   .tab.drag-shift, #tabmenu .menu-item, #sidepane-resize { transition: none; }
