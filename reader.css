@@ -5,13 +5,12 @@
    nothing here reaches another element. The reading page has its
    own stylesheet (reader-page.css) and shares nothing with this.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own — :root[data-theme="light"]
-   relights all of it for free.
+   LOOK. Helm's icon button. Every rule is written against tokens.css
+   names (chrome.css @imports it), so html[data-theme="light"]
+   relights it with no block of its own.
 
-   MOTION. The nav row sits on a backdrop-filter, so an animated
-   frame re-blurs the page behind it. Nothing animates continuously
-   here; the only transition is the one .iconbtn already carries.
+   MOTION. Nothing animates continuously here; the only transition is
+   the one .iconbtn already carries.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -21,28 +20,18 @@
    load-bearing, not housekeeping. */
 #reader[hidden] { display: none; }
 
-/* Shape, hover, radius and glass all come from `.iconbtn` in
-   chrome.css. This file adds only the icon font and the one state
-   chrome.css cannot know about: the instrument under the pointer. */
+/* Shape, hover fill, radius and colour all come from `.iconbtn` in
+   chrome.css (Helm's icon button: --text-2 at rest, the raised fill
+   and --text under the pointer). No halo on hover: glow is reserved
+   for the focus ring. This file adds only the icon font. */
 #reader .glyph {
   font-family: var(--icon-font);
   font-size: 15px;
   line-height: 1;
 }
 
-/* The glyph is the only thing that lights: the button itself keeps
-   the same glass as every other instrument in the row. Status here is
-   light, not paint — the glyph takes the same halo a pip does, so a
-   readable page reads as an instrument that has power. */
-#reader:hover .glyph {
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
-}
-
-/* Focus is light too: a hairline ion ring, never a thick white outline.
-   No box-shadow halo here — this button wears .glass, whose inset
-   shadows a box-shadow would replace for as long as it held focus. */
+/* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #reader:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
