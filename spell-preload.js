@@ -238,6 +238,12 @@ const { ipcRenderer, webFrame } = require('electron');
       if (mode === 'email' || mode === 'url' || mode === 'tel' || mode === 'numeric' || mode === 'decimal') return null;
     }
     if (t.closest(CODE_SELECTOR)) return null;
+    // Model editors (Slate = Discord, Lexical, Draft) keep their own document model and rewrite
+    // the DOM from it, so an insertText we make can be undone or misplaced by the editor, and the
+    // lane's stand-in showed Backspace-to-undo deleting the WRONG character there. Until a fix is
+    // proven in a real one, auto-fix stays off in them; the red underline and the right-click
+    // suggestions (native spellcheck + main's context menu) still work, so nothing is silently lost.
+    if (kind === 'ce' && (t.closest(MODEL_EDITOR) || t.querySelector('[data-contents="true"]'))) return null;
     return { el: t, kind, search };
   }
 
