@@ -13,6 +13,11 @@
      wallpaper  a copy of the Windows wallpaper, made by main into
                 <userData>/backgrounds/wallpaper.<ext> (bgfiles.js).
                 The default.
+     builtin    one of Helm's photos, shipped in assets/backgrounds/ and
+                listed by main (Settings.builtinBackground(id)). An id
+                this build does not have shows the WALLPAPER instead,
+                with state 'fallback' and the reason, so the window is
+                never left plain over a stale setting.
      image      the user's own picture, the JPEG Settings keeps in
                 IndexedDB (db 'browser', store 'assets', 'newtab-bg').
      video      the user's clip or GIF, main's copy in backgrounds/.
@@ -120,6 +125,7 @@
   function signature(cfg) {
     if (cfg.kind === 'video') return 'video|' + stillKey(cfg);
     if (cfg.kind === 'image') return 'image|' + (cfg.imageRev || 0);
+    if (cfg.kind === 'builtin') return 'builtin|' + (cfg.id || '');
     return String(cfg.kind);
   }
 
@@ -369,6 +375,41 @@
     });
   }
 
+  /**
+   * A built-in photo: a file:// URL in the app folder, read like the
+   * wallpaper copy. When Settings cannot resolve the id (a newer build's
+   * photo, a deleted file, no list) the WALLPAPER is read in its place and
+   * the result carries fallbackReason, which render() publishes as state
+   * 'fallback' with that picture still shown (source.shown = true).
+   */
+  function builtinSource(cfg) {
+    var s = settings();
+    var ask = s && typeof s.builtinBackground === 'function'
+      ? Promise.resolve().then(function () { return s.builtinBackground(cfg.id); })
+      : Promise.resolve({ ok: false, reason: 'this window was started before the built-in photos existed; restart the browser' });
+    return ask.then(function (res) {
+      if (res && res.ok && res.item) {
+        var item = res.item;
+        var source = { type: 'builtin', id: item.id, title: item.title, url: item.fileUrl, fileName: item.file };
+        return decodeUrl(item.fileUrl).then(function (bitmap) {
+          return { bitmap: bitmap, source: source };
+        }, function (err) {
+          throw fail(reasonOf(err), source);
+        });
+      }
+      var why = (res && res.reason) || 'the built-in photo could not be found';
+      return wallpaperSource().then(function (got) {
+        got.source.fallbackFor = { type: 'builtin', id: cfg.id || null };
+        got.source.shown = true;
+        got.fallbackReason = why;
+        return got;
+      }, function (err) {
+        throw fail(why + '; the Windows wallpaper could not be shown either (' + reasonOf(err) + ')',
+          { type: 'builtin', id: cfg.id || null });
+      });
+    });
+  }
+
   function imageSource() {
     var store = assets();
     var source = { type: 'image', key: IMAGE_KEY };
@@ -539,6 +580,7 @@
 
     var pick = kind === 'image' ? imageSource()
       : kind === 'video' ? videoSource(cfg)
+      : kind === 'builtin' ? builtinSource(cfg)
       : wallpaperSource();
 
     return pick.then(function (got) {
@@ -549,6 +591,11 @@
         if (!shown || mySeq !== seq) return;
         var note = null;
         if (kind === 'wallpaper' && recopyNote) { note = recopyNote; recopyNote = null; }
+        // A built-in id stood in for by the wallpaper: shown, but said.
+        if (got.fallbackReason) {
+          publish({ kind: kind, state: 'fallback', reason: got.fallbackReason, source: got.source });
+          return;
+        }
         publish({ kind: kind, state: 'ok', reason: note, source: got.source });
       }, function (err) {
         throw fail(reasonOf(err), got.source);

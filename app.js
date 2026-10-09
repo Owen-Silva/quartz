@@ -359,7 +359,7 @@ function newTabUrl() {
       // push lands. Older builds stored 'board'/'aurora'; settings.js migrates
       // them, and anything unknown reads as the default, the wallpaper.
       const storedKind = all.newtabBackground && all.newtabBackground.kind;
-      const bgKind = ['wallpaper', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'wallpaper';
+      const bgKind = ['wallpaper', 'builtin', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'wallpaper';
       params.set('bg', bgKind);
     } catch (err) { /* defaults are fine */ }
   }
@@ -438,8 +438,9 @@ function pushHistoryToAll() {
 
 /**
  * What the new tab guest's __applyBackground() gets (the background contract):
- *   { kind: 'wallpaper'|'image'|'video'|'none', dim, url?, fileName?, state, reason? }
- * url is the file:// URL of main's wallpaper copy, the picture's data: URL, or
+ *   { kind: 'wallpaper'|'builtin'|'image'|'video'|'none', dim, url?, fileName?, state, reason? }
+ * url is the file:// URL of main's wallpaper copy, of a built-in photo in the
+ * app folder (assets/backgrounds/), the picture's data: URL, or
  * the file:// URL of main's copy of the clip (fileName lets the page pick
  * <video> over <img> for a GIF). state/reason come from backdrop.js, which has
  * already tried to read the same source for the chrome: when it could not
@@ -471,6 +472,14 @@ function backgroundPayload(bg) {
     if (!reason) reason = kind === 'wallpaper' ? 'the Windows wallpaper could not be copied' : 'no picture is chosen yet';
   }
   if (state === 'fallback') url = '';
+  /* A built-in id this build does not have: the chrome stands the wallpaper
+     in for it (backdrop.js, source.shown), so the new tab does the same,
+     still marked 'fallback' with the reason. Not when the layer says the
+     wallpaper failed too. */
+  if (state === 'fallback' && kind === 'builtin' && typeof bg.fallbackUrl === 'string' && bg.fallbackUrl &&
+      !(seen && seen.kind === kind && seen.state === 'fallback' && !(seen.source && seen.source.shown))) {
+    url = bg.fallbackUrl;
+  }
 
   payload.state = state;
   if (reason) payload.reason = reason;

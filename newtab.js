@@ -4164,8 +4164,12 @@ window.__search = function (text) {
 /* pushes it in on dom-ready and on every change:                      */
 /*                                                                     */
 /*   window.__applyBackground({ kind, dim, url, fileName, state, reason }) */
-/*     kind      'wallpaper' | 'image' | 'video' | 'none'              */
+/*     kind      'wallpaper' | 'builtin' | 'image' | 'video' | 'none'  */
 /*               (a stored 'board' or 'aurora' reads as 'wallpaper')   */
+/*               'builtin' is one of Helm's photos (file:// URL in the  */
+/*               app folder), a still exactly like the wallpaper; for  */
+/*               an id the build lacks it arrives as 'fallback' WITH   */
+/*               the wallpaper's url, and the note says so.            */
 /*     dim       0..0.6, the wash over the picture                     */
 /*     url       wallpaper: file:// URL of main's copy of the Windows   */
 /*               wallpaper; image: the data: URL out of IndexedDB;     */
@@ -4182,7 +4186,12 @@ window.__search = function (text) {
 /* load or decode HERE, leaves the plain --bg and says why in #bg-note. */
 /* ------------------------------------------------------------------ */
 
-const BG_KINDS = ['wallpaper', 'image', 'video', 'none'];
+const BG_KINDS = ['wallpaper', 'builtin', 'image', 'video', 'none'];
+
+/** The kinds that are one still picture (an <img>-able URL, no clip). */
+function bgIsStill(kind) {
+  return kind === 'wallpaper' || kind === 'builtin' || kind === 'image';
+}
 const BG_DIM_DEFAULT = 0.25;
 const BG_DIM_MAX = 0.6;
 
@@ -4246,6 +4255,7 @@ function bgCssUrl(url) {
 function bgWhat(kind, fileName) {
   if (kind === 'wallpaper') return 'The copy of the Windows wallpaper';
   const name = typeof fileName === 'string' && fileName ? ' (' + fileName + ')' : '';
+  if (kind === 'builtin') return 'The built-in photo' + name;
   if (kind === 'video') return 'The background clip' + name;
   return 'The background picture' + name;
 }
@@ -4272,7 +4282,11 @@ function paintBgNote() {
   if (!note) return;
   let text = '';
   if (bgState.localError) text = bgState.localError;
-  else if (bgState.state === 'fallback') {
+  else if (bgState.state === 'fallback' && bgState.kind === 'builtin' && bgState.url) {
+    // The wallpaper standing in for a built-in id this build does not have.
+    text = 'Built-in photo unavailable' + (bgState.reason ? ': ' + bgState.reason : '') +
+      '. Showing your Windows wallpaper instead.';
+  } else if (bgState.state === 'fallback') {
     text = 'Background unavailable' + (bgState.reason ? ': ' + bgState.reason : '');
   }
   if (note.textContent !== text) note.textContent = text;
@@ -4429,10 +4443,10 @@ function applyBackground(bg) {
   const fileName = typeof next.fileName === 'string' ? next.fileName : '';
   let url = kind === 'none' ? '' : raw;
   /* A still is only ever a picture: no data:video in the stylesheet. */
-  if ((kind === 'wallpaper' || kind === 'image') && /^data:(?!image\/)/i.test(url)) url = '';
+  if (bgIsStill(kind) && /^data:(?!image\/)/i.test(url)) url = '';
   const clipLayer = kind === 'video' ? bgClipLayer(url, fileName) : '';
 
-  const sameStill = (kind === 'wallpaper' || kind === 'image') &&
+  const sameStill = bgIsStill(kind) &&
     url === bgState.url && kind === bgState.kind && bgState.stillShown && !bgState.localError;
 
   bgSeq += 1;
@@ -4450,7 +4464,7 @@ function applyBackground(bg) {
 
   /* The still: kept as it is when the push repeats it, so a settings push
      that changed only the dim does not blink the picture. */
-  if ((kind === 'wallpaper' || kind === 'image') && url) {
+  if (bgIsStill(kind) && url) {
     if (!sameStill) {
       setStill('');
       loadStill(url, bgSeq);
