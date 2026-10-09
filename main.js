@@ -1315,6 +1315,41 @@ ipcMain.handle('background:clear-video', () => {
   return { ok: true };
 });
 
+// The Windows wallpaper copy: Quartz's DEFAULT background. bgfiles.js reads
+// %APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper, sniffs its bytes and
+// writes <userData>/backgrounds/wallpaper.<ext> -- once when it is missing
+// ('background:wallpaper', which every boot asks), and again only when the
+// user presses "Copy again from Windows" ('background:recopy-wallpaper').
+// Both resolve { ok, fileUrl, fileName, copiedAt, reason } and never reject;
+// a failed re-copy still hands back the old copy's fileUrl beside the reason.
+function wallpaperCopy(force) {
+  let appDataDir = process.env.APPDATA || '';
+  try { appDataDir = app.getPath('appData') || appDataDir; } catch { /* keep the env value */ }
+  try {
+    const out = bgFiles.copyWallpaper({ appDataDir, dir: backgroundsDir(), force: !!force });
+    return {
+      ok: !!out.ok,
+      fileUrl: out.fileUrl || null,
+      fileName: out.fileName || null,
+      copiedAt: out.copiedAt || null,
+      reason: out.reason || null,
+    };
+  } catch (err) {
+    return { ok: false, fileUrl: null, fileName: null, copiedAt: null,
+      reason: (err && err.message) || 'the wallpaper could not be copied' };
+  }
+}
+
+ipcMain.handle('background:wallpaper', (event) => {
+  if (!isChromeSender(event)) return { ok: false, fileUrl: null, fileName: null, copiedAt: null, reason: 'refused' };
+  return wallpaperCopy(false);
+});
+
+ipcMain.handle('background:recopy-wallpaper', (event) => {
+  if (!isChromeSender(event)) return { ok: false, fileUrl: null, fileName: null, copiedAt: null, reason: 'refused' };
+  return wallpaperCopy(true);
+});
+
 // ---------------------------------------------------------------------------
 // Idle music: the user's own tracks
 //

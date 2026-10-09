@@ -157,7 +157,12 @@ contextBridge.exposeInMainWorld('api', {
     // ('cancelled', 'too-large' past 512 MB, or a message). Never rejects.
     chooseVideo: () => ipcRenderer.invoke('background:choose-video'),
     // Deletes the copied clip; resolves { ok: true } either way.
-    clearVideo: () => ipcRenderer.invoke('background:clear-video')
+    clearVideo: () => ipcRenderer.invoke('background:clear-video'),
+    // The Windows wallpaper copy (the default background). wallpaper() copies
+    // it once if there is no copy yet; recopyWallpaper() re-reads it from
+    // Windows. Both resolve { ok, fileUrl, fileName, copiedAt, reason }.
+    wallpaper: () => ipcRenderer.invoke('background:wallpaper'),
+    recopyWallpaper: () => ipcRenderer.invoke('background:recopy-wallpaper')
   },
   // The idle music player's own tracks. Nothing is copied: main runs the picker
   // and hands back descriptors, and the chrome plays each file where it lies
