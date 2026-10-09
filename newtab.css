@@ -68,14 +68,15 @@
 /* --- Home's own values (Helm home.css, as they are) ---------- */
 /* --home-card is the one addition: the tiles here are taller than
    Helm's cards and may sit over a moving clip, so instead of blurring
-   they are the opaque surface at 86%. */
+   they are the opaque surface at 92% (86% let a bright photo read
+   through the instrument card, measured on the Windows wallpaper). */
 :root {
   --home-glass: rgba(14, 15, 16, 0.5);
   --home-glass-hover: rgba(24, 25, 27, 0.62);
   --home-edge: rgba(255, 255, 255, 0.1);
   --home-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 18px rgba(0, 0, 0, 0.38);
   --home-scrim: 9 10 11;
-  --home-card: color-mix(in srgb, var(--surface-solid) 86%, transparent);
+  --home-card: color-mix(in srgb, var(--surface-solid) 92%, transparent);
 
   --rail-w: 352px;                 /* the markets tile's width */
 }
@@ -280,6 +281,7 @@ body {
   width: 16px;
   height: 16px;
   margin-top: -8px;
+  z-index: 1;                      /* over the field, which paints after it */
   color: var(--text-2);
   pointer-events: none;
 }
@@ -1926,7 +1928,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 /* Chips are controls, not containers: they keep ordinary round corners
@@ -2002,7 +2004,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 32px;                /* Helm: a label opens a new group */
 }
 
 /* The amber of a request that did not happen: the chrome's --amber, which
@@ -2017,17 +2019,17 @@ body {
 
    It costs the column ~10px of height, once. Nothing here may CHURN.
 
-   Its right end holds the row's note — "already saved", or, in amber, a
+   After the title comes the row's note — "already saved", or, in amber, a
    request the browser did not answer. Same line, so a note costs no height
    unless a narrow window makes it wrap. */
 .saved-caption {
   position: relative;
   display: flex;
   align-items: baseline;
+  justify-content: center;         /* centred over the centred tiles */
   gap: 12px;
   flex: 0 0 100%;               /* own line, above the tiles */
-  margin: 0 0 7px;
-  padding-bottom: 5px;
+  margin: 0 0 4px;
   /* Helm's .home-label: the label sits on the picture, so it wears the
      Home text shadow, the one other place on the page that does. */
   color: var(--text);
@@ -2036,16 +2038,16 @@ body {
   text-shadow: var(--home-shadow);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
-  text-align: left;
+  text-align: center;
 }
 
 .saved-title { flex: 0 0 auto; }
 
 .saved-status {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   font-weight: 500;
-  text-align: right;
+  text-align: left;
 }
 
 .saved-status[data-tone="warn"] { color: var(--saved-warn); }
