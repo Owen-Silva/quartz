@@ -182,15 +182,17 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 .backdrop > div { position: absolute; inset: 0; }
 
 
-/* --- glass recipe -------------------------------------------- */
+/* --- the tint recipe (class .glass, kept for its many users) -- */
+/* What used to be frosted glass is now Helm's window-chrome tint: a
+   translucent neutral over the background layer, a 1px inset top edge,
+   and NO backdrop-filter — the layer underneath is blurred once, in a
+   bitmap, so a bar never re-blurs it (and full-width blurred bars are
+   what made this GPU drop raster tiles). Panes that float over a web
+   page override the fill with --surface-solid / --overlay in their own
+   sheets: there is nothing behind them to show through. */
 .glass {
-  background: var(--sheen), var(--glass);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 1px 0 var(--shade-drop);
+  background: var(--surface-0);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
 /* --- chrome layer + launch entrance --------------------------- */
@@ -200,27 +202,27 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
   flex: 0 0 auto;
 }
 
+/* The entrance is a short fade and a 2px settle — Helm's 150ms ceiling,
+   no blur (a filter on the whole chrome would have to be rasterised
+   twice for a flourish nobody waits for). */
 body:not(.booted) .chrome-layer {
   opacity: 0;
-  filter: blur(6px);
-  transform: translateY(-4px);
+  transform: translateY(-2px);
 }
 
 body.booted .chrome-layer {
   opacity: 1;
-  filter: none;                    /* back to none so child backdrop-filters work */
   transform: none;
-  /* the entrance, plus the 180ms theme tempo (see "theme transition") */
-  transition: opacity 600ms ease-out, filter 600ms ease-out, transform 600ms ease-out,
-              background-color 180ms ease, color 180ms ease,
-              border-color 180ms ease, box-shadow 180ms ease;
+  /* the entrance, plus the theme tempo (see "theme transition") */
+  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease),
+              background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 
-body:not(.booted) .navrow { opacity: 0; transform: translateY(-3px); }
+body:not(.booted) .navrow { opacity: 0; }
 body.booted .navrow {
   opacity: 1;
-  transform: none;
-  transition: opacity 520ms ease-out 120ms, transform 520ms ease-out 120ms;
+  transition: opacity var(--dur-slow) var(--ease);
 }
 
 /* --- icon glyphs --------------------------------------------- */
@@ -238,38 +240,31 @@ button {
   padding: 0;
   border: none;
   background: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   font: inherit;
   cursor: default;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 
-button:disabled { color: var(--fg-3); }
+button:disabled { color: var(--text-3); }
 
-/* Focus is light, not paint: a 1px accent ring with the pip's halo
-   sized up behind it, never a thick white outline. */
+/* Focus is Helm's ring and nothing else: a 1px gap in the base colour,
+   then 2px of the accent at half strength (tokens.css --focus-ring is a
+   whole box-shadow value). It REPLACES any resting shadow while it
+   shows — a ring added to an inset edge would need every control to
+   restate its edge here. Never an outline, never a glow. */
 button:focus-visible,
 .tab:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-/* A glass control keeps its lit lip and its shaded underside while it
-   is focused; the halo is simply added to them. Said after, and one
-   class heavier, so it beats the rule above rather than erasing it. */
-button.glass:focus-visible {
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 1px 0 var(--shade-drop),
-    0 0 0 3px var(--ion-soft);
-}
-
-/* --- titlebar: the thinnest, lightest pane -------------------- */
+/* --- titlebar (the tab strip's row) --------------------------- */
 #titlebar {
   position: relative;
   display: flex;
@@ -277,23 +272,23 @@ button.glass:focus-visible {
   gap: 4px;
   height: var(--titlebar-h);
   padding-left: 8px;
-  border-bottom: 1px solid var(--edge);
-  background: var(--sheen), var(--glass-thin);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-0);
+  box-shadow: none;              /* the top edge of the window is the frame's own */
   -webkit-app-region: drag;
 }
 
 /* --- the strip tint: which workspace you are in, very faintly ---
    app.js stamps data-ws-colour on the titlebar (the row the tab strip lives
-   in) with the current workspace's colour; the five values are workspaces.css
-   tokens, the same ones the dots wear, at 7% — enough to tell two workspaces
-   apart out of the corner of the eye, not enough to be a colour scheme. Home
-   has no colour, so it carries no attribute and this never applies to it. */
+   in) with the current workspace's colour; the five values are the
+   workspace tokens (alias block above), the same ones the dots wear, at
+   7% — enough to tell two workspaces apart out of the corner of the eye,
+   not enough to be a colour scheme. Home has no colour, so it carries no
+   attribute and this never applies to it. */
 #titlebar[data-ws-colour] {
   background:
     linear-gradient(var(--ws-tint), var(--ws-tint)),
-    var(--sheen), var(--glass-thin);
+    var(--surface-0);
 }
 
 #titlebar[data-ws-colour="ion"]      { --ws-tint: var(--ws-ion-wash); }
@@ -313,16 +308,22 @@ button.glass:focus-visible {
   overflow-y: hidden;
 }
 
+/* the + after the strip: Helm's ghost icon button */
 #newtab {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
 }
 
-#newtab:hover { background: var(--sheen), var(--glass-2); color: var(--fg); }
-#newtab:active { background: var(--sheen), var(--glass-3); }
+#newtab:hover { background: var(--surface-3); color: var(--text); }
+#newtab:active { background: var(--surface-2); }
 
 /* --- tabs (chips injected at runtime) ------------------------- */
+/* Helm's tab (ui/shell/tabs.css): quiet at rest, a faint fill on hover,
+   and the active one a raised panel — --surface-1, a hairline, the inset
+   top edge and the small shadow. The accent is only the short marker
+   under the active title (::after), never a fill or a rim. */
 .tab {
   position: relative;
   display: flex;
@@ -339,66 +340,46 @@ button.glass:focus-visible {
   min-width: 104px;
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
-  border-radius: var(--bevel);
+  border-radius: var(--radius-m);
   background: transparent;
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* the title is a readout: Bahnschrift a notch narrower, opened up a
-     hair, and figures in a host or a count line up column to column */
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  line-height: 1;
   white-space: nowrap;
   cursor: default;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 
 .tab:hover {
-  background: var(--sheen), var(--glass-2);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--surface-0);
+  color: var(--text);
 }
 
-/* The active chip is the one segment of the strip that is a container:
-   it takes the cut corners (in the @supports block near the end) and
-   the lit rim, so it reads as a pane seated in the strip rather than a
-   chip tinted a shade lighter. Inactive chips stay quiet — hover is
-   still nothing but a lighter glass and a hairline.
-
-   The rim is a border-box layer under a transparent border, and the
-   interior above it has to be OPAQUE or the gradient shows through the
-   whole chip instead of sitting on its edge — that bleed is what turned
-   the chip into a grey blob. A chip cannot take the ring-on-a-pseudo
-   treatment: ::after is the ion line (and the loading shimmer) and
-   ::before is the workspace bar, so both are spoken for. So this is the
-   addendum's opaque-interior variant — --panel-bg under the glass tint,
-   which keeps the chip reading lighter than its neighbours while the
-   rim stops at the border. */
 .tab.active {
-  border-color: transparent;
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 6px 14px -8px var(--shade-drop);
+  background: var(--surface-1);
+  border-color: var(--hairline);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
 }
 
-/* the ion line under the active chip */
+/* keyboard focus on a chip: the ring, plus the active chip's own edge */
+.tab.active:focus-visible { box-shadow: var(--focus-ring), var(--shadow-1); }
+
+/* the accent marker under the active chip: short, centred, flat */
 .tab::after {
   content: '';
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--ion), transparent);
+  left: 50%;
+  bottom: 2px;
+  width: 14px;
+  height: 2px;
+  margin-left: -7px;
+  border-radius: 2px;
+  background: var(--accent);
   opacity: 0;
-  transition: opacity 140ms steps(3, end);
+  transition: opacity var(--dur) var(--ease);
   pointer-events: none;
 }
 
@@ -433,7 +414,7 @@ button.glass:focus-visible {
   border-radius: 2px;
   background: var(--ws-colour);
   opacity: .45;
-  transition: opacity 140ms steps(3, end);
+  transition: opacity var(--dur) var(--ease);
   pointer-events: none;
 }
 
@@ -441,7 +422,7 @@ button.glass:focus-visible {
 .tab[data-ws-colour].active::before { opacity: .9; }
 
 /* out of the workspace bar's way */
-.tab[data-ws-colour]::after { bottom: 2px; }
+.tab[data-ws-colour]::after { bottom: 4px; }
 
 /* The switcher UI's slot, left of the strip. app.js inserts it empty and
    workspaces.css styles whatever goes in; zero-width until it does. */
@@ -465,12 +446,12 @@ button.glass:focus-visible {
 .tab-close {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 10px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 /* collapse-to-icon: the close button's twin, one slot to its left. Same box,
@@ -479,12 +460,12 @@ button.glass:focus-visible {
 .tab-collapse {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 9px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .tab:hover .tab-close,
@@ -492,8 +473,8 @@ button.glass:focus-visible {
 .tab:hover .tab-collapse,
 .tab.active .tab-collapse { opacity: 1; }
 
-.tab-close:hover { background: var(--glass-3); color: var(--fg); }
-.tab-collapse:hover { background: var(--glass-3); color: var(--fg); }
+.tab-close:hover { background: var(--surface-3); color: var(--text); }
+.tab-collapse:hover { background: var(--surface-3); color: var(--text); }
 
 /* --- tab chip states (classes set by app.js) ------------------ */
 
@@ -512,15 +493,22 @@ img.tab-icon:not([src]),
 img.tab-icon[src=""],
 .tab.claude img.tab-icon { display: none; }
 
-/* loading: a highlight travels the ion line under the chip. The line
-   itself is still only visible while the tab is active. */
-.tab.loading::after {
+/* loading: the active chip's marker widens into a track and a short
+   accent highlight travels it until the page is in. Only the ACTIVE chip
+   shows (and so runs) it — a marker at opacity 0 would still tick the
+   compositor on every background tab — and only while loading, so it is
+   never an always-running animation. steps() keeps it to 20 paints a
+   second rather than every frame. */
+.tab.active.loading::after {
+  left: 10px;
+  right: 10px;
+  width: auto;
+  margin-left: 0;
   background:
-    linear-gradient(90deg, transparent 0%, var(--tab-shimmer) 50%, transparent 100%),
-    linear-gradient(90deg, transparent, var(--ion), transparent);
+    linear-gradient(90deg, transparent 0%, var(--accent) 50%, transparent 100%) no-repeat,
+    var(--tab-shimmer);
   background-size: 40% 100%, 100% 100%;
-  background-repeat: no-repeat, no-repeat;
-  animation: tab-shimmer 1.2s steps(24) infinite;  /* same reason as live-pulse */
+  animation: tab-shimmer 1.2s steps(24) infinite;
 }
 
 @keyframes tab-shimmer {
@@ -595,22 +583,21 @@ img.tab-icon[src=""],
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   font-family: var(--icon-font);
   font-size: 11px;
   line-height: 1;
-  color: var(--fg-2);
+  color: var(--text-2);
 }
 
-.tab-audio:hover { background: var(--glass-3); color: var(--fg); }
+.tab-audio:hover { background: var(--surface-3); color: var(--text); }
 
 /* It is a control, but it is also a status: sound coming out of the tab
-   is shown by the glyph itself (E767 speaker vs E74F muted); the pip token
-   now resolves to none, so nothing here glows at rest. */
-.tab-audio:not(.is-muted) { text-shadow: var(--pip-glow); }
+   is shown by the glyph itself (E767 speaker vs E74F muted), and nothing
+   about it glows: no text-shadow, playing or not. */
 
 /* muted is the quiet state in every sense: --fg-3, like the broken glyph */
-.tab-audio.is-muted { color: var(--fg-3); }
+.tab-audio.is-muted { color: var(--text-3); }
 
 /* .glyph sets display:inline-block, so hidden has to be said louder */
 .tab-audio[hidden] { display: none; }
@@ -671,13 +658,14 @@ img.tab-icon[src=""],
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--glass-3);
-  color: var(--fg);
+  background: var(--overlay);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--hairline-strong);
   font-family: var(--icon-font);
   font-size: 8px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 120ms steps(3, end);
+  transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .tab.pinned:hover .tab-expand,
@@ -695,7 +683,7 @@ img.tab-icon[src=""],
   font-size: 12px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-2);
+  color: var(--text-2);
 }
 
 .tab.pinned.has-icon .tab-globe,
@@ -716,7 +704,7 @@ img.tab-icon[src=""],
   font-size: 11px;
   line-height: 1;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 /* an icon-only chip has no room for the mark: it would crowd out the favicon */
@@ -725,29 +713,21 @@ img.tab-icon[src=""],
 
 /* --- drag to reorder (app.js sets the classes and the transforms) ---
    The lifted chip tracks the pointer exactly, so it carries NO transform
-   transition; the chips stepping aside carry a stepped one, because the
-   strip sits on a backdrop-filter and a smooth slide re-blurs every frame. */
+   transition; the chips stepping aside slide in Helm's 150ms. (They used to
+   step, because the strip was a backdrop-filter and a smooth slide re-blurred
+   it every frame; the strip is a plain tint now, so a slide costs nothing.)
+   Raised look as Helm's lifted tab: a near-opaque fill, so the chips it
+   passes over do not show through, a stronger hairline and the small shadow. */
 .tab.dragging {
   z-index: 4;
-  border-color: transparent;
-  /* opaque interior under the tint, for the same reason .tab.active
-     carries one: both of a chip's pseudo-elements are already in use, so
-     the rim stays a border-box layer and --panel-bg is what stops it
-     bleeding across the chip. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--glass-3), var(--glass-3)) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  color: var(--fg);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 10px 20px -10px var(--shade-drop),
-    0 0 0 1px var(--ion-soft);
+  background: var(--overlay);
+  border-color: var(--hairline-strong);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-1);
   transition: none;
 }
 
-.tab.drag-shift { transition: transform 140ms steps(4, end); }
+.tab.drag-shift { transition: transform var(--dur-slow) var(--ease); }
 
 /* No close buttons anywhere in the strip while a chip is in the air. Three
    classes deep and after it, so it beats the .tab:hover rule above. */
@@ -771,8 +751,8 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 
 #win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
 
-#win-min:hover, #win-max:hover { background: var(--glass-2); color: var(--fg); }
-#win-min:active, #win-max:active { background: var(--glass-3); }
+#win-min:hover, #win-max:hover { background: var(--surface-3); color: var(--text); }
+#win-min:active, #win-max:active { background: var(--surface-2); }
 
 /* the one earned exception to monochrome: the Windows close convention */
 #win-close:hover { background: rgba(232,17,35,.9); color: #ffffff; }
