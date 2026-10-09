@@ -4,14 +4,22 @@
    Loaded after chrome.css, and scoped entirely to #downloads and
    #downloads-panel: nothing here reaches another element.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme needs no block of its own at the bottom of this file —
-   :root[data-theme="light"] relights all of it for free.
+   LOOK. Helm's: neutral surfaces, exact 1px hairlines, real shadow
+   for depth, and the accent only for state (progress, focus). Every
+   rule is written against tokens.css names (chrome.css @imports it),
+   so html[data-theme="light"] relights the whole file with no block
+   of its own.
 
-   MOTION. Both panes sit on a backdrop-filter, so an animated frame
-   re-blurs everything behind it. Nothing animates continuously here:
-   the two indeterminate states are stepped to 10fps, the "done" flash
-   is two frames and runs once, and hover transitions are steps(2).
+   GLASS. The popover floats over a web page and its list scrolls, so
+   it gets the opaque --surface-solid and NO backdrop-filter: a blur
+   on a tall, scrolling pane is exactly what drops raster tiles on
+   this GPU, and over a page there is nothing worth blurring anyway.
+
+   MOTION. Hover and press fills are a 120 ms colour change. The only
+   animations are the two "size unknown" indicators, and they run
+   only while such a download is in flight (downloads.js removes the
+   class the moment it ends), stepped to 10 fps so they cost a tenth
+   of a smooth spin.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -24,7 +32,7 @@
 /* ============================================================
    The nav-row instrument
    Shape, hover and radius come from `.iconbtn` in chrome.css; this
-   file adds only the ring and the arrival flash.
+   file adds only the open state, the ring and the arrival flash.
    ============================================================ */
 
 #downloads {
@@ -33,26 +41,29 @@
 
 #downloads .glyph { font-family: var(--icon-font); }
 
-/* the panel is open: the instrument stays lit while it is */
+/* The panel is open: Helm's pressed icon button (.icon-btn.on), a
+   raised fill with a hairline drawn as an inset shadow so the button
+   keeps exactly the box it had. */
 #downloads.is-open {
-  background: var(--sheen), var(--glass-3);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 /* --- the progress ring ---------------------------------------
-   A conic sweep of ion light over an --edge track, punched hollow
-   by a radial mask so only a 2px annulus survives. --progress (0..1)
-   is set from downloads.js and is the sum of everything in flight.
-   The mask colour is a stencil, not paint: only its alpha is read,
-   so it is the one value in this file that is not a token. */
+   A conic sweep of accent over a hairline track, punched hollow by a
+   radial mask so only a 2px annulus survives. --progress (0..1) is
+   set from downloads.js and is the sum of everything in flight. The
+   mask colour is a stencil, not paint: only its alpha is read, so it
+   is the one value in this file that is not a token. */
 #downloads::before {
   content: '';
   position: absolute;
   inset: 1px;
   border-radius: 50%;
   background: conic-gradient(from -90deg,
-    var(--ion) calc(var(--progress, 0) * 360deg),
-    var(--edge) 0);
+    var(--accent) calc(var(--progress, 0) * 360deg),
+    var(--hairline-strong) 0);
   -webkit-mask: radial-gradient(closest-side,
     transparent calc(100% - 2px), #000 calc(100% - 2px));
           mask: radial-gradient(closest-side,
@@ -64,12 +75,12 @@
 #downloads.active::before { opacity: 1; }
 
 /* Size unknown: a fixed arc stepped around the circle. steps(12) is
-   10 frames a second — a rotating ring at that rate still reads as
-   motion, and costs a twelfth of what a linear spin would. */
+   10 frames a second, and the class only exists while that download
+   runs, so this is a state indicator, never an idle animation. */
 #downloads.indeterminate::before {
   background: conic-gradient(from -90deg,
-    var(--ion) 0deg 96deg,
-    var(--edge) 96deg 360deg);
+    var(--accent) 0deg 96deg,
+    var(--hairline-strong) 96deg 360deg);
   animation: dl-ring-sweep 1.2s steps(12) infinite;
 }
 
@@ -78,15 +89,16 @@
 }
 
 /* --- the arrival flash ----------------------------------------
-   Everything finished: the ring vanishes and the glyph lights ion
-   for one frame, then returns. Two frames, once, never a loop. */
+   Everything finished: the ring vanishes and the glyph takes the
+   accent for one frame, then returns. Two frames, once, never a
+   loop, and a colour change only (no glow). */
 #downloads.pulse .glyph {
   animation: dl-arrive 560ms steps(2) 1;
 }
 
 @keyframes dl-arrive {
-  0%,   49.9% { color: var(--ion); }
-  50%,  100%  { color: var(--fg-2); }
+  0%,   49.9% { color: var(--accent); }
+  50%,  100%  { color: var(--text-2); }
 }
 
 /* ============================================================
@@ -108,42 +120,20 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* A machined pane: bevelled on the diagonal (see the @supports below)
-     and edged with the rim gradient rather than a painted border —
-     specular at the top-left, accent at the bottom-right. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel-lg);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* The chamber's ground, not the nav row's: this pane floats over
-     guest pages, and --glass alone would leave a site legible
-     through it. Same recipe the Claude chamber uses; the ground clips
-     to the padding box so the rim keeps the border strip to itself. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 14px 34px var(--shade-drop);
-}
-
-/* TL round, TR cut, BR round, BL cut: two cuts on the diagonal, echoing
-   the sheen's angle. Guarded, so a build without corner-shape keeps the
-   plain radius above. */
-@supports (corner-shape: bevel) {
-  #downloads-panel { corner-shape: round bevel round bevel; }
+  /* Helm's panel: one hairline, the large radius, the inset top edge
+     and the level-3 drop shadow of a thing that floats. Opaque, for
+     the reason in the header. */
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-l);
+  background: var(--surface-solid);
+  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-3);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
 }
 
 /* --- header --------------------------------------------------- */
-/* The rule under the head is the seam motif, not a border: a hairline
-   that fades out to the right. The border stays, transparent, so the
-   box model is exactly what it was and the gradient has a strip to
-   paint in. */
+/* Helm's card head: a plain 1px hairline under it, no fade. */
 #downloads-panel .dl-head {
   flex: 0 0 auto;
   display: flex;
@@ -151,37 +141,34 @@
   justify-content: space-between;
   gap: 8px;
   padding: 9px 10px 9px 12px;
-  border-bottom: 1px solid transparent;
-  background: linear-gradient(90deg, var(--edge), transparent)
-              left bottom / 100% 1px no-repeat border-box;
+  border-bottom: 1px solid var(--hairline);
 }
 
 #downloads-panel .dl-title {
   /* The header's buttons belong together on the right, so the title takes
      every bit of slack rather than space-between spreading all three. */
   margin-right: auto;
-  color: var(--fg);
-  font-size: 13px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-s);
+  font-weight: 600;
 }
 
-/* the small word-buttons: Clear in the header, Retry on a dead row */
+/* The small word-buttons (Clear and Open folder in the header, Retry
+   on a dead row): Helm's ghost button at its small size. */
 #downloads-panel .dl-text {
   height: 22px;
   padding: 0 8px;
-  /* a control: round corners, so the bevel stays the pane's signature */
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#downloads-panel .dl-text:hover { background: var(--glass-2); color: var(--fg); }
-#downloads-panel .dl-text:active { background: var(--glass-3); }
+#downloads-panel .dl-text:hover { background: var(--surface-3); color: var(--text); }
+#downloads-panel .dl-text:active { background: var(--surface-2); }
 
 /* Open folder wears its glyph ahead of the word. */
 #downloads-panel .dl-folder {
@@ -204,24 +191,27 @@
   padding: 4px;
 }
 
+/* Helm's .empty-note */
 #downloads-panel .dl-empty {
   padding: 26px 12px;
   text-align: center;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-s);
 }
 
+/* A row is a Helm list row: transparent at rest, the raised fill
+   under the pointer or while keyboard focus is inside it. */
 #downloads-panel .dl-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 7px 6px 7px 8px;
-  border-radius: var(--radius-ctl);
-  transition: background-color 120ms steps(2);
+  border-radius: var(--radius-s);
+  transition: background-color var(--dur) var(--ease);
 }
 
 #downloads-panel .dl-row:hover,
-#downloads-panel .dl-row:focus-within { background: var(--glass); }
+#downloads-panel .dl-row:focus-within { background: var(--surface-3); }
 
 #downloads-panel .dl-main {
   flex: 1 1 auto;
@@ -237,62 +227,63 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   text-align: left;
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  font-weight: 500;
 }
 
-/* a finished file's name is the shortcut that opens it */
-#downloads-panel .dl-name.is-open:hover { color: var(--ion); }
+/* a finished file's name is the shortcut that opens it: a link's
+   accent and underline, as Helm's base.css draws every link */
+#downloads-panel .dl-name.is-open:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
-/* Sizes, percentages and times: a readout, so semi-condensed with
-   tabular digits — the numbers hold their columns as they count up. */
+/* Sizes, percentages and times: tabular digits, so the numbers hold
+   their columns as they count up. */
 #downloads-panel .dl-meta {
   margin-top: 2px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--fg-2);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
 }
 
 /* cancelled and failed: present, but the dimmest type in the app */
-#downloads-panel .dl-meta.is-dim { color: var(--fg-3); }
+#downloads-panel .dl-meta.is-dim { color: var(--text-3); }
 
 #downloads-panel .dl-note {
   margin-top: 4px;
-  color: var(--fg-3);
-  font-size: 11px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
 }
 
 /* --- the row's progress bar ----------------------------------- */
+/* Helm's range track: a quiet --surface-3 groove with the accent run
+   in it. Progress is paint here, not light: no halo at all. */
 #downloads-panel .dl-bar {
   position: relative;
   margin-top: 6px;
   height: 3px;
-  border-radius: 2px;
-  background: var(--edge);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
   overflow: hidden;
 }
 
-/* Progress is light, not paint: the filled run carries the same halo a
-   status pip does, so a running download reads as something lit. */
 #downloads-panel .dl-fill {
   display: block;
   width: 0;
   height: 100%;
-  border-radius: 2px;
-  background: var(--ion);
-  box-shadow: var(--pip-glow);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
 
 /* total unknown: a short bead stepped across the track, same 10fps
-   budget as the ring. */
+   budget (and the same "only while it runs") as the ring. */
 #downloads-panel .dl-bar.is-indeterminate .dl-fill {
   width: 28%;
   animation: dl-bar-sweep 1.2s steps(12) infinite;
@@ -312,7 +303,7 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 120ms steps(2);
+  transition: opacity var(--dur) var(--ease);
 }
 
 #downloads-panel .dl-row:hover .dl-actions,
@@ -322,16 +313,19 @@
   #downloads-panel .dl-actions { opacity: 1; }
 }
 
+/* Helm's small icon button. The row under it is already --surface-3
+   while the pointer is on it, so the button's own hover goes one step
+   further, to the strong hairline's tint, or it would vanish. */
 #downloads-panel .dl-act {
   width: 26px;
   height: 26px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#downloads-panel .dl-act:hover { background: var(--glass-2); color: var(--fg); }
-#downloads-panel .dl-act:active { background: var(--glass-3); }
+#downloads-panel .dl-act:hover { background: var(--hairline-strong); color: var(--text); }
+#downloads-panel .dl-act:active { background: var(--hairline); }
 
 /* Ask Claude is a word among glyphs on a finished row: it never wraps, and
    the filename column (min-width: 0) gives up the space, not this. */
@@ -347,20 +341,14 @@
 }
 
 /* --- focus ----------------------------------------------------
-   chrome.css already rings every button; these repeat it so the
-   panel keeps its keyboard outline even if that rule moves. Focus is
-   light: a hairline ion ring with the pip's halo behind it. */
+   Helm's one focus treatment: the --focus-ring box-shadow (a dark
+   1px gap, then a 2px accent band) and no outline. chrome.css rings
+   every button already; these repeat it so the panel and the
+   instrument keep it even if that rule moves. */
 #downloads:focus-visible,
 #downloads-panel button:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-}
-
-/* The halo behind the ring. Only inside the panel: the nav instrument
-   carries .glass's own inset shadows, and a box-shadow here would
-   replace them for as long as it held focus. */
-#downloads-panel button:focus-visible {
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* --- reduced motion -------------------------------------------
