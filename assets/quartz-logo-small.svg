@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <title>Quartz</title>
+  <!-- bowl: a quartz crystal in silhouette; shaded face, then the lit left face -->
+  <g>
+    <path fill="#666666" fill-rule="evenodd" d="M7 0.9L12 4.1L12 11.1L7 14.3L2 11.1L2 4.1Z M7 3.3L10 5.2L10 10L7 11.9L4 10L4 5.2Z"/>
+    <path fill="#959595" d="M7 14.3L2 11.1L2 4.1L7 0.9L7 3.3L4 5.2L4 10L7 11.9Z"/>
+  </g>
+  <!-- tail: a small doubly terminated crystal piercing the bowl -->
+  <path fill="#5f9bb8" d="M6.8 9.6L7.2 11.7L11.5 15.3L13.6 15.5L13.1 13.4L8.9 9.8Z"/>
+</svg>
