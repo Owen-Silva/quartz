@@ -1655,10 +1655,9 @@ body {
 .dock-name {
   max-width: 100%;
   color: inherit;
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  line-height: 12px;
+  font-size: var(--fs-2xs);
+  /* 14px, not 12: Segoe UI's descenders (the p in "Add app") were cut at 12 */
+  line-height: 14px;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
