@@ -1,598 +1,121 @@
-/* ============================================================
-   chrome.css — "Crystal instruments over an aurora"
-   Frosted glass panels lit from behind by a blue-violet-teal
-   aurora. Cool ion light marks what is active; one warm amber
-   light means a Claude session is live. Nothing else is colour.
+@import url("tokens.css");
 
-   THEMES. Every colour in this file resolves through a token, so
-   a theme is nothing but a second token block. The source of
-   truth is data-theme on <html>: "dark" (the default, and what an
-   absent attribute means) or "light". theme-boot.js stamps it
-   before first paint; no rule below tests the attribute itself.
+/* ============================================================
+   chrome.css — the chrome document, dressed like Helm
+   The tab strip, the toolbar and the side panes are translucent
+   neutral tints over ONE fixed, pre-blurred background layer
+   (.backdrop, painted by backdrop.css / backdrop.js). Depth comes
+   from exact 1px hairlines, a 1px inset top edge and real shadow;
+   the one desaturated accent marks STATE only (the active tab's
+   marker, focus, selection, a primary action); glow exists only as
+   the focus ring. No sheen, no gradient rim, no bevel, no aurora.
+
+   TOKENS. Every colour resolves through tokens.css (imported on the
+   first line, Helm's names and values). This file keeps the older
+   Quartz names below ONLY as aliases onto those, because every pane
+   stylesheet in this document (find, downloads, settings, ...) still
+   reads them; nothing here invents a colour. When the last reader of
+   an alias is gone, the alias can go too.
+
+   THEMES. data-theme on <html> is "dark" (the default, and what an
+   absent attribute means) or "light"; theme-boot.js stamps it before
+   first paint. tokens.css switches its values on that attribute, so
+   the aliases below re-theme by themselves; only the few entries
+   that hold a raw value (a shadow colour, the workspace hues) carry
+   a light variant here.
    ============================================================ */
 
-/* --- tokens: dark (default) ---------------------------------- */
+/* --- legacy aliases (onto tokens.css) ------------------------- */
 :root {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
+  /* base fills: the old aurora's ink field is now just the canvas */
+  --ink-0: var(--bg);
+  --ink-1: var(--surface-solid);
 
-  --fg:   #eef1f8;
-  --fg-2: #b0b5bf;
-  --fg-3: #a6abb5;                        /* 4.5:1 on --panel-bg; #5c6478 was 3.1:1 */
+  /* text */
+  --fg:   var(--text);
+  --fg-2: var(--text-2);
+  --fg-3: var(--text-3);
+  --placeholder: var(--text-3);
 
-  --glass:   rgba(255,255,255,.055);
-  --glass-2: rgba(255,255,255,.09);
-  --glass-3: rgba(255,255,255,.14);
+  /* surfaces. --glass was a control's resting fill, --glass-2 its
+     hover, --glass-3 its pressed / raised state: Helm's card, hover
+     and raised surfaces. --glass-thin was the titlebar's own tint. */
+  --glass:      var(--surface-2);
+  --glass-2:    var(--surface-3);
+  --glass-3:    var(--surface-3);
+  --glass-thin: var(--surface-0);
+  --panel-bg:   var(--surface-solid);  /* panes over a page: nothing behind them to show through */
+  --chamber-bg: var(--surface-1);      /* the Claude pane beside a page */
+  --acrylic-bg: var(--bg);             /* body with DWM acrylic on: the canvas, like any other window */
 
-  --edge:     rgba(255,255,255,.11);
-  --specular: rgba(255,255,255,.14);
+  /* edges. --edge is the hairline; --specular was the lit top lip and
+     is now Helm's inset top edge (box-shadow: inset 0 1px 0 ...). The
+     shaded lower lip is gone (Helm has none), so --shade-in is clear.
+     --shade-drop stays a real shadow colour, Helm's --shadow-2 ink. */
+  --edge:       var(--hairline);
+  --specular:   var(--panel-edge);
+  --shade-in:   transparent;
+  --shade-drop: rgba(0, 0, 0, 0.30);
 
-  --ion:      #72adca;
-  --ion-soft: rgba(114,173,202,.14);
-  --ion-glow: rgba(114,173,202,.22);
+  /* the old lit treatments, flattened. They were gradients used as
+     background LAYERS (var(--sheen), var(--glass) ...), so each stays
+     an image — a clear or one-colour gradient — never a bare colour,
+     which would void the whole background declaration it sits in. */
+  --sheen:     linear-gradient(transparent, transparent);
+  --rim:       linear-gradient(var(--hairline), var(--hairline));
+  --rim-focus: linear-gradient(var(--accent-line), var(--accent-line));
+  --rim-soft:  linear-gradient(var(--hairline), var(--hairline));
+  --seam:      linear-gradient(var(--hairline), var(--hairline));
+  --seam-v:    linear-gradient(var(--hairline), var(--hairline));
 
-  --amber:      #e0a059;
-  --amber-glow: rgba(224,160,89,.26);
+  /* warm state: "a Claude session is live / needs you" reads as Helm's
+     warn. Status is a flat dot now, never a glow, so every pip shadow
+     is none. */
+  --amber:            var(--warn);
+  --amber-glow:       var(--warn-soft);
+  --pip-glow:         none;
+  --pip-amber:        none;
+  --pip-amber-strong: none;
+  --tab-shimmer:      var(--hairline-strong);   /* the loading sweep on a tab */
 
-  /* the diagonal reflection every glass surface carries */
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.035)  0%,
-    rgba(255,255,255,.035) 38%,
-    rgba(255,255,255,.035) 60%);
+  /* shape: the bevel names now carry Helm's plain radii */
+  --bevel:      var(--radius-m);
+  --bevel-lg:   var(--radius-l);
+  --radius-ctl: var(--radius-s);
 
-  /* --- surfaces and details that are not a plain fill --------- */
-  --glass-thin:  rgba(255,255,255,.04);   /* titlebar: the lightest pane */
-  --shade-in:    rgba(0,0,0,.20);         /* the shaded lower lip of a pane */
-  --shade-drop:  rgba(0,0,0,.45);         /* the 1px shadow a pane casts */
-  --focus-ring:  rgba(255,255,255,.55);
-  --placeholder: rgba(190,195,205,.80);   /* --fg-3 vanished against the glass */
-  --scroll-thumb:       rgba(255,255,255,.18);
-  --scroll-thumb-hover: rgba(255,255,255,.28);
-  --tab-shimmer: rgba(255,255,255,.5);    /* the travelling highlight on a loading tab */
-
-  --ion-line:     rgba(114,173,202,.65);  /* omnibox border, focused */
-  --ion-select:   rgba(114,173,202,.30);
-  --seam-color:   rgba(114,173,202,.14);  /* the lit seam under the chrome */
-  --chamber-seam: rgba(114,173,202,.16);   /* the lit top edge of the chamber */
-
-  --acrylic-bg: rgba(26,28,32,.80);         /* body when DWM acrylic is on */
-  --chamber-bg: rgba(26,28,32,.62);         /* the Claude chamber's own glass */
-  --panel-bg:   rgba(34,37,42,.96);       /* panes floating over a page: nothing behind them to blur */
-
-  /* a lit seam: 1px of ion light, brightest at the centre */
-  --seam: linear-gradient(90deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
-
-  /* the three aurora layers, tokenised whole so a theme relights them */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,170,255,0)   50%,
-    rgba(140,170,255,.03) 76%,
-    rgba(140,170,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(75,34,168,.13)  0%,
-    rgba(75,34,168,.055) 45%,
-    rgba(75,34,168,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(15,181,201,.085)  0%,
-    rgba(15,181,201,.035) 46%,
-    rgba(15,181,201,0)   78%);
-
-  /* type + metrics */
-  --ui-font:    'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
-  --icon-font:  'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
+  /* type + metrics (heights unchanged: look only, nothing moves) */
+  --ui-font:         var(--font);
+  --readout-stretch: 100%;            /* no condensed readout type any more */
   --titlebar-h: 40px;
   --nav-h:      44px;
 
-  /* --- instrument glass -----------------------------------------
-     The glass starts behaving like a pane of an instrument: a cut
-     edge that catches light, a lit rim, status as light, type as a
-     readout. Every token below is built out of the theme tokens
-     above with var(), so the ONE definition here covers dark, light
-     and all six palettes — a palette that relights --ion / --edge /
-     --specular relights these with it. Never copy them per palette.
-
-     A container (the omnibox slot, the active chip, a popover, a
-     pane) carries --bevel with corner-shape: round bevel round
-     bevel — TL round, TR cut, BR round, BL cut. Two cuts on the
-     diagonal, echoing the 115deg sheen; four would read as a kit.
-     CONTROLS keep ordinary round corners at --radius-ctl, so the
-     bevel stays a container signature, and nothing under ~28px
-     tall is ever bevelled. */
-  --bevel:      10px;
-  --bevel-lg:   14px;                     /* full panes, the new-tab search slot */
-  --radius-ctl:  6px;                     /* buttons, chips, menu rows */
-
-  /* the 1px lit edge: specular at the top-left falling to the accent
-     at the bottom-right, so a container looks lit from above and
-     powered from below. Painted as a border-box background layer
-     under a transparent border, which is the only way to put a
-     gradient edge on translucent glass. */
-  --rim: linear-gradient(135deg,
-    var(--specular)  0%,
-    var(--edge)     30%,
-    var(--edge)     62%,
-    var(--edge)    100%);
-
-  /* the same rim with the accent at full strength: the focused slot */
-  --rim-focus: linear-gradient(135deg,
-    var(--specular) 0%,
-    var(--ion-line) 45%,
-    var(--ion) 100%);
-
-  /* a quiet row, or a tile at rest */
-  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
-
-  /* status as light. A pip is a dot that glows rather than a dot that
-     is painted. --pip-glow is the cool instrument light; the amber
-     pair is kept separate because amber resolves through --amber, not
-     --ion, and it alone means "a Claude session". The two amber
-     strengths preserve the distinction the chamber already draws:
-     live breathes, needs-you flashes brighter. */
-  --pip-glow:         none;
-  --pip-amber:        0 0 3px var(--amber-glow);
-  --pip-amber-strong: 0 0 4px var(--amber-glow);
-
-  /* the lit seam stood on end, for the split divider */
-  --seam-v: linear-gradient(180deg, transparent 0%, var(--seam-color) 50%, transparent 100%);
-
-  /* Bahnschrift's wdth axis one notch in (75–100): labels, tab
-     titles, the omnibox, badges — type set as a readout */
-  --readout-stretch: 87.5%;
+  /* Workspace colours: fixed hues (they must stay told apart whatever
+     palette is on) at Helm's quiet strength. The wash is the same hue
+     at the alpha a tint takes behind the strip. */
+  --ws-ion:      var(--ion);
+  --ws-ember:    hsl(345 35% 70%);
+  --ws-forest:   hsl(160 35% 70%);
+  --ws-ocean:    hsl(190 35% 70%);
+  --ws-midnight: hsl(262 35% 70%);
+  --ws-ion-wash:      color-mix(in srgb, var(--ion) 7%, transparent);
+  --ws-ember-wash:    hsl(345 35% 70% / .07);
+  --ws-forest-wash:   hsl(160 35% 70% / .07);
+  --ws-ocean-wash:    hsl(190 35% 70% / .07);
+  --ws-midnight-wash: hsl(262 35% 70% / .07);
 }
 
-/* --- tokens: light ------------------------------------------- */
-/* Same instruments, daylight instead of night: white frosted panels
-   over a pale aurora, ink text, edges as soft ink lines, and the ion
-   accent dropped to a deeper blue so it still reads on white.
-   Nothing here but custom properties — every rule below re-themes
-   itself. Type/metric tokens are inherited from the dark block. */
-:root[data-theme="light"] {
-  --ink-0: #eef1f7;
-  --ink-1: #f7f8fc;
-
-  --fg:   #12162a;
-  --fg-2: #4a526b;                        /* ~7:1 on the glass, ~5:1 at the aurora's deepest */
-  --fg-3: #656d82;                        /* 4.7:1 on --panel-bg, the ground every
-                                             pane over a page paints on; #767e94
-                                             cleared the glass but was 3.8:1 there */
-
-  --glass:   rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.72);
-  --glass-3: rgba(255,255,255,.9);
-
-  --edge:     rgba(18,22,42,.12);
-  --specular: rgba(255,255,255,.95);
-
-  --ion:      #0b7fd6;
-  --ion-soft: rgba(11,127,214,.14);
-  --ion-glow: rgba(11,127,214,.35);
-
-  --amber:      #f08c00;
-  --amber-glow: rgba(240,140,0,.4);
-
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.7)  0%,
-    rgba(255,255,255,.25) 38%,
-    rgba(255,255,255,0)   60%);
-
-  /* surfaces and details */
-  --glass-thin:  rgba(255,255,255,.42);
-  --shade-in:    rgba(18,22,42,.07);      /* ink, not black: a shaded lip, not a bruise */
-  --shade-drop:  rgba(18,22,42,.10);
-  --focus-ring:  rgba(18,22,42,.55);
-  --placeholder: rgba(74,82,107,.7);
-  --scroll-thumb:       rgba(18,22,42,.2);
-  --scroll-thumb-hover: rgba(18,22,42,.34);
-  --tab-shimmer: rgba(255,255,255,.85);
-
-  --ion-line:     rgba(11,127,214,.75);
-  --ion-select:   rgba(11,127,214,.2);
-  --seam-color:   rgba(11,127,214,.45);
-  --chamber-seam: rgba(11,127,214,.5);
-
-  --acrylic-bg: rgba(238,241,247,.72);
-  --chamber-bg: rgba(255,255,255,.55);
-  --panel-bg:   rgba(247,248,252,.96);
-
-  /* daylight aurora: cornflower band, lilac pool, mint rim */
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,160,255,0)   50%,
-    rgba(120,160,255,.13) 76%,
-    rgba(120,160,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(185,167,255,.55)  0%,
-    rgba(185,167,255,.26) 45%,
-    rgba(185,167,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(127,224,216,.45)  0%,
-    rgba(127,224,216,.18) 46%,
-    rgba(127,224,216,0)   78%);
-}
-
-/* --- tokens: palette presets --------------------------------- */
-/* A palette relights the room without redesigning it. data-palette on
-   <html> picks a colour world: the three aurora layers, and the ion
-   accent derived from it. Absent — or "aurora" — is the original look,
-   so nothing above this comment changes.
-
-   Two rules per palette, dark then light, and each selector matches
-   BOTH the root and any descendant carrying the attribute, because
-   settings paints its swatches with <button data-palette="ember">:
-     dark   [data-palette="x"]                                  (0,1,0)
-     light  :root[data-theme="light"][data-palette="x"],
-            :root[data-theme="light"] [data-palette="x"]        (0,3,0)
-   The light pair outranks both the dark palette rule and the light
-   default block, so a light window always lands on the light palette.
-
-   Every block overrides the same ten tokens — the three aurora
-   gradients, --ion / --ion-soft / --ion-glow / --ion-line /
-   --ion-select, --seam-color and --chamber-seam — plus a whisper of
-   the palette in --ink-0 / --ink-1 / --acrylic-bg, and
-   --palette-preview: the 48x32 swatch a settings button wears.
-
-   Two rules the palettes keep. The gradients reuse the default
-   geometry and alphas exactly (only the RGB triples move), so the
-   stepped pool and rim drifts animate identically. And no accent goes
-   near --amber, which is reserved for "a Claude session is live": the
-   closest any palette comes is ember at hue 345 — rose, not orange —
-   and forest's gold lives in the rim wash, never in the accent. */
-
-/* the default world, named, so an "aurora" swatch can paint itself */
-:root,
-[data-palette="aurora"] {
-  --palette-preview: linear-gradient(135deg, #212429 0%, #38236f 40%, #17737f 72%, #72adca 100%);
-}
-
-:root[data-theme="light"],
-:root[data-theme="light"] [data-palette="aurora"] {
-  --palette-preview: linear-gradient(135deg, #eef1f7 0%, #b9a7ff 40%, #7fe0d8 72%, #0b7fd6 100%);
-}
-
-/* --- ember: warm dusk ---------------------------------------- */
-/* Rose band, deep plum pool, magenta rim; the accent a coral-pink at
-   hue 345, kept off orange so it can never be read as the amber. */
-[data-palette="ember"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #cb768b;
-  --ion-soft: rgba(203,118,139,.14);
-  --ion-glow: rgba(203,118,139,.22);
-
-  --ion-line:     rgba(203,118,139,.65);
-  --ion-select:   rgba(203,118,139,.30);
-  --seam-color:   rgba(203,118,139,.14);
-  --chamber-seam: rgba(203,118,139,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,160,190,0)   50%,
-    rgba(255,160,190,.03) 76%,
-    rgba(255,160,190,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(112,26,96,.13)  0%,
-    rgba(112,26,96,.055) 45%,
-    rgba(112,26,96,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(201,35,118,.085)  0%,
-    rgba(201,35,118,.035) 46%,
-    rgba(201,35,118,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #4c1e47 40%, #7d2353 72%, #cb768b 100%);
-}
-
-:root[data-theme="light"][data-palette="ember"],
-:root[data-theme="light"] [data-palette="ember"] {
-  --ink-0: #f7edf1;
-  --ink-1: #fdf7f9;
-  --acrylic-bg: rgba(247,237,241,.72);
-
-  --ion:      #c1113d;
-  --ion-soft: rgba(193,17,61,.14);
-  --ion-glow: rgba(193,17,61,.35);
-
-  --ion-line:     rgba(193,17,61,.75);
-  --ion-select:   rgba(193,17,61,.2);
-  --seam-color:   rgba(193,17,61,.45);
-  --chamber-seam: rgba(193,17,61,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(255,150,185,0)   50%,
-    rgba(255,150,185,.13) 76%,
-    rgba(255,150,185,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(246,176,205,.55)  0%,
-    rgba(246,176,205,.26) 45%,
-    rgba(246,176,205,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(232,160,214,.45)  0%,
-    rgba(232,160,214,.18) 46%,
-    rgba(232,160,214,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #fdf7f9 0%, #f6b0cd 40%, #e8a0d6 72%, #c1113d 100%);
-}
-
-/* --- forest: deep green -------------------------------------- */
-/* Teal band over a forest-floor pool, with the rim carrying the one
-   hint of gold — a wash, well off the amber's saturation, and never
-   the accent. The accent is mint at hue 160. */
-[data-palette="forest"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #72caad;
-  --ion-soft: rgba(114,202,173,.14);
-  --ion-glow: rgba(114,202,173,.22);
-
-  --ion-line:     rgba(114,202,173,.65);
-  --ion-select:   rgba(114,202,173,.30);
-  --seam-color:   rgba(114,202,173,.14);
-  --chamber-seam: rgba(114,202,173,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,225,200,0)   50%,
-    rgba(120,225,200,.03) 76%,
-    rgba(120,225,200,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,84,60,.13)  0%,
-    rgba(16,84,60,.055) 45%,
-    rgba(16,84,60,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(178,166,104,.085)  0%,
-    rgba(178,166,104,.035) 46%,
-    rgba(178,166,104,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #183e33 40%, #716c4c 72%, #72caad 100%);
-}
-
-:root[data-theme="light"][data-palette="forest"],
-:root[data-theme="light"] [data-palette="forest"] {
-  --ink-0: #ecf4ef;
-  --ink-1: #f6fbf8;
-  --acrylic-bg: rgba(236,244,239,.72);
-
-  --ion:      #067a53;
-  --ion-soft: rgba(6,122,83,.14);
-  --ion-glow: rgba(6,122,83,.35);
-
-  --ion-line:     rgba(6,122,83,.75);
-  --ion-select:   rgba(6,122,83,.2);
-  --seam-color:   rgba(6,122,83,.45);
-  --chamber-seam: rgba(6,122,83,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,220,190,0)   50%,
-    rgba(120,220,190,.13) 76%,
-    rgba(120,220,190,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(158,226,190,.55)  0%,
-    rgba(158,226,190,.26) 45%,
-    rgba(158,226,190,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(226,214,148,.45)  0%,
-    rgba(226,214,148,.18) 46%,
-    rgba(226,214,148,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f6fbf8 0%, #9ee2be 40%, #e2d694 72%, #067a53 100%);
-}
-
-/* --- ocean: navy and cyan ------------------------------------ */
-/* A steel band falling into a navy pool, cyan surfacing at the rim.
-   Accent cyan at hue 190 — the default ion's neighbourhood, pushed
-   greener and hung in a much colder room. */
-[data-palette="ocean"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #72bdca;
-  --ion-soft: rgba(114,189,202,.14);
-  --ion-glow: rgba(114,189,202,.22);
-
-  --ion-line:     rgba(114,189,202,.65);
-  --ion-select:   rgba(114,189,202,.30);
-  --seam-color:   rgba(114,189,202,.14);
-  --chamber-seam: rgba(114,189,202,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(130,190,255,0)   50%,
-    rgba(130,190,255,.03) 76%,
-    rgba(130,190,255,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(16,44,120,.13)  0%,
-    rgba(16,44,120,.055) 45%,
-    rgba(16,44,120,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(24,190,214,.085)  0%,
-    rgba(24,190,214,.035) 46%,
-    rgba(24,190,214,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #182854 40%, #1c7988 72%, #72bdca 100%);
-}
-
-:root[data-theme="light"][data-palette="ocean"],
-:root[data-theme="light"] [data-palette="ocean"] {
-  --ink-0: #eaf1f8;
-  --ink-1: #f5f9fd;
-  --acrylic-bg: rgba(234,241,248,.72);
-
-  --ion:      #087a91;
-  --ion-soft: rgba(8,122,145,.14);
-  --ion-glow: rgba(8,122,145,.35);
-
-  --ion-line:     rgba(8,122,145,.75);
-  --ion-select:   rgba(8,122,145,.2);
-  --seam-color:   rgba(8,122,145,.45);
-  --chamber-seam: rgba(8,122,145,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,175,255,0)   50%,
-    rgba(120,175,255,.13) 76%,
-    rgba(120,175,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(150,190,250,.55)  0%,
-    rgba(150,190,250,.26) 45%,
-    rgba(150,190,250,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(126,222,238,.45)  0%,
-    rgba(126,222,238,.18) 46%,
-    rgba(126,222,238,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f5f9fd 0%, #96befa 40%, #7edeee 72%, #087a91 100%);
-}
-
-/* --- midnight: indigo and violet ----------------------------- */
-/* The darkest room here: near-black indigo ink, a violet pool, a
-   periwinkle rim. Accent violet at hue 262. */
-[data-palette="midnight"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #a281cf;
-  --ion-soft: rgba(162,129,207,.14);
-  --ion-glow: rgba(162,129,207,.22);
-
-  --ion-line:     rgba(162,129,207,.65);
-  --ion-select:   rgba(162,129,207,.30);
-  --seam-color:   rgba(162,129,207,.14);
-  --chamber-seam: rgba(162,129,207,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(120,130,235,0)   50%,
-    rgba(120,130,235,.03) 76%,
-    rgba(120,130,235,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(84,34,178,.13)  0%,
-    rgba(84,34,178,.055) 45%,
-    rgba(84,34,178,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(138,104,245,.085)  0%,
-    rgba(138,104,245,.035) 46%,
-    rgba(138,104,245,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #3d2374 40%, #5b4999 72%, #a281cf 100%);
-}
-
-:root[data-theme="light"][data-palette="midnight"],
-:root[data-theme="light"] [data-palette="midnight"] {
-  --ink-0: #efedf9;
-  --ink-1: #f8f7fd;
-  --acrylic-bg: rgba(239,237,249,.72);
-
-  --ion:      #6322d3;
-  --ion-soft: rgba(99,34,211,.14);
-  --ion-glow: rgba(99,34,211,.35);
-
-  --ion-line:     rgba(99,34,211,.75);
-  --ion-select:   rgba(99,34,211,.2);
-  --seam-color:   rgba(99,34,211,.45);
-  --chamber-seam: rgba(99,34,211,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(150,152,255,0)   50%,
-    rgba(150,152,255,.13) 76%,
-    rgba(150,152,255,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(198,176,255,.55)  0%,
-    rgba(198,176,255,.26) 45%,
-    rgba(198,176,255,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(178,158,250,.45)  0%,
-    rgba(178,158,250,.18) 46%,
-    rgba(178,158,250,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f8f7fd 0%, #c6b0ff 40%, #b29efa 72%, #6322d3 100%);
-}
-
-/* --- mono: graphite ------------------------------------------ */
-/* No chroma in the aurora at all: the three layers are pure grey, so
-   they read as luminance alone — a band of light, a pool, a rim. The
-   accent carries the only colour, and barely: a cool off-white at hue
-   215 in the dark, graphite blue-grey in daylight. */
-[data-palette="mono"] {
-  --ink-0: #1a1c20;
-  --ink-1: #212429;
-  --acrylic-bg: rgba(26,28,32,.80);
-
-  --ion:      #aab0ba;
-  --ion-soft: rgba(170,176,186,.14);
-  --ion-glow: rgba(170,176,186,.22);
-
-  --ion-line:     rgba(170,176,186,.65);
-  --ion-select:   rgba(170,176,186,.30);
-  --seam-color:   rgba(170,176,186,.14);
-  --chamber-seam: rgba(170,176,186,.16);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(214,214,214,0)   50%,
-    rgba(214,214,214,.03) 76%,
-    rgba(214,214,214,.06) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(128,128,128,.13)  0%,
-    rgba(128,128,128,.055) 45%,
-    rgba(128,128,128,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(186,186,186,.085)  0%,
-    rgba(186,186,186,.035) 46%,
-    rgba(186,186,186,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #212429 0%, #2f3035 40%, #5b5c61 72%, #aab0ba 100%);
-}
-
-:root[data-theme="light"][data-palette="mono"],
-:root[data-theme="light"] [data-palette="mono"] {
-  --ink-0: #eff0f2;
-  --ink-1: #f8f9fa;
-  --acrylic-bg: rgba(239,240,242,.72);
-
-  --ion:      #495565;
-  --ion-soft: rgba(73,85,101,.14);
-  --ion-glow: rgba(73,85,101,.35);
-
-  --ion-line:     rgba(73,85,101,.75);
-  --ion-select:   rgba(73,85,101,.2);
-  --seam-color:   rgba(73,85,101,.45);
-  --chamber-seam: rgba(73,85,101,.5);
-
-  --aurora-band: linear-gradient(-35deg,
-    rgba(140,140,140,0)   50%,
-    rgba(140,140,140,.13) 76%,
-    rgba(140,140,140,.28) 100%);
-
-  --aurora-pool: radial-gradient(1000px 480px at 50% 108%,
-    rgba(176,176,176,.55)  0%,
-    rgba(176,176,176,.26) 45%,
-    rgba(176,176,176,0)   74%);
-
-  --aurora-rim: radial-gradient(600px 600px at 100% 100%,
-    rgba(196,196,196,.45)  0%,
-    rgba(196,196,196,.18) 46%,
-    rgba(196,196,196,0)   78%);
-
-  --palette-preview: linear-gradient(135deg, #f8f9fa 0%, #c4c4c4 40%, #8c8c8c 72%, #495565 100%);
+html[data-theme="light"] {
+  --shade-drop: rgba(0, 0, 0, 0.08);
+
+  --ws-ember:    hsl(345 40% 40%);
+  --ws-forest:   hsl(160 40% 40%);
+  --ws-ocean:    hsl(190 40% 40%);
+  --ws-midnight: hsl(262 40% 40%);
+  --ws-ion-wash:      color-mix(in srgb, var(--ion) 9%, transparent);
+  --ws-ember-wash:    hsl(345 40% 40% / .09);
+  --ws-forest-wash:   hsl(160 40% 40% / .09);
+  --ws-ocean-wash:    hsl(190 40% 40% / .09);
+  --ws-midnight-wash: hsl(262 40% 40% / .09);
 }
 
 /* --- reset / window ------------------------------------------ */
@@ -607,19 +130,22 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  background: var(--ink-0);        /* never fully transparent */
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 13px;
+  background: var(--bg);           /* never fully transparent: the backdrop's fallback */
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   line-height: 1.4;
+  font-feature-settings: "ss01", "cv11";   /* Helm base.css: Segoe UI Variable's open forms */
+  -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
-/* DWM acrylic on: let the desktop read through faintly, no further. */
+/* DWM acrylic on: the canvas stays the plain base. The picture behind the
+   chrome is Quartz's own background layer (.backdrop), not the desktop read
+   through the window, so acrylic changes nothing here. */
 body.acrylic { background: var(--acrylic-bg); }
-body.acrylic .aurora-base { opacity: .45; }
 
 /* Frameless: Win11 rounds the frame itself and guest views do not clip,
    so no outer radius is added. This stays as the guard the contract asks for. */
@@ -630,7 +156,11 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 
 .spacer { flex: 1 1 auto; min-width: 0; }
 
-/* --- backdrop: coloured light behind the glass ---------------- */
+/* --- backdrop: the one pre-blurred background layer ----------- */
+/* Its children (.bg-base / .bg-photo / .bg-wash) are styled by backdrop.css
+   and painted once by backdrop.js; this file only places the box. Every
+   chrome surface above it is a translucent tint with NO backdrop-filter:
+   the blur is already in the bitmap, so nothing re-blurs at runtime. */
 .backdrop {
   /* absolute, not fixed. The chrome document never scrolls (html and body are
      overflow:hidden at 100% height), so the two place it identically — but a
@@ -640,8 +170,8 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
      it) was forced into a THIRD full-window layer: two extra window-sized
      tile sets in the GPU process for pixels the root layer can hold. Measured
      2026-09-26: chrome layers 16 -> 14, chrome tile memory 31.6 -> 24.3 MB.
-     The glass above re-blurs the same pixels; screenshots differ by at most
-     4/255 inside the frosted rows (raster rounding), nowhere else. */
+     (Measured with the old aurora; the background layer that replaced it
+     sits in the same box for the same reason.) */
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -650,29 +180,6 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
 }
 
 .backdrop > div { position: absolute; inset: 0; }
-
-/* (a) base ink field */
-.aurora-base { background: linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%); }
-
-/* (b) light band entering from the upper-left along the -35deg axis */
-.aurora-band { background: var(--aurora-band); }
-
-/* (c) violet pool low in the window, under the Claude chamber */
-.aurora-pool {
-  background: var(--aurora-pool);
-  /* steps(): the pool nudges twice a second instead of every frame. Each move
-     makes every frosted panel above it re-blur, so continuous motion cost a
-     quarter of a CPU core for a sway nobody can see happen. */
-  /* Still. It drifted in 120 steps a minute once; each step re-blurred every
-     frosted surface above it, which read as a faint flicker in the panes and
-     cost real GPU time whenever a Claude tab was open. */
-}
-
-/* (d) teal-cyan rim at the bottom-right, drifting the other way */
-.aurora-rim {
-  background: var(--aurora-rim);
-}
-
 
 
 /* --- glass recipe -------------------------------------------- */
@@ -909,23 +416,6 @@ button.glass:focus-visible {
    of mixing. Accents are fixed hsl, not --ion, because they have to stay
    told apart from each other whatever palette is on. */
 .tab[hidden] { display: none; }
-
-:root {
-  --ws-ion:      var(--ion);
-  --ws-ember:    hsl(345 100% 72%);
-  --ws-forest:   hsl(160 84% 68%);
-  --ws-ocean:    hsl(190 100% 70%);
-  --ws-midnight: hsl(262 92% 76%);
-}
-
-/* Light: the same hues, dropped to 44% so they read on a pale strip. */
-:root[data-theme="light"] {
-  --ws-ion:      var(--ion);
-  --ws-ember:    hsl(345 100% 44%);
-  --ws-forest:   hsl(160 84% 44%);
-  --ws-ocean:    hsl(190 100% 44%);
-  --ws-midnight: hsl(262 92% 44%);
-}
 
 .tab[data-ws-colour="ion"]      { --ws-colour: var(--ws-ion); }
 .tab[data-ws-colour="ember"]    { --ws-colour: var(--ws-ember); }
