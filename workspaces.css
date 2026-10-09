@@ -5,17 +5,14 @@
    popover and the .ws-* parts inside them: nothing here reaches
    another element.
 
-   THEMES. Every colour resolves through a chrome.css token, so the
-   light theme relights all of it for free. The one exception is the
-   four named workspace colours, which are not tokens anywhere else
-   in the app: they get a :root[data-theme="light"] block at the
-   bottom of this file that drops them to 44% lightness so a 10px
-   dot still reads against white glass.
+   LOOK. Helm's chip for the pill and Helm's menu for the popover.
+   Every rule is written against tokens.css names (chrome.css
+   @imports it), so html[data-theme="light"] relights it. The one
+   exception is the four named workspace colours, which are not
+   tokens anywhere else: they are set here once per theme, at the
+   same quiet strength tokens.css gives the palette accents.
 
-   MOTION. Both surfaces sit on a backdrop-filter, so an animated
-   frame re-blurs everything behind it. Nothing animates
-   continuously: every transition is stepped and none runs longer
-   than 150ms.
+   MOTION. 120 ms colour changes; nothing animates continuously.
    ============================================================ */
 
 /* ============================================================
@@ -25,37 +22,38 @@
    the only thing that wore them; the titlebar now washes itself in
    the current workspace's colour too (chrome.css, #titlebar
    [data-ws-colour]), so the values live here once and both read
-   them. Same colours, same light-theme drop to 44% lightness —
-   nothing new was invented for the wash, it is the same hue at the
-   alpha a tint takes (7% dark, 9% light, where a slightly stronger
-   wash is needed to read against white glass).
+   them. They sit at the strength of tokens.css's palette accents
+   (dark 31% saturation / 71% lightness, light 26% / 41%), so a
+   workspace mark is as quiet as the accent and nothing reads as
+   neon. The wash is the same hue at a tint's alpha (7% dark, 9%
+   light).
    ============================================================ */
 :root {
-  --ws-ion:      var(--ion);            /* chrome.css owns ion in both themes */
-  --ws-ember:    hsl(345 100% 72%);
-  --ws-forest:   hsl(160 84% 68%);
-  --ws-ocean:    hsl(190 100% 70%);
-  --ws-midnight: hsl(262 92% 76%);
+  --ws-ion:      var(--accent);            /* tokens.css owns the accent in both themes */
+  --ws-ember:    hsl(345 31% 71%);
+  --ws-forest:   hsl(150 31% 71%);
+  --ws-ocean:    hsl(188 31% 68%);
+  --ws-midnight: hsl(255 31% 76%);
 
   /* the same five at wash strength: a tint you read without looking at */
-  --ws-ion-wash:      rgba(114, 173, 202, .07);   /* = --ion, dark theme */
-  --ws-ember-wash:    hsl(345 100% 72% / .07);
-  --ws-forest-wash:   hsl(160 84% 68% / .07);
-  --ws-ocean-wash:    hsl(190 100% 70% / .07);
-  --ws-midnight-wash: hsl(262 92% 76% / .07);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 7%, transparent);
+  --ws-ember-wash:    hsl(345 31% 71% / .07);
+  --ws-forest-wash:   hsl(150 31% 71% / .07);
+  --ws-ocean-wash:    hsl(188 31% 68% / .07);
+  --ws-midnight-wash: hsl(255 31% 76% / .07);
 }
 
-:root[data-theme="light"] {
-  --ws-ember:    hsl(345 100% 44%);
-  --ws-forest:   hsl(160 84% 44%);
-  --ws-ocean:    hsl(190 100% 44%);
-  --ws-midnight: hsl(262 92% 44%);
+html[data-theme="light"] {
+  --ws-ember:    hsl(345 26% 41%);
+  --ws-forest:   hsl(150 26% 36%);
+  --ws-ocean:    hsl(188 30% 34%);
+  --ws-midnight: hsl(255 26% 46%);
 
-  --ws-ion-wash:      rgba(11, 127, 214, .09);    /* = --ion, light theme */
-  --ws-ember-wash:    hsl(345 100% 44% / .09);
-  --ws-forest-wash:   hsl(160 84% 44% / .09);
-  --ws-ocean-wash:    hsl(190 100% 44% / .09);
-  --ws-midnight-wash: hsl(262 92% 44% / .09);
+  --ws-ion-wash:      color-mix(in srgb, var(--accent) 9%, transparent);
+  --ws-ember-wash:    hsl(345 26% 41% / .09);
+  --ws-forest-wash:   hsl(150 26% 36% / .09);
+  --ws-ocean-wash:    hsl(188 30% 34% / .09);
+  --ws-midnight-wash: hsl(255 26% 46% / .09);
 }
 
 /* There is no global reset in this app, and chrome.css gives every
@@ -82,38 +80,35 @@
   padding: 0 8px 0 9px;
   border: 1px solid transparent;
   border-radius: 999px;
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12px;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   /* a label you can press, set as a readout */
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
   white-space: nowrap;
-  transition: background-color 120ms steps(3, end), color 120ms steps(3, end),
-              border-color 120ms steps(3, end);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
 
 #workspace-pill:hover {
-  background: var(--sheen), var(--glass-2);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--surface-3);
+  border-color: var(--hairline);
+  color: var(--text);
 }
 
-#workspace-pill:active { background: var(--sheen), var(--glass-3); }
+#workspace-pill:active { background: var(--surface-2); }
 
 /* while the popover is open the pill stays lit, so it reads as the thing
    holding it open rather than a button that did nothing */
 #workspace-pill.is-open {
-  background: var(--sheen), var(--glass-3);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--surface-3);
+  border-color: var(--hairline);
+  color: var(--text);
 }
 
-/* focus is light: a 1px ion line and a soft halo, never a white slab */
+/* Helm's one focus treatment: the --focus-ring box-shadow */
 #workspace-pill:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 #workspace-pill .ws-pill-name {
@@ -128,16 +123,16 @@
 #workspace-pill .ws-chev {
   flex: 0 0 auto;
   font-size: 8px;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 #workspace-pill:hover .ws-chev,
-#workspace-pill.is-open .ws-chev { color: var(--fg-2); }
+#workspace-pill.is-open .ws-chev { color: var(--text-2); }
 
 /* ============================================================
    The colour dot
    The whole vocabulary of the feature: a workspace is a name and a
-   dot. --fg-3 is "no colour" — quiet, but never absent, so the row
+   dot. --text-3 is "no colour" — quiet, but never absent, so the row
    never changes shape when a colour is set.
    ============================================================ */
 
@@ -147,33 +142,22 @@
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  /* The mark and the light it throws are one hue, held in a pair of local
-     properties so a workspace colour can glow in its own colour rather than
-     borrowing the ion one. "No colour" throws no light. */
-  --ws-mark: var(--fg-3);
-  --ws-mark-glow: transparent;
+  /* the mark's hue, held in one local property so each colour below sets
+     it once; "no colour" is the quiet text grey */
+  --ws-mark: var(--text-3);
   background: var(--ws-mark);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
-  transition: background-color 120ms steps(2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background-color var(--dur) var(--ease);
 }
 
-.ws-dot[data-colour="ion"]      { --ws-mark: var(--ws-ion);      --ws-mark-glow: var(--ion-glow); }
-.ws-dot[data-colour="ember"]    { --ws-mark: var(--ws-ember);    --ws-mark-glow: hsl(345 100% 72% / .5); }
-.ws-dot[data-colour="forest"]   { --ws-mark: var(--ws-forest);   --ws-mark-glow: hsl(160 84% 68% / .5); }
-.ws-dot[data-colour="ocean"]    { --ws-mark: var(--ws-ocean);    --ws-mark-glow: hsl(190 100% 70% / .5); }
-.ws-dot[data-colour="midnight"] { --ws-mark: var(--ws-midnight); --ws-mark-glow: hsl(262 92% 76% / .5); }
+.ws-dot[data-colour="ion"]      { --ws-mark: var(--ws-ion); }
+.ws-dot[data-colour="ember"]    { --ws-mark: var(--ws-ember); }
+.ws-dot[data-colour="forest"]   { --ws-mark: var(--ws-forest); }
+.ws-dot[data-colour="ocean"]    { --ws-mark: var(--ws-ocean); }
+.ws-dot[data-colour="midnight"] { --ws-mark: var(--ws-midnight); }
 
-/* The workspace you are in states itself as light: the pill's mark and the
-   current row's mark are pips, lit in their own hue. Every other dot — the
-   swatches, the other rows — stays unlit, so only one thing in the pane
-   glows at a time. */
-#workspace-pill .ws-pill-dot,
-#workspaces-panel .ws-row.is-current .ws-row-dot {
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, .12),
-    0 0 6px var(--ws-mark-glow),
-    0 0 1px var(--ws-mark);
-}
+/* No dot glows: glow is only ever the focus ring. The workspace you are in
+   is told by the pill itself and by the current row's accent rail. */
 
 /* ============================================================
    The popover
@@ -191,44 +175,29 @@
   width: 300px;
   max-width: calc(100vw - 20px);
   padding: 6px 6px 0;
-  /* The light rim: 1px of gradient in the border box, specular at the
-     top-left and ion at the bottom-right. */
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  /* The chamber's ground, not the titlebar's: this pane floats over guest
-     pages, and --glass alone would leave a site legible through it. Opaque,
-     so the rim only shows where it should. */
-  background:
-    var(--sheen) padding-box,
-    linear-gradient(var(--panel-bg), var(--panel-bg)) padding-box,
-    var(--rim) border-box;
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-m);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  /* Helm's menu ground. This pane floats over guest pages, and a <webview>
+     gives a backdrop-filter nothing it can sample, so --overlay (legible on
+     its own) carries it and there is no blur. Its list also scrolls. */
+  background: var(--overlay);
   box-shadow:
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 var(--shade-in),
-    0 14px 34px var(--shade-drop);
-}
-
-/* two cut corners on the diagonal: the container signature, where supported */
-@supports (corner-shape: bevel) {
-  #workspaces-panel { corner-shape: round bevel round bevel; }
+    inset 0 1px 0 var(--panel-edge),
+    var(--shadow-3);
 }
 
 #workspaces-panel:focus { outline: none; }
 
 /* The header, in move mode only: a section title, so the readout setting —
-   12px, 600, --fg-3, sentence case, never tracked out. */
+   12px, 600, --text-3, sentence case, never tracked out. */
 #workspaces-panel .ws-head {
   padding: 5px 8px 7px;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
   text-transform: none;
 }
 
@@ -263,21 +232,19 @@
   min-height: 34px;
   padding: 0 6px 0 11px;
   /* a row is a control: round, so the bevel stays the pane's signature */
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-stretch: var(--readout-stretch);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
   cursor: default;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-row:hover { background: var(--glass); color: var(--fg); }
-#workspaces-panel .ws-row.is-current { color: var(--fg); }
+#workspaces-panel .ws-row:hover { background: var(--surface-3); color: var(--text); }
+#workspaces-panel .ws-row.is-current { color: var(--text); }
 
 #workspaces-panel .ws-row:focus { outline: none; }
 #workspaces-panel .ws-row:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 #workspaces-panel .ws-row::before {
@@ -288,12 +255,10 @@
   bottom: 7px;
   width: 2px;
   border-radius: 2px;
-  background: var(--ion);
-  /* the rail is light, not paint: the same halo the pips carry */
-  box-shadow: 0 0 6px var(--ion-glow);
+  background: var(--accent);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms steps(2);
+  transition: opacity var(--dur) var(--ease);
 }
 
 #workspaces-panel .ws-row.is-current::before { opacity: 1; }
@@ -318,9 +283,8 @@
 /* a count: tabular, so the column holds still as tabs open and close */
 #workspaces-panel .ws-count {
   flex: 0 0 auto;
-  color: var(--fg-3);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -332,9 +296,8 @@
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--fg-3);
-  font-size: 10.5px;
-  font-stretch: var(--readout-stretch);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   letter-spacing: .02em;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -345,9 +308,8 @@
   flex: 0 0 auto;
   margin-left: auto;
   padding-left: 6px;
-  font-size: 11px;
-  color: var(--ion);
-  text-shadow: var(--pip-glow);
+  font-size: var(--fs-2xs);
+  color: var(--accent);
 }
 
 /* --- the per-row buttons ---------------------------------------
@@ -360,7 +322,7 @@
   flex: 0 0 auto;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms steps(2);
+  transition: opacity var(--dur) var(--ease);
 }
 
 #workspaces-panel .ws-row:hover .ws-row-acts,
@@ -372,35 +334,33 @@
 #workspaces-panel .ws-act {
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-3);
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-act .glyph { font-family: var(--icon-font); font-size: 11px; }
-#workspaces-panel .ws-act:hover { background: var(--glass-2); color: var(--fg); }
-#workspaces-panel .ws-act:active { background: var(--glass-3); }
+#workspaces-panel .ws-act .glyph { font-family: var(--icon-font); font-size: var(--fs-2xs); }
+#workspaces-panel .ws-act:hover { background: var(--surface-3); color: var(--text); }
+#workspaces-panel .ws-act:active { background: var(--surface-2); }
 
 #workspaces-panel .ws-act:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* the second press of the two-step delete */
 #workspaces-panel .ws-confirm {
   width: auto;
   padding: 0 8px;
-  border: 1px solid var(--edge);
-  background: var(--glass-2);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  /* Helm's danger button: it deletes */
+  border: 1px solid transparent;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-family: var(--font);
+  font-size: var(--fs-2xs);
 }
 
-#workspaces-panel .ws-confirm:hover { background: var(--glass-3); }
+#workspaces-panel .ws-confirm:hover { background: var(--danger); color: var(--text-inverse); }
 
 /* --- rename, in place ------------------------------------------ */
 #workspaces-panel .ws-rename {
@@ -409,13 +369,12 @@
   height: 24px;
   margin: 0;
   padding: 0 6px;
-  border: 1px solid var(--ion-line);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   -webkit-user-select: text;
   user-select: text;
 }
@@ -443,20 +402,19 @@
   height: 22px;
   border-radius: 999px;
   border: 1px solid transparent;
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-swatch:hover { background: var(--glass-2); }
+#workspaces-panel .ws-swatch:hover { background: var(--surface-3); }
 
 #workspaces-panel .ws-swatch.is-on {
-  background: var(--glass-3);
-  border-color: var(--edge);
+  background: var(--surface-3);
+  border-color: var(--hairline);
 }
 
 #workspaces-panel .ws-swatch:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* ============================================================
@@ -468,10 +426,10 @@
 
 /* the expander button itself: lit while open, marked while the workspace
    actually has a folder or a pane set */
-#workspaces-panel .ws-act-setup.is-set { color: var(--fg-2); }
+#workspaces-panel .ws-act-setup.is-set { color: var(--text-2); }
 #workspaces-panel .ws-act-setup.is-on {
-  background: var(--glass-3);
-  color: var(--fg);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 #workspaces-panel .ws-setup {
@@ -491,10 +449,8 @@
 
 #workspaces-panel .ws-setup-label {
   flex: 0 0 44px;
-  color: var(--fg-3);
-  font-size: 11px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
 }
 
 /* The path, as a button: the folder's own name, with the whole path in the
@@ -504,43 +460,41 @@
   min-width: 0;
   height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
-  transition: background-color 120ms steps(2), border-color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-folder:hover:not(:disabled) { background: var(--glass-2); }
-#workspaces-panel .ws-folder.is-unset { color: var(--fg-3); }
+#workspaces-panel .ws-folder:hover:not(:disabled) { background: var(--surface-3); }
+#workspaces-panel .ws-folder.is-unset { color: var(--text-3); }
 #workspaces-panel .ws-folder:disabled { opacity: .55; cursor: default; }
 
 /* A folder that is not there any more. A warning is the one place a line is
    allowed to be coloured; it still does not glow. */
 #workspaces-panel .ws-folder.is-missing {
-  border-color: var(--ws-ember);
-  color: var(--ws-ember);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 #workspaces-panel .ws-folder:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* Why something is not available, in words, under the row it belongs to. */
 #workspaces-panel .ws-setup-note {
   padding-left: 50px;
-  color: var(--ws-ember);
-  font-size: 11px;
+  color: var(--warn);
+  font-size: var(--fs-2xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -558,51 +512,37 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-s);
   background: transparent;
-  color: var(--fg-3);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-pane-opt:hover:not(:disabled) { background: var(--glass-2); color: var(--fg); }
+#workspaces-panel .ws-pane-opt:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 #workspaces-panel .ws-pane-opt.is-on {
-  background: var(--glass-3);
-  border-color: var(--edge);
-  color: var(--fg);
+  background: var(--surface-3);
+  border-color: var(--hairline);
+  color: var(--text);
 }
 #workspaces-panel .ws-pane-opt:disabled { opacity: .55; cursor: default; }
 
 #workspaces-panel .ws-pane-opt:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* ============================================================
    The "New workspace" footer
    ============================================================ */
 
-/* The 1px stays where the solid border held it; the paint moves to ::before
-   so the rule fades out to the right — the seam motif at pane scale. */
+/* One plain 1px hairline above the footer, as Helm separates a menu. */
 #workspaces-panel .ws-new {
   position: relative;
   padding: 4px 0 2px;
-  border-top: 1px solid transparent;
+  border-top: 1px solid var(--hairline);
   margin-top: 5px;
-}
-
-#workspaces-panel .ws-new::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
-  pointer-events: none;
 }
 
 #workspaces-panel .ws-newbtn {
@@ -613,22 +553,20 @@
   width: 100%;
   min-height: 32px;
   padding: 0 11px;
-  border-radius: var(--radius-ctl);
-  color: var(--fg-2);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   text-align: left;
-  transition: background-color 120ms steps(2), color 120ms steps(2);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-newbtn .glyph { font-family: var(--icon-font); font-size: 11px; }
-#workspaces-panel .ws-newbtn:hover { background: var(--glass); color: var(--fg); }
+#workspaces-panel .ws-newbtn .glyph { font-family: var(--icon-font); font-size: var(--fs-2xs); }
+#workspaces-panel .ws-newbtn:hover { background: var(--surface-3); color: var(--text); }
 
 #workspaces-panel .ws-newbtn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: -1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 #workspaces-panel .ws-newform { padding: 2px 6px 2px 11px; }
@@ -646,18 +584,17 @@
   height: 24px;
   margin: 0;
   padding: 0 6px;
-  border: 1px solid var(--ion-line);
-  border-radius: var(--radius-ctl);
-  background: var(--glass);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 12.5px;
-  font-stretch: var(--readout-stretch);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   -webkit-user-select: text;
   user-select: text;
 }
 
-#workspaces-panel .ws-newinput::placeholder { color: var(--placeholder); }
+#workspaces-panel .ws-newinput::placeholder { color: var(--text-3); }
 #workspaces-panel .ws-newinput:focus { outline: none; }
 #workspaces-panel .ws-newinput::selection { background: var(--ion-select); }
 
@@ -666,23 +603,22 @@
   gap: 6px;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-ctl);
-  background: var(--glass-2);
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 11.5px;
-  font-stretch: var(--readout-stretch);
-  transition: background-color 120ms steps(2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
-#workspaces-panel .ws-create .glyph { font-family: var(--icon-font); font-size: 10px; color: var(--ion); }
-#workspaces-panel .ws-create:hover { background: var(--glass-3); }
+#workspaces-panel .ws-create .glyph { font-family: var(--icon-font); font-size: 10px; color: var(--accent); }
+#workspaces-panel .ws-create:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
 
 #workspaces-panel .ws-create:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* the new form's colour strip sits under the field, flush with the dot */
@@ -697,47 +633,10 @@
 #workspaces-panel .ws-hint {
   position: relative;
   padding: 7px 11px 9px;
-  border-top: 1px solid transparent;
-  color: var(--fg-3);
-  font-size: 10.5px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-}
-
-/* the same fading rule, in the pixel the solid border used to own */
-#workspaces-panel .ws-hint::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
-  pointer-events: none;
-}
-
-/* ============================================================
-   Light theme: the four named colours, relit
-   --ion is a token and re-themes itself; these four are not, and at
-   68-76% lightness they vanish on white glass. 44% keeps each hue
-   recognisable while staying legible against --panel-bg.
-   ============================================================ */
-
-:root[data-theme="light"] .ws-dot[data-colour="ember"]    { --ws-mark: hsl(345 100% 44%); --ws-mark-glow: hsl(345 100% 44% / .45); }
-:root[data-theme="light"] .ws-dot[data-colour="forest"]   { --ws-mark: hsl(160 84% 44%);  --ws-mark-glow: hsl(160 84% 44% / .45); }
-:root[data-theme="light"] .ws-dot[data-colour="ocean"]    { --ws-mark: hsl(190 100% 44%); --ws-mark-glow: hsl(190 100% 44% / .45); }
-:root[data-theme="light"] .ws-dot[data-colour="midnight"] { --ws-mark: hsl(262 92% 44%);  --ws-mark-glow: hsl(262 92% 44% / .45); }
-
-/* the inset ring reads as grime on a light dot; ink it instead */
-:root[data-theme="light"] .ws-dot { box-shadow: inset 0 0 0 1px rgba(18, 22, 42, .10); }
-
-/* the lit pips take the inked ring too, and keep their halo */
-:root[data-theme="light"] #workspace-pill .ws-pill-dot,
-:root[data-theme="light"] #workspaces-panel .ws-row.is-current .ws-row-dot {
-  box-shadow:
-    inset 0 0 0 1px rgba(18, 22, 42, .10),
-    0 0 6px var(--ws-mark-glow),
-    0 0 1px var(--ws-mark);
+  /* one plain hairline, the same as the footer's */
+  border-top: 1px solid var(--hairline);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
 }
 
 /* ============================================================
