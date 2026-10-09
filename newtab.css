@@ -356,6 +356,9 @@ html[data-theme="light"] #bg-dim {
    always the column's first child (hidden unless the column is empty), so
    "first piece" is the one right after it. */
 .column > .col-empty + [data-piece] { margin-top: 0; }
+/* The Q has no margin of its own (it was always first); under another
+   piece (the clock dropped on top of the column) it needs one. */
+.column > [data-piece] + .home-logo { margin-top: 24px; }
 .column > .module { margin: 28px auto 0; }
 .column > .module-clock { text-align: center; }
 .column > .module-clock .mod-time { justify-content: center; }
