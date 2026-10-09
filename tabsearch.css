@@ -106,9 +106,13 @@
 #tabsearch-input::placeholder { color: var(--text-3); }
 #tabsearch-input:focus { outline: none; }
 
+/* No ring on the field, as on Helm's palette (.palette-input input:focus-visible
+   { box-shadow: none }): the palette itself is what has focus, it opens with
+   the caret in this field, and a ring drawn inside the pane read as a second
+   box within the box. */
 #tabsearch-input:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring);
+  box-shadow: none;
 }
 
 /* The outline follows the element's radius, and this input had none — so the
