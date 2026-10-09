@@ -1,57 +1,46 @@
+@import url("tokens.css");
 /*
- * phone-page.css — the Phone tab. Same instrument-glass voice as the other
- * bundled pages: neutral dark ground, plain hairlines, glow only for focus and
- * live states, motion stepped and short (<= 150 ms).
+ * phone-page.css — the Phone tab, dressed like Helm: neutral greys, exact 1px
+ * hairlines, real shadow for depth, the one accent for state only (live,
+ * pressed, focus), glow only as the focus ring, motion <= 150 ms.
  *
- * chrome.css's tokens do NOT reach this page: it is a file:// <webview> guest
- * with its own document. So the palette below mirrors chrome.css's neutrals
- * by hand, and newtab-theme.js sets data-theme on <html> from ?theme= before
- * the first paint, exactly as it does for the new-tab and reader pages.
+ * This page is a file:// <webview> guest with its own document, so chrome.css
+ * does not reach it; tokens.css (imported above, Helm's names) does, and
+ * newtab-theme.js stamps data-theme / palette / hue on <html> before first
+ * paint as it does for the new-tab and reader pages. There is no blurred
+ * layer behind a tab, so the canvas is the plain neutral --bg and the panels
+ * are Helm tints over it.
+ *
+ * The --pp-* names below are the file's older names, kept ONLY as aliases
+ * onto tokens.css, so no colour is defined in this file.
  */
 
 :root {
-  --pp-bg: #171819;
-  --pp-bg-2: #131415;
-  --pp-fg: #e6e6e6;
-  --pp-fg-2: #a9abad;
-  --pp-fg-3: #6f7275;
-  --pp-line: rgba(255, 255, 255, 0.08);
-  --pp-line-2: rgba(255, 255, 255, 0.14);
-  --pp-panel: rgba(255, 255, 255, 0.03);
-  --pp-panel-2: rgba(255, 255, 255, 0.06);
-  --pp-ok: #7fd18a;
-  --pp-warn: #e0b45a;
-  --pp-err: #e07a6a;
-  --pp-ion: #6fa8ff;
-  --pp-focus: rgba(111, 168, 255, 0.55);
-  --pp-font: system-ui, "Segoe UI Variable", "Segoe UI", sans-serif;
-  --pp-mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
-}
-
-html[data-theme="light"] {
-  --pp-bg: #f2f2f3;
-  --pp-bg-2: #e9e9ea;
-  --pp-fg: #1b1c1d;
-  --pp-fg-2: #4a4c4f;
-  --pp-fg-3: #7b7e82;
-  --pp-line: rgba(0, 0, 0, 0.1);
-  --pp-line-2: rgba(0, 0, 0, 0.18);
-  --pp-panel: rgba(0, 0, 0, 0.03);
-  --pp-panel-2: rgba(0, 0, 0, 0.06);
-  --pp-ok: #2f7d43;
-  --pp-warn: #8a6410;
-  --pp-err: #a33b2b;
-  --pp-ion: #2563c9;
-  --pp-focus: rgba(37, 99, 201, 0.5);
+  --pp-bg: var(--bg);
+  --pp-bg-2: var(--surface-1);
+  --pp-fg: var(--text);
+  --pp-fg-2: var(--text-2);
+  --pp-fg-3: var(--text-3);
+  --pp-line: var(--hairline);
+  --pp-line-2: var(--hairline-strong);
+  --pp-panel: var(--surface-1);
+  --pp-panel-2: var(--surface-3);
+  --pp-ok: var(--ok);
+  --pp-warn: var(--warn);
+  --pp-err: var(--danger);
+  --pp-ion: var(--accent);
+  --pp-font: var(--font);
+  --pp-mono: var(--mono);
 }
 
 html, body { height: 100%; margin: 0; }
 
 body {
-  background: var(--pp-bg);
-  color: var(--pp-fg);
-  font: 13px/1.45 var(--pp-font);
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-s)/1.45 var(--font);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -64,7 +53,8 @@ body {
 }
 
 /* --- status strip ------------------------------------------------------- */
-
+/* A Helm panel bar: --surface-1 tint on --bg, the panel's inset top edge and
+   a 1px hairline under it. */
 .status {
   grid-column: 1 / -1;
   display: flex;
@@ -72,50 +62,60 @@ body {
   gap: 10px;
   min-height: 38px;
   padding: 7px 14px;
-  border-bottom: 1px solid var(--pp-line);
-  background: var(--pp-bg-2);
-  color: var(--pp-fg);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-1);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
+  color: var(--text);
 }
 
+/* Status dots carry Helm's state colours flat: no halo at rest. */
 .status-dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--pp-fg-3);
-  transition: background 120ms steps(3, end);
+  background: var(--st-idle);
+  transition: background-color var(--dur) var(--ease);
 }
-.status-dot[data-kind="ok"] { background: var(--pp-ok); box-shadow: 0 0 6px var(--pp-ok); }
-.status-dot[data-kind="warn"] { background: var(--pp-warn); }
-.status-dot[data-kind="error"] { background: var(--pp-err); }
-.status-dot[data-kind="busy"] { background: var(--pp-ion); }
+.status-dot[data-kind="ok"] { background: var(--ok); }
+.status-dot[data-kind="warn"] { background: var(--st-waiting); }
+.status-dot[data-kind="error"] { background: var(--st-error); }
+.status-dot[data-kind="busy"] { background: var(--st-working); }
 
 .status-text { flex: none; }
 
 .status-sub {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--pp-fg-3);
+  color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Helm's default .btn, at the strip's size. */
 .status-action {
   flex: none;
   margin-left: auto;
   padding: 4px 12px;
   font: inherit;
-  color: var(--pp-fg);
-  background: var(--pp-panel-2);
-  border: 1px solid var(--pp-line-2);
-  border-radius: 6px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
   cursor: pointer;
-  transition: background 120ms steps(2, end);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color     var(--dur) var(--ease);
 }
-.status-action:hover { background: var(--pp-panel); border-color: var(--pp-ion); }
-.status-action:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pp-focus); }
-.status-action[disabled] { opacity: 0.55; cursor: default; }
+@media (hover: hover) {
+  .status-action:hover:not([disabled]) { background: var(--surface-3); border-color: var(--hairline-strong); }
+}
+.status-action:active:not([disabled]) { background: var(--surface-2); }
+.status-action:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.status-action[disabled] { opacity: 0.45; cursor: default; }
 
 /* --- the stage and the phone frame -------------------------------------- */
 
@@ -125,14 +125,14 @@ body {
   padding: 16px;
   min-height: 0;
   min-width: 0;
-  background:
-    radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.025), transparent 70%),
-    var(--pp-bg);
+  background: var(--bg);
 }
 
 /* The frame is sized in script (it must fit BOTH axes at the device's aspect),
    so only the look lives here. aspect-ratio is the portrait fallback for the
-   first paint, before any session packet says what the device really is. */
+   first paint, before any session packet says what the device really is.
+   The phone's own screen is black whatever the theme (#000 is the picture's
+   letterbox, not a palette colour). */
 .frame {
   position: relative;
   /* border-box: the hairline lives INSIDE the size the script sets, so the
@@ -141,13 +141,14 @@ body {
   aspect-ratio: 9 / 20;
   max-width: 100%;
   max-height: 100%;
-  border: 1px solid var(--pp-line-2);
+  border: 1px solid var(--hairline-strong);
   border-radius: 20px;
   background: #000;
   overflow: hidden;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-2);
 }
-.frame[data-live="1"] { border-color: rgba(111, 168, 255, 0.35); }
+/* Live is state, so it takes the accent hairline (no glow). */
+.frame[data-live="1"] { border-color: var(--accent-line); }
 
 #screen {
   width: 100%;
@@ -158,8 +159,10 @@ body {
   touch-action: none;
   cursor: default;
 }
-#screen:focus-visible { box-shadow: inset 0 0 0 2px var(--pp-focus); }
+#screen:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); }
 
+/* Over the black screen in both themes, so it is a dark scrim with light
+   text whatever the page theme is. */
 .frame-note {
   position: absolute;
   inset: 0;
@@ -167,7 +170,7 @@ body {
   place-items: center;
   padding: 24px;
   text-align: center;
-  color: var(--pp-fg-2);
+  color: #d8d8d6;
   background: rgba(0, 0, 0, 0.55);
   pointer-events: none;
   white-space: pre-line;
@@ -186,23 +189,24 @@ body {
   gap: 10px;
   padding: 12px 12px 14px;
   overflow-y: auto;
-  border-left: 1px solid var(--pp-line);
-  background: var(--pp-panel);
+  border-left: 1px solid var(--hairline);
+  background: var(--surface-1);
 }
 
+/* Helm's chip; "on" is the pressed chip (accent-soft + accent hairline). */
 .rail-pill {
   padding: 4px 8px;
   text-align: center;
-  font-size: 11px;
-  color: var(--pp-fg-2);
-  border: 1px solid var(--pp-line-2);
-  border-radius: 999px;
-  background: var(--pp-bg-2);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
 }
 .rail-pill[data-on="1"] {
-  color: var(--pp-fg);
-  border-color: var(--pp-ion);
-  box-shadow: 0 0 8px rgba(111, 168, 255, 0.25);
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 .rail-keys {
@@ -211,28 +215,36 @@ body {
   gap: 6px;
 }
 
+/* Helm's default .btn, small. */
 .rail-btn {
   padding: 7px 4px;
-  font: 11px/1.2 var(--pp-font);
-  color: var(--pp-fg-2);
-  background: var(--pp-bg-2);
-  border: 1px solid var(--pp-line);
-  border-radius: 7px;
+  font: 500 var(--fs-2xs)/1.2 var(--font);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
   cursor: pointer;
-  transition: background 100ms steps(2, end), color 100ms steps(2, end);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color     var(--dur) var(--ease),
+    color            var(--dur) var(--ease);
 }
-.rail-btn:hover:not([disabled]) { color: var(--pp-fg); background: var(--pp-panel-2); }
-.rail-btn:active:not([disabled]) { border-color: var(--pp-ion); box-shadow: 0 0 8px rgba(111, 168, 255, 0.3); }
-.rail-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pp-focus); }
+@media (hover: hover) {
+  .rail-btn:hover:not([disabled]) { color: var(--text); background: var(--surface-3); border-color: var(--hairline-strong); }
+}
+.rail-btn:active:not([disabled]) { background: var(--surface-2); border-color: var(--accent-line); }
+.rail-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .rail-btn[disabled] { opacity: 0.4; cursor: default; }
-.rail-btn[data-on="1"] { color: var(--pp-fg); border-color: var(--pp-ion); }
+.rail-btn[data-on="1"] { color: var(--text); background: var(--accent-soft); border-color: var(--accent-line); }
 .rail-btn.wide { grid-column: 1 / -1; }
 
 /* Sound: Computer | Phone | Both — where the phone's sound plays. One
-   hairline-framed strip of three, straight under Mute. The chosen segment is
-   lit like a pressed rail key (ion hairline, no glow); a change restarts the
-   stream, so the segment being switched to is marked busy with a static
-   dashed rim and a trailing ellipsis — no looping animation while it waits. */
+   hairline-framed segmented strip of three, straight under Mute. The chosen
+   segment is the pressed state (accent-soft fill, accent hairline, no glow);
+   a change restarts the stream, so the segment being switched to is marked
+   busy with a static dashed rim and a trailing ellipsis — no looping
+   animation while it waits. */
 .rail-sound {
   display: flex;
   flex-direction: column;
@@ -241,7 +253,7 @@ body {
 }
 .rail-sound-label {
   font-size: 10px;
-  color: var(--pp-fg-3);
+  color: var(--text-3);
   letter-spacing: 0.02em;
 }
 .rail-seg {
@@ -249,37 +261,41 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--pp-line);
-  border-radius: 8px;
-  background: var(--pp-bg-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
 }
 .rail-seg-btn {
   min-width: 0;
   padding: 5px 2px;
-  font: 11px/1.2 var(--pp-font);
-  color: var(--pp-fg-2);
+  font: 500 var(--fs-2xs)/1.2 var(--font);
+  color: var(--text-2);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: background 100ms steps(2, end), color 100ms steps(2, end);
+  transition:
+    background-color var(--dur) var(--ease),
+    color            var(--dur) var(--ease);
 }
-.rail-seg-btn:hover:not([disabled]) { color: var(--pp-fg); background: var(--pp-panel-2); }
-.rail-seg-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pp-focus); }
+@media (hover: hover) {
+  .rail-seg-btn:hover:not([disabled]) { color: var(--text); background: var(--surface-3); }
+}
+.rail-seg-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .rail-seg-btn[aria-pressed="true"] {
-  color: var(--pp-fg);
-  background: var(--pp-panel-2);
-  border-color: var(--pp-ion);
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 .rail-seg-btn[aria-disabled="true"] { opacity: 0.45; }
 .rail-seg-btn[disabled] { cursor: progress; }
 .rail-seg-btn[disabled]:not([data-busy="1"]) { opacity: 0.4; }
 .rail-seg-btn[data-busy="1"] {
-  color: var(--pp-fg);
-  border-color: var(--pp-ion);
+  color: var(--text);
+  border-color: var(--accent-line);
   border-style: dashed;
 }
 .rail-seg-btn[data-busy="1"]::after { content: "\2026"; }
@@ -288,15 +304,15 @@ body {
    is the whole point: a button that did nothing must say why. */
 .rail-note {
   min-height: 30px;
-  font-size: 11px;
-  color: var(--pp-fg-2);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
   word-break: break-word;
 }
-.rail-note[data-kind="error"] { color: var(--pp-err); }
-.rail-note[data-kind="ok"] { color: var(--pp-ok); }
+.rail-note[data-kind="error"] { color: var(--danger); }
+.rail-note[data-kind="ok"] { color: var(--ok); }
 /* "warn" was already sent (the audio socket's refusal) with no colour of its
    own; the Sound answer uses it too, for an ok stream that lost its sound. */
-.rail-note[data-kind="warn"] { color: var(--pp-warn); }
+.rail-note[data-kind="warn"] { color: var(--warn); }
 
 .rail-read {
   margin: 0;
@@ -306,12 +322,12 @@ body {
      words in its title. */
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   gap: 2px 8px;
-  font-size: 11px;
-  border-top: 1px solid var(--pp-line);
+  font-size: var(--fs-2xs);
+  border-top: 1px solid var(--hairline);
   padding-top: 8px;
 }
 .rail-read dt {
-  color: var(--pp-fg-3);
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -319,15 +335,28 @@ body {
 .rail-read dd {
   margin: 0;
   text-align: right;
-  font-family: var(--pp-mono);
-  color: var(--pp-fg-2);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rail-read dd[data-kind="ok"] { color: var(--pp-ok); }
-.rail-read dd[data-kind="warn"] { color: var(--pp-warn); }
-.rail-read dd[data-kind="error"] { color: var(--pp-err); }
+.rail-read dd[data-kind="ok"] { color: var(--ok); }
+.rail-read dd[data-kind="warn"] { color: var(--warn); }
+.rail-read dd[data-kind="error"] { color: var(--danger); }
+
+/* Helm base.css scrollbars: thin, quiet, no arrows (the rail scrolls). */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* A very narrow tab (a split view, a phone-width window): the rail must not
    eat the picture. Narrower rail only — labels ellipsis and keep their title,

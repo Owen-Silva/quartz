@@ -1,160 +1,52 @@
+@import url("tokens.css");
 /* ============================================================
    reader-page.css — the reading page.
 
-   Same world as chrome.css and newtab.css — frosted glass, near
-   monochrome, one ice-cyan light — turned down to read on. The
-   aurora is a single still wash, the only glass is the slim bar
-   at the top, and the article itself is set in a reading serif
-   at a size the reader chose.
+   Dressed like Helm's assistant prose (Helm ui/chat/chat.css ".md"):
+   --text on the plain neutral --bg, a comfortable measure, code on
+   --code-bg inside a 1px hairline card, links in the one accent with
+   a quiet underline. This page is web content in a tab, so there is
+   no blurred layer behind it: the canvas is simply --bg.
 
-   THEMES. Set by newtab-theme.js from ?theme= before first paint,
-   and re-set by the browser chrome on every theme flip. The tokens
-   are mirrored from newtab.css; every rule below reads through them
-   and none tests the attribute itself.
+   TOKENS come from tokens.css (imported above, Helm's names). The
+   few older names this file used are kept below ONLY as aliases onto
+   those, so no colour is defined here. Theme and accent arrive the
+   same way as before: newtab-theme.js stamps html[data-theme] (and a
+   palette / custom hue) before first paint, tokens.css answers it.
 
    METRICS. Two more things live on <html>, written by reader-page.js
    from this page's localStorage before first paint:
      --body-size  the article's text size, 16-26px
-     data-width   narrow (62ch) / wide (84ch); unset is this file's 68ch
+     data-width   narrow / wide; unset is this file's default measure
    ============================================================ */
 
-/* --- tokens: dark (default) ---------------------------------- */
+/* --- aliases (older names -> tokens.css) ---------------------- */
 :root {
-  --link: var(--ion);
-  --ink-0: #05060a;
-  --ink-1: #0c0f18;
+  --link: var(--accent);
+  --fg:   var(--text);
+  --fg-2: var(--text-2);
+  --fg-3: var(--text-3);
+  --rule: var(--hairline);
+  /* --code-bg is NOT redefined here: tokens.css's value is the one
+     every Quartz page uses, so it wins untouched. */
 
-  --fg:   #eef1f8;
-  --fg-2: #9aa3b8;
-  --fg-3: #838b9f;  /* 4.5:1 on this page's ground; mirrors chrome.css */
-
-  --glass:   rgba(255,255,255,.08);
-  --glass-2: rgba(255,255,255,.13);
-  --glass-3: rgba(255,255,255,.18);
-
-  --edge:     rgba(255,255,255,.22);
-  --specular: rgba(255,255,255,.55);
-
-  --ion:      #7dd3ff;
-  --ion-soft: rgba(125,211,255,.16);
-  --ion-glow: rgba(125,211,255,.45);
-  --ion-line: rgba(125,211,255,.75);
-
-  --bar-shadow: rgba(0,0,0,.45);
-  --rule:       rgba(255,255,255,.12);   /* hairlines inside the article */
-  --code-bg:    rgba(255,255,255,.07);
-
-  /* the diagonal reflection the bar carries, as every glass surface does */
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.10)  0%,
-    rgba(255,255,255,.03) 38%,
-    rgba(255,255,255,0)   60%);
-
-  /* One still wash instead of the new-tab page's three drifting ones: a
-     reading page has no business moving, and no business being loud. */
-  --wash: radial-gradient(1100px 620px at 50% 0%,
-    rgba(75,34,168,.30)  0%,
-    rgba(75,34,168,.12) 46%,
-    rgba(75,34,168,0)   76%);
-
-  --ui-font:      'Bahnschrift', 'Segoe UI Variable', 'Segoe UI', sans-serif;
-  --reading-font: Georgia, 'Cambria', 'Times New Roman', serif;
-  --mono-font:    Consolas, 'Cascadia Mono', 'Courier New', monospace;
-
-  /* --- instrument glass (mirrored from chrome.css) ------------
-     Built out of the tokens above through var(), so this one block
-     covers dark and light: the light block moves --edge, --specular
-     and the --ion family, and these re-read whatever won there. It
-     needs nothing added. */
-  --bevel:      10px;   /* containers: cards, code blocks */
-  --bevel-lg:   14px;   /* full panels */
-  --radius-ctl: 6px;    /* controls keep ordinary round corners */
-
-  /* the lit rim: specular at the top-left, powered at the bottom-right */
-  --rim: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--edge)      28%,
-    var(--edge)      62%,
-    var(--ion-glow) 100%);
-
-  /* the same rim with the accent at full strength */
-  --rim-focus: linear-gradient(135deg,
-    var(--specular)   0%,
-    var(--ion-line)  45%,
-    var(--ion)      100%);
-
-  /* quiet containers at rest */
-  --rim-soft: linear-gradient(135deg, var(--edge) 0%, transparent 60%);
-
-  --pip-glow: 0 0 6px var(--ion-glow), 0 0 1px var(--ion);
-
-  /* Bahnschrift semi-condensed: the bar's labels and readouts */
-  --readout-stretch: 87.5%;
-
-  /* The lit seam under the bar. chrome.css owns --seam for the window
-     chrome; this page is inside a <webview> and cannot see it, so the
-     same line is named here out of the tokens above. */
-  --seam: linear-gradient(90deg,
-    transparent      0%,
-    var(--ion-glow) 18%,
-    var(--ion-glow) 82%,
-    transparent    100%);
-
-  /* the title rule: a hairline that fades out to the right */
-  --title-rule: linear-gradient(90deg, var(--rule), transparent);
+  --ui-font:      var(--font);
+  /* The article is set in Helm's UI face, as Helm sets its prose: one
+     family across the bar and the text, no reading serif. */
+  --reading-font: var(--font);
+  --mono-font:    var(--mono);
 
   --body-size: 19px;    /* reader-page.js overwrites this from storage */
-  /* The measure: 68 characters, with the narrow and wide settings at 62 and
-     84. It is written in em of the reading font rather than in ch because
-     Georgia sets its digits old-style and wide — its "0" is .61em, so 68ch
-     comes out at ~94 characters a line, a third past the measure asked for.
-     One em here is one --body-size, so the column grows with the text. */
-  --column:    32em;    /* ~68 characters; data-width overrides it below */
+  /* The measure, written in em of the reading size so the column grows
+     with the text. Segoe UI's average character is about .48em, so
+     32em is ~66 characters a line; narrow and wide sit either side. */
+  --column:    32em;
   --bar-h:     40px;
 }
 
-/* --- tokens: light ------------------------------------------- */
-/* Tokens only — every rule below is written once and reads through
-   them, exactly as chrome.css and newtab.css do. */
-:root[data-theme="light"] {
-  --link: #0a5fb0;  /* links are body text here: 5.2:1 on the light ground */
-  --ink-0: #eef1f7;
-  --ink-1: #f7f8fc;
-
-  --fg:   #12162a;
-  --fg-2: #4a526b;
-  --fg-3: #656d82;  /* mirrors chrome.css */
-
-  --glass:   rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.72);
-  --glass-3: rgba(255,255,255,.9);
-
-  --edge:     rgba(18,22,42,.12);
-  --specular: rgba(255,255,255,.95);
-
-  --ion:      #0b7fd6;
-  --ion-soft: rgba(11,127,214,.14);
-  --ion-glow: rgba(11,127,214,.35);
-  --ion-line: rgba(11,127,214,.75);
-
-  --bar-shadow: rgba(18,22,42,.16);
-  --rule:       rgba(18,22,42,.12);
-  --code-bg:    rgba(18,22,42,.05);
-
-  --sheen: linear-gradient(115deg,
-    rgba(255,255,255,.7)  0%,
-    rgba(255,255,255,.25) 38%,
-    rgba(255,255,255,0)   60%);
-
-  --wash: radial-gradient(1100px 620px at 50% 0%,
-    rgba(185,167,255,.36)  0%,
-    rgba(185,167,255,.14) 46%,
-    rgba(185,167,255,0)   76%);
-}
-
 /* --- column width -------------------------------------------- */
-:root[data-width="narrow"] { --column: 29em; }    /* ~62 characters */
-:root[data-width="wide"]   { --column: 39.5em; }  /* ~84 characters */
+:root[data-width="narrow"] { --column: 29em; }    /* ~60 characters */
+:root[data-width="wide"]   { --column: 39.5em; }  /* ~82 characters */
 
 /* --- page ---------------------------------------------------- */
 * { box-sizing: border-box; }
@@ -164,30 +56,32 @@ html { height: 100%; }
 body {
   margin: 0;
   min-height: 100%;
-  background: var(--ink-0);          /* never fully transparent */
-  color: var(--fg);
-  font-family: var(--ui-font);
-  font-size: 14px;
-  line-height: 1.4;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-m);
+  line-height: var(--lh);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
-  /* a theme flip is a crossfade, not a cut — stepped, like everything
-     else that moves in this world */
-  transition: background-color 160ms steps(4, end), color 160ms steps(4, end);
+  /* a theme flip is a short crossfade, not a cut */
+  transition: background-color var(--dur-slow) var(--ease), color var(--dur-slow) var(--ease);
 }
 
-/* One fixed, inert wash. It does not move, ever. */
+/* The element stays (reader.html places it) but paints nothing of its
+   own any more: the plain --bg canvas IS the background. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    var(--wash),
-    linear-gradient(180deg, var(--ink-0) 0%, var(--ink-1) 100%);
+  background: var(--bg);
 }
 
+::selection { background: var(--ion-select); }
+
 /* --- the top bar --------------------------------------------- */
+/* Sticky over a scrolling article, and full width, so it is opaque
+   (--surface-solid) with a 1px hairline under it: no blur, no seam. */
 .topbar {
   position: sticky;
   top: 0;
@@ -197,16 +91,9 @@ body {
   gap: 14px;
   height: var(--bar-h);
   padding: 0 14px;
-  /* the lit seam runs along the bottom of the bar, just above its
-     hairline: the signature line, at reading brightness */
-  background:
-    var(--seam) 0 100% / 100% 1px no-repeat,
-    var(--sheen),
-    var(--glass);
-  border-bottom: 1px solid var(--edge);
-  box-shadow: 0 1px 0 var(--bar-shadow);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  backdrop-filter: blur(18px) saturate(140%);
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
 .topbar .sitename {
@@ -214,10 +101,8 @@ body {
   margin: 0;
   min-width: 0;
   text-align: center;
-  color: var(--fg-2);
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -230,8 +115,8 @@ body {
   flex: 0 0 auto;
 }
 
-/* Every control in the bar is the same instrument, whether it is a
-   link or a button: small glass, ion on hover, nothing on idle. */
+/* Every control in the bar is Helm's small ghost button (.btn-ghost.sm):
+   nothing at rest, a --surface-3 fill on hover. */
 .barbtn {
   display: inline-flex;
   align-items: center;
@@ -239,50 +124,50 @@ body {
   height: 26px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius-ctl);   /* a control, so no cut corner */
+  border-radius: var(--radius-s);
   background: transparent;
-  color: var(--fg-2);
+  color: var(--text-2);
   font: inherit;
-  font-size: 12px;
-  font-stretch: var(--readout-stretch);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
+  user-select: none;
   transition:
-    background-color 150ms steps(3, end),
-    color            150ms steps(3, end),
-    border-color     150ms steps(3, end);
+    background-color var(--dur) var(--ease),
+    color            var(--dur) var(--ease),
+    border-color     var(--dur) var(--ease);
 }
 
-.barbtn:hover {
-  background: var(--glass-2);
-  border-color: var(--edge);
-  color: var(--fg);
+@media (hover: hover) {
+  .barbtn:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
 }
 
-.barbtn:active { background: var(--glass-3); }
+.barbtn:active { background: var(--surface-2); }
 
-/* Focus is light: a hairline of ion and a soft halo, never a slab. */
+/* Focus is Helm's ring, the only glow on the page. */
 .barbtn:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .barbtn[hidden] { display: none; }
 
 .back { flex: 0 0 auto; }
-.back .arrow { color: var(--ion); font-size: 13px; }
+.back .arrow { color: var(--text-2); font-size: var(--fs-s); }
+@media (hover: hover) { .back:hover .arrow { color: var(--text); } }
 
-/* The width toggle carries its state, so it stays lit while it is wide —
-   held state is shown as light, the same way a pip is. */
+/* The width toggle holds state, so it reads like Helm's pressed chip:
+   accent-soft fill and an accent hairline, no glow. */
 .wide-toggle[aria-pressed="true"] {
-  background: var(--ion-soft);
-  border-color: var(--ion-line);
-  box-shadow: inset 0 0 10px -6px var(--ion-glow);
-  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
 }
 
 /* --- the reading column -------------------------------------- */
@@ -292,11 +177,9 @@ body {
   padding: 44px 24px 120px;
 }
 
-/* The measure is in ch, and ch is the width of a "0" in the element's OWN
-   font — so the column has to be set in the reading serif at the reading
-   size, or 68ch would silently mean 68 characters of 14px Bahnschrift and
-   the line would come out a third too short. Everything inside that is not
-   the article body names its own font again. */
+/* The column is set at the reading size so --column (in em) measures
+   against the text it holds. Everything inside that is not the article
+   body names its own size again. */
 .column {
   max-width: var(--column);
   margin: 0 auto;
@@ -306,99 +189,96 @@ body {
 
 .placeholder {
   margin: 40px 0;
-  font-family: var(--ui-font);
-  color: var(--fg-3);
-  font-size: 13px;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
+  font-family: var(--font);
+  color: var(--text-3);
+  font-size: var(--fs-s);
 }
 
 .placeholder[hidden] { display: none; }
 
 .title {
   margin: 0 0 10px;
-  font-family: var(--ui-font);
+  font-family: var(--font-display);
   font-size: clamp(26px, 3.4vw, 34px);
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -.01em;
-  color: var(--fg);
+  color: var(--text);
 }
 
 .title[hidden], .meta[hidden] { display: none; }
 
-/* The rule under the byline fades out to the right instead of running
-   solid across: the seam motif at article scale. It is painted into the
-   same box the hairline used, so nothing below it moves. */
+/* A plain 1px hairline under the byline (it was a fading seam). */
 .meta {
   margin: 0 0 28px;
   padding-bottom: 20px;
-  border-bottom: 1px solid transparent;
-  background-image: var(--title-rule);
-  background-repeat: no-repeat;
-  background-size: 100% 1px;
-  background-position: 0 100%;
-  font-family: var(--ui-font);
-  font-size: 12.5px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font);
+  font-size: var(--fs-s);
   font-variant-numeric: tabular-nums;   /* dates and reading times */
-  color: var(--fg-2);
+  color: var(--text-2);
 }
 
 /* --- the article itself -------------------------------------- */
-/* The only place on this page set in the reading serif, at the size
-   the reader chose. Everything inside is the source page's markup, so
-   these rules are written to land on whatever shape arrives. */
+/* Helm's prose rules (chat.css .md) at the size the reader chose.
+   Everything inside is the source page's markup, so these rules are
+   written to land on whatever shape arrives. */
 .content-root {
   display: block;
   font-family: var(--reading-font);
   font-size: var(--body-size);
-  line-height: 1.6;
-  color: var(--fg);
+  line-height: 1.65;
+  color: var(--text);
+  overflow-wrap: break-word;
 }
 
 .content-root > :first-child { margin-top: 0; }
 
 .content-root p,
 .content-root li {
-  margin: 0 0 1.15em;
+  margin: 0 0 1.05em;
 }
 
 .content-root ul,
-.content-root ol { padding-left: 1.4em; margin: 0 0 1.15em; }
+.content-root ol { padding-left: 1.4em; margin: 0 0 1.05em; }
 
-.content-root li { margin-bottom: .5em; }
+.content-root li { margin-bottom: .4em; }
+.content-root li::marker { color: var(--text-3); }
 
 .content-root h1,
 .content-root h2,
 .content-root h3,
 .content-root h4 {
-  font-family: var(--ui-font);
+  font-family: var(--font-display);
   font-weight: 600;
-  line-height: 1.25;
-  margin: 1.8em 0 .6em;
-  color: var(--fg);
+  line-height: 1.3;
+  margin: 1.7em 0 .55em;
+  color: var(--text);
 }
 
-.content-root h1 { font-size: 1.5em; }
-.content-root h2 { font-size: 1.3em; }
-.content-root h3 { font-size: 1.12em; }
-.content-root h4 { font-size: 1em; letter-spacing: .02em; }
+.content-root h1 { font-size: 1.4em; }
+.content-root h2 { font-size: 1.25em; }
+.content-root h3 { font-size: 1.1em; }
+.content-root h4 { font-size: 1em; color: var(--text-2); }
 
 .content-root a {
   color: var(--link);
-  text-decoration: none;
-  border-bottom: 1px solid var(--ion-soft);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 2px;
+  border-radius: 2px;
 }
 
-.content-root a:hover { border-bottom-color: var(--ion-line); }
+@media (hover: hover) {
+  .content-root a:hover { text-decoration-color: var(--accent); }
+}
 
 .content-root a:focus-visible {
-  outline: 1px solid var(--ion-line);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--ion-soft);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.content-root strong, .content-root b { font-weight: 700; }
+.content-root strong, .content-root b { font-weight: 600; color: var(--text); }
 
 .content-root img,
 .content-root video {
@@ -406,63 +286,59 @@ body {
   max-width: 100%;
   height: auto;
   margin: 1.4em auto;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
 }
 
 .content-root figure { margin: 1.6em 0; }
 
 .content-root figcaption {
   margin-top: .6em;
-  font-family: var(--ui-font);
-  font-size: 12.5px;
+  font-family: var(--font);
+  font-size: var(--fs-xs);
   line-height: 1.45;
-  color: var(--fg-3);
+  color: var(--text-3);
   text-align: center;
 }
 
-/* A quote is marked by one rail of ion light, nothing else. */
+/* A quote: a neutral 2px rail and secondary text, as Helm's prose. */
 .content-root blockquote {
   margin: 1.5em 0;
-  padding: .1em 0 .1em 1.1em;
-  border-left: 2px solid var(--ion);
-  color: var(--fg-2);
-  font-style: italic;
+  padding: .1em 0 .1em 1em;
+  border-left: 2px solid var(--hairline-strong);
+  color: var(--text-2);
 }
 
 .content-root blockquote p:last-child { margin-bottom: 0; }
 
+/* Inline code: Helm's chip of mono on --surface-3 with a hairline. */
 .content-root code,
 .content-root kbd,
 .content-root samp {
   font-family: var(--mono-font);
-  font-size: .88em;
-  background: var(--code-bg);
-  border-radius: 4px;
-  padding: .12em .35em;
+  font-size: .86em;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  padding: .08em .36em;
+  color: var(--text);
 }
 
-/* The one container inside the article: a card, so it takes the bevel and
-   the light rim. Its type is untouched — this is still something to read. */
+/* A code block: Helm's .md-code card, --code-bg inside a 1px hairline. */
 .content-root pre {
   margin: 1.5em 0;
-  padding: 14px 16px;
-  border: 1px solid transparent;
-  border-radius: var(--bevel);
-  background:
-    linear-gradient(var(--code-bg), var(--code-bg)) padding-box,
-    var(--rim-soft) border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--code-bg);
   overflow-x: auto;
   font-family: var(--mono-font);
-  font-size: .86em;
-  line-height: 1.5;
-}
-
-@supports (corner-shape: bevel) {
-  .content-root pre { corner-shape: round bevel round bevel; }
+  font-size: .8em;
+  line-height: 1.6;
 }
 
 .content-root pre code {
   background: none;
+  border: 0;
   padding: 0;
   font-size: 1em;
 }
@@ -470,49 +346,41 @@ body {
 .content-root hr {
   margin: 2.2em 0;
   border: 0;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--hairline);
 }
 
 .content-root table {
   width: 100%;
   margin: 1.5em 0;
   border-collapse: collapse;
-  font-family: var(--ui-font);
-  font-size: .82em;
+  font-family: var(--font);
+  font-size: .78em;
 }
 
 .content-root th,
 .content-root td {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--rule);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--hairline);
   text-align: left;
   vertical-align: top;
 }
 
-.content-root th { color: var(--fg-2); font-weight: 600; }
+.content-root th { color: var(--text-2); font-weight: 600; background: var(--surface-2); }
+.content-root tr:last-child td { border-bottom: 0; }
 
 /* --- scrollbar ------------------------------------------------ */
-::-webkit-scrollbar { width: 12px; height: 12px; }
+/* Helm base.css: thin, quiet, no arrows. The tokens carry a thumb that
+   reads on both grounds, so light needs no rule of its own. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--glass-2);
+  background: var(--scroll-thumb);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 6px;
+  border-radius: 10px;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--glass-3); background-clip: content-box; }
-
-/* The glass tokens are white overlays: on the light page they painted a white
-   thumb on a white column, so the article looked like it had no scrollbar at
-   all. The ink tokens are what read on that ground. */
-:root[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: var(--fg-3);
-  background-clip: content-box;
-}
-:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--fg-2);
-  background-clip: content-box;
-}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 /* --- narrow windows ------------------------------------------ */
 @media (max-width: 620px) {
@@ -524,8 +392,8 @@ body {
 }
 
 /* --- reduced motion ------------------------------------------ */
-/* There is nothing here that loops, so this only has to take away the
-   two crossfades: the theme flip and the control hovers. */
+/* Nothing here loops, so this only takes away the two crossfades: the
+   theme flip and the control hovers. */
 @media (prefers-reduced-motion: reduce) {
   body, .barbtn { transition: none; }
   * { scroll-behavior: auto; }
