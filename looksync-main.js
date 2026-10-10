@@ -108,10 +108,42 @@ function install(deps) {
     let st = null;
     try { st = fs.statSync(still); } catch (err) { return fallback('the still is missing: ' + path.basename(still) + ' (' + (err.code || err.message) + ')', record); }
     if (!st.isFile() || st.size === 0) return fallback('the still is empty: ' + path.basename(still), record);
+    const g = guardOf(record);
     return {
       state: 'ok', stillUrl: pathToFileURL(still).href + '?rev=' + record.rev,
       title: record.title || record.id || null, rev: record.rev, reason: null, record,
-      stillSize: record.stillSize || null, type: record.type || null
+      stillSize: record.stillSize || null, type: record.type || null,
+      guard: g.guard, guardReason: g.reason
+    };
+  }
+
+  /* CONTRACT "Shared top-band darkening": Mantle's one dark alpha for the
+     top 144 DIP of the monitor. { guard: { alpha, dim, blurPx, contrast },
+     reason: null } when it is usable, else { guard: null, reason } in words.
+     Freshness (dim/blurPx against the synced glass) is the renderer's check:
+     it knows the glass in effect, a live preview included. */
+  function guardOf(record) {
+    const isNum = (v) => typeof v === 'number' && isFinite(v);
+    const g = record.guard;
+    if (g === undefined || g === null) {
+      return { guard: null, reason: record.guardReason
+        ? "Mantle couldn't work out the shared value (" + String(record.guardReason) + ')'
+        : "Mantle's record has no shared value (an older Mantle?)" };
+    }
+    const d = g && typeof g === 'object' ? g.dark : null;
+    if (!d || typeof d !== 'object') return { guard: null, reason: "Mantle's shared value has no dark entry" };
+    // An alpha at all here; its range (the dim it was worked out from up to
+    // the .88 ceiling) is the renderer's check, next to the freshness one,
+    // since the floor IS the dim (CONTRACT: start at glass.dark.dim).
+    if (!isNum(d.alpha) || d.alpha < 0 || d.alpha > 1) {
+      return { guard: null, reason: "Mantle's shared value " + JSON.stringify(d.alpha) + ' is not an alpha (0-1)' };
+    }
+    if (!isNum(d.dim)) return { guard: null, reason: "Mantle's shared value names no dim" };
+    if (!isNum(d.blurPx)) return { guard: null, reason: "Mantle's shared value names no blur" };
+    return {
+      guard: { alpha: Math.round(d.alpha * 100) / 100, dim: d.dim, blurPx: d.blurPx,
+               contrast: isNum(d.contrast) ? d.contrast : null },
+      reason: null
     };
   }
 

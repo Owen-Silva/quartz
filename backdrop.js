@@ -238,7 +238,12 @@
     }
     if (d.state === 'ok') {
       if (typeof d.stillUrl === 'string' && d.stillUrl) {
-        return { state: 'ok', stillUrl: d.stillUrl, title: d.title || null, rev: d.rev == null ? null : d.rev, reason: null };
+        // guard / guardReason: Mantle's shared top-band value as main
+        // validated it (looksync-main.js guardOf); refreshGuard() checks it
+        // is fresh against the glass in effect.
+        return { state: 'ok', stillUrl: d.stillUrl, title: d.title || null, rev: d.rev == null ? null : d.rev, reason: null,
+                 guard: d.guard && typeof d.guard === 'object' ? d.guard : null,
+                 guardReason: typeof d.guardReason === 'string' && d.guardReason ? d.guardReason : null };
       }
       return { state: 'fallback', stillUrl: null,
                reason: "Following Windows' wallpaper: Mantle's record names no picture" };
@@ -343,6 +348,12 @@
       floor: g.dim,
       alpha: dark ? guard.alpha : g.dim,
       raised: dark ? !!guard.raised : false,
+      // dark: where alpha came from. 'shared' = Mantle's desktop.guard;
+      // 'own' = Quartz's guard over its own strip, with sourceReason saying
+      // why the shared value is not in use. ownAlpha = Quartz's own answer.
+      source: dark ? (guard.source || 'own') : null,
+      sourceReason: dark ? (guard.reason || null) : null,
+      ownAlpha: dark && typeof guard.own === 'number' ? guard.own : null,
       blurPx: g.blurPx,
       panel: g.panel,
       lined: lined,
@@ -351,7 +362,7 @@
   }
 
   function glassKeyOf(g) {
-    return [g.theme, g.floor, g.alpha, g.raised, g.blurPx, g.panel, g.lined].join('|');
+    return [g.theme, g.floor, g.alpha, g.raised, g.source, g.sourceReason, g.blurPx, g.panel, g.lined].join('|');
   }
 
   function dispatchChange() {
@@ -701,19 +712,78 @@
    * otherwise the frame's top band, as always. Applied whatever the theme
    * (light never reads --chrome-glass-a), so a flip back to dark is right.
    */
-  function refreshGuard() {
-    var floor = glassFor('dark').dim;
+  function refreshGuard(quiet) {
+    var g = glassFor('dark');
+    var floor = g.dim;
+    var own;
     if (!shown) {
-      guard = { alpha: floor, brightest: null, ratio: null, raised: false };
-      // No picture: today's CSS fallback (.5) unless the floor moved.
-      applyGlass(Math.abs(floor - GLASS_FLOOR) < 0.001 ? null : floor);
+      own = { alpha: floor, brightest: null, ratio: null, raised: false };
     } else {
       var px = shown.pixels;
       var rect = shown.lined && placeNow ? guardBand(placeNow, shown.layout) : shown.band;
-      guard = guardAlpha(px ? bandCandidates(px.data, px.w, rect) : [], floor);
-      applyGlass(guard.alpha);
+      own = guardAlpha(px ? bandCandidates(px.data, px.w, rect) : [], floor);
     }
-    if (booted) announceGlass();
+    var shared = sharedGuard(g);
+    if (shared.alpha !== null) {
+      guard = { alpha: shared.alpha, brightest: own.brightest, ratio: shared.contrast, raised: shared.alpha > floor + 1e-9,
+                source: 'shared', reason: null, own: own.alpha };
+    } else {
+      guard = { alpha: own.alpha, brightest: own.brightest, ratio: own.ratio, raised: own.raised,
+                source: 'own', reason: shared.reason, own: own.alpha };
+    }
+    // No picture and nothing shared: today's CSS fallback (.5) unless the floor moved.
+    if (!shown && guard.source === 'own') applyGlass(Math.abs(floor - GLASS_FLOOR) < 0.001 ? null : floor);
+    else applyGlass(guard.alpha);
+    if (booted && !quiet) announceGlass();
+  }
+
+  /**
+   * CONTRACT "Shared top-band darkening": Mantle works out ONE dark alpha
+   * over the top 144 DIP of the monitor (Mantle's top bar, every app's strip,
+   * this toolbar) and publishes it as desktop.guard. While Quartz follows
+   * the desktop (Mantle's still on screen, sync on) and the value is fresh
+   * (worked out for the dark glass in effect: same dim, same blur), it IS
+   * the wash, over the whole window, as in Helm. Anything else keeps
+   * Quartz's own value (guardAlpha over its own strip) and says why, in
+   * words, for Settings: { alpha, contrast, reason }.
+   */
+  function sharedGuard(g) {
+    function no(why) { return { alpha: null, contrast: null, reason: why }; }
+    var kind = current.kind;
+    if (kind !== 'desktop') {
+      return no(kind === 'none' ? 'no picture is shown'
+        : "the background is Quartz's own picture, not the desktop");
+    }
+    var ls = window.LookSync;
+    if (ls && typeof ls.enabled === 'function') {
+      var on = true;
+      try { on = ls.enabled() !== false; } catch (err) { on = true; }
+      if (!on) return no('Look Sync is off');
+    }
+    var d = deskInfo();
+    if (d.state !== 'ok') return no("Quartz is showing Windows' wallpaper, not Mantle's");
+    if (!shown || shown.srcKey !== 'desktop|' + d.stillUrl) return no("Mantle's wallpaper is still being prepared");
+    var sg = d.guard;
+    if (!sg) return no(d.guardReason || "Mantle's record has no shared value");
+    var dim = Number(sg.dim);
+    var blur = Number(sg.blurPx);
+    if (!isFinite(dim) || Math.abs(dim - g.dim) > 0.001 || !isFinite(blur) || Math.round(blur) !== g.blurPx) {
+      return no("Mantle's shared value was worked out for Dim " + alphaWords(dim) + ' and blur ' +
+        (isFinite(blur) ? blur : '?') + ' px, not this Dim ' + alphaWords(g.dim) + ' and blur ' + g.blurPx +
+        ' px (waiting for Mantle to work it out again)');
+    }
+    var a = Number(sg.alpha);
+    var ceil = Math.max(GLASS_CEIL, g.dim);
+    if (!isFinite(a) || a < g.dim - 1e-9 || a > ceil + 1e-9) {
+      return no("Mantle's shared value " + alphaWords(a) + ' is outside ' + alphaWords(g.dim) + '-' + alphaWords(ceil));
+    }
+    return { alpha: Math.round(a * 100) / 100, contrast: typeof sg.contrast === 'number' && isFinite(sg.contrast) ? sg.contrast : null, reason: null };
+  }
+
+  /** .5 -> ".50", the way the guard writes an alpha. */
+  function alphaWords(a) {
+    var n = Math.round(Number(a) * 100) / 100;
+    return isFinite(n) ? n.toFixed(2).replace(/^0(?=\.)/, '') : '?';
   }
 
   /* --- panel and light dim ------------------------------------------ */
@@ -1637,8 +1707,11 @@
     });
   }
   document.addEventListener('lookglass', onLook);
-  document.addEventListener('lookdesktop', function () { render(false); });
-  document.addEventListener('lookstatus', function () { render(false); });
+  // A new record may carry a new shared value (or lose it), and sync on/off
+  // decides whether it applies: re-read the wash even when the picture is
+  // the same one (render() then returns early).
+  document.addEventListener('lookdesktop', function () { refreshGuard(); render(false); });
+  document.addEventListener('lookstatus', function () { refreshGuard(); render(false); });
   document.addEventListener('lookplace', onLookPlace);
   if (typeof MutationObserver === 'function') {
     try {

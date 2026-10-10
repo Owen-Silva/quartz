@@ -2539,8 +2539,19 @@
     try { st = (layer && typeof layer.state === 'function') ? layer.state() : null; } catch (err) { st = null; }
     var gs = st && st.glass;
     var theme = isLight() ? 'light' : 'dark';
-    if (gs && gs.raised && (!gs.theme || gs.theme === theme)) {
-      note.textContent = 'Dim raised to ' + alphaText(gs.alpha) + ' over this bright photo so text stays readable.';
+    var dark = theme === 'dark' && gs && (!gs.theme || gs.theme === theme);
+    if (dark && gs.source === 'shared') {
+      // CONTRACT "Shared top-band darkening": Mantle's one value for the top
+      // of the screen, the same one Mantle's top bar and Helm use.
+      note.textContent = 'Dark wash ' + alphaText(gs.alpha) + ', shared with Mantle and Helm (worked out over the top of the screen)' +
+        (gs.raised ? '; raised from ' + alphaText(gs.floor) + ' so text stays readable over this bright photo.' : '.');
+      note.hidden = false;
+    } else if (dark && (gs.source === 'own' || gs.raised)) {
+      // Quartz's own value over its own strip, and why the shared one is not used.
+      note.textContent = (gs.raised
+        ? 'Dim raised to ' + alphaText(gs.alpha) + ' over this bright photo so text stays readable'
+        : 'Dark wash ' + alphaText(gs.alpha)) +
+        ', worked out by Quartz' + (gs.sourceReason ? ': ' + gs.sourceReason : '') + '.';
       note.hidden = false;
     } else {
       note.textContent = '';
