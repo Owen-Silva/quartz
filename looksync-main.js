@@ -29,9 +29,45 @@ const LS = require('./looksync/look-sync');
 const winMode = require('./looksync/windows-mode');
 
 const STILL_EXT = /\.(jpe?g|png|webp|bmp)$/i;
-// Mantle has no "open Wallpapers" argument yet (its second-instance handler
-// only knows --quit and test flags), so there is no button, and the row says so.
-const MANTLE_OPEN = { canOpen: false, reason: 'Mantle has no command yet that lets another app open its Wallpapers' };
+// Mantle's live instance opens its Wallpapers window when a second instance is
+// started with --open=wallpapers (Mantle look-sync lane, 2026-10-10). That second
+// instance exits 0 = opened, 3 = Mantle is not running, 4 = value refused.
+const MANTLE_DIR = path.join(require('os').homedir(), 'mantle-live');
+const MANTLE_CMD = {
+  exe: path.join(MANTLE_DIR, 'node_modules', 'electron', 'dist', 'electron.exe'),
+  args: ['.', '--open=wallpapers'],
+  cwd: MANTLE_DIR,
+};
+const MANTLE_EXIT = {
+  3: 'Mantle is not running, so its Wallpapers could not be opened',
+  4: 'Mantle refused the request',
+};
+const MANTLE_OPEN = fs.existsSync(MANTLE_CMD.exe)
+  ? { canOpen: true, reason: null }
+  : { canOpen: false, reason: 'Mantle was not found at ' + MANTLE_DIR };
+
+function openMantleWallpapers() {
+  return new Promise((resolve) => {
+    let done = false;
+    let err = '';
+    let child = null;
+    const finish = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+    const timer = setTimeout(() => {
+      finish({ ok: false, reason: 'Mantle did not answer within 10 s' });
+      try { child && child.kill(); } catch (_) {}
+    }, 10000);
+    try {
+      child = require('child_process').spawn(MANTLE_CMD.exe, MANTLE_CMD.args, { cwd: MANTLE_CMD.cwd, windowsHide: true });
+    } catch (e) {
+      finish({ ok: false, reason: 'Could not start Mantle: ' + e.message });
+      return;
+    }
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('error', (e) => finish({ ok: false, reason: 'Could not start Mantle: ' + e.message }));
+    child.on('exit', (code) => finish(code === 0 ? { ok: true }
+      : { ok: false, reason: err.trim() || MANTLE_EXIT[code] || ('Mantle exited with code ' + code) }));
+  });
+}
 
 function install(deps) {
   const { app, ipcMain, send, liveWin, isChromeSender, screen, powerMonitor, nativeTheme } = deps;
@@ -198,7 +234,9 @@ function install(deps) {
 
   ipcMain.handle('looksync:open-mantle', (event) => {
     if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
-    return { ok: false, reason: MANTLE_OPEN.reason };
+    if (!MANTLE_OPEN.canOpen) return { ok: false, reason: MANTLE_OPEN.reason };
+    if (isTest) return { ok: true, test: true };   // test runs never start Mantle
+    return openMantleWallpapers();
   });
 
   ipcMain.handle('looksync:debug', (event) => {
