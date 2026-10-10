@@ -74,8 +74,13 @@
      <body data-bg-kind="desktop|builtin|image|video|none"
            data-bg-state="loading|ok|fallback">
      window.Backdrop.state()  -> { kind, state, reason, source,
-       glass: { theme, floor, alpha, raised, blurPx, panel, lined, offset:{x,y} } }
+       glass: { theme, floor, alpha, raised, source, sourceReason, ownAlpha,
+                blurPx, panel, lined, offset:{x,y} },
+       home: { want, on, reason } }
      window.Backdrop.refresh() -> re-reads the source now
+     window.Backdrop.setHome(bool) -> app.js: a new tab is the page in front
+       (Helm's Home: the picture unblurred under a see-through new tab)
+     <body data-bg-home> while the Home picture is showing
      window.Backdrop.recopyWallpaper() -> { ok, reason, copiedAt }
      'backdropchange' on document, detail = state()
    ============================================================ */
@@ -329,7 +334,8 @@
       state: current.state,
       reason: current.reason,
       source: current.source ? JSON.parse(JSON.stringify(current.source)) : null,
-      glass: glassSnapshot()
+      glass: glassSnapshot(),
+      home: homeSnapshot()
     };
   }
 
@@ -380,6 +386,9 @@
       body.setAttribute('data-bg-kind', next.kind);
       body.setAttribute('data-bg-state', next.state);
     }
+    // The kind decides whether Mantle's shared value can apply (and whether
+    // the Home picture can show), so both are re-read before anyone hears.
+    if (booted) { refreshGuard(true); syncHome(); }
     dispatchChange();
   }
 
@@ -418,12 +427,13 @@
   function clearPhoto() {
     var old = shown;
     shown = null;
-    if (old && cache.indexOf(old) < 0) revokeLater(old.url);
+    if (old && cache.indexOf(old) < 0) revokeEntry(old);
     if (photoEl) {
       photoEl.removeAttribute('data-ready');
       photoEl.style.backgroundImage = '';
       applyGeometry(null);
     }
+    syncHome();
     refreshGuard();              // no picture: the wash at its floor (today's CSS .5)
   }
 
@@ -439,8 +449,15 @@
 
   function dropEntry(e) {
     if (!e || e === shown) return;
-    revokeLater(e.url);
+    revokeEntry(e);
     e.pixels = null;
+  }
+
+  /** An entry's object URLs: the blur, and its own unblurred copy if any. */
+  function revokeEntry(e) {
+    if (!e) return;
+    revokeLater(e.url);
+    if (e.clearOwned) revokeLater(e.clearUrl);
   }
 
   function cachePut(entry) {
@@ -469,11 +486,12 @@
       applyGeometry(entry);
       photoEl.style.backgroundImage = 'url("' + entry.url + '")';
       photoEl.setAttribute('data-ready', '');
-      if (old && old !== entry && cache.indexOf(old) < 0) revokeLater(old.url);
+      if (old && old !== entry && cache.indexOf(old) < 0) revokeEntry(old);
       lastRender = JSON.parse(JSON.stringify(entry.info));
       lastRender.key = entry.key;
       lastRender.cached = !!entry.pub;           // shown again from the cache, not re-blurred
       refreshGuard();
+      syncHome();
       return true;
     });
   }
@@ -524,6 +542,133 @@
       ? 'translate3d(' + t.x + 'px, ' + t.y + 'px, 0)'
       : 'translate(' + t.x + 'px, ' + t.y + 'px)';
     lastPos = { x: t.x, y: t.y, moving: moving };
+    if (home.on) placeClear(moving);
+  }
+
+  /* --- Helm's Home: the picture unblurred ------------------------------ */
+
+  /*
+   * Helm's Home (helm ui/shell/home.css, chrome.js Background): while Home
+   * is in front, an UNBLURRED copy of the picture (.bg-clear) fades in over
+   * the blurred layer, which is hidden once it is covered; a 96px scrim
+   * (rgb(9 10 11 / .5) -> 0) sits under the tab bar, and the ONE wash still
+   * covers the whole window. Quartz's Home is the new tab: app.js calls
+   * Backdrop.setHome(true) while a new tab is the page in front, and in dark
+   * the new tab guest is see-through (newtab.css data-bg-layer), so the
+   * strip, the toolbar and the page are one picture with no edge between
+   * them. Lined up, the copy is the MONITOR, cover-fitted the way the
+   * desktop draws it and moved like the blurred layer.
+   *
+   * Dark only: light is held as shipped (the new tab paints its own picture
+   * there). A clip plays on the new tab itself, so 'video' has no Home here.
+   * Only opacity / transform animate, once per switch; nothing runs at rest.
+   */
+  var clearEl = layer ? layer.querySelector('.bg-clear') : null;
+  var clearImgEl = clearEl ? clearEl.querySelector('.bg-clear-img') : null;
+  var HOME_KINDS = { desktop: 1, builtin: 1, image: 1 };
+  var HOME_OUT_MS = 320;         // Helm: home-bg-out 300ms, then the layer goes
+  var home = { want: false, on: false, url: null, reason: 'no new tab is in front' };
+  var homeSeq = 0;
+  var homeOutTimer = 0;
+
+  /** Why the Home picture is not showing, or null when it should. */
+  function homeWhyNot() {
+    if (!home.want) return 'no new tab is in front';
+    if (themeNow() === 'light') return 'light keeps the new tab\'s own picture';
+    if (!HOME_KINDS[current.kind]) {
+      return current.kind === 'video' ? 'the clip plays on the new tab itself' : 'no picture is chosen';
+    }
+    if (!shown && current.state === 'fallback') {
+      return 'no picture could be shown' + (current.reason ? ' (' + current.reason + ')' : '');
+    }
+    if (!shown || !shown.clearUrl) return 'the picture is still being prepared';
+    return null;
+  }
+
+  /** The unblurred copy's box: the monitor at its offset, or the window. */
+  function placeClear(moving) {
+    if (!clearImgEl) return;
+    var st = clearImgEl.style;
+    if (shown && shown.lined && placeNow) {
+      var o = monitorOffset(placeNow);
+      clearImgEl.setAttribute('data-lined', '');
+      if (moving) clearImgEl.setAttribute('data-moving', '');
+      else clearImgEl.removeAttribute('data-moving');
+      st.width = shown.layout.monW + 'px';
+      st.height = shown.layout.monH + 'px';
+      st.transform = moving
+        ? 'translate3d(' + round2(o.x) + 'px, ' + round2(o.y) + 'px, 0)'
+        : 'translate(' + round2(o.x) + 'px, ' + round2(o.y) + 'px)';
+    } else {
+      clearImgEl.removeAttribute('data-lined');
+      clearImgEl.removeAttribute('data-moving');
+      st.width = '';
+      st.height = '';
+      st.transform = '';
+    }
+  }
+
+  function homeIn() {
+    window.clearTimeout(homeOutTimer);
+    homeOutTimer = 0;
+    placeClear(false);
+    if (home.on) return;
+    home.on = true;
+    clearEl.setAttribute('data-on', 'in');
+    if (document.body) document.body.setAttribute('data-bg-home', '');
+  }
+
+  function homeOut() {
+    if (!home.on) return;
+    home.on = false;
+    if (document.body) document.body.removeAttribute('data-bg-home');
+    clearEl.setAttribute('data-on', 'out');
+    window.clearTimeout(homeOutTimer);
+    homeOutTimer = window.setTimeout(function () {
+      homeOutTimer = 0;
+      if (!home.on) clearEl.removeAttribute('data-on');
+    }, HOME_OUT_MS);
+  }
+
+  /**
+   * Show or hide the Home picture to match home.want, the theme, the kind
+   * and the picture on the layer. A new picture is decoded off screen first,
+   * so it never paints half-drawn; the blurred layer stays up meanwhile.
+   */
+  function syncHome() {
+    var why = homeWhyNot();
+    home.reason = why;
+    if (!clearEl || !clearImgEl) { home.on = !why; return; }
+    if (why) { homeSeq++; homeOut(); return; }
+    var url = shown.clearUrl;
+    if (home.url === url) { homeIn(); return; }
+    var my = ++homeSeq;
+    var img = new Image();
+    img.src = url;
+    var decoded = typeof img.decode === 'function' ? img.decode() : Promise.resolve();
+    decoded.then(function () {
+      if (my !== homeSeq) return;
+      clearImgEl.style.backgroundImage = 'url("' + String(url).replace(/["\\\n\r]/g, encodeURIComponent) + '")';
+      home.url = url;
+      homeIn();
+    }, function (err) {
+      if (my !== homeSeq) return;
+      // The blurred layer stays; say why the sharp one is missing.
+      home.reason = 'the picture could not be decoded for the Home (' + reasonOf(err) + ')';
+      homeOut();
+    });
+  }
+
+  /** app.js: a new tab is (true) or is not (false) the page in front. */
+  function setHome(want) {
+    want = !!want;
+    if (want === home.want) return;
+    home.want = want;
+    syncHome();
+  }
+
+  function homeSnapshot() {
+    return { want: home.want, on: home.on, reason: home.on ? null : home.reason };
   }
 
   /* --- decoding --------------------------------------------------- */
@@ -1118,7 +1263,8 @@
       if (!blob) throw fail('no image is stored yet; choose one', source);
       source.bytes = blob.size || 0;
       return decodeBlob(blob).then(function (bitmap) {
-        return { bitmap: bitmap, source: source };
+        // blob: the Home picture (unblurred) is this file, as an object URL.
+        return { bitmap: bitmap, source: source, blob: blob };
       }, function () {
         throw fail('the stored image could not be decoded', source);
       });
@@ -1532,6 +1678,14 @@
           lined: !!p.lined, layout: frame.layout, pixels: frame.pixels, band: frame.band,
           info: frame.info, pub: null
         };
+        // The same picture UNBLURRED, for Helm's Home (syncHome): the file
+        // itself for the desktop still, a built-in photo and the wallpaper
+        // copy; the stored picture as an object URL (owned, revoked with the
+        // entry). A clip has none: it plays on the new tab itself.
+        if (kind !== 'video') {
+          if (got.source && typeof got.source.url === 'string' && got.source.url) entry.clearUrl = got.source.url;
+          else if (got.blob) { entry.clearUrl = URL.createObjectURL(got.blob); entry.clearOwned = true; }
+        }
         cachePut(entry);
         return showEntry(entry, mySeq);
       }).then(function (ok) {
@@ -1605,6 +1759,7 @@
   function onLook() {
     applyLookVars();
     refreshGuard();
+    syncHome();                  // a flip to light hands the Home back to the new tab
     var theme = themeNow();
     window.clearTimeout(lookTimer);
     lookTimer = 0;
@@ -1658,6 +1813,7 @@
   window.Backdrop = {
     state: snapshot,
     refresh: function () { return render(true); },
+    setHome: setHome,
     recopyWallpaper: recopyWallpaper,
     stillKey: stillKey,
     // test seams

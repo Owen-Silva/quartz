@@ -3499,8 +3499,15 @@
   function appendBgDim(field, cfg) {
     field.appendChild(bgDimRow(cfg));
     /* newtab.css lays the dim in the theme's wash colour: darker in dark
-       theme, paler in light (with a light floor so dark text stays legible). */
-    field.appendChild(el('p', 'set-hint', 'Dim softens the picture on the new tab: darker in dark theme, paler in light.'));
+       theme, paler in light (with a light floor so dark text stays legible).
+       Dark, a picture (not a clip): the new tab is Helm's Home, see-through
+       over the window's ONE picture and ONE wash (backdrop.js syncHome), so
+       this Dim does not reach it there; the Look's glass Dim does. Said, so
+       a slider that changes nothing in dark is never a mystery. */
+    var darkHome = !isLight() && cfg && cfg.kind !== 'video' && cfg.kind !== 'none';
+    field.appendChild(el('p', 'set-hint', darkHome
+      ? 'Dim softens the picture on the new tab in light theme. In dark the new tab sits under the window\'s one wash, like Helm\'s Home: set it with the Look\'s glass Dim.'
+      : 'Dim softens the picture on the new tab: darker in dark theme, paler in light.'));
   }
 
   /* --- the built-in photo gallery ----------------------------------

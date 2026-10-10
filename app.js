@@ -4773,6 +4773,42 @@ function syncBoardPause() {
     if (tab.boardPausedSent === want) continue;
     if (pushBoardPaused(tab, want)) tab.boardPausedSent = want;
   }
+  // The same edges (a switch, a split, a tab leaving the pair) decide which
+  // page is in front, which is all the Home picture follows.
+  syncHomeLayer();
+}
+
+/*
+ * Helm's Home. Helm draws ONE background for the whole window and, on its
+ * Home, shows that picture unblurred under the same wash. Quartz's Home is
+ * the new tab: while a new tab is the page in front (alone, not half of a
+ * split), backdrop.js shows the picture unblurred behind the whole window
+ * (Backdrop.setHome), and in dark the new tab guest is see-through over it
+ * (newtab.css data-bg-layer; chrome.css .own-layer drops the element's
+ * white), so the tab strip, the toolbar and the page are one picture. A web
+ * page in front, or a split, puts the blurred layer back under the strip.
+ * Cheap and idempotent: it runs on every edge syncBoardPause() runs on, and
+ * on every navigation.
+ */
+let homeLayerWaiting = false;
+function syncHomeLayer() {
+  for (const tab of tabs) {
+    if (tab.viewEl && tab.viewEl.classList) {
+      tab.viewEl.classList.toggle('own-layer', tab.kind === 'page' && isNewTabUrl(tab.url));
+    }
+  }
+  const active = getActiveTab();
+  const want = !!active && active.kind === 'page' && isNewTabUrl(active.url) && !splitPartner(active);
+  const layer = window.Backdrop;
+  if (!layer || typeof layer.setHome !== 'function') {
+    // backdrop.js loads after this file: catch up on its first state.
+    if (!homeLayerWaiting) {
+      homeLayerWaiting = true;
+      document.addEventListener('backdropchange', () => { homeLayerWaiting = false; syncHomeLayer(); }, { once: true });
+    }
+    return;
+  }
+  try { layer.setHome(want); } catch (err) { /* the layer keeps what it shows */ }
 }
 
 function wireOverlayWatch() {
@@ -10283,6 +10319,9 @@ function wireViewEvents(tab) {
       updateNavState();
       updateSaveStar();  // a new address: saved or not is a new question
     }
+    // Onto or off the new tab: the Home picture and the guest's see-through
+    // element follow the address.
+    syncHomeLayer();
     saveSession(); // background tabs move too, and the debounce absorbs bursts
     historyCall('record', tab.url, tab.title);
   };

@@ -91,12 +91,76 @@
    it nets ~rgba(19,20,21,.83), the way a Helm panel does. Helm's look is
    NOT one ~50% layer: only its strip and rail are; its panels are ~83%.
    backdrop.js raises the wash (--chrome-glass-a, .50 to .88) only over a
-   picture too bright for the strip's text at 50%. Light keeps its own
-   wash. The new tab Home paints its own picture and its own Dim
-   (newtab.css #bg-dim), so it is unchanged. */
+   picture too bright for the strip's text at 50%, or sets it to Mantle's
+   shared top-band value (CONTRACT "Shared top-band darkening") while
+   following the desktop. Light keeps its own wash. In dark the new tab is
+   Helm's Home: it is see-through, and this layer shows the picture
+   unblurred under the SAME wash (.bg-clear below), so there is one picture
+   and one wash from the top of the window to the bottom. In light the new
+   tab still paints its own picture and Dim (newtab.css), as shipped. */
 html:not([data-theme="light"]) .backdrop > .bg-wash {
   background: rgb(var(--wash-rgb) / var(--chrome-glass-a, 0.5));
   opacity: 1;
+}
+
+/* Helm's Home (helm ui/shell/home.css): while a new tab is in front (dark),
+   the picture shows UNBLURRED. .bg-clear sits between the blurred layer and
+   the wash, so the one wash still covers the whole window; it fades in
+   (280ms, from a 1.5% scale) and out (300ms) once per switch, and the
+   blurred layer stops drawing once it is covered. The new tab guest is
+   see-through over it (newtab.css data-bg-layer), so tab strip, toolbar and
+   page are one picture. backdrop.js syncHome() sets data-on and
+   <body data-bg-home>; the picture and, lined up, the monitor-sized box and
+   its translate are inline on .bg-clear-img (cover on the monitor, the way
+   the desktop draws it). No filter anywhere: nothing re-rasterises. */
+.backdrop > .bg-clear {
+  display: none;
+  overflow: hidden;
+}
+
+.backdrop > .bg-clear[data-on] { display: block; }
+/* backwards, not both: once the fade is done nothing is left filling, so
+   no animation stays attached to a full-window layer at rest (the end
+   state is the element's own opacity 1 / no transform, identical). */
+.backdrop > .bg-clear[data-on="in"] { animation: bg-home-in 280ms var(--ease) backwards; }
+.backdrop > .bg-clear[data-on="out"] { animation: bg-home-out 300ms var(--ease) both; }
+
+.bg-clear > .bg-clear-img {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+
+.bg-clear > .bg-clear-img[data-lined] {
+  inset: auto;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.bg-clear > .bg-clear-img[data-moving] { will-change: transform; }
+
+/* Helm's scrim under the tab bar, so tabs and the address read over bright
+   photos: 96px from the top of the window, the wash colour at .5 -> 0. */
+.backdrop > .bg-clear::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 96px;
+  background: linear-gradient(rgb(var(--wash-rgb) / 0.5), rgb(var(--wash-rgb) / 0));
+}
+
+@keyframes bg-home-in { from { opacity: 0; transform: scale(1.015); } }
+@keyframes bg-home-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* Covered: stop drawing the blurred layer once the fade is done. */
+body[data-bg-home] .backdrop > .bg-photo {
+  visibility: hidden;
+  transition: opacity var(--dur-slow) var(--ease), visibility 0s linear 320ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -104,4 +168,8 @@ html:not([data-theme="light"]) .backdrop > .bg-wash {
   .backdrop > .bg-wash {
     transition: none;
   }
+  .backdrop > .bg-clear[data-on="in"],
+  .backdrop > .bg-clear[data-on="out"] { animation: none; }
+  .backdrop > .bg-clear[data-on="out"] { opacity: 0; }
+  body[data-bg-home] .backdrop > .bg-photo { transition: none; }
 }

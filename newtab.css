@@ -199,6 +199,14 @@ body {
 
 #bg-dim { background: rgb(var(--wash-rgb) / var(--bg-dim, 0)); }
 
+/* Helm's Home, dark: the chrome window draws the picture behind the whole
+   window, unblurred under its one wash and Helm's top scrim (backdrop.css
+   .bg-clear), and this page is see-through over it, so the tab strip, the
+   toolbar and this page are one picture. newtab.js sets data-bg-layer for
+   a still in dark and loads no still here, so #bg-image, #bg-dim and the
+   scrim stay off. Light and clips are drawn here, as shipped. */
+html[data-bg-layer="chrome"] body { background: transparent; }
+
 /* Light theme lays a fixed light floor under the user's dim. Dark ink on a
    photo needs a pale ground, and Quartz's dim default (0.25) left the photo
    almost clear behind the Saved caption and chips; Helm's light Home is the

@@ -4083,6 +4083,8 @@ function watchTheme() {
     // between samples would otherwise leave them in the old colour for
     // up to a second.
     paintStats();
+    // Dark hands the picture to the chrome's layer, light paints it here.
+    if (bgLayerIsChrome() !== bgState.chromeLayer) applyBackground(bgLastPush);
   });
 
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -4171,9 +4173,10 @@ window.__search = function (text) {
 /* ------------------------------------------------------------------ */
 /* Background                                                          */
 /*                                                                     */
-/* The Quartz background (Settings, key newtabBackground), shown here   */
-/* CLEAR and full-bleed: Helm's Home treatment, while the chrome around */
-/* this page wears a blurred still of the same picture. The chrome     */
+/* The Quartz background (Settings, key newtabBackground), shown CLEAR  */
+/* and full-bleed: Helm's Home treatment. In dark a still is drawn by   */
+/* the CHROME's layer under this see-through page (bgLayerIsChrome);    */
+/* in light, and for a clip, it is drawn here. The chrome              */
 /* pushes it in on dom-ready and on every change:                      */
 /*                                                                     */
 /*   window.__applyBackground({ kind, dim, url, fileName, state, reason }) */
@@ -4279,8 +4282,25 @@ function bgWhat(kind, fileName) {
 
 let bgState = {
   kind: 'desktop', dim: 0, state: 'loading', reason: '',
-  url: '', fileName: '', stillShown: false, clipLayer: '', localError: ''
+  url: '', fileName: '', stillShown: false, clipLayer: '', localError: '', chromeLayer: false
 };
+
+/* Helm's Home (dark): a still picture is NOT drawn here. The chrome window
+   draws ONE picture behind the whole window, unblurred while this page is
+   in front (backdrop.js syncHome: .bg-clear, Helm's 96px scrim, and the
+   one wash at the strip's alpha), and this page is see-through over it
+   (html[data-bg-layer="chrome"], newtab.css), so the tab strip, the
+   toolbar and this page are one picture with no edge at the toolbar.
+   Light keeps painting its own picture and Dim here, as shipped; a clip
+   (video / GIF) always plays here. The last push is kept so a theme flip
+   can hand the picture back and forth (watchTheme). */
+let bgLastPush = null;
+
+/** True when the chrome draws this kind's picture under the page. */
+function bgLayerIsChrome(kind) {
+  const k = kind === undefined ? bgState.kind : kind;
+  return bgIsStill(k) && document.documentElement.getAttribute('data-theme') !== 'light';
+}
 
 /* Kind 'desktop' (Look Sync): the desktop's still, LINED UP with the screen.
    The chrome sends align { mw, mh, x, y }: the monitor's size and this
@@ -4362,6 +4382,8 @@ function paintBgRoot() {
      even when the push said 'ok'. */
   root.setAttribute('data-bg-state', bgState.localError ? 'fallback' : bgState.state);
   root.style.setProperty('--bg-dim', String(bgState.dim));
+  if (bgState.chromeLayer) root.setAttribute('data-bg-layer', 'chrome');
+  else root.removeAttribute('data-bg-layer');
 }
 
 /* A file that cannot be shown here (moved since the chrome copied it, a
@@ -4508,9 +4530,11 @@ function applyBackground(bg) {
   if (bgIsStill(kind) && /^data:(?!image\/)/i.test(url)) url = '';
   const clipLayer = kind === 'video' ? bgClipLayer(url, fileName) : '';
 
-  const sameStill = bgIsStill(kind) &&
+  const chromeLayer = bgLayerIsChrome(kind);
+  const sameStill = bgIsStill(kind) && !chromeLayer &&
     url === bgState.url && kind === bgState.kind && bgState.stillShown && !bgState.localError;
 
+  bgLastPush = next;
   bgSeq += 1;
   bgState = {
     kind: kind,
@@ -4521,14 +4545,18 @@ function applyBackground(bg) {
     fileName: fileName,
     stillShown: sameStill,
     clipLayer: clipLayer,
-    localError: ''
+    localError: '',
+    chromeLayer: chromeLayer
   };
   bgAlign = kind === 'desktop' ? bgAlignOf(next.align) : null;
   paintBgAlign();
 
   /* The still: kept as it is when the push repeats it, so a settings push
-     that changed only the dim does not blink the picture. */
-  if (bgIsStill(kind) && url) {
+     that changed only the dim does not blink the picture. In dark the
+     chrome draws it (above), so nothing is loaded here at all. */
+  if (chromeLayer) {
+    setStill('');
+  } else if (bgIsStill(kind) && url) {
     if (!sameStill) {
       setStill('');
       loadStill(url, bgSeq);
@@ -4599,6 +4627,9 @@ window.__background = function () {
     clipPlaying: !!(video && bgState.clipLayer === 'video' && !video.paused),
     chromePaused: bgChromePaused,
     align: bgAlign,
+    // 'chrome': dark + a still, drawn by the window's layer under this
+    // see-through page (Helm's Home); 'page': drawn here.
+    layer: bgState.chromeLayer ? 'chrome' : 'page',
     note: note && !note.hidden ? note.textContent : ''
   };
 };

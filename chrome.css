@@ -1055,6 +1055,21 @@ body.sidepane-dragging #sidepane-resize { background: var(--accent-soft); transi
   background: #fff;
 }
 
+/* The new tab is Helm's Home in dark: the guest is see-through
+   (newtab.css data-bg-layer) and the window's background layer shows the
+   picture under it (backdrop.css .bg-clear), so its element must not paint
+   white either. app.js keeps .own-layer on new tab guests only; web pages
+   keep the white above. Light: the new tab paints its own picture, as
+   shipped. */
+html:not([data-theme="light"]) #views webview.own-layer { background: transparent; }
+
+/* ...and on that Home the strip's and toolbar's hairlines go, as Helm's
+   strip has none over its Home: tabs, toolbar and page are one picture.
+   A web page in front brings them back. */
+body[data-bg-home] #titlebar { border-bottom-color: transparent; }
+body[data-bg-home] .navrow { border-bottom-color: transparent; }
+body[data-bg-home] #well { border-top-color: transparent; }
+
 #views webview[hidden],
 #views webview.hidden,
 #views webview.inactive { display: none; }
