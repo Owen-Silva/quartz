@@ -318,7 +318,7 @@
     ['--ion-soft', 0.14, 0.11],
     ['--ion-glow', 0.22, 0.22],
     ['--ion-line', 0.42, 0.40],
-    ['--ion-select', 0.30, 0.2],
+    ['--ion-select', 0.32, 0.2],
     ['--seam-color', 0.14, 0.14],
     ['--chamber-seam', 0.16, 0.16]
   ];                            /* [token, dark alpha, light alpha] */

@@ -28,7 +28,7 @@
    How it stays cheap, which is the whole point of the design:
 
    - The blur happens once per source, into a small canvas (about a
-     third of the screen), with ctx.filter set to Helm's 28px scaled
+     third of the screen), with ctx.filter set to the user's Helm 5px scaled
      down by the same factor, and a few sigmas of overscan so the
      edges blur into real pixels instead of fading to grey. The
      result is a JPEG blob set as .bg-photo's background-image, with
@@ -63,11 +63,12 @@
 (function () {
   'use strict';
 
-  /* Helm's --bg-blur at full size, and how far down the bitmap is
-     rendered. A blurred picture has no detail to lose, so a third of
-     the screen is plenty, and the blur radius shrinks with it so the
-     result matches Helm's 28px once cover scales it back up. */
-  var HELM_BLUR_PX = 28;
+  /* The user's Helm blur (Helm settings.json background.blur = 5; Helm's
+     default is 28) at full size, and how far down the bitmap is rendered.
+     The blur radius shrinks with the bitmap so the result matches Helm's
+     5px once cover scales it back up; at 5px that is 1.5 bitmap px, still
+     a properly sampled gaussian, so a third of the screen is enough. */
+  var HELM_BLUR_PX = 5;
   var SCALE = 0.3;
   /* Overscan, in blur radii: Helm's .bg-photo sits at
      inset: calc(var(--bg-blur) * -2.5), so its picture is cover-fitted to
@@ -293,12 +294,13 @@
   /* --- how see-through the dark glass can be ------------------------ */
 
   /*
-   * In dark the chrome's tint (--surface-0 / --surface-1, tokens.css) is the
-   * ONE layer over this picture, at Helm's and Mantle's 50%. Over most
-   * pictures that is it. Over a bright one (misty-woods, foggy-cliffs, stone,
-   * cloud-peaks: a pale sky right where the tab strip sits) 50% of a dark
-   * grey leaves the strip mid-grey and the tab titles under 4.5:1, so the
-   * glass darkens JUST enough to keep the composite at or under GLASS_MAX_L
+   * In dark the strip and toolbar read the wash alone, rgb(9 10 11) at
+   * Helm's 50% (backdrop.css); side panes add --surface-1 on top (~83% net,
+   * like a Helm panel). Over most pictures that is it. Over a bright one
+   * (misty-woods, foggy-cliffs, stone, cloud-peaks: a pale sky right where
+   * the tab strip sits) 50% of a dark grey leaves the strip mid-grey and the
+   * tab titles under 4.5:1, so the wash (--chrome-glass-a) darkens JUST
+   * enough to keep the composite at or under GLASS_MAX_L
    * (relative luminance), measured on the blurred bitmap itself: the
    * brightest block of the band under the strip and toolbar, and of the
    * right-hand column where the side pane opens. Never below 50%, never
@@ -307,7 +309,7 @@
   var GLASS_FLOOR = 0.5;
   var GLASS_CEIL = 0.66;
   var GLASS_MAX_L = 0.13;        // --text 4.9:1, the glass's --text-2 3.2:1 (chrome.css), with margin for a bright patch inside a block
-  var GLASS_FILL = 22;           // the lighter of the two tints (--surface-1), so both pass
+  var GLASS_FILL = 9;            // the wash (--wash-rgb 9 10 11): the strip's only layer
 
   function linear(v) {
     v /= 255;

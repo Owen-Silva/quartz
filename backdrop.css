@@ -59,15 +59,19 @@
   opacity: 1;
 }
 
-/* Dark: no wash behind the chrome. The --surface-0 / --surface-1 tint
-   (rgba .50, tokens.css) is the ONE layer between the blurred picture and
-   the strip, toolbar and panes, the way Mantle's and Helm's dark glass is
-   one ~50% layer. Washing under a 50% surface stacked to ~73% dark (75-80%
-   under the panes), which read as opaque. Light keeps its wash. The new
-   tab Home paints its own picture and its own Dim (newtab.css #bg-dim), so
-   it is unchanged. */
+/* Dark: Helm's own stack (Helm shell.css). The wash is rgb(9 10 11 / .50),
+   The user's Helm "Dim 50%", over the whole window and always on, as Helm's
+   is; the strip and toolbar paint no fill of their own (chrome.css), so
+   they read the wash alone, and a side pane's --surface-1 (.66) on top of
+   it nets ~rgba(19,20,21,.83), the way a Helm panel does. Helm's look is
+   NOT one ~50% layer: only its strip and rail are; its panels are ~83%.
+   backdrop.js raises the wash (--chrome-glass-a, .50 to .66) only over a
+   picture too bright for the strip's text at 50%. Light keeps its own
+   wash. The new tab Home paints its own picture and its own Dim
+   (newtab.css #bg-dim), so it is unchanged. */
 html:not([data-theme="light"]) .backdrop > .bg-wash {
-  display: none;
+  background: rgb(var(--wash-rgb) / var(--chrome-glass-a, 0.5));
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

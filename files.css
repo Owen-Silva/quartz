@@ -61,7 +61,7 @@ body {
   font-feature-settings: "ss01", "cv11";
 }
 
-::selection { background: var(--accent-soft); color: inherit; }
+::selection { background: var(--ion-select); color: inherit; }   /* Helm base.css: the accent at .32 */
 
 /* Focus is a ring, never a glow and never an outline: Helm's
    --focus-ring is a box-shadow value. Each control below states its
@@ -450,11 +450,11 @@ body {
   gap: 0 8px;
   position: relative;
   height: 24px;
-  /* 24px each side, which is where a row's grid box actually starts: the
-     scroller's own 16px of padding plus the row's 8px on the left, and the
-     scrollbar gutter plus both paddings on the right. The header has no
-     scroller of its own, so it states the sum. */
-  padding: 0 24px;
+  /* Where a row's grid box actually starts: 24px on the left (the
+     scroller's own 16px of padding plus the row's 8px), 26px on the right
+     (the 10px scrollbar gutter, the scroller's 8px and the row's 8px). The
+     header has no scroller of its own, so it states the sums. */
+  padding: 0 26px 0 24px;
 }
 
 /* The rule under the header: one plain 1px hairline, edge to edge
@@ -535,13 +535,14 @@ body {
 .rows:focus,
 .rows:focus-visible { box-shadow: none; }
 
-/* 8px wide, NOT Helm's 10px: the header's 24px right padding assumes
-   this gutter, and a wider one would shear the columns apart. */
-.rows::-webkit-scrollbar { width: 8px; }
+/* Helm's 10px gutter with a 4px thumb (base.css). The header's 26px right
+   padding (.cols) assumes this width: change one, change both, or the
+   columns shear apart. */
+.rows::-webkit-scrollbar { width: 10px; }
 .rows::-webkit-scrollbar-track { background: transparent; }
 
 .rows::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   border-radius: var(--radius-pill);
   background: var(--scroll-thumb);
   background-clip: content-box;
@@ -552,11 +553,11 @@ body {
   background-clip: content-box;
 }
 
-.rail::-webkit-scrollbar { width: 8px; }
+.rail::-webkit-scrollbar { width: 10px; }
 .rail::-webkit-scrollbar-track { background: transparent; }
 
 .rail::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   border-radius: var(--radius-pill);
   background: var(--scroll-thumb);
   background-clip: content-box;

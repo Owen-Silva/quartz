@@ -41,14 +41,15 @@
 
   /* canvas + surfaces (alpha over the blurred background layer) */
   --bg: #141516;                         /* the neutral base under the photo, and the whole fallback */
-  /* In dark these two are the ONE layer over the blurred picture: the
-     chrome's .bg-wash does not paint in dark (backdrop.css), so the strip,
-     the toolbar and the side panes are half see-through like Mantle's and
-     Helm's dark glass (Helm's "Dim 50%"). --chrome-glass-a is set
-     by backdrop.js only in the chrome, and only above .50 over a picture
-     too bright for the text at 50%; everywhere else it is .50. */
-  --surface-0: rgba(14, 15, 16, var(--chrome-glass-a, 0.50));   /* window chrome: tab strip, toolbar */
-  --surface-1: rgba(22, 23, 24, var(--chrome-glass-a, 0.50));   /* panels: side panes, settings, history */
+  /* Helm's two values, composed the way Helm composes them (shell.css):
+     in dark the chrome's .bg-wash, rgb(9 10 11 / .50) = the user's Helm
+     "Dim 50%", lies over the whole blurred picture (backdrop.css); the
+     strip and toolbar paint nothing more (Helm's .strip and .rail have no
+     fill: chrome.css), so they read the wash alone, ~(9,10,11,.50); a
+     panel's --surface-1 sits on the wash, ~(19,20,21,.83) net, so the
+     picture shows through a side pane at 17%, as through a Helm panel. */
+  --surface-0: rgba(14, 15, 16, 0.50);   /* hover tints and small fields on the strip */
+  --surface-1: rgba(22, 23, 24, 0.66);   /* panels: side panes, settings, history */
   --surface-2: rgba(40, 41, 43, 0.62);   /* cards, inputs, rows inside a panel */
   --surface-3: rgba(62, 63, 66, 0.62);   /* hover / pressed / raised inside a card */
   --surface-solid: #1f2021;              /* opaque: anything floating over a web page */
@@ -72,7 +73,7 @@
   --ion-soft: rgba(159, 180, 204, 0.14);
   --ion-glow: rgba(159, 180, 204, 0.22);
   --ion-line: rgba(159, 180, 204, 0.42);
-  --ion-select: rgba(159, 180, 204, 0.30);
+  --ion-select: rgba(159, 180, 204, 0.32);
   --seam-color: rgba(159, 180, 204, 0.14);
   --chamber-seam: rgba(159, 180, 204, 0.16);
 
@@ -203,7 +204,7 @@ html[data-theme="light"] [data-palette="aurora"] {
   --ion-soft: hsl(345 31% 71% / .14);
   --ion-glow: hsl(345 31% 71% / .22);
   --ion-line: hsl(345 31% 71% / .42);
-  --ion-select: hsl(345 31% 71% / .30);
+  --ion-select: hsl(345 31% 71% / .32);
   --seam-color: hsl(345 31% 71% / .14);
   --chamber-seam: hsl(345 31% 71% / .16);
   --palette-preview: linear-gradient(135deg, #1f2021 0%, #1f2021 58%, hsl(345 31% 71%) 58%, hsl(345 31% 71%) 100%);
@@ -225,7 +226,7 @@ html[data-theme="light"] [data-palette="ember"] {
   --ion-soft: hsl(150 31% 71% / .14);
   --ion-glow: hsl(150 31% 71% / .22);
   --ion-line: hsl(150 31% 71% / .42);
-  --ion-select: hsl(150 31% 71% / .30);
+  --ion-select: hsl(150 31% 71% / .32);
   --seam-color: hsl(150 31% 71% / .14);
   --chamber-seam: hsl(150 31% 71% / .16);
   --palette-preview: linear-gradient(135deg, #1f2021 0%, #1f2021 58%, hsl(150 31% 71%) 58%, hsl(150 31% 71%) 100%);
@@ -247,7 +248,7 @@ html[data-theme="light"] [data-palette="forest"] {
   --ion-soft: hsl(188 31% 68% / .14);
   --ion-glow: hsl(188 31% 68% / .22);
   --ion-line: hsl(188 31% 68% / .42);
-  --ion-select: hsl(188 31% 68% / .30);
+  --ion-select: hsl(188 31% 68% / .32);
   --seam-color: hsl(188 31% 68% / .14);
   --chamber-seam: hsl(188 31% 68% / .16);
   --palette-preview: linear-gradient(135deg, #1f2021 0%, #1f2021 58%, hsl(188 31% 68%) 58%, hsl(188 31% 68%) 100%);
@@ -269,7 +270,7 @@ html[data-theme="light"] [data-palette="ocean"] {
   --ion-soft: hsl(255 31% 76% / .14);
   --ion-glow: hsl(255 31% 76% / .22);
   --ion-line: hsl(255 31% 76% / .42);
-  --ion-select: hsl(255 31% 76% / .30);
+  --ion-select: hsl(255 31% 76% / .32);
   --seam-color: hsl(255 31% 76% / .14);
   --chamber-seam: hsl(255 31% 76% / .16);
   --palette-preview: linear-gradient(135deg, #1f2021 0%, #1f2021 58%, hsl(255 31% 76%) 58%, hsl(255 31% 76%) 100%);
@@ -339,10 +340,10 @@ html[data-theme="light"] [data-palette="mono"] {
 
   /* motion: short and stepped-feeling; nothing in Quartz runs longer */
   --dur: 120ms;
-  --dur-slow: 150ms;
+  --dur-slow: 200ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* the background layer (backdrop.js may override per the user's setting) */
-  --bg-blur: 28px;
+  --bg-blur: 5px;                        /* the user's Helm setting (Helm settings.json background.blur) */
   --bg-dim: 0.45;
 }

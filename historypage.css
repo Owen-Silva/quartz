@@ -363,13 +363,13 @@ mark {
 /* --- scrollbar ------------------------------------------------ */
 /* Helm's thin thumb, from tokens.css in both themes; without these the
    page falls back to the wide OS scrollbar with stepper arrows. */
-::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 6px;
+  border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
