@@ -298,17 +298,24 @@
    * Helm's 50% (backdrop.css); side panes add --surface-1 on top (~83% net,
    * like a Helm panel). Over most pictures that is it. Over a bright one
    * (misty-woods, foggy-cliffs, stone, cloud-peaks: a pale sky right where
-   * the tab strip sits) 50% of a dark grey leaves the strip mid-grey and the
-   * tab titles under 4.5:1, so the wash (--chrome-glass-a) darkens JUST
-   * enough to keep the composite at or under GLASS_MAX_L
-   * (relative luminance), measured on the blurred bitmap itself: the
-   * brightest block of the band under the strip and toolbar, and of the
-   * right-hand column where the side pane opens. Never below 50%, never
-   * above the old pane's 66%. Light theme does not read the variable.
+   * the tab strip sits) 50% of a dark grey leaves the strip mid-grey, so the
+   * wash (--chrome-glass-a) darkens JUST enough, by Mantle's bar rule
+   * (mantle ui/shared/glass-adapt.js guardTokens + glassTint, dark
+   * --lg-guard-bar 4.2): Helm's secondary ink (#a9aaa7) must keep 4.2:1 over
+   * the 48 brightest pixels of the blurred band under the strip and toolbar,
+   * stepping .02 up from .50. Helm's own strip gives that ink 4.3:1 over
+   * snow-peak, so Helm's .50 holds there, as in Mantle's top bar; the user,
+   * 2026-10-10: the old rule (a luminance cap that also read the side-pane
+   * column) set .52 on snow-peak, a visible step under Mantle's bar. The
+   * side pane no longer decides: it sits at ~83% net anyway. Never below
+   * 50%, never above the old pane's 66%. Light does not read the variable.
    */
   var GLASS_FLOOR = 0.5;
   var GLASS_CEIL = 0.66;
-  var GLASS_MAX_L = 0.13;        // --text 4.9:1, the glass's --text-2 3.2:1 (chrome.css), with margin for a bright patch inside a block
+  var GLASS_STEP = 0.02;         // Mantle's GUARD.step
+  var GLASS_NEED = 4.2;          // Mantle's dark --lg-guard-bar
+  var GLASS_INK = [169, 170, 167]; // Helm --text-2 #a9aaa7 = Mantle's dark --lg-ink-2
+  var GLASS_CAND = 48;           // Mantle's glassTint: only the brightest few pixels can be the worst
   var GLASS_FILL = 9;            // the wash (--wash-rgb 9 10 11): the strip's only layer
 
   function linear(v) {
@@ -321,41 +328,35 @@
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   }
 
+  function contrastOf(l1, l2) {
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  }
+
   function glassAlphaFor(ctx, W, H) {
-    var blocks = [];
     var band = Math.max(2, Math.round(H * 0.11));   // strip + toolbar, ~84 of 836 px
-    var half = Math.ceil(band / 2);                  // the strip, then the toolbar
-    var cols = 16;                                    // small blocks: a bright patch is not averaged away
-    for (var i = 0; i < cols; i++) {
-      blocks.push([Math.floor(W * i / cols), 0, Math.ceil(W / cols), half]);
-      blocks.push([Math.floor(W * i / cols), half, Math.ceil(W / cols), band - half]);
-    }
-    var paneX = Math.floor(W * 0.68);                 // a 480 px pane on a 1536 px window
-    var paneW = Math.ceil((W - paneX) / 3);
-    var rows = 8;
-    for (var j = 0; j < rows; j++) {
-      for (var k = 0; k < 3; k++) {
-        blocks.push([paneX + k * paneW, band + Math.floor((H - band) * j / rows), paneW, Math.ceil((H - band) / rows)]);
-      }
-    }
-    var worst = [0, 0, 0];
-    var worstL = -1;
+    var cand = [];
     try {
-      blocks.forEach(function (bk) {
-        var d = ctx.getImageData(bk[0], bk[1], Math.max(1, bk[2]), Math.max(1, bk[3])).data;
-        var s = [0, 0, 0];
-        var n = d.length / 4;
-        for (var k = 0; k < d.length; k += 4) { s[0] += d[k]; s[1] += d[k + 1]; s[2] += d[k + 2]; }
-        var mean = [s[0] / n, s[1] / n, s[2] / n];
-        var l = lumOver(mean, 0);
-        if (l > worstL) { worstL = l; worst = mean; }
-      });
+      var d = ctx.getImageData(0, 0, W, band).data;
+      for (var k = 0; k < d.length; k += 4) {
+        var px = [d[k], d[k + 1], d[k + 2]];
+        cand.push([lumOver(px, 0), px]);
+      }
     } catch (err) {
-      return { alpha: GLASS_FLOOR, brightest: null };   // unreadable: Helm's 50%
+      return { alpha: GLASS_FLOOR, brightest: null, ratio: null };   // unreadable: Helm's 50%
+    }
+    cand.sort(function (p, q) { return q[0] - p[0]; });
+    cand = cand.slice(0, GLASS_CAND);
+    if (!cand.length) return { alpha: GLASS_FLOOR, brightest: null, ratio: null };
+    var inkL = lumOver(GLASS_INK, 0);
+    function worstRatio(a) {
+      var w = Infinity;
+      for (var j = 0; j < cand.length; j++) w = Math.min(w, contrastOf(inkL, lumOver(cand[j][1], a)));
+      return w;
     }
     var a = GLASS_FLOOR;
-    while (a < GLASS_CEIL && lumOver(worst, a) > GLASS_MAX_L) a = Math.round((a + 0.01) * 100) / 100;
-    return { alpha: a, brightest: Math.round(worstL * 1000) / 1000 };
+    while (a < GLASS_CEIL && worstRatio(a) < GLASS_NEED) a = Math.round((a + GLASS_STEP) * 100) / 100;
+    if (a > GLASS_CEIL) a = GLASS_CEIL;
+    return { alpha: a, brightest: Math.round(cand[0][0] * 1000) / 1000, ratio: Math.round(worstRatio(a) * 100) / 100 };
   }
 
   function applyGlass(alpha) {
@@ -424,7 +425,7 @@
     try { corner = ctx.getImageData(0, 0, 1, 1).data[3]; } catch (err) { corner = null; }
     var glass = glassAlphaFor(ctx, W, H);
     lastRender = { width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner,
-                   glassAlpha: glass.alpha, glassBrightest: glass.brightest };
+                   glassAlpha: glass.alpha, glassBrightest: glass.brightest, glassRatio: glass.ratio };
     big.width = 0;                 // drop the big bitmap now, not at GC
     return toBlob(out, OUT_TYPE, OUT_QUALITY).then(function (blob) {
       out.width = 0;
