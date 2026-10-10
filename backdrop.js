@@ -96,6 +96,11 @@
     light: { blurPx: 12, dim: 0.45, panel: 0 }
   };
   var LIGHT_TOKEN_DIM = 0.45;    // tokens.css --bg-dim: the light wash as shipped
+  /* Light is held as shipped (The user: light mode stays exactly as it is until
+     he says otherwise). look.glass.light is still carried in the shared
+     file but never applied here: light draws at 5px (1.5 bitmap px), the
+     token --bg-dim .45 and untouched surfaces, for every background kind. */
+  var LIGHT_HELD = { blurPx: 5, dim: LIGHT_TOKEN_DIM, panel: 0 };
   var SCALE = 0.3;
   /* Overscan, in blur radii: Helm's .bg-photo sits at
      inset: calc(var(--bg-blur) * -2.5), so its picture is cover-fitted to
@@ -190,9 +195,11 @@
   }
 
   /** The glass in effect for theme: LookSync's (a live preview included);
-      without LookSync, Settings' stored glass; else the seed. */
+      without LookSync, Settings' stored glass; else the seed. Light is
+      always LIGHT_HELD. */
   function glassFor(theme) {
     var t = theme === 'light' ? 'light' : 'dark';
+    if (t === 'light') return Object.assign({}, LIGHT_HELD);
     var g = null;
     var ls = window.LookSync;
     if (ls && typeof ls.glassFor === 'function') {

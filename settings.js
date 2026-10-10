@@ -2468,6 +2468,14 @@
     if (!field) return;
     field.textContent = '';
     var theme = isLight() ? 'light' : 'dark';
+    /* Light is held as shipped (backdrop.js LIGHT_HELD): no sliders that
+       would do nothing; the light values in the shared file stay as they are. */
+    if (theme === 'light') {
+      field.appendChild(el('p', 'set-hint set-glass-title', 'Glass for the Light theme:'));
+      field.appendChild(el('p', 'set-note set-glass-held',
+        'Light mode look is coming later. Light keeps its own glass for now; switch to Dark to set Blur, Dim and See-through.'));
+      return;
+    }
     var g = glass()[theme];
     var ls = lookSyncApi();
     var canPreview = !!(ls && typeof ls.previewGlass === 'function');
