@@ -610,10 +610,15 @@
    * 2026-10-10: the old rule (a luminance cap that also read the side-pane
    * column) set .52 on snow-peak, a visible step under Mantle's bar. The
    * side pane no longer decides: it sits at ~83% net anyway. Never below
-   * 50%, never above the old pane's 66%. Light does not read the variable.
+   * 50%, never above Mantle's guard ceiling .88 (the alpha of dark
+   * --lg-fill-pop, rgba(19,20,21,.88), mantle ui/shared/glass-light.css;
+   * guardTokens uses it for bars and windows alike). The user, 2026-10-10: over
+   * very bright photos the strip darkens as far as Mantle's bars do (the old
+   * .66 cap left cloud-peaks / sand-ripples at ~3:1 where Mantle hit .76).
+   * Light does not read the variable.
    */
   var GLASS_FLOOR = 0.5;
-  var GLASS_CEIL = 0.66;
+  var GLASS_CEIL = 0.88;         // Mantle's dark --lg-fill-pop alpha (guard ceiling)
   var GLASS_STEP = 0.02;         // Mantle's GUARD.step
   var GLASS_NEED = 4.2;          // Mantle's dark --lg-guard-bar
   var GLASS_INK = [169, 170, 167]; // Helm --text-2 #a9aaa7 = Mantle's dark --lg-ink-2

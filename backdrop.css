@@ -90,7 +90,7 @@
    they read the wash alone, and a side pane's --surface-1 (.66) on top of
    it nets ~rgba(19,20,21,.83), the way a Helm panel does. Helm's look is
    NOT one ~50% layer: only its strip and rail are; its panels are ~83%.
-   backdrop.js raises the wash (--chrome-glass-a, .50 to .66) only over a
+   backdrop.js raises the wash (--chrome-glass-a, .50 to .88) only over a
    picture too bright for the strip's text at 50%. Light keeps its own
    wash. The new tab Home paints its own picture and its own Dim
    (newtab.css #bg-dim), so it is unchanged. */
