@@ -156,6 +156,19 @@ body {
   transition: opacity var(--dur-slow) var(--ease);
 }
 
+/* Kind 'desktop' lined up (Look Sync): newtab.js sizes the still to the
+   MONITOR (inline width/height = mw x mh, cover + centre as above, the
+   desktop's own fit) and moves it with an inline translate3d(-x, -y, 0), so
+   this page shows the part of the wallpaper behind it. Only the transform
+   changes while the window moves: a compositor move, no relayout. The
+   .backdrop clips the overflow. */
+#bg-image.lined {
+  inset: auto;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
 /* The moving picture: a clip in the <video>, a GIF in the <img>, never
    both. object-fit: cover is background-size: cover for a replaced
    element. */

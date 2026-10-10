@@ -98,6 +98,30 @@
     return themeName === 'light' ? { s: 26, l: 41 } : { s: 31, l: 71 };
   }
 
+  /* LookAccent.tokens(hue, theme) -> { acc, soft, glow, line, select, rgb }
+     onto the --ion* names this page has always set. --seam-color and
+     --chamber-seam have no shared token: they are the accent rgb at this
+     page's own alphas, exactly as before. null when the module refuses. */
+  function sharedTokens(hue, themeName) {
+    var t;
+    try { t = window.LookAccent.tokens(hue, themeName); } catch (err) { t = null; }
+    if (!t || !t.rgb) return null;
+    var light = themeName === 'light';
+    var rgb = t.rgb.join(', ');
+    var out = {
+      '--ion': t.acc,
+      '--ion-soft': t.soft,
+      '--ion-glow': t.glow,
+      '--ion-line': t.line,
+      '--ion-select': t.select
+    };
+    for (var i = 0; i < ION_TOKENS.length; i++) {
+      var name = ION_TOKENS[i][0];
+      if (!out[name]) out[name] = 'rgba(' + rgb + ', ' + ION_TOKENS[i][light ? 2 : 1] + ')';
+    }
+    return out;
+  }
+
   // Kept so a data-theme flip can re-derive the same hue on the new base.
   var lastHue = null;
 
@@ -126,6 +150,18 @@
     }
 
     var light = root.getAttribute('data-theme') === 'light';
+
+    /* The shared Look Sync formula (looksync/accent.browser.js, loaded just
+       before this file): the same tokens Helm, Mantle and the chrome derive,
+       mapped onto the same --ion* names as before. Missing (an old page
+       shell) -> the local formula below, as before. */
+    var shared = window.LookAccent && typeof window.LookAccent.tokens === 'function'
+      ? sharedTokens(Math.round(h) % 360, light ? 'light' : 'dark') : null;
+    if (shared) {
+      for (i = 0; i < ION_TOKENS.length; i++) style.setProperty(ION_TOKENS[i][0], shared[ION_TOKENS[i][0]]);
+      return;
+    }
+
     var base = baseFor(light ? 'light' : 'dark');
     var head = h + ' ' + base.s + '% ' + base.l + '%';
 

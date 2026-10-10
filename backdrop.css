@@ -43,6 +43,31 @@
   transition: opacity var(--dur-slow) var(--ease);
 }
 
+/* "Same as desktop", LINED UP: the layer is the MONITOR (plus a few px of
+   overscan), not the window. backdrop.js sets its width and height inline
+   (the monitor in CSS px) and moves it with a transform to the monitor's
+   origin relative to this window, so the wallpaper behind the window is
+   the part that shows. The bitmap was cover-fitted to the monitor when it
+   was blurred, so here it is just stretched to the box (100% 100%). The
+   box keeps chrome.css's top/left 0; .backdrop's overflow: hidden clips it
+   to the window. */
+.backdrop > .bg-photo[data-lined] {
+  right: auto;
+  bottom: auto;
+  background-size: 100% 100%;
+  background-position: 0 0;
+  transform-origin: 0 0;
+}
+
+/* Only while the window moves: its own compositor layer, so each frame is
+   a translate on the GPU with no repaint. At rest the hint is dropped
+   (one repaint), so the window does not keep an extra full-size layer and
+   the chrome above it is not pushed into overlap layers (chrome.css
+   .backdrop). */
+.backdrop > .bg-photo[data-lined][data-moving] {
+  will-change: transform;
+}
+
 /* backdrop.js sets data-ready only once the blurred bitmap has decoded,
    so the layer never flashes half-drawn. */
 .backdrop > .bg-photo[data-ready] {

@@ -10,9 +10,21 @@
    What the picture is comes from Settings (key newtabBackground,
    read through Settings.backgroundConfig() and its change events):
 
-     wallpaper  a copy of the Windows wallpaper, made by main into
-                <userData>/backgrounds/wallpaper.<ext> (bgfiles.js).
-                The default.
+     desktop    "Same as desktop", the default (Look Sync, 2026-10-10):
+                Mantle's desktop still (LookSync.desktop().stillUrl),
+                drawn LINED UP with the screen, so the chrome looks
+                see-through to the wallpaper: the still is blurred once
+                into a canvas the size of the MONITOR the window is mostly
+                on (cover-fit on that monitor, the way the desktop draws
+                it), and .bg-photo is that monitor-sized layer, moved by a
+                transform to (monitor origin - content origin). Moving the
+                window moves the layer, once per animation frame; nothing
+                re-blurs until the still, the blur or the monitor size
+                changes. When Mantle has not shared a still, the copy of
+                the Windows wallpaper (main's <userData>/backgrounds/
+                wallpaper.<ext>, bgfiles.js) is drawn the same way, with
+                state 'fallback' and LookSync's reason. A stored
+                'wallpaper' (the old default) reads as 'desktop'.
      builtin    one of Helm's photos, shipped in assets/backgrounds/ and
                 listed by main (Settings.builtinBackground(id)). An id
                 this build does not have shows the WALLPAPER instead,
@@ -52,10 +64,17 @@
    and the reason is in Backdrop.state() for Settings to show under
    the picker.
 
+   Glass (Look Sync): LookSync.glassFor(theme) -> { blurPx, dim, panel }
+   for the resolved theme. blurPx is the blur (Helm's 5 = the old fixed
+   value); in dark, dim is the FLOOR of the strip's wash, which the
+   contrast guard may raise (below); in light it is --bg-dim; panel
+   shifts the alpha of --surface-0..3 and --overlay (0 = tokens.css as is).
+
    Public surface:
-     <body data-bg-kind="wallpaper|image|video|none"
+     <body data-bg-kind="desktop|builtin|image|video|none"
            data-bg-state="loading|ok|fallback">
-     window.Backdrop.state()  -> { kind, state, reason, source }
+     window.Backdrop.state()  -> { kind, state, reason, source,
+       glass: { theme, floor, alpha, raised, blurPx, panel, lined, offset:{x,y} } }
      window.Backdrop.refresh() -> re-reads the source now
      window.Backdrop.recopyWallpaper() -> { ok, reason, copiedAt }
      'backdropchange' on document, detail = state()
@@ -68,7 +87,15 @@
      The blur radius shrinks with the bitmap so the result matches Helm's
      5px once cover scales it back up; at 5px that is 1.5 bitmap px, still
      a properly sampled gaussian, so a third of the screen is enough. */
-  var HELM_BLUR_PX = 5;
+  /* Look Sync: the blur is the shared glass.<theme>.blurPx (0..64) instead
+     of a fixed HELM_BLUR_PX; dark's seed 5 is exactly the old value, so the
+     bitmap blur stays round(5 * SCALE, .1) = 1.5 px. Seeds = LS.SEED glass,
+     used when neither LookSync nor Settings answers. */
+  var SEED_GLASS = {
+    dark: { blurPx: 5, dim: 0.5, panel: 0 },
+    light: { blurPx: 12, dim: 0.45, panel: 0 }
+  };
+  var LIGHT_TOKEN_DIM = 0.45;    // tokens.css --bg-dim: the light wash as shipped
   var SCALE = 0.3;
   /* Overscan, in blur radii: Helm's .bg-photo sits at
      inset: calc(var(--bg-blur) * -2.5), so its picture is cover-fitted to
@@ -92,16 +119,33 @@
   var SEEK_GRACE_MS = 4000;
   var RETRY_STEPS_MS = [5000, 15000, 30000, 60000];
   var RETRY_EVERY_MS = 120000;
+  /* Lined up: a move "ends" MOVE_END_MS after the last lookplace (then the
+     guard re-reads the band and the layer drops its compositor hint). A
+     glass change (a slider preview) re-blurs LOOK_RENDER_MS after it stops.
+     The desktop record is waited for at most DESK_WAIT_MS (the glue
+     promises 4 s). CACHE_MAX blurred results are kept: a theme flip
+     between dark's and light's blur swaps without re-blurring. */
+  var MOVE_END_MS = 250;
+  var LOOK_RENDER_MS = 150;
+  var DESK_WAIT_MS = 5000;
+  var CACHE_MAX = 2;
 
   var layer = document.querySelector('.backdrop');
   var photoEl = layer ? layer.querySelector('.bg-photo') : null;
 
-  var current = { kind: 'wallpaper', state: 'loading', reason: null, source: null };
-  var shownUrl = null;           // the object URL on .bg-photo right now
+  var current = { kind: 'desktop', state: 'loading', reason: null, source: null };
+  var shown = null;              // the cache entry on .bg-photo right now (null = no picture)
+  var cache = [];                // blurred results, oldest first (see cachePut)
   var seq = 0;                   // newest render wins; older ones drop out
   var lastSig = null;
   var recopyNote = null;         // a failed "Copy again", told once
-  var lastRender = null;         // test seam: what the last blur did
+  var lastRender = null;         // test seam: what the shown blur did
+  var placeNow = null;           // LookSync.place(), the last valid one
+  var guard = { alpha: 0.5, brightest: null, ratio: null, raised: false };   // dark strip, last measured
+  var glassKey = null;           // the glass last announced in a backdropchange
+  var deskReady = false;         // LookSync.ready() settled (or timed out)
+  var deskWait = false;
+  var booted = false;            // the first publish went out (glass events may follow)
 
   /* --- reading the setting ---------------------------------------- */
 
@@ -112,7 +156,134 @@
     if (s && typeof s.backgroundConfig === 'function') {
       try { return s.backgroundConfig(); } catch (err) { /* fall through */ }
     }
-    return { kind: 'wallpaper', dim: 0.25 };
+    return { kind: 'desktop', dim: 0.25 };
+  }
+
+  /** The kinds this layer draws. The old 'wallpaper' (and anything this
+      build does not know) is 'desktop', the default; settings.js
+      normalizes the stored value too. */
+  var OWN_KINDS = { builtin: 1, image: 1, video: 1, none: 1 };
+  function normKind(kind) {
+    return kind && OWN_KINDS[kind] === 1 ? kind : 'desktop';
+  }
+
+  function themeNow() {
+    return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  }
+
+  function numIn(v, lo, hi, dflt) {
+    if (typeof v !== 'number' && typeof v !== 'string') return dflt;
+    var n = Number(v);
+    if (v === '' || !isFinite(n)) return dflt;
+    return Math.min(hi, Math.max(lo, n));
+  }
+
+  /** { blurPx, dim, panel } in range (Settings' ranges), seeds for gaps. */
+  function normGlass(g, theme) {
+    var seed = SEED_GLASS[theme === 'light' ? 'light' : 'dark'];
+    g = g && typeof g === 'object' ? g : {};
+    return {
+      blurPx: Math.round(numIn(g.blurPx, 0, 64, seed.blurPx)),
+      dim: Math.round(numIn(g.dim, 0.2, 0.9, seed.dim) * 100) / 100,
+      panel: Math.round(numIn(g.panel, -0.3, 0.15, seed.panel) * 100) / 100
+    };
+  }
+
+  /** The glass in effect for theme: LookSync's (a live preview included);
+      without LookSync, Settings' stored glass; else the seed. */
+  function glassFor(theme) {
+    var t = theme === 'light' ? 'light' : 'dark';
+    var g = null;
+    var ls = window.LookSync;
+    if (ls && typeof ls.glassFor === 'function') {
+      try { g = ls.glassFor(t); } catch (err) { g = null; }
+    }
+    if (!g || typeof g !== 'object') {
+      var s = settings();
+      try {
+        var all = s && typeof s.get === 'function' ? s.get('glass') : null;
+        g = all && typeof all === 'object' ? all[t] : null;
+      } catch (err) { g = null; }
+    }
+    return normGlass(g, t);
+  }
+
+  /* --- LookSync: the desktop record and this window's place ------------ */
+
+  var NO_LINK_REASON = "Following Windows' wallpaper: this window has no Look Sync link (restart the browser)";
+
+  /**
+   * What 'desktop' should draw: { state: 'ok', stillUrl, title, rev } or
+   * { state: 'fallback', reason } (Windows' wallpaper, said) or
+   * { state: 'loading' } until LookSync.ready() settles. Never throws: a
+   * missing or broken LookSync is a fallback with the reason in words.
+   */
+  function deskInfo() {
+    var ls = window.LookSync;
+    if (!ls || typeof ls.desktop !== 'function') return { state: 'fallback', reason: NO_LINK_REASON, stillUrl: null };
+    var d;
+    try { d = ls.desktop(); } catch (err) {
+      return { state: 'fallback', stillUrl: null,
+               reason: "Following Windows' wallpaper: Look Sync could not be asked (" + reasonOf(err) + ')' };
+    }
+    if (!d || typeof d !== 'object') {
+      return { state: 'fallback', stillUrl: null, reason: "Following Windows' wallpaper: Look Sync gave no answer" };
+    }
+    if (d.state === 'ok') {
+      if (typeof d.stillUrl === 'string' && d.stillUrl) {
+        return { state: 'ok', stillUrl: d.stillUrl, title: d.title || null, rev: d.rev == null ? null : d.rev, reason: null };
+      }
+      return { state: 'fallback', stillUrl: null,
+               reason: "Following Windows' wallpaper: Mantle's record names no picture" };
+    }
+    if (d.state === 'loading') {
+      if (!deskReady) return { state: 'loading', stillUrl: null, reason: null };
+      return { state: 'fallback', stillUrl: null,
+               reason: d.reason || "Following Windows' wallpaper: Mantle's wallpaper has not arrived yet" };
+    }
+    return { state: 'fallback', stillUrl: null,
+             reason: d.reason || "Following Windows' wallpaper: Mantle hasn't shared one" };
+  }
+
+  /** Wait (once) for LookSync.ready(), capped, then render what it says. */
+  function waitForDesktop() {
+    if (deskWait || deskReady) return;
+    deskWait = true;
+    var ls = window.LookSync;
+    var ready = Promise.resolve().then(function () {
+      return ls && typeof ls.ready === 'function' ? ls.ready() : null;
+    }).catch(function () { /* the status line says why */ });
+    var cap = new Promise(function (resolve) { window.setTimeout(resolve, DESK_WAIT_MS); });
+    Promise.race([ready, cap]).then(function () {
+      deskWait = false;
+      deskReady = true;
+      render(false);
+    });
+  }
+
+  function readPlace() {
+    var ls = window.LookSync;
+    if (!ls || typeof ls.place !== 'function') return null;
+    try { return ls.place(); } catch (err) { return null; }
+  }
+
+  function finiteAll(o, keys) {
+    for (var i = 0; i < keys.length; i++) if (typeof o[keys[i]] !== 'number' || !isFinite(o[keys[i]])) return false;
+    return true;
+  }
+
+  /** A place with numbers where they belong and a monitor of some size. */
+  function validPlace(pl) {
+    if (!pl || typeof pl !== 'object' || !pl.content || !pl.display) return null;
+    var k = ['x', 'y', 'width', 'height'];
+    if (!finiteAll(pl.content, k) || !finiteAll(pl.display, k)) return null;
+    if (pl.display.width <= 0 || pl.display.height <= 0 || pl.content.width <= 0 || pl.content.height <= 0) return null;
+    return pl;
+  }
+
+  function currentPlace() {
+    if (!placeNow) placeNow = validPlace(readPlace());
+    return placeNow;
   }
 
   function bgApi() {
@@ -145,8 +316,43 @@
       kind: current.kind,
       state: current.state,
       reason: current.reason,
-      source: current.source ? JSON.parse(JSON.stringify(current.source)) : null
+      source: current.source ? JSON.parse(JSON.stringify(current.source)) : null,
+      glass: glassSnapshot()
     };
+  }
+
+  /** The glass in effect, for Settings' guard note and the tests. In dark,
+      alpha is the strip's wash (the guard's answer, >= floor); in light the
+      wash is --bg-dim, so alpha = floor = dim. offset = the monitor's
+      top-left relative to this window's content area (lined up only). */
+  function glassSnapshot() {
+    var theme = themeNow();
+    var g = glassFor(theme);
+    var lined = !!(shown && shown.lined && placeNow);
+    var off = lined ? monitorOffset(placeNow) : { x: 0, y: 0 };
+    var dark = theme === 'dark';
+    return {
+      theme: theme,
+      floor: g.dim,
+      alpha: dark ? guard.alpha : g.dim,
+      raised: dark ? !!guard.raised : false,
+      blurPx: g.blurPx,
+      panel: g.panel,
+      lined: lined,
+      offset: { x: off.x, y: off.y }
+    };
+  }
+
+  function glassKeyOf(g) {
+    return [g.theme, g.floor, g.alpha, g.raised, g.blurPx, g.panel, g.lined].join('|');
+  }
+
+  function dispatchChange() {
+    var detail = snapshot();
+    glassKey = glassKeyOf(detail.glass);
+    try {
+      document.dispatchEvent(new CustomEvent('backdropchange', { detail: detail }));
+    } catch (err) { /* a listener's problem, not the layer's */ }
   }
 
   function publish(next) {
@@ -156,10 +362,14 @@
       body.setAttribute('data-bg-kind', next.kind);
       body.setAttribute('data-bg-state', next.state);
     }
-    var detail = snapshot();
-    try {
-      document.dispatchEvent(new CustomEvent('backdropchange', { detail: detail }));
-    } catch (err) { /* a listener's problem, not the layer's */ }
+    dispatchChange();
+  }
+
+  /** A backdropchange when the glass the state reports moved (the guard
+      raised or lowered the wash, the theme or a glass value changed);
+      never for the offset alone, which changes every frame of a drag. */
+  function announceGlass() {
+    if (glassKeyOf(glassSnapshot()) !== glassKey) dispatchChange();
   }
 
   /** An Error carrying the plain-words reason the state line shows. */
@@ -186,31 +396,116 @@
     }, 1000);
   }
 
+  /** Take the picture down (Plain, or a source that failed). */
   function clearPhoto() {
-    if (!photoEl) return;
-    photoEl.removeAttribute('data-ready');
-    applyGlass(null);
-    photoEl.style.backgroundImage = '';
-    revokeLater(shownUrl);
-    shownUrl = null;
+    var old = shown;
+    shown = null;
+    if (old && cache.indexOf(old) < 0) revokeLater(old.url);
+    if (photoEl) {
+      photoEl.removeAttribute('data-ready');
+      photoEl.style.backgroundImage = '';
+      applyGeometry(null);
+    }
+    refreshGuard();              // no picture: the wash at its floor (today's CSS .5)
   }
 
-  /** Put a blurred blob on the layer once it has decoded (no half frame). */
-  function showBlob(blob, mySeq, glass) {
-    var url = URL.createObjectURL(blob);
+  /* The cache: CACHE_MAX blurred results, each an object URL plus the
+     pixels the guard reads, keyed by everything that shaped the bitmap
+     (source, blurPx, monitor size or 'window'). An entry leaves the cache
+     oldest first, never while it is on the layer; its URL is revoked once
+     it is neither cached nor shown. */
+  function cacheGet(key) {
+    for (var i = 0; i < cache.length; i++) if (cache[i].key === key) return cache[i];
+    return null;
+  }
+
+  function dropEntry(e) {
+    if (!e || e === shown) return;
+    revokeLater(e.url);
+    e.pixels = null;
+  }
+
+  function cachePut(entry) {
+    for (var i = cache.length - 1; i >= 0; i--) {
+      if (cache[i].key === entry.key) dropEntry(cache.splice(i, 1)[0]);
+    }
+    cache.push(entry);
+    while (cache.length > CACHE_MAX) {
+      var j = 0;
+      while (j < cache.length - 1 && cache[j] === shown) j++;
+      if (j >= cache.length - 1) break;          // only the new one and the shown one left
+      dropEntry(cache.splice(j, 1)[0]);
+    }
+  }
+
+  /** Put a blurred entry on the layer once it has decoded (no half frame).
+      Its geometry (lined up or cover on the window) lands in the same frame. */
+  function showEntry(entry, mySeq) {
     var img = new Image();
-    img.src = url;
+    img.src = entry.url;
     var decoded = typeof img.decode === 'function' ? img.decode() : Promise.resolve();
     return decoded.catch(function () { /* paint it anyway */ }).then(function () {
-      if (mySeq !== seq || !photoEl) { revokeLater(url); return false; }
-      photoEl.style.backgroundImage = 'url("' + url + '")';
+      if (mySeq !== seq || !photoEl) return false;
+      var old = shown;
+      shown = entry;
+      applyGeometry(entry);
+      photoEl.style.backgroundImage = 'url("' + entry.url + '")';
       photoEl.setAttribute('data-ready', '');
-      applyGlass(glass);
-      var old = shownUrl;
-      shownUrl = url;
-      revokeLater(old);
+      if (old && old !== entry && cache.indexOf(old) < 0) revokeLater(old.url);
+      lastRender = JSON.parse(JSON.stringify(entry.info));
+      lastRender.key = entry.key;
+      lastRender.cached = !!entry.pub;           // shown again from the cache, not re-blurred
+      refreshGuard();
       return true;
     });
+  }
+
+  /* --- lined up: the layer's geometry -------------------------------- */
+
+  var lastPos = null;            // { x, y, moving }: the translate on the layer now
+
+  function round2(v) { return Math.round(v * 100) / 100; }
+
+  /** Lined: the layer is the monitor (+ overscan) in CSS px, moved by a
+      transform. Not lined: chrome.css's inset 0 and backdrop.css's cover. */
+  function applyGeometry(entry) {
+    if (!photoEl) return;
+    var st = photoEl.style;
+    lastPos = null;
+    if (entry && entry.lined) {
+      photoEl.setAttribute('data-lined', '');
+      st.width = round2(entry.layout.cssW) + 'px';
+      st.height = round2(entry.layout.cssH) + 'px';
+      positionLayer(entry, false);
+    } else {
+      photoEl.removeAttribute('data-lined');
+      photoEl.removeAttribute('data-moving');
+      st.width = '';
+      st.height = '';
+      st.transform = '';
+    }
+  }
+
+  /**
+   * Move the lined layer to the window's place. While the window moves the
+   * layer carries data-moving (backdrop.css: will-change: transform), so
+   * each frame is a compositor-only translate3d, no repaint; at rest it
+   * drops the hint and sits on a plain 2D translate, painted into the root
+   * layer, so the window does not keep an extra full-size layer (and the
+   * chrome above it is not forced into overlap layers: chrome.css .backdrop).
+   */
+  function positionLayer(entry, moving) {
+    if (!photoEl || !entry || !entry.lined || !placeNow) return;
+    var t = layerTranslate(placeNow, entry.layout);
+    var same = lastPos && lastPos.x === t.x && lastPos.y === t.y;
+    if (same && (moving || !lastPos.moving)) return;   // nothing moved (a resize from the right edge)
+    if (!lastPos) moving = false;                      // first placement: no hint needed
+    if (moving) photoEl.setAttribute('data-moving', '');
+    else photoEl.removeAttribute('data-moving');
+    photoEl.style.transform = moving
+      ? 'translate3d(' + t.x + 'px, ' + t.y + 'px, 0)'
+      : 'translate(' + t.x + 'px, ' + t.y + 'px)';
+    lastPos = { x: t.x, y: t.y, moving: moving };
   }
 
   /* --- decoding --------------------------------------------------- */
@@ -332,31 +627,53 @@
     return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
   }
 
-  function glassAlphaFor(ctx, W, H) {
-    var band = Math.max(2, Math.round(H * 0.11));   // strip + toolbar, ~84 of 836 px
+  /* The band the guard reads: the strip + toolbar, ~84 of 836 px, i.e. 11%
+     of the frame's height (Look Sync keeps that height in window px). */
+  var BAND_FRAC = 0.11;
+
+  /** The GLASS_CAND brightest pixels of rect (x0,y0 inclusive, x1,y1
+      exclusive) in an RGBA buffer w px wide, as [luminance, rgb], brightest
+      first. Row-major and a stable sort: the same order as before. */
+  function bandCandidates(data, w, rect) {
     var cand = [];
-    try {
-      var d = ctx.getImageData(0, 0, W, band).data;
-      for (var k = 0; k < d.length; k += 4) {
-        var px = [d[k], d[k + 1], d[k + 2]];
+    if (!data || !rect) return cand;
+    for (var y = rect.y0; y < rect.y1; y++) {
+      for (var x = rect.x0; x < rect.x1; x++) {
+        var k = (y * w + x) * 4;
+        var px = [data[k], data[k + 1], data[k + 2]];
         cand.push([lumOver(px, 0), px]);
       }
-    } catch (err) {
-      return { alpha: GLASS_FLOOR, brightest: null, ratio: null };   // unreadable: Helm's 50%
     }
     cand.sort(function (p, q) { return q[0] - p[0]; });
-    cand = cand.slice(0, GLASS_CAND);
-    if (!cand.length) return { alpha: GLASS_FLOOR, brightest: null, ratio: null };
+    return cand.slice(0, GLASS_CAND);
+  }
+
+  /**
+   * Mantle's bar rule from floor (the shared dark dim, Helm's .50 by
+   * default): step .02 up until the ink keeps GLASS_NEED over every
+   * candidate, never past GLASS_CEIL. A floor above the ceiling wins as is
+   * (The user asked for that much dim). No pixels: the floor.
+   */
+  function guardAlpha(cand, floor) {
+    if (typeof floor !== 'number' || !isFinite(floor)) floor = GLASS_FLOOR;
     var inkL = lumOver(GLASS_INK, 0);
     function worstRatio(a) {
       var w = Infinity;
       for (var j = 0; j < cand.length; j++) w = Math.min(w, contrastOf(inkL, lumOver(cand[j][1], a)));
       return w;
     }
-    var a = GLASS_FLOOR;
-    while (a < GLASS_CEIL && worstRatio(a) < GLASS_NEED) a = Math.round((a + GLASS_STEP) * 100) / 100;
-    if (a > GLASS_CEIL) a = GLASS_CEIL;
-    return { alpha: a, brightest: Math.round(cand[0][0] * 1000) / 1000, ratio: Math.round(worstRatio(a) * 100) / 100 };
+    if (!cand || !cand.length) return { alpha: floor, brightest: null, ratio: null, raised: false };
+    var a = floor;
+    if (floor <= GLASS_CEIL) {
+      while (a < GLASS_CEIL && worstRatio(a) < GLASS_NEED) a = Math.round((a + GLASS_STEP) * 100) / 100;
+      if (a > GLASS_CEIL) a = GLASS_CEIL;
+    }
+    return {
+      alpha: a,
+      brightest: Math.round(cand[0][0] * 1000) / 1000,
+      ratio: Math.round(worstRatio(a) * 100) / 100,
+      raised: a > floor + 1e-9
+    };
   }
 
   function applyGlass(alpha) {
@@ -365,42 +682,214 @@
     else root.style.setProperty('--chrome-glass-a', String(alpha));
   }
 
+  /**
+   * Re-read the dark strip's wash from the CACHED pixels of what is shown
+   * (never a canvas read): on show, when a move ends, when the floor moves.
+   * Lined up, the band is the monitor rows behind the window's top strip;
+   * otherwise the frame's top band, as always. Applied whatever the theme
+   * (light never reads --chrome-glass-a), so a flip back to dark is right.
+   */
+  function refreshGuard() {
+    var floor = glassFor('dark').dim;
+    if (!shown) {
+      guard = { alpha: floor, brightest: null, ratio: null, raised: false };
+      // No picture: today's CSS fallback (.5) unless the floor moved.
+      applyGlass(Math.abs(floor - GLASS_FLOOR) < 0.001 ? null : floor);
+    } else {
+      var px = shown.pixels;
+      var rect = shown.lined && placeNow ? guardBand(placeNow, shown.layout) : shown.band;
+      guard = guardAlpha(px ? bandCandidates(px.data, px.w, rect) : [], floor);
+      applyGlass(guard.alpha);
+    }
+    if (booted) announceGlass();
+  }
+
+  /* --- panel and light dim ------------------------------------------ */
+
+  /* tokens.css's glass surfaces (dark :51-56, light :126-131) as
+     [r, g, b, alpha]. A panel value shifts every alpha by the same amount,
+     clamped .05..99, inline on :root for the current theme; panel 0 removes
+     the inline values so tokens.css stands untouched. */
+  var PANEL_PROPS = ['--surface-0', '--surface-1', '--surface-2', '--surface-3', '--overlay'];
+  var PANEL_BASE = {
+    dark: {
+      '--surface-0': [14, 15, 16, 0.50],
+      '--surface-1': [22, 23, 24, 0.66],
+      '--surface-2': [40, 41, 43, 0.62],
+      '--surface-3': [62, 63, 66, 0.62],
+      '--overlay': [29, 30, 31, 0.93]
+    },
+    light: {
+      '--surface-0': [244, 244, 242, 0.56],
+      '--surface-1': [248, 248, 246, 0.76],
+      '--surface-2': [255, 255, 255, 0.70],
+      '--surface-3': [232, 232, 230, 0.86],
+      '--overlay': [250, 250, 248, 0.95]
+    }
+  };
+
+  /** { prop: 'rgba(...)' } for theme shifted by panel, or null for panel 0. */
+  function panelValues(theme, panel) {
+    if (typeof panel !== 'number' || !isFinite(panel) || Math.abs(panel) < 0.005) return null;
+    var base = PANEL_BASE[theme === 'light' ? 'light' : 'dark'];
+    var out = {};
+    for (var i = 0; i < PANEL_PROPS.length; i++) {
+      var b = base[PANEL_PROPS[i]];
+      var a = Math.min(0.99, Math.max(0.05, Math.round((b[3] + panel) * 100) / 100));
+      out[PANEL_PROPS[i]] = 'rgba(' + b[0] + ', ' + b[1] + ', ' + b[2] + ', ' + a + ')';
+    }
+    return out;
+  }
+
+  /** Panel and light dim for the resolved theme, inline on :root. */
+  function applyLookVars() {
+    var theme = themeNow();
+    var g = glassFor(theme);
+    var st = document.documentElement.style;
+    var v = panelValues(theme, g.panel);
+    for (var i = 0; i < PANEL_PROPS.length; i++) {
+      if (v) st.setProperty(PANEL_PROPS[i], v[PANEL_PROPS[i]]);
+      else st.removeProperty(PANEL_PROPS[i]);
+    }
+    // Light's wash is --bg-dim; dark's is the guarded --chrome-glass-a.
+    if (theme === 'light' && Math.abs(g.dim - LIGHT_TOKEN_DIM) > 0.001) st.setProperty('--bg-dim', String(g.dim));
+    else st.removeProperty('--bg-dim');
+  }
+
+  /* --- the pure geometry (Backdrop._math) ---------------------------- */
+
+  /** The bitmap blur for a full-size blur of blurPx: 5 -> 1.5, as always. */
+  function blurBitmapPx(blurPx) {
+    return Math.round(blurPx * SCALE * 10) / 10;
+  }
+
+  /** CSS cover: sw x sh into w x h, centred, the long side cropped. */
+  function coverRect(sw, sh, w, h) {
+    var scale = Math.max(w / sw, h / sh);
+    var dw = sw * scale;
+    var dh = sh * scale;
+    return { x: (w - dw) / 2, y: (h - dh) / 2, w: dw, h: dh };
+  }
+
+  /**
+   * The lined layer for a monW x monH monitor (CSS px) at blurPx: the
+   * monitor is W x H bitmap px; the bitmap carries m px of overscan on
+   * every side (outW x outH), which is marginX/marginY in CSS px; the layer
+   * element is cssW x cssH.
+   */
+  function linedLayout(monW, monH, blurPx) {
+    var W = Math.max(64, Math.round(monW * SCALE));
+    var H = Math.max(36, Math.round(monH * SCALE));
+    var b = blurBitmapPx(blurPx);
+    var m = Math.ceil(b * OVERSCAN_SIGMAS);
+    var sx = W / monW;
+    var sy = H / monH;
+    return {
+      monW: monW, monH: monH, W: W, H: H, b: b, m: m,
+      outW: W + 2 * m, outH: H + 2 * m, sx: sx, sy: sy,
+      marginX: m / sx, marginY: m / sy,
+      cssW: monW + 2 * m / sx, cssH: monH + 2 * m / sy
+    };
+  }
+
+  /** The monitor's top-left relative to this window's content area. */
+  function monitorOffset(place) {
+    return { x: place.display.x - place.content.x, y: place.display.y - place.content.y };
+  }
+
+  /** The layer's translate: the monitor offset, less the overscan margin. */
+  function layerTranslate(place, layout) {
+    var o = monitorOffset(place);
+    return { x: round2(o.x - layout.marginX), y: round2(o.y - layout.marginY) };
+  }
+
+  /** Not lined: the frame's top band, full width (as before Look Sync). */
+  function topBand(W, H) {
+    return { x0: 0, y0: 0, x1: W, y1: Math.max(2, Math.round(H * BAND_FRAC)) };
+  }
+
+  /**
+   * Lined: the rows of the bitmap behind the window's strip + toolbar, i.e.
+   * the window's columns, from its top, BAND_FRAC of the taller of window
+   * and monitor (= the old band's height in window px), clamped to the
+   * bitmap. A window entirely off its monitor reads the monitor's top band.
+   */
+  function guardBand(place, layout) {
+    var c = place.content;
+    var d = place.display;
+    var rows = Math.max(2, Math.round(BAND_FRAC * Math.max(c.height, d.height) * layout.sy));
+    var x0 = Math.round((c.x - d.x) * layout.sx) + layout.m;
+    var y0 = Math.round((c.y - d.y) * layout.sy) + layout.m;
+    var x1 = x0 + Math.max(1, Math.round(c.width * layout.sx));
+    var y1 = y0 + rows;
+    function clampTo(v, hi) { return Math.min(hi, Math.max(0, v)); }
+    var r = { x0: clampTo(x0, layout.outW), y0: clampTo(y0, layout.outH), x1: clampTo(x1, layout.outW), y1: clampTo(y1, layout.outH) };
+    if (r.x1 - r.x0 < 1 || r.y1 - r.y0 < 1) {
+      r = { x0: layout.m, y0: layout.m, x1: layout.m + layout.W, y1: Math.min(layout.outH, layout.m + rows) };
+    }
+    return r;
+  }
+
   /** Draw src to fill w x h, cropping the long side (CSS cover). */
   function drawCover(ctx, src, w, h) {
     var sw = src.width || src.videoWidth;
     var sh = src.height || src.videoHeight;
-    var scale = Math.max(w / sw, h / sh);
-    var dw = sw * scale;
-    var dh = sh * scale;
-    ctx.drawImage(src, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    var r = coverRect(sw, sh, w, h);
+    ctx.drawImage(src, r.x, r.y, r.w, r.h);
   }
 
   /**
    * The one blur. Source -> a (W+2m) x (H+2m) canvas, unfiltered, so there
    * are m real pixels past every edge; then that canvas -> W x H through
    * ctx.filter blur, offset by -m, so the edge pixels blur into picture,
-   * not into transparent black. Encoded as a JPEG blob.
+   * not into transparent black. Encoded as a JPEG blob. The blur is the
+   * plan's blurPx at SCALE (blurBitmapPx); W x H is the window/screen as
+   * before, or, lined up, the monitor (below). Returns the blob, the guard's
+   * pixels (read once, here) and what was done (Backdrop._lastRender()).
    */
-  function blurToBlob(src) {
+  function blurFrame(src, p) {
     var sw = src.width;
     var sh = src.height;
     if (!sw || !sh) { closeBitmap(src); return Promise.reject(fail('the picture has no pixels')); }
 
-    var scr = window.screen || {};
-    var vw = Math.max(window.innerWidth || 0, scr.width || 0, 640);
-    var vh = Math.max(window.innerHeight || 0, scr.height || 0, 360);
-    var W = Math.max(64, Math.round(vw * SCALE));
-    var H = Math.max(36, Math.round(vh * SCALE));
-    var b = Math.round(HELM_BLUR_PX * SCALE * 10) / 10;
+    var b = blurBitmapPx(p.blurPx);
     var m = Math.ceil(b * OVERSCAN_SIGMAS);
+    var W, H, outW, outH, big, bctx, layout = null;
 
-    var big = canvasOf(W + 2 * m, H + 2 * m);
-    var bctx = big.getContext('2d');
-    bctx.imageSmoothingQuality = 'high';
-    drawCover(bctx, src, big.width, big.height);
+    if (p.lined) {
+      /* Lined up: the bitmap is the MONITOR at SCALE plus m px of overscan
+         on every side (so the layer has real pixels past the monitor's
+         edges too), blurred from a canvas with 2m: first today's cover of
+         the whole canvas as a base (it fills the overscan), then the exact
+         monitor-cover placement on top, unclipped, so along the long side
+         the picture itself runs on into the margin. */
+      layout = linedLayout(p.mon.w, p.mon.h, p.blurPx);
+      W = layout.W;
+      H = layout.H;
+      outW = layout.outW;
+      outH = layout.outH;
+      big = canvasOf(W + 4 * m, H + 4 * m);
+      bctx = big.getContext('2d');
+      bctx.imageSmoothingQuality = 'high';
+      drawCover(bctx, src, big.width, big.height);
+      var r = coverRect(sw, sh, W, H);
+      bctx.drawImage(src, 2 * m + r.x, 2 * m + r.y, r.w, r.h);
+    } else {
+      var scr = window.screen || {};
+      var vw = Math.max(window.innerWidth || 0, scr.width || 0, 640);
+      var vh = Math.max(window.innerHeight || 0, scr.height || 0, 360);
+      W = Math.max(64, Math.round(vw * SCALE));
+      H = Math.max(36, Math.round(vh * SCALE));
+      outW = W;
+      outH = H;
+      big = canvasOf(W + 2 * m, H + 2 * m);
+      bctx = big.getContext('2d');
+      bctx.imageSmoothingQuality = 'high';
+      drawCover(bctx, src, big.width, big.height);
+    }
     closeBitmap(src);
 
-    var out = canvasOf(W, H);
+    var out = canvasOf(outW, outH);
     var ctx = out.getContext('2d');
     var filtered = false;
     if ('filter' in ctx) {
@@ -418,18 +907,32 @@
       tctx.imageSmoothingQuality = 'high';
       tctx.drawImage(big, 0, 0, tiny.width, tiny.height);
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(tiny, 0, 0, W, H);
+      if (p.lined) ctx.drawImage(tiny, -m, -m, big.width, big.height);   // keep the lined placement
+      else ctx.drawImage(tiny, 0, 0, W, H);
     }
 
     var corner = null;
     try { corner = ctx.getImageData(0, 0, 1, 1).data[3]; } catch (err) { corner = null; }
-    var glass = glassAlphaFor(ctx, W, H);
-    lastRender = { width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner,
-                   glassAlpha: glass.alpha, glassBrightest: glass.brightest, glassRatio: glass.ratio };
+    /* The pixels the guard reads, read ONCE here: lined, the whole bitmap
+       (the band moves with the window); otherwise the top band only. */
+    var band = p.lined ? null : topBand(W, H);
+    var pixels = null;
+    try {
+      var readH = p.lined ? outH : band.y1;
+      pixels = { data: ctx.getImageData(0, 0, outW, readH).data, w: outW, h: readH };
+    } catch (err) { pixels = null; }   // unreadable: the guard keeps the floor
+
+    var info = {
+      width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner,
+      blurPx: p.blurPx, lined: !!p.lined, outWidth: outW, outHeight: outH,
+      monitor: p.lined ? { width: p.mon.w, height: p.mon.h } : null,
+      layer: p.lined ? { width: round2(layout.cssW), height: round2(layout.cssH),
+                         marginX: round2(layout.marginX), marginY: round2(layout.marginY) } : null
+    };
     big.width = 0;                 // drop the big bitmap now, not at GC
     return toBlob(out, OUT_TYPE, OUT_QUALITY).then(function (blob) {
       out.width = 0;
-      return { blob: blob, glass: glass.alpha };
+      return { blob: blob, pixels: pixels, band: band, layout: layout, info: info };
     });
   }
 
@@ -494,6 +997,34 @@
         throw fail(why + '; the Windows wallpaper could not be shown either (' + reasonOf(err) + ')',
           { type: 'builtin', id: cfg.id || null });
       });
+    });
+  }
+
+  /**
+   * "Same as desktop": Mantle's still when LookSync has one, else the copy
+   * of the Windows wallpaper with the fallback reason (render() publishes
+   * state 'fallback' with that picture shown). A still that will not read
+   * falls back the same way, and says so.
+   */
+  function desktopSource(p) {
+    var d = p.desk;
+    function windowsWallpaper(why) {
+      return wallpaperSource().then(function (got) {
+        got.source.fallbackFor = { type: 'desktop' };
+        got.source.shown = true;
+        got.fallbackReason = why;
+        return got;
+      }, function (err) {
+        throw fail(why + '; the Windows wallpaper could not be shown either (' + reasonOf(err) + ')',
+          { type: 'desktop' });
+      });
+    }
+    if (d.state !== 'ok') return windowsWallpaper(d.reason || NO_LINK_REASON);
+    var source = { type: 'desktop', url: d.stillUrl, title: d.title, rev: d.rev };
+    return decodeUrl(d.stillUrl).then(function (bitmap) {
+      return { bitmap: bitmap, source: source };
+    }, function (err) {
+      return windowsWallpaper("Following Windows' wallpaper: Mantle's still could not be read (" + reasonOf(err) + ')');
     });
   }
 
@@ -820,15 +1351,52 @@
 
   /* --- the render ----------------------------------------------------- */
 
+  /**
+   * What the layer should show now, and its key: everything that shapes the
+   * blurred bitmap and nothing else (the dim, the panel and the accent are
+   * CSS; the window's position is a transform).
+   */
+  function plan(cfg) {
+    var kind = normKind(cfg && cfg.kind);
+    var g = glassFor(themeNow());
+    var p = { kind: kind, blurPx: g.blurPx, srcKey: null, key: null, desk: null, lined: false, mon: null };
+    if (kind === 'none') { p.key = 'none'; return p; }
+    if (kind === 'desktop') {
+      p.desk = deskInfo();
+      if (p.desk.state === 'loading') { p.key = 'desktop|loading'; return p; }
+      p.srcKey = p.desk.state === 'ok' ? 'desktop|' + p.desk.stillUrl : 'desktop|windows-wallpaper';
+      var pl = currentPlace();
+      if (pl) { p.lined = true; p.mon = { w: pl.display.width, h: pl.display.height }; }
+    } else {
+      p.srcKey = signature(cfg);
+    }
+    p.key = p.srcKey + '|blur ' + p.blurPx + '|' + (p.lined ? 'monitor ' + p.mon.w + 'x' + p.mon.h : 'window');
+    return p;
+  }
+
+  /** A desktop fallback whose reason changed (LookSync says why anew). */
+  function refreshDeskReason(p) {
+    if (current.kind !== 'desktop' || current.state !== 'fallback' || !p.desk) return;
+    if (p.desk.state !== 'fallback' || !p.desk.reason || current.reason === p.desk.reason) return;
+    var src = current.source;
+    if (!src || !src.fallbackFor || src.fallbackFor.type !== 'desktop') return;
+    publish({ kind: current.kind, state: current.state, reason: p.desk.reason, source: src });
+  }
+
   function render(force) {
     var cfg = config();
-    var sig = signature(cfg);
-    if (!force && sig === lastSig) return Promise.resolve(snapshot());
-    lastSig = sig;
+    var p = plan(cfg);
+    if (!force && p.key === lastSig) {
+      refreshDeskReason(p);
+      return Promise.resolve(snapshot());
+    }
+    lastSig = p.key;
     var mySeq = ++seq;
-    var kind = cfg.kind;
+    var kind = p.kind;
+    var sig = signature(cfg);      // the clip's retry key (video)
 
     if (kind === 'none') {
+      clearClipRetry(true);
       clearPhoto();
       publish({ kind: 'none', state: 'ok', reason: null, source: { type: 'none' } });
       return Promise.resolve(snapshot());
@@ -838,32 +1406,66 @@
     if (kind !== 'video' || (clipRetry.sig !== null && clipRetry.sig !== sig)) clearClipRetry(true);
     else clearClipRetry(false);
 
-    // The old picture stays up while the new one is prepared. A retried
-    // still keeps saying why it is being retried while it runs.
-    var again = kind === 'video' && clipRetry.attempt > 0 && clipRetry.reason
-      ? 'trying again (try ' + (clipRetry.attempt + 1) + ') after: ' + clipRetry.reason : null;
-    publish({ kind: kind, state: 'loading', reason: again, source: null });
+    // The desktop record is not in yet: the old picture (if any) stays up.
+    if (kind === 'desktop' && p.desk.state === 'loading') {
+      publish({ kind: kind, state: 'loading', reason: null, source: null });
+      waitForDesktop();
+      return Promise.resolve(snapshot());
+    }
+
+    // Blurred before for exactly this (a theme flip back, the monitor it
+    // was on): shown again from the cache, nothing re-read or re-blurred.
+    var hit = force ? null : cacheGet(p.key);
+    if (hit && hit.pub) {
+      return showEntry(hit, mySeq).then(function (ok) {
+        if (ok && mySeq === seq) {
+          publish(JSON.parse(JSON.stringify(hit.pub)));
+          refreshDeskReason(p);
+        }
+        return snapshot();
+      });
+    }
+
+    // The old picture stays up while the new one is prepared. A re-blur of
+    // the SAME source (another blur value, another monitor size) does not
+    // say 'loading'. A retried still keeps saying why it is being retried.
+    if (!(shown && shown.srcKey === p.srcKey && current.kind === kind)) {
+      var again = kind === 'video' && clipRetry.attempt > 0 && clipRetry.reason
+        ? 'trying again (try ' + (clipRetry.attempt + 1) + ') after: ' + clipRetry.reason : null;
+      publish({ kind: kind, state: 'loading', reason: again, source: null });
+    }
 
     var pick = kind === 'image' ? imageSource()
       : kind === 'video' ? videoSource(cfg)
       : kind === 'builtin' ? builtinSource(cfg)
-      : wallpaperSource();
+      : desktopSource(p);
 
     return pick.then(function (got) {
       if (mySeq !== seq) { closeBitmap(got.bitmap); return null; }
-      return blurToBlob(got.bitmap).then(function (out) {
-        return showBlob(out.blob, mySeq, out.glass);
-      }).then(function (shown) {
-        if (!shown || mySeq !== seq) return;
+      var entry = null;
+      return blurFrame(got.bitmap, p).then(function (frame) {
+        if (mySeq !== seq) return false;
+        entry = {
+          key: p.key, srcKey: p.srcKey, url: URL.createObjectURL(frame.blob),
+          lined: !!p.lined, layout: frame.layout, pixels: frame.pixels, band: frame.band,
+          info: frame.info, pub: null
+        };
+        cachePut(entry);
+        return showEntry(entry, mySeq);
+      }).then(function (ok) {
+        if (!ok || mySeq !== seq) return;
         var note = null;
-        if (kind === 'wallpaper' && recopyNote) { note = recopyNote; recopyNote = null; }
-        // A built-in id stood in for by the wallpaper: shown, but said.
+        if (got.source && got.source.type === 'wallpaper' && recopyNote) { note = recopyNote; recopyNote = null; }
+        var pub;
+        // A built-in id, or the desktop, stood in for by the wallpaper: shown, but said.
         if (got.fallbackReason) {
-          publish({ kind: kind, state: 'fallback', reason: got.fallbackReason, source: got.source });
-          return;
+          pub = { kind: kind, state: 'fallback', reason: got.fallbackReason + (note ? '. ' + note : ''), source: got.source };
+        } else {
+          if (kind === 'video') clearClipRetry(true);
+          pub = { kind: kind, state: 'ok', reason: note, source: got.source };
         }
-        if (kind === 'video') clearClipRetry(true);
-        publish({ kind: kind, state: 'ok', reason: note, source: got.source });
+        entry.pub = JSON.parse(JSON.stringify(pub));
+        publish(pub);
       }, function (err) {
         throw fail(reasonOf(err), got.source);
       });
@@ -896,11 +1498,75 @@
     return Promise.resolve().then(function () { return api.recopyWallpaper(); }).then(function (res) {
       var out = res && typeof res === 'object' ? res : { ok: false, reason: 'no answer from the browser' };
       if (!out.ok && out.fileUrl) recopyNote = 'Could not copy it again: ' + (out.reason || 'unknown reason');
-      if (config().kind === 'wallpaper') return render(true).then(function () { return out; });
+      // Re-read only when the copy is what the layer shows (the desktop's
+      // fallback, or a built-in stood in for by it).
+      if (current.source && current.source.type === 'wallpaper') return render(true).then(function () { return out; });
       return out;
     }, function (err) {
       return { ok: false, reason: reasonOf(err) };
     });
+  }
+
+  /* --- Look Sync events: glass, theme, place ---------------------------- */
+
+  var lookTimer = 0;
+  var lookTheme = null;
+
+  /**
+   * The glass or the theme changed (lookglass, data-theme, Settings'
+   * glass): panel and dim are CSS at once, the guard re-reads cached
+   * pixels, and a re-blur happens only if the key moved: at once on a
+   * theme flip (from the cache when it can), after LOOK_RENDER_MS of quiet
+   * for a slider preview, so a drag of the Blur slider is not a blur per
+   * input event.
+   */
+  function onLook() {
+    applyLookVars();
+    refreshGuard();
+    var theme = themeNow();
+    window.clearTimeout(lookTimer);
+    lookTimer = 0;
+    if (theme !== lookTheme) { lookTheme = theme; render(false); return; }
+    lookTimer = window.setTimeout(function () { lookTimer = 0; render(false); }, LOOK_RENDER_MS);
+  }
+
+  var placeRaf = 0;
+  var pendingPlace = null;
+  var moveEndTimer = 0;
+  var nextFrame = typeof window.requestAnimationFrame === 'function'
+    ? function (fn) { return window.requestAnimationFrame(fn); }
+    : function (fn) { return window.setTimeout(fn, 16); };
+
+  /** lookplace is RAW (60+/s in a drag): keep the newest, act once a frame. */
+  function onLookPlace(e) {
+    var pl = validPlace(e && e.detail) || validPlace(readPlace());
+    if (!pl) return;
+    pendingPlace = pl;
+    if (!placeRaf) placeRaf = nextFrame(placeFrame);
+  }
+
+  function placeFrame() {
+    placeRaf = 0;
+    var pl = pendingPlace;
+    pendingPlace = null;
+    if (!pl) return;
+    placeNow = pl;
+    if (current.kind !== 'desktop') return;     // own kinds cover the window: nothing to move
+    if (!shown || !shown.lined || shown.layout.monW !== pl.display.width || shown.layout.monH !== pl.display.height) {
+      // The first place, or a monitor of another size: its blur (cached or
+      // new). Same key as the render in flight returns at once.
+      render(false);
+    }
+    if (shown && shown.lined) positionLayer(shown, true);
+    window.clearTimeout(moveEndTimer);
+    moveEndTimer = window.setTimeout(moveEnded, MOVE_END_MS);
+  }
+
+  /** The move ended: the layer leaves the compositor, the guard re-reads. */
+  function moveEnded() {
+    moveEndTimer = 0;
+    if (shown && shown.lined) positionLayer(shown, false);
+    refreshGuard();
   }
 
   /* --- boot ------------------------------------------------------------ */
@@ -913,20 +1579,59 @@
     recopyWallpaper: recopyWallpaper,
     stillKey: stillKey,
     // test seams
-    _lastRender: function () { return lastRender ? JSON.parse(JSON.stringify(lastRender)) : null; },
+    _lastRender: function () {
+      if (!lastRender) return null;
+      var out = JSON.parse(JSON.stringify(lastRender));
+      if (shown) {
+        out.glassAlpha = guard.alpha;
+        out.glassBrightest = guard.brightest;
+        out.glassRatio = guard.ratio;
+        out.glassRaised = guard.raised;
+      }
+      out.offset = shown && shown.lined && placeNow ? monitorOffset(placeNow) : null;
+      out.translate = lastPos ? { x: lastPos.x, y: lastPos.y, moving: lastPos.moving } : null;
+      return out;
+    },
+    _cache: function () {
+      return cache.map(function (e) { return { key: e.key, lined: e.lined, shown: e === shown }; });
+    },
+    _math: {
+      SCALE: SCALE, BAND_FRAC: BAND_FRAC, OVERSCAN_SIGMAS: OVERSCAN_SIGMAS,
+      GLASS_FLOOR: GLASS_FLOOR, GLASS_CEIL: GLASS_CEIL, PANEL_BASE: PANEL_BASE,
+      blurBitmapPx: blurBitmapPx, coverRect: coverRect, linedLayout: linedLayout,
+      monitorOffset: monitorOffset, layerTranslate: layerTranslate,
+      topBand: topBand, guardBand: guardBand, bandCandidates: bandCandidates,
+      guardAlpha: guardAlpha, panelValues: panelValues, normGlass: normGlass, normKind: normKind
+    },
     _keys: { image: IMAGE_KEY, still: STILL_KEY }
   };
 
-  var first = config();
-  publish({ kind: first.kind, state: first.kind === 'none' ? 'ok' : 'loading', reason: null, source: null });
+  lookTheme = themeNow();
+  applyLookVars();
+  refreshGuard();
+  var firstKind = normKind(config().kind);
+  publish({ kind: firstKind, state: firstKind === 'none' ? 'ok' : 'loading', reason: null, source: null });
+  booted = true;
 
   var s = settings();
   if (s && typeof s.on === 'function') {
     s.on(function (all, keys) {
-      if (Array.isArray(keys) && keys.indexOf('newtabBackground') < 0) return;
+      var any = !Array.isArray(keys);
+      // Without LookSync no lookglass comes: Settings' glass is the source.
+      if (any || keys.indexOf('glass') >= 0) onLook();
+      if (!any && keys.indexOf('newtabBackground') < 0) return;
       dropStaleStill();
       render(false);
     });
+  }
+  document.addEventListener('lookglass', onLook);
+  document.addEventListener('lookdesktop', function () { render(false); });
+  document.addEventListener('lookstatus', function () { render(false); });
+  document.addEventListener('lookplace', onLookPlace);
+  if (typeof MutationObserver === 'function') {
+    try {
+      new MutationObserver(onLook).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (err) { /* lookglass also fires on a flip */ }
   }
   render(true);
 

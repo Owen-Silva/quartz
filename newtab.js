@@ -4177,8 +4177,10 @@ window.__search = function (text) {
 /* pushes it in on dom-ready and on every change:                      */
 /*                                                                     */
 /*   window.__applyBackground({ kind, dim, url, fileName, state, reason }) */
-/*     kind      'wallpaper' | 'builtin' | 'image' | 'video' | 'none'  */
-/*               (a stored 'board' or 'aurora' reads as 'wallpaper')   */
+/*     kind      'desktop' | 'builtin' | 'image' | 'video' | 'none'    */
+/*               (unknown, 'board', 'aurora' read as 'desktop')        */
+/*               'desktop' = Mantle's still (or Windows' wallpaper),   */
+/*               with align { mw, mh, x, y }: lined up, see below      */
 /*               'builtin' is one of Helm's photos (file:// URL in the  */
 /*               app folder), a still exactly like the wallpaper; for  */
 /*               an id the build lacks it arrives as 'fallback' WITH   */
@@ -4199,19 +4201,20 @@ window.__search = function (text) {
 /* load or decode HERE, leaves the plain --bg and says why in #bg-note. */
 /* ------------------------------------------------------------------ */
 
-const BG_KINDS = ['wallpaper', 'builtin', 'image', 'video', 'none'];
+const BG_KINDS = ['desktop', 'wallpaper', 'builtin', 'image', 'video', 'none'];
 
 /** The kinds that are one still picture (an <img>-able URL, no clip). */
 function bgIsStill(kind) {
-  return kind === 'wallpaper' || kind === 'builtin' || kind === 'image';
+  return kind === 'desktop' || kind === 'wallpaper' || kind === 'builtin' || kind === 'image';
 }
 const BG_DIM_DEFAULT = 0.25;
 const BG_DIM_MAX = 0.6;
 
-/** Unknown, missing and the retired 'board' / 'aurora' all mean the wallpaper. */
+/** Unknown, missing and the retired 'board' / 'aurora' all mean the desktop
+    (Look Sync's default; settings.js migrates 'wallpaper' to it too). */
 function bgKind(value) {
   const k = String(value == null ? '' : value);
-  return BG_KINDS.indexOf(k) >= 0 ? k : 'wallpaper';
+  return BG_KINDS.indexOf(k) >= 0 ? k : 'desktop';
 }
 
 /** 0..0.6, with anything unreadable falling back to the default wash. */
@@ -4266,6 +4269,7 @@ function bgCssUrl(url) {
 
 /** What a picture is called in a note: its file name when the push had one. */
 function bgWhat(kind, fileName) {
+  if (kind === 'desktop') return 'The desktop wallpaper';
   if (kind === 'wallpaper') return 'The copy of the Windows wallpaper';
   const name = typeof fileName === 'string' && fileName ? ' (' + fileName + ')' : '';
   if (kind === 'builtin') return 'The built-in photo' + name;
@@ -4274,9 +4278,54 @@ function bgWhat(kind, fileName) {
 }
 
 let bgState = {
-  kind: 'wallpaper', dim: 0, state: 'loading', reason: '',
+  kind: 'desktop', dim: 0, state: 'loading', reason: '',
   url: '', fileName: '', stillShown: false, clipLayer: '', localError: ''
 };
+
+/* Kind 'desktop' (Look Sync): the desktop's still, LINED UP with the screen.
+   The chrome sends align { mw, mh, x, y }: the monitor's size and this
+   page's top-left on that monitor (CSS px). #bg-image is then sized to the
+   MONITOR with background-size: cover, centred (exactly the desktop's fit),
+   and moved by translate3d(-x, -y, 0), so the part of the wallpaper behind
+   this page is the part it shows. Moves arrive through
+   window.__applyBackgroundAlign(align), which touches the transform (and
+   the size only when the monitor changed): no reload, no decode, no
+   layout of anything else. align null = no place yet: cover on the window,
+   like every other kind. Own kinds never get .lined. */
+let bgAlign = null;
+
+/** A usable align, or null. */
+function bgAlignOf(value) {
+  if (!value || typeof value !== 'object') return null;
+  const mw = Number(value.mw);
+  const mh = Number(value.mh);
+  const x = Number(value.x);
+  const y = Number(value.y);
+  if (!(mw > 0) || !(mh > 0) || !isFinite(x) || !isFinite(y)) return null;
+  return { mw: mw, mh: mh, x: x, y: y };
+}
+
+/** Put the still where the align says, or back to cover on the window. */
+function paintBgAlign() {
+  const layer = document.getElementById('bg-image');
+  if (!layer) return;
+  const a = bgState.kind === 'desktop' ? bgAlign : null;
+  if (!a) {
+    if (layer.classList.contains('lined')) {
+      layer.classList.remove('lined');
+      layer.style.removeProperty('width');
+      layer.style.removeProperty('height');
+      layer.style.removeProperty('transform');
+    }
+    return;
+  }
+  layer.classList.add('lined');
+  const w = a.mw + 'px';
+  const h = a.mh + 'px';
+  if (layer.style.width !== w) layer.style.width = w;
+  if (layer.style.height !== h) layer.style.height = h;
+  layer.style.transform = 'translate3d(' + (-a.x) + 'px, ' + (-a.y) + 'px, 0)';
+}
 
 /* Bumped by every push, so a still that finishes loading after a newer push
    arrived never paints over it. */
@@ -4474,6 +4523,8 @@ function applyBackground(bg) {
     clipLayer: clipLayer,
     localError: ''
   };
+  bgAlign = kind === 'desktop' ? bgAlignOf(next.align) : null;
+  paintBgAlign();
 
   /* The still: kept as it is when the push repeats it, so a settings push
      that changed only the dim does not blink the picture. */
@@ -4502,6 +4553,28 @@ window.__applyBackground = function (bg) {
   return applyBackground(bg);
 };
 
+/** The cheap per-move update for kind 'desktop': the transform only. */
+window.__applyBackgroundAlign = function (align) {
+  bgAlign = bgAlignOf(align);
+  paintBgAlign();
+  return window.__bgAlignState();
+};
+
+/** Test seam: the align in effect, and whether the layer wears it. */
+window.__bgAlignState = function () {
+  const layer = document.getElementById('bg-image');
+  const a = bgAlign;
+  return {
+    kind: bgState.kind,
+    mw: a ? a.mw : null,
+    mh: a ? a.mh : null,
+    x: a ? a.x : null,
+    y: a ? a.y : null,
+    lined: !!(layer && layer.classList.contains('lined')),
+    transform: layer ? layer.style.transform : ''
+  };
+};
+
 /* The chrome's pause hook, kept under its old name so the chrome as it is
    reaches it: app.js pushBoardPaused() calls it while an overlay is open
    over this page or the window is behind. It stops the clip, and starts it
@@ -4525,6 +4598,7 @@ window.__background = function () {
     hasClip: !!(bgState.kind === 'video' && bgState.url && !bgState.localError),
     clipPlaying: !!(video && bgState.clipLayer === 'video' && !video.paused),
     chromePaused: bgChromePaused,
+    align: bgAlign,
     note: note && !note.hidden ? note.textContent : ''
   };
 };

@@ -26,6 +26,15 @@ function withSkipPermissions(opts) {
   return out;
 }
 
+// One listener per call; returns its unsubscribe. The event object never
+// crosses the bridge, only the payload.
+function subscribe(channel, cb) {
+  if (typeof cb !== 'function') return () => {};
+  const handler = (_event, payload) => cb(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 contextBridge.exposeInMainWorld('api', {
   homeDir: HOME_DIR,
   // Shortcuts the main process caught on our behalf because focus was inside a
@@ -168,6 +177,26 @@ contextBridge.exposeInMainWorld('api', {
     // The built-in photos (Helm's gallery): { ok, reason, items: [{ id, file,
     // title, category, credit, url, fileUrl, thumbUrl, missing }] }.
     builtins: () => ipcRenderer.invoke('background:builtins')
+  },
+  // Look Sync (looksync-main.js / looksync.js): the look shared with Helm and
+  // Mantle through %APPDATA%\look-sync\look.json, and Mantle's desktop still.
+  // The chrome owns the settings; main owns the file.
+  lookSync: {
+    // { enabled, local: { theme, accent, glass } } -> { ok, status, desktop,
+    // place, shared, mantle, systemTheme, dir, instance }
+    hello: (init) => ipcRenderer.invoke('looksync:hello', init),
+    local: (values) => ipcRenderer.send('looksync:local', values),
+    publish: (field, value) => ipcRenderer.invoke('looksync:publish', field, value),
+    setEnabled: (on) => ipcRenderer.invoke('looksync:set-enabled', !!on),
+    refresh: () => ipcRenderer.send('looksync:refresh'),
+    systemTheme: () => ipcRenderer.invoke('looksync:system-theme'),
+    openMantle: () => ipcRenderer.invoke('looksync:open-mantle'),
+    debug: () => ipcRenderer.invoke('looksync:debug'),
+    onStatus: (cb) => subscribe('looksync:status', cb),
+    onApply: (cb) => subscribe('looksync:apply', cb),
+    onDesktop: (cb) => subscribe('looksync:desktop', cb),
+    onPlace: (cb) => subscribe('looksync:place', cb),
+    onSystemTheme: (cb) => subscribe('looksync:system-theme', cb)
   },
   // The idle music player's own tracks. Nothing is copied: main runs the picker
   // and hands back descriptors, and the chrome plays each file where it lies

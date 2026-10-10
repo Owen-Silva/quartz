@@ -996,6 +996,48 @@
   text-align: right;
 }
 
+/* --- Look Sync (Settings > Look, top) ---------------------------
+   The status line reads differently per state: a plain hint when it is
+   healthy or starting, a warn mark when it runs on local values for a
+   reason, a danger mark when the shared file is damaged or unwritable.
+   A left hairline, not a glow. */
+#settings-panel .set-look-status {
+  margin: 7px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--hairline);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+#settings-panel .set-look-status.is-ok { border-left-color: var(--ok); color: var(--text-2); }
+#settings-panel .set-look-status.is-starting,
+#settings-panel .set-look-status.is-off { border-left-color: var(--hairline); }
+#settings-panel .set-look-status.is-missing,
+#settings-panel .set-look-status.is-newer { border-left-color: var(--warn); color: var(--warn); }
+#settings-panel .set-look-status.is-corrupt,
+#settings-panel .set-look-status.is-error,
+#settings-panel .set-look-status.is-nomodule { border-left-color: var(--danger); color: var(--danger); }
+
+#settings-panel .set-look-skipped {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#settings-panel .set-look-warn { color: var(--warn); }
+
+/* The glass sliders reuse the Dim row's slot (.set-bg-dim); the readout is
+   wide enough for "64 px" and "+30". */
+#settings-panel .set-glass-ctl .set-bg-dim-value { min-width: 38px; }
+#settings-panel .set-glass-title { margin-bottom: 2px; }
+#settings-panel .set-glass-guard { margin: 2px 0 4px; color: var(--warn); }
+
+/* "Same as desktop": the one line, and the way to change it. */
+#settings-panel .set-bg-desktop .set-bg-row { margin-top: 8px; }
+#settings-panel .set-bg-desktop-line.is-fallback,
+#settings-panel .set-bg-state.is-fallback { color: var(--warn); }
+
 /* --- the built-in photos: Helm's gallery (helm/ui/shell/settings.css .gal-*)
    at the three columns Helm drops to on a narrow pane, which is what this
    440px panel is. Neutral tiles on one hairline; the accent marks only the

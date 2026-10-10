@@ -32,6 +32,10 @@ const bgFiles = require('./bgfiles');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
 const budgetModule = require('./budget');
+const lookSyncMain = require('./looksync-main');
+// Look Sync (looksync-main.js): installed once the app is ready (it needs
+// screen and powerMonitor), then attached to the chrome window in createWindow.
+let lookSync = null;
 const schoolModule = require('./school');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
@@ -729,6 +733,7 @@ function createWindow() {
   }
 
   acrylicActive = acrylic;
+  if (lookSync) lookSync.attachWindow(win);
 
   // Electron 44 still lets a guest <webview> request its own preload / node
   // integration. Strip both so a page we navigate to can never elevate itself.
@@ -775,7 +780,10 @@ function createWindow() {
     // Maximize BEFORE showing, or the window flashes at the restored size for
     // a frame and then snaps out to full screen.
     if (savedState && savedState.maximized) win.maximize();
-    win.show();
+    // TEST RUNS ONLY (--test-profile --show-inactive): appear without taking
+    // the foreground from whoever is at the machine.
+    if (process.argv.includes('--test-profile') && process.argv.includes('--show-inactive')) win.showInactive();
+    else win.show();
   });
 
   // The renderer owns the maximize/restore glyph, so it has to hear about
@@ -968,6 +976,10 @@ app.whenReady().then(() => {
   // Before the first window: a session preload only reaches frames created
   // after it is registered, and the chrome's own document is one of them.
   spell.start();
+  lookSync = lookSyncMain.install({
+    app, ipcMain, send, liveWin, isChromeSender, nativeTheme,
+    screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
+  });
   createWindow();
 
   // A link that STARTED the browser: its tab goes in on top of the session the
@@ -4992,6 +5004,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  try { if (lookSync) lookSync.close(); } catch { /* the folder watcher only */ }
   // Before anything else: give every embedded app window back to the desktop.
   // A child HWND dies with its parent, so this is the difference between "the
   // browser quit" and "Notepad quit too, taking the document with it".

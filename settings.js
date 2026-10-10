@@ -26,13 +26,20 @@
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
  *                                           // you are not looking at
  *     workspaceSleepMinutes: 0|5|10|30|60,  // 'all' only: minutes away first
- *     newtabBackground: { kind: 'wallpaper'|'builtin'|'image'|'video'|'none',
+ *     newtabBackground: { kind: 'desktop'|'builtin'|'image'|'video'|'none',
  *                         dim: 0..0.6, id?, fileUrl?, fileName?,
  *                         clipRev?, imageRev?, rev },
  *                   // THE Quartz background: the whole window's (behind
  *                   // the tabs, toolbar and panes, see backdrop.js) AND
  *                   // the new tab's. The key keeps its old name so stored
- *                   // prefs survive; 'board'/'aurora' read as 'wallpaper'.
+ *                   // prefs survive; 'wallpaper'/'board'/'aurora' read as
+ *                   // 'desktop' (Mantle's desktop wallpaper, Look Sync).
+ *     ownBackground: null | { kind: 'builtin'|'image'|'video'|'none', ... },
+ *                   // the last "Own picture" choice, restored by that mode
+ *     bgMigration:  1 once the one-time move to 'desktop' ran
+ *     lookSync:     true | false,           // "Match Helm and Mantle"
+ *     glass:        { dark: { blurPx, dim, panel }, light: { ... },
+ *                     render: 'picture' }    // shared through Look Sync
  *     music:        { enabled, source: 'ambient'|'files',
  *                     where: 'newtab'|'anywhere', volume: 0..1,
  *                     files: [{ path, name }], shuffle } }
@@ -137,9 +144,14 @@
        blurs it once and the tab strip, toolbar and panes are tints over it)
        AND what the new tab shows. The key keeps its old name so stored
        prefs survive.
-         { kind: 'wallpaper', dim }        a copy of the Windows wallpaper
-                                           (main copies it once into
-                                           <userData>/backgrounds/)
+         { kind: 'desktop', dim }          THE DEFAULT ("Same as desktop"):
+                                           the still Mantle publishes through
+                                           Look Sync, drawn lined up with the
+                                           screen. When Mantle has not shared
+                                           one, Windows' wallpaper copy (main
+                                           copies it into
+                                           <userData>/backgrounds/), reason said
+         -- "Own picture" kinds (the last one is kept in ownBackground) --
          { kind: 'builtin', id, dim }      one of Helm's photos, shipped in
                                            assets/backgrounds/ (id = the file
                                            name without extension, 'forest').
@@ -151,11 +163,33 @@
                                            new tab plays it, the chrome shows
                                            one blurred still of it
          { kind: 'none' }                  plain: no picture at all
-       Older builds stored 'board' (the circuit board) or 'aurora'; both read
-       as 'wallpaper' now. The picture itself is NOT in here — see the asset
-       store below. The clip is not either: main copies it into
-       <userData>/backgrounds/ and only its file:// URL is stored. */
-    newtabBackground: { kind: 'wallpaper' },
+       Older builds stored 'wallpaper' (a copy of the Windows wallpaper),
+       'board' (the circuit board) or 'aurora'; all three read as 'desktop'
+       now. The picture itself is NOT in here — see the asset store below.
+       The clip is not either: main copies it into <userData>/backgrounds/
+       and only its file:// URL is stored. */
+    newtabBackground: { kind: 'desktop' },
+    /* The last "Own picture" descriptor (builtin/image/video/none, no rev),
+       or null. Choosing "Own picture" again restores it; null restores the
+       built-in snow-peak. Written by every own choice (setBackground). */
+    ownBackground: null,
+    /* 1 once the one-time move to 'desktop' has run (migrateBackground):
+       a later "Own picture" choice is never migrated again. */
+    bgMigration: 0,
+    /* Look Sync (looksync.js): ON, Quartz reads and writes the theme, the
+       accent and the glass shared with Helm and Mantle through
+       %APPDATA%\look-sync\look.json; OFF, it keeps its own. The background
+       mode is always per app either way. */
+    lookSync: true,
+    /* The glass over the background, per theme: blurPx 0..64 (integer),
+       dim 0.20..0.90, panel -0.30..+0.15 (added to the surfaces' alpha).
+       = LS.SEED's glass, which matches today's look. backdrop.js reads the
+       effective value through LookSync.glassFor(theme). */
+    glass: {
+      dark: { blurPx: 5, dim: 0.5, panel: 0 },
+      light: { blurPx: 12, dim: 0.45, panel: 0 },
+      render: 'picture'
+    },
     /* The apps pinned to the new tab page's dock: apps.js ids, webapps.js
        'web:<slug>' ids and 'term:<program>' ids — names, icons and running
        state are NOT stored, they are looked up against the installed index
@@ -188,17 +222,33 @@
   /* An id is a hash from apps.js; anything longer is not one. */
   var APP_ID_MAX = 200;
 
-  /* The backgrounds, as the select offers them. The first is the default. */
+  /* Every kind the descriptor can hold. The first is THE default: "Same as
+     desktop", which follows Mantle's desktop wallpaper (Look Sync). */
+  var BG_KINDS = ['desktop', 'builtin', 'image', 'video', 'none'];
+  var BG_DEFAULT_KIND = BG_KINDS[0];
+  /* The "Own picture" kinds, as the select offers them (the Windows-wallpaper
+     option is gone: 'desktop' replaced it). The first is what the select
+     shows for a value it does not know. */
   var NEWTAB_BACKGROUNDS = [
-    { value: 'wallpaper', name: 'Windows wallpaper' },
     { value: 'builtin', name: 'Built-in photo' },
     { value: 'image', name: 'Your image' },
     { value: 'video', name: 'Moving picture (video or GIF)' },
     { value: 'none', name: 'Plain (no picture)' }
   ];
+  var OWN_KINDS = NEWTAB_BACKGROUNDS.map(function (b) { return b.value; });
+  /* "Own picture" with nothing kept from before starts here. */
+  var OWN_DEFAULT = { kind: 'builtin', id: 'snow-peak' };
   /* Kinds older builds stored, and what they read as now. The circuit board
-     and the aurora are gone; their users get the new default. */
-  var LEGACY_BACKGROUNDS = { board: 'wallpaper', aurora: 'wallpaper' };
+     and the aurora are gone, and the Windows-wallpaper copy is what
+     'desktop' falls back to, so all three follow the desktop now. */
+  var LEGACY_BACKGROUNDS = { wallpaper: 'desktop', board: 'desktop', aurora: 'desktop' };
+
+  /* Look Sync's glass ranges (quartz-lane-contract.md, "Settings keys"). */
+  var GLASS_RANGE = {
+    blurPx: [0, 64],
+    dim: [0.2, 0.9],
+    panel: [-0.3, 0.15]
+  };
 
   /* The picture: never bigger than this on its long edge, always re-encoded
      as a JPEG, and always behind this much black so the capsule stays legible. */
@@ -381,13 +431,29 @@
     } catch (err) { /* storage blocked — the values still hold for this run */ }
   }
 
+  /**
+   * The keys whose values are always read (and stored) in range. Look Sync
+   * writes three of them from the other apps' values, so a wrong type or an
+   * out-of-range number from anywhere lands as the nearest valid value.
+   */
+  function normalizeKey(key, value) {
+    switch (key) {
+      case 'glass': return normalizeGlass(value);
+      case 'lookSync': return value !== false;
+      case 'ownBackground': return normalizeOwnBackground(value);
+      case 'accentHue': return normalizeHue(value);
+      case 'bgMigration': return value === 1 ? 1 : 0;
+      default: return value;
+    }
+  }
+
   function all() {
     var s = load();
     var out = {};
     for (var k in DEFAULTS) {
       if (!Object.prototype.hasOwnProperty.call(DEFAULTS, k)) continue;
-      out[k] = Object.prototype.hasOwnProperty.call(s, k) && s[k] !== undefined
-        ? s[k] : DEFAULTS[k];
+      out[k] = normalizeKey(k, Object.prototype.hasOwnProperty.call(s, k) && s[k] !== undefined
+        ? s[k] : DEFAULTS[k]);
     }
     return out;
   }
@@ -409,7 +475,7 @@
     var changed = [];
     for (var k in patch) {
       if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
-      var next = patch[k];
+      var next = Object.prototype.hasOwnProperty.call(DEFAULTS, k) ? normalizeKey(k, patch[k]) : patch[k];
       if (JSON.stringify(s[k]) === JSON.stringify(next)) continue;
       s[k] = next;
       changed.push(k);
@@ -465,12 +531,8 @@
   /** Anything stored (or pushed) read as a complete, in-range descriptor. */
   function normalizeBackground(value) {
     var v = value && typeof value === 'object' ? value : {};
-    var kind = NEWTAB_BACKGROUNDS[0].value;
-    var asked = Object.prototype.hasOwnProperty.call(LEGACY_BACKGROUNDS, v.kind)
-      ? LEGACY_BACKGROUNDS[v.kind] : v.kind;
-    for (var i = 0; i < NEWTAB_BACKGROUNDS.length; i++) {
-      if (NEWTAB_BACKGROUNDS[i].value === asked) kind = asked;
-    }
+    var asked = backgroundKindOf(v.kind);
+    var kind = asked || BG_DEFAULT_KIND;
     var dim = (v.dim === null || v.dim === undefined || v.dim === '')
       ? BG_DIM_DEFAULT : Number(v.dim);
     if (!isFinite(dim)) dim = BG_DIM_DEFAULT;
@@ -491,26 +553,143 @@
     return out;
   }
 
+  /** A stored kind as it reads today ('wallpaper' -> 'desktop'), or null. */
+  function backgroundKindOf(kind) {
+    var asked = Object.prototype.hasOwnProperty.call(LEGACY_BACKGROUNDS, kind)
+      ? LEGACY_BACKGROUNDS[kind] : kind;
+    return BG_KINDS.indexOf(asked) >= 0 ? asked : null;
+  }
+
+  /** True for the "Own picture" kinds (builtin, image, video, none). */
+  function isOwnKind(kind) {
+    return OWN_KINDS.indexOf(kind) >= 0;
+  }
+
+  /**
+   * ownBackground as it may be stored: an own descriptor (normalised, no
+   * rev) or null. A 'desktop' (or legacy wallpaper) value is not an own
+   * choice, so it reads as null: "Own picture" then starts on snow-peak.
+   */
+  function normalizeOwnBackground(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (!isOwnKind(backgroundKindOf(value.kind))) return null;
+    return normalizeBackground(value);
+  }
+
+  /** null, or an integer hue 0..360 (the shared store rejects non-integers). */
+  function normalizeHue(value) {
+    if (value === null || value === undefined || value === '') return null;
+    var n = Number(value);
+    if (!isFinite(n)) return null;
+    return Math.min(360, Math.max(0, Math.round(n)));
+  }
+
+  /** One glass number, clamped to its range; integer for blur, 2 decimals else. */
+  function glassNumber(raw, range, fallback, integer) {
+    var n = (raw === null || raw === undefined || raw === '') ? NaN : Number(raw);
+    if (!isFinite(n)) n = fallback;
+    n = Math.min(range[1], Math.max(range[0], n));
+    n = integer ? Math.round(n) : Math.round(n * 100) / 100;
+    return n || 0;                       // never -0
+  }
+
+  /**
+   * The glass group, complete and in range, whatever was stored or pushed.
+   * A missing theme or field takes the default's value (LS.SEED).
+   */
+  function normalizeGlass(value) {
+    var v = value && typeof value === 'object' ? value : {};
+    var out = {};
+    ['dark', 'light'].forEach(function (theme) {
+      var t = v[theme] && typeof v[theme] === 'object' ? v[theme] : {};
+      var d = DEFAULTS.glass[theme];
+      out[theme] = {
+        blurPx: glassNumber(t.blurPx, GLASS_RANGE.blurPx, d.blurPx, true),
+        dim: glassNumber(t.dim, GLASS_RANGE.dim, d.dim, false),
+        panel: glassNumber(t.panel, GLASS_RANGE.panel, d.panel, false)
+      };
+    });
+    /* 'picture' is the only render the user chose; a short id from a newer app
+       is kept rather than dropped, so syncing never erases it. */
+    out.render = (typeof v.render === 'string' && /^[a-z][a-z-]{0,23}$/.test(v.render))
+      ? v.render : DEFAULTS.glass.render;
+    return out;
+  }
+
+  /** The glass group as it stands (normalised). */
+  function glass() {
+    return normalizeGlass(get('glass'));
+  }
+
   /** The descriptor as it stands, normalised (sync; backdrop.js reads this). */
   function backgroundConfig() {
     return normalizeBackground(get('newtabBackground'));
   }
 
   /**
-   * One-time migration: a stored 'board' / 'aurora' (or the retired
-   * boardOverImage switch) is written back as the new descriptor, so every
-   * raw reader of the key — the new tab's first-paint hint included — sees
-   * a kind that still exists. Runs at load; a clean store is left alone.
+   * THE one-time migration to "Same as desktop", as a pure function of the
+   * stored object (test seam: Settings._migrateBackground). Returns the
+   * patch to store, or null when it already ran (bgMigration === 1).
+   *   - an own kind (builtin/image/video/none) is kept as ownBackground, so
+   *     "Own picture" brings it back;
+   *   - 'wallpaper' / 'board' / 'aurora' / nothing keep no own pick (an
+   *     ownBackground already stored is left alone);
+   *   - newtabBackground becomes { kind: 'desktop', dim: <old dim>, rev };
+   *   - bgMigration = 1, so a later "Own picture" choice is never migrated.
    */
+  function migrateBackgroundState(stored, now) {
+    var s = stored && typeof stored === 'object' ? stored : {};
+    if (s.bgMigration === 1) return null;
+    var raw = s.newtabBackground;
+    var patch = { bgMigration: 1 };
+    var own = normalizeOwnBackground(raw);
+    if (own) patch.ownBackground = own;
+    var old = normalizeBackground(raw);
+    var stamp = isFinite(now) ? Number(now) : 0;
+    if (raw && typeof raw === 'object' && isFinite(raw.rev) && raw.rev >= stamp) stamp = Number(raw.rev) + 1;
+    patch.newtabBackground = { kind: 'desktop', dim: old.dim, rev: stamp };
+    return patch;
+  }
+
+  /* Set when the migration ran in THIS load: { ownKept: kind | null }.
+     boot() says it once in a toast, so the switch is never silent. */
+  var migrationRan = null;
+
+  /** Runs at load, before app.js builds the first new tab from the key. */
   function migrateBackground() {
-    var raw = load().newtabBackground;
-    if (!raw || typeof raw !== 'object') return;
-    var legacy = Object.prototype.hasOwnProperty.call(LEGACY_BACKGROUNDS, raw.kind)
-      || Object.prototype.hasOwnProperty.call(raw, 'boardOverImage');
-    if (!legacy) return;
-    var next = normalizeBackground(raw);
-    if (raw.rev) next.rev = raw.rev;
-    set({ newtabBackground: next });
+    var patch = migrateBackgroundState(load(), Date.now());
+    if (!patch) return;
+    var had = load().newtabBackground;
+    migrationRan = {
+      ownKept: patch.ownBackground ? patch.ownBackground.kind : null,
+      /* A fresh profile had nothing to move, so there is nothing to say. */
+      tell: !!(had && typeof had === 'object' && had.kind !== 'desktop')
+    };
+    set(patch);
+  }
+
+  /**
+   * "Same as desktop" ('desktop') or "Own picture" ('own'). Own restores the
+   * last own choice (ownBackground), or the built-in snow-peak when there
+   * is none; the Dim stays what it is, it is one Quartz-local value.
+   */
+  function setBackgroundMode(mode) {
+    if (mode === 'desktop') return setBackground({ kind: 'desktop' });
+    var own = normalizeOwnBackground(get('ownBackground')) || OWN_DEFAULT;
+    var patch = { kind: own.kind };
+    if (own.id) patch.id = own.id;
+    if (own.kind === 'video') {
+      patch.fileUrl = own.fileUrl || null;
+      patch.fileName = own.fileName || null;
+    }
+    if (own.clipRev) patch.clipRev = own.clipRev;
+    if (own.imageRev) patch.imageRev = own.imageRev;
+    return setBackground(patch);
+  }
+
+  /** 'desktop' or 'own', for the mode choice. */
+  function backgroundMode() {
+    return backgroundConfig().kind === 'desktop' ? 'desktop' : 'own';
   }
 
   /**
@@ -546,7 +725,11 @@
     var stamp = Date.now();
     if (prev && typeof prev === 'object' && prev.rev >= stamp) stamp = prev.rev + 1;
     next.rev = stamp;
-    set({ newtabBackground: next });
+    /* Any own choice (builtin/image/video/none, its Dim included) is also
+       THE own choice "Own picture" restores later. One set(), one emit. */
+    var out = { newtabBackground: next };
+    if (isOwnKind(next.kind)) out.ownBackground = normalizeOwnBackground(next);
+    set(out);
     return next;
   }
 
@@ -694,9 +877,10 @@
   }
 
   /**
-   * Drop the picture. The kind goes back to the default (the Windows
-   * wallpaper) with it: leaving it on 'image' would leave the window
-   * showing a background that isn't there.
+   * Drop the picture. The kind goes to "Own picture"'s own default (the
+   * built-in snow-peak) with it: leaving it on 'image' would leave the
+   * window showing a background that isn't there, and the own picker is
+   * where he is, so it stays.
    */
   function removeBackgroundImage() {
     return assetStore['delete'](BG_ASSET_KEY).catch(function () { /* already gone */ })
@@ -705,7 +889,7 @@
         revokePreview();
         bgPreviewBlob = null;
         bgPreviewLoaded = true;
-        setBackground({ kind: NEWTAB_BACKGROUNDS[0].value, imageRev: Date.now() });
+        setBackground({ kind: OWN_DEFAULT.kind, id: OWN_DEFAULT.id, imageRev: Date.now() });
       });
   }
 
@@ -750,8 +934,8 @@
   }
 
   /**
-   * Drop the clip. The kind goes back to the default (the Windows wallpaper)
-   * with it, exactly as removing the picture does. Main's clear removes the
+   * Drop the clip. The kind goes to the built-in snow-peak with it,
+   * exactly as removing the picture does. Main's clear removes the
    * clip only; the wallpaper copy beside it is never touched (bgfiles.js).
    */
   function removeBackgroundVideo() {
@@ -760,7 +944,7 @@
       ? Promise.resolve().then(function () { return api.clearVideo(); }).catch(function () { })
       : Promise.resolve();
     return done.then(function () {
-      setBackground({ kind: NEWTAB_BACKGROUNDS[0].value, fileUrl: null, fileName: null, clipRev: Date.now() });
+      setBackground({ kind: OWN_DEFAULT.kind, id: OWN_DEFAULT.id, fileUrl: null, fileName: null, clipRev: Date.now() });
       renderNewtabBg();
     });
   }
@@ -800,8 +984,9 @@
   /**
    * What app.js pushes into the new tab guest, before it adds the layer's
    * state and reason:
-   *   { kind: 'wallpaper', dim, url?, fileName?, copiedAt?, reason? }
-   *       url = the file:// URL of main's wallpaper copy
+   *   { kind: 'desktop', dim }
+   *       app.js adds the desktop still (LookSync.desktop()) itself
+   *   { kind: 'builtin', dim, id?, url?, fileName?, reason?, fallbackUrl? }
    *   { kind: 'image', dim, url?, dataUrl? }
    *       url (= dataUrl) is only there with a picture actually stored; it
    *       is read out of IndexedDB once and then kept in memory
@@ -882,17 +1067,10 @@
       if (cfg.fileName) out.fileName = cfg.fileName;
       return Promise.resolve(out);
     }
-    if (cfg.kind === 'wallpaper') {
-      return wallpaperCopy().then(function (res) {
-        if (res && typeof res.fileUrl === 'string' && res.fileUrl) {
-          out.url = res.fileUrl;
-          if (res.fileName) out.fileName = res.fileName;
-          if (res.copiedAt) out.copiedAt = res.copiedAt;
-        }
-        if (res && !res.ok && res.reason) out.reason = res.reason;
-        return out;
-      });
-    }
+    /* "Same as desktop": { kind: 'desktop', dim }. app.js adds the still
+       itself from LookSync.desktop() (or Windows' wallpaper copy on its
+       fallback) and the lined-up align, so nothing is resolved here. */
+    if (cfg.kind === 'desktop') return Promise.resolve(out);
     if (cfg.kind !== 'image') return Promise.resolve(out);
     if (bgDataUrl) {
       out.url = bgDataUrl;
@@ -1478,16 +1656,70 @@
    * Paint the accent tokens inline on <html>, or strip them so the authored
    * ones in chrome.css come back. The new tab page runs this same formula.
    */
+  /* null while the shared formula (window.LookAccent, looksync/accent.js)
+     paints the accent; otherwise why this window fell back to its own copy.
+     The Look status row says it. */
+  var accentFallback = null;
+
+  /**
+   * The accent tokens from the SHARED formula (Look Sync contract section 3,
+   * the one Helm and Mantle run): acc -> --ion, soft/glow/line/select ->
+   * their --ion-* tokens, and the two seams are the same colour at the
+   * alphas tokens.css authors for them (ACCENT_TOKENS). null = not available.
+   */
+  function sharedAccentProps(h, light) {
+    var LA = window.LookAccent;
+    if (!LA || typeof LA.tokens !== 'function') {
+      accentFallback = 'the shared accent formula (looksync/accent.browser.js) did not load, so this window uses its own copy of it';
+      return null;
+    }
+    var t;
+    try { t = LA.tokens(h, light ? 'light' : 'dark'); } catch (err) {
+      accentFallback = 'the shared accent formula refused hue ' + h + ' (' + ((err && err.message) || 'error') + '), so this window uses its own copy of it';
+      return null;
+    }
+    if (!t || !Array.isArray(t.rgb)) {
+      accentFallback = 'the shared accent formula gave no colours for hue ' + h + ', so this window uses its own copy of it';
+      return null;
+    }
+    accentFallback = null;
+    var rgb = t.rgb.join(', ');
+    var seamA = function (name) {
+      for (var j = 0; j < ACCENT_TOKENS.length; j++) {
+        if (ACCENT_TOKENS[j][0] === name) return ACCENT_TOKENS[j][light ? 2 : 1];
+      }
+      return 0.14;
+    };
+    return {
+      '--ion': t.acc,
+      '--ion-soft': t.soft,
+      '--ion-glow': t.glow,
+      '--ion-line': t.line,
+      '--ion-select': t.select,
+      '--seam-color': 'rgba(' + rgb + ', ' + seamA('--seam-color') + ')',
+      '--chamber-seam': 'rgba(' + rgb + ', ' + seamA('--chamber-seam') + ')'
+    };
+  }
+
   function applyAccent(hue) {
     var root = document.documentElement;
-    var n = Number(hue);
     var i;
-    if (hue === null || hue === undefined || !isFinite(n)) {
+    var h = normalizeHue(hue);
+    if (h === null) {
+      /* The palette's own accent, exactly as authored: no inline props. */
       for (i = 0; i < ACCENT_TOKENS.length; i++) root.style.removeProperty(ACCENT_TOKENS[i][0]);
       return;
     }
-    var h = ((n % 360) + 360) % 360;
     var light = isLight();
+    var shared = sharedAccentProps(h, light);
+    if (shared) {
+      for (var name0 in shared) {
+        if (Object.prototype.hasOwnProperty.call(shared, name0)) root.style.setProperty(name0, shared[name0]);
+      }
+      return;
+    }
+    /* Fallback only (accentFallback says why): this file's own formula. */
+    h = h % 360;
     var sl = light ? ACCENT_SL.light : ACCENT_SL.dark;
     var s = sl[0];
     var l = sl[1];
@@ -1953,6 +2185,11 @@
 
   function buildLook() {
     var s = section('Look');
+    /* Look Sync first: the switch, then the sentence on how it is going. */
+    var sync = el('div', 'set-field set-looksync');
+    sync.setAttribute('data-field', 'looksync');
+    s.appendChild(sync);
+
     var seg = el('div', 'set-field');
     seg.setAttribute('data-field', 'theme');
     s.appendChild(seg);
@@ -1964,6 +2201,10 @@
     var accent = el('div', 'set-field set-accent');
     accent.setAttribute('data-field', 'accent');
     s.appendChild(accent);
+
+    var glassField = el('div', 'set-field set-glass');
+    glassField.setAttribute('data-field', 'glass');
+    s.appendChild(glassField);
 
     var bookmarks = el('div', 'set-field');
     bookmarks.setAttribute('data-field', 'bookmarksbar');
@@ -1990,16 +2231,8 @@
     var accentField = bodyEl.querySelector('[data-field="accent"]');
     if (!themeField || !accentField) return;
 
-    var theme = isLight() ? 'light' : 'dark';
-    themeField.textContent = '';
-    themeField.appendChild(segmented(
-      [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }],
-      theme,
-      function (mode) {
-        if (typeof window.setTheme === 'function') window.setTheme(mode);
-        else document.documentElement.setAttribute('data-theme', mode);
-      }
-    ));
+    renderLookSync();
+    renderTheme(themeField);
 
     var paletteField = bodyEl.querySelector('[data-field="palette"]');
     if (paletteField) {
@@ -2044,7 +2277,267 @@
     accentField.appendChild(row);
     accentField.appendChild(el('p', 'set-hint', 'One colour marks what is active, everywhere.'));
 
+    renderGlass();
     renderBookmarksBar();
+  }
+
+  /* ============================================================
+     Look Sync rows (Settings > Look, top)
+     window.LookSync is looksync.js's glue (quartz-lane-contract.md); it
+     loads before this file, but every use is feature-detected so a window
+     without it says so instead of quietly doing nothing.
+     ============================================================ */
+
+  function lookSyncApi() {
+    var ls = window.LookSync;
+    return ls && typeof ls === 'object' ? ls : null;
+  }
+
+  /** LookSync.<name>() or null, never a throw. */
+  function lookCall(name) {
+    var ls = lookSyncApi();
+    if (!ls || typeof ls[name] !== 'function') return null;
+    try { return ls[name].apply(ls, Array.prototype.slice.call(arguments, 1)); } catch (err) { return null; }
+  }
+
+  var LOOK_MISSING = 'Look sync did not load in this window (looksync.js is missing), so Quartz keeps its own look and cannot follow the desktop';
+
+  /* Each distinct message is toasted once per window (lookapplied messages,
+     the desktop fallback, status fallbacks). */
+  /* The chrome has one toast that a newer one replaces, so these queue:
+     two at boot (the migration note and a desktop fallback) both get read. */
+  var LOOK_TOAST_MS = 5200;
+  var lookToasted = {};
+  var lookToastQueue = [];
+  var lookToastBusyUntil = 0;
+  function lookToastOnce(text) {
+    if (!text || lookToasted[text] || !document.body) return;
+    lookToasted[text] = true;
+    lookToastQueue.push(String(text));
+    if (lookToastQueue.length === 1) lookToastNext();
+  }
+  function lookToastNext() {
+    if (!lookToastQueue.length) return;
+    var wait = lookToastBusyUntil - Date.now();
+    if (wait > 0) { window.setTimeout(lookToastNext, wait); return; }
+    var text = lookToastQueue.shift();
+    showToast(text, LOOK_TOAST_MS);
+    lookToastBusyUntil = Date.now() + LOOK_TOAST_MS + 250;
+    if (lookToastQueue.length) window.setTimeout(lookToastNext, LOOK_TOAST_MS + 250);
+  }
+
+  /** The status sentence, with its rev when the line does not already say it. */
+  function lookStatusText(st) {
+    if (!st) return LOOK_MISSING + '.';
+    var line = st.line ? String(st.line) : ('Sync with the others: ' + (st.state || 'unknown')
+      + (st.reason ? ' (' + st.reason + ')' : ''));
+    if (st.rev !== undefined && st.rev !== null && !/\brev\b/i.test(line)) line += ' · rev ' + st.rev;
+    return line;
+  }
+
+  /** The switch and the status line under it. */
+  function renderLookSync() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="looksync"]');
+    if (!field) return;
+    field.textContent = '';
+    var on = get('lookSync') !== false;
+    field.appendChild(switchRow('Match Helm and Mantle', on, function (next) {
+      set({ lookSync: !!next });
+    }));
+    var line = el('p', 'set-look-status');
+    line.setAttribute('data-look-status', '');
+    line.setAttribute('role', 'status');
+    field.appendChild(line);
+    var skipped = el('ul', 'set-look-skipped');
+    skipped.setAttribute('data-look-skipped', '');
+    field.appendChild(skipped);
+    field.appendChild(el('p', 'set-hint',
+      'Theme, accent colour and glass stay the same in Quartz, Helm and Mantle. The background choice is always this app’s own.'));
+    renderLookStatus();
+  }
+
+  /** Just the status line (lookstatus fires on every change of it). */
+  function renderLookStatus() {
+    var line = bodyEl && bodyEl.querySelector('[data-look-status]');
+    if (!line) return;
+    var st = lookCall('status');
+    var state = st ? String(st.state || 'starting') : 'nomodule';
+    line.className = 'set-look-status is-' + state.replace(/[^a-z-]/gi, '');
+    line.setAttribute('data-state', state);
+    line.textContent = lookStatusText(st);
+    var list = bodyEl.querySelector('[data-look-skipped]');
+    if (list) {
+      list.textContent = '';
+      var sk = st && Array.isArray(st.skipped) ? st.skipped : [];
+      sk.forEach(function (x) {
+        if (!x) return;
+        var text = (x.reason ? String(x.reason) : 'Ignored a bad value') + (x.field ? ' (' + x.field + ')' : '');
+        if (line.textContent.indexOf(text) >= 0) return;
+        list.appendChild(el('li', 'set-note set-look-warn', text));
+      });
+      var accentWhy = accentFallback || ((!window.LookAccent || typeof window.LookAccent.tokens !== 'function')
+        ? 'the shared accent formula (looksync/accent.browser.js) did not load, so a custom accent uses this window’s own copy of it'
+        : null);
+      if (accentWhy) list.appendChild(el('li', 'set-note set-look-warn', 'Accent: ' + accentWhy + '.'));
+      list.hidden = !list.firstChild;
+    }
+  }
+
+  /* ---- Theme: System / Light / Dark --------------------------------- */
+
+  /* The last reason app.js gave with quartzthemechange (System could not
+     read Windows' apps mode, so it resolved to Dark). */
+  var themeReason = '';
+
+  function renderTheme(themeField) {
+    var field = themeField || (bodyEl && bodyEl.querySelector('[data-field="theme"]'));
+    if (!field) return;
+    field.textContent = '';
+    var QT = window.QuartzTheme;
+    if (QT && typeof QT.setMode === 'function') {
+      var mode = 'dark';
+      try { mode = typeof QT.mode === 'function' ? QT.mode() : mode; } catch (err) { /* keep dark */ }
+      field.appendChild(segmented(
+        [{ id: 'system', name: 'System' }, { id: 'light', name: 'Light' }, { id: 'dark', name: 'Dark' }],
+        mode,
+        function (next) {
+          try { QT.setMode(next); } catch (err) {
+            showToast('Could not change the theme: ' + ((err && err.message) || 'unknown reason'));
+          }
+        }
+      ));
+      if (mode === 'system') {
+        var resolved = isLight() ? 'Light' : 'Dark';
+        if (themeReason) {
+          field.appendChild(el('p', 'set-note set-look-warn',
+            'System could not read Windows’ setting, so Quartz is ' + resolved + ': ' + themeReason + '.'));
+        } else {
+          field.appendChild(el('p', 'set-hint', 'Following Windows’ app mode: ' + resolved + ' right now.'));
+        }
+      }
+      return;
+    }
+    /* No QuartzTheme (app.js from before Look Sync): the old two choices,
+       and the reason System is missing. */
+    field.appendChild(segmented(
+      [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }],
+      isLight() ? 'light' : 'dark',
+      function (m) {
+        if (typeof window.setTheme === 'function') window.setTheme(m);
+        else document.documentElement.setAttribute('data-theme', m);
+      }
+    ));
+    field.appendChild(el('p', 'set-note set-look-warn',
+      'System is not offered: this window’s theme module (QuartzTheme) did not load, and the theme is not shared with Helm and Mantle.'));
+  }
+
+  /* ---- Glass: Blur / Dim / See-through for the current theme --------- */
+
+  /** One labelled range with a readout; input previews, change stores. */
+  function glassSlider(label, id, min, max, value, format, onInput, onChange) {
+    var wrap = el('span', 'set-bg-dim set-glass-ctl');
+    var slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = '1';
+    slider.className = 'set-range';
+    slider.id = id;
+    slider.value = String(value);
+    slider.setAttribute('aria-label', label);
+    var readout = el('span', 'set-bg-dim-value', format(value));
+    slider.addEventListener('input', function () {
+      readout.textContent = format(Number(slider.value));
+      onInput();
+    });
+    slider.addEventListener('change', onChange);
+    wrap.appendChild(slider);
+    wrap.appendChild(readout);
+    return { row: controlRow(label, id, wrap), slider: slider };
+  }
+
+  /** ".58" (the guard's way of writing an alpha). */
+  function alphaText(a) {
+    var n = Math.round(Number(a) * 100) / 100;
+    if (!isFinite(n)) return '?';
+    return n.toFixed(2).replace(/^0(?=\.)/, '');
+  }
+
+  function renderGlass() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="glass"]');
+    if (!field) return;
+    field.textContent = '';
+    var theme = isLight() ? 'light' : 'dark';
+    var g = glass()[theme];
+    var ls = lookSyncApi();
+    var canPreview = !!(ls && typeof ls.previewGlass === 'function');
+
+    var blur, dim, see;
+    function current() {
+      return {
+        blurPx: Number(blur.slider.value),
+        dim: Number(dim.slider.value) / 100,
+        /* See-through is the panel alpha turned around: more = clearer. */
+        panel: -Number(see.slider.value) / 100
+      };
+    }
+    function onInput() {
+      if (!canPreview) return;
+      try { ls.previewGlass(theme, normalizeGlass(withTheme(current()))[theme]); } catch (err) { /* glue's problem; change still saves */ }
+    }
+    function withTheme(v) {
+      var all_ = glass();
+      all_[theme] = v;
+      return all_;
+    }
+    function onChange() {
+      set({ glass: withTheme(current()) });
+      if (canPreview) { try { ls.previewGlass(theme, null); } catch (err) { /* fine */ } }
+    }
+
+    field.appendChild(el('p', 'set-hint set-glass-title',
+      'Glass for the ' + (theme === 'light' ? 'Light' : 'Dark') + ' theme (switch theme to set the other):'));
+    blur = glassSlider('Blur', 'set-glass-blur', GLASS_RANGE.blurPx[0], GLASS_RANGE.blurPx[1], g.blurPx,
+      function (v) { return v + ' px'; }, onInput, onChange);
+    field.appendChild(blur.row);
+    dim = glassSlider('Dim', 'set-glass-dim', Math.round(GLASS_RANGE.dim[0] * 100), Math.round(GLASS_RANGE.dim[1] * 100),
+      Math.round(g.dim * 100), function (v) { return v + '%'; }, onInput, onChange);
+    field.appendChild(dim.row);
+    var guard = el('p', 'set-note set-glass-guard');
+    guard.setAttribute('data-glass-guard', '');
+    guard.setAttribute('role', 'status');
+    field.appendChild(guard);
+    see = glassSlider('See-through', 'set-glass-see', Math.round(-GLASS_RANGE.panel[1] * 100), Math.round(-GLASS_RANGE.panel[0] * 100),
+      Math.round(-g.panel * 100), function (v) { return (v > 0 ? '+' : '') + v; }, onInput, onChange);
+    field.appendChild(see.row);
+    field.appendChild(el('p', 'set-hint',
+      'Blur softens the picture behind the tabs; Dim darkens it so text stays readable; See-through makes the panels clearer (+) or more solid (−).'));
+    if (!ls) {
+      field.appendChild(el('p', 'set-note set-look-warn', LOOK_MISSING
+        + '. These values are saved, but nothing in this window applies them until it loads.'));
+    } else if (!canPreview) {
+      field.appendChild(el('p', 'set-note set-look-warn',
+        'No live preview: this look sync module has no previewGlass, so a change shows when you let go.'));
+    }
+    renderGlassGuard();
+  }
+
+  /** The guard note under Dim, from backdrop.js's state (backdropchange). */
+  function renderGlassGuard() {
+    var note = bodyEl && bodyEl.querySelector('[data-glass-guard]');
+    if (!note) return;
+    var layer = window.Backdrop;
+    var st = null;
+    try { st = (layer && typeof layer.state === 'function') ? layer.state() : null; } catch (err) { st = null; }
+    var gs = st && st.glass;
+    var theme = isLight() ? 'light' : 'dark';
+    if (gs && gs.raised && (!gs.theme || gs.theme === theme)) {
+      note.textContent = 'Dim raised to ' + alphaText(gs.alpha) + ' over this bright photo so text stays readable.';
+      note.hidden = false;
+    } else {
+      note.textContent = '';
+      note.hidden = true;
+    }
   }
 
   /**
@@ -2929,15 +3422,13 @@
     var src = st.source || {};
     var why = st.reason ? String(st.reason) : 'unknown reason';
     if (st.kind === 'none') return 'Plain background: no picture behind the tabs or on the new tab.';
-    if (st.kind === 'wallpaper') {
+    if (st.kind === 'desktop') {
+      /* The line above already says what is followed (LookSync.desktop());
+         this one only speaks when the window could not show it at all. */
       if (st.state === 'fallback') {
-        return (src.phase === 'read'
-          ? 'Could not read the copy of your Windows wallpaper: '
-          : 'Could not copy the Windows wallpaper: ') + why + '. Showing the plain background.';
+        return 'Could not show the desktop wallpaper behind the tabs: ' + why + '. Showing the plain background.';
       }
-      var when = bgShortDate(src.copiedAt);
-      return 'Showing a copy of your Windows wallpaper' + (when ? ' (copied ' + when + ')' : '') + '.'
-        + (st.reason ? ' ' + st.reason + '.' : '');
+      return '';
     }
     if (st.kind === 'builtin') {
       if (st.state === 'fallback') {
@@ -2982,6 +3473,7 @@
     var bad = !st || st.state === 'fallback';
     line.className = (bad ? 'set-note' : 'set-hint') + ' set-bg-state' + (bad ? ' is-fallback' : '');
     line.textContent = bgStateText(st, backgroundConfig());
+    line.hidden = !line.textContent;
   }
 
   /** Dim, plus the one sentence on what it does now. */
@@ -3144,6 +3636,81 @@
     return wrap;
   }
 
+  /**
+   * "Same as desktop": the one line on what is followed (LookSync.desktop():
+   * the title and rev, or the fallback reason), and the way to change it:
+   * a button into Mantle's Wallpapers when Mantle can be opened, else the
+   * plain sentence. Re-rendered on lookdesktop.
+   */
+  function renderDesktopLine() {
+    var box = bodyEl && bodyEl.querySelector('[data-bg-desktop]');
+    if (!box) return;
+    box.textContent = '';
+    var ls = lookSyncApi();
+    var d = lookCall('desktop');
+    var line = el('p', 'set-hint set-bg-desktop-line');
+    line.setAttribute('role', 'status');
+    var fallback = false;
+    if (!ls || !d) {
+      fallback = true;
+      line.textContent = 'Following your desktop wallpaper is not possible: '
+        + (ls ? 'the look sync module did not answer' : 'look sync did not load in this window (looksync.js is missing)')
+        + '. Showing Windows’ wallpaper where it can be read.';
+    } else if (d.state === 'ok') {
+      var what = d.title ? '“' + d.title + '”' : 'Mantle’s wallpaper';
+      line.textContent = 'Following your desktop wallpaper: ' + what
+        + (d.rev !== undefined && d.rev !== null ? ' (rev ' + d.rev + ')' : '') + '.';
+    } else if (d.state === 'fallback') {
+      fallback = true;
+      var why = d.reason ? String(d.reason) : 'Following Windows’ wallpaper: Mantle hasn’t shared one';
+      line.textContent = 'Following your desktop wallpaper. ' + why + (/[.!?]$/.test(why) ? '' : '.');
+    } else {
+      line.textContent = 'Following your desktop wallpaper (waiting for Mantle’s answer…)'
+        + (d.reason ? ' ' + d.reason : '') + '.';
+    }
+    if (fallback) line.className = 'set-note set-bg-desktop-line is-fallback';
+    box.appendChild(line);
+
+    var m = lookCall('mantle');
+    var row = el('div', 'set-bg-row');
+    if (m && m.canOpen && typeof ls.openMantleWallpapers === 'function') {
+      var open = textButton('Open Mantle’s Wallpapers', 'set-btn set-bg-mantle', function () {
+        open.disabled = true;
+        Promise.resolve().then(function () { return ls.openMantleWallpapers(); }).then(function (res) {
+          open.disabled = false;
+          if (!res || res.ok !== true) {
+            showToast('Could not open Mantle’s Wallpapers: ' + ((res && res.reason) || 'no answer from Mantle'));
+          }
+        }, function (err) {
+          open.disabled = false;
+          showToast('Could not open Mantle’s Wallpapers: ' + ((err && err.message) || 'unknown reason'));
+        });
+      });
+      row.appendChild(open);
+      box.appendChild(row);
+    } else {
+      box.appendChild(el('p', 'set-hint', 'Change it in Mantle’s Wallpapers.'));
+      if (m && m.reason) box.appendChild(el('p', 'set-note', 'No button to open it: ' + m.reason + '.'));
+    }
+
+    /* On the fallback the window shows main's copy of Windows' wallpaper,
+       which is taken once, so the re-copy stays within reach. */
+    if (fallback) {
+      var wrow = el('div', 'set-bg-row');
+      var recopy = textButton('Copy again from Windows', 'set-btn set-bg-recopy', function () {
+        recopy.disabled = true;
+        recopyWallpaper().then(function (res) {
+          recopy.disabled = false;
+          if (res && res.ok) showToast('Copied your Windows wallpaper again');
+          else showToast('Could not copy the wallpaper: ' + ((res && res.reason) || 'unknown reason'));
+          renderBgState();
+        });
+      });
+      wrow.appendChild(recopy);
+      box.appendChild(wrow);
+    }
+  }
+
   /** The background picker: one select, the state line, and the picture's controls under it. */
   function renderNewtabBg() {
     var field = bodyEl && bodyEl.querySelector('[data-field="newtabbg"]');
@@ -3151,8 +3718,31 @@
     field.textContent = '';
 
     var cfg = normalizeBackground(get('newtabBackground'));
+    var mode = cfg.kind === 'desktop' ? 'desktop' : 'own';
 
-    field.appendChild(controlRow('Background', 'set-newtab-bg',
+    field.appendChild(controlRow('Background', null, segmented(
+      [{ id: 'desktop', name: 'Same as desktop' }, { id: 'own', name: 'Own picture' }],
+      mode,
+      function (next) { if (next !== mode) setBackgroundMode(next); }
+    )));
+
+    if (mode === 'desktop') {
+      /* No picker: the desktop wallpaper is the one place a picture is
+         chosen (The user, 2026-10-10). One line, and the way to change it. */
+      var desk = el('div', 'set-bg-desktop');
+      desk.setAttribute('data-bg-desktop', '');
+      field.appendChild(desk);
+      renderDesktopLine();
+      var stateLineD = el('p', 'set-hint set-bg-state');
+      stateLineD.setAttribute('data-bg-state-line', '');
+      stateLineD.setAttribute('role', 'status');
+      field.appendChild(stateLineD);
+      renderBgState();
+      appendBgDim(field, cfg);
+      return;
+    }
+
+    field.appendChild(controlRow('Picture', 'set-newtab-bg',
       glassSelect('set-newtab-bg', NEWTAB_BACKGROUNDS, cfg.kind, function (value) {
         /* "Built-in photo" with none picked before starts on the first one,
            so the select alone never lands on an empty choice. */
@@ -3174,25 +3764,6 @@
     if (cfg.kind === 'none') return;
 
     if (cfg.kind === 'builtin') {
-      appendBgDim(field, cfg);
-      return;
-    }
-
-    if (cfg.kind === 'wallpaper') {
-      var wrow = el('div', 'set-bg-row');
-      var recopy = textButton('Copy again from Windows', 'set-btn set-bg-recopy', function () {
-        recopy.disabled = true;
-        recopyWallpaper().then(function (res) {
-          recopy.disabled = false;
-          if (res && res.ok) showToast('Copied your Windows wallpaper again');
-          else showToast('Could not copy the wallpaper: ' + ((res && res.reason) || 'unknown reason'));
-          renderBgState();
-        });
-      });
-      wrow.appendChild(recopy);
-      field.appendChild(wrow);
-      field.appendChild(el('p', 'set-hint',
-        'A copy, taken once: changing the Windows wallpaper later does not change it until you copy again.'));
       appendBgDim(field, cfg);
       return;
     }
@@ -6377,6 +6948,10 @@
     on(function (_snapshot, keys) {
       if (!bodyEl) return;
       if (keys.indexOf('accentHue') >= 0 || keys.indexOf('palette') >= 0) renderLook();
+      /* Look Sync's remote values arrive as plain set() calls, so these
+         rows follow Helm and Mantle through this same listener. */
+      else if (keys.indexOf('glass') >= 0) renderGlass();
+      if (keys.indexOf('lookSync') >= 0) renderLookSync();
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
       if (keys.indexOf('claudeSkipPermissions') >= 0) renderClaudeSkip();
@@ -6422,10 +6997,61 @@
     // backdrop.js says when the window's background is ready, or why it is
     // not; the line under the picker repeats it in words.
     document.addEventListener('backdropchange', renderBgState);
+    document.addEventListener('backdropchange', renderGlassGuard);
+    wireLookSync();
   }
 
-  /* A stored circuit board / aurora becomes the wallpaper before anything
-     reads the key (app.js builds the first new tab URL from it). */
+  /**
+   * Look Sync's events (looksync.js and app.js fire them on document): the
+   * status line, the theme rows, the desktop line, and the one-time toasts
+   * for remote applies and fallbacks. Every message is toasted once.
+   */
+  function wireLookSync() {
+    document.addEventListener('lookstatus', function (event) {
+      renderLookStatus();
+      var st = (event && event.detail) || lookCall('status');
+      /* Fallbacks show a toast once (CONTRACT section 2); a healthy, off,
+         starting or first-seed state does not. */
+      if (st && (st.state === 'corrupt' || st.state === 'newer' || st.state === 'error')) {
+        lookToastOnce(st.line || st.reason);
+      }
+    });
+    document.addEventListener('lookdesktop', function (event) {
+      renderDesktopLine();
+      var d = (event && event.detail) || lookCall('desktop');
+      if (d && d.state === 'fallback' && backgroundMode() === 'desktop') lookToastOnce(d.reason);
+    });
+    document.addEventListener('lookapplied', function (event) {
+      var d = event && event.detail;
+      if (d && d.message) lookToastOnce(d.message);
+    });
+    document.addEventListener('quartzthemechange', function (event) {
+      var d = (event && event.detail) || {};
+      themeReason = d.reason ? String(d.reason) : '';
+      if (bodyEl) renderTheme();
+    });
+
+    if (migrationRan && migrationRan.tell) {
+      lookToastOnce(migrationRan.ownKept
+        ? 'The background now follows your desktop wallpaper. Your own picture is kept: Settings › New tab › Own picture.'
+        : 'The background now follows your desktop wallpaper.');
+    }
+    /* A missing module is said once too, not only inside the folded pane. */
+    var ls = lookSyncApi();
+    if (!ls) { lookToastOnce(LOOK_MISSING + '.'); return; }
+    if (typeof ls.ready === 'function') {
+      Promise.resolve().then(function () { return ls.ready(); }).catch(function () { }).then(function () {
+        renderLookStatus();
+        renderDesktopLine();
+        var d = lookCall('desktop');
+        if (d && d.state === 'fallback' && backgroundMode() === 'desktop') lookToastOnce(d.reason);
+      });
+    }
+  }
+
+  /* The one-time move to "Same as desktop" (the old own pick is kept in
+     ownBackground) happens before anything reads the key: app.js builds
+     the first new tab URL from it. */
   migrateBackground();
 
   /* Accent and site theme are applied at script load, not at DOMContentLoaded:
@@ -6481,6 +7107,13 @@
     background: background,
     backgroundConfig: backgroundConfig,
     setBackground: setBackground,
+    /* "Same as desktop" ('desktop') or "Own picture" ('own'); setting 'own'
+       restores ownBackground (null -> the built-in snow-peak). */
+    backgroundMode: backgroundMode,
+    setBackgroundMode: setBackgroundMode,
+    /* Look Sync's glass group, complete and in range:
+       { dark:{blurPx,dim,panel}, light:{...}, render }. */
+    glass: glass,
     assets: assetStore,
     recopyWallpaper: recopyWallpaper,
     /* Helm's built-in photos: builtinBackgrounds() -> { ok, reason, items },
@@ -6539,6 +7172,19 @@
     _chipSources: CHIP_SOURCES,
     _assetStore: assetStore,
     _normalizeBackground: normalizeBackground,
+    /* Look Sync: the pure one-time migration (stored object, now) -> patch
+       or null; whether it ran in THIS load (and what own kind it kept);
+       the normalizers every stored/pushed value goes through. */
+    _migrateBackground: migrateBackgroundState,
+    _migrationRan: migrationRan,
+    _normalizeGlass: normalizeGlass,
+    _normalizeOwnBackground: normalizeOwnBackground,
+    _normalizeHue: normalizeHue,
+    _bgKinds: BG_KINDS,
+    _renderLookSync: renderLookSync,
+    _renderGlass: renderGlass,
+    _renderDesktopLine: renderDesktopLine,
+    _accentFallback: function () { return accentFallback; },
     _normalizeAppPins: normalizeAppPins,
     _normalizeAppPin: normalizeAppPin,
     _pinIdOf: pinIdOf,

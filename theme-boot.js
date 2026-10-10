@@ -14,6 +14,13 @@
   // Dark is the default until the user picks, as in Helm (dark is its default
   // too); the Windows app-mode setting is not a choice they made about this
   // browser.
+  // Look Sync: localStorage.themeMode is the CHOICE ('system'|'light'|'dark')
+  // and localStorage.theme the RESOLVED value app.js last painted. An explicit
+  // mode is its own answer; 'system' (or no mode) paints the last resolved
+  // value, and app.js repaints only if Windows answers differently.
+  var mode = null;
+  try { mode = window.localStorage.getItem('themeMode'); } catch (err) { mode = null; }
+  if (mode === 'light' || mode === 'dark') stored = mode;
   var theme = (stored === 'light' || stored === 'dark') ? stored : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
 

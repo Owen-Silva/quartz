@@ -357,9 +357,10 @@ function newTabUrl() {
       // The first-paint hint: which kind of background is coming, so the page
       // paints its plain --bg ground (never a different picture) until the
       // push lands. Older builds stored 'board'/'aurora'; settings.js migrates
-      // them, and anything unknown reads as the default, the wallpaper.
+      // them, and anything unknown reads as the default, the desktop (Look
+      // Sync: Mantle's wallpaper still, lined up with the screen).
       const storedKind = all.newtabBackground && all.newtabBackground.kind;
-      const bgKind = ['wallpaper', 'builtin', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'wallpaper';
+      const bgKind = ['desktop', 'builtin', 'image', 'video', 'none'].indexOf(storedKind) >= 0 ? storedKind : 'desktop';
       params.set('bg', bgKind);
       // The Home's layout, so a customised page paints its pieces where they
       // belong from the first frame instead of jumping when the push lands.
@@ -506,6 +507,142 @@ function backgroundPayload(bg) {
   return payload;
 }
 
+/* ------------------------------------------------------------------ */
+/* Kind 'desktop' (Look Sync): the desktop's still, LINED UP            */
+/* ------------------------------------------------------------------ */
+/*
+ * The new tab shows the SAME still the desktop shows, unblurred, placed the
+ * way the desktop draws it: cover on the monitor the window is mostly on,
+ * offset by where this guest sits on that monitor, so the page looks
+ * see-through to the wallpaper. The payload gains align { mw, mh, x, y }:
+ *   mw x mh = the monitor's size (DIPs = CSS px at zoom 1)
+ *   (x, y)  = the guest's top-left on that monitor
+ *           = (content.x - display.x + rect.left, content.y - display.y + rect.top)
+ * align is null when there is no place yet: the page then covers the window,
+ * as every other kind does.
+ *
+ * Source: LookSync.desktop().stillUrl when its state is 'ok' (a video desktop
+ * gives its still, never the clip); otherwise Windows' wallpaper copy, the
+ * file the old 'wallpaper' kind showed (settings.background() may already
+ * carry it as url; else it is asked for here).
+ *
+ * Moves: 'lookplace' fires RAW (60+/s in a drag) and layout changes (resize,
+ * side pane, split, tab switch) can move the guest too. Both only schedule
+ * ONE animation frame, which pushes ONLY the align, ONLY to new-tab guests
+ * on screen that are showing 'desktop', and only when it changed (pushMemo).
+ * Hidden tabs are corrected when they come back on screen (tabchange).
+ */
+
+/** Pure: the align for a guest at rect inside a window placed at place. */
+function lookAlignFor(place, rect) {
+  if (!place || !place.content || !place.display) return null;
+  const c = place.content;
+  const d = place.display;
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : NaN);
+  const mw = num(d.width);
+  const mh = num(d.height);
+  if (!(mw > 0) || !(mh > 0)) return null;
+  const left = rect ? num(rect.left) : 0;
+  const top = rect ? num(rect.top) : 0;
+  const x = num(c.x) - num(d.x) + (isFinite(left) ? left : 0);
+  const y = num(c.y) - num(d.y) + (isFinite(top) ? top : 0);
+  if (!isFinite(x) || !isFinite(y)) return null;
+  return { mw: Math.round(mw), mh: Math.round(mh), x: Math.round(x), y: Math.round(y) };
+}
+
+function lookSyncModule() {
+  const ls = window.LookSync;
+  return ls && typeof ls === 'object' ? ls : null;
+}
+
+function lookPlace() {
+  const ls = lookSyncModule();
+  if (!ls || typeof ls.place !== 'function') return null;
+  try { return ls.place() || null; } catch (err) { return null; }
+}
+
+/**
+ * Where a guest is in the chrome. A hidden guest (display:none) measures 0x0,
+ * so it borrows the box its tab would fill (#views): close enough for a push
+ * to a background tab, and corrected by the align push when it is shown.
+ */
+function guestRect(tab) {
+  const el = tab && tab.viewEl;
+  if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+  const r = el.getBoundingClientRect();
+  if (r && r.width > 0 && r.height > 0) return r;
+  const host = el.parentElement;
+  return host && typeof host.getBoundingClientRect === 'function' ? host.getBoundingClientRect() : r;
+}
+
+function lookAlignForTab(tab) {
+  return lookAlignFor(lookPlace(), guestRect(tab));
+}
+
+// Test seam: the last align (or full payload's align) pushed to each tab.
+const lookAlignLog = Object.create(null);
+let lookAlignPushes = 0;
+window.__lookAlign = {
+  last: (tabId) => lookAlignLog[tabId] || null,
+  all: () => Object.assign({}, lookAlignLog),
+  pushes: () => lookAlignPushes,
+  compute: (tabId) => {
+    const tab = tabs.find((t) => t.id === tabId) || getActiveTab();
+    return tab ? lookAlignForTab(tab) : null;
+  }
+};
+
+// What each guest was last told its background kind is (keyed on the element,
+// like pushMemo; a reloaded guest is re-pushed in full on dom-ready anyway).
+const bgKindSent = new WeakMap();
+
+/** Windows' wallpaper copy, the fallback source. Resolves {url, reason}. */
+function windowsWallpaperCopy(bg) {
+  if (bg && typeof bg.url === 'string' && bg.url) return Promise.resolve({ url: bg.url, reason: '' });
+  const api = window.api && window.api.background;
+  if (!api || typeof api.wallpaper !== 'function') {
+    return Promise.resolve({ url: '', reason: 'this window was started before the wallpaper copy existed; restart the browser' });
+  }
+  return Promise.resolve()
+    .then(() => api.wallpaper())
+    .then((res) => (res && typeof res.fileUrl === 'string' && res.fileUrl)
+      ? { url: res.fileUrl, reason: '' }
+      : { url: '', reason: (res && res.reason) || 'the Windows wallpaper could not be copied' })
+    .catch((err) => ({ url: '', reason: (err && err.message) || 'the Windows wallpaper could not be copied' }));
+}
+
+/** LookSync.desktop(), waiting out 'loading' once (ready() settles within 4 s). */
+function lookDesktopRecord() {
+  const ls = lookSyncModule();
+  if (!ls || typeof ls.desktop !== 'function') return Promise.resolve(null);
+  const read = () => { try { return ls.desktop() || null; } catch (err) { return null; } };
+  const first = read();
+  if (!first || first.state !== 'loading' || typeof ls.ready !== 'function') return Promise.resolve(first);
+  return Promise.resolve().then(() => ls.ready()).catch(() => null).then(read);
+}
+
+/**
+ * The full payload for kind 'desktop'. state is 'ok' whenever a picture is
+ * there to show (Mantle's still, or Windows' wallpaper standing in, which
+ * Settings explains); 'fallback' only when neither could be had, with both
+ * reasons, so the page says why it is plain.
+ */
+function desktopPayload(bg) {
+  return lookDesktopRecord().then((rec) => {
+    const base = { kind: 'desktop', dim: bg.dim };
+    if (rec && rec.state === 'ok' && typeof rec.stillUrl === 'string' && rec.stillUrl) {
+      return Object.assign(base, { url: rec.stillUrl, state: 'ok', source: 'mantle',
+        title: rec.title || '', rev: rec.rev == null ? null : rec.rev });
+    }
+    const why = rec ? (rec.reason || '') : 'Look Sync is not loaded in this window';
+    return windowsWallpaperCopy(bg).then((w) => {
+      if (w.url) return Object.assign(base, { url: w.url, state: 'ok', source: 'windows', reason: why });
+      return Object.assign(base, { state: 'fallback', source: 'none',
+        reason: (why ? why + '; ' : '') + 'the Windows wallpaper could not be copied either (' + w.reason + ')' });
+    });
+  });
+}
+
 function pushBackgroundToTab(tab) {
   const settings = window.Settings;
   if (!settings || typeof settings.background !== 'function') return;
@@ -513,14 +650,81 @@ function pushBackgroundToTab(tab) {
   Promise.resolve()
     .then(() => settings.background())
     .then((bg) => {
-      if (!bg || !isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
-      const payload = backgroundPayload(bg);
+      if (!bg) return null;
+      return bg.kind === 'desktop' ? desktopPayload(bg) : backgroundPayload(bg);
+    })
+    .then((payload) => {
+      if (!payload || !isViewUsable(tab) || !isNewTabUrl(tab.url)) return;
+      if (payload.kind === 'desktop') {
+        // Measured at the moment of the push, after the async source reads.
+        payload.align = lookAlignForTab(tab);
+        // Recorded in the memo, so the next align-only push skips if unmoved.
+        pushUnchanged(tab, 'align', JSON.stringify(payload.align));
+        lookAlignLog[tab.id] = { align: payload.align, via: 'full', at: Date.now() };
+      } else {
+        pushFailed(tab, 'align');
+      }
+      bgKindSent.set(tab.viewEl, payload.kind);
       const pending = tab.viewEl.executeJavaScript(
         'window.__applyBackground && window.__applyBackground(' + JSON.stringify(payload) + ')'
       );
-      if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+      if (pending && typeof pending.catch === 'function') pending.catch(() => pushFailed(tab, 'align'));
     })
     .catch(() => { /* guest went away, or no storage: the page keeps its default */ });
+}
+
+/** Push ONLY the align to one on-screen 'desktop' new tab, when it moved. */
+function pushAlignToTab(tab) {
+  if (!isViewUsable(tab) || !isNewTabUrl(tab.url) || !isTabOnScreen(tab)) return;
+  if (bgKindSent.get(tab.viewEl) !== 'desktop') return;
+  const align = lookAlignForTab(tab);
+  if (!align) return;
+  const json = JSON.stringify(align);
+  if (pushUnchanged(tab, 'align', json)) return;
+  lookAlignLog[tab.id] = { align, via: 'align', at: Date.now() };
+  lookAlignPushes += 1;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__applyBackgroundAlign && window.__applyBackgroundAlign(' + json + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => pushFailed(tab, 'align'));
+  } catch (err) { pushFailed(tab, 'align'); }
+}
+
+function pushAlignToVisible() {
+  for (const tab of tabs) pushAlignToTab(tab);
+}
+
+let lookAlignFrame = 0;
+/** Coalesce any number of move / layout signals into one frame. */
+function scheduleLookAlign() {
+  if (lookAlignFrame) return;
+  lookAlignFrame = window.requestAnimationFrame(() => {
+    lookAlignFrame = 0;
+    pushAlignToVisible();
+  });
+}
+
+let lookSyncWired = false;
+/** Called from init(): document events work whether or not looksync.js loaded. */
+function wireLookSyncBackground() {
+  if (lookSyncWired) return;
+  lookSyncWired = true;
+  // A new desktop record (or its fallback) is a new picture: full push.
+  document.addEventListener('lookdesktop', () => {
+    for (const tab of tabs) pushBackgroundToTab(tab);
+  });
+  document.addEventListener('lookplace', scheduleLookAlign);
+  window.addEventListener('resize', scheduleLookAlign);
+  document.addEventListener('sidepane', scheduleLookAlign);
+  document.addEventListener('workspacechange', scheduleLookAlign);
+  // A tab coming on screen may have been told an align while hidden (or
+  // before the window moved): correct it now, not a frame later.
+  document.addEventListener('tabchange', () => pushAlignToVisible());
+  const views = document.getElementById('views') || document.getElementById('well');
+  if (views && typeof ResizeObserver === 'function') {
+    try { new ResizeObserver(scheduleLookAlign).observe(views); } catch (err) { /* layout is never fatal */ }
+  }
 }
 
 /**
@@ -4928,8 +5132,176 @@ function setTheme(input) {
   for (const tab of tabs) pushThemeToTab(tab, theme);
 }
 
+/*
+ * Theme MODE (Look Sync): what the user chose, 'system' | 'light' | 'dark',
+ * kept in localStorage.themeMode. localStorage.theme keeps the RESOLVED
+ * 'light' | 'dark' (setTheme writes it), so theme-boot.js paints the right
+ * way round before first paint whatever the mode is. 'system' follows the
+ * Windows APPS mode through main (window.api.lookSync.systemTheme()), never
+ * prefers-color-scheme: siteTheme drives nativeTheme.themeSource, so that
+ * query reports the site theme, not Windows.
+ *
+ * setTheme() above stays the ONE place that stamps data-theme; setMode()
+ * resolves and calls it, then fires `quartzthemechange` on document with
+ * { mode, resolved, fromSync, reason, cause }. looksync.js publishes local
+ * changes from that event (fromSync false) and applies remote ones through
+ * setMode(v, { fromSync: true }). Nothing is fired at boot: a boot is not a
+ * change and must never be published over the shared value.
+ */
+const THEME_MODE_KEY = 'themeMode';
+const THEME_MODES = ['system', 'light', 'dark'];
+const THEME_NO_API_REASON = 'this window predates Look Sync; restart Quartz';
+
+/** Stored mode; missing -> the old resolved key, else dark (Quartz's default). */
+function readThemeMode(storage) {
+  let mode = null;
+  let theme = null;
+  try { mode = storage ? storage.getItem(THEME_MODE_KEY) : null; } catch (err) { mode = null; }
+  if (THEME_MODES.indexOf(mode) >= 0) return mode;
+  try { theme = storage ? storage.getItem(THEME_STORAGE_KEY) : null; } catch (err) { theme = null; }
+  return theme === 'light' || theme === 'dark' ? theme : 'dark';
+}
+
+/**
+ * Pure: a mode plus what Windows said -> { resolved, reason }.
+ * sys = null/undefined means no answer could be had (no api: an old preload).
+ * sys.light === null means main could not read the apps mode; it is dark then,
+ * and the reason travels so Settings can say why.
+ */
+function resolveThemeMode(mode, sys, noApiReason) {
+  if (mode === 'light' || mode === 'dark') return { resolved: mode, reason: '' };
+  if (!sys || typeof sys !== 'object') {
+    return { resolved: 'dark', reason: noApiReason || 'Windows did not answer' };
+  }
+  if (sys.light === true) return { resolved: 'light', reason: '' };
+  if (sys.light === false) return { resolved: 'dark', reason: '' };
+  return {
+    resolved: 'dark',
+    reason: (typeof sys.reason === 'string' && sys.reason) ? sys.reason : 'Windows did not say which mode its apps use'
+  };
+}
+
+/** Pure: the toolbar toggle is an explicit flip of what is on screen. */
+function toggledThemeMode(resolved) {
+  return resolved === 'dark' ? 'light' : 'dark';
+}
+
+let themeMode = readThemeMode(window.localStorage); // the boot paint already matches it (theme-boot.js)
+let themeReason = '';           // why 'system' resolved the way it did, when it is not plain
+let themeSystemLast = null;     // last { light, reason } from main, or null
+let themeModeSeq = 0;           // a newer setMode wins over an older pending answer
+let themeSystemWired = false;
+let themeLastEvent = null;
+
+function lookSyncApi() {
+  const api = window.api && window.api.lookSync;
+  return api && typeof api.systemTheme === 'function' ? api : null;
+}
+
+/** Ask main for the Windows apps mode. Resolves to {light, reason} or null (no api). */
+function querySystemTheme() {
+  const api = lookSyncApi();
+  if (!api) return Promise.resolve(null);
+  return Promise.resolve()
+    .then(() => api.systemTheme())
+    .then((res) => (res && typeof res === 'object') ? res : { light: null, reason: 'no answer from Quartz' })
+    .catch((err) => ({ light: null, reason: (err && err.message) || 'the Windows mode could not be read' }));
+}
+
+function emitThemeChange(fromSync, cause) {
+  const detail = { mode: themeMode, resolved: getTheme(), fromSync: !!fromSync, reason: themeReason, cause: cause || 'set' };
+  themeLastEvent = detail;
+  try { document.dispatchEvent(new CustomEvent('quartzthemechange', { detail })); } catch (err) { /* never fatal */ }
+}
+
+/** Apply a resolution: stamp (only when it moved) and remember why. */
+function applyResolvedTheme(res) {
+  themeReason = res.reason || '';
+  if (getTheme() !== res.resolved) setTheme(res.resolved);
+}
+
+/**
+ * Store a mode, resolve it, paint it, announce it. Returns a Promise of
+ * { ok, mode, resolved, reason }. An unknown mode is refused with a reason.
+ */
+function setThemeMode(mode, opts) {
+  const fromSync = !!(opts && opts.fromSync);
+  if (THEME_MODES.indexOf(mode) < 0) {
+    return Promise.resolve({ ok: false, mode: themeMode, resolved: getTheme(), reason: 'unknown theme mode "' + mode + '"' });
+  }
+  themeMode = mode;
+  try { window.localStorage.setItem(THEME_MODE_KEY, mode); } catch (err) { /* storage blocked: holds for this run */ }
+  const seq = ++themeModeSeq;
+  if (mode !== 'system') {
+    applyResolvedTheme(resolveThemeMode(mode, null));
+    emitThemeChange(fromSync, 'set');
+    return Promise.resolve({ ok: true, mode, resolved: getTheme(), reason: '' });
+  }
+  // 'system': keep what is on screen until Windows answers (no flash), then
+  // paint the answer. A newer setMode while this was pending wins.
+  return querySystemTheme().then((sys) => {
+    if (seq !== themeModeSeq) return { ok: true, mode: themeMode, resolved: getTheme(), reason: themeReason, superseded: true };
+    themeSystemLast = sys;
+    applyResolvedTheme(resolveThemeMode('system', sys, THEME_NO_API_REASON));
+    emitThemeChange(fromSync, 'set');
+    return { ok: true, mode, resolved: getTheme(), reason: themeReason };
+  });
+}
+
+/** main pushed a (possible) Windows apps-mode change. Only 'system' cares. */
+function onSystemThemePush(sys) {
+  themeSystemLast = (sys && typeof sys === 'object') ? sys : { light: null, reason: 'no answer from Quartz' };
+  if (themeMode !== 'system') return;
+  const before = getTheme() + '|' + themeReason;
+  applyResolvedTheme(resolveThemeMode('system', themeSystemLast, THEME_NO_API_REASON));
+  if (getTheme() + '|' + themeReason !== before) emitThemeChange(false, 'system');
+}
+
+/**
+ * Boot: read the mode, re-apply what theme-boot.js painted (glyph, terminal),
+ * and for 'system' ask Windows once. No event is fired here.
+ */
+function initThemeMode() {
+  themeMode = readThemeMode(window.localStorage);
+  if (themeMode !== 'system') {
+    setTheme(themeMode); // normally what theme-boot already painted
+  } else {
+    setTheme(getTheme()); // the last resolved value, until Windows answers
+    const seq = themeModeSeq;
+    querySystemTheme().then((sys) => {
+      if (seq !== themeModeSeq || themeMode !== 'system') return;
+      themeSystemLast = sys;
+      applyResolvedTheme(resolveThemeMode('system', sys, THEME_NO_API_REASON));
+    });
+  }
+  const api = lookSyncApi();
+  if (!themeSystemWired && api && typeof api.onSystemTheme === 'function') {
+    themeSystemWired = true;
+    try { api.onSystemTheme(onSystemThemePush); } catch (err) { themeSystemWired = false; }
+  }
+}
+
+window.QuartzTheme = {
+  mode: () => themeMode,
+  resolved: () => getTheme(),
+  reason: () => themeReason,
+  setMode: (mode, opts) => setThemeMode(mode, opts),
+  _debug: () => ({
+    mode: themeMode,
+    resolved: getTheme(),
+    reason: themeReason,
+    stored: { themeMode: (() => { try { return window.localStorage.getItem(THEME_MODE_KEY); } catch (err) { return null; } })(),
+              theme: (() => { try { return window.localStorage.getItem(THEME_STORAGE_KEY); } catch (err) { return null; } })() },
+    system: themeSystemLast,
+    hasApi: !!lookSyncApi(),
+    systemWired: themeSystemWired,
+    seq: themeModeSeq,
+    lastEvent: themeLastEvent
+  })
+};
+
 function toggleTheme() {
-  setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+  setThemeMode(toggledThemeMode(getTheme()));
 }
 
 /* ------------------------------------------------------------------ */
@@ -7807,6 +8179,9 @@ function refreshSplit() {
   // hosted app window is parked over a measured rect rather than laid out by
   // the flexbox: it has to be told. Costs nothing with no native tab open.
   queueNativeLayout();
+  // A split moves/resizes the halves without resizing #views: a lined-up
+  // desktop new tab has to be told where it now is (one frame, if moved).
+  scheduleLookAlign();
 }
 
 /**
@@ -11543,6 +11918,7 @@ function init() {
   wireWindowControls();
   wireKeyboard();
   wireSettings();
+  wireLookSyncBackground(); // kind 'desktop': lookdesktop / lookplace / layout -> new tabs
   updateSaveStar();  // the star as the list stands at boot (tabchange repaints it after)
   // The chips follow the history store: a visit moves the counts, and the row
   // is recomposed off its signal (debounced, and only when it really moved).
@@ -11586,7 +11962,9 @@ function init() {
   // Re-apply the theme theme-boot.js already stamped on <html>: this is what
   // paints the toggle glyph and hands the theme to terminal.js. Runs before the
   // first tab so that tab is born with the right ?theme= on its URL.
-  setTheme(getTheme());
+  // initThemeMode() does that and reads the Look Sync mode ('system' asks
+  // Windows, async, and repaints only if the answer differs).
+  initThemeMode();
 
   updateNavState();
   syncReloadButton();
