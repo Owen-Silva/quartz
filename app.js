@@ -338,6 +338,22 @@ function searchUrlFor(text) {
 }
 
 /**
+ * The URL for a keyword search ("gh helm", "rh nvda"), or null when the text
+ * does not start with a keyword. keywords.js owns the list and the rules;
+ * this only asks it. Guarded so a missing or broken keywords.js leaves the
+ * address bar exactly as it was: the text simply goes on to searchUrlFor().
+ */
+function keywordUrlFor(text) {
+  const keywords = window.Keywords;
+  if (!keywords || typeof keywords.match !== 'function') return null;
+  try {
+    const hit = keywords.match(text);
+    if (hit && typeof hit.url === 'string' && /^https?:\/\//i.test(hit.url)) return hit.url;
+  } catch (err) { /* fall through to the plain search */ }
+  return null;
+}
+
+/**
  * The new-tab page URL carrying everything it needs for its first paint: the
  * theme, and the accent / search engine / chips from settings when set. Later
  * changes are pushed into open pages by pushSettingsToTab.
@@ -5029,6 +5045,11 @@ function toNavigationUrl(rawInput) {
   // always plain http, everything else defaults to https.
   if (LOCALHOST_RE.test(text) || IPV4_RE.test(text)) return 'http://' + text;
   if (BARE_DOMAIN_RE.test(text)) return 'https://' + text;
+
+  // A keyword and a query ("gh helm") searches that one site. Only after
+  // the address checks above, so a keyword can never shadow a URL.
+  const keywordUrl = keywordUrlFor(text);
+  if (keywordUrl) return keywordUrl;
 
   // Anything else is a search.
   return searchUrlFor(text);
@@ -11357,10 +11378,13 @@ function wireWindowControls() {
     });
   }
 
-  // The context menu's "Open link in new tab" and "Search Google for" land here.
+  // The context menu's "Open link in new tab" and "Search for …" land here.
+  // A search arrives as raw text in `search`, so it goes to the engine chosen
+  // in Settings rather than the Google `url` main attaches as a fallback.
   if (window.api && typeof window.api.onOpenUrl === 'function') {
     window.api.onOpenUrl((payload) => {
-      const url = payload && payload.url;
+      const search = payload && typeof payload.search === 'string' ? payload.search.trim() : '';
+      const url = search ? searchUrlFor(search) : payload && payload.url;
       if (!url) return;
       createTab(url, { background: !!(payload && payload.background) });
     });

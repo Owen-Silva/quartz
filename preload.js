@@ -665,6 +665,12 @@ contextBridge.exposeInMainWorld('api', {
     // The path itself, onto the clipboard -> { ok, reason }.
     copyPath: (target) => ipcRenderer.invoke('files:copy-path', String(target == null ? '' : target))
   },
+  // The address bar's folder source (history.js only): the folders directly
+  // under the home folder and Downloads, depth 1, as
+  // { ok, folders: [{ name, path, root: 'home'|'downloads' }], reason }.
+  // Always resolves; an unreadable root comes back as ok:false with a reason
+  // in plain words. See the "lens's folder source" block in main.js.
+  listProjectFolders: () => ipcRenderer.invoke('omni:folders'),
   pty: {
     // The terminal programs a tab may run: [{ id, title, available }]. The ids
     // are the only thing start() accepts as `program`.

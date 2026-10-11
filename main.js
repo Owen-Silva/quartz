@@ -3198,10 +3198,15 @@ function guestMenuTemplate(contents, params) {
     selection.push(
       { label: 'Copy', click: () => contents.copy() },
       {
-        label: 'Search Google for "' + selectionLabel(selected) + '"',
+        // The search engine is a renderer setting (settings.js), so main
+        // cannot name it here. It sends the raw text as `search` and app.js
+        // builds the URL with the chosen engine; `url` stays as the Google
+        // fallback for a renderer that does not read `search`.
+        label: 'Search for "' + selectionLabel(selected) + '"',
         click: () =>
           send('open-url', {
             url: 'https://www.google.com/search?q=' + encodeURIComponent(selected),
+            search: selected,
             background: false,
           }),
       }
@@ -4729,6 +4734,66 @@ ipcMain.handle('files:copy-path', (event, rawPath) => {
   }
   return { ok: true, reason: '' };
 });
+
+/* ------------------------------------------------------------------ */
+/* The lens's folder source: project folders, one level deep           */
+/* ------------------------------------------------------------------ */
+/*
+ * SELF-CONTAINED BLOCK. Nothing above or below calls into it, and it calls
+ * nothing of its own beyond fs/os/path and isChromeSender; delete the block
+ * and preload.js's listProjectFolders() and the lens simply shows "Folders
+ * unavailable". history.js is the only caller.
+ *
+ * The address bar's suggestion list (#omni-suggest) offers the user's project
+ * folders by name: type "helm" and ~/helm is a row that opens in the Files
+ * tab. The renderer cannot list a directory, so this is the one narrow way:
+ *
+ *   omni:folders  ->  { ok, folders: [{ name, path, root }], reason }
+ *
+ * where root is 'home' (C:\Users\you) or 'downloads' (…\Downloads), and
+ * reason is '' or a plain sentence naming the root that could not be read.
+ *
+ * DELIBERATELY SMALL. Depth 1 only: one readdir per root, never a walk, never
+ * a stat per entry (Dirent already says "directory"). A junction such as
+ * "Application Data" reads as a symlink, not a directory, so the legacy
+ * Windows aliases fall out by themselves; dot-, $- and ~-names, node_modules
+ * and AppData are skipped by name, since Node cannot see the hidden bit.
+ * The renderer caches the answer for minutes, so this runs rarely.
+ */
+const OMNI_FOLDER_SKIP = new Set(['node_modules', 'appdata', 'application data', 'local settings']);
+const OMNI_FOLDER_MAX_PER_ROOT = 500;   // a sane ceiling; a home folder has ~100
+
+ipcMain.handle('omni:folders', async (event) => {
+  if (!isChromeSender(event)) return { ok: false, folders: [], reason: 'refused: not the browser window' };
+  const home = os.homedir();
+  const roots = [
+    { key: 'home', dir: home },
+    { key: 'downloads', dir: path.join(home, 'Downloads') },
+  ];
+  const folders = [];
+  const problems = [];
+  for (const root of roots) {
+    let dirents;
+    try {
+      dirents = await fs.promises.readdir(root.dir, { withFileTypes: true });
+    } catch (err) {
+      problems.push('could not read ' + root.dir + ' (' + ((err && err.code) || 'error') + ')');
+      continue;
+    }
+    let kept = 0;
+    for (const d of dirents) {
+      if (kept >= OMNI_FOLDER_MAX_PER_ROOT) break;
+      if (!d || !d.isDirectory()) continue;
+      const name = String(d.name || '');
+      if (!name || /^[.$~]/.test(name)) continue;
+      if (OMNI_FOLDER_SKIP.has(name.toLowerCase())) continue;
+      folders.push({ name, path: path.join(root.dir, name), root: root.key });
+      kept++;
+    }
+  }
+  return { ok: problems.length === 0, folders, reason: problems.join('; ') };
+});
+/* --- end of the lens's folder source -------------------------------- */
 
 /** file:// prefix of the app's own folder: newtab.html, reader.html, files… */
 const BUNDLED_PAGE_PREFIX = pathToFileURL(path.join(__dirname, path.sep)).href;

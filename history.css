@@ -165,6 +165,38 @@
 /* the default row's "Google search" note: a label, not content */
 #omni-suggest .omni-row--faint .omni-secondary { color: var(--text-3); }
 
+/* --- the source label ------------------------------------------- */
+/* "Open tab", "Saved", "Notes", "Folder", "History": plain small text
+   pinned to the row's right edge (margin-left:auto), never a pill, so it
+   reads as a caption and not as a second badge. It never shrinks; the
+   body column takes the ellipsis instead, so a long title cannot push
+   the label out of the row. */
+#omni-suggest .omni-src {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+#omni-suggest .omni-row.is-hi .omni-src { color: var(--text-2); }
+
+/* --- the state line --------------------------------------------- */
+/* One faint line under the rows when a source could not answer
+   ("Folders unavailable: …"). Not a row: no highlight, no hover, and a
+   hairline above it so it never reads as one more result. */
+#omni-suggest .omni-state {
+  margin-top: 4px;
+  padding: 6px 12px 4px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+#omni-suggest .omni-state[hidden] { display: none; }
+
 /* a row with nothing on the second line centres its one line */
 #omni-suggest .omni-row--single .omni-body { gap: 0; }
 

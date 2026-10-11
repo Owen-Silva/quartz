@@ -17,6 +17,9 @@
  *     accentHue:    null | 0..360,
  *     chips:        null | [{ label, url }, ...],
  *     chipsSource:  'visited' | 'list',      // where the new tab's five come from
+ *     keywords:     null | [{ key, name, url, upper?, disabled? }, ...],
+ *                                           // address-bar keywords ("gh helm");
+ *                                           // null = keywords.js's built-ins
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // Claude pane's folder; null = home
  *     claudeResume: true | false,           // --continue on a restored beside pane
@@ -112,6 +115,12 @@
        shortcuts should start following the history too, so the default is
        the counted one rather than the list. */
     chipsSource: 'visited',
+    /* The address bar's search keywords ("gh helm" searches GitHub). null
+       means "never touched" and reads as keywords.js's built-in list, the
+       same convention as `chips`; an array is the user's own list. A row
+       that fails keywords.js's check() is stored with disabled:true, and the
+       editor prints why beside it. */
+    keywords: null,
     /* The bookmarks bar under the nav row: the chips below, on every page.
        bookmarks.js owns the bar; this is the only place its visibility lives. */
     bookmarksBar: false,
@@ -1225,6 +1234,56 @@
     list.splice(to, 0, item);
     set({ chips: list });
     return true;
+  }
+
+  /* ============================================================
+     Keywords (address-bar search shortcuts: "gh helm")
+     keywords.js owns the built-in list, the rules and match(); this is
+     only where the user's list is kept. keywords.js loads after this file,
+     so every use of window.Keywords here is at call time, never at load.
+     ============================================================ */
+
+  function keywordRules() {
+    var k = window.Keywords;
+    return k && typeof k.check === 'function' && typeof k.defaults === 'function' ? k : null;
+  }
+
+  /**
+   * The list with a verdict on every row: [{ key, name, url, upper?, ok,
+   * reason }]. null (never touched) reads as the built-ins. [] without
+   * keywords.js, and the editor says that it did not load.
+   */
+  function keywordList() {
+    var rules = keywordRules();
+    if (!rules) return [];
+    var stored = get('keywords');
+    return rules.check(Array.isArray(stored) ? stored : rules.defaults());
+  }
+
+  /**
+   * Store a whole list. Every row is kept, valid or not, so a half-typed row
+   * is never thrown away; one that fails the check is saved with
+   * disabled:true (match() skips it either way) and the editor prints why.
+   * @returns the list as stored, each row with its verdict.
+   */
+  function setKeywords(list) {
+    var rules = keywordRules();
+    if (!rules) return [];
+    var checked = rules.check(Array.isArray(list) ? list : []);
+    set({
+      keywords: checked.map(function (r) {
+        var out = { key: r.key, name: r.name, url: r.url };
+        if (r.upper) out.upper = true;
+        if (!r.ok) out.disabled = true;
+        return out;
+      })
+    });
+    return checked;
+  }
+
+  /** Back to the built-in list: null, so a later default list reaches it too. */
+  function resetKeywords() {
+    set({ keywords: null });
   }
 
   /* ============================================================
@@ -2881,6 +2940,11 @@
     field.setAttribute('data-field', 'engine');
     s.appendChild(field);
     s.appendChild(el('p', 'set-hint', 'Used by the address bar and the new tab page.'));
+
+    /* Keywords sit under the engine they bypass: same section, own field. */
+    var kw = el('div', 'set-field');
+    kw.setAttribute('data-field', 'keywords');
+    s.appendChild(kw);
     return s;
   }
 
@@ -2891,6 +2955,179 @@
     field.appendChild(optionList(engines(), get('searchEngine'), function (id) {
       set({ searchEngine: id });
     }));
+  }
+
+  /**
+   * The keyword list, built from the shortcut rows (.set-chip / chipInput) so
+   * it reads like the New tab list: a row is the keyword and the name on one
+   * line, the address template under them, and a remove button. A row the
+   * check refuses is still saved (as disabled), and the reason is printed
+   * right under it with the amber pip, so a bad row is never silently dead.
+   *
+   * A cell commits on blur. The write is put off one tick so the redraw it
+   * causes can see where focus went (Tab into the next cell) and put it back
+   * there, instead of dropping focus on every cell you leave.
+   */
+  function renderKeywords() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="keywords"]');
+    if (!field) return;
+
+    // Where focus was inside this field before the redraw, to restore after.
+    var active = document.activeElement;
+    var refocus = null;
+    if (active && field.contains(active) && active.getAttribute('data-kw-cell')) {
+      refocus = {
+        cell: active.getAttribute('data-kw-cell'),
+        start: active.selectionStart,
+        end: active.selectionEnd
+      };
+    }
+
+    field.textContent = '';
+    field.appendChild(el('p', 'set-label', 'Keywords'));
+
+    if (!keywordRules()) {
+      field.appendChild(el('p', 'set-typing-notice',
+        'Keyword search is off: keywords.js did not load, so the address bar only uses the engine above.'));
+      return;
+    }
+
+    field.appendChild(el('p', 'set-hint',
+      'Type a keyword, a space, then your search: “gh helm” searches GitHub for helm. ' +
+      'In the address, %s is where the search goes.'));
+
+    var list = keywordList();
+    var rows = el('div', 'set-chips set-kws');
+
+    if (!list.length) {
+      rows.appendChild(el('p', 'set-empty', 'No keywords. Add one below, or reset to the defaults.'));
+    }
+
+    function editRow(index, patch) {
+      setTimeout(function () {
+        var next = keywordList();
+        if (!next[index]) return;
+        for (var k in patch) {
+          if (Object.prototype.hasOwnProperty.call(patch, k)) next[index][k] = patch[k];
+        }
+        setKeywords(next);
+      }, 0);
+      return true;     // always kept: an invalid value is saved disabled, and says so
+    }
+
+    list.forEach(function (kw, index) {
+      var wrap = el('div', 'set-kw' + (kw.ok ? '' : ' is-off'));
+      var row = el('div', 'set-chip');
+
+      var texts = el('div', 'set-chip-texts');
+      var line = el('div', 'set-kw-line');
+      var keyIn = chipInput(kw.key, 'is-key', 'Keyword', function (next) {
+        return editRow(index, { key: next });
+      });
+      keyIn.setAttribute('data-kw-cell', index + ':key');
+      keyIn.setAttribute('aria-label', 'Keyword');
+      var nameIn = chipInput(kw.name, 'is-label', 'Name', function (next) {
+        return editRow(index, { name: next });
+      });
+      nameIn.setAttribute('data-kw-cell', index + ':name');
+      nameIn.setAttribute('aria-label', 'Name');
+      line.appendChild(keyIn);
+      line.appendChild(nameIn);
+      texts.appendChild(line);
+      var urlIn = chipInput(kw.url, 'is-url', 'https://example.com/search?q=%s', function (next) {
+        return editRow(index, { url: next });
+      });
+      urlIn.setAttribute('data-kw-cell', index + ':url');
+      urlIn.setAttribute('aria-label', 'Address with %s');
+      texts.appendChild(urlIn);
+      row.appendChild(texts);
+
+      var acts = el('div', 'set-chip-acts');
+      acts.appendChild(iconButton(GLYPH_DELETE, 'Remove keyword ' + (kw.key || ''), 'set-act', function () {
+        var next = keywordList();
+        next.splice(index, 1);
+        setKeywords(next);
+      }));
+      row.appendChild(acts);
+      wrap.appendChild(row);
+
+      if (!kw.ok) {
+        wrap.appendChild(el('p', 'set-kw-msg', 'Off: ' + kw.reason));
+      }
+      rows.appendChild(wrap);
+    });
+    field.appendChild(rows);
+
+    /* The add row: keyword, name and template; Enter in the address adds it.
+       It is added even when it fails the check, and then says why above. */
+    var add = el('div', 'set-chip set-chip-add');
+    var addTexts = el('div', 'set-chip-texts');
+    var addLine = el('div', 'set-kw-line');
+    function addInput(cls, placeholder, label) {
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'set-chip-text ' + cls;
+      input.placeholder = placeholder;
+      input.spellcheck = false;
+      input.autocomplete = 'off';
+      input.setAttribute('aria-label', label);
+      return input;
+    }
+    var keyAdd = addInput('is-key', 'Keyword', 'New keyword');
+    keyAdd.setAttribute('data-kw-cell', 'add:key');
+    var nameAdd = addInput('is-label', 'Name', 'New keyword name');
+    var urlAdd = addInput('is-url', 'https://example.com/search?q=%s', 'New keyword address with %s');
+    addLine.appendChild(keyAdd);
+    addLine.appendChild(nameAdd);
+    addTexts.appendChild(addLine);
+    addTexts.appendChild(urlAdd);
+    add.appendChild(addTexts);
+
+    function commitAdd() {
+      var key = keyAdd.value.trim();
+      var url = urlAdd.value.trim();
+      if (!key && !url) { keyAdd.focus(); return; }
+      var next = keywordList();
+      next.push({ key: key, name: nameAdd.value.trim(), url: url });
+      var stored = setKeywords(next);
+      var last = stored[stored.length - 1];
+      if (last && last.ok) {
+        showToast('Keyword “' + last.key + '” added');
+      } else {
+        showToast('Added, but off: ' + (last ? last.reason : 'it could not be checked.'));
+      }
+      var again = field.querySelector('[data-kw-cell="add:key"]');
+      if (again) again.focus();
+    }
+    [keyAdd, nameAdd].forEach(function (input, i) {
+      input.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        (i === 0 ? nameAdd : urlAdd).focus();
+      });
+    });
+    urlAdd.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); commitAdd(); }
+    });
+    add.appendChild(iconButton(GLYPH_ADD, 'Add keyword', 'set-act', commitAdd));
+    field.appendChild(add);
+
+    var reset = textButton('Reset to defaults', 'set-btn', function () {
+      resetKeywords();
+      showToast('Keywords reset to the defaults');
+    });
+    reset.disabled = !Array.isArray(get('keywords'));
+    field.appendChild(reset);
+
+    if (refocus) {
+      var target = field.querySelector('[data-kw-cell="' + refocus.cell + '"]');
+      if (target) {
+        target.focus();
+        try {
+          if (refocus.start != null) target.setSelectionRange(refocus.start, refocus.end);
+        } catch (err) { /* not a text cell */ }
+      }
+    }
   }
 
   function buildSites() {
@@ -6796,6 +7033,7 @@
     renderWorkspaceSleep();
     renderDownloads();
     renderSearch();
+    renderKeywords();
     renderTyping();
     renderSites();
     renderSiteStyles();
@@ -6989,6 +7227,7 @@
         || keys.indexOf('workspaceSleepMinutes') >= 0) renderWorkspaceSleep();
       if (keys.indexOf('downloadsAskWhere') >= 0) renderDownloads();
       if (keys.indexOf('searchEngine') >= 0) renderSearch();
+      if (keys.indexOf('keywords') >= 0) renderKeywords();
       if (keys.indexOf('siteTheme') >= 0) renderSites();
       if (keys.indexOf('chips') >= 0 || keys.indexOf('chipsSource') >= 0) renderChips();
       if (keys.indexOf('bookmarksBar') >= 0) renderBookmarksBar();
@@ -7176,6 +7415,15 @@
     engines: engines,
     searchUrl: searchUrl,
     isSearchUrl: isSearchUrl,
+
+    /* Address-bar keywords. keywordList() -> [{ key, name, url, upper?, ok,
+       reason }] (the built-ins while never touched); setKeywords(list) stores
+       every row, the ones keywords.js refuses as disabled:true, and announces
+       'keywords'; resetKeywords() goes back to the built-ins. Matching itself
+       is window.Keywords.match(), not here. */
+    keywordList: keywordList,
+    setKeywords: setKeywords,
+    resetKeywords: resetKeywords,
 
     applyAccent: applyAccent,
     applyPalette: applyPalette,

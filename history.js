@@ -11,15 +11,38 @@
       from did-navigate and updateTitle() from page-title-updated.
 
    2. THE LENS (#omni-suggest). A glass panel that hangs directly
-      under the omnibox capsule and mirrors its left/width. With text
-      typed it leads with the row that mirrors what Enter already
-      does, then any apps whose name the query hits (badged, borrowed
-      from tabsearch.js), then the best history matches; on an empty
-      focus it shows what was open recently. It never navigates by
-      itself: it writes into #omnibox and hands the Enter key to
-      app.js, so tab and Claude handling stay in exactly one place.
-      An app row is the single exception — it launches the app and
-      then puts the bar back to the page that is really on screen.
+      under the omnibox capsule and mirrors its left/width. It is ONE
+      box that searches the user's own things first and then falls through
+      to the web. With text typed, in this order and each source capped:
+
+        default row   what Enter already does (a search, an address,
+                      or a site keyword such as "gh helm" when
+                      keywords.js is loaded and recognises it)
+        open tabs     page and Claude tabs whose title / URL / folder
+                      the query hits; the row switches to that tab
+        saved         the bookmarks, which are Settings.chips()
+        notes         sections of the School class notes, from the
+                      index school.js already keeps in main
+        folders       folders directly under ~ and ~/Downloads
+                      (one cached IPC listing), opened in the Files tab
+        apps          from tabsearch.js's app index, badged
+        history       the best matches from the store above
+
+      Every row carries a glyph and a quiet source label on its right,
+      so a tab never reads like a history hit. The total stays at ten
+      rows, the default row included; history always keeps two places
+      when it has matches. All sources are synchronous in-memory reads
+      except the folder listing, which is fetched in the background and
+      redraws the panel when it lands. A source that cannot answer says
+      so on one faint line at the foot of the panel, in plain words.
+      On an empty focus it still shows only what was open recently.
+
+      Most rows never navigate by themselves: they write into #omnibox
+      and hand the Enter key to app.js, so tab and Claude handling stay
+      in exactly one place. Three kinds act on their own — an app row
+      launches the app, a tab row switches to the tab, a folder row
+      opens the Files tab — and each then puts the bar back to the page
+      that is really on screen.
 
    3. THE PAGE (historypage.html). Ctrl+H opens the full list in a tab
       of its own. The guest has no preload, so the chrome pushes it a
@@ -40,8 +63,17 @@
   var WRITE_DELAY = 500;     // ms of quiet before the list hits localStorage
   var INPUT_DELAY = 40;      // ms of quiet before the panel re-renders
   var BLUR_DELAY = 120;      // ms grace so a click outside still lands
-  var MAX_ROWS = 6;          // history rows; the default row makes 7
-  var MAX_APP_ROWS = 3;      // app rows, between the default row and history
+  var MAX_ROWS = 6;          // history rows at most (and the empty-focus recent list)
+  var MAX_APP_ROWS = 3;      // app rows, between the folders and history
+  var MAX_TAB_ROWS = 3;      // "switch to tab" rows, right under the default row
+  var MAX_SAVED_ROWS = 2;    // bookmark (chip) rows
+  var MAX_NOTE_ROWS = 2;     // School note sections
+  var MAX_FOLDER_ROWS = 2;   // project folders under ~ and ~/Downloads
+  var MAX_TOTAL_ROWS = 10;   // every row for a typed query, the default row included
+  var MIN_HISTORY_ROWS = 2;  // places history keeps when it has matches at all
+  var MIN_WIDE_QUERY = 2;    // notes and folders wait for two characters: one
+                             // letter would match half of 750 note sections
+  var FOLDER_TTL = 180000;   // ms a folder listing is trusted before a refetch
   var PANEL_GAP = 6;         // px between the omnibox capsule and the panel
 
   // Segoe Fluent Icons, same set the rest of the chrome draws from.
@@ -49,6 +81,20 @@
   var GLYPH_GLOBE  = '\uE774';   // globe: a plain address
   var GLYPH_CLOCK  = '\uE81C';   // clock: something already visited
   var GLYPH_APP    = '\uECAA';   // tile: an app, when it has no icon of its own
+  var GLYPH_TAB    = '\uE8AB';   // Switch: a tab that is already open
+  var GLYPH_CLAUDE = '\uE756';   // CommandPrompt: a Claude session tab (tabsearch.js's mark)
+  var GLYPH_STAR   = '\uE734';   // FavoriteStar: a saved site, as on the omnibox star
+  var GLYPH_NOTES  = '\uE82D';   // Dictionary: a section of the class notes
+  var GLYPH_FOLDER = '\uE8B7';   // Folder: a project folder
+
+  // Where the class notes live when school.js hands over a bare file name.
+  // school-pane.js carries the same constant; main never sends the folder.
+  var NOTES_DIR = 'C:/Users/you/Documents/notes/';
+
+  // files.js boots into this localStorage key. The chrome and its file://
+  // guests share one origin, so writing it here opens a NEW Files tab
+  // straight on the folder a lens row asked for.
+  var FILES_LAST_KEY = 'files.last';
 
   // Schemes that are never worth remembering. file: matters most: the
   // bundled new-tab page is a file:// URL and would otherwise be the
@@ -637,8 +683,10 @@
   var panel = null;
   var listEl = null;
   var capEl = null;
-  var rows = [];             // [{ url, kind, app }] parallel to the row elements
+  var rows = [];             // [{ url, kind, app, tabId, path }] parallel to the row elements
   var rowEls = [];
+  var stateEl = null;        // the one faint "X unavailable: why" line, or null
+  var actionNote = '';       // a row that could not act says so here, once
   var hi = -1;               // -1 = nothing highlighted; Enter does what it always did
   var typedValue = '';       // what the user actually typed, before any highlight
   var openState = false;
@@ -708,8 +756,11 @@
     capEl.textContent = 'Recent';
     capEl.hidden = true;
     listEl = el('div', 'omni-list');
+    stateEl = el('div', 'omni-state');
+    stateEl.hidden = true;
     panel.appendChild(capEl);
     panel.appendChild(listEl);
+    panel.appendChild(stateEl);
     document.body.appendChild(panel);
   }
 
@@ -782,6 +833,14 @@
     }
     row.appendChild(body);
 
+    // Where the row came from ("Open tab", "Saved", "Notes", "History"…),
+    // pinned to the right edge so a long title can never push it out.
+    if (spec.label) {
+      var src = el('span', 'omni-src');
+      src.textContent = spec.label;
+      row.appendChild(src);
+    }
+
     // mousedown is swallowed so the omnibox never blurs; click then still
     // fires on the row and the input keeps its caret and selection.
     row.addEventListener('mousedown', function (event) { event.preventDefault(); });
@@ -792,7 +851,24 @@
 
     listEl.appendChild(row);
     rowEls.push(row);
-    rows.push({ url: spec.url, kind: spec.kind, app: spec.app || null });
+    rows.push({
+      url: spec.url,
+      kind: spec.kind,
+      app: spec.app || null,
+      tabId: spec.tabId === undefined ? null : spec.tabId,
+      path: spec.path || null
+    });
+  }
+
+  /**
+   * The quiet line under the rows for a source that could not answer. It is
+   * not a row: it never takes the highlight and Enter never lands on it.
+   */
+  function setStateLine(text) {
+    if (!stateEl) return;
+    stateEl.textContent = text || '';
+    stateEl.title = text || '';
+    stateEl.hidden = !text;
   }
 
   function clearRows() {
@@ -800,6 +876,7 @@
     rowEls = [];
     hi = -1;
     if (listEl) listEl.textContent = '';
+    setStateLine('');
   }
 
   /* --- apps, borrowed from tabsearch.js -------------------------- */
@@ -842,15 +919,429 @@
 
   /** The index landed late: redraw, keeping the highlight if it still fits. */
   function onAppsReady() {
+    redrawIfOpen();
+  }
+
+  /**
+   * A source that answers asynchronously (the app index, the folder list,
+   * the School index) landed: redraw the open panel in place. Skipped while
+   * a keyboard highlight is previewing a URL in the bar, because render()
+   * reads the bar and would search the preview instead of what was typed.
+   */
+  function redrawIfOpen() {
     if (rendering) return;   // it landed synchronously; this render already has it
     if (!openState || !panel || panel.hidden) return;
     if (typeof document !== 'undefined' && document.activeElement !== omniboxEl) return;
+    if (String(omniboxEl.value || '') !== typedValue) return;
     var prev = hi;
     render();
     if (!rows.length) { close(); return; }
     place();
     hi = (prev >= 0 && prev < rows.length) ? prev : -1;
     paintHighlight();
+  }
+
+  /* --- open tabs, read from app.js ------------------------------- */
+
+  /*
+   * tabs and activeTabId are top-level const/let in app.js: shared scope for
+   * classic scripts, never properties of window. Every read sits behind a
+   * typeof guard, exactly as tabsearch.js's bridge does, so a build without
+   * them simply has no tab rows.
+   */
+  function readActiveTabId() {
+    try {
+      /* global activeTabId */
+      return (typeof activeTabId !== 'undefined') ? activeTabId : null;
+    } catch (err) { return null; }
+  }
+
+  function isNewTabPage(url) {
+    var fn = globalFn('isNewTabUrl');
+    if (!fn) return false;
+    try { return !!fn(url); } catch (err) { return false; }
+  }
+
+  /**
+   * Page and Claude tabs the query hits, best first. The active tab is left
+   * out (switching to it is a no-op), so are blank new tabs (nothing to find)
+   * and hosted native apps (the app rows already switch to those).
+   */
+  function tabMatches(lower, words, limit) {
+    var all = allTabs();
+    if (!all || !words.length) return [];
+    var active = readActiveTabId();
+    var hits = [];
+    for (var i = 0; i < all.length; i++) {
+      var tab = all[i];
+      if (!tab || tab.id === active) continue;
+      var claude = tab.kind === 'claude';
+      if (!claude && tab.kind !== 'page') continue;
+      var url = claude ? '' : String(tab.url || '');
+      if (!claude && (!url || isNewTabPage(url))) continue;
+      var title = String(tab.title || '') || (claude ? 'Claude' : shortLabel(url));
+      var extra = claude ? String(tab.cwd || '') : url;
+      if (!hitsAll(words, title, extra)) continue;
+      var t = title.toLowerCase();
+      var rank = t.indexOf(lower) === 0 ? 0 : (t.indexOf(lower) >= 0 ? 1 : 2);
+      hits.push({ rank: rank, order: i, tab: tab, claude: claude, title: title, extra: extra });
+    }
+    hits.sort(function (a, b) { return (a.rank - b.rank) || (a.order - b.order); });
+    return hits.slice(0, limit);
+  }
+
+  /**
+   * True when every query word lands in `name` or `address`. A one-letter
+   * query only counts at the start of a word ("h" finds "Helm", not every
+   * https:// address); from two letters on, anywhere counts, so "hub"
+   * still finds GitHub.
+   */
+  function hitsAll(words, name, address) {
+    if (words.length === 1 && words[0].length < MIN_WIDE_QUERY) {
+      var needle = ' ' + words[0];
+      var bare = String(address || '').replace(/^[a-z][a-z0-9+.-]*:\/*(www\.)?/i, '');
+      return wordHay(name).indexOf(needle) >= 0 || wordHay(bare).indexOf(needle) >= 0;
+    }
+    var a = String(name || '').toLowerCase();
+    var b = String(address || '').toLowerCase();
+    for (var w = 0; w < words.length; w++) {
+      if (a.indexOf(words[w]) < 0 && b.indexOf(words[w]) < 0) return false;
+    }
+    return true;
+  }
+
+  /** Switch to an open tab. False when app.js has no activateTab to call. */
+  function switchToTab(id) {
+    var activate = globalFn('activateTab');
+    if (!activate) return false;
+    var all = allTabs();
+    var alive = false;
+    for (var i = 0; all && i < all.length; i++) {
+      if (all[i] && all[i].id === id) { alive = true; break; }
+    }
+    if (!alive) return false;   // closed between the keystroke and the press
+    try { activate(id); } catch (err) { return false; }
+    return true;
+  }
+
+  /* --- saved sites: Settings.chips() IS the bookmarks list -------- */
+
+  function savedMatches(lower, words, limit) {
+    var settings = (typeof window !== 'undefined') ? window.Settings : null;
+    if (!settings || typeof settings.chips !== 'function' || !words.length) return [];
+    var list;
+    try { list = settings.chips(); } catch (err) { return []; }
+    if (!list || typeof list.length !== 'number') return [];
+    var hits = [];
+    for (var i = 0; i < list.length; i++) {
+      var chip = list[i];
+      if (!chip || typeof chip.url !== 'string' || !chip.url) continue;
+      var label = String(chip.label || '') || shortLabel(chip.url);
+      if (!hitsAll(words, label, chip.url)) continue;
+      var l = label.toLowerCase();
+      var rank = l.indexOf(lower) === 0 ? 0 : (l.indexOf(lower) >= 0 ? 1 : 2);
+      hits.push({ rank: rank, order: i, url: chip.url, label: label });
+    }
+    hits.sort(function (a, b) { return (a.rank - b.rank) || (a.order - b.order); });
+    return hits.slice(0, limit);
+  }
+
+  /* --- School notes: the section index school.js keeps in main --- */
+
+  /*
+   * school.js parses every class file in Documents\notes at startup (and on
+   * every change) into state.classes = [{ id, name, file, sections: [{ id,
+   * title }] }] and already hands the chrome the whole state through
+   * api.school.describe() and its school:update pushes. This keeps a flat,
+   * lowercased copy of just the sections, so a keystroke is a plain loop.
+   */
+  var notesIndex = [];       // [{ cls, title, url, t, c }]
+  var notesWatching = false;
+  var notesReady = false;    // true once a describe/push said ready
+  var notesReason = '';      // why there are no notes, in plain words ('' = fine or still loading)
+  var notesSig = '';         // what the last adopted index looked like, to skip no-op pushes
+
+  /** The notes file as a file:// URL, the same rule school-pane.js's fileUrl() follows. */
+  function notesFileUrl(cls) {
+    var raw = cls && typeof cls.file === 'string' ? cls.file.trim() : '';
+    if (/^file:\/\//i.test(raw)) return raw;
+    var p = raw || (String(cls && cls.id ? cls.id : '') + '.html');
+    p = p.replace(/\\/g, '/');
+    if (!/^[a-zA-Z]:\//.test(p) && p.charAt(0) !== '/') p = NOTES_DIR + p;
+    return 'file:///' + p.replace(/^\//, '').replace(/[#?%]/g, function (c) {
+      return '%' + c.charCodeAt(0).toString(16).toUpperCase();
+    });
+  }
+
+  function adoptSchool(state) {
+    if (!state || typeof state !== 'object') {
+      notesIndex = [];
+      notesReady = false;
+      notesReason = 'the School index did not answer';
+      notesSig = '';
+      redrawIfOpen();
+      return;
+    }
+    var classes = Array.isArray(state.classes) ? state.classes : [];
+    var next = [];
+    for (var i = 0; i < classes.length; i++) {
+      var cls = classes[i];
+      if (!cls || !Array.isArray(cls.sections)) continue;
+      var name = String(cls.name || cls.id || 'Notes');
+      var base = notesFileUrl(cls);
+      for (var j = 0; j < cls.sections.length; j++) {
+        var s = cls.sections[j];
+        if (!s || typeof s.id !== 'string' || !s.id) continue;
+        var title = String(s.title || s.id);
+        next.push({
+          cls: name,
+          title: title,
+          url: base + '#' + encodeURIComponent(s.id),
+          t: title.toLowerCase(),
+          c: name.toLowerCase(),
+          tw: wordHay(title),     // ' word word …' for start-of-word tests
+          cw: wordHay(name)
+        });
+      }
+    }
+    var ready = !!state.ready && next.length > 0;
+    var reason = ready ? '' : String(state.reason || 'the School index is empty');
+    // school:update fires for everything the workspace does (every LessonPlayer
+    // read, every helper step), not just for the notes. Only a change in
+    // the sections themselves is worth repainting an open panel for.
+    var chars = 0;
+    for (var k = 0; k < next.length; k++) chars += next[k].url.length + next[k].t.length;
+    var sig = next.length + ':' + chars + ':' + (ready ? 1 : 0) + ':' + reason;
+    notesIndex = next;
+    notesReady = ready;
+    notesReason = reason;
+    if (sig === notesSig) return;
+    notesSig = sig;
+    redrawIfOpen();
+  }
+
+  /** Once per window: take the current state, then every push after it. */
+  function watchNotes() {
+    if (notesWatching) return;
+    notesWatching = true;
+    var api = (typeof window !== 'undefined' && window.api) ? window.api.school : null;
+    if (!api || typeof api.describe !== 'function') {
+      notesReason = 'this build has no School index to search';
+      return;
+    }
+    try {
+      if (typeof api.onUpdate === 'function') api.onUpdate(adoptSchool);
+    } catch (err) { /* describe() below still seeds it once */ }
+    try {
+      Promise.resolve(api.describe()).then(adoptSchool, function (err) {
+        notesReason = 'the School index failed: ' + ((err && err.message) || 'no answer');
+        redrawIfOpen();
+      });
+    } catch (err) {
+      notesReason = 'the School index failed: ' + ((err && err.message) || 'no answer');
+    }
+  }
+
+  /** Lowercased, punctuation folded to spaces, with a leading space: ' ' + w finds a word start. */
+  function wordHay(text) {
+    return ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  /**
+   * Sections whose title the query hits. Every word has to START a word in
+   * the section title or the class name ("git" must not find "Digital"),
+   * and at least one has to land in the title: "chem" alone must not list
+   * all 219 course sections by their class.
+   */
+  function noteMatches(lower, words, limit) {
+    if (lower.length < MIN_WIDE_QUERY || !notesIndex.length || !words.length) return [];
+    var needles = [];
+    for (var k = 0; k < words.length; k++) {
+      var folded = wordHay(words[k]);
+      if (folded.length > 1) needles.push(folded);   // pure punctuation folds to ' ': skip it
+    }
+    if (!needles.length) return [];
+    var whole = wordHay(lower) + ' ';
+    var hits = [];
+    for (var i = 0; i < notesIndex.length; i++) {
+      var n = notesIndex[i];
+      var inTitle = 0;
+      var ok = true;
+      for (var w = 0; w < needles.length; w++) {
+        if (n.tw.indexOf(needles[w]) >= 0) inTitle++;
+        else if (n.cw.indexOf(needles[w]) < 0) { ok = false; break; }
+      }
+      if (!ok || !inTitle) continue;
+      // 0 the title starts with it, 1 it is a whole word of the title
+      // ("matter" in "Classification of Matter" beats "mattered"), 2 the
+      // title contains it, 3 every word in the title, 4 split with the class.
+      var rank = n.t.indexOf(lower) === 0 ? 0
+        : ((n.tw + ' ').indexOf(whole) >= 0 ? 1
+          : (n.t.indexOf(lower) >= 0 ? 2 : (inTitle === needles.length ? 3 : 4)));
+      hits.push({ rank: rank, order: i, note: n });
+    }
+    hits.sort(function (a, b) {
+      return (a.rank - b.rank) || (a.note.t.length - b.note.t.length) || (a.order - b.order);
+    });
+    return hits.slice(0, limit).map(function (h) { return h.note; });
+  }
+
+  /* --- project folders: one cached listing from main -------------- */
+
+  /*
+   * The renderer cannot read a directory, so main.js answers omni:folders
+   * (preload: api.listProjectFolders) with the folders directly under ~ and
+   * ~/Downloads. It is asked at most once per FOLDER_TTL — on focus, or on
+   * the first query that wants it — and never awaited: the rows that are
+   * ready paint now and the folders join them when the answer lands.
+   */
+  var folders = [];          // [{ name, path, root, n }]
+  var foldersAt = 0;         // when the last answer (or failure) landed
+  var foldersPending = false;
+  var foldersReason = '';    // '' = fine; otherwise why the list is missing or partial
+  var folderListerOverride = null;   // test seam only: History._lens.folderLister(fn)
+
+  function refreshFolders(force) {
+    if (foldersPending) return;
+    if (!force && foldersAt && Date.now() - foldersAt < FOLDER_TTL) return;
+    var api = (typeof window !== 'undefined') ? window.api : null;
+    if (folderListerOverride) api = { listProjectFolders: folderListerOverride };
+    if (!api || typeof api.listProjectFolders !== 'function') {
+      foldersAt = Date.now();
+      foldersReason = 'this build cannot list folders (no listProjectFolders in preload)';
+      return;
+    }
+    foldersPending = true;
+    var settle = function (answer, failure) {
+      foldersPending = false;
+      foldersAt = Date.now();
+      if (!answer || typeof answer !== 'object') {
+        // Keep the last good list: stale folders beat none. Say so anyway.
+        foldersReason = 'the folder list failed: ' + (failure || 'no answer');
+      } else {
+        var list = Array.isArray(answer.folders) ? answer.folders : [];
+        var next = [];
+        for (var i = 0; i < list.length; i++) {
+          var f = list[i];
+          if (!f || typeof f.name !== 'string' || !f.name || typeof f.path !== 'string' || !f.path) continue;
+          next.push({ name: f.name, path: f.path, root: f.root === 'downloads' ? 'downloads' : 'home', n: f.name.toLowerCase() });
+        }
+        folders = next;
+        foldersReason = answer.ok === false ? String(answer.reason || 'the folder list came back incomplete') : '';
+      }
+      redrawIfOpen();
+    };
+    try {
+      Promise.resolve(api.listProjectFolders()).then(
+        function (answer) { settle(answer, ''); },
+        function (err) { settle(null, (err && err.message) || 'IPC error'); }
+      );
+    } catch (err) {
+      settle(null, (err && err.message) || 'IPC error');
+    }
+  }
+
+  /** Folder names the query hits: exact, then prefix, then anywhere; ~ before Downloads. */
+  function folderMatches(lower, words, limit) {
+    if (lower.length < MIN_WIDE_QUERY || !folders.length || !words.length) return [];
+    var hits = [];
+    for (var i = 0; i < folders.length; i++) {
+      var f = folders[i];
+      var ok = true;
+      for (var w = 0; w < words.length; w++) {
+        if (f.n.indexOf(words[w]) < 0) { ok = false; break; }
+      }
+      if (!ok) continue;
+      var rank = f.n === lower ? 0 : (f.n.indexOf(lower) === 0 ? 1 : 2);
+      hits.push({ rank: rank, home: f.root === 'home' ? 0 : 1, folder: f });
+    }
+    hits.sort(function (a, b) {
+      return (a.rank - b.rank) || (a.home - b.home) || (a.folder.n.length - b.folder.n.length);
+    });
+    return hits.slice(0, limit).map(function (h) { return h.folder; });
+  }
+
+  /**
+   * Open one folder in Quartz's own Files tab. A new tab boots straight into
+   * it through files.js's remembered-folder key; a Files tab that is already
+   * up is switched to and handed the listing, the same push app.js answers
+   * the page's own requests with. False only when nothing could be opened.
+   */
+  function openFolder(target) {
+    try { window.localStorage.setItem(FILES_LAST_KEY, target); } catch (err) { /* a new tab opens on its last folder instead */ }
+
+    var find = globalFn('findFilesTab');
+    var existing = null;
+    if (find) { try { existing = find(); } catch (err) { existing = null; } }
+
+    if (existing) {
+      if (!switchToTab(existing.id)) return false;
+      if (pushFolder(existing, target)) return true;
+      // An older app.js with no push: a reload boots the page into the key above.
+      try {
+        if (existing.viewEl && typeof existing.viewEl.reload === 'function') existing.viewEl.reload();
+      } catch (err) { /* asleep: waking it boots it into the key */ }
+      return true;
+    }
+
+    var url = globalFn('filesUrl');
+    var create = globalFn('createTab');
+    if (!url || !create) return false;
+    var tab = null;
+    try { tab = create(url()); } catch (err) { return false; }
+    if (!tab) return false;
+    // A brand-new Files guest can print its boot request before app.js has
+    // marked the view ready, and that first answer is lost (the page then
+    // sits on "This PC"). So once the view IS ready, push the folder too:
+    // the page is waiting on exactly this path, so it takes it in either
+    // order. Bounded: about six seconds of 150 ms looks, then it gives up
+    // and the page's own boot is all there is.
+    var tries = 0;
+    var look = function () {
+      tries++;
+      if (tab.ready && tab.viewEl) { pushFolder(tab, target); return; }
+      if (tries < 40) setTimeout(look, 150);
+    };
+    setTimeout(look, 150);
+    return true;
+  }
+
+  /**
+   * List one folder through main and hand it to a Files guest with app.js's
+   * own push (pushFilesListing), plus the places rail when app.js offers it.
+   * False when this build of app.js has neither piece.
+   */
+  function pushFolder(tab, target) {
+    var push = globalFn('pushFilesListing');
+    var filesApi = (window.api && window.api.files) ? window.api.files : null;
+    var view = tab && tab.viewEl;
+    if (!push || !filesApi || typeof filesApi.list !== 'function' || !view) return false;
+    var places = globalFn('pushFilePlacesToTab');
+    if (places) { try { places(tab); } catch (err) { /* the rail is a nicety */ } }
+    Promise.resolve(filesApi.list(target)).then(function (answer) {
+      try { push(tab, view, answer); } catch (err) { /* the page shows its own error */ }
+    }, function () {
+      try { push(tab, view, { path: target, entries: [], error: 'the folder could not be listed' }); } catch (err) { /* gone */ }
+    });
+    return true;
+  }
+
+  /* --- site keywords: keywords.js, when it is loaded -------------- */
+
+  /**
+   * "gh helm" -> { key, name, query, url } from keywords.js, or null. Fully
+   * guarded: no Keywords, a throw, or a malformed answer all mean "behave
+   * exactly as before". app.js does the navigating; this only relabels.
+   */
+  function keywordFor(text) {
+    var kw = (typeof window !== 'undefined') ? window.Keywords : null;
+    if (!kw || typeof kw.match !== 'function') return null;
+    try {
+      var m = kw.match(text);
+      if (m && typeof m === 'object' && typeof m.name === 'string' && m.name &&
+          typeof m.url === 'string' && m.url) return m;
+    } catch (err) { /* a broken keyword table must not break the bar */ }
+    return null;
   }
 
   /**
@@ -890,38 +1381,143 @@
     capEl.hidden = true;
 
     // Row one always mirrors what Enter does today, so the panel never
-    // changes the meaning of just typing and pressing Enter.
-    var target = navUrlFor(query);
-    if (target) {
-      if (isSearchUrl(target)) {
-        addRow({
-          kind: 'default',
-          url: target,
-          glyph: GLYPH_SEARCH,
-          primary: query,
-          secondary: 'Google search',
-          faint: true,
-          words: null
-        });
-      } else {
-        addRow({
-          kind: 'default',
-          url: target,
-          glyph: GLYPH_GLOBE,
-          primary: target,
-          secondary: '',
-          words: null
-        });
+    // changes the meaning of just typing and pressing Enter. A site keyword
+    // ("gh helm") only changes how that row reads and which URL it shows;
+    // app.js is still the one that resolves the Enter.
+    var target = null;
+    var kw = keywordFor(query);
+    if (kw) {
+      target = kw.url;
+      var kwQuery = String(kw.query == null ? '' : kw.query);
+      addRow({
+        kind: 'default',
+        url: target,
+        glyph: GLYPH_SEARCH,
+        primary: kwQuery ? 'Search ' + kw.name + ' for “' + kwQuery + '”' : 'Search ' + kw.name,
+        secondary: target,
+        faint: true,
+        words: null
+      });
+    } else {
+      target = navUrlFor(query);
+      if (target) {
+        if (isSearchUrl(target)) {
+          addRow({
+            kind: 'default',
+            url: target,
+            glyph: GLYPH_SEARCH,
+            primary: query,
+            secondary: 'Google search',
+            faint: true,
+            words: null
+          });
+        } else {
+          addRow({
+            kind: 'default',
+            url: target,
+            glyph: GLYPH_GLOBE,
+            primary: target,
+            secondary: '',
+            words: null
+          });
+        }
       }
     }
 
     var words = toWords(query);
+    var lower = query.toLowerCase();
+
+    // Gather every source first, then share out the ten places: each source
+    // up to its own cap, in order, with two places held back for history so
+    // a busy query never squeezes out what was actually visited.
+    refreshFolders(false);   // a no-op unless the cached list is stale
+    var tabHits = tabMatches(lower, words, MAX_TAB_ROWS);
+    var savedHits = savedMatches(lower, words, MAX_SAVED_ROWS);
+    var noteHits = noteMatches(lower, words, MAX_NOTE_ROWS);
+    var folderHits = folderMatches(lower, words, MAX_FOLDER_ROWS);
+    var apps = appMatches(query, MAX_APP_ROWS);
+    waitForApps();
+    var hits = search(query, MAX_ROWS);
+
+    var budget = MAX_TOTAL_ROWS - rows.length - Math.min(hits.length, MIN_HISTORY_ROWS);
+    function take(list) {
+      var n = Math.max(0, Math.min(list.length, budget));
+      budget -= n;
+      return n;
+    }
+
+    // Addresses already offered above: a history hit for one of them is
+    // dropped below so one page never shows twice (an open tab wins, since
+    // switching beats loading the page a second time).
+    var shown = Object.create(null);
+    if (target) shown[target] = true;
+
+    // Open tabs: the press switches to the tab instead of loading it again.
+    var nTabs = take(tabHits);
+    for (var t = 0; t < nTabs; t++) {
+      var th = tabHits[t];
+      if (!th.claude && th.extra) shown[th.extra] = true;
+      addRow({
+        kind: 'tab',
+        tabId: th.tab.id,
+        url: null,
+        glyph: th.claude ? GLYPH_CLAUDE : GLYPH_TAB,
+        primary: th.title,
+        secondary: th.claude ? (th.extra || 'Claude session') : th.extra,
+        label: th.claude ? 'Claude tab' : 'Open tab',
+        words: words
+      });
+    }
+
+    // Saved sites navigate like history does.
+    var nSaved = take(savedHits);
+    for (var s = 0; s < nSaved; s++) {
+      shown[savedHits[s].url] = true;
+      addRow({
+        kind: 'saved',
+        url: savedHits[s].url,
+        glyph: GLYPH_STAR,
+        primary: savedHits[s].label,
+        secondary: savedHits[s].url,
+        label: 'Saved',
+        words: words
+      });
+    }
+
+    // Note sections open the class file at that section, in this tab.
+    var nNotes = take(noteHits);
+    for (var n = 0; n < nNotes; n++) {
+      addRow({
+        kind: 'notes',
+        url: noteHits[n].url,
+        glyph: GLYPH_NOTES,
+        primary: 'notes: ' + noteHits[n].cls + ' › ' + noteHits[n].title,
+        secondary: '',
+        label: 'Notes',
+        words: words
+      });
+    }
+
+    // Folders open in the Files tab; the full path is the second line.
+    var nFolders = take(folderHits);
+    for (var f = 0; f < nFolders; f++) {
+      addRow({
+        kind: 'folder',
+        path: folderHits[f].path,
+        url: null,
+        glyph: GLYPH_FOLDER,
+        primary: folderHits[f].name,
+        secondary: folderHits[f].path,
+        label: 'Folder',
+        words: words
+      });
+    }
 
     // Then the apps whose name the query hits. These launch instead of
     // navigating, which is why they carry a badge and never the default
     // row's place: row one still means exactly what Enter means.
-    var apps = appMatches(query, MAX_APP_ROWS);
-    for (var a = 0; a < apps.length && a < MAX_APP_ROWS; a++) {
+    var nApps = take(apps);
+    for (var a = 0; a < nApps; a++) {
       var app = apps[a];
       if (!app) continue;
       var hint = String(app.hint == null ? '' : app.hint);
@@ -946,20 +1542,33 @@
         words: words
       });
     }
-    waitForApps();
 
-    var hits = search(query, MAX_ROWS);
-    for (var j = 0; j < hits.length; j++) {
-      if (target && hits[j].url === target && rows.length && rows[0].kind === 'default') continue;
+    // History fills whatever is left, never past the total.
+    for (var j = 0; j < hits.length && rows.length < MAX_TOTAL_ROWS; j++) {
+      if (shown[hits[j].url]) continue;
       addRow({
         kind: 'history',
         url: hits[j].url,
         glyph: GLYPH_CLOCK,
         primary: hits[j].title || shortLabel(hits[j].url),
         secondary: hits[j].url,
+        label: 'History',
         words: words
       });
     }
+
+    // A source that could not answer says so here, once, in plain words.
+    // Notes and folders are only searched from two characters on, so their
+    // trouble is only reported from there too.
+    var trouble = [];
+    if (actionNote) trouble.push(actionNote);
+    if (lower.length >= MIN_WIDE_QUERY) {
+      if (!notesReady && notesReason && notesReason !== 'starting up') {
+        trouble.push('Notes unavailable: ' + notesReason);
+      }
+      if (foldersReason) trouble.push('Folders unavailable: ' + foldersReason);
+    }
+    setStateLine(trouble.join(' · '));
   }
 
   function shortLabel(url) {
@@ -990,10 +1599,22 @@
     paintHighlight();
     if (!fromKeyboard) return;
     // The default row IS the typed text, so previewing it would only swap
-    // "cats" for a google.com/search URL; an app row has no URL to preview
-    // at all. Only history rows preview.
-    if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') omniboxEl.value = rows[hi].url;
+    // "cats" for a google.com/search URL; app, tab and folder rows act
+    // rather than navigate, so they have no URL to preview. Only the rows
+    // that navigate (history, saved, notes) preview.
+    if (hi >= 0 && rows[hi] && navigates(rows[hi])) omniboxEl.value = rows[hi].url;
     else omniboxEl.value = typedValue;
+  }
+
+  /** History, saved and notes rows navigate: Enter loads their URL via app.js. */
+  function navigates(row) {
+    return !!row && !!row.url &&
+      (row.kind === 'history' || row.kind === 'saved' || row.kind === 'notes');
+  }
+
+  /** App, tab and folder rows act on their own; app.js must never see their Enter. */
+  function acts(row) {
+    return !!row && (row.kind === 'app' || row.kind === 'tab' || row.kind === 'folder');
   }
 
   function step(delta) {
@@ -1031,6 +1652,16 @@
     if (omniboxEl && omniboxEl.value !== typedValue) omniboxEl.value = typedValue;
   }
 
+  /** After a row that acted on its own: drop focus, show the page really on screen. */
+  function restoreBar() {
+    if (!omniboxEl) return;
+    omniboxEl.blur();
+    if (typeof syncOmniboxFromActive === 'function') {
+      try { syncOmniboxFromActive(true); return; } catch (err) { /* fall through */ }
+    }
+    omniboxEl.value = typedValue;
+  }
+
   /**
    * Navigate by handing the work back to app.js: write the URL into the
    * omnibox, then send the same Enter keydown app.js already listens for.
@@ -1053,11 +1684,28 @@
         if (inTab) row.app.runInTab();
         else if (typeof row.app.run === 'function') row.app.run();
       } catch (err) { /* a dead launcher must not wedge the bar */ }
-      if (omniboxEl) {
-        omniboxEl.blur();
-        if (typeof syncOmniboxFromActive === 'function') syncOmniboxFromActive(true);
-        else omniboxEl.value = typedValue;
+      restoreBar();
+      return;
+    }
+
+    // A tab row switches; a folder row opens the Files tab. If either one
+    // cannot act, the lens stays open and says so on its state line rather
+    // than closing on nothing.
+    if (row.kind === 'tab' || row.kind === 'folder') {
+      var done = row.kind === 'tab' ? switchToTab(row.tabId) : openFolder(row.path);
+      if (!done) {
+        actionNote = row.kind === 'tab'
+          ? 'Could not switch: that tab is no longer open'
+          : 'Could not open the Files tab for ' + row.path;
+        render();
+        actionNote = '';
+        if (!rows.length) { close(); return; }
+        place();
+        paintHighlight();
+        return;
       }
+      close();
+      restoreBar();
       return;
     }
 
@@ -1102,18 +1750,19 @@
 
     if (key === 'Enter') {
       if (!openState) return;
-      // An app row is the one case the lens acts on itself. app.js has its
-      // own bubble-phase Enter handler on this same element, so the event
-      // has to die here or the typed text would navigate as well.
-      if (hi >= 0 && rows[hi] && rows[hi].kind === 'app') {
+      // App, tab and folder rows are the cases the lens acts on itself.
+      // app.js has its own bubble-phase Enter handler on this same element,
+      // so the event has to die here or the typed text would navigate too.
+      if (hi >= 0 && acts(rows[hi])) {
         event.preventDefault();
         event.stopImmediatePropagation();
         commit(hi, !!event.shiftKey);
         return;
       }
-      // A highlighted history row rewrites the bar before app.js reads it.
-      // The default row needs nothing: app.js already resolves the typed text.
-      if (hi >= 0 && rows[hi] && rows[hi].kind === 'history') {
+      // A highlighted history / saved / notes row rewrites the bar before
+      // app.js reads it. The default row needs nothing: app.js already
+      // resolves the typed text (keywords included).
+      if (hi >= 0 && navigates(rows[hi])) {
         omniboxEl.value = rows[hi].url;
       }
       close();
@@ -1134,6 +1783,9 @@
   function onFocus() {
     if (blurTimer !== null) { clearTimeout(blurTimer); blurTimer = null; }
     typedValue = String(omniboxEl.value || '');
+    // Warm the folder list in the background so the first query has it.
+    // A no-op while the cached one is younger than FOLDER_TTL.
+    refreshFolders(false);
     // A new tab puts the caret here by itself (app.js focusOmniboxForNewTab)
     // and marks that one focus quiet: the recent list would otherwise cover
     // the new-tab page on every Ctrl+T. One-shot, and consumed here even when
@@ -1161,6 +1813,7 @@
     if (!omniboxEl || !document.body) return false;
 
     buildPanel();
+    watchNotes();   // seed the note-section index once; pushes keep it fresh
 
     omniboxEl.addEventListener('keydown', onKeydown, true); // capture: before app.js
     omniboxEl.addEventListener('input', onInput);
@@ -1233,6 +1886,16 @@
     _ignored: isIgnored,
     _flush: writeNow,
     _load: load,
-    _max: MAX_ITEMS
+    _max: MAX_ITEMS,
+    // The lens's sources, for probes that force a failure and read the
+    // state line back: swap the folder lister (null restores the real
+    // one) and refetch, or feed the notes index a School state by hand.
+    _lens: {
+      folderLister: function (fn) {
+        folderListerOverride = typeof fn === 'function' ? fn : null;
+        refreshFolders(true);
+      },
+      adoptSchool: adoptSchool
+    }
   };
 })();

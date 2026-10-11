@@ -1326,6 +1326,57 @@
 }
 
 /* ============================================================
+   Search keywords ("gh helm")
+   The shortcut rows again: keyword and name share the top line, the
+   address template sits under them in the URL cell's smaller grey. The
+   keyword is set in the mono face because it is something you type.
+   ============================================================ */
+
+#settings-panel .set-field[data-field="keywords"] > .set-hint { margin: 0 0 8px; }
+
+#settings-panel .set-kw-line {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+#settings-panel .set-chip-text.is-key {
+  flex: 0 0 76px;
+  width: 76px;
+  font-family: var(--mono);
+}
+
+#settings-panel .set-kw-line .set-chip-text.is-label { flex: 1 1 auto; }
+
+/* A row the check refused: still editable, quieter, and the reason under
+   it with the amber pip. Amber stays on the pip, not the words — as type
+   it falls under contrast on the light pane (see .set-tokens-sum). */
+#settings-panel .set-kw.is-off .set-chip-text { color: var(--text-3); }
+
+#settings-panel .set-kw-msg {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0 0 4px;
+  padding: 0 6px 0 12px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+#settings-panel .set-kw-msg::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  transform: translateY(-1px);
+}
+
+#settings-panel .set-field[data-field="keywords"] .set-btn { margin-top: 8px; }
+
+/* ============================================================
    Typing
    The host and word lists reuse the shortcut rows. A row's text is a
    plain span in the chip cell's type, not an input: a host or a word is
