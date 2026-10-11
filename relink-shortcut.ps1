@@ -1,12 +1,22 @@
 # relink-shortcut.ps1 - give Quartz its Start Menu shortcut, carrying its identity.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File relink-shortcut.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File relink-shortcut.ps1 -Pin
 #
 # Writes %APPDATA%\Microsoft\Windows\Start Menu\Programs\Quartz.lnk:
-#   target   <this folder>\node_modules\electron\dist\electron.exe
+#   target   <this folder>\node_modules\electron\dist\Quartz.exe
 #   args     "<this folder>"
-#   icon     <this folder>\assets\browser.ico,0 (electron.exe's own if it is missing)
+#   icon     <this folder>\assets\browser.ico,0 (Quartz.exe's own if it is missing)
 #   System.AppUserModel.ID = com.owensilva.quartz
+#
+# WHY Quartz.exe, not electron.exe (2026-10-10). Task Manager names a process by
+# its exe's FileDescription, so launched as electron.exe every Quartz process
+# was listed as "Electron". tools/make-quartz-exe.js (npm postinstall) copies
+# electron.exe to Quartz.exe in the same folder and stamps it "Quartz" with the
+# repo icon; renderers, GPU and utilities spawn from process.execPath, so they
+# are Quartz too. Run `npm run quartz-exe` first if Quartz.exe is missing.
+# A shortcut still pointing at electron.exe of this folder counts as ours and is
+# moved over to Quartz.exe.
 #
 # WHY the id matters. main.js calls app.setAppUserModelId('com.owensilva.quartz').
 # Windows shows a toast for an unpackaged app (the "Claude is waiting"
@@ -22,14 +32,19 @@
 # leave you with neither). If it is not there (the case on 2026-09-26: only the
 # taskbar pin existed), Quartz.lnk is built from this folder.
 #
-# What it does NOT touch: the taskbar pin in User Pinned\TaskBar\Browser.lnk.
-# Mantle reads that folder and orders its bar by finding each pin's FILE NAME in
-# the Taskband blob, so renaming the pin would drop it out of order. Re-pin from
-# the new Start Menu entry by hand if the pin should say Quartz (Windows 11
-# refuses scripted pinning). It never opens a window, Settings or Explorer,
+# The taskbar pin in User Pinned\TaskBar\Browser.lnk is NEVER renamed: Mantle
+# reads that folder and orders its bar by finding each pin's FILE NAME in the
+# Taskband blob, so renaming the pin would drop it out of order. Without -Pin it
+# is not touched at all. With -Pin its TARGET is rewritten in place (same file
+# name, same arguments, working folder, icon and description; the AppUserModel
+# ID is set to com.owensilva.quartz), and only when it points at this folder's
+# electron.exe or Quartz.exe. Mantle lights a pin up by matching the running
+# window's full exe path against the pin's target, so do this when Quartz is
+# about to be restarted as Quartz.exe: until then the old electron.exe window
+# no longer matches the pin. It never opens a window, Settings or Explorer,
 # never resolves the link (Resolve can show UI), and is safe to re-run.
 
-param()
+param([switch]$Pin)
 
 $ErrorActionPreference = 'Stop'
 
@@ -39,13 +54,15 @@ $OldLinkName = 'Browser.lnk'
 $Description = 'Quartz'
 
 $AppDir = $PSScriptRoot
-$Exe    = Join-Path $AppDir 'node_modules\electron\dist\electron.exe'
+$Exe    = Join-Path $AppDir 'node_modules\electron\dist\Quartz.exe'
+$ElectronExe = Join-Path $AppDir 'node_modules\electron\dist\electron.exe'   # what older links point at
 $Ico    = Join-Path $AppDir 'assets\browser.ico'
 $Programs = [Environment]::GetFolderPath('Programs')   # %APPDATA%\Microsoft\Windows\Start Menu\Programs
 $NewLink = Join-Path $Programs $LinkName
 $OldLink = Join-Path $Programs $OldLinkName
+$PinLink = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Browser.lnk'
 
-if (-not (Test-Path -LiteralPath $Exe)) { throw "electron.exe not found at $Exe - run npm install in $AppDir first." }
+if (-not (Test-Path -LiteralPath $Exe)) { throw "Quartz.exe not found at $Exe - run 'npm run quartz-exe' (or npm install) in $AppDir first." }
 if (-not $Programs -or -not (Test-Path -LiteralPath $Programs)) { throw "Start Menu Programs folder not found ('$Programs')." }
 
 Add-Type -TypeDefinition @'
@@ -174,7 +191,7 @@ if (Test-Path -LiteralPath $OldLink) {
     $old = [QuartzLink.Link]::Read($OldLink)
     "found    $OldLink"
     "  target=$($old.Target)  args=$($old.Arguments)  icon=$($old.IconPath),$($old.IconIndex)  aumid=$($old.AppUserModelId)"
-    if (Test-SameFile $old.Target $Exe) {
+    if ((Test-SameFile $old.Target $Exe) -or (Test-SameFile $old.Target $ElectronExe)) {
         $oldIsOurs = $true
         $want.Arguments = $old.Arguments
         if ($old.WorkingDirectory) { $want.WorkingDirectory = $old.WorkingDirectory }
@@ -206,7 +223,8 @@ if ($bad.Count -gt 0) {
 }
 
 # Only now, with the new one proven, does the old Start Menu entry go -- and
-# only if it was ours (same electron.exe), never someone else's Browser.lnk.
+# only if it was ours (this folder's electron.exe or Quartz.exe), never someone
+# else's Browser.lnk.
 if ($oldIsOurs) {
     Remove-Item -LiteralPath $OldLink -Force
     "removed  $OldLink"
@@ -214,4 +232,56 @@ if ($oldIsOurs) {
 
 ''
 "Done. Start Menu > Quartz now carries $AppUserModelId."
-'Taskbar pin (User Pinned\TaskBar\Browser.lnk) left as is; see the header for why.'
+
+if (-not $Pin) {
+    'Taskbar pin (User Pinned\TaskBar\Browser.lnk) left as is; -Pin points it at Quartz.exe (see the header).'
+    return
+}
+
+# -Pin: the same file, a new target. Built in %TEMP% and read back there first,
+# so Mantle's watch on the pin folder never sees a half-written or extra .lnk;
+# the original is kept in %TEMP% until the copy over it reads back right.
+''
+if (-not (Test-Path -LiteralPath $PinLink)) {
+    "Taskbar pin NOT changed: $PinLink does not exist."
+    exit 1
+}
+$pinOld = [QuartzLink.Link]::Read($PinLink)
+"found    $PinLink"
+"  target=$($pinOld.Target)  args=$($pinOld.Arguments)  icon=$($pinOld.IconPath),$($pinOld.IconIndex)  aumid=$($pinOld.AppUserModelId)"
+if (-not ((Test-SameFile $pinOld.Target $Exe) -or (Test-SameFile $pinOld.Target $ElectronExe))) {
+    "Taskbar pin NOT changed: it points at '$($pinOld.Target)', not this folder's electron.exe or Quartz.exe."
+    exit 1
+}
+if ((Test-SameFile $pinOld.Target $Exe) -and $pinOld.AppUserModelId -eq $AppUserModelId) {
+    'Taskbar pin already points at Quartz.exe with the Quartz id; nothing to do.'
+    return
+}
+$pinArgs = $(if ($pinOld.Arguments) { $pinOld.Arguments } else { '"' + $AppDir + '"' })
+$pinWd   = $(if ($pinOld.WorkingDirectory) { $pinOld.WorkingDirectory } else { $AppDir })
+$pinIcon = $(if ($pinOld.IconPath) { $pinOld.IconPath } elseif (Test-Path -LiteralPath $Ico) { $Ico } else { $Exe })
+$pinIdx  = $(if ($pinOld.IconPath) { $pinOld.IconIndex } else { 0 })
+$pinDesc = $(if ($pinOld.Description) { $pinOld.Description } else { $Description })
+$stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
+$pinTmp  = Join-Path $env:TEMP "quartz-pin-$stamp.lnk"
+$pinBak  = Join-Path $env:TEMP "quartz-pin-backup-$stamp.lnk"
+[QuartzLink.Link]::Write($pinTmp, $Exe, $pinArgs, $pinWd, $pinIcon, $pinIdx, $pinDesc, $AppUserModelId)
+$t = [QuartzLink.Link]::Read($pinTmp)
+if (-not (Test-SameFile $t.Target $Exe) -or $t.Arguments -ne $pinArgs -or $t.AppUserModelId -ne $AppUserModelId) {
+    Remove-Item -LiteralPath $pinTmp -Force -ErrorAction SilentlyContinue
+    "Taskbar pin NOT changed: the new shortcut did not read back right (target '$($t.Target)', args '$($t.Arguments)', aumid '$($t.AppUserModelId)')."
+    exit 1
+}
+Copy-Item -LiteralPath $PinLink -Destination $pinBak -Force
+Copy-Item -LiteralPath $pinTmp -Destination $PinLink -Force
+Remove-Item -LiteralPath $pinTmp -Force
+$p = [QuartzLink.Link]::Read($PinLink)
+"  target=$($p.Target)"
+"  args=$($p.Arguments)  wd=$($p.WorkingDirectory)  icon=$($p.IconPath),$($p.IconIndex)"
+"  System.AppUserModel.ID=$($p.AppUserModelId)"
+if (-not (Test-SameFile $p.Target $Exe) -or $p.Arguments -ne $pinArgs) {
+    Copy-Item -LiteralPath $pinBak -Destination $PinLink -Force
+    "Taskbar pin did NOT read back right after the copy; the original was put back from $pinBak."
+    exit 1
+}
+"Taskbar pin now starts Quartz.exe (original kept at $pinBak)."

@@ -202,7 +202,7 @@ const MAX_PROC_CHILDREN = 24;
  * PowerShell per pid for it.
  */
 const CHROMIUM_BASES = new Set([
-  'electron', 'chrome', 'msedge', 'msedgewebview2', 'chromium',
+  'electron', 'quartz', 'chrome', 'msedge', 'msedgewebview2', 'chromium',
   'brave', 'vivaldi', 'opera', 'opera_gx', 'code', 'discord', 'slack',
 ]);
 

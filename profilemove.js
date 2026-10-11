@@ -222,7 +222,7 @@ function refusalText(result, oldDir, newDir) {
       where +
       'Moving the folder failed (' + result.code + '): something still has files open inside ' +
       oldDir + '. That is almost always an old copy of the browser that is still running ' +
-      '(check the tray and Task Manager for electron.exe).\n\n' +
+      '(check the tray and Task Manager for Quartz.exe, or electron.exe for a copy started the old way).\n\n' +
       'Close the other window and start Quartz again.' +
       safe;
   } else {

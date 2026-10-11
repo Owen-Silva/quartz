@@ -44,7 +44,8 @@ public class WB {
 try { Add-Type -TypeDefinition $sig -ErrorAction Stop } catch { }
 
 function Get-TreePids([string]$m) {
-  $all = Get-CimInstance Win32_Process -Filter "Name='electron.exe'"
+  # Quartz.exe is the named launch (tools/make-quartz-exe.js); electron.exe is `npx electron .`.
+  $all = Get-CimInstance Win32_Process -Filter "Name='electron.exe' OR Name='Quartz.exe'"
   # Match the --profile-name flag itself, never a bare substring: '-Match ws'
   # matched 'browser' in the live browser's path and sent IT to the back once.
   $needle = if ($m.Contains('=')) { $m } else { '--profile-name=' + $m }

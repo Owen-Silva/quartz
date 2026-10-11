@@ -24,6 +24,11 @@
 #
 # Re-running it is safe: every value is written to the same place with the same
 # contents. -Unregister removes the Quartz four, leaving the profile alone.
+#
+# The command it registers starts Quartz.exe, not electron.exe (2026-10-10): the
+# same binary renamed and stamped "Quartz" by tools/make-quartz-exe.js (npm
+# postinstall), so a clicked link opens a process Task Manager calls Quartz.
+# Run `npm run quartz-exe` first if Quartz.exe is missing.
 
 param([switch]$Unregister, [switch]$RemoveOld, [switch]$Force)
 
@@ -32,7 +37,7 @@ $ErrorActionPreference = 'Stop'
 # Everything is resolved from where this script sits, so a moved repo needs no
 # edit - only a re-run.
 $AppDir = $PSScriptRoot
-$Exe    = Join-Path $AppDir 'node_modules\electron\dist\electron.exe'
+$Exe    = Join-Path $AppDir 'node_modules\electron\dist\Quartz.exe'
 $IcoRepo = Join-Path $AppDir 'assets\browser.ico'
 
 $ProgIdUrl  = 'QuartzURL'
@@ -148,10 +153,10 @@ if ($Unregister) {
 # Register
 # ---------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $Exe)) {
-    throw "electron.exe not found at $Exe - run npm install in $AppDir first."
+    throw "Quartz.exe not found at $Exe - run 'npm run quartz-exe' (or npm install) in $AppDir first."
 }
 
-# The repo's own .ico if it is there, electron.exe's own icon if it is not.
+# The repo's own .ico if it is there, Quartz.exe's own icon if it is not.
 # Converting an image into one is not this script's job.
 if (Test-Path -LiteralPath $IcoRepo) { $IconPath = "$IcoRepo,0" } else { $IconPath = "$Exe,0" }
 
@@ -176,7 +181,7 @@ function Set-RegValue([string]$Key, [string]$Name, [string]$Value) {
     }
 }
 
-"electron.exe : $Exe"
+"Quartz.exe   : $Exe"
 "app dir      : $AppDir"
 "icon         : $IconPath"
 ''

@@ -5,7 +5,9 @@
   "private": true,
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "postinstall": "node tools/make-quartz-exe.js",
+    "quartz-exe": "node tools/make-quartz-exe.js"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.18.2",
@@ -18,5 +20,7 @@
     "koffi": "^3.2.1",
     "ws": "^8.21.3"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "rcedit": "^5.0.2"
+  }
 }

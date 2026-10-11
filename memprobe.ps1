@@ -13,17 +13,18 @@
     wsMB    working set, what Task Manager's details tab shows; includes shared pages, so
             the total over-counts.
   A copy is matched by command line: the live one runs from C:\Users\you\browser and
-  has no --test-profile; a test one carries --profile-name=<Match>. Mantle is also
-  electron.exe, and is never counted.
+  has no --test-profile; a test one carries --profile-name=<Match>. Either may run as
+  Quartz.exe (the named launch, built by tools/make-quartz-exe.js) or as electron.exe
+  (`npx electron .`); both are read. Mantle is also electron.exe, and is never counted.
 #>
 param(
   [string]$Match = '',
   [switch]$Json
 )
 
-$procs = Get-CimInstance Win32_Process -Filter "Name='electron.exe'"
+$procs = Get-CimInstance Win32_Process -Filter "Name='electron.exe' OR Name='Quartz.exe'"
 $byId = @{}
-Get-Process electron -ErrorAction SilentlyContinue | ForEach-Object { $byId[[int]$_.Id] = $_ }
+Get-Process electron, Quartz -ErrorAction SilentlyContinue | ForEach-Object { $byId[[int]$_.Id] = $_ }
 
 # Children do not repeat our own switches (Chromium copies only the ones it
 # knows), so pick the MAIN process by command line and then take its children

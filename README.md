@@ -36,12 +36,22 @@ npx electron .     # same thing without the script
 Run `npm install` after pulling a change that adds a dependency; `koffi`, for the native app-tab
 engine, is the newest one.
 
+Quartz launches as `node_modules\electron\dist\Quartz.exe`, not `electron.exe`, so Task Manager
+lists it (main, GPU, renderers, utilities) as **Quartz** with the Quartz icon instead of
+"Electron". `tools/make-quartz-exe.js` copies `electron.exe` to `Quartz.exe` in the same folder
+(it needs that folder's DLLs and resources) and stamps its version strings and icon with `rcedit`
+(a devDependency). It runs as npm's `postinstall`, is idempotent (a stamp file next to it), builds
+a running copy aside rather than over it, and exits 1 with a plain reason on any failure. After
+`npm install electron@<x>` run `npm run quartz-exe` to be sure it was rebuilt. `npx electron .`
+test instances still run as `electron.exe` and are unaffected.
+
 The Start Menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Quartz.lnk` launches
-`electron.exe` with this project path as its argument and carries `System.AppUserModel.ID =
+`Quartz.exe` with this project path as its argument and carries `System.AppUserModel.ID =
 com.owensilva.quartz`, which Windows needs before it shows the app's toasts. `relink-shortcut.ps1`
 writes it (and reads it back); re-run it after moving the repo. The taskbar pin
-(`User Pinned\TaskBar\Browser.lnk`, same target) is made by hand: Windows 11 refuses scripted
-pinning, so a lost pin has to be re-done from the Start Menu.
+(`User Pinned\TaskBar\Browser.lnk`) is made by hand: Windows 11 refuses scripted pinning, so a
+lost pin has to be re-done from the Start Menu. `relink-shortcut.ps1 -Pin` retargets the existing
+pin in place (same file name, so Mantle keeps its order) from `electron.exe` to `Quartz.exe`.
 
 Settings → About has a "Restart browser" button, and the command palette has a "Restart browser"
 row. Either one flushes the session and the window state, releases any Spotify auto-pause hold,
@@ -108,7 +118,7 @@ Then do the last step by hand: **Settings → Apps → Default apps → Quartz �
 Windows 11 protects that choice with a hash no application can forge, so the script does not try
 — it only puts "Quartz" in the list.
 
-A clicked link arrives as a command line (`"electron.exe" "<app dir>" "%1"`). The first instance
+A clicked link arrives as a command line (`"Quartz.exe" "<app dir>" "%1"`). The first instance
 holds a single-instance lock, so every later copy hands its URL over and exits: the link opens as
 a foreground tab in the window that is already up, which is restored and focused. A URL on the
 command line at a cold start opens as a tab on top of the restored session.
@@ -1310,7 +1320,8 @@ one run before and one after.
 | `webapps.js` | The web-app catalogue: 30 entries with `web:<slug>` ids, URL, host, the desktop exe they pair with and a `drm` mark, plus `findWebApp`, `webAppForHost` (exact, then longest subdomain match), `webAppForExe`, `isWebAppId`, `isTerminalId`, `terminalProgram` and `DRM_NOTE`. Loads as a module or a script tag (`window.WEBAPPS` / `window.WebApps`), and is a first-paint seed on the new tab as well as the chrome's own table. |
 | `embed.js` | Native app tabs, main-process side: Win32 through koffi, required lazily. `findWindows` by pid or exe, `attach` in owner mode by default (the browser as `GWLP_HWNDPARENT`, `WS_POPUP`, `WS_EX_TOOLWINDOW`, positioned in screen space, no `SetParent` so the app's input queue is never joined to ours) with child mode kept as a per-call fallback, `layout` over a CSS-pixel rect with the display scale applied, `detach` back to a normal window, `close` as `WM_CLOSE` with a restore fallback, the 1s poll with its gone event, title pushes and the debounced `IsHungAppWindow` hung/recovered events, the owner-chain focus check and the `AttachThreadInput` keyboard handoff, the restore when an owner is lost, the refusal of store apps, tool windows, owned windows and our own, `SW_SHOWNOACTIVATE` so nothing steals focus, per-call error handling in attach recovery and detach, and `detachAll` on before-quit, window close and process exit. main.js wires `embed:find/attach/open/layout/detach/close/list` and the `embed:gone` push, guards a second open on the same tab, and detaches everything on `render-process-gone`; a missing koffi answers `{ok:false, reason:'unavailable'}` and startup is unaffected. app.js holds the native tab that the window is positioned over. |
 | `profilemove.js` | The one-time profile move for the app id change, pure node with fs injected: `%APPDATA%\browser` → `%APPDATA%\Quartz` by atomic rename, a short retry for a lock that is letting go, and a refusal (error box text included) for a held lock, both folders present, or anything that is not a folder. Inert while old and new are the same folder. main.js runs it before the single-instance lock. |
-| `relink-shortcut.ps1` | Writes Start Menu → `Quartz.lnk` (electron.exe + this folder, the repo icon) with `System.AppUserModel.ID = com.owensilva.quartz` through IShellLinkW + IPropertyStore compiled by Add-Type, reads it back, and only then removes an old `Browser.lnk` of ours. Leaves the taskbar pin alone. |
+| `relink-shortcut.ps1` | Writes Start Menu → `Quartz.lnk` (Quartz.exe + this folder, the repo icon) with `System.AppUserModel.ID = com.owensilva.quartz` through IShellLinkW + IPropertyStore compiled by Add-Type, reads it back, and only then removes an old `Browser.lnk` of ours (electron.exe or Quartz.exe). Leaves the taskbar pin alone unless `-Pin`, which retargets it in place to Quartz.exe (built and read back in %TEMP%, original kept there). |
+| `tools/make-quartz-exe.js` | npm `postinstall` (and `npm run quartz-exe`): copies `electron.exe` to `Quartz.exe` in the same dist folder and stamps FileDescription/ProductName "Quartz" and `assets\browser.ico` with rcedit, so Task Manager says Quartz. Idempotent via `Quartz.exe.stamp.json`; swaps a running copy aside; exits 1 with a plain reason on any failure. |
 | `bgfiles.js` | The moving-picture file rules, pure: the mp4/webm/mov/m4v/gif allowlist, the 512 MB cap, the copy into `userData/backgrounds/newtab-bg.<ext>` with older copies removed, and the file URL it hands back. main.js answers `background:choose-video` and `background:clear-video` through it. |
 | `autopause.js` | Spotify auto-pause, main-process side: the client for the `~/spotify-autopause` bridge, the scheduled-task switch and its direct-launch fallback, the watch over audible guests and the hold machine, `autopause.json`, and `doctor.ps1`. Its pure halves (host matching, the hold machine, response parsing) are exported, so they run under plain node with no Electron in the process. |
 | `terminal.js` | `window.ClaudeTerminal`: one xterm.js instance per Claude tab, lazy open, id dispatch, restart, the `activity`/`idle`/`bell` attention events, and the paste queue that waits for a session's first quiet — and, while a trust or safety prompt is on screen, for the quiet after that. |
