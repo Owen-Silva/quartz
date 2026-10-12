@@ -35,6 +35,57 @@ function subscribe(channel, cb) {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
+/*
+ * Top-row hints (toprow-main.js createClient): the pipe client lives here, in
+ * the chrome's own process (sandbox is off for this window, so Node's net is
+ * available to the preload and never to the page). Main answers toprow:config
+ * with this window's HWND, the pipe and whether this is a test window, and
+ * sends toprow:window for what only main sees (maximize, fullscreen, pop-ups).
+ * Until the config is in, the last hint is kept and goes out with it.
+ */
+const toprowListeners = new Set();
+let toprowClient = null;
+let toprowEarly = null;              // { top, t } before the client exists
+const toprowEvents = [];
+let toprowNote = { state: 'starting', reason: 'asking main for this window' };
+function toprowStatus() { return toprowClient ? toprowClient.status() : Object.assign({}, toprowNote); }
+function toprowTell(s) { for (const cb of toprowListeners) { try { cb(s); } catch (err) { /* the page's problem */ } } }
+function toprowHint(top, t) {
+  if (toprowClient) toprowClient.hint(top, t);
+  else toprowEarly = { top, t };
+}
+function toprowEvent(m) {
+  if (!m || !toprowClient) { if (m) toprowEvents.push(m); return; }
+  if (m.event === 'create') toprowClient.window(m.hwnd, { chrome: false });
+  else toprowClient.event(m.hwnd, m.event);
+}
+ipcRenderer.on('toprow:window', (_event, m) => toprowEvent(m));
+ipcRenderer.invoke('toprow:config').then((cfg) => {
+  if (!cfg || !cfg.hwnd) {
+    toprowNote = { state: 'off', reason: 'main did not name this window (not the chrome window?)' };
+    toprowTell(toprowStatus());
+    return;
+  }
+  try {
+    const { createClient } = require('./toprow-main.js');
+    toprowClient = createClient({
+      net: require('net'), pipe: cfg.pipe, disabled: cfg.disabled,
+      log: (line) => console.log('[toprow] ' + line),
+      onStatus: toprowTell,
+    });
+    toprowClient.window(cfg.hwnd, { chrome: true, fullscreen: !!cfg.fullscreen });
+    if (toprowEarly) { toprowClient.hint(toprowEarly.top, toprowEarly.t); toprowEarly = null; }
+    while (toprowEvents.length) toprowEvent(toprowEvents.shift());
+  } catch (err) {
+    toprowClient = null;
+    toprowNote = { state: 'off', reason: 'the pipe client could not start (' + ((err && err.message) || err) + ')' };
+  }
+  toprowTell(toprowStatus());
+}, (err) => {
+  toprowNote = { state: 'off', reason: 'main did not answer (' + ((err && err.message) || err) + ')' };
+  toprowTell(toprowStatus());
+});
+
 contextBridge.exposeInMainWorld('api', {
   homeDir: HOME_DIR,
   // Shortcuts the main process caught on our behalf because focus was inside a
@@ -197,6 +248,19 @@ contextBridge.exposeInMainWorld('api', {
     onDesktop: (cb) => subscribe('looksync:desktop', cb),
     onPlace: (cb) => subscribe('looksync:place', cb),
     onSystemTheme: (cb) => subscribe('looksync:system-theme', cb)
+  },
+  // Top-row hints for Mantle's top bar (toprow.js -> the pipe client below
+  // -> Mantle). hint() writes to the pipe from THIS process, in the page's
+  // task: no hop through main, whose busy event loop held hints back.
+  toprow: {
+    hint: (top, t) => toprowHint(top, t),
+    // -> { state: 'connected'|'connecting'|'waiting'|'off'|'starting', reason, pipe, sent, ... }
+    status: () => toprowStatus(),
+    onStatus: (cb) => {
+      if (typeof cb !== 'function') return () => {};
+      toprowListeners.add(cb);
+      return () => toprowListeners.delete(cb);
+    }
   },
   // The idle music player's own tracks. Nothing is copied: main runs the picker
   // and hands back descriptors, and the chrome plays each file where it lies

@@ -36,6 +36,10 @@ const lookSyncMain = require('./looksync-main');
 // Look Sync (looksync-main.js): installed once the app is ready (it needs
 // screen and powerMonitor), then attached to the chrome window in createWindow.
 let lookSync = null;
+// Top-row hints for Mantle's top bar (toprow-main.js): the pipe client runs in
+// the chrome's preload; main only tells it its HWND and the window events.
+const toprowMain = require('./toprow-main');
+let toprow = null;
 const schoolModule = require('./school');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
@@ -734,6 +738,7 @@ function createWindow() {
 
   acrylicActive = acrylic;
   if (lookSync) lookSync.attachWindow(win);
+  if (toprow) toprow.attachWindow(win, { chrome: true });
 
   // Electron 44 still lets a guest <webview> request its own preload / node
   // integration. Strip both so a page we navigate to can never elevate itself.
@@ -980,6 +985,7 @@ app.whenReady().then(() => {
     app, ipcMain, send, liveWin, isChromeSender, nativeTheme,
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
   });
+  toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
   createWindow();
 
   // A link that STARTED the browser: its tab goes in on top of the session the
@@ -4927,6 +4933,9 @@ function adoptPopupWindow(child) {
   try {
     child.setMenuBarVisibility(false);
   } catch {}
+  // Its top row is Windows' own caption, which Quartz cannot describe:
+  // Mantle hears "none" for it (its own capture), never a stale hint.
+  try { if (toprow) toprow.attachWindow(child, { chrome: false }); } catch { /* hints only */ }
 
   const wc = child.webContents;
   if (wc && !wc.isDestroyed()) {

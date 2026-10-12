@@ -2410,9 +2410,62 @@
     var skipped = el('ul', 'set-look-skipped');
     skipped.setAttribute('data-look-skipped', '');
     field.appendChild(skipped);
+    var hints = el('p', 'set-look-status');
+    hints.setAttribute('data-toprow-status', '');
+    hints.setAttribute('role', 'status');
+    field.appendChild(hints);
     field.appendChild(el('p', 'set-hint',
       'Theme, accent colour and glass stay the same in Quartz, Helm and Mantle. The background choice is always this app’s own.'));
     renderLookStatus();
+    renderToprowStatus();
+  }
+
+  /* ---- Top bar hints (toprow.js -> toprow-main.js -> Mantle's pipe) ----
+     One line under the sync status: is Mantle listening, what Quartz is
+     telling it about its top row, and why when it is not (Mantle not
+     running, a test window, "can't say" with the reason). */
+  function alphaWords2(a) {
+    var v = Math.round(Number(a) * 100) / 100;
+    return isFinite(v) ? (v >= 1 ? '1' : '.' + String(Math.round(v * 100)).padStart(2, '0')) : '?';
+  }
+
+  function toprowTopWords(st) {
+    var top = st && st.top;
+    if (!top) return '';
+    if (top.kind === 'wash') return 'the wallpaper under a ' + alphaWords2(top.alpha) + ' wash';
+    if (top.kind === 'flat') return 'a flat colour, rgb(' + top.rgb.join(', ') + ')';
+    if (top.kind === 'cols') return 'the picture, ' + top.cols.length + ' columns across';
+    return '“can’t say”' + (st.why ? ' (' + st.why + ')' : '') + ', so it reads the screen';
+  }
+
+  function toprowText(st) {
+    if (!st) return 'Top bar hints: not loaded in this window (toprow.js is missing), so Mantle reads the screen to colour its top bar.';
+    var m = st.main || {};
+    var what = toprowTopWords(st);
+    var secs = Math.round((m.retryMs || 2000) / 1000);
+    if (m.state === 'connected') {
+      return 'Top bar hints: Mantle connected' + (what ? ', telling it ' + what : '') +
+        (isLight() ? ' (Mantle uses them in dark only)' : '') + '.';
+    }
+    if (m.state === 'waiting') {
+      return 'Top bar hints: ' + (m.reason || 'Mantle can’t be reached') + '. Trying again every ' + secs +
+        ' s; meanwhile Mantle reads the screen.';
+    }
+    if (m.state === 'connecting' || m.state === 'starting') return 'Top bar hints: connecting to Mantle…';
+    return 'Top bar hints: ' + (m.reason || m.state || 'off') + '.';
+  }
+
+  function renderToprowStatus() {
+    var line = bodyEl && bodyEl.querySelector('[data-toprow-status]');
+    if (!line) return;
+    var T = window.Toprow;
+    var st = null;
+    try { st = T && typeof T.status === 'function' ? T.status() : null; } catch (err) { st = null; }
+    var state = st ? String((st.main && st.main.state) || 'starting') : 'nomodule';
+    var cls = state === 'connected' ? 'ok' : state === 'waiting' ? 'missing' : state === 'connecting' ? 'starting' : state;
+    line.className = 'set-look-status is-' + cls.replace(/[^a-z-]/gi, '');
+    line.setAttribute('data-state', state);
+    line.textContent = toprowText(st);
   }
 
   /** Just the status line (lookstatus fires on every change of it). */
@@ -7272,6 +7325,7 @@
    * for remote applies and fallbacks. Every message is toasted once.
    */
   function wireLookSync() {
+    document.addEventListener('toprowstatus', renderToprowStatus);
     document.addEventListener('lookstatus', function (event) {
       renderLookStatus();
       var st = (event && event.detail) || lookCall('status');

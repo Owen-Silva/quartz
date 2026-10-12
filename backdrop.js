@@ -1140,12 +1140,16 @@
 
     var corner = null;
     try { corner = ctx.getImageData(0, 0, 1, 1).data[3]; } catch (err) { corner = null; }
-    /* The pixels the guard reads, read ONCE here: lined, the whole bitmap
-       (the band moves with the window); otherwise the top band only. */
+    /* The pixels the guard reads, read ONCE here: the whole bitmap. Lined,
+       the band moves with the window; not lined, the guard reads the top
+       band only, but toprow.js (top bar hints for Mantle) samples the row
+       at the window's top edge, which cover-fit can put below that band
+       (a wide, short window), so the whole bitmap is kept either way
+       (~0.75 MB at 1920x1080, the size lined has always kept). */
     var band = p.lined ? null : topBand(W, H);
     var pixels = null;
     try {
-      var readH = p.lined ? outH : band.y1;
+      var readH = outH;
       pixels = { data: ctx.getImageData(0, 0, outW, readH).data, w: outW, h: readH };
     } catch (err) { pixels = null; }   // unreadable: the guard keeps the floor
 
@@ -1816,6 +1820,26 @@
     setHome: setHome,
     recopyWallpaper: recopyWallpaper,
     stillKey: stillKey,
+    /* toprow.js (top bar hints for Mantle): which picture is on the layer
+       and how it maps onto the window. shown = a blurred bitmap is on
+       .bg-photo; srcKey 'desktop|<stillUrl>' when it is Mantle's still,
+       deskStillUrl = the still Mantle's record names right now (null when
+       the record is not usable), so "the layer shows the current shared
+       still" is srcKey === 'desktop|' + deskStillUrl. pixels = the blurred
+       bitmap (outW x outH RGBA, pre-JPEG), layout = the lined geometry
+       (null when cover-fitted to the window), place = LookSync's last
+       valid place. Read-only: nothing here is copied. */
+    toprowSource: function () {
+      var d = deskInfo();
+      return {
+        kind: current.kind, state: current.state,
+        shown: !!shown, srcKey: shown ? shown.srcKey : null, lined: !!(shown && shown.lined),
+        layout: shown ? shown.layout : null, pixels: shown ? shown.pixels : null,
+        outW: shown && shown.info ? shown.info.outWidth : null,
+        outH: shown && shown.info ? shown.info.outHeight : null,
+        place: placeNow, deskStillUrl: d && d.state === 'ok' ? d.stillUrl : null
+      };
+    },
     // test seams
     _lastRender: function () {
       if (!lastRender) return null;
