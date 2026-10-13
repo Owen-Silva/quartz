@@ -1,4 +1,4 @@
-/* VENDORED from ~/look-sync commit 4f82c4b (look-sync.js), Owen-Silva/look-sync.
+/* VENDORED from ~/look-sync commit 8b9e452 (look-sync.js), Owen-Silva/look-sync.
    Do not edit this copy: change ~/look-sync, run its tests, then `node looksync/vendor.js <commit>`. */
 'use strict';
 /*
@@ -12,11 +12,13 @@
  *   const LS = require('./look-sync');
  *   const sync = LS.create({ app: 'helm', enabled: true, local: () => ({ theme, accent, glass }) });
  *   sync.on('status',  s => ...)  // { state: ok|missing|corrupt|newer|off|error, reason, rev, by, at, skipped }
+ *                                 //   recovered: 'corrupt' on the ok right after a damaged file was moved aside and re-seeded
  *   sync.on('apply',   e => ...)  // { changes: { theme?, accent?, glass? }, by, rev, cause: remote|adopt|seed }
  *   sync.on('desktop', d => ...)  // the desktop record (or null) + reason; delivered even while sync is OFF
  *   sync.start();                 // read (seed if missing), then watch the folder
  *   await sync.publish('theme', 'light');   // -> { ok, rev, reason }   (never throws)
  *   await sync.setEnabled(false|true);      // the per-app switch, section 5
+ *   sync.readOnlyNow();           // -> reason while a newer-schema file is on disk NOW, else null
  *   sync.refresh();               // call on window focus and on resume from sleep
  *   sync.close();
  *
@@ -219,7 +221,7 @@ class LookSync extends EventEmitter {
     this.local = typeof opts.local === 'function' ? opts.local : () => ({});
     this.fs = opts.fs || fs;
     this.retryDelays = opts.retryDelays || [50, 100, 200];
-    this.debounceMs = opts.debounceMs != null ? opts.debounceMs : 150;
+    this.debounceMs = opts.debounceMs != null ? opts.debounceMs : 50; // writes are atomic renames: 50 ms coalesces the burst (was 150; the 1 s follow target)
     this.corruptRetryMs = opts.corruptRetryMs != null ? opts.corruptRetryMs : 250;
     this.rewatchDelays = opts.rewatchDelays || [1000, 5000, 30000];
     this.now = opts.now || (() => new Date());
@@ -245,6 +247,16 @@ class LookSync extends EventEmitter {
     const d = this.doc && this.doc.desktop;
     if (!d) return { record: null, reason: "Mantle hasn't shared a desktop wallpaper yet" };
     return { record: clone(d), reason: d.ok ? null : (d.reason || 'Mantle reported the wallpaper is unavailable') };
+  }
+  // Read-only RIGHT NOW? Re-reads the file (sync, cheap) instead of trusting the last status, so a newer
+  // file that was just deleted or replaced never blocks a change while its watch event is still in flight
+  // (or was missed). When it is no longer newer, a check is queued so the status catches up. -> reason | null
+  readOnlyNow() {
+    if (this.closed) return null;
+    const r = read(this.dir, this.fs);
+    if (r.state === 'newer') { this.readOnly = true; return r.reason; }
+    if (this.readOnly || this._status.state === 'newer') { this.readOnly = false; this.lastHash = null; this._check({}); }
+    return null;
   }
   shared() { return this.doc ? clone(this.doc.look) : null; }
 
@@ -350,7 +362,7 @@ class LookSync extends EventEmitter {
     if (r.hash && r.hash === this.lastHash && r.state === 'ok') return; // no-op event
 
     if (r.state === 'missing') {
-      this.lastHash = null;
+      this.lastHash = null; this.readOnly = false; // a deleted newer file no longer makes this app read-only
       if (ctx.startup && this.enabled) return this._seed('first');
       if (this.hadFile) return this._emitStatus('missing', 'Not shared yet: file was removed');
       return this._emitStatus('missing', 'Not shared yet');
@@ -426,7 +438,12 @@ class LookSync extends EventEmitter {
       this.emit('apply', { changes: clone(vals), by: this.app, rev, cause: 'seed', fromSync: true });
       return this._emitStatus('ok', 'Look sync started from the shared defaults (Dark), seeded by ' + appName(this.app));
     }
-    if (corruptNote) return this._emitStatus('corrupt', corruptNote);
+    if (corruptNote) {
+      // Say the damage once (apps toast a 'corrupt' fallback), then the TRUE state: the file is healthy again,
+      // written from this app's values. The reason rides on the 'ok' status until the next change.
+      this._emitStatus('corrupt', corruptNote);
+      return this._emitStatus('ok', corruptNote, { recovered: 'corrupt' });
+    }
     return this._emitStatus('ok', 'Look sync started from ' + appName(this.app) + "'s settings");
   }
 
