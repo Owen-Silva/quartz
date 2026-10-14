@@ -1,4 +1,4 @@
-/* VENDORED from ~/look-sync commit 8b9e452 (look-sync.js), Owen-Silva/look-sync.
+/* VENDORED from ~/look-sync commit 0b55b9c (look-sync.js), Owen-Silva/look-sync.
    Do not edit this copy: change ~/look-sync, run its tests, then `node looksync/vendor.js <commit>`. */
 'use strict';
 /*
@@ -36,10 +36,11 @@ const FILE = 'look.json';
 const FIELDS = ['theme', 'accent', 'glass'];
 const APP_NAMES = { helm: 'Helm', quartz: 'Quartz', mantle: 'Mantle' };
 
-// The agreed first seed (The user, 2026-10-10): Dark; glass from today's matched
-// dark values; light values exactly as the contract has them.
+// The first seed: Match Windows (2026-10-14, when the user un-held the light look;
+// the 2026-10-10 seed was Dark). Glass from the 10-10 matched dark values; light
+// values = Mantle's island light (CONTRACT "Light look").
 const SEED = Object.freeze({
-  theme: 'dark',
+  theme: 'system',
   accent: Object.freeze({ hue: null }),
   glass: Object.freeze({
     dark: Object.freeze({ blurPx: 5, dim: 0.50, panel: 0 }),
@@ -424,7 +425,7 @@ class LookSync extends EventEmitter {
   }
 
   async _seed(kind, corruptNote) {
-    // kind 'first': the agreed SEED (The user: start on Dark). 'local': this app's values.
+    // kind 'first': the agreed SEED (Match Windows). 'local': this app's values.
     const vals = kind === 'first' ? clone(SEED) : Object.assign(clone(SEED), validLocal(this.local()));
     const doc = this._baseDoc();
     if (this.doc && this.doc.desktop) doc.desktop = clone(this.doc.desktop);
@@ -436,7 +437,7 @@ class LookSync extends EventEmitter {
     if (kind === 'first') {
       // This app adopts the seed so all three start on the same look.
       this.emit('apply', { changes: clone(vals), by: this.app, rev, cause: 'seed', fromSync: true });
-      return this._emitStatus('ok', 'Look sync started from the shared defaults (Dark), seeded by ' + appName(this.app));
+      return this._emitStatus('ok', 'Look sync started from the shared defaults (Match Windows), seeded by ' + appName(this.app));
     }
     if (corruptNote) {
       // Say the damage once (apps toast a 'corrupt' fallback), then the TRUE state: the file is healthy again,

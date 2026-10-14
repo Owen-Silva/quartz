@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const PINNED = '8b9e452';
+const PINNED = '0b55b9c';
 const SRC_REPO = process.env.LOOK_SYNC_REPO || path.join(require('os').homedir(), 'look-sync');
 const FILES = ['look-sync.js', 'accent.js', 'windows-mode.js'];
 const HERE = __dirname;
