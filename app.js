@@ -348,7 +348,9 @@ function keywordUrlFor(text) {
   if (!keywords || typeof keywords.match !== 'function') return null;
   try {
     const hit = keywords.match(text);
-    if (hit && typeof hit.url === 'string' && /^https?:\/\//i.test(hit.url)) return hit.url;
+    // Quartz's own results page is the one non-web target a keyword may have
+    // ("b <words>" when Brave is the engine; keywords.js asks settings.js).
+    if (hit && typeof hit.url === 'string' && (/^https?:\/\//i.test(hit.url) || isSearchPageUrl(hit.url))) return hit.url;
   } catch (err) { /* fall through to the plain search */ }
   return null;
 }
@@ -4486,6 +4488,21 @@ function replayFilesBootList(tab) {
   return handleFilesLine(tab, early.viewEl, early.text);
 }
 
+/**
+ * `quartz-search:settings {}` from our results page: open Settings at Search,
+ * where the Brave key goes. Any other guest printing it is ignored. The
+ * search itself never comes through here: main (bravesearch.js) answers the
+ * page directly, so the key never enters this renderer.
+ */
+function handleSearchPageLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl || !isSearchPageUrl(tab.url)) return false;
+  if (typeof text !== 'string' || text.trim() !== 'quartz-search:settings {}') return false;
+  const settings = window.Settings;
+  if (!settings || typeof settings.open !== 'function') return false;
+  try { settings.open('Search'); } catch (err) { return false; }
+  return true;
+}
+
 /** The Files tab already open, or null. There is only ever one. */
 function findFilesTab() {
   for (const tab of tabs) {
@@ -5135,6 +5152,23 @@ function readerSourceOf(url) {
   return source.href;
 }
 
+// search.html is Quartz's own results page (Brave Search API, through main's
+// bravesearch.js). Like Files it is a bundled, preload-less guest wearing the
+// look from its URL; the omnibox shows the search, not the file:// address.
+const SEARCH_PAGE_URL = new URL('search.html', window.location.href).href;
+
+/** True for Quartz's own results page, any query and any tab of it. */
+function isSearchPageUrl(url) {
+  return typeof url === 'string' && url.indexOf(SEARCH_PAGE_URL) === 0;
+}
+
+/** The words behind a results-page URL, or ''. */
+function searchPageQueryOf(url) {
+  if (!isSearchPageUrl(url)) return '';
+  const parsed = parseUrlOrNull(url);
+  return (parsed && parsed.searchParams.get('q')) || '';
+}
+
 // phone.html is the user's phone on the screen — the Phone workspace's own page,
 // and the tab that workspace opens when it has none. Like the new tab page and
 // the folder browser it is a bundled, preload-less file:// guest; unlike them
@@ -5154,6 +5188,8 @@ function shortLabelFor(url) {
   // The Phone page the same way: "Phone" from the first frame, not "New tab"
   // until phone.html's own <title> arrives.
   if (isPhoneUrl(url)) return 'Phone';
+  // Our results page reads as the search until its own <title> lands.
+  if (isSearchPageUrl(url)) return searchPageQueryOf(url) || 'Search';
   // Local pages (the new-tab page above all) have no hostname worth showing.
   if (parsed && parsed.protocol === 'file:') return 'New tab';
   if (parsed && parsed.hostname) return parsed.hostname.replace(/^www\./, '');
@@ -5186,7 +5222,7 @@ function getTheme() {
 function pushThemeToTab(tab, theme) {
   // The Files page wears the same tokens and follows the same switch: without
   // this, flipping to light leaves an open folder browser dark until a reload.
-  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url))) return;
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url))) return;
   if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -5601,8 +5637,9 @@ function setOmniboxValue(url, force) {
   // and so is the Phone page's — neither is an address the user ever typed.
   const blank = !url || url === 'about:blank' || isNewTabUrl(url)
     || isFilesUrl(url) || isPhoneUrl(url) || ours;
-  // A reader tab shows the article it is reading, not our wrapper page.
-  omniboxEl.value = blank ? '' : (readerSourceOf(url) || url);
+  // A reader tab shows the article it is reading, not our wrapper page, and
+  // our results page shows the search itself: Enter on it searches again.
+  omniboxEl.value = blank ? '' : (searchPageQueryOf(url) || readerSourceOf(url) || url);
 }
 
 function syncOmniboxFromActive(force) {
@@ -10488,6 +10525,12 @@ function wireViewEvents(tab) {
   // answered on window.__applyFiles / __applyFileIcons / __applyFileResult.
   viewEl.addEventListener('console-message', (event) => {
     handleFilesLine(tab, viewEl, event && event.message);
+  });
+
+  // Our results page has one ask of the chrome: "Open Settings > Search" on
+  // its no-key / bad-key / limit panels. Heard only from that page.
+  viewEl.addEventListener('console-message', (event) => {
+    handleSearchPageLine(tab, viewEl, event && event.message);
   });
 
   // The idle music tile's three controls, `newtab:music {json}`, answered on

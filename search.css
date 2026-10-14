@@ -1,0 +1,374 @@
+@import url("tokens.css");
+
+/* ============================================================
+   search.css — Quartz's own results page (search.html).
+
+   Helm's look, by Helm's names, like files.css: every colour,
+   hairline, radius and font comes from tokens.css, so light, dark,
+   the palettes and a custom hue are decided there. html[data-theme]
+   / [data-palette] are set by newtab-theme.js before first paint and
+   re-set by the chrome on a theme flip.
+
+   A plain file:// tab with no photo behind it: the canvas is flat
+   --bg, the header is the window-chrome tint (--surface-0) over a
+   hairline, and the results are a LIST, not cards: no fills at rest,
+   one quiet column, the accent on links and state only. The problem
+   panel is the one raised surface. Motion: colour fades at --dur
+   (120 ms), nothing else moves.
+   ============================================================ */
+
+* { box-sizing: border-box; }
+
+/* The gutter is kept even without a scrollbar, so the column sits in the
+   same place on a long results page and a short problem panel. */
+html { background: var(--bg); scrollbar-gutter: stable; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  line-height: var(--lh);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+
+::selection { background: var(--ion-select); color: inherit; }
+:focus { outline: none; }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-xs); }
+
+a { color: inherit; text-decoration: none; }
+
+.sr-glyph { font-family: var(--icon-font); font-size: 10px; line-height: 1; }
+
+/* One column, the same width under the header and down the page. */
+.sr-head-in,
+.sr-main,
+.sr-foot p {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding-left: var(--space-5);
+  padding-right: var(--space-5);
+}
+
+/* --- header -------------------------------------------------- */
+.sr-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+}
+/* The tint sits on the solid --bg so results never show through it. */
+.sr-head::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface-0);
+  pointer-events: none;
+}
+.sr-head-in { position: relative; padding-top: var(--space-4); }
+
+.sr-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.sr-query {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Brave's terms (§4(d)): "POWERED BY BRAVE", conspicuous. A small
+   instrument label: caps, tracked, the third ink, a hairline pill. */
+.sr-attrib {
+  flex: none;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.sr-head .sr-attrib {
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.sr-attrib:hover { color: var(--text); border-color: var(--hairline-strong); }
+
+.sr-row2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 44px;
+}
+
+/* Tabs: words on the bar, the current one underlined in the accent.
+   The underline sits ON the header's hairline, like a tab strip. */
+.sr-tabs { display: flex; align-self: stretch; gap: var(--space-1); }
+.sr-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-weight: 500;
+  transition: color var(--dur) var(--ease);
+}
+.sr-tab:hover { color: var(--text); }
+.sr-tab.is-on { color: var(--text); }
+.sr-tab.is-on::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+.sr-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sr-plain {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  transition: color var(--dur) var(--ease);
+}
+.sr-plain:hover { color: var(--text); }
+
+/* --- main ---------------------------------------------------- */
+.sr-main { flex: 1 0 auto; padding-top: var(--space-4); padding-bottom: var(--space-6); }
+
+.sr-altered {
+  margin: 0 0 var(--space-4);
+  color: var(--text-2);
+}
+.sr-altered strong { color: var(--text); font-weight: 600; }
+
+.sr-results { list-style: none; margin: 0; padding: 0; }
+
+.sr-result { padding: var(--space-3) 0 var(--space-4); }
+.sr-result + .sr-result { border-top: 1px solid var(--hairline); }
+
+/* The site line: favicon well, host, path. */
+.sr-site {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: 4px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+.sr-site-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-host { color: var(--text-2); }
+.sr-path { color: var(--text-3); }
+
+.sr-fav {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+}
+.sr-fav img { position: absolute; width: 14px; height: 14px; }
+.sr-fav-letter { font-size: 10px; font-weight: 600; color: var(--text-3); }
+.sr-fav.has-img .sr-fav-letter { visibility: hidden; }
+
+.sr-title {
+  display: inline;
+  color: var(--accent);
+  font-size: var(--fs-l);
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.sr-title:hover { text-decoration-color: currentColor; }
+.sr-title:visited { color: color-mix(in srgb, var(--accent) 62%, var(--text-3)); }
+.sr-title strong { font-weight: 600; }
+
+.sr-desc {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-s);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.sr-desc strong { color: var(--text); font-weight: 600; }
+.sr-age { color: var(--text-3); }
+
+/* News: the words, then a thumbnail at the right. */
+.sr-news { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4); align-items: start; }
+.sr-thumb {
+  position: relative;
+  display: block;
+  width: 112px;
+  height: 72px;
+  margin-top: 26px;
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+}
+.sr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sr-thumb.is-empty { visibility: hidden; }
+
+/* Videos: a 16:9 thumbnail at the left, its length on it. */
+.sr-video { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.sr-video .sr-site { margin: 4px 0 0; }
+.sr-thumb-wide { width: 176px; height: 99px; margin-top: 2px; }
+.sr-thumb-wide.is-empty { visibility: visible; }
+.sr-duration {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: rgba(12, 13, 14, 0.78);
+  color: #f2f2f0;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading: still blocks where results will land. No shimmer: a
+   moving gradient repaints every frame for nothing. */
+.sr-skeleton { display: grid; gap: 8px; }
+.sr-sk { display: block; height: 10px; border-radius: var(--radius-xs); background: var(--surface-2); }
+.sr-sk-site { width: 140px; }
+.sr-sk-title { width: 62%; height: 16px; }
+.sr-sk-line { width: 94%; }
+.sr-sk-short { width: 70%; }
+
+/* --- the problem panel -------------------------------------- */
+.sr-problem {
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-l);
+  background: var(--surface-1);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+}
+.sr-problem-head { display: flex; align-items: center; gap: 10px; }
+.sr-problem-title { margin: 0; font-family: var(--font-display); font-size: var(--fs-l); font-weight: 600; }
+.sr-pip {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--info);
+}
+.sr-problem[data-problem="bad-key"] .sr-pip,
+.sr-problem[data-problem="offline"] .sr-pip,
+.sr-problem[data-problem="server"] .sr-pip,
+.sr-problem[data-problem="bad-answer"] .sr-pip,
+.sr-problem[data-problem="no-answer"] .sr-pip { background: var(--danger); }
+.sr-problem[data-problem="rate-limited"] .sr-pip,
+.sr-problem[data-problem="quota"] .sr-pip,
+.sr-problem[data-problem="plan"] .sr-pip { background: var(--warn); }
+.sr-problem[data-problem="empty"] .sr-pip,
+.sr-problem[data-problem="no-query"] .sr-pip { background: var(--text-3); }
+
+.sr-problem-detail {
+  margin: var(--space-2) 0 0 18px;
+  max-width: 62ch;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.sr-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0 0 18px; }
+
+/* Helm .btn: a --surface-2 face, hairline, 1px inner top edge. */
+.sr-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-s);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.sr-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+.sr-btn-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.sr-btn-primary:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); border-color: var(--accent); }
+
+/* --- pager --------------------------------------------------- */
+.sr-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+.sr-pager[hidden], .sr-pager [hidden] { display: none; }
+.sr-page { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+
+/* --- footer -------------------------------------------------- */
+.sr-foot { border-top: 1px solid var(--hairline); }
+.sr-foot p {
+  margin: 0 auto;
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-4);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  line-height: 1.6;
+}
+.sr-foot .sr-attrib { margin-right: 8px; }
+
+@media (max-width: 560px) {
+  .sr-head-in, .sr-main, .sr-foot p { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .sr-plain { display: none; }
+  .sr-thumb { width: 84px; height: 56px; }
+  .sr-video { grid-template-columns: minmax(0, 1fr); }
+  .sr-thumb-wide { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+}

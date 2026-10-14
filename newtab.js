@@ -4108,8 +4108,25 @@ const SEARCH_ENGINES = {
   duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
   bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=' },
   brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=' },
-  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/do/search?q=' }
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/do/search?q=' },
+  // Quartz's own results page (search.html, next to this file), fed by the
+  // Brave Search API through main. `own` makes searchTarget() build it.
+  'brave-api': { name: 'Brave',     url: 'https://search.brave.com/search?q=', own: true }
 };
+
+/** Quartz's own results page for `q`, wearing this page's look. */
+function ownResultsUrl(q) {
+  const p = new URLSearchParams();
+  p.set('q', q);
+  const root = document.documentElement;
+  const theme = root.getAttribute('data-theme');
+  p.set('theme', theme === 'light' ? 'light' : 'dark');
+  const palette = root.getAttribute('data-palette');
+  if (palette) p.set('palette', palette);
+  const hue = typeof window.__accentHue === 'function' ? window.__accentHue() : null;
+  if (typeof hue === 'number' && isFinite(hue)) p.set('hue', String(hue));
+  return new URL('search.html', window.location.href).href + '?' + p.toString();
+}
 
 let searchEngineKey = 'google';
 
@@ -4138,6 +4155,7 @@ function searchTarget(text) {
   if (!q) return '';
   const typed = parseTypedAddress(q);
   if (typed && typed.url) return typed.url;
+  if (searchEngine().own) return ownResultsUrl(q);
   return searchEngine().url + encodeURIComponent(q);
 }
 

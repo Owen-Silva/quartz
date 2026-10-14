@@ -773,6 +773,16 @@
     panel.style.top = Math.round(box.bottom + PANEL_GAP) + 'px';
   }
 
+  /** How the omnibox names a search that lands on Quartz's own results page. */
+  var OWN_RESULTS_LABEL = 'Brave search, on Quartz’s results page';
+
+  /** True for Quartz's own results page (settings.js knows its address). */
+  function isOwnResults(url) {
+    var settings = window.Settings;
+    if (!settings || typeof settings.isOwnResultsUrl !== 'function') return false;
+    try { return !!settings.isOwnResultsUrl(url); } catch (err) { return false; }
+  }
+
   /** A results page rather than a destination: Google, Bing, DDG, Yahoo. */
   function isSearchUrl(url) {
     var parsed = parseUrl(url);
@@ -1394,14 +1404,25 @@
         url: target,
         glyph: GLYPH_SEARCH,
         primary: kwQuery ? 'Search ' + kw.name + ' for “' + kwQuery + '”' : 'Search ' + kw.name,
-        secondary: target,
+        secondary: isOwnResults(target) ? OWN_RESULTS_LABEL : target,
         faint: true,
         words: null
       });
     } else {
       target = navUrlFor(query);
       if (target) {
-        if (isSearchUrl(target)) {
+        if (isOwnResults(target)) {
+          // Quartz's own results page: the search, never its file:// address.
+          addRow({
+            kind: 'default',
+            url: target,
+            glyph: GLYPH_SEARCH,
+            primary: query,
+            secondary: OWN_RESULTS_LABEL,
+            faint: true,
+            words: null
+          });
+        } else if (isSearchUrl(target)) {
           addRow({
             kind: 'default',
             url: target,

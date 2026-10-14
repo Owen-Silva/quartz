@@ -265,6 +265,9 @@
 }
 
 #settings-panel .set-field + .set-field { margin-top: 10px; }
+/* A field that follows a hint line rather than another field (the Brave
+   key under the engine list's hint) gets the same air above it. */
+#settings-panel .set-hint + .set-field-gap { margin-top: 14px; }
 
 /* ============================================================
    Controls

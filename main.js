@@ -31,6 +31,7 @@ const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
+const braveSearchModule = require('./bravesearch');
 const budgetModule = require('./budget');
 const lookSyncMain = require('./looksync-main');
 // Look Sync (looksync-main.js): installed once the app is ready (it needs
@@ -346,6 +347,23 @@ const stocks = stocksModule.create({
   ipcMain,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
+});
+
+/**
+ * Quartz's own search results page (bravesearch.js + search.html). The Brave
+ * Search API key lives in <userData>/brave-search.json and, like the Finnhub
+ * key, never comes back out: IPC answers a mask and a boolean. Only a TEST
+ * profile may point it somewhere else (a mock server, via QUARTZ_BRAVE_API),
+ * so a live Quartz always talks to Brave itself.
+ */
+const braveSearch = braveSearchModule.create({
+  app,
+  ipcMain,
+  isChromeSender: (event) => isChromeSender(event),
+  isBundledPage: (url) => isBundledPageUrl(url),
+  apiBase: process.argv.includes('--test-profile') && process.env.QUARTZ_BRAVE_API
+    ? process.env.QUARTZ_BRAVE_API
+    : undefined,
 });
 
 /**
@@ -3327,6 +3345,10 @@ function dumpMenu(where, template) {
   } catch (err) {
     console.error('[menu-dump] could not write:', err.message);
   }
+  // The dumped template stays reachable from main's inspector, so a harness
+  // can click an item exactly as the menu would (bravesearch-e2e.js clicks
+  // "Search for"). --test-profile --menu-dump only, like the dump itself.
+  global.__quartzLastMenu = template;
   return true;
 }
 
@@ -5104,6 +5126,8 @@ app.on('before-quit', (event) => {
   // to nothing when the last new tab goes away; this is the case where the
   // window is closed with one still open.
   stocks.stop();
+  // The search page's in-memory answers (Brave's terms: transient only).
+  try { braveSearch.stop(); } catch { /* best effort */ }
   // The budget poller's timer and the school helper's child processes (a
   // headless claude, a UIA/OCR reader) must not outlive the quit either.
   try { budget.stop(); } catch { /* best effort */ }

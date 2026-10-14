@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Nothing on this page is fetched but its own files and Brave's https
+     thumbnails / favicons: no connect, no frames, no forms posting out.
+     Results are built with createElement + textContent only (search.js). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
+<title>Search</title>
+<!-- Quartz's own results page. A bundled, preload-less file:// guest like
+     files.html: the theme, palette and accent arrive in the URL (read by
+     newtab-theme.js before first paint), the question is ?q= / ?kind= /
+     ?page=, and the answer comes from main (bravesearch.js) on
+     window.__applySearch. The Brave key never reaches this page. -->
+<script src="newtab-theme.js"></script>
+<script src="search.js"></script>
+<link rel="stylesheet" href="search.css">
+</head>
+<body>
+<header class="sr-head">
+  <div class="sr-head-in">
+    <div class="sr-row1">
+      <h1 class="sr-query" id="sr-query"></h1>
+      <a class="sr-attrib" id="sr-attrib-top" href="https://brave.com/search/api/" title="Results come from the Brave Search API">Powered by Brave</a>
+    </div>
+    <div class="sr-row2">
+      <nav class="sr-tabs" id="sr-tabs" aria-label="Kind of results">
+        <a class="sr-tab" data-kind="web" href="#">All</a>
+        <a class="sr-tab" data-kind="news" href="#">News</a>
+        <a class="sr-tab" data-kind="videos" href="#">Videos</a>
+      </nav>
+      <span class="sr-meta" id="sr-meta" aria-live="polite"></span>
+      <a class="sr-plain" id="sr-plain" href="#" title="The same search on Brave's own site, which needs no key">Open on search.brave.com <span class="sr-glyph" aria-hidden="true">&#xE8A7;</span></a>
+    </div>
+  </div>
+</header>
+
+<main class="sr-main">
+  <p class="sr-altered" id="sr-altered" hidden></p>
+  <section class="sr-problem" id="sr-problem" hidden role="alert">
+    <div class="sr-problem-head"><span class="sr-pip" aria-hidden="true"></span><h2 class="sr-problem-title" id="sr-problem-title"></h2></div>
+    <p class="sr-problem-detail" id="sr-problem-detail"></p>
+    <div class="sr-actions" id="sr-actions"></div>
+  </section>
+  <ol class="sr-results" id="sr-results" aria-label="Results"></ol>
+  <nav class="sr-pager" id="sr-pager" hidden aria-label="Pages">
+    <a class="sr-btn" id="sr-prev" href="#">Previous</a>
+    <span class="sr-page" id="sr-page"></span>
+    <a class="sr-btn" id="sr-next" href="#">Next</a>
+  </nav>
+</main>
+
+<footer class="sr-foot">
+  <p><a class="sr-attrib" href="https://brave.com/search/api/">Powered by Brave</a>
+  <span id="sr-foot-note">Results from the Brave Search API, in Brave's order. Quartz keeps them in memory for a few minutes so Back and reload are free, and never writes them to disk.</span></p>
+</footer>
+</body>
+</html>

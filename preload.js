@@ -531,6 +531,17 @@ contextBridge.exposeInMainWorld('api', {
     // Upper-case tickers; main normalises, de-duplicates and caps the list.
     setSymbols: (list) => ipcRenderer.invoke('stocks:set-symbols', Array.isArray(list) ? list : [])
   },
+  // Quartz's own search page (bravesearch.js). Same one-way key as stocks:
+  // describe() -> { hasKey, keyMask, last: { state, ok, title, at } | null,
+  // usage: { limit, remaining, resetSec, at } | null, signupUrl, cacheMinutes }.
+  // setKey('') removes it; an unusable paste comes back with `error`. test()
+  // spends ONE real search and adds `check: { ok, state, title, detail }`.
+  // Every call resolves null if main refuses it.
+  braveSearch: {
+    describe: () => ipcRenderer.invoke('brave-search:describe'),
+    setKey: (key) => ipcRenderer.invoke('brave-search:set-key', String(key == null ? '' : key)),
+    test: () => ipcRenderer.invoke('brave-search:test')
+  },
   // The School workspace: classes, the current subject, the LessonPlayer reader,
   // the headless-Claude helper and its match. State shape and command names
   // are documented in school.js. Every call resolves; a refused or failing

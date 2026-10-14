@@ -204,10 +204,26 @@
         key: row.key,
         name: row.name || hostOf(row.url) || row.key,
         query: q,
-        url: row.url.split('%s').join(encodeURIComponent(q))
+        url: ownResultsFor(row, q) || row.url.split('%s').join(encodeURIComponent(q))
       };
     }
     return null;
+  }
+
+  /**
+   * A Brave keyword ("b", or any row whose template is search.brave.com's
+   * results page) goes to Quartz's OWN results page when that is the chosen
+   * engine: settings.js says so by answering ownResultsUrl() with a URL.
+   * Any other engine, or no settings.js, leaves the row's own template.
+   */
+  function ownResultsFor(row, q) {
+    if (hostOf(row.url) !== 'search.brave.com' || !/\/search\?q=%s$/.test(row.url)) return null;
+    var settings = window.Settings;
+    if (!settings || typeof settings.ownResultsUrl !== 'function') return null;
+    try {
+      var url = settings.ownResultsUrl(q);
+      return typeof url === 'string' && url ? url : null;
+    } catch (err) { return null; }
   }
 
   window.Keywords = {

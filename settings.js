@@ -279,8 +279,18 @@
     { id: 'duckduckgo', name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
     { id: 'bing', name: 'Bing', url: 'https://www.bing.com/search?q=' },
     { id: 'brave', name: 'Brave', url: 'https://search.brave.com/search?q=' },
-    { id: 'startpage', name: 'Startpage', url: 'https://www.startpage.com/do/search?q=' }
+    { id: 'startpage', name: 'Startpage', url: 'https://www.startpage.com/do/search?q=' },
+    /* Quartz's OWN results page (search.html), fed by the Brave Search API
+       through main (bravesearch.js). `own` routes searchUrl() there; `url`
+       is the plain Brave site, which the page offers when the API cannot
+       answer (no key, a bad key, the limit, offline). */
+    { id: 'brave-api', name: 'Quartz results (Brave)', url: 'https://search.brave.com/search?q=', own: true }
   ];
+
+  /* search.html sits next to index.html, which is the document this runs in. */
+  var SEARCH_PAGE_URL = (function () {
+    try { return new URL('search.html', window.location.href).href; } catch (err) { return ''; }
+  })();
 
   /* The palettes chrome.css authors. 'aurora' is the file's own :root, so it
      is the one id that must never reach the attribute — the swatch for it
@@ -1111,7 +1121,41 @@
   }
 
   function searchUrl(query) {
+    var own = ownResultsUrl(query);
+    if (own) return own;
     return engineFor(get('searchEngine')).url + encodeURIComponent(String(query == null ? '' : query));
+  }
+
+  /**
+   * Quartz's own results page for `query` when that is the chosen engine,
+   * else null. The look rides in the URL (theme, palette, hue) so the page is
+   * right on its first frame, the way the Files page is. keywords.js asks this
+   * too, so "b <words>" lands here when Brave is the engine.
+   */
+  function ownResultsUrl(query) {
+    if (!SEARCH_PAGE_URL || !engineFor(get('searchEngine')).own) return null;
+    var q = String(query == null ? '' : query).replace(/\s+/g, ' ').trim();
+    if (!q) return null;
+    var p = new URLSearchParams();
+    p.set('q', q);
+    var theme = document.documentElement.getAttribute('data-theme');
+    p.set('theme', theme === 'light' ? 'light' : 'dark');
+    var palette = get('palette');
+    if (palette && palette !== 'aurora') p.set('palette', String(palette));
+    var hue = get('accentHue');
+    if (typeof hue === 'number' && isFinite(hue)) p.set('hue', String(hue));
+    return SEARCH_PAGE_URL + '?' + p.toString();
+  }
+
+  /** True for Quartz's own results page (any query, any tab of it). */
+  function isOwnResultsUrl(url) {
+    return !!SEARCH_PAGE_URL && typeof url === 'string' && url.indexOf(SEARCH_PAGE_URL) === 0;
+  }
+
+  /** The search behind an own-results URL, or ''. */
+  function ownResultsQuery(url) {
+    if (!isOwnResultsUrl(url)) return '';
+    try { return new URL(url).searchParams.get('q') || ''; } catch (err) { return ''; }
   }
 
   /** True when `url` is any known engine's results page (same host + path). */
@@ -3004,6 +3048,11 @@
     s.appendChild(field);
     s.appendChild(el('p', 'set-hint', 'Used by the address bar and the new tab page.'));
 
+    /* The Brave Search API key for Quartz's own results page. */
+    var bk = el('div', 'set-field set-field-gap');
+    bk.setAttribute('data-field', 'bravekey');
+    s.appendChild(bk);
+
     /* Keywords sit under the engine they bypass: same section, own field. */
     var kw = el('div', 'set-field');
     kw.setAttribute('data-field', 'keywords');
@@ -3018,6 +3067,167 @@
     field.appendChild(optionList(engines(), get('searchEngine'), function (id) {
       set({ searchEngine: id });
     }));
+    renderBraveKey();
+  }
+
+  /* ============================================================
+     The Brave Search API key (Quartz's own results page)
+
+     Same one-way arrangement as the Finnhub key: main keeps it in
+     <userData>/brave-search.json and answers describe() with
+     `hasKey` and a mask, never the key. The field is never pre-filled;
+     the mask is its placeholder. "Check key" spends one real search
+     and says what Brave answered. The status line under it is what
+     the last real search said, so a key that stopped working is
+     visible here as well as on the page.
+     ============================================================ */
+
+  var bkState = null;      // the last describe() from main, or null
+  var bkShowKey = false;   // the eye: reveals what is being TYPED only
+  var bkBusy = false;      // a Check in flight
+  var bkFocus = '';
+
+  function braveApi() {
+    var api = window.api && window.api.braveSearch;
+    return api && typeof api.describe === 'function' ? api : null;
+  }
+
+  function braveTake(answer) {
+    if (!answer || typeof answer !== 'object') return;
+    bkState = answer;
+    renderBraveKey();
+    if (bkFocus) {
+      var back = panelEl && panelEl.querySelector(bkFocus);
+      bkFocus = '';
+      if (back) { try { back.focus(); } catch (err) { /* re-rendered away */ } }
+    }
+  }
+
+  function braveCall(method, arg, failed) {
+    var api = braveApi();
+    if (!api || typeof api[method] !== 'function') { showToast(failed); return; }
+    var answer;
+    try { answer = api[method](arg); } catch (err) { showToast(failed); return; }
+    Promise.resolve(answer).then(function (value) {
+      bkBusy = false;
+      if (value) braveTake(value);
+      else { renderBraveKey(); showToast(failed); }
+    }, function () { bkBusy = false; renderBraveKey(); showToast(failed); });
+  }
+
+  /** One describe() when the pane opens. */
+  function braveRefresh() {
+    var api = braveApi();
+    if (!api) { bkState = null; renderBraveKey(); return; }
+    try {
+      Promise.resolve(api.describe()).then(function (value) {
+        if (value) braveTake(value);
+      }, function () { /* the last state stays up */ });
+    } catch (err) { /* nothing to take */ }
+  }
+
+  function braveStatusLine(st) {
+    if (!st) return '';
+    if (st.check) {
+      return (st.check.ok ? 'Checked: ' : 'Check failed: ') + st.check.title +
+        (st.check.ok ? '.' : '. ' + (st.check.detail || ''));
+    }
+    if (!st.hasKey) return '';
+    var parts = [];
+    if (st.last) parts.push('Last search: ' + (st.last.ok ? 'worked' : st.last.title) + '.');
+    if (st.usage && typeof st.usage.remaining === 'number' && typeof st.usage.limit === 'number') {
+      parts.push(st.usage.remaining.toLocaleString() + ' of ' + st.usage.limit.toLocaleString() +
+        ' searches left this month, by Brave’s last answer.');
+    }
+    return parts.join(' ');
+  }
+
+  function renderBraveKey() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="bravekey"]');
+    if (!field) return;
+    var typed = '';
+    var live = field.querySelector('.set-path');
+    if (live) typed = live.value;
+    field.textContent = '';
+
+    var label = el('label', 'set-label', 'Brave Search API key');
+    label.setAttribute('for', 'set-brave-key');
+    field.appendChild(label);
+
+    if (!braveApi()) {
+      field.appendChild(el('p', 'set-typing-notice',
+        'This build has no bridge to the search page, so Quartz results cannot work here. Restart Quartz to pick up the newer build.'));
+      return;
+    }
+
+    var has = !!(bkState && bkState.hasKey);
+    var mask = (bkState && bkState.keyMask) || '';
+    var row = el('div', 'set-path-row');
+
+    var input = document.createElement('input');
+    input.type = bkShowKey ? 'text' : 'password';
+    input.id = 'set-brave-key';
+    input.className = 'set-path';
+    input.value = typed;
+    input.placeholder = has ? mask : 'Paste your key';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.title = has ? 'A key is saved. Type to replace it.' : 'Paste the key from your Brave Search API dashboard';
+    row.appendChild(input);
+
+    row.appendChild(textButton(bkShowKey ? 'Hide' : 'Show', 'set-text set-brave-eye', function () {
+      bkShowKey = !bkShowKey;
+      renderBraveKey();
+      var again = field.querySelector('.set-path');
+      if (again) { try { again.focus(); } catch (err) { /* gone */ } }
+    }));
+
+    row.appendChild(textButton('Save', 'set-btn set-brave-save', function () {
+      var now = field.querySelector('.set-path');
+      var next = now ? now.value.trim() : '';
+      if (!next) return;
+      bkShowKey = false;
+      bkFocus = '.set-brave-save';
+      if (now) now.value = '';
+      braveCall('setKey', next, 'That key could not be saved');
+    }));
+
+    if (has) {
+      var check = textButton(bkBusy ? 'Checking…' : 'Check key', 'set-text set-brave-check', function () {
+        if (bkBusy) return;
+        bkBusy = true;
+        renderBraveKey();
+        braveCall('test', undefined, 'The key could not be checked');
+      });
+      check.title = 'Runs one real search (it counts toward the month)';
+      row.appendChild(check);
+      row.appendChild(textButton('Remove', 'set-text set-brave-clear', function () {
+        bkShowKey = false;
+        bkFocus = '#set-brave-key';
+        braveCall('setKey', '', 'That key could not be removed');
+      }));
+    }
+    field.appendChild(row);
+
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var save = field.querySelector('.set-brave-save');
+      if (save) save.click();
+    });
+
+    if (bkState && bkState.error) field.appendChild(el('p', 'set-note set-brave-error', bkState.error));
+    var status = braveStatusLine(bkState);
+    if (status) field.appendChild(el('p', 'set-note set-brave-status', status));
+
+    var own = engineFor(get('searchEngine')).own;
+    var where = 'Get one at brave.com/search/api (the Search plan; set a monthly limit in its dashboard). ' +
+      'Stored by the browser itself and never given to a page.';
+    var lead = !own ? 'For “Quartz results (Brave)” above: Quartz’s own results page. '
+      : has ? 'Quartz results uses this key. '
+        : 'Quartz results needs this key: until it is saved, searches show a page saying so, with the plain Brave search one click away. ';
+    field.appendChild(el('p', 'set-hint', lead + where));
   }
 
   /**
@@ -7146,6 +7356,8 @@
        One call per open, never a poll -- nothing in that section moves on its
        own. */
     stocksRefresh();
+    /* And one for the Brave key under Search, for the same reason. */
+    braveRefresh();
     /* And the Phone section, which unlike Stocks DOES move on its own: a
        download's progress, a device coming and going, a stream's bitrate.
        So it takes a subscription as well as one describe(), and gives both
@@ -7480,6 +7692,11 @@
     engines: engines,
     searchUrl: searchUrl,
     isSearchUrl: isSearchUrl,
+    /* Quartz's own results page: the URL for a query when that is the
+       engine (else null), the test for one, and the query behind one. */
+    ownResultsUrl: ownResultsUrl,
+    isOwnResultsUrl: isOwnResultsUrl,
+    ownResultsQuery: ownResultsQuery,
 
     /* Address-bar keywords. keywordList() -> [{ key, name, url, upper?, ok,
        reason }] (the built-ins while never touched); setKeywords(list) stores
