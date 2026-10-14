@@ -435,6 +435,26 @@
     return normalizeTyped(readStore(LAST_KEY));
   }
 
+  /**
+   * The folder the chrome opened this tab on (filesUrl(path) puts it in
+   * ?path=), or null. Read once at boot and then taken OUT of the address with
+   * replaceState: the URL is what a reload and a restored session reopen, and
+   * by then the folder on screen (files.last) is the one that should come back,
+   * not the one the tab happened to be opened on.
+   */
+  function readUrlPath() {
+    var found = null;
+    try {
+      var url = new URL(window.location.href);
+      var raw = url.searchParams.get('path');
+      if (raw === null) return null;
+      found = normalizeTyped(raw);
+      url.searchParams.delete('path');
+      window.history.replaceState(window.history.state, '', url.href);
+    } catch (err) { /* an odd address: the remembered folder still opens */ }
+    return found;
+  }
+
   function writeLast(path) {
     if (typeof path !== 'string' || !path) return false;
     return writeStore(LAST_KEY, path);
@@ -1211,10 +1231,13 @@
     // Whatever the chrome pushed before the document was up paints now.
     render();
 
-    // One ask, either way: last session's folder when it still looks like a
-    // path, the root otherwise. The chrome answers not-found if it is gone,
-    // and pushes the places alongside it.
-    if (cwd === null && !entries.length) askList(readLast());
+    // One ask, either way: the folder in the URL (filesUrl(path)), else last
+    // session's folder when it still looks like a path, the root otherwise.
+    // The chrome answers not-found if it is gone, and pushes the places
+    // alongside it. The URL is read even when a push got here first, so it
+    // never lingers in the address for a reload to reopen.
+    var urlPath = readUrlPath();
+    if (cwd === null && !entries.length) askList(urlPath || readLast());
 
     if (el.rows) el.rows.focus();
   }

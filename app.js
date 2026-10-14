@@ -4392,9 +4392,26 @@ function pushFilePlacesToTab(tab, fresh) {
  */
 function handleFilesLine(tab, viewEl, text) {
   if (!tab || tab.viewEl !== viewEl) return false;
-  if (!isViewUsable(tab) || !isFilesUrl(tab.url)) return false;
+  if (!isFilesUrl(tab.url)) return false;
+  if (!isViewUsable(tab)) {
+    // files.js asks for its boot listing from DOMContentLoaded, and that
+    // console line can reach us BEFORE this <webview>'s dom-ready has set
+    // tab.ready — the guest exists, we just have not been told yet. Dropping
+    // it left every new Files tab sitting on "This PC". So a list request
+    // that arrives early is kept (the newest one wins) and replayed by
+    // replayFilesBootList() from dom-ready, when the answer can be pushed.
+    if (!tab.ready && viewEl && viewEl.isConnected && !tab.asleep) {
+      const early = parseFilesLine(text);
+      if (early && early.verb === 'list') {
+        tab.filesBootList = { viewEl: viewEl, text: text };
+        return true;
+      }
+    }
+    return false;
+  }
   const req = parseFilesLine(text);
   if (!req) return false;
+  if (req.verb === 'list') tab.filesBootList = null;  // answered live: nothing to replay
 
   const api = filesApi();
 
@@ -4453,6 +4470,20 @@ function handleFilesLine(tab, viewEl, text) {
     () => pushFileResult(tab, viewEl, req.verb, req.path, { ok: false, reason: 'failed' })
   );
   return true;
+}
+
+/**
+ * dom-ready's half of the early-request fix in handleFilesLine: answer the
+ * boot listing the page asked for before the tab was ready. Only for the same
+ * guest element and only while it is still a Files page; taken either way, so
+ * it is answered at most once. True when a request was replayed.
+ */
+function replayFilesBootList(tab) {
+  const early = tab && tab.filesBootList;
+  if (!early) return false;
+  tab.filesBootList = null;
+  if (early.viewEl !== tab.viewEl || !isFilesUrl(tab.url)) return false;
+  return handleFilesLine(tab, early.viewEl, early.text);
 }
 
 /** The Files tab already open, or null. There is only ever one. */
@@ -5070,9 +5101,15 @@ function isFilesUrl(url) {
   return typeof url === 'string' && url.indexOf(FILES_URL) === 0;
 }
 
-function filesUrl() {
+/**
+ * The Files page's address. `folder`, when given, rides along as ?path= and is
+ * the folder a NEW tab boots straight into (files.js reads it once, prefers it
+ * over its remembered folder, and strips it from the address).
+ */
+function filesUrl(folder) {
   const params = new URLSearchParams();
   params.set('theme', getTheme());
+  if (typeof folder === 'string' && folder && folder.length <= FILES_PATH_MAX) params.set('path', folder);
   const settings = window.Settings;
   if (settings && typeof settings.all === 'function') {
     try {
@@ -10243,6 +10280,7 @@ function wireViewEvents(tab) {
     pushProcIconCacheToTab(tab);  // process icons we already have, in one go
     pushHistoryToTab(tab);
     pushFilePlacesToTab(tab, true);  // the folder browser's rail: places and drives
+    replayFilesBootList(tab);        // ...and its boot listing, if it asked before now
     pushReadoutToTab(tab);
     pushMusicToTab(tab);             // the Idle music tile: the player's state
     pushMediaToTab(tab, freshMediaPayload());  // ...and what the machine is playing
