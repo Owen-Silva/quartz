@@ -674,6 +674,10 @@ function queueWindowStateSave(w) {
   }, 300);
 }
 
+/** Test-only off-screen window (see createWindow). Never set without --test-profile. */
+const OFFSCREEN_TEST = process.argv.includes('--test-profile') && process.argv.includes('--offscreen');
+const OFFSCREEN_XY = -20000;
+
 function createWindow() {
   const baseOptions = {
     width: 1280,
@@ -713,6 +717,19 @@ function createWindow() {
       baseOptions.x = savedState.x;
       baseOptions.y = savedState.y;
     }
+  }
+
+  // TEST RUNS ONLY (--test-profile --offscreen): the window is CREATED far off
+  // every monitor and never gets a taskbar button, so a test instance is never
+  // on the user's screen, not even for the first frame. Moving it there after it
+  // appears (the old toback/placeloop way) left it visible at the default
+  // place for about a second per launch. A remembered place or maximize is
+  // ignored: either would bring it back on screen. Pair with --measure-visible
+  // so Windows' occlusion tracking does not throttle a window nobody can see.
+  if (OFFSCREEN_TEST) {
+    baseOptions.x = OFFSCREEN_XY;
+    baseOptions.y = OFFSCREEN_XY;
+    baseOptions.skipTaskbar = true;
   }
 
   // --no-acrylic gives a flat window; used to measure what the material costs.
@@ -785,7 +802,7 @@ function createWindow() {
     if (!win || win.isDestroyed()) return;
     // Maximize BEFORE showing, or the window flashes at the restored size for
     // a frame and then snaps out to full screen.
-    if (savedState && savedState.maximized) win.maximize();
+    if (savedState && savedState.maximized && !OFFSCREEN_TEST) win.maximize();
     // TEST RUNS ONLY (--test-profile --show-inactive): appear without taking
     // the foreground from whoever is at the machine.
     if (process.argv.includes('--test-profile') && process.argv.includes('--show-inactive')) win.showInactive();
