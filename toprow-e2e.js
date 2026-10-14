@@ -7,8 +7,10 @@ require('C:/Users/you/tools/lowcpu.js');   // first: one capped browser at a tim
 //    with its arrival time. Never the real \\.\pipe\look-sync-toprow.
 // 2. A temp look-sync dir (snow-peak as Mantle's desktop still, dark, glass 5/.50/0) via
 //    LOOK_SYNC_DIR; never the real %APPDATA%\look-sync.
-// 3. Quartz: --test-profile --profile-name=toprowe2e<pid> --show-inactive --measure-visible,
-//    sent to the back with toback.ps1 (no focus taken). Driven over CDP.
+// 3. Quartz: --test-profile --profile-name=toprowe2e<pid> --offscreen --show-inactive --measure-visible:
+//    created off every monitor with no taskbar button (main.js), so it is never on the user's screen;
+//    testwatch.js's 25 ms watcher (started before launch) fails the run if it ever is. Driven over CDP.
+//    Not launched under 2.5 GB free RAM.
 // 4. A scripted session: Home -> a web page -> Home -> light -> dark -> page fullscreen ->
 //    an own (built-in) picture -> no picture -> back to the desktop. For each step:
 //      ORDER/TIMING: the first hint after the action was SENT before the renderer's next
@@ -20,7 +22,9 @@ require('C:/Users/you/tools/lowcpu.js');   // first: one capped browser at a tim
 //      monitor, blurred at the shared blurPx, lined up at the window's place, under
 //      rgb at alpha; cols / flat as sent. Max and mean error in levels, per channel.
 // Kills ONLY the process it started, deletes the temp profile and look dir.
-// Prints PASS/FAIL lines and one summary line: "toprow-e2e: N passed, M failed".
+// Prints PASS/FAIL/SKIP lines and one summary line: "toprow-e2e: N passed, M failed[, K skipped]".
+// The wash PIXELS checks need the window on a monitor, so they are SKIPPED (with the reason) while
+// the window is off-screen; the hints, order, timing and the cols/flat pixel checks still run.
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -29,6 +33,7 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { performance } = require('perf_hooks');
 const WS = require(path.join(__dirname, 'node_modules', 'ws'));
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -44,7 +49,7 @@ const STILL_SRC = path.join(APP, 'assets', 'backgrounds', 'snow-peak.jpg');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const now = () => performance.timeOrigin + performance.now();
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(cond, name, detail) {
   if (cond) pass++; else fail++;
   console.log((cond ? 'PASS ' : 'FAIL ') + name + (detail ? '  ' + detail : ''));
@@ -182,6 +187,11 @@ async function pixels(name, limit) {
   const act = await topRowActual(N);
   let pred;
   if (top.kind === 'wash') {
+    // A wash is the still LINED UP with the monitor at the window's place. The --offscreen test
+    // window is off every monitor (The user's screen stays clear), so there is no screen place to
+    // compare against: the prediction would sample outside the still. Said, never passed quietly.
+    const off = await ev("(() => { const p = LookSync.place(); if (!p) return 'no place'; const c = p.content, d = p.display; return c.x + c.width <= d.x || c.x >= d.x + d.width || c.y + c.height <= d.y || c.y >= d.y + d.height ? 'window at ' + c.x + ',' + c.y + ', monitor ' + d.x + ',' + d.y + ' ' + d.width + 'x' + d.height : ''; })()");
+    if (off) { skip++; console.log('SKIP pixels ' + name + ': wash ' + top.alpha + ' is lined up with the monitor, and the off-screen test window is on none (' + off + ')'); return null; }
     const blur = await ev("(() => { const g = Backdrop.state().glass; return g.blurPx; })()");
     pred = (await ev('__tr.predictWash(' + JSON.stringify(top) + ', ' + N + ', ' + blur + ')')).cols;
   } else if (top.kind === 'flat') {
@@ -260,13 +270,18 @@ async function step(name, src, expectKind, settleMs) {
 
 (async () => {
   let child = null;
+  let watcher = null;
   try {
+    const free = freeRamGb();
+    if (!(free >= MIN_FREE_GB)) { console.log('toprow-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
+    watcher = startWatcher((l) => console.log('[e2e] ' + l));
+    await watcher.ready;
     await new Promise((r, j) => { server.once('error', j); server.listen(PIPE, r); });
     makeLookDir();
     const env = Object.assign({}, process.env, { LOOK_SYNC_DIR: LOOK_DIR, TOPROW_PIPE: PIPE });
-    child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + PORT, '--test-profile', '--profile-name=' + PROFILE, '--show-inactive', '--measure-visible'], { cwd: APP, stdio: 'ignore', env });
+    child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
+    watcher.watch(child.pid);
     console.log('[e2e] quartz pid ' + child.pid + ', pipe ' + PIPE);
-    spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(APP, 'toback.ps1'), '-Match', PROFILE, '-WaitSec', '40'], { stdio: 'ignore' });
 
     // boot: "none" on create, then the renderer's first hint, both for the window's HWND
     const t0 = Date.now();
@@ -358,6 +373,7 @@ async function step(name, src, expectKind, settleMs) {
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));
   } finally {
+    if (watcher) { const v = watcher.verdict(); check(v.ok, v.line); watcher.stop(); }
     if (child && !KEEP) {
       try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ }
       await sleep(1200);
@@ -366,7 +382,7 @@ async function step(name, src, expectKind, settleMs) {
     }
     if (ws) ws.close();
     server.close();
-    console.log(`toprow-e2e: ${pass} passed, ${fail} failed`);
+    console.log(`toprow-e2e: ${pass} passed, ${fail} failed` + (skip ? `, ${skip} skipped` : ''));
     process.exit(fail ? 1 : 0);
   }
 })();

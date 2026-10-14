@@ -1,14 +1,20 @@
+require('C:/Users/you/tools/lowcpu.js');   // first: one capped browser at a time (The user, 2026-09-17)
 // Runtime smoke test. Launches the app, drives it over CDP, proves the
-// Claude Code terminal actually spawns and renders. Deleted after use.
-const { spawn } = require('child_process');
+// Claude Code terminal actually spawns and renders.
+// The window is created OFF-SCREEN (--offscreen, see main.js and testwatch.js) and a 25 ms
+// watcher started before launch fails the run if it ever touches the user's screen. Not launched
+// under 2.5 GB free RAM. Kills only its own process tree and deletes its own temp profile.
+const { spawn, execFileSync } = require('child_process');
+const os = require('os');
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.SMOKE_PORT) || 9222;
 const OUT = process.argv[2] || path.join(__dirname, 'smoke');
-// --keep leaves the app running (terminal pane open) so an OS-level screenshot
-// can be taken afterwards; kill electron.exe yourself when done.
+// --keep leaves the app running (terminal pane open, still off-screen) for CDP
+// probes afterwards; kill it by the pid printed at launch when done, never all electron.exe.
 const KEEP = process.argv.includes('--keep');
 const electron = require('electron'); // path to electron.exe
 
@@ -97,16 +103,36 @@ const evaluate = async (c, expr) => {
   return { value: r.result.value };
 };
 
+let proc = null;
+let watcher = null;
+const PROFILE = 'smoke' + process.pid;
+// Stop the watcher, kill ONLY our own tree, drop our temp profile (unless --keep).
+function teardown() {
+  if (watcher) { const v = watcher.verdict(); say((v.ok ? 'OK: ' : 'FAIL: ') + v.line); watcher.stop(); watcher = null; }
+  if (proc && !KEEP) {
+    try { execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ }
+    const prof = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
+    for (let i = 0; i < 10; i++) { try { fs.rmSync(prof, { recursive: true, force: true }); break; } catch (e) { execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 400']); } }
+  }
+}
+
 (async () => {
-  // --test-profile keeps this run's storage out of the real profile (see main.js).
-  const proc = spawn(electron, ['.', `--remote-debugging-port=${PORT}`, '--test-profile'], {
+  const free = freeRamGb();
+  if (!(free >= MIN_FREE_GB)) { console.log('smoke: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
+  watcher = startWatcher();
+  await watcher.ready;
+  // --test-profile keeps this run's storage out of the real profile (see main.js);
+  // --profile-name gives this run its own, deleted afterwards.
+  proc = spawn(electron, ['.', `--remote-debugging-port=${PORT}`, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], {
     cwd: __dirname,
     stdio: 'ignore',
     detached: KEEP, // survive this script exiting when --keep is passed
   });
+  watcher.watch(proc.pid);
+  console.log('electron pid ' + proc.pid + ', profile ' + PROFILE);
 
   const target = await getPageTarget();
-  if (!target) { say('FAIL: app never exposed a CDP page target'); proc.kill(); finish(); }
+  if (!target) { say('FAIL: app never exposed a CDP page target'); teardown(); finish(); }
   say('OK: app window is up, CDP target found');
 
   const ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
@@ -226,11 +252,11 @@ const evaluate = async (c, expr) => {
   if (KEEP) {
     say('KEEP: app left running with the Claude pane open');
     proc.unref();
-  } else {
-    proc.kill();
   }
+  teardown();
   finish();
 })().catch((e) => {
   say('HARNESS ERROR: ' + e.message);
+  try { teardown(); } catch (e2) { /* best effort */ }
   finish();
 });

@@ -22,6 +22,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const WebSocket = require(path.join(__dirname, 'node_modules', 'ws'));
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -39,87 +40,19 @@ const BG = path.join(APP, 'assets', 'backgrounds');
 let MAINPID = 0;
 let electronProc = null;
 let watcher = null;
-const onScreen = [];   // every sighting of a test window on the visible desktop
-
-/* ---- the invisibility watcher ------------------------------------------- */
-const WATCH_PS = String.raw`param([string]$PidFile)
-Add-Type @"
-using System; using System.Runtime.InteropServices;
-public static class W {
-  public delegate bool EnumProc(IntPtr h, IntPtr p);
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
-  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
-}
-"@
-[W]::SetProcessDPIAware() | Out-Null
-$vx = [W]::GetSystemMetrics(76); $vy = [W]::GetSystemMetrics(77); $vw = [W]::GetSystemMetrics(78); $vh = [W]::GetSystemMetrics(79)
-"READY desktop $vx,$vy $($vw)x$vh"
-$target = 0; $seen = 0
-# Output inside an EnumWindows callback is swallowed (it becomes the delegate's return value),
-# so the callback only collects; the lines are printed from the loop.
-$out = New-Object System.Collections.Generic.List[string]
-while ($true) {
-  if ($target -eq 0 -and (Test-Path $PidFile)) { $target = [int](Get-Content $PidFile) }
-  if ($target -ne 0) {
-    $cb = [W+EnumProc]{ param($h, $p)
-      $wp = 0; [W]::GetWindowThreadProcessId($h, [ref]$wp) | Out-Null
-      if ($wp -eq $target -and [W]::IsWindowVisible($h)) {
-        $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
-        $script:seen++
-        if ($script:seen -eq 1) { $out.Add("FIRST $h $($r.L),$($r.T),$($r.R),$($r.B)") }
-        if ($r.R -gt $vx -and $r.L -lt ($vx + $vw) -and $r.B -gt $vy -and $r.T -lt ($vy + $vh) -and ($r.R - $r.L) -gt 0 -and ($r.B - $r.T) -gt 0) {
-          $out.Add("ONSCREEN $h $($r.L),$($r.T),$($r.R),$($r.B)") } }
-      return $true }
-    [W]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
-    foreach ($l in $out) { $l }
-    $out.Clear()
-  }
-  Start-Sleep -Milliseconds 25
-}`;
-function startWatcher(pidFile) {
-  const ps1 = path.join(DIR, '..', 'looksync-e2e-watch-' + process.pid + '.ps1');
-  fs.writeFileSync(ps1, WATCH_PS);
-  watcher = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-PidFile', pidFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-  watcher.ps1 = ps1;
-  return new Promise((resolve, reject) => {
-    let buf = '';
-    const t = setTimeout(() => reject(new Error('the window watcher did not start within 30 s')), 30000);
-    watcher.stdout.on('data', (d) => {
-      buf += d.toString();
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-        if (/^READY/.test(line)) { clearTimeout(t); console.log('     watcher ' + line); resolve(); }
-        else if (/^ONSCREEN/.test(line)) { onScreen.push(line); console.log('     ' + line); }
-        else if (/^FIRST/.test(line)) { watcher.first = line; console.log('     watcher saw the test window: ' + line); }
-      }
-    });
-    watcher.on('exit', (c) => { clearTimeout(t); reject(new Error('the window watcher exited (' + c + ')')); });
-  });
-}
 
 /* ---- launch / cleanup ----------------------------------------------------- */
-function freeRamGb() {
-  const kb = Number(execFileSync('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory'], { encoding: 'utf8' }).trim());
-  return kb / 1048576;
-}
 async function launch() {
   const free = freeRamGb();
-  if (!(free >= 2.5)) { console.log('looksync-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs 2.5 GB'); process.exit(3); }
+  if (!(free >= MIN_FREE_GB)) { console.log('looksync-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
   console.log('     free RAM ' + free.toFixed(2) + ' GB; look dir ' + DIR);
-  const pidFile = path.join(DIR, '..', 'looksync-e2e-pid-' + process.pid + '.txt');
-  await startWatcher(pidFile);
+  watcher = startWatcher();
+  await watcher.ready;
   const env = Object.assign({}, process.env, { LOOK_SYNC_DIR: DIR });
   electronProc = spawn(ELECTRON, ['.', '--remote-debugging-port=' + PORT, '--test-profile', '--profile-name=' + PROFILE,
-    '--offscreen', '--show-inactive', '--measure-visible'], { cwd: APP, stdio: 'ignore', env });
+    ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
   MAINPID = electronProc.pid;
-  fs.writeFileSync(pidFile, String(MAINPID));
-  watcher.pidFile = pidFile;
+  watcher.watch(MAINPID);
   console.log('     electron pid ' + MAINPID + ' port ' + PORT + ' profile ' + PROFILE);
   // Readiness, not a sleep: the chrome's CDP target answering.
   const t0 = Date.now();
@@ -135,10 +68,7 @@ async function launch() {
 }
 function cleanup() {
   if (MAINPID) { try { execFileSync('taskkill', ['/PID', String(MAINPID), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* already gone */ } }
-  if (watcher) {
-    try { watcher.kill(); } catch (e) { /* gone */ }
-    for (const f of [watcher.ps1, watcher.pidFile]) { try { if (f) fs.unlinkSync(f); } catch (e) { /* gone */ } }
-  }
+  if (watcher) watcher.stop();
   if (!KEEP) {
     const prof = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
     for (const d of [DIR, prof]) { for (let i = 0; i < 5; i++) { try { fs.rmSync(d, { recursive: true, force: true }); break; } catch (e) { execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 400']); } } }
@@ -587,9 +517,7 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
 
   // Last: the watcher has looked at every frame of the run by now.
   if (!ONLY || new RegExp(ONLY).test('invisible')) {
-    if (!watcher.first) { results.push(['invisible', false]); console.log('FAIL invisible: the watcher never saw the test window, so it proves nothing'); }
-    else if (onScreen.length) { results.push(['invisible', false]); console.log('FAIL invisible: a test window touched the visible desktop ' + onScreen.length + ' time(s): ' + onScreen.slice(0, 3).join('; ')); }
-    else { results.push(['invisible', true]); console.log('PASS invisible: no test window on the visible desktop at any 25 ms poll (watcher ran from before launch)'); }
+    const v = watcher.verdict(); results.push(['invisible', v.ok]); console.log((v.ok ? 'PASS ' : 'FAIL ') + v.line);
   }
 
   const pass = results.filter((r) => r[1]).length;
