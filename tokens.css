@@ -119,27 +119,35 @@
 }
 
 /* --- light --------------------------------------------------- */
+/* CONTRACT "Light look" (The user, 2026-10-14): one island light in Quartz,
+   Helm and Mantle. Ground, bars, ink and lines = Mantle's island light
+   (mantle ui/shared/glass-light.css :root); panels and pop-ups = Helm's
+   light alphas re-tinted pure white. The bars are the white wash itself
+   (backdrop.css, --chrome-glass-a = glass.light.dim, .45); a panel's .76
+   on it nets ~.87; cards .70; menus .95. backdrop.js shifts these alphas
+   by glass.light.panel (See-through), clamped .30..97. Ink is Mantle's
+   --lg-ink / -2 / -3; lines its outer hairline and inner lip. */
 html[data-theme="light"] {
   color-scheme: light;
 
   --bg: #e9e9e7;
-  --surface-0: rgba(244, 244, 242, 0.56);
-  --surface-1: rgba(248, 248, 246, 0.76);
-  --surface-2: rgba(255, 255, 255, 0.70);
-  --surface-3: rgba(232, 232, 230, 0.86);
-  --surface-solid: #f6f6f4;
-  --overlay: rgba(250, 250, 248, 0.95);
-  --scrim: rgba(30, 31, 32, 0.22);
+  --surface-0: rgba(255, 255, 255, 0.56);   /* hover tints and small fields on the strip */
+  --surface-1: rgba(255, 255, 255, 0.76);   /* panels */
+  --surface-2: rgba(255, 255, 255, 0.70);   /* cards, inputs inside a panel */
+  --surface-3: rgba(233, 235, 240, 0.86);   /* pressed / raised on a white card: a cool grey */
+  --surface-solid: #fbfbfc;
+  --overlay: rgba(255, 255, 255, 0.95);     /* menus, popovers, sheets */
+  --scrim: rgba(11, 14, 26, 0.22);
 
-  --hairline: rgba(0, 0, 0, 0.09);
-  --hairline-strong: rgba(0, 0, 0, 0.16);
-  --hairline-inner: rgba(255, 255, 255, 0.7);
-  --panel-edge: rgba(255, 255, 255, 0.55);
+  --hairline: rgba(11, 14, 26, 0.10);       /* Mantle's outer hairline */
+  --hairline-strong: rgba(11, 14, 26, 0.18);
+  --hairline-inner: rgba(255, 255, 255, 0.62);   /* Mantle's inner lip */
+  --panel-edge: rgba(255, 255, 255, 0.62);
 
-  --text: #1b1c1d;
-  --text-2: #55575a;
-  --text-3: #717376;
-  --text-inverse: #f6f6f4;
+  --text: #0b0e1a;                          /* Mantle --lg-ink */
+  --text-2: #333a4e;                        /* --lg-ink-2 */
+  --text-3: #5b6478;                        /* --lg-ink-3 */
+  --text-inverse: #fbfbfc;
 
   --ion: #4d6784;                        /* hsl(212 26% 41%) */
   --ion-soft: rgba(77, 103, 132, 0.11);
@@ -173,10 +181,10 @@ html[data-theme="light"] {
   --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.10), 0 24px 64px rgba(0, 0, 0, 0.18);
   --focus-ring: 0 0 0 1px rgba(255, 255, 255, 0.9), 0 0 0 3px color-mix(in srgb, var(--ion) 50%, transparent);
 
-  --scroll-thumb: rgba(0, 0, 0, 0.16);
-  --scroll-thumb-hover: rgba(0, 0, 0, 0.28);
+  --scroll-thumb: rgba(11, 14, 26, 0.16);
+  --scroll-thumb-hover: rgba(11, 14, 26, 0.28);
 
-  --wash-rgb: 236 236 234;
+  --wash-rgb: 255 255 255;                  /* the white wash (backdrop.css) */
 }
 
 /* --- palettes: an accent, nothing else ------------------------ */

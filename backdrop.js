@@ -66,9 +66,12 @@
 
    Glass (Look Sync): LookSync.glassFor(theme) -> { blurPx, dim, panel }
    for the resolved theme. blurPx is the blur (Helm's 5 = the old fixed
-   value); in dark, dim is the FLOOR of the strip's wash, which the
-   contrast guard may raise (below); in light it is --bg-dim; panel
-   shifts the alpha of --surface-0..3 and --overlay (0 = tokens.css as is).
+   value; light adds saturate(150%), CONTRACT "Light look"); dim is the
+   FLOOR of the window's wash (--chrome-glass-a: dark rgb(9 10 11), light
+   white), which Mantle's shared top-band value (desktop.guard.<theme>)
+   may raise while following the desktop, and in dark Quartz's own guard
+   otherwise (below); panel shifts the alpha of --surface-0..3 and
+   --overlay (0 = tokens.css as is).
 
    Public surface:
      <body data-bg-kind="desktop|builtin|image|video|none"
@@ -100,12 +103,13 @@
     dark: { blurPx: 5, dim: 0.5, panel: 0 },
     light: { blurPx: 12, dim: 0.45, panel: 0 }
   };
-  var LIGHT_TOKEN_DIM = 0.45;    // tokens.css --bg-dim: the light wash as shipped
-  /* Light is held as shipped (The user: light mode stays exactly as it is until
-     he says otherwise). look.glass.light is still carried in the shared
-     file but never applied here: light draws at 5px (1.5 bitmap px), the
-     token --bg-dim .45 and untouched surfaces, for every background kind. */
-  var LIGHT_HELD = { blurPx: 5, dim: LIGHT_TOKEN_DIM, panel: 0 };
+  /* Light (CONTRACT "Light look", the user 2026-10-14, un-held): glass.light is
+     applied in light exactly as glass.dark is in dark. The ground is the
+     picture at blur(glass.light.blurPx) saturate(150%), Mantle's island
+     light; dark keeps its plain blur. LIGHT_WASH_DIM = backdrop.css's
+     fallback for the white wash when nothing has set --chrome-glass-a. */
+  var LIGHT_WASH_DIM = 0.45;
+  var LIGHT_SATURATE = 150;      // % (Mantle ui/shared/glass-light.css ground)
   var SCALE = 0.3;
   /* Overscan, in blur radii: Helm's .bg-photo sits at
      inset: calc(var(--bg-blur) * -2.5), so its picture is cover-fitted to
@@ -152,6 +156,7 @@
   var lastRender = null;         // test seam: what the shown blur did
   var placeNow = null;           // LookSync.place(), the last valid one
   var guard = { alpha: 0.5, brightest: null, ratio: null, raised: false };   // dark strip, last measured
+  var guardLight = { alpha: LIGHT_WASH_DIM, raised: false, source: 'own', reason: null, ratio: null };   // light wash
   var glassKey = null;           // the glass last announced in a backdropchange
   var deskReady = false;         // LookSync.ready() settled (or timed out)
   var deskWait = false;
@@ -200,11 +205,9 @@
   }
 
   /** The glass in effect for theme: LookSync's (a live preview included);
-      without LookSync, Settings' stored glass; else the seed. Light is
-      always LIGHT_HELD. */
+      without LookSync, Settings' stored glass; else the seed. */
   function glassFor(theme) {
     var t = theme === 'light' ? 'light' : 'dark';
-    if (t === 'light') return Object.assign({}, LIGHT_HELD);
     var g = null;
     var ls = window.LookSync;
     if (ls && typeof ls.glassFor === 'function') {
@@ -248,7 +251,11 @@
         // is fresh against the glass in effect.
         return { state: 'ok', stillUrl: d.stillUrl, title: d.title || null, rev: d.rev == null ? null : d.rev, reason: null,
                  guard: d.guard && typeof d.guard === 'object' ? d.guard : null,
-                 guardReason: typeof d.guardReason === 'string' && d.guardReason ? d.guardReason : null };
+                 guardReason: typeof d.guardReason === 'string' && d.guardReason ? d.guardReason : null,
+                 // The light entry (desktop.guard.light), checked the same way.
+                 guardLight: d.guardLight && typeof d.guardLight === 'object' ? d.guardLight : null,
+                 guardLightReason: typeof d.guardLightReason === 'string' && d.guardLightReason ? d.guardLightReason
+                   : (d.guardLight ? null : 'light top band not published by Mantle yet') };
       }
       return { state: 'fallback', stillUrl: null,
                reason: "Following Windows' wallpaper: Mantle's record names no picture" };
@@ -339,27 +346,30 @@
     };
   }
 
-  /** The glass in effect, for Settings' guard note and the tests. In dark,
-      alpha is the strip's wash (the guard's answer, >= floor); in light the
-      wash is --bg-dim, so alpha = floor = dim. offset = the monitor's
-      top-left relative to this window's content area (lined up only). */
+  /** The glass in effect, for Settings' guard note and the tests. alpha is
+      the window's wash (--chrome-glass-a, >= floor): in dark the guard's
+      answer, in light Mantle's guard.light or the dim. offset = the
+      monitor's top-left relative to this window's content area (lined up only). */
   function glassSnapshot() {
     var theme = themeNow();
     var g = glassFor(theme);
     var lined = !!(shown && shown.lined && placeNow);
     var off = lined ? monitorOffset(placeNow) : { x: 0, y: 0 };
     var dark = theme === 'dark';
+    var gd = dark ? guard : guardLight;
     return {
       theme: theme,
       floor: g.dim,
-      alpha: dark ? guard.alpha : g.dim,
-      raised: dark ? !!guard.raised : false,
-      // dark: where alpha came from. 'shared' = Mantle's desktop.guard;
-      // 'own' = Quartz's guard over its own strip, with sourceReason saying
-      // why the shared value is not in use. ownAlpha = Quartz's own answer.
-      source: dark ? (guard.source || 'own') : null,
-      sourceReason: dark ? (guard.reason || null) : null,
+      alpha: gd.alpha,
+      raised: !!gd.raised,
+      // Where alpha came from. 'shared' = Mantle's desktop.guard.<theme>;
+      // 'own' = Quartz's own value (dark: its guard over its own strip;
+      // light: the dim unraised), with sourceReason saying why the shared
+      // value is not in use. ownAlpha = Quartz's own answer (dark only).
+      source: gd.source || 'own',
+      sourceReason: gd.reason || null,
       ownAlpha: dark && typeof guard.own === 'number' ? guard.own : null,
+      saturate: dark ? 100 : LIGHT_SATURATE,
       blurPx: g.blurPx,
       panel: g.panel,
       lined: lined,
@@ -559,8 +569,8 @@
    * them. Lined up, the copy is the MONITOR, cover-fitted the way the
    * desktop draws it and moved like the blurred layer.
    *
-   * Dark only: light is held as shipped (the new tab paints its own picture
-   * there). A clip plays on the new tab itself, so 'video' has no Home here.
+   * Both themes (light un-held: the same one picture under the white
+   * wash, as Helm's light Home). A clip plays on the new tab itself, so 'video' has no Home here.
    * Only opacity / transform animate, once per switch; nothing runs at rest.
    */
   var clearEl = layer ? layer.querySelector('.bg-clear') : null;
@@ -574,7 +584,6 @@
   /** Why the Home picture is not showing, or null when it should. */
   function homeWhyNot() {
     if (!home.want) return 'no new tab is in front';
-    if (themeNow() === 'light') return 'light keeps the new tab\'s own picture';
     if (!HOME_KINDS[current.kind]) {
       return current.kind === 'video' ? 'the clip plays on the new tab itself' : 'no picture is chosen';
     }
@@ -854,10 +863,39 @@
    * Re-read the dark strip's wash from the CACHED pixels of what is shown
    * (never a canvas read): on show, when a move ends, when the floor moves.
    * Lined up, the band is the monitor rows behind the window's top strip;
-   * otherwise the frame's top band, as always. Applied whatever the theme
-   * (light never reads --chrome-glass-a), so a flip back to dark is right.
+   * otherwise the frame's top band, as always. --chrome-glass-a is the wash
+   * of the theme in effect: dark's guard in dark, light's in light (a theme
+   * flip re-runs this, onLook).
    */
   function refreshGuard(quiet) {
+    refreshLightGuard();
+    if (themeNow() === 'light') {
+      applyGlass(guardLight.alpha);
+      if (booted && !quiet) announceGlass();
+      return;
+    }
+    refreshDarkGuard();
+    if (booted && !quiet) announceGlass();
+  }
+
+  /**
+   * CONTRACT "Light look": the light wash is white at glass.light.dim, raised
+   * to Mantle's desktop.guard.light while following the desktop and that
+   * value is fresh (worked out for this light dim and blur). Quartz has no
+   * light guard of its own: anything else is the dim unraised, with the
+   * reason (Settings shows it).
+   */
+  function refreshLightGuard() {
+    var g = glassFor('light');
+    var shared = sharedGuard(g, 'light');
+    if (shared.alpha !== null) {
+      guardLight = { alpha: shared.alpha, raised: shared.alpha > g.dim + 1e-9, source: 'shared', reason: null, ratio: shared.contrast };
+    } else {
+      guardLight = { alpha: g.dim, raised: false, source: 'own', reason: shared.reason, ratio: null };
+    }
+  }
+
+  function refreshDarkGuard() {
     var g = glassFor('dark');
     var floor = g.dim;
     var own;
@@ -868,7 +906,7 @@
       var rect = shown.lined && placeNow ? guardBand(placeNow, shown.layout) : shown.band;
       own = guardAlpha(px ? bandCandidates(px.data, px.w, rect) : [], floor);
     }
-    var shared = sharedGuard(g);
+    var shared = sharedGuard(g, 'dark');
     if (shared.alpha !== null) {
       guard = { alpha: shared.alpha, brightest: own.brightest, ratio: shared.contrast, raised: shared.alpha > floor + 1e-9,
                 source: 'shared', reason: null, own: own.alpha };
@@ -879,7 +917,6 @@
     // No picture and nothing shared: today's CSS fallback (.5) unless the floor moved.
     if (!shown && guard.source === 'own') applyGlass(Math.abs(floor - GLASS_FLOOR) < 0.001 ? null : floor);
     else applyGlass(guard.alpha);
-    if (booted && !quiet) announceGlass();
   }
 
   /**
@@ -892,7 +929,8 @@
    * Quartz's own value (guardAlpha over its own strip) and says why, in
    * words, for Settings: { alpha, contrast, reason }.
    */
-  function sharedGuard(g) {
+  function sharedGuard(g, theme) {
+    var light = theme === 'light';
     function no(why) { return { alpha: null, contrast: null, reason: why }; }
     var kind = current.kind;
     if (kind !== 'desktop') {
@@ -908,11 +946,19 @@
     var d = deskInfo();
     if (d.state !== 'ok') return no("Quartz is showing Windows' wallpaper, not Mantle's");
     if (!shown || shown.srcKey !== 'desktop|' + d.stillUrl) return no("Mantle's wallpaper is still being prepared");
-    var sg = d.guard;
-    if (!sg) return no(d.guardReason || "Mantle's record has no shared value");
+    var sg = light ? d.guardLight : d.guard;
+    if (!sg) {
+      return no(light ? (d.guardLightReason || 'light top band not published by Mantle yet')
+        : (d.guardReason || "Mantle's record has no shared value"));
+    }
     var dim = Number(sg.dim);
     var blur = Number(sg.blurPx);
     if (!isFinite(dim) || Math.abs(dim - g.dim) > 0.001 || !isFinite(blur) || Math.round(blur) !== g.blurPx) {
+      if (light) {
+        return no('light top band is stale: Mantle worked it out for Dim ' + alphaWords(dim) + ' and blur ' +
+          (isFinite(blur) ? blur : '?') + ' px, not this Dim ' + alphaWords(g.dim) + ' and blur ' + g.blurPx +
+          ' px (waiting for Mantle to work it out again)');
+      }
       return no("Mantle's shared value was worked out for Dim " + alphaWords(dim) + ' and blur ' +
         (isFinite(blur) ? blur : '?') + ' px, not this Dim ' + alphaWords(g.dim) + ' and blur ' + g.blurPx +
         ' px (waiting for Mantle to work it out again)');
@@ -920,7 +966,7 @@
     var a = Number(sg.alpha);
     var ceil = Math.max(GLASS_CEIL, g.dim);
     if (!isFinite(a) || a < g.dim - 1e-9 || a > ceil + 1e-9) {
-      return no("Mantle's shared value " + alphaWords(a) + ' is outside ' + alphaWords(g.dim) + '-' + alphaWords(ceil));
+      return no((light ? "Mantle's light top band " : "Mantle's shared value ") + alphaWords(a) + ' is outside ' + alphaWords(g.dim) + '-' + alphaWords(ceil));
     }
     return { alpha: Math.round(a * 100) / 100, contrast: typeof sg.contrast === 'number' && isFinite(sg.contrast) ? sg.contrast : null, reason: null };
   }
@@ -946,12 +992,15 @@
       '--surface-3': [62, 63, 66, 0.62],
       '--overlay': [29, 30, 31, 0.93]
     },
+    // CONTRACT "Light look": Helm's light alphas re-tinted pure white
+    // (panels .76, cards .70, overlays .95); --surface-3 is the pressed
+    // state on a white card, so it stays a cool grey from the ink's family.
     light: {
-      '--surface-0': [244, 244, 242, 0.56],
-      '--surface-1': [248, 248, 246, 0.76],
+      '--surface-0': [255, 255, 255, 0.56],
+      '--surface-1': [255, 255, 255, 0.76],
       '--surface-2': [255, 255, 255, 0.70],
-      '--surface-3': [232, 232, 230, 0.86],
-      '--overlay': [250, 250, 248, 0.95]
+      '--surface-3': [233, 235, 240, 0.86],
+      '--overlay': [255, 255, 255, 0.95]
     }
   };
 
@@ -962,13 +1011,16 @@
     var out = {};
     for (var i = 0; i < PANEL_PROPS.length; i++) {
       var b = base[PANEL_PROPS[i]];
-      var a = Math.min(0.99, Math.max(0.05, Math.round((b[3] + panel) * 100) / 100));
+      // Dark as it always was (.05..99); light per the contract (.30..97).
+      var a = theme === 'light'
+        ? Math.min(0.97, Math.max(0.30, Math.round((b[3] + panel) * 100) / 100))
+        : Math.min(0.99, Math.max(0.05, Math.round((b[3] + panel) * 100) / 100));
       out[PANEL_PROPS[i]] = 'rgba(' + b[0] + ', ' + b[1] + ', ' + b[2] + ', ' + a + ')';
     }
     return out;
   }
 
-  /** Panel and light dim for the resolved theme, inline on :root. */
+  /** The panel shift for the resolved theme, inline on :root. */
   function applyLookVars() {
     var theme = themeNow();
     var g = glassFor(theme);
@@ -978,9 +1030,9 @@
       if (v) st.setProperty(PANEL_PROPS[i], v[PANEL_PROPS[i]]);
       else st.removeProperty(PANEL_PROPS[i]);
     }
-    // Light's wash is --bg-dim; dark's is the guarded --chrome-glass-a.
-    if (theme === 'light' && Math.abs(g.dim - LIGHT_TOKEN_DIM) > 0.001) st.setProperty('--bg-dim', String(g.dim));
-    else st.removeProperty('--bg-dim');
+    // Both themes' wash is --chrome-glass-a now (refreshGuard); the old
+    // light --bg-dim override is cleared in case an older build left it.
+    st.removeProperty('--bg-dim');
   }
 
   /* --- the pure geometry (Backdrop._math) ---------------------------- */
@@ -1119,9 +1171,12 @@
     var out = canvasOf(outW, outH);
     var ctx = out.getContext('2d');
     var filtered = false;
+    var filterUsed = null;
     if ('filter' in ctx) {
-      ctx.filter = 'blur(' + b + 'px)';
+      // Light's ground is Mantle's island light: blur, then saturate(150%).
+      ctx.filter = 'blur(' + b + 'px)' + (p.saturate && p.saturate !== 100 ? ' saturate(' + p.saturate + '%)' : '');
       filtered = ctx.filter !== 'none';
+      filterUsed = filtered ? ctx.filter : null;
     }
     if (filtered) {
       ctx.drawImage(big, -m, -m);
@@ -1155,7 +1210,7 @@
 
     var info = {
       width: W, height: H, blur: b, overscan: m, filtered: filtered, cornerAlpha: corner,
-      blurPx: p.blurPx, lined: !!p.lined, outWidth: outW, outHeight: outH,
+      blurPx: p.blurPx, saturate: p.saturate || 100, filter: filterUsed, lined: !!p.lined, outWidth: outW, outHeight: outH,
       monitor: p.lined ? { width: p.mon.w, height: p.mon.h } : null,
       layer: p.lined ? { width: round2(layout.cssW), height: round2(layout.cssH),
                          marginX: round2(layout.marginX), marginY: round2(layout.marginY) } : null
@@ -1591,7 +1646,8 @@
   function plan(cfg) {
     var kind = normKind(cfg && cfg.kind);
     var g = glassFor(themeNow());
-    var p = { kind: kind, blurPx: g.blurPx, srcKey: null, key: null, desk: null, lined: false, mon: null };
+    var light = themeNow() === 'light';
+    var p = { kind: kind, blurPx: g.blurPx, saturate: light ? LIGHT_SATURATE : 100, srcKey: null, key: null, desk: null, lined: false, mon: null };
     if (kind === 'none') { p.key = 'none'; return p; }
     if (kind === 'desktop') {
       p.desk = deskInfo();
@@ -1602,7 +1658,8 @@
     } else {
       p.srcKey = signature(cfg);
     }
-    p.key = p.srcKey + '|blur ' + p.blurPx + '|' + (p.lined ? 'monitor ' + p.mon.w + 'x' + p.mon.h : 'window');
+    p.key = p.srcKey + '|blur ' + p.blurPx + (p.saturate !== 100 ? '|sat ' + p.saturate : '') + '|' +
+      (p.lined ? 'monitor ' + p.mon.w + 'x' + p.mon.h : 'window');
     return p;
   }
 

@@ -109,11 +109,13 @@ function install(deps) {
     try { st = fs.statSync(still); } catch (err) { return fallback('the still is missing: ' + path.basename(still) + ' (' + (err.code || err.message) + ')', record); }
     if (!st.isFile() || st.size === 0) return fallback('the still is empty: ' + path.basename(still), record);
     const g = guardOf(record);
+    const gl = guardLightOf(record);
     return {
       state: 'ok', stillUrl: pathToFileURL(still).href + '?rev=' + record.rev,
       title: record.title || record.id || null, rev: record.rev, reason: null, record,
       stillSize: record.stillSize || null, type: record.type || null,
-      guard: g.guard, guardReason: g.reason
+      guard: g.guard, guardReason: g.reason,
+      guardLight: gl.guard, guardLightReason: gl.reason
     };
   }
 
@@ -140,6 +142,32 @@ function install(deps) {
     }
     if (!isNum(d.dim)) return { guard: null, reason: "Mantle's shared value names no dim" };
     if (!isNum(d.blurPx)) return { guard: null, reason: "Mantle's shared value names no blur" };
+    return {
+      guard: { alpha: Math.round(d.alpha * 100) / 100, dim: d.dim, blurPx: d.blurPx,
+               contrast: isNum(d.contrast) ? d.contrast : null },
+      reason: null
+    };
+  }
+
+  /* CONTRACT "Light look": desktop.guard.light, Mantle's one WHITE alpha for
+     the same top band in light (ink-2 #333A4E keeps 4.7:1 over its darkest
+     pixels). Same shape and checks as dark; a missing entry is said as
+     "not published by Mantle yet" (an older Mantle publishes dark only). */
+  function guardLightOf(record) {
+    const isNum = (v) => typeof v === 'number' && isFinite(v);
+    const g = record.guard;
+    const d = g && typeof g === 'object' ? g.light : null;
+    if (d === undefined || d === null) {
+      return { guard: null, reason: record.guardReason && !(g && typeof g === 'object')
+        ? "Mantle couldn't work out the light top band (" + String(record.guardReason) + ')'
+        : 'light top band not published by Mantle yet' };
+    }
+    if (typeof d !== 'object') return { guard: null, reason: "Mantle's light top band is not a record" };
+    if (!isNum(d.alpha) || d.alpha < 0 || d.alpha > 1) {
+      return { guard: null, reason: "Mantle's light top band " + JSON.stringify(d.alpha) + ' is not an alpha (0-1)' };
+    }
+    if (!isNum(d.dim)) return { guard: null, reason: "Mantle's light top band names no dim" };
+    if (!isNum(d.blurPx)) return { guard: null, reason: "Mantle's light top band names no blur" };
     return {
       guard: { alpha: Math.round(d.alpha * 100) / 100, dim: d.dim, blurPx: d.blurPx,
                contrast: isNum(d.contrast) ? d.contrast : null },

@@ -80,12 +80,13 @@
 
   --rail-w: 352px;                 /* the markets tile's width */
 }
+/* Light (CONTRACT "Light look"): white glass, Mantle's hairline and ink. */
 html[data-theme="light"] {
-  --home-glass: rgba(250, 250, 248, 0.62);
+  --home-glass: rgba(255, 255, 255, 0.62);
   --home-glass-hover: rgba(255, 255, 255, 0.76);
-  --home-edge: rgba(0, 0, 0, 0.08);
+  --home-edge: rgba(11, 14, 26, 0.10);
   --home-shadow: 0 1px 2px rgba(255, 255, 255, 0.7), 0 2px 18px rgba(255, 255, 255, 0.55);
-  --home-scrim: 236 236 234;
+  --home-scrim: 255 255 255;
 }
 /* Over a moving clip nothing blurs (it would be redone every frame), so
    the small glass things take the card's opacity instead. */
@@ -204,7 +205,8 @@ body {
    .bg-clear), and this page is see-through over it, so the tab strip, the
    toolbar and this page are one picture. newtab.js sets data-bg-layer for
    a still in dark and loads no still here, so #bg-image, #bg-dim and the
-   scrim stay off. Light and clips are drawn here, as shipped. */
+   scrim stay off. Light does the same (the light look was un-held); clips
+   are drawn here. */
 html[data-bg-layer="chrome"] body { background: transparent; }
 
 /* Light theme lays a fixed light floor under the user's dim. Dark ink on a

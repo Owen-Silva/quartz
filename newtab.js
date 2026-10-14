@@ -4291,15 +4291,15 @@ let bgState = {
    one wash at the strip's alpha), and this page is see-through over it
    (html[data-bg-layer="chrome"], newtab.css), so the tab strip, the
    toolbar and this page are one picture with no edge at the toolbar.
-   Light keeps painting its own picture and Dim here, as shipped; a clip
-   (video / GIF) always plays here. The last push is kept so a theme flip
+   Light does the same (CONTRACT "Light look": one picture under the white
+   wash, as Helm's light Home); a clip (video / GIF) always plays here. The last push is kept so a theme flip
    can hand the picture back and forth (watchTheme). */
 let bgLastPush = null;
 
 /** True when the chrome draws this kind's picture under the page. */
 function bgLayerIsChrome(kind) {
   const k = kind === undefined ? bgState.kind : kind;
-  return bgIsStill(k) && document.documentElement.getAttribute('data-theme') !== 'light';
+  return bgIsStill(k);
 }
 
 /* Kind 'desktop' (Look Sync): the desktop's still, LINED UP with the screen.

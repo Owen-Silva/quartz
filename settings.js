@@ -2579,15 +2579,10 @@
     var field = bodyEl && bodyEl.querySelector('[data-field="glass"]');
     if (!field) return;
     field.textContent = '';
+    /* CONTRACT "Light look": the sliders edit glass.light while Quartz is
+       light and glass.dark while it is dark; the title says which. */
     var theme = isLight() ? 'light' : 'dark';
-    /* Light is held as shipped (backdrop.js LIGHT_HELD): no sliders that
-       would do nothing; the light values in the shared file stay as they are. */
-    if (theme === 'light') {
-      field.appendChild(el('p', 'set-hint set-glass-title', 'Glass for the Light theme:'));
-      field.appendChild(el('p', 'set-note set-glass-held',
-        'Light mode look is coming later. Light keeps its own glass for now; switch to Dark to set Blur, Dim and See-through.'));
-      return;
-    }
+    field.setAttribute('data-glass-theme', theme);
     var g = glass()[theme];
     var ls = lookSyncApi();
     var canPreview = !!(ls && typeof ls.previewGlass === 'function');
@@ -2630,8 +2625,9 @@
     see = glassSlider('See-through', 'set-glass-see', Math.round(-GLASS_RANGE.panel[1] * 100), Math.round(-GLASS_RANGE.panel[0] * 100),
       Math.round(-g.panel * 100), function (v) { return (v > 0 ? '+' : '') + v; }, onInput, onChange);
     field.appendChild(see.row);
-    field.appendChild(el('p', 'set-hint',
-      'Blur softens the picture behind the tabs; Dim darkens it so text stays readable; See-through makes the panels clearer (+) or more solid (−).'));
+    field.appendChild(el('p', 'set-hint', theme === 'light'
+      ? 'Blur softens the picture behind the tabs; Dim lays white over it so text stays readable; See-through makes the panels clearer (+) or more solid (−).'
+      : 'Blur softens the picture behind the tabs; Dim darkens it so text stays readable; See-through makes the panels clearer (+) or more solid (−).'));
     if (!ls) {
       field.appendChild(el('p', 'set-note set-look-warn', LOOK_MISSING
         + '. These values are saved, but nothing in this window applies them until it loads.'));
@@ -2651,6 +2647,20 @@
     try { st = (layer && typeof layer.state === 'function') ? layer.state() : null; } catch (err) { st = null; }
     var gs = st && st.glass;
     var theme = isLight() ? 'light' : 'dark';
+    var light = theme === 'light' && gs && gs.theme === 'light';
+    if (light) {
+      // CONTRACT "Light look": Mantle's desktop.guard.light while following
+      // the desktop, else the Dim unraised and why (no silent fallback).
+      if (gs.source === 'shared') {
+        note.textContent = 'Light wash ' + alphaText(gs.alpha) + ', shared with Mantle and Helm (worked out over the top of the screen)' +
+          (gs.raised ? '; raised from ' + alphaText(gs.floor) + ' so text stays readable over this dark photo.' : '.');
+      } else {
+        note.textContent = 'Light wash ' + alphaText(gs.alpha) + ' (the Dim, not raised)' +
+          (gs.sourceReason ? ': ' + gs.sourceReason : '') + '.';
+      }
+      note.hidden = false;
+      return;
+    }
     var dark = theme === 'dark' && gs && (!gs.theme || gs.theme === theme);
     if (dark && gs.source === 'shared') {
       // CONTRACT "Shared top-band darkening": Mantle's one value for the top
@@ -3790,13 +3800,14 @@
     field.appendChild(bgDimRow(cfg));
     /* newtab.css lays the dim in the theme's wash colour: darker in dark
        theme, paler in light (with a light floor so dark text stays legible).
-       Dark, a picture (not a clip): the new tab is Helm's Home, see-through
-       over the window's ONE picture and ONE wash (backdrop.js syncHome), so
-       this Dim does not reach it there; the Look's glass Dim does. Said, so
-       a slider that changes nothing in dark is never a mystery. */
-    var darkHome = !isLight() && cfg && cfg.kind !== 'video' && cfg.kind !== 'none';
-    field.appendChild(el('p', 'set-hint', darkHome
-      ? 'Dim softens the picture on the new tab in light theme. In dark the new tab sits under the window\'s one wash, like Helm\'s Home: set it with the Look\'s glass Dim.'
+       A picture (not a clip), in either theme since the light look was
+       un-held: the new tab is Helm's Home, see-through over the window's ONE
+       picture and ONE wash (backdrop.js syncHome), so this Dim does not
+       reach it; the Look's glass Dim does. Said, so a slider that changes
+       nothing there is never a mystery. */
+    var home = cfg && cfg.kind !== 'video' && cfg.kind !== 'none';
+    field.appendChild(el('p', 'set-hint', home
+      ? 'Dim softens a clip on the new tab. A picture on the new tab sits under the window\'s one wash, like Helm\'s Home: set it with the Look\'s glass Dim.'
       : 'Dim softens the picture on the new tab: darker in dark theme, paler in light.'));
   }
 

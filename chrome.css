@@ -199,13 +199,16 @@ button, input, .no-drag, .tab { -webkit-app-region: no-drag; }
   box-shadow: inset 0 1px 0 var(--panel-edge);
 }
 
-/* Dark: the bars are Helm's .strip and .rail, which have NO fill of their
-   own: what shows is the background layer's wash, rgb(9 10 11 / .50)
-   (backdrop.css), ~50% over the picture. Panels (the side pane, the Claude
-   pane's frame) keep --surface-1 on that wash, ~83% net, like Helm's.
-   Only the fill colour goes: the workspace tint gradient and the hairlines
-   stay. Light is unchanged (its bars keep --surface-0 over its wash). */
-html:not([data-theme="light"]) :is(#titlebar, .navrow, #bookmarks-bar, #views > .split-divider) {
+/* Both themes: the bars are Helm's .strip and .rail, which have NO fill of
+   their own: what shows is the background layer's wash (backdrop.css),
+   dark rgb(9 10 11 / .50), light white / .45 (CONTRACT "Light look": the
+   strip and toolbar = --chrome-glass-a), over the picture. Panels (the
+   side pane, the Claude pane's frame) keep --surface-1 on that wash, ~83%
+   net in dark, ~87% in light. Only the fill colour goes: the workspace
+   tint gradient and the hairlines stay. (Stated per theme to keep the
+   html[...] specificity: #titlebar's own background comes later.) */
+html:not([data-theme="light"]) :is(#titlebar, .navrow, #bookmarks-bar, #views > .split-divider),
+html[data-theme="light"] :is(#titlebar, .navrow, #bookmarks-bar, #views > .split-divider) {
   background-color: transparent;
 }
 
@@ -1059,9 +1062,8 @@ body.sidepane-dragging #sidepane-resize { background: var(--accent-soft); transi
    (newtab.css data-bg-layer) and the window's background layer shows the
    picture under it (backdrop.css .bg-clear), so its element must not paint
    white either. app.js keeps .own-layer on new tab guests only; web pages
-   keep the white above. Light: the new tab paints its own picture, as
-   shipped. */
-html:not([data-theme="light"]) #views webview.own-layer { background: transparent; }
+   keep the white above. Light too, since the light look was un-held. */
+#views webview.own-layer { background: transparent; }
 
 /* ...and on that Home the strip's and toolbar's hairlines go, as Helm's
    strip has none over its Home: tabs, toolbar and page are one picture.

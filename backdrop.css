@@ -93,13 +93,24 @@
    backdrop.js raises the wash (--chrome-glass-a, .50 to .88) only over a
    picture too bright for the strip's text at 50%, or sets it to Mantle's
    shared top-band value (CONTRACT "Shared top-band darkening") while
-   following the desktop. Light keeps its own wash. In dark the new tab is
-   Helm's Home: it is see-through, and this layer shows the picture
-   unblurred under the SAME wash (.bg-clear below), so there is one picture
-   and one wash from the top of the window to the bottom. In light the new
-   tab still paints its own picture and Dim (newtab.css), as shipped. */
+   following the desktop. The new tab is Helm's Home in both themes: it is
+   see-through, and this layer shows the picture unblurred under the SAME
+   wash (.bg-clear below), so there is one picture and one wash from the
+   top of the window to the bottom. */
 html:not([data-theme="light"]) .backdrop > .bg-wash {
   background: rgb(var(--wash-rgb) / var(--chrome-glass-a, 0.5));
+  opacity: 1;
+}
+
+/* Light (CONTRACT "Light look", Mantle's island light): the same stack in
+   white. The wash is rgb(255 255 255 / glass.light.dim), .45 by default,
+   over the picture blurred with saturate(150%) (backdrop.js); backdrop.js
+   sets --chrome-glass-a to Mantle's desktop.guard.light while following
+   the desktop (or the dim unraised, with the reason in Settings). The
+   strip and toolbar paint nothing more (chrome.css), so they ARE this
+   wash; panels lay white .76 on it (~.87 net). */
+html[data-theme="light"] .backdrop > .bg-wash {
+  background: rgb(var(--wash-rgb) / var(--chrome-glass-a, 0.45));
   opacity: 1;
 }
 
