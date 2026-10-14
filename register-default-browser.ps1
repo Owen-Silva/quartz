@@ -58,14 +58,19 @@ $CapKey    = "$ClientKey\Capabilities"
 $UrlKey    = "HKCU:\Software\Classes\$ProgIdUrl"
 $HtmlKey   = "HKCU:\Software\Classes\$ProgIdHtml"
 $RegAppKey = 'HKCU:\Software\RegisteredApplications'
-$UserChoiceKey = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
-
 # Every place Windows keeps "open this with ProgId X" for what we register.
+# Each is the PARENT of the choice. Current Windows 11 builds keep TWO records
+# that can disagree: the legacy UserChoice key and UserChoiceLatest\ProgId.
+# Seen 2026-10-14: https said MSEdgeHTM in UserChoice and OwenBrowserURL in
+# UserChoiceLatest, and Windows itself resolved https to Edge; .html said AceHTM
+# vs OwenBrowserHTML and resolved to the OwenBrowserHTML command. So neither
+# record alone is "the default": both are read, and what Windows will actually
+# run is asked of Windows (AssocQueryString) - all read-only.
 $ChoiceKeys = [ordered]@{
-    'https' = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
-    'http'  = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice'
-    '.html' = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.html\UserChoice'
-    '.htm'  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.htm\UserChoice'
+    'https' = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https'
+    'http'  = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http'
+    '.html' = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.html'
+    '.htm'  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.htm'
 }
 
 function Get-RegValue([string]$Key, [string]$Name) {
@@ -73,10 +78,36 @@ function Get-RegValue([string]$Key, [string]$Name) {
     try { return (Get-Item -LiteralPath $Key).GetValue($Name, $null) } catch { return $null }
 }
 
+# Every ProgId either record names for $kind (read-only - never written here).
+function Get-RecordedChoices([string]$kind) {
+    $base = $ChoiceKeys[$kind]
+    $ids = @()
+    foreach ($v in @((Get-RegValue "$base\UserChoiceLatest\ProgId" 'ProgId'), (Get-RegValue "$base\UserChoice" 'ProgId'))) {
+        if ($v -and ($ids -notcontains $v)) { $ids += $v }
+    }
+    return ,$ids
+}
+
+# The command line Windows resolves for $kind right now - the real answer.
+function Get-ResolvedCommand([string]$kind) {
+    try {
+        if (-not ('QuartzReg.Assoc' -as [type])) {
+            Add-Type -Namespace QuartzReg -Name Assoc -MemberDefinition '[DllImport("Shlwapi.dll", CharSet = CharSet.Unicode)] public static extern uint AssocQueryString(int flags, int str, string assoc, string extra, [Out] System.Text.StringBuilder outBuf, ref uint outLen);'
+        }
+        $sb = New-Object System.Text.StringBuilder 2048
+        [uint32]$n = 2048
+        # str 1 = ASSOCSTR_COMMAND
+        if ([QuartzReg.Assoc]::AssocQueryString(0, 1, $kind, 'open', $sb, [ref]$n) -ne 0) { return '<none>' }
+        return $sb.ToString()
+    } catch { return "<could not ask Windows: $($_.Exception.Message)>" }
+}
+
 function Show-CurrentDefault {
-    $progId = Get-RegValue $UserChoiceKey 'ProgId'
-    if ($progId) { "current https default (read-only): $progId" }
-    else { 'current https default (read-only): <none set>' }
+    foreach ($kind in $ChoiceKeys.Keys) {
+        $ids = Get-RecordedChoices $kind
+        if ($ids.Count -gt 0) { $rec = $ids -join ' / ' } else { $rec = '<none set>' }
+        "current $kind default (read-only): recorded $rec; Windows runs $(Get-ResolvedCommand $kind)"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -94,9 +125,13 @@ if ($RemoveOld) {
     )
     $stillOld = @()
     foreach ($kind in $ChoiceKeys.Keys) {
-        $progId = Get-RegValue $ChoiceKeys[$kind] 'ProgId'
-        if ($progId) { "current $kind default (read-only): $progId" } else { "current $kind default (read-only): <none set>" }
-        if ($progId -eq $OldProgIdUrl -or $progId -eq $OldProgIdHtml) { $stillOld += "$kind -> $progId" }
+        # Either record naming an old ProgId counts: Windows can switch to the
+        # other one, and deleting under it would leave the type with no handler.
+        $ids = Get-RecordedChoices $kind
+        if ($ids.Count -gt 0) { "current $kind default (read-only): $($ids -join ' / ')" } else { "current $kind default (read-only): <none set>" }
+        foreach ($progId in $ids) {
+            if ($progId -eq $OldProgIdUrl -or $progId -eq $OldProgIdHtml) { $stillOld += "$kind -> $progId" }
+        }
     }
     if ($stillOld.Count -gt 0 -and -not $Force) {
         ''
@@ -226,6 +261,43 @@ foreach ($k in @($UrlKey, $HtmlKey)) {
 # 4. The pointer. Without this line the Capabilities block above is never read.
 Set-RegValue $RegAppKey $AppKeyName "Software\Clients\StartMenuInternet\$AppKeyName\Capabilities"
 
+# 5. The pre-Quartz OwenBrowser* entries, while they still exist. Windows may
+#    still open every link and .html with them (it did on 2026-10-14, via
+#    UserChoiceLatest), and they started electron.exe as a row called "Browser".
+#    Repoint them at the same Quartz.exe command so a click lands in Quartz
+#    today, and rename them so the leftover row is recognisable. Only keys that
+#    already exist are touched - this never creates an old entry - and
+#    -RemoveOld deletes them once the user has picked the new "Quartz" row.
+$OldName = 'Quartz (old entry)'
+$OldClientKey = "HKCU:\Software\Clients\StartMenuInternet\$OldAppKeyName"
+$OldUrlKey    = "HKCU:\Software\Classes\$OldProgIdUrl"
+$OldHtmlKey   = "HKCU:\Software\Classes\$OldProgIdHtml"
+$legacyChecks = @()
+if (Test-Path -LiteralPath $OldClientKey) {
+    ''
+    'repointing the old OwenBrowser entries at Quartz.exe:'
+    Set-RegValue $OldClientKey '' $OldName
+    Set-RegValue "$OldClientKey\shell\open\command" '' $CmdPlain
+    $legacyChecks += @{ Key = $OldClientKey; Name = ''; Want = $OldName }
+    $legacyChecks += @{ Key = "$OldClientKey\shell\open\command"; Name = ''; Want = $CmdPlain }
+    if (Test-Path -LiteralPath "$OldClientKey\Capabilities") {
+        Set-RegValue "$OldClientKey\Capabilities" 'ApplicationName' $OldName
+        $legacyChecks += @{ Key = "$OldClientKey\Capabilities"; Name = 'ApplicationName'; Want = $OldName }
+    }
+}
+foreach ($pair in @(@($OldUrlKey, 'Quartz URL (old entry)'), @($OldHtmlKey, 'Quartz HTML Document (old entry)'))) {
+    $k = $pair[0]
+    if (-not (Test-Path -LiteralPath $k)) { continue }
+    Set-RegValue $k '' $pair[1]
+    Set-RegValue $k 'FriendlyTypeName' $OldName
+    Set-RegValue "$k\shell\open" 'FriendlyAppName' $OldName
+    Set-RegValue "$k\shell\open\command" '' $CmdUrl
+    $legacyChecks += @{ Key = $k; Name = ''; Want = $pair[1] }
+    $legacyChecks += @{ Key = $k; Name = 'FriendlyTypeName'; Want = $OldName }
+    $legacyChecks += @{ Key = "$k\shell\open"; Name = 'FriendlyAppName'; Want = $OldName }
+    $legacyChecks += @{ Key = "$k\shell\open\command"; Name = ''; Want = $CmdUrl }
+}
+
 # ---------------------------------------------------------------------------
 # Read it all back - a write that did not land must not be reported as success.
 # ---------------------------------------------------------------------------
@@ -257,6 +329,7 @@ foreach ($k in @($UrlKey, $HtmlKey)) {
     $checks += @{ Key = "$k\Application"; Name = 'ApplicationIcon'; Want = $IconPath }
     $checks += @{ Key = "$k\Application"; Name = 'AppUserModelId';  Want = $AppUserModelId }
 }
+$checks += $legacyChecks
 
 $bad = 0
 foreach ($c in $checks) {
@@ -280,8 +353,9 @@ if ($bad -eq 0) {
     '(Windows 11 will not let an app set that for itself, and this script does not try.)'
     if ((Test-Path -LiteralPath "HKCU:\Software\Clients\StartMenuInternet\$OldAppKeyName") -or
         (Test-Path -LiteralPath "HKCU:\Software\Classes\$OldProgIdUrl")) {
-        'The old OwenBrowser entries are still registered too (a second row in Default apps);'
-        'run this again with -RemoveOld once Quartz is picked.'
+        'The old OwenBrowser entries are still registered too (a second row in Default apps,'
+        'now called "Quartz (old entry)" and also starting Quartz.exe);'
+        'run this again with -RemoveOld once the new "Quartz" row is picked.'
     }
 } else {
     "$bad value(s) did not read back - NOT registered cleanly."

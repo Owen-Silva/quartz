@@ -43,6 +43,7 @@ let toprow = null;
 const schoolModule = require('./school');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
+const { urlFromArgv } = require('./argvurl');
 const spellModule = require('./spell');
 
 /** @type {BrowserWindow | null} */
@@ -914,29 +915,9 @@ function createWindow() {
 /** A URL that beat the chrome to it. Flushed on the first 'did-finish-load'. */
 let pendingOpenUrl = null;
 
-/**
- * The URL on a command line, or null. Electron's own switches and the app path
- * are skipped: a switch starts with '-', and the app path is not an http(s) URL
- * and does not end in .htm(l). The LAST candidate wins, which is where Windows
- * puts the '%1' it substitutes.
- */
-function urlFromArgv(argv) {
-  const args = Array.isArray(argv) ? argv : [];
-  for (let i = args.length - 1; i >= 0; i--) {
-    const arg = String(args[i] || '');
-    if (!arg || arg.startsWith('-')) continue;
-    if (/^https?:\/\//i.test(arg)) return arg;
-    // The .htm / .html association hands over a PATH, not a URL.
-    if (/\.html?$/i.test(arg)) {
-      try {
-        return pathToFileURL(path.resolve(arg)).href;
-      } catch (err) {
-        return null;
-      }
-    }
-  }
-  return null;
-}
+// urlFromArgv(argv) -- the URL on a command line, or null: an http(s) URL, a
+// file: URL, or an .htm(l) PATH (the file association's "%1"). It lives in
+// argvurl.js so argvurl-harness.js can test it under plain node.
 
 /** Give the chrome a foreground tab for `url`, or park it until it can take one. */
 function openUrlTab(url) {
