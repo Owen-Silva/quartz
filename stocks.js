@@ -427,6 +427,8 @@ function create(deps) {
   const electronApp = d.app || null;
   const setTimer = d.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = d.clearTimer || ((t) => clearTimeout(t));
+  const setRepeat = d.setRepeat || ((fn, ms) => setInterval(fn, ms));
+  const clearRepeat = d.clearRepeat || ((t) => clearInterval(t));
   const now = d.now || (() => Date.now());
   const isBundledPage = typeof d.isBundledPage === 'function' ? d.isBundledPage : () => false;
   /* Quiet by default. --stocks-log turns it on, and NOTHING it prints may
@@ -702,25 +704,43 @@ function create(deps) {
     return socketState === 'live' ? SLOW_POLL_MS : POLL_MS;
   }
 
+  /* One interval for as long as anyone is subscribed, and each POLL_MS beat runs a round only
+     once it is due (pollDelay() after the last one ended). Not a timeout re-armed after every
+     round: in Electron's main process every setTimeout also calls process.activateUvLoop(), and
+     doing that from inside an I/O or timer callback can lock the main thread and libuv's poll
+     thread into waking each other hundreds of times a second (next-week/quartz-efficiency.md).
+     The cost is up to one beat (10 s) of lateness on the 60 s and 5 min waits. */
+  let pollKick = null;
+  let pollDueAt = 0;
+  let pollBusy = false;
   function startPolling() {
     if (pollTimer || !subscribers.size || !hasKey()) return;
-    const tick = () => {
-      pollTimer = null;
+    pollDueAt = 0;
+    const beat = () => {
+      if (!pollTimer || pollBusy || now() < pollDueAt) return;
+      if (!subscribers.size || !hasKey()) { stopPolling(); return; }
+      pollBusy = true;
       Promise.resolve(pollRound()).catch(() => {}).then(() => {
+        pollBusy = false;
+        if (!pollTimer) return;                     // stopped mid-round
         if (subscribers.size && hasKey() && !keyInBackoff()) {
-          pollTimer = setTimer(tick, pollDelay());
+          pollDueAt = now() + pollDelay();
         } else if (subscribers.size && hasKey()) {
           /* A rejected key still gets one retry, a minute out, and then that
              retry's answer decides again. This is the "no retry storm" rule. */
-          pollTimer = setTimer(tick, KEY_DENIED_BACKOFF_MS);
+          pollDueAt = now() + KEY_DENIED_BACKOFF_MS;
+        } else {
+          stopPolling();
         }
       });
     };
-    pollTimer = setTimer(tick, 0);
+    pollTimer = setRepeat(beat, POLL_MS);
+    pollKick = setTimer(() => { pollKick = null; beat(); }, 0);
   }
 
   function stopPolling() {
-    if (pollTimer) { clearTimer(pollTimer); pollTimer = null; }
+    if (pollKick) { clearTimer(pollKick); pollKick = null; }
+    if (pollTimer) { clearRepeat(pollTimer); pollTimer = null; }
   }
 
   /* --- the websocket --------------------------------------------------- */

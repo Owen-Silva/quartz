@@ -219,6 +219,34 @@ const TASKLIST_ARGS = ['/FI', 'IMAGENAME eq LessonPlayerApp.exe', '/FO', 'CSV', 
     ok('push: the sent state is the new one', /tasklist exploded/.test(sends[sends.length - 1][1]), JSON.stringify(sends[sends.length - 1]));
   } finally { global.setTimeout = realSetTimeout; s.stop(); }
 
+  // The 3 s reader runs only while LessonPlayer does (lane idle2, 2026-10-15): started on the "running"
+  // edge with one read at once, stopped on the "closed" edge; while closed, one read says so.
+  let lessonplayerUp = false;
+  const noChildren = () => { throw new Error('harness: no child processes'); };
+  const realSetInterval = global.setInterval;
+  let readIntervals = 0;
+  global.setInterval = function countRead(fn, ms, ...rest) { if (ms === 3000) readIntervals++; return realSetInterval.call(this, fn, ms, ...rest); };
+  try {
+    s = schoolModule.create({ notesDir, userDataDir: tmp, spawn: noChildren, isRunning: () => lessonplayerUp });
+    await settle();
+    eq('reader gate: LessonPlayer closed at start -> no 3 s reader', [s.__test.readerTimer(), readIntervals], [false, 0]);
+    eq('reader gate: the pane is told it is not running', s.__test.state.reader.reason, 'LessonPlayer is not running');
+    lessonplayerUp = true;
+    await s.__test.checkPresence(); await settle();
+    eq('reader gate: LessonPlayer opens -> the 3 s reader starts', [s.__test.readerTimer(), readIntervals], [true, 1]);
+    ok('reader gate: and reads at once', s.__test.state.reader.reason !== 'LessonPlayer is not running', s.__test.state.reader.reason);
+    await s.__test.checkPresence(); await settle();
+    eq('reader gate: still running -> the same reader, no second one', [s.__test.readerTimer(), readIntervals], [true, 1]);
+    lessonplayerUp = false;
+    await s.__test.checkPresence(); await settle();
+    eq('reader gate: LessonPlayer closes -> the reader stops', s.__test.readerTimer(), false);
+    eq('reader gate: and the pane says so', s.__test.state.reader.reason, 'LessonPlayer is not running');
+    lessonplayerUp = true;
+    await s.__test.checkPresence(); await settle();
+    eq('reader gate: LessonPlayer opens again -> one new reader', [s.__test.readerTimer(), readIntervals], [true, 2]);
+  } finally { global.setInterval = realSetInterval; s.stop(); }
+  eq('reader gate: stop() clears the reader', s.__test.readerTimer(), false);
+
   /* ---- 3. live: the real snapshot, where koffi is installed ---------------------------------- */
   childProcess.spawn = realSpawn;
   procfind.__test.use(undefined);

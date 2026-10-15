@@ -1005,6 +1005,13 @@ function create(deps) {
   const spawnFn = d.spawn || spawn;
   const setTimer = d.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = d.clearTimer || ((t) => clearTimeout(t));
+  // The 1 s tick and the 30 s refresh are intervals armed once from the subscribe IPC, not
+  // timeouts re-armed from their own callbacks: in Electron's main process every setTimeout
+  // also calls process.activateUvLoop(), and doing that from a timer callback can lock the main
+  // thread and libuv's poll thread into waking each other hundreds of times a second
+  // (next-week/quartz-efficiency.md).
+  const setRepeat = d.setRepeat || ((fn, ms) => setInterval(fn, ms));
+  const clearRepeat = d.clearRepeat || ((t) => clearInterval(t));
   const now = d.now || (() => Date.now());
   const readCpus = d.cpus || (() => os.cpus());
   const readUptime = d.uptime || (() => os.uptime());
@@ -1044,8 +1051,9 @@ function create(deps) {
    */
   let lastSampleOut = null;
 
-  /** The running tick timer, the grace timer, and the typeperf retry timer. */
+  /** The running tick interval (+ the one early first sample), the grace timer, and the typeperf retry timer. */
   let tickTimer = null;
+  let firstTimer = null;
   let graceTimer = null;
   let retryTimer = null;
   /** The 30 s instance-list refresh. */
@@ -1316,11 +1324,9 @@ function create(deps) {
    */
   function scheduleRefresh() {
     if (refreshTimer) return;
-    refreshTimer = setTimer(() => {
-      refreshTimer = null;
-      if (totalCount() === 0) return;
+    refreshTimer = setRepeat(() => {
+      if (totalCount() === 0) return;          // the grace period: nobody is looking
       if (active && !pending) startChild(true);
-      scheduleRefresh();
     }, REFRESH_MS);
   }
 
@@ -1481,7 +1487,6 @@ function create(deps) {
   }
 
   function tick() {
-    tickTimer = null;
     // Read the children BEFORE building the sample: the row that lands in
     // this sample is the one typeperf wrote a moment ago.
     if (pending) pump(pending);
@@ -1517,23 +1522,25 @@ function create(deps) {
         } catch { /* the window went away mid-send */ }
       }
     }
-
-    tickTimer = setTimer(tick, SAMPLE_MS);
   }
 
   function startSampling() {
     if (tickTimer) return;
     prevCpus = readCpus();
-    tickTimer = setTimer(tick, FIRST_SAMPLE_MS);
+    // One early sample so the card fills fast, then a steady 1 s interval (both armed here,
+    // from the subscribe IPC; see setRepeat above).
+    firstTimer = setTimer(() => { firstTimer = null; tick(); }, FIRST_SAMPLE_MS);
+    tickTimer = setRepeat(tick, SAMPLE_MS);
     barren = 0;
     startChild(false);
     scheduleRefresh();
   }
 
   function stopSampling() {
-    if (tickTimer) { clearTimer(tickTimer); tickTimer = null; }
+    if (firstTimer) { clearTimer(firstTimer); firstTimer = null; }
+    if (tickTimer) { clearRepeat(tickTimer); tickTimer = null; }
     if (retryTimer) { clearTimer(retryTimer); retryTimer = null; }
-    if (refreshTimer) { clearTimer(refreshTimer); refreshTimer = null; }
+    if (refreshTimer) { clearRepeat(refreshTimer); refreshTimer = null; }
     prevCpus = null;
     killChild();
     for (const field of COUNTER_FIELDS) { delete counterValues[field]; delete counterAt[field]; }

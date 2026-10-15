@@ -572,6 +572,8 @@ function create(deps) {
    */
   const setTimer = d.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = d.clearTimer || ((t) => clearTimeout(t));
+  const setRepeat = d.setRepeat || ((fn, ms) => setInterval(fn, ms));
+  const clearRepeat = d.clearRepeat || ((t) => clearInterval(t));
 
   let config = null;
   let lastError = null;
@@ -721,7 +723,7 @@ function create(deps) {
   let mutePollTimer = null;
 
   function stopMutePoll() {
-    if (mutePollTimer !== null) { clearTimer(mutePollTimer); mutePollTimer = null; }
+    if (mutePollTimer !== null) { clearRepeat(mutePollTimer); mutePollTimer = null; }
   }
 
   function anyAudibleGuest() {
@@ -729,9 +731,12 @@ function create(deps) {
     return false;
   }
 
+  // An interval while something is audible, not a timeout re-armed from its own callback: in
+  // Electron's main process every setTimeout also calls process.activateUvLoop(), and doing that
+  // from a timer callback twice a second can lock the main thread and libuv's poll thread into
+  // waking each other hundreds of times a second (next-week/quartz-efficiency.md).
   function armMutePoll() {
-    mutePollTimer = setTimer(() => {
-      mutePollTimer = null;
+    mutePollTimer = setRepeat(() => {
       let changed = false;
       for (const entry of guests.values()) {
         if (!entry.audible) continue;
@@ -739,7 +744,7 @@ function create(deps) {
         if (muted !== entry.muted) { entry.muted = muted; changed = true; }
       }
       // Re-evaluating twice a second when nothing moved would be pure noise, so
-      // only a real change goes through. recount() re-arms us via syncMutePoll.
+      // only a real change goes through. recount() stops us via syncMutePoll.
       if (changed) recount();
       else syncMutePoll();
     }, MUTE_POLL_MS);

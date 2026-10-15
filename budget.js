@@ -80,7 +80,7 @@
  *     honest — the numbers ARE good — and the note still reaches the School
  *     pane's helper line, because a file we silently skipped is exactly the
  *     kind of thing that should not be silent.
- *   - The extra create() options `dir`, `now`, `setTimer`, `clearTimer`,
+ *   - The extra create() options `dir`, `now`, `setRepeat`, `clearRepeat`,
  *     `stateFile` and `stat` exist for the harness. Main passes none of them:
  *     it gets the folder from the home directory and the baseline file from
  *     app.getPath('userData').
@@ -212,8 +212,12 @@ function create(options) {
   const electronApp = opts.app;
   const dir = opts.dir || defaultDir();
   const now = typeof opts.now === 'function' ? opts.now : () => Date.now();
-  const setTimer = opts.setTimer || ((fn, ms) => setTimeout(fn, ms));
-  const clearTimer = opts.clearTimer || ((t) => clearTimeout(t));
+  /* An interval, not a setTimeout re-armed from its own callback: in Electron's main process every
+     setTimeout call also calls process.activateUvLoop(), and doing that from inside a timer
+     callback can lock the main thread and libuv's poll thread into waking each other hundreds of
+     times a second (next-week/quartz-efficiency.md). An interval re-arms inside Node itself. */
+  const setRepeat = opts.setRepeat || ((fn, ms) => setInterval(fn, ms));
+  const clearRepeat = opts.clearRepeat || ((t) => clearInterval(t));
   /* The harness fakes birthtimes through here; main never passes it. */
   const statFile = typeof opts.stat === 'function' ? opts.stat : (file) => fs.statSync(file);
 
@@ -487,15 +491,13 @@ function create(options) {
 
   function schedule() {
     if (timer) return;
-    timer = setTimer(function tick() {
-      timer = null;
+    timer = setRepeat(function tick() {
       try { refresh(); } catch { /* a reading that threw must not stop the poll */ }
-      schedule();
     }, POLL_MS);
   }
 
   function stop() {
-    if (timer) { clearTimer(timer); timer = null; }
+    if (timer) { clearRepeat(timer); timer = null; }
   }
 
   /* --- wiring ----------------------------------------------------------- */
