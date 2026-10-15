@@ -54,6 +54,34 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
   await Promise.resolve().then(() => q.activateUvLoop());
   ok('real id: a promise continuation still activates (Node gives it no id)', q.real === before + 1, JSON.stringify(c2));
 
+  // Mode 'all' (Electron >= 44): every activation is skipped, wherever it comes from.
+  const ver = (v) => Object.assign(fakeProc('browser'), { versions: { electron: v } });
+  ok('defaultMode: Electron 44.3.0 -> all', uvquiet.defaultMode(ver('44.3.0')) === 'all');
+  ok('defaultMode: Electron 45.0.0-beta.1 -> all', uvquiet.defaultMode(ver('45.0.0-beta.1')) === 'all');
+  ok('defaultMode: Electron 43.9.9 -> asyncid', uvquiet.defaultMode(ver('43.9.9')) === 'asyncid');
+  ok('defaultMode: no Electron version -> asyncid', uvquiet.defaultMode(fakeProc('browser')) === 'asyncid' && uvquiet.defaultMode(null) === 'asyncid');
+  const a = ver('44.3.0');
+  let aid = 0;
+  let aPassHook = 0;
+  const ca = uvquiet.install({ proc: a, asyncId: () => aid, onPass: () => { aPassHook++; } });
+  ok('Electron 44 install picks mode all', !!ca && ca.mode === 'all', JSON.stringify(ca));
+  aid = 0; a.activateUvLoop();
+  aid = 1; a.activateUvLoop();
+  aid = 9; a.activateUvLoop();
+  ok('mode all: Chromium task, main script and Node callback are all skipped', a.real === 0 && ca.skipped === 3 && ca.passed === 0 && aPassHook === 0, JSON.stringify(ca));
+  await Promise.resolve().then(() => a.activateUvLoop());
+  ok('mode all: a promise continuation is skipped too', a.real === 0 && ca.skipped === 4);
+  ok('mode all: the wrapper returns undefined like the real one', a.activateUvLoop() === undefined);
+  const b = ver('44.3.0');
+  let bid = 0;
+  const cb = uvquiet.install({ proc: b, mode: 'asyncid', asyncId: () => bid });
+  bid = 0; b.activateUvLoop();
+  bid = 5; b.activateUvLoop();
+  ok('an explicit asyncid mode on Electron 44 keeps the old rule', cb.mode === 'asyncid' && b.real === 1 && cb.skipped === 1 && cb.passed === 1, JSON.stringify(cb));
+  const c = ver('44.3.0');
+  const cc = uvquiet.install({ proc: c, mode: 'bogus' });
+  ok('an unknown mode falls back to the default', cc.mode === 'all');
+
   console.log(`uvquiet-test: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.log('FAIL harness threw: ' + (e && e.stack)); console.log(`uvquiet-test: ${pass} passed, ${fail + 1} failed`); process.exit(1); });

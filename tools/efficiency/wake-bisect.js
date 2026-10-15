@@ -1,7 +1,7 @@
 // tools/efficiency/wake-bisect.js -- which part of Quartz's main process keeps waking it at idle.
 //
 //   node tools/efficiency/wake-bisect.js --conds="base;bare:BARE;all:off=ALL;school:off=school+procfind;d:diag"
-//        [--settle=45] [--window=60] [--stagger=3] [--out=wake-out]
+//        [--settle=45] [--window=60] [--stagger=3] [--out=wake-out] [--bridge]
 //
 // RUNNER ONLY (CI=true or QUARTZ_BENCH_OK=1): it starts several Quartz instances at once and kills
 // each one it started by PID tree. Never on the user's laptop.
@@ -128,6 +128,9 @@ async function cdpEval(port, expr) {
 // idle = the music player and the now-playing poll (syncIdlePresence).
 const FOCUS_PART = {
   stats: '(statsApi().subscribe(), "stats subscribed")',
+  // The sampler runs and the chrome gets every sample, but nothing is pushed into the Home guest
+  // (no webview.executeJavaScript round trip through main once a second).
+  statsnopush: '(pushStatsToTab = function () {}, statsApi().subscribe(), "stats subscribed, no guest push")',
   board: '(windowBlurred = false, syncBoardPause(), "board un-paused")',
   idle: '(windowBlurred = false, syncIdlePresence(), "idle presence synced")',
 };
@@ -165,6 +168,14 @@ function rate(a, b, pid) {
     : argv.conds;
   const conds = parseConds(spec);
   console.log('wake-bisect: ' + conds.length + ' conditions, settle ' + SETTLE + ' s, window ' + WINDOW + ' s');
+  // --bridge: tools/efficiency/fake-bridge.js on 8787 for the whole run (every condition sees a
+  // live Spotify bridge, as on the user's machine); killed with the instances.
+  let bridge = null;
+  if (argv.bridge) {
+    bridge = spawn(process.execPath, [path.join(__dirname, 'fake-bridge.js'), '--port=8787'], { cwd: REPO, stdio: ['ignore', fs.openSync(path.join(OUT, 'log-fake-bridge.txt'), 'w'), 'ignore'], windowsHide: true });
+    await sleep(1000);
+    console.log('wake-bisect: fake bridge up (pid ' + bridge.pid + ')');
+  }
   try {
     for (const c of conds) { launch(c); await sleep(STAGGER * 1000); }
     await Promise.all(conds.map(bootCheck));
@@ -191,6 +202,7 @@ function rate(a, b, pid) {
     if (conds.some((c) => c.diag)) await sleep(15000); // the diag instance writes at settle+5+20 s
   } finally {
     for (const c of conds) { if (c.pid) { try { execFileSync('taskkill', ['/PID', String(c.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ } } }
+    if (bridge) { try { execFileSync('taskkill', ['/PID', String(bridge.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ } }
   }
   const rows = conds.map((c) => ({ name: c.name, off: c.off, no: c.no, sch: c.sch, diag: c.diag, boot: c.boot,
     mainCtxPerS: c.whole && c.whole.ctxPerS, halves: [c.half1 && c.half1.ctxPerS, c.half2 && c.half2.ctxPerS],

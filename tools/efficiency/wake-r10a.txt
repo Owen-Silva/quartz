@@ -1,0 +1,13 @@
+# wake-bisect.js round 10 (lane homestorm), phase A: no Spotify bridge. Every Quartz row runs this
+# branch (uvquiet mode all + now-playing polled from a main-process interval). Which part of the
+# stats card still storms: the guest push (statsnopush), procicons (off=procicons)?
+home:
+fs-stats:focus=stats
+fs-stats-2:focus=stats
+fs-stats-nopush:focus=statsnopush
+fs-stats-noicons:focus=stats,off=procicons
+fs-idle:focus=idle
+fs-full:focus
+r-wv:repro=wvexec1s
+r-wv-all:repro=wvexec1s-guardall
+bare:BARE

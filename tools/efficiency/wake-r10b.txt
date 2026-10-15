@@ -1,0 +1,4 @@
+# wake-bisect.js round 10 (lane homestorm), phase B: --bridge (fake bridge on 8787).
+fs-idle:focus=idle
+fs-idle-2:focus=idle
+fs-full:focus

@@ -1,0 +1,18 @@
+# wake-bisect.js round 9 (lane homestorm), phase A: no Spotify bridge (the runner default).
+# old = QWAKE_GUARD=asyncid (master 63df0be's async-id rule), new = this branch's default
+# (Electron 44: every activateUvLoop skipped). repro rows are plain Electron.
+home-new:
+fs-full-old:focus,env=QWAKE_GUARD=asyncid
+fs-full-new:focus
+fs-stats-old:focus=stats,env=QWAKE_GUARD=asyncid
+fs-stats-new:focus=stats
+fs-idle-old:focus=idle,env=QWAKE_GUARD=asyncid
+fs-idle-new:focus=idle
+fs-stats-noprocs:focus=stats,env=BROWSER_STATS_NO_PROCS=1
+r-async-id:repro=unref3s-async-guardid
+r-async-all:repro=unref3s-async-guardall
+r-con:repro=con2s
+r-con-http:repro=con2s-http
+r-con-httpok:repro=con2s-httpok
+r-con-httpok-all:repro=con2s-httpok-guardall
+bare:BARE

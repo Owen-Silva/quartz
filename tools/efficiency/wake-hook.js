@@ -118,6 +118,7 @@ if (OFF.size || SCHOOL.size || AB) {
 }
 
 // QWAKE_GUARD=on: install ../../uvquiet.js before main.js runs (an A/B on a build without it).
+// QWAKE_GUARD=asyncid|all: the same, in that mode ('asyncid' = master 63df0be's rule).
 // QWAKE_GUARD=off: make main.js's own install a no-op (the guard is already in place, as a fake).
 // QWAKE_GUARD_LOG=<file>: every 10 s, write the guard's counters and where the activations that
 // still go through come from (top stack frames, tallied).
@@ -126,10 +127,14 @@ if (process.env.QWAKE_GUARD === 'off' && typeof process.activateUvLoop === 'func
   const passthrough = function activateUvLoop() { return real.apply(process, arguments); };
   passthrough.__uvquiet = { skipped: 0, passed: 0, disabledByHook: true };
   process.activateUvLoop = passthrough;
-} else if (process.env.QWAKE_GUARD === 'on' || process.env.QWAKE_GUARD_LOG) {
+} else if (process.env.QWAKE_GUARD === 'on' || process.env.QWAKE_GUARD === 'asyncid' || process.env.QWAKE_GUARD === 'all' || process.env.QWAKE_GUARD_LOG) {
+  // QWAKE_GUARD=asyncid|all: install that mode first (main.js's own install is then a no-op), so
+  // one build can be A/B'd against the old async-id rule in the same run.
   const stacks = {};
   const logFile = process.env.QWAKE_GUARD_LOG;
+  const gmode = process.env.QWAKE_GUARD === 'asyncid' || process.env.QWAKE_GUARD === 'all' ? process.env.QWAKE_GUARD : undefined;
   const counts = require(path.join(__dirname, '..', '..', 'uvquiet.js')).install({
+    mode: gmode,
     onPass: logFile ? () => {
       const lines = String(new Error().stack).split('\n').slice(3, 7).map((l) => l.trim().replace(/\(.*[\\/]/, '(')).join(' < ');
       stacks[lines] = (stacks[lines] || 0) + 1;

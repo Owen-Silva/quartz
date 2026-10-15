@@ -1,0 +1,6 @@
+# wake-bisect.js round 9 (lane homestorm), phase B: --bridge (tools/efficiency/fake-bridge.js on
+# 8787), so now-playing makes one GET /now per poll on a live port, as on the user's machine.
+fs-full-old:focus,env=QWAKE_GUARD=asyncid
+fs-full-new:focus
+fs-idle-old:focus=idle,env=QWAKE_GUARD=asyncid
+fs-idle-new:focus=idle
