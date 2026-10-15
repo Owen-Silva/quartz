@@ -279,6 +279,9 @@ WATCHDOG.unref();
     await watcher.ready;
     child = await launch(['--force-device-scale-factor=1'], watcher);
     global.__child = child;
+    // Every Look Sync status this run, so a 'Problem' (a cloud run's light screenshot once caught
+    // 'Watching ...look-sync stopped (folder was removed)') fails the run instead of hiding in a shot.
+    await ev("(window.__lsProblems = [], document.addEventListener('lookstatus', (e) => { const s = e.detail || {}; if (s.state === 'error') __lsProblems.push(String(s.reason)); }), (window.LookSync && LookSync.status().state === 'error' && __lsProblems.push(String(LookSync.status().reason))), 1)");
     await ev("setThemeMode('dark') || true");
 
     // 1. Visit three sites, so the store and the history hold them.
@@ -370,6 +373,8 @@ WATCHDOG.unref();
     judgeTiles('new tab (light)', ntLight, 0);
     lk = await looks();
     check(isLight(lk.newtab), 'theme: switched to light, the new tab page is light', JSON.stringify(lk.newtab));
+    const lsProblems = await ev("window.__lsProblems.concat(LookSync.status().state === 'error' ? [String(LookSync.status().reason)] : [])");
+    check(lsProblems.length === 0, 'Look Sync: no Problem through two theme flips (dark, then light)', lsProblems.slice(0, 3).join(' | ') || 'none');
     check(isLight(lk.history) && painted(lk.history), 'theme: switched to light, the open history page follows (it used to stay dark)', JSON.stringify(lk.history));
     // ...and back: a history page opened in light follows the switch to dark as well.
     await ev("setThemeMode('dark') || true");

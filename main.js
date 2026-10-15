@@ -1568,46 +1568,18 @@ function isPlainObject(value) {
  * and stalled the event loop for 1168 ms at the 99th percentile. Every one of
  * those milliseconds was the whole UI: main draws no frames, so a disk hiccup
  * during a burst of tab closes is felt as a freeze. Async takes the same work
- * off the loop thread; `pendingSession` collapses a burst into one write per
+ * off the loop thread; the pending slot collapses a burst into one write per
  * completed write, because only the NEWEST snapshot has ever been worth
  * keeping. Durability is unchanged where it matters: flushSessionSync() below
  * runs on quit and restart, when there is no loop left to protect.
  */
-let pendingSession = null;   // newest snapshot json not yet on disk
-let sessionWriting = false;  // a write is in flight
-
-/** Write-then-rename: a kill mid-write can only ever destroy the .tmp, so
- *  session.json is either the previous snapshot or the new one, never half. */
-function drainSession() {
-  if (sessionWriting || pendingSession === null) return;
-  const json = pendingSession;
-  pendingSession = null;
-  sessionWriting = true;
-  const target = sessionStatePath();
-  const tmp = `${target}.tmp`;
-  fs.promises
-    .writeFile(tmp, json, 'utf8')
-    .then(() => fs.promises.rename(tmp, target))
-    .catch(() => { /* a disk error must never take down the pump */ })
-    .then(() => {
-      sessionWriting = false;
-      drainSession(); // whatever arrived while that one was in flight
-    });
-}
+// sessionfile.js: the pump above, plus a failed write keeps its snapshot and tries again (a
+// virus scanner holding session.json makes the rename fail for a moment on Windows).
+const sessionFile = require('./sessionfile').create({ target: sessionStatePath });
 
 /** The last moment anything can be written: the process is about to go. */
 function flushSessionSync() {
-  if (pendingSession === null) return;
-  const json = pendingSession;
-  pendingSession = null;
-  try {
-    const target = sessionStatePath();
-    const tmp = `${target}.tmp`;
-    fs.writeFileSync(tmp, json, 'utf8');
-    fs.renameSync(tmp, target);
-  } catch {
-    // Nothing useful to do while quitting.
-  }
+  try { sessionFile.flushSync(); } catch { /* Nothing useful to do while quitting. */ }
 }
 
 ipcMain.on('session:write', (_event, { snapshot } = {}) => {
@@ -1618,14 +1590,17 @@ ipcMain.on('session:write', (_event, { snapshot } = {}) => {
     if (typeof json !== 'string') return;
     if (Buffer.byteLength(json, 'utf8') > SESSION_MAX_BYTES) return;
 
-    pendingSession = json;
-    drainSession();
+    sessionFile.write(json);
   } catch {
     // A disk error must never take down an IPC handler.
   }
 });
 
-ipcMain.handle('session:read', () => {
+// Tests only: answer late, the way a main busy at boot does (sessions-e2e boot 3).
+const SESSION_READ_DELAY_MS = process.argv.includes('--test-profile') ? Math.min(Number(process.env.QUARTZ_TEST_SESSION_READ_DELAY_MS) || 0, 2500) : 0;
+
+ipcMain.handle('session:read', async () => {
+  if (SESSION_READ_DELAY_MS > 0) await new Promise((r) => setTimeout(r, SESSION_READ_DELAY_MS));
   try {
     const parsed = JSON.parse(fs.readFileSync(sessionStatePath(), 'utf8'));
     return isPlainObject(parsed) ? parsed : null;

@@ -49,6 +49,8 @@ const TESTS = [
   { name: 'keywords', file: 'keywords-harness.js' },
   { name: 'log', file: 'log-harness.js' },
   { name: 'profilemove', file: 'profilemove-harness.js' },
+  // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
+  { name: 'sessionfile', file: 'sessionfile-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
@@ -66,13 +68,19 @@ const TESTS = [
   { name: 'find-e2e', file: 'find-e2e.js', e2e: true },
   { name: 'downloads-e2e', file: 'downloads-e2e.js', e2e: true },
   { name: 'omnibox-e2e', file: 'omnibox-e2e.js', e2e: true },
-  {
-    name: 'looksync-e2e', file: 'looksync-e2e.js', e2e: true,
-    needs: () => (exists(path.join(os.homedir(), 'look-sync', 'fake-writer.js')) ? null : 'needs ~/look-sync/fake-writer.js (the Look Sync repo), not on this machine'),
-  },
+  // Drives the shared look file with looksync/fake-writer.js (vendored, so it runs anywhere).
+  { name: 'looksync-e2e', file: 'looksync-e2e.js', e2e: true },
   {
     name: 'smoke', file: 'smoketest.js', args: [path.join(os.tmpdir(), 'quartz-suite-smoke')], e2e: true,
-    needs: () => (exists(path.join(os.homedir(), '.local', 'bin', 'claude.exe')) ? null : 'opens a Claude Code pane: needs claude.exe at ~/.local/bin, not on this machine'),
+    // Not on a cloud runner: the terminal needs node-pty built for Electron, and there is no
+    // Electron prebuild of @homebridge/node-pty-prebuilt-multiarch and its npm package lacks the
+    // winpty sources to build one (tried on a runner: gyp 'deps/winpty/src/winpty.gyp not found').
+    needs: () => {
+      const why = [];
+      if (!exists(path.join(ROOT, 'node_modules', '@homebridge', 'node-pty-prebuilt-multiarch', 'build', 'Release', 'conpty.node'))) why.push('node-pty built for Electron (node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/conpty.node; no Electron prebuild exists and the package cannot be built from npm)');
+      if (!exists(path.join(os.homedir(), '.local', 'bin', 'claude.exe'))) why.push('claude.exe at ~/.local/bin');
+      return why.length ? 'opens a Claude Code pane: needs ' + why.join(' and ') + ', not on this machine' : null;
+    },
   },
 ];
 

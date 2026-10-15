@@ -49,7 +49,9 @@ run('sessions-e2e', async ({ check, launch, say, profileDir }) => {
     .map((t) => ({ id: t.id, url: String(readCurrentUrl(t) || t.url).slice(${B.length}), pinned: !!t.pinned, asleep: !!t.asleep, title: t.title || '', active: t.id === activeTabId }))`;
 
   // ---- boot 1 -------------------------------------------------------------------------------
-  let q = await launch({ cdp: CDP });
+  // reg.exe (the Windows apps-mode read) answers 5 s late, as on a runner busy at boot: Look Sync's
+  // hello must not wait for it (the window gives up after 4 s and says 'the browser did not answer').
+  let q = await launch({ cdp: CDP, env: { QUARTZ_TEST_APPS_MODE_DELAY_MS: '5000' } });
   let c = q.chrome;
   check(fileView() === null || fileView().entries === '', 'a fresh profile has no stored tabs of ours', fileView());
   // A fresh profile has no Mantle record, so the background falls back to Windows' wallpaper and
@@ -61,6 +63,15 @@ run('sessions-e2e', async ({ check, launch, say, profileDir }) => {
   const toast = await c.waitFor("(() => { for (const n of document.querySelectorAll('body *')) { if (getComputedStyle(n).position === 'fixed' && /^Following Windows/.test(n.textContent || '')) return n.textContent.trim(); } return ''; })()", 6000).catch(() => '');
   if (toast) check(toast.replace(/[.\s]+$/, '') === WANT_WHY && !/\(.*\)/.test(toast), 'fresh profile: the toast says it once, no reason repeated in brackets', toast);
   else say('no wallpaper toast seen within 6 s (only the reason was checked)');
+  // A fresh profile's look-sync folder is new, not removed: never a "Problem". On a runner (TEMP is
+  // an 8.3 short path) the watcher read Quartz's own first write as "folder was removed".
+  const lsFirst = await c.waitFor("(() => { const s = window.LookSync && window.LookSync.status(); return s && s.state !== 'starting' ? s.state + ': ' + s.reason : ''; })()", 10000).catch((e) => e.message);
+  let lsProblem = /^error/.test(lsFirst) ? lsFirst : '';
+  for (const t0 = Date.now(); !lsProblem && Date.now() - t0 < 3000;) {
+    lsProblem = await c.ev("(() => { const s = window.LookSync.status(); return s.state === 'error' ? s.reason : ''; })()");
+    if (!lsProblem) await sleep(100);
+  }
+  check(!lsProblem, 'fresh profile: Look Sync is never a Problem (3 s after it settles)', lsProblem || lsFirst);
   const open = async (name, file) => {
     const id = await c.ev(`(() => { window.__t = window.__t || {}; const t = createTab(${JSON.stringify(B + '/' + file)}); window.__t[${JSON.stringify(name)}] = t; activateTab(t.id); return t.id; })()`);
     await c.waitFor(`window.__t[${JSON.stringify(name)}].ready === true`, 15000);
@@ -123,7 +134,9 @@ run('sessions-e2e', async ({ check, launch, say, profileDir }) => {
   check(await q.kill(), 'boot 2: killed (taskkill /F, no clean shutdown)');
 
   // ---- boot 3 -------------------------------------------------------------------------------
-  q = await launch({ cdp: CDP });
+  // main answers the session read 1 s late, as a main busy at boot does (seen on a runner after a
+  // kill): boot must still wait for session.json, the copy that survived the kill.
+  q = await launch({ cdp: CDP, env: { QUARTZ_TEST_SESSION_READ_DELAY_MS: '1000' } });
   c = q.chrome;
   strip = await c.waitFor(`(() => { const s = ${STRIP}; return s.length >= 4 ? s : null; })()`, 15000).catch(() => null);
   strip = strip || await c.ev(STRIP);

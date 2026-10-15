@@ -9975,8 +9975,11 @@ function wireTabMenu() {
  */
 const SESSION_STORAGE_KEY = 'session';
 const SESSION_SAVE_DELAY = 500;
-// How long boot waits for the file copy before going with localStorage alone.
-const SESSION_READ_TIMEOUT = 300;
+// How long boot waits for the file copy before going with localStorage alone. Only a HUNG main
+// should hit this: a main that is merely busy at boot answers late, and its copy is the one that
+// survives a kill (localStorage loses its last write then). At 300 ms a cloud runner's busy main
+// missed it after a kill and the last tab opened did not come back (sessions-e2e, boot 3).
+const SESSION_READ_TIMEOUT = 3000;
 const SESSION_MAX_TABS = 40;
 // 'main' plus however many the user made; a bound so a corrupt file cannot
 // grow the switcher without limit.

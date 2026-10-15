@@ -69,12 +69,37 @@ function openMantleWallpapers() {
   });
 }
 
+/*
+ * The folder as its long, real path. Electron's fs.watch on Windows names each change by cutting
+ * the file's LONG path at the length of the folder AS GIVEN; given an 8.3 short path (a GitHub
+ * runner's TEMP is C:\Users\RUNNER~1\..., so a test profile there is one) the name comes out as
+ * 'nc\look.json' (the tail of 'look-sync' plus the file). look-sync reads a name with a
+ * backslash as 'the folder was removed': a 'Problem' toast after every write, and changes from
+ * Mantle or Helm never followed. Measured on a runner: plain node 24 names it right, Electron 44
+ * does not (zf probe, cloud run 38691949758). Hand look-sync the long path.
+ */
+function longPath(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return fs.realpathSync.native(dir);
+  } catch (e) {
+    return dir; // look-sync makes it, or reports why it cannot
+  }
+}
+
+/** A file's long, real path; a missing file keeps its name under its folder's long path. */
+function longFile(file) {
+  const p = path.resolve(String(file));
+  try { return fs.realpathSync.native(p); } catch (e) { /* missing: try its folder */ }
+  try { return path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)); } catch (e) { return p; }
+}
+
 function install(deps) {
   const { app, ipcMain, send, liveWin, isChromeSender, screen, powerMonitor, nativeTheme } = deps;
   const isTest = process.argv.includes('--test-profile');
   // Resolved lazily: --test-profile rewrites userData before ready.
-  const syncDir = () => process.env.LOOK_SYNC_DIR
-    || (isTest ? path.join(app.getPath('userData'), 'look-sync') : LS.defaultDir());
+  const syncDir = () => longPath(process.env.LOOK_SYNC_DIR
+    || (isTest ? path.join(app.getPath('userData'), 'look-sync') : LS.defaultDir()));
 
   let sync = null;
   let local = {};               // the renderer's current values: the seed source
@@ -111,7 +136,8 @@ function install(deps) {
     }
     if (!record.still) return fallback("Mantle's record has no still picture", record);
     const stillsDir = path.resolve(sync ? sync.dir : syncDir(), 'stills');
-    const still = path.resolve(record.still);
+    // Long form, like the folder (longPath): Mantle may name it through a short path.
+    const still = longFile(record.still);
     if (still.toLowerCase().indexOf(stillsDir.toLowerCase() + path.sep) !== 0) {
       return fallback("Mantle's still is outside " + stillsDir, record);
     }
@@ -221,7 +247,10 @@ function install(deps) {
 
   function readMode() {
     if (modeReading) return modeReading;
-    modeReading = winMode.appsMode().then((m) => {
+    // Tests only: a slow reg.exe, the way a runner busy at boot is (sessions-e2e, boot 1).
+    const slow = isTest ? Math.min(Number(process.env.QUARTZ_TEST_APPS_MODE_DELAY_MS) || 0, 8000) : 0;
+    const read = slow > 0 ? new Promise((r) => setTimeout(r, slow)).then(() => winMode.appsMode()) : winMode.appsMode();
+    modeReading = read.then((m) => {
       modeReading = null;
       const changed = m.light !== systemTheme.light || m.reason !== systemTheme.reason;
       systemTheme = { light: m.light, reason: m.reason || null };
@@ -265,9 +294,18 @@ function install(deps) {
     ensure(enabled);
     if (!first && sync.enabled !== enabled) await sync.setEnabled(enabled);
     else if (!first) sync.refresh();
+    // start() queues its first read on look-sync's promise queue, and that read sends the desktop
+    // and status events. Let the queue run (microtasks all drain before setImmediate) so this reply
+    // carries what those events said: a reply built before them would land after them and put the
+    // window back on "Mantle hasn't shared one yet" (toprow-e2e on a runner, 1 run in 3).
+    await new Promise((r) => setImmediate(r));
     lastDesktop = desktopPayload(sync.desktop());
     lastPlace = placeOf(liveWin());
-    const mode = await readMode();
+    // Never wait on reg.exe here: on a busy machine at boot it took seconds, the window's 4 s wait
+    // for this answer ran out, and the wallpaper fell back with 'the browser did not answer'.
+    // The mode goes out on looksync:system-theme when the read lands (readMode sends on change).
+    readMode();
+    const mode = systemTheme;
     return {
       ok: true, dir: sync.dir, instance: sync.instance, status: sync.status(), desktop: lastDesktop,
       place: lastPlace, shared: sync.shared(), mantle: MANTLE_OPEN, systemTheme: mode
