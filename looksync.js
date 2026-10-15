@@ -148,7 +148,8 @@
         break;
       }
       case 'off': out = 'Off · Quartz keeps its own look' + (s.reason && !/^Sync is off/.test(s.reason) ? ' (' + s.reason + ')' : '') + rev; break;
-      case 'missing': out = 'On · not shared yet' + why + rev; break;
+      // look-sync.js's reason here is usually "no shared look file yet": said once, not twice.
+      case 'missing': out = 'On · not shared yet' + (s.reason && !/no shared look file yet/i.test(s.reason) ? why : '') + rev; break;
       case 'corrupt': out = 'On · shared look file was damaged' + why + rev; break;
       case 'newer': out = 'Read-only · ' + (s.reason || 'shared look is from a newer version; update this app') + rev; break;
       case 'error': out = 'Problem · ' + (s.reason || 'unknown error') + rev; break;

@@ -87,27 +87,38 @@ function install(deps) {
 
   /* ---- desktop record -> what the renderer draws ------------------- */
 
+  /* One plain sentence: the state, then the reason, said once. (It used to
+     wrap every reason in "Mantle hasn't shared one (...)", which read
+     "Mantle hasn't shared one (Mantle hasn't shared a desktop wallpaper
+     yet)" in the commonest case, and was wrong for a record that WAS shared
+     but could not be used.) */
   function fallback(why, record) {
     return {
       state: 'fallback', stillUrl: null, title: record && record.title || null, rev: record ? record.rev : null,
-      reason: "Following Windows' wallpaper: Mantle hasn't shared one (" + why + ')', record: record || null
+      reason: "Following Windows' wallpaper: " + why, record: record || null
     };
   }
 
   function desktopPayload(d) {
     const record = d && d.record;
-    if (!record) return fallback((d && d.reason) || 'no desktop record in the look file', null);
-    if (!record.ok) return fallback(record.reason || 'Mantle says the wallpaper is unavailable', record);
-    if (!record.still) return fallback('its record has no still picture', record);
+    if (!record) {
+      // look-sync.js's own words for "no record" are "Mantle hasn't shared a desktop wallpaper yet".
+      const why = d && d.reason ? String(d.reason) : '';
+      return fallback(!why || /hasn.t shared/i.test(why) ? "Mantle hasn't shared one yet" : why, null);
+    }
+    if (!record.ok) {
+      return fallback(record.reason ? 'Mantle says ' + String(record.reason).replace(/^Mantle (says|reported) /i, '') : 'Mantle says its wallpaper is unavailable', record);
+    }
+    if (!record.still) return fallback("Mantle's record has no still picture", record);
     const stillsDir = path.resolve(sync ? sync.dir : syncDir(), 'stills');
     const still = path.resolve(record.still);
     if (still.toLowerCase().indexOf(stillsDir.toLowerCase() + path.sep) !== 0) {
-      return fallback('its still is outside ' + stillsDir, record);
+      return fallback("Mantle's still is outside " + stillsDir, record);
     }
-    if (!STILL_EXT.test(still)) return fallback('its still is not a picture file: ' + path.basename(still), record);
+    if (!STILL_EXT.test(still)) return fallback("Mantle's still is not a picture file: " + path.basename(still), record);
     let st = null;
-    try { st = fs.statSync(still); } catch (err) { return fallback('the still is missing: ' + path.basename(still) + ' (' + (err.code || err.message) + ')', record); }
-    if (!st.isFile() || st.size === 0) return fallback('the still is empty: ' + path.basename(still), record);
+    try { st = fs.statSync(still); } catch (err) { return fallback("Mantle's still " + path.basename(still) + ' is missing: ' + (err.code || err.message), record); }
+    if (!st.isFile() || st.size === 0) return fallback("Mantle's still is empty: " + path.basename(still), record);
     const g = guardOf(record);
     const gl = guardLightOf(record);
     return {

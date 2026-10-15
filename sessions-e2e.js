@@ -52,6 +52,15 @@ run('sessions-e2e', async ({ check, launch, say, profileDir }) => {
   let q = await launch({ cdp: CDP });
   let c = q.chrome;
   check(fileView() === null || fileView().entries === '', 'a fresh profile has no stored tabs of ours', fileView());
+  // A fresh profile has no Mantle record, so the background falls back to Windows' wallpaper and
+  // says why, in one sentence. It used to repeat itself: "...Mantle hasn't shared one (Mantle
+  // hasn't shared a desktop wallpaper yet)".
+  const WANT_WHY = "Following Windows' wallpaper: Mantle hasn't shared one yet";
+  const why = await c.waitFor("(() => { const d = window.LookSync && window.LookSync.desktop(); return d && d.state === 'fallback' ? String(d.reason) : ''; })()", 10000).catch((e) => e.message);
+  check(why === WANT_WHY, 'fresh profile: the wallpaper fallback reason is one plain sentence', why);
+  const toast = await c.waitFor("(() => { for (const n of document.querySelectorAll('body *')) { if (getComputedStyle(n).position === 'fixed' && /^Following Windows/.test(n.textContent || '')) return n.textContent.trim(); } return ''; })()", 6000).catch(() => '');
+  if (toast) check(toast.replace(/[.\s]+$/, '') === WANT_WHY && !/\(.*\)/.test(toast), 'fresh profile: the toast says it once, no reason repeated in brackets', toast);
+  else say('no wallpaper toast seen within 6 s (only the reason was checked)');
   const open = async (name, file) => {
     const id = await c.ev(`(() => { window.__t = window.__t || {}; const t = createTab(${JSON.stringify(B + '/' + file)}); window.__t[${JSON.stringify(name)}] = t; activateTab(t.id); return t.id; })()`);
     await c.waitFor(`window.__t[${JSON.stringify(name)}].ready === true`, 15000);
