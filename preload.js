@@ -470,6 +470,18 @@ contextBridge.exposeInMainWorld('api', {
     // Known keys come back from main's cache without touching the disk.
     procIcons: (keys) => ipcRenderer.invoke('stats:proc-icons', Array.isArray(keys) ? keys : [])
   },
+  // Tab favicons (tabicons.js drives these; main's faviconstore.js answers).
+  //   get(origins)  -> { [origin]: { src, data, at } | null }  the disk cache
+  //   put(origin, { src, data })                               remember one (fire and forget)
+  //   fetch(url)    -> { ok, mime, dataUrl } | { ok: false, reason }  raw icon bytes, http(s) only
+  //   describe()    -> the cache's size, caps and last errors
+  favicons: {
+    get: (origins) => ipcRenderer.invoke('favicons:get', Array.isArray(origins) ? origins : []),
+    put: (origin, entry) => ipcRenderer.send('favicons:put', String(origin || ''), entry && typeof entry === 'object'
+      ? { src: String(entry.src || ''), data: String(entry.data || '') } : null),
+    fetch: (url) => ipcRenderer.invoke('favicons:fetch', String(url || '')),
+    describe: () => ipcRenderer.invoke('favicons:describe')
+  },
   // Installed native apps: the new tab page's dock and the palette's
   // "Open <app>" rows. Main builds the index from Start Menu shortcuts plus
   // Get-StartApps, caches it for a day, and is the only one that ever starts a

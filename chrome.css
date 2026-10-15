@@ -507,20 +507,94 @@ button:focus-visible,
 
 /* --- tab chip states (classes set by app.js) ------------------ */
 
-/* the page's own favicon, sitting where the Claude chip keeps its dot */
-img.tab-icon {
+/* The logo box (app.js buildTabFavicon): one 16px square on every page and
+   app chip, in EVERY state, sitting where the Claude chip keeps its dot. Its
+   size never changes, so nothing moves when an icon arrives. Inside it, laid
+   over each other: the monogram, the site's icon, and the state badge.
+   data-state: pending (held empty for the few ms the disk cache takes, so a
+   restored chip never flashes its letter first), icon, mono. */
+.tab-fav {
+  position: relative;
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  margin-right: 8px;
-  border-radius: 3px;
-  opacity: .9;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;   /* + the chip's 6px gap: 8px to the title */
 }
 
-/* no favicon yet, or a Claude chamber: the chip shows nothing there */
-img.tab-icon:not([src]),
-img.tab-icon[src=""],
-.tab.claude img.tab-icon { display: none; }
+.tab-fav > img.tab-icon,
+.tab-fav > .tab-mono {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* The icon is a data: URL (a 32px PNG, or the site's own SVG), drawn into
+   16 CSS px: 16/20/24/32 device px at 100/125/150/200%. Not rounded — a
+   logo's corners are the site's to draw. Hidden until it has DECODED, so a
+   half-loaded image never shows. */
+.tab-fav > img.tab-icon {
+  display: block;
+  object-fit: contain;
+  visibility: hidden;
+}
+
+.tab-fav[data-state="icon"] > img.tab-icon { visibility: visible; }
+
+/* The monogram: the site's first letter on a quiet tile. Neutral by design —
+   no per-site colour — so a strip of them reads as one family. A bundled
+   page gets its glyph (globe, phone) instead, with no tile behind it. */
+.tab-fav > .tab-mono {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tab-fav > .tab-mono.glyph {
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--icon-font);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.tab-fav[data-state="mono"] > .tab-mono { display: flex; }
+
+/* The state badge: ON the logo's corner, never instead of it. A 10px disc
+   with a hairline ring, so it reads on any logo in either look. */
+.tab-fav > .tab-badge {
+  display: none;
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--overlay);
+  box-shadow: 0 0 0 1px var(--hairline-strong);
+  color: var(--text-2);
+  font-family: var(--icon-font);
+  font-size: 8px;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.tab.asleep .tab-fav > .tab-badge,
+.tab.broken .tab-fav > .tab-badge { display: flex; }
+
+.tab.asleep .tab-fav > .tab-badge::before { content: '\E708'; }   /* crescent */
+.tab.broken .tab-fav > .tab-badge::before { content: '\E7BA'; }   /* warning */
 
 /* loading: the active chip's marker widens into a track and a short
    accent highlight travels it until the page is in. Only the ACTIVE chip
@@ -545,60 +619,22 @@ img.tab-icon[src=""],
   to   { background-position: 130% 0, 0 0; }
 }
 
-/* broken: the page crashed or never loaded. The chip trades its favicon for a
-   warning glyph in --text-3 — quiet grey, never the warn colour of a pane that needs you. */
+/* broken: the page crashed or never loaded. The logo stays; the warning glyph
+   is its badge (above), in the badge's quiet grey — never the warn colour of a
+   pane that needs you. app.js still builds the old inline glyph: never shown. */
 .tab .tab-warn { display: none; }
 
-.tab.broken .tab-warn {
-  flex: 0 0 auto;
-  display: inline-block;
-  width: 14px;
-  margin-right: 8px;
-  font-size: 11px;
-  line-height: 1;
-  text-align: center;
-  color: var(--text-3);
-}
-
-.tab.broken img.tab-icon { display: none; }
-
-/* asleep: the tab gave its renderer back. Deliberately quiet — no badge, no
-   glyph, nothing that changes the chip's width — because the strip must not
-   reshuffle when a tab sleeps or wakes. The title drops to --text-3 and the
-   favicon dims; hovering brings the title back up, so the chip still answers. */
+/* asleep: the tab gave its renderer back. Quiet, and nothing changes the
+   chip's width, because the strip must not reshuffle when a tab sleeps or
+   wakes: the title drops to --text-3, the logo dims a step, and the crescent
+   badge sits on the logo's corner (it used to stand alone at the chip's right
+   edge, where it read as the NEXT tab's icon). */
 .tab.asleep .tab-title { color: var(--text-3); }
 
-.tab.asleep img.tab-icon { opacity: .55; }
+.tab.asleep .tab-fav > img.tab-icon,
+.tab.asleep .tab-fav > .tab-mono { opacity: .6; }
 
 .tab.asleep:hover .tab-title { color: var(--text-2); }
-
-/* ...and one mark, so a dim chip is not the only tell — a workspace can come
-   back from a restart with every chip in it asleep, and "dim" needs something
-   to be dim against. The crescent is parked ABSOLUTELY over the close button's
-   seat, so it costs the chip no width and the strip does not reshuffle when a
-   tab sleeps; it steps aside the moment the close button lights up. */
-.tab .tab-sleep {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: none;
-  color: var(--text-3);
-  font-size: 10px;
-  line-height: 1;
-  pointer-events: none;
-}
-
-.tab.asleep .tab-sleep { display: block; }
-
-/* The close and collapse buttons own that corner whenever they are visible. */
-.tab.asleep:hover .tab-sleep,
-.tab.asleep.active .tab-sleep { display: none; }
-
-/* A pinned or collapsed chip is 40px of favicon with no corner to spare: the
-   dimmed icon is the whole of the state there, exactly as it was. */
-.tab.asleep.pinned .tab-sleep,
-.tab.asleep.collapsed .tab-sleep { display: none; }
 
 /* audible / muted: a speaker button left of the title, which app.js only
    hangs on a chip that has actually made a sound. Clicking it mutes the tab
@@ -664,8 +700,8 @@ img.tab-icon[src=""],
 .tab.collapsed:not(.active:not(.dragging)) .tab-close,
 .tab.collapsed:not(.active:not(.dragging)) .tab-collapse { display: none; }
 
-.tab.pinned img.tab-icon,
-.tab.collapsed:not(.active:not(.dragging)) img.tab-icon { margin-right: 0; }
+.tab.pinned .tab-fav,
+.tab.collapsed:not(.active:not(.dragging)) .tab-fav { margin-right: 0; }
 
 /* a Claude chamber and a terminal carry a liveness dot instead of a favicon:
    that dot IS their icon once the chip is down to 40px */
@@ -699,27 +735,6 @@ img.tab-icon[src=""],
 
 .tab.pinned:hover .tab-expand,
 .tab.collapsed:not(.active:not(.dragging)):hover .tab-expand { opacity: 1; }
-
-/* the globe stands in for a favicon the page never reported: only an icon-only
-   chip shows it, and only until app.js marks the chip .has-icon */
-.tab .tab-globe { display: none; }
-
-.tab.pinned .tab-globe,
-.tab.collapsed:not(.active:not(.dragging)) .tab-globe {
-  flex: 0 0 auto;
-  display: inline-block;
-  width: 14px;
-  font-size: 12px;
-  line-height: 1;
-  text-align: center;
-  color: var(--text-2);
-}
-
-.tab.pinned.has-icon .tab-globe,
-.tab.collapsed:not(.active:not(.dragging)).has-icon .tab-globe { display: none; }
-
-/* broken beats both: the warning glyph is the only icon on the chip */
-.tab.broken .tab-globe { display: none; }
 
 /* the two-panes glyph both halves of a split pair carry, ahead of the
    title. It is a quiet mark, not a state: an active chip keeps every

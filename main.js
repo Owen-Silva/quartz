@@ -3752,6 +3752,49 @@ ipcMain.handle('stats:proc-icons', (event, keys) => {
 });
 
 // ---------------------------------------------------------------------------
+// Tab favicons: the per-origin cache on disk, and icon fetches for the chrome
+//
+// faviconstore.js keeps one small icon per origin in userData so a chip shows
+// its logo the moment it is built — a tab restored after a restart or born
+// asleep has no page to ask. Built on first use, because a test profile
+// redirects userData before the window exists. Fetches go through the default
+// session (the one the <webview> guests use), so cookies apply; only http(s)
+// is fetched, never a third-party favicon service. Chrome sender only.
+// ---------------------------------------------------------------------------
+
+let faviconStore = null;
+function faviconStoreInstance() {
+  if (faviconStore) return faviconStore;
+  faviconStore = require('./faviconstore').create({
+    dir: app.getPath('userData'),
+    fetch: (url, init) => session.defaultSession.fetch(url, Object.assign({ bypassCustomProtocolHandlers: true }, init || {}))
+  });
+  return faviconStore;
+}
+
+ipcMain.handle('favicons:get', (event, origins) => {
+  if (!isChromeSender(event)) return {};
+  try { return faviconStoreInstance().get(Array.isArray(origins) ? origins.slice(0, 256) : []); } catch { return {}; }
+});
+
+ipcMain.on('favicons:put', (event, origin, entry) => {
+  if (!isChromeSender(event)) return;
+  try { faviconStoreInstance().put(origin, entry); } catch { /* a refused entry is simply not kept */ }
+});
+
+ipcMain.handle('favicons:fetch', (event, url) => {
+  if (!isChromeSender(event)) return { ok: false, reason: 'refused' };
+  try { return faviconStoreInstance().fetchIcon(typeof url === 'string' ? url.slice(0, 2048) : ''); } catch (err) {
+    return { ok: false, reason: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('favicons:describe', (event) => {
+  if (!isChromeSender(event)) return null;
+  try { return faviconStoreInstance().describe(); } catch { return null; }
+});
+
+// ---------------------------------------------------------------------------
 // Installed apps (the new tab's dock, the palette's "Open <app>" rows)
 //
 // Same gate as stats:end-task, and for the same reason: starting a process and
@@ -5128,6 +5171,8 @@ app.on('before-quit', (event) => {
   stocks.stop();
   // The search page's in-memory answers (Brave's terms: transient only).
   try { braveSearch.stop(); } catch { /* best effort */ }
+  // The favicon cache: a logo learned a moment ago must be there next start.
+  try { if (faviconStore) faviconStore.flushSync(); } catch { /* best effort */ }
   // The budget poller's timer and the school helper's child processes (a
   // headless claude, a UIA/OCR reader) must not outlive the quit either.
   try { budget.stop(); } catch { /* best effort */ }
