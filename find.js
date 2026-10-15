@@ -43,6 +43,19 @@
   /* One 'found-in-page' listener per guest, ever. */
   var wired = new WeakSet();
 
+  /* The last result each guest reported ({ text, ordinal, matches }),
+     kept per guest so a tab remembers the hit its bar was closed on. */
+  var lastResult = new WeakMap();
+
+  /* Reopening the bar starts a FRESH session, and Chromium begins that
+     one after the hit left selected, so it lands one match late (2 of 5
+     becomes 3 of 5). Chrome stays on the same hit. While this is set,
+     the bar walks back to { ordinal } of { matches } one step per final
+     result, with the count held until it arrives (or the page changed
+     under it, or the step budget ran out: the bar then shows where it
+     really is). */
+  var restore = null;
+
   /* --- app.js bridges ---------------------------------------- */
 
   function activeTab() {
@@ -116,8 +129,35 @@
     var result = event.result;
     if (!result) return;
     if (!inputEl || !inputEl.value) return setCount('', false);
+    if (result.finalUpdate && result.matches && result.activeMatchOrdinal > 0) {
+      lastResult.set(view, { text: searchedText, ordinal: result.activeMatchOrdinal, matches: result.matches });
+    }
+    if (restore) {
+      if (!result.finalUpdate) return; // hold the count: it is about to move
+      if (restoreStep(view, result)) return;
+    }
     if (!result.matches) return setCount('No matches', true);
     setCount(result.activeMatchOrdinal + ' of ' + result.matches, false);
+  }
+
+  /**
+   * One step of the walk back to the remembered hit. True = a step was
+   * issued (the next final result comes back here); false = done, or
+   * abandoned, and the caller shows the result as it is.
+   */
+  function restoreStep(view, result) {
+    var r = restore;
+    var n = result.matches;
+    var cur = result.activeMatchOrdinal;
+    if (view !== r.view || n !== r.matches || !cur || cur === r.ordinal || r.budget <= 0) {
+      restore = null;
+      return false;
+    }
+    // The shorter way round; both wrap at the ends.
+    var ahead = (r.ordinal - cur + n) % n;
+    r.budget -= 1;
+    callFind(view, searchedText, true, ahead <= n - ahead);
+    return true;
   }
 
   function wire(view) {
@@ -271,6 +311,7 @@
   }
 
   function onInput() {
+    restore = null; // new text: wherever the fresh search lands is right
     syncButtons();
     window.clearTimeout(debounceTimer);
     var text = inputEl.value;
@@ -286,6 +327,7 @@
     var text = inputEl.value;
     if (!text) return;
     window.clearTimeout(debounceTimer);
+    restore = null; // the user is stepping now
     var view = currentView();
     if (!view) return setCount('', false);
     // findNext only continues a search this guest already knows about.
@@ -329,12 +371,27 @@
     barEl.hidden = false; // display:none -> flex replays the stepped entrance
     focusInput();
     syncButtons();
-    if (inputEl.value) search(inputEl.value);
-    else setCount('', false);
+    if (!inputEl.value) return setCount('', false);
+    var view = viewOf(tab);
+    var last = view && lastResult.get(view);
+    if (!last || last.text !== inputEl.value) return search(inputEl.value);
+    // Same tab, same text: come back on the hit the bar was closed on,
+    // but only while that hit is still the page's selection. A click or
+    // a new selection since then moves the start point, as in Chrome.
+    var text = inputEl.value;
+    var asked = view.executeJavaScript ? view.executeJavaScript('String(window.getSelection())') : null;
+    Promise.resolve(asked).catch(function () { return ''; }).then(function (sel) {
+      if (!opened || inputEl.value !== text || viewOf(activeTab()) !== view) return;
+      restore = String(sel || '').toLowerCase() === text.toLowerCase()
+        ? { view: view, ordinal: last.ordinal, matches: last.matches, budget: last.matches }
+        : null;
+      search(text);
+    });
   }
 
   function close() {
     opened = false;
+    restore = null;
     window.clearTimeout(debounceTimer);
     if (!barEl) return;
     barEl.hidden = true;
@@ -383,6 +440,7 @@
       return;
     }
     callStop(searchedView, 'clearSelection'); // do not leave a hit lit behind
+    restore = null;
     searchedView = null;
     searchedText = '';
     setCount('', false);

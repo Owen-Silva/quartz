@@ -139,13 +139,29 @@ run('find-e2e', async ({ check, launch }) => {
   s = await c.waitFor('window.FindBar.isOpen() && / of 5$/.test(document.getElementById("find-count").textContent)', 3000).then(() => state()).catch(() => state());
   check(s.open && s.value === 'quartz' && s.focused, 'Ctrl+F in the page: the bar is back with the last text, focused', s);
   check(/^[1-5] of 5$/.test(s.count), 'and it counts again on open', s.count);
-  // Left on match 2 (selected). A later ordinal means the fresh session started AFTER the
-  // selection rather than on it. Whether Chrome does the same is not checked here, so this is
-  // measured and printed, not judged.
-  if (s.count !== '2 of 5') console.log('NOTE reopened on ' + s.count + ', not on the match left selected (2 of 5)');
+  // Left on match 2 (selected). Chrome reopens on that same hit; a fresh Electron session starts
+  // AFTER the selection and lands on 3, so the bar walks back to it. Read once it has settled.
+  s = await waitCount('2 of 5');
+  check(s.count === '2 of 5', 'Ctrl+F reopens on the match left selected (2 of 5), as Chrome does', s.count);
+  // The other way round: left on the LAST match, a fresh session wraps to 1; it must come back to 5.
+  for (let i = 0; i < 3; i++) await c.key('Enter', KEYS.Enter);
+  s = await waitCount('5 of 5');
+  check(s.count === '5 of 5', 'Enter x3 from 2: "5 of 5"', s.count);
   await c.key('Escape', KEYS.Escape);
   s = await c.waitFor('!window.FindBar.isOpen()', 3000).then(() => state()).catch(() => state());
   check(!s.open, 'Escape closes it again', s);
+  await c.key('f', { code: 'KeyF', vk: 70, mods: CTRL });
+  await c.waitFor('window.FindBar.isOpen()', 3000).catch(() => {});
+  s = await waitCount('5 of 5');
+  check(s.open && s.count === '5 of 5', 'Ctrl+F reopens on the last match too (5 of 5, not wrapped to 1)', s);
+  // A plain Enter after the reopen still steps on from there (the session is a live one).
+  await c.key('Enter', KEYS.Enter);
+  s = await waitCount('1 of 5');
+  check(s.count === '1 of 5', 'Enter after the reopen wraps on to "1 of 5"', s.count);
+  if (process.env.FIND_SHOTS) await c.shot(require('path').resolve(process.env.FIND_SHOTS, 'findbar.png')).catch((e) => console.log('shot failed: ' + e.message));
+  await c.key('Escape', KEYS.Escape);
+  s = await c.waitFor('!window.FindBar.isOpen()', 3000).then(() => state()).catch(() => state());
+  check(!s.open, 'Escape closes it a third time', s);
 
   check(await q.quit(), 'closing the window quit Quartz');
   srv.close();

@@ -58,6 +58,18 @@ class Cdp {
     await this.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
   }
   async type(text) { await this.send('Input.insertText', { text }); }
+  /** A PNG of this page to `file`, with a hard 15 s stop (a capture once hung a cloud run 25 min). */
+  async shot(file) {
+    const m = await Promise.race([
+      this.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false }),
+      sleep(15000).then(() => ({ error: { message: 'captureScreenshot timed out after 15 s' } })),
+    ]);
+    if (m.error || !m.result || !m.result.data) throw new Error((m.error && m.error.message) || 'no data');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.from(m.result.data, 'base64'));
+    console.log('[e2e] shot ' + file);
+    return file;
+  }
   close() { try { this.ws.close(); } catch (e) { /* gone */ } }
 }
 const KEYS = {
