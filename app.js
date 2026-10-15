@@ -3878,7 +3878,7 @@ function createNativeTab(appId, options) {
     ready: true,
     loading: false,
     iconEl: null,
-    globeEl: null,
+    favEl: null,   // the 16px logo box: buildTabFavicon()
     cardEl: null,
     app: null,
     noteEl: null,
@@ -4997,7 +4997,7 @@ const CLAUDE_DEFAULT_TITLE = 'Claude';
  *   term?:Object|null, live?:boolean, termOff?:Function[],
  *   cardEl?:Element|null, warnEl?:Element|null, broken?:boolean,
  *   failedThisLoad?:boolean, audible?:boolean, muted?:boolean,
- *   audioEl?:Element|null, pinned?:boolean, globeEl?:Element|null,
+ *   audioEl?:Element|null, pinned?:boolean, favEl?:Element|null,
  *   asleep?:boolean, openedAt?:number, workspace?:string
  * }>}
  */
@@ -5759,11 +5759,9 @@ function chipGlyphFor(url) {
   return isPhoneUrl(url) ? TAB_GLYPH.phone : TAB_GLYPH.globe;
 }
 
-/** Put the right stand-in glyph on a chip. Safe on a chip with no globe. */
+/** Every navigation re-titles the tab through here: the logo follows the url. */
 function syncChipGlyph(tab) {
-  if (!tab || !tab.globeEl) return;
-  const glyph = chipGlyphFor(tab.url);
-  if (tab.globeEl.textContent !== glyph) tab.globeEl.textContent = glyph;
+  syncTabFavicon(tab);
 }
 
 function buildChip(tab) {
@@ -5781,15 +5779,14 @@ function buildChip(tab) {
     chip.appendChild(dot);
   }
 
-  // The globe stands in for a favicon on a pinned chip, which has no title to
-  // read. chrome.css hides it everywhere else and whenever a real icon landed.
+  // The logo box: one fixed 16px square on every page and app chip, in every
+  // state, so the title never moves when an icon arrives. It holds the site's
+  // icon, the monogram (or a glyph, for a bundled page) underneath it, and
+  // the state badge (asleep, broken) ON its corner — a state is never shown
+  // INSTEAD of the logo. syncTabFavicon() fills it; see tabicons.js for the
+  // chain the icon comes from.
   if (!isClaudeTab(tab)) {
-    const globe = document.createElement('span');
-    globe.className = 'glyph tab-globe';
-    globe.textContent = chipGlyphFor(tab.url);
-    globe.setAttribute('aria-hidden', 'true');
-    chip.appendChild(globe);
-    tab.globeEl = globe;
+    buildTabFavicon(tab, chip);
 
     // The two-panes glyph: chrome.css only shows it while the chip is .split,
     // so it is built once here rather than added and removed with the pair.
@@ -5798,16 +5795,9 @@ function buildChip(tab) {
     split.textContent = TAB_GLYPH.split;
     split.setAttribute('aria-hidden', 'true');
     chip.appendChild(split);
-
-    // The crescent a sleeping chip wears. Built once, like the split glyph,
-    // and shown by chrome.css only while the chip is .asleep — and parked
-    // ABSOLUTELY over the close button, so a tab going to sleep costs the
-    // chip no width and the strip never reshuffles underneath the pointer.
-    const doze = document.createElement('span');
-    doze.className = 'glyph tab-sleep';
-    doze.textContent = TAB_GLYPH.sleep;
-    doze.setAttribute('aria-hidden', 'true');
-    chip.appendChild(doze);
+    // (The crescent a sleeping chip wears is the logo box's badge now: it used
+    // to sit by itself at the chip's right edge, where it read as belonging to
+    // the NEXT tab's title.)
   }
 
   const title = document.createElement('span');
@@ -6054,53 +6044,191 @@ function syncTabMutedFromView(tab) {
   syncTabAudio(tab);
 }
 
-/**
- * The favicon <img> is created on the first icon a page reports and then reused.
- * Claude chips lead with their liveness dot and never get one.
- */
-function tabIconEl(tab) {
-  if (!tab || isClaudeTab(tab) || !tab.chipEl) return null;
-  if (tab.iconEl && tab.iconEl.isConnected) return tab.iconEl;
+/* ------------------------------------------------------------------ */
+/* Tab logos                                                           */
+/* ------------------------------------------------------------------ */
 
+/*
+ * Every page and app chip carries one 16px logo box (built by buildChip):
+ *
+ *   span.tab-fav[data-state]   the box; its size never changes
+ *     span.tab-mono            the monogram (or a glyph for a bundled page)
+ *     img.tab-icon             the site's icon, always a data: URL now
+ *     span.tab-badge           the state badge on the corner (asleep, broken)
+ *
+ * data-state is 'pending' (box held, nothing drawn: the disk cache is being
+ * asked and answers in a few ms — this is what keeps a restored chip from
+ * flashing its letter and then its logo), 'icon' (the img has decoded) or
+ * 'mono' (no icon: the letter, with the reason on hover).
+ *
+ * What USED to go wrong (The user, 2026-10-14: "half the time they arent even
+ * there"): the img pointed at the page's remote icon URL and was wiped at
+ * did-start-loading — which fires for sub-frame loads too, after which the
+ * page has no reason to report the same icon again — and a tab born asleep
+ * (every restored background workspace) or restored after a restart never had
+ * a page to report one at all. Now nothing clears a logo except a move to
+ * another origin, and the origin's cached logo is drawn before any page loads.
+ */
+
+// How long a chip holds an empty box for the cache before showing the letter.
+const FAVICON_PENDING_MS = 350;
+
+function tabIconsResolver() {
+  try { return window.TabIcons ? window.TabIcons.resolver() : null; } catch (err) { return null; }
+}
+
+function setFavState(tab, state, reason) {
+  if (!tab || !tab.favEl) return;
+  if (tab.favEl.dataset.state !== state) tab.favEl.dataset.state = state;
+  // No silent fallback: a letter where a logo should be says why on hover.
+  const why = state === 'mono' && reason ? 'No site icon: ' + reason : '';
+  if (why) tab.favEl.title = why;
+  else if (tab.favEl.hasAttribute('title')) tab.favEl.removeAttribute('title');
+}
+
+function buildTabFavicon(tab, chip) {
+  const box = document.createElement('span');
+  box.className = 'tab-fav';
+  box.dataset.state = 'pending';
+  const mono = document.createElement('span');
+  mono.className = 'tab-mono';
+  mono.setAttribute('aria-hidden', 'true');
   const img = document.createElement('img');
   img.className = 'tab-icon';
   img.alt = '';
-  // A dead icon URL must never leave a broken-image box in the strip.
+  img.draggable = false;
+  const badge = document.createElement('span');
+  badge.className = 'tab-badge';
+  badge.setAttribute('aria-hidden', 'true');
+  box.append(mono, img, badge);
+  // The state follows what the img really did, not what was asked of it: a
+  // src that never decodes leaves the letter, never a broken-image box.
+  img.addEventListener('load', () => {
+    if (img.getAttribute('src')) setFavState(tab, 'icon');
+  });
   img.addEventListener('error', () => {
     try { img.removeAttribute('src'); } catch (err) { /* already detached */ }
-    // A pinned chip shows nothing but this icon: hand it back the globe.
-    if (tab.chipEl) tab.chipEl.classList.remove('has-icon');
+    setFavState(tab, 'mono', 'the icon did not decode');
   });
-
-  try {
-    // Left to right: icon, speaker, title. The speaker is only there once the
-    // page has made a sound, so it is the anchor when it exists.
-    const anchor = (tab.audioEl && tab.audioEl.isConnected)
-      ? tab.audioEl
-      : (tab.titleEl || tab.chipEl.firstChild);
-    tab.chipEl.insertBefore(img, anchor);
-  } catch (err) {
-    return null;
-  }
+  chip.appendChild(box);
+  tab.favEl = box;
+  tab.monoEl = mono;
   tab.iconEl = img;
-  return img;
+  tab.favKey = '';
+  tab.favToken = 0;
+  tab.favDeclared = -1;
+  syncTabFavicon(tab);
 }
 
+/** The letter (or glyph) under the icon. */
+function setTabMono(tab, text, isGlyph) {
+  if (!tab.monoEl) return;
+  tab.monoEl.classList.toggle('glyph', !!isGlyph);
+  if (tab.monoEl.textContent !== text) tab.monoEl.textContent = text;
+}
+
+/** Put an icon (a data: URL) on the chip, unless the tab has moved on since. */
+function showTabIconData(tab, data, token) {
+  if (!tab || !tab.iconEl || typeof data !== 'string' || !data) return;
+  if (token !== undefined && tab.favToken !== token) return;
+  const img = tab.iconEl;
+  if (img.getAttribute('src') === data) {
+    if (img.complete && img.naturalWidth) setFavState(tab, 'icon');
+    return;
+  }
+  img.setAttribute('src', data); // the load listener flips the box to 'icon'
+}
+
+/**
+ * Bring the logo box in line with the tab's url. Called when the chip is built
+ * and on every navigation (through setTabTitle -> syncChipGlyph). Staying on
+ * the same origin changes nothing: the logo is never cleared by a load.
+ */
+function syncTabFavicon(tab, force) {
+  if (!tab || !tab.favEl) return;
+  const TI = window.TabIcons;
+  if (isNativeTab(tab)) {
+    const letter = TI ? TI.monogramFor(tab.native && tab.native.name) : '';
+    setTabMono(tab, letter || TAB_GLYPH.globe, !letter);
+    if (!tab.iconEl.getAttribute('src')) setFavState(tab, 'mono');
+    return;
+  }
+  const origin = TI ? TI.originOf(tab.url) : null;
+  const key = origin || ('glyph:' + chipGlyphFor(tab.url));
+  if (!force && key === tab.favKey) return;
+  tab.favKey = key;
+  const token = ++tab.favToken;
+
+  if (!origin) {
+    // A bundled page (the new tab, Phone): its glyph, until it reports an
+    // icon of its own.
+    setTabMono(tab, chipGlyphFor(tab.url), true);
+    tab.iconEl.removeAttribute('src');
+    setFavState(tab, 'mono');
+    return;
+  }
+
+  const letter = TI.monogramFor(tab.url);
+  setTabMono(tab, letter || TAB_GLYPH.globe, !letter);
+  const r = tabIconsResolver();
+  const hit = r ? r.peek(origin) : null;
+  if (hit) { showTabIconData(tab, hit.data, token); return; }
+  tab.iconEl.removeAttribute('src');
+  if (!r || hit === null) { setFavState(tab, 'mono'); return; }
+
+  setFavState(tab, 'pending');
+  const timer = setTimeout(() => {
+    if (tab.favToken === token && tab.favEl.dataset.state === 'pending') setFavState(tab, 'mono');
+  }, FAVICON_PENDING_MS);
+  r.cached(origin).then((entry) => {
+    clearTimeout(timer);
+    if (tab.favToken !== token) return;
+    // The page may have reported a newer icon while the cache was asked.
+    if (tab.iconEl.getAttribute('src')) return;
+    if (entry) showTabIconData(tab, entry.data, token);
+    else if (tab.favEl.dataset.state === 'pending') setFavState(tab, 'mono');
+  });
+}
+
+/** What a resolver answer does to the chip. */
+function applyIconResult(tab, token, res) {
+  if (!tab || tab.favToken !== token || !res) return;
+  tab.favFrom = res.from;
+  tab.favReason = res.reason || '';
+  if (res.entry) showTabIconData(tab, res.entry.data, token);
+  else if (!tab.iconEl.getAttribute('src')) setFavState(tab, 'mono', res.reason);
+}
+
+/** page-favicon-updated: the page's own candidates, then the chain below them. */
+function onTabFavicons(tab, icons) {
+  const r = tabIconsResolver();
+  if (!r || !tab || !tab.favEl) return;
+  const token = tab.favToken;
+  tab.favDeclared = token;
+  r.declared(tab.url, Array.isArray(icons) ? icons : []).then((res) => applyIconResult(tab, token, res));
+}
+
+/**
+ * did-stop-loading: a page that has loaded without reporting any icon (a
+ * bare text page, an error page) still gets the cache and then the site's
+ * well-known icons. Skipped as soon as an icon is showing or one was reported.
+ */
+function onTabLoadedForIcon(tab) {
+  const r = tabIconsResolver();
+  if (!r || !tab || !tab.favEl || isNativeTab(tab)) return;
+  const token = tab.favToken;
+  if (tab.favDeclared === token || tab.iconEl.getAttribute('src')) return;
+  if (!window.TabIcons.originOf(tab.url)) return;
+  setTimeout(() => {
+    if (tab.favToken !== token || tab.favDeclared === token || tab.iconEl.getAttribute('src')) return;
+    r.fallback(tab.url).then((res) => applyIconResult(tab, token, res));
+  }, 1200);
+}
+
+/** An icon from elsewhere (a native app's own exe icon, from the apps index). */
 function setTabIcon(tab, url) {
   if (typeof url !== 'string' || !url) return;
-  try {
-    const img = tabIconEl(tab);
-    if (img) img.setAttribute('src', url);
-    // .has-icon is what a pinned chip reads to drop its globe fallback.
-    if (img && tab.chipEl) tab.chipEl.classList.add('has-icon');
-  } catch (err) { /* chip went away mid-load */ }
-}
-
-function clearTabIcon(tab) {
-  try {
-    if (tab && tab.iconEl) tab.iconEl.removeAttribute('src');
-    if (tab && tab.chipEl) tab.chipEl.classList.remove('has-icon');
-  } catch (err) { /* chip went away mid-load */ }
+  try { showTabIconData(tab, url); } catch (err) { /* chip went away mid-load */ }
 }
 
 function setTabTitle(tab, title) {
@@ -7639,7 +7767,7 @@ function createTab(url, options) {
     // Collapsed to its icon in the strip. Sticky and independent of pinned:
     // the chip still expands while this tab is the active one.
     collapsed: false,
-    globeEl: null,
+    favEl: null,   // the 16px logo box: buildTabFavicon()
     asleep: false,
     // Whether this tab's page held the keyboard when the user last left the tab
     // (activateTab() records it on the way out). A new-tab page coming back
@@ -10449,7 +10577,9 @@ function wireViewEvents(tab) {
     if (stale()) return;
     dropNavCache(tab); // a navigation has begun
     setTabLoading(tab, true);
-    clearTabIcon(tab); // the incoming page reports its own, or stays blank
+    // The logo is NOT cleared here: did-start-loading also fires for sub-frame
+    // loads, after which a page has no reason to report the same icon again.
+    // A move to another origin swaps the logo in syncTabFavicon() instead.
     tab.failedThisLoad = false;
     clearTabCard(tab); // a fresh attempt: last time's failure leaves the screen
   });
@@ -10459,6 +10589,7 @@ function wireViewEvents(tab) {
     dropNavCache(tab); // the settled url and history stack are the authority now
     setTabLoading(tab, false);
     if (tab.id === activeTabId) updateNavState();
+    onTabLoadedForIcon(tab); // loaded with no icon reported: cache, then the site's own
     emitTabEvent('tabloaded', tab);
   });
 
@@ -10565,8 +10696,7 @@ function wireViewEvents(tab) {
   viewEl.addEventListener('page-favicon-updated', (event) => {
     if (stale()) return;
     try {
-      const icons = event && event.favicons;
-      if (Array.isArray(icons) && icons.length) setTabIcon(tab, icons[0]);
+      onTabFavicons(tab, event && event.favicons);
     } catch (err) { /* malformed event payload */ }
   });
 
