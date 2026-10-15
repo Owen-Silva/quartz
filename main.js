@@ -419,6 +419,9 @@ const drm = drmModule.create({
 });
 
 const budget = budgetModule.create({ app });
+// The first-run welcome's flag and its default-browser step (firstrun-main.js).
+// Created here, before any window: it reads what the profile held before this run.
+require('./firstrun-main').create({ app, ipcMain, shell: require('electron').shell, isChromeSender: (event) => isChromeSender(event), appDir: __dirname });
 const school = schoolModule.create({
   app,
   ipcMain,

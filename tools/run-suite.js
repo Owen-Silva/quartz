@@ -71,6 +71,9 @@ const TESTS = [
   { name: 'omnibox-e2e', file: 'omnibox-e2e.js', e2e: true },
   // Drives the shared look file with looksync/fake-writer.js (vendored, so it runs anywhere).
   { name: 'looksync-e2e', file: 'looksync-e2e.js', e2e: true },
+  // The first-run welcome: fresh profile shows it, choices persist, skip sets the flag, an existing
+  // profile never sees it, Settings re-opens it. Screenshots of every step, light and dark.
+  { name: 'welcome-e2e', file: 'welcome-e2e.js', e2e: true },
   {
     name: 'smoke', file: 'smoketest.js', args: [path.join(os.tmpdir(), 'quartz-suite-smoke')], e2e: true,
     // Not on a cloud runner: the terminal needs node-pty built for Electron, and there is no

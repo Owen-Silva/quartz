@@ -582,6 +582,15 @@ contextBridge.exposeInMainWorld('api', {
     setKey: (key) => ipcRenderer.invoke('brave-search:set-key', String(key == null ? '' : key)),
     test: () => ipcRenderer.invoke('brave-search:test')
   },
+  // The first-run welcome (firstrun-main.js): whether to show it, the flag
+  // that says it is done, and its default-browser step. Every call resolves;
+  // a failure comes back with a plain `reason`, never a silent null.
+  firstrun: {
+    state: () => ipcRenderer.invoke('firstrun:state'),
+    done: (how) => ipcRenderer.invoke('firstrun:done', String(how == null ? '' : how)),
+    makeDefault: () => ipcRenderer.invoke('firstrun:make-default'),
+    defaultStatus: () => ipcRenderer.invoke('firstrun:default-status')
+  },
   // The School workspace: classes, the current subject, the LessonPlayer reader,
   // the headless-Claude helper and its match. State shape and command names
   // are documented in school.js. Every call resolves; a refused or failing

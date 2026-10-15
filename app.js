@@ -5276,6 +5276,13 @@ function isPhoneUrl(url) {
   return typeof url === 'string' && url.indexOf(PHONE_URL) === 0;
 }
 
+// welcome.html is the first-run welcome (firstrun.js owns it): a bundled,
+// preload-less guest like the history page, wearing the look from its URL.
+function isWelcomeUrl(url) {
+  const fr = window.FirstRun;
+  return !!(fr && typeof fr.isWelcomeUrl === 'function' && fr.isWelcomeUrl(url));
+}
+
 function shortLabelFor(url) {
   const parsed = parseUrlOrNull(url);
   // The folder browser is named, not hostnamed: the chip says Files from the
@@ -5284,6 +5291,7 @@ function shortLabelFor(url) {
   // The Phone page the same way: "Phone" from the first frame, not "New tab"
   // until phone.html's own <title> arrives.
   if (isPhoneUrl(url)) return 'Phone';
+  if (isWelcomeUrl(url)) return 'Welcome';
   // Our results page reads as the search until its own <title> lands.
   if (isSearchPageUrl(url)) return searchPageQueryOf(url) || 'Search';
   // Local pages (the new-tab page above all) have no hostname worth showing.
@@ -5321,7 +5329,7 @@ function pushThemeToTab(tab, theme) {
   // The history page too: its ?theme= is only the first-paint hint, so without
   // the push it kept the theme it was opened in (and a restored one, the theme
   // it was SAVED in) whatever the switch said afterwards.
-  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url) || isHistoryTab(tab))) return;
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url) || isHistoryTab(tab) || isWelcomeUrl(tab.url))) return;
   if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -5735,7 +5743,7 @@ function setOmniboxValue(url, force) {
   // The folder browser has a path bar of its own; its file:// href is noise,
   // and so is the Phone page's — neither is an address the user ever typed.
   const blank = !url || url === 'about:blank' || isNewTabUrl(url)
-    || isFilesUrl(url) || isPhoneUrl(url) || ours;
+    || isFilesUrl(url) || isPhoneUrl(url) || isWelcomeUrl(url) || ours;
   // A reader tab shows the article it is reading, not our wrapper page, and
   // our results page shows the search itself: Enter on it searches again.
   omniboxEl.value = blank ? '' : (searchPageQueryOf(url) || readerSourceOf(url) || url);
@@ -10862,6 +10870,15 @@ function wireViewEvents(tab) {
     handleMediaLine(tab, viewEl, event && event.message);
   });
 
+  // The first-run welcome's choices, `welcome:<verb> {json}`, answered on
+  // window.__applyWelcome (firstrun.js; heard only from welcome.html).
+  viewEl.addEventListener('console-message', (event) => {
+    const fr = window.FirstRun;
+    if (fr && typeof fr.handleLine === 'function') {
+      try { fr.handleLine(tab, viewEl, event && event.message); } catch (err) { /* never fatal */ }
+    }
+  });
+
   viewEl.addEventListener('page-favicon-updated', (event) => {
     if (stale()) return;
     try {
@@ -12450,6 +12467,10 @@ function init() {
     // the pane is CLOSED hears that too rather than waiting for a switch.
     syncStripTint();
     syncSidePane(true);
+    // The first-run welcome, on a brand-new profile only (main keeps the flag).
+    if (window.FirstRun && typeof window.FirstRun.boot === 'function') {
+      try { window.FirstRun.boot(session); } catch (err) { /* the strip is already up */ }
+    }
     // One frame later so the launch entrance animation has a state to start from.
     window.requestAnimationFrame(() => {
       document.body.classList.add('booted');

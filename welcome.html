@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to Quartz</title>
+<!-- First, above the stylesheet: stamps data-theme / data-palette / the hue
+     from ?theme= &palette= &hue= so the page is right on its first frame.
+     Shared verbatim with newtab.html and historypage.html. -->
+<script src="newtab-theme.js"></script>
+<!-- Second, also above the stylesheet: window.__applyWelcome must exist
+     before the chrome can call it (it answers the page's hello). -->
+<script src="welcome.js"></script>
+<link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+
+<div class="wc">
+  <header class="wc-top">
+    <div class="wc-brand">
+      <img src="assets/quartz-logo.svg" alt="" width="22" height="22">
+      <span>Quartz</span>
+    </div>
+    <div class="wc-progress" id="progress" role="progressbar" aria-label="Setup progress"
+         aria-valuemin="1" aria-valuemax="4" aria-valuenow="1" hidden>
+      <span class="wc-seg"></span><span class="wc-seg"></span><span class="wc-seg"></span><span class="wc-seg"></span>
+    </div>
+    <button class="wc-skip" id="skip" type="button">Skip setup</button>
+  </header>
+
+  <main class="wc-stage" id="stage">
+
+    <!-- 0. Hello ------------------------------------------------------- -->
+    <section class="wc-step wc-hello" data-step="welcome" aria-labelledby="h-welcome">
+      <img class="wc-logo" src="assets/quartz-logo.svg" alt="" width="88" height="88">
+      <h1 id="h-welcome" class="wc-h" tabindex="-1">Welcome to Quartz</h1>
+      <p class="wc-lede">Four quick choices and you&rsquo;re browsing. Every one of them can be changed later in Settings.</p>
+      <ol class="wc-agenda" aria-label="What this covers">
+        <li><span class="wc-agenda-n">1</span>Look</li>
+        <li><span class="wc-agenda-n">2</span>Search engine</li>
+        <li><span class="wc-agenda-n">3</span>Default browser</li>
+        <li><span class="wc-agenda-n">4</span>What&rsquo;s different here</li>
+      </ol>
+      <div class="wc-actions wc-actions-center">
+        <button class="wc-btn wc-primary" type="button" data-go="next" data-focus>Get started</button>
+      </div>
+    </section>
+
+    <!-- 1. Look -------------------------------------------------------- -->
+    <section class="wc-step" data-step="look" aria-labelledby="h-look" hidden>
+      <p class="wc-eyebrow">Step 1 of 4</p>
+      <h1 id="h-look" class="wc-h" tabindex="-1">Pick a look</h1>
+      <p class="wc-lede">The whole window changes as you pick, so you can see it before you decide.</p>
+
+      <div class="wc-looks" id="looks" role="radiogroup" aria-labelledby="h-look">
+        <button class="wc-look" type="button" role="radio" aria-checked="false" data-mode="system" tabindex="-1">
+          <span class="wc-thumb wc-thumb-split" aria-hidden="true">
+            <span class="mw mw-light"><span class="mw-bar"><i></i><i></i></span><span class="mw-url"></span><span class="mw-body"><u></u><u></u><u></u></span></span>
+            <span class="mw mw-dark"><span class="mw-bar"><i></i><i></i></span><span class="mw-url"></span><span class="mw-body"><u></u><u></u><u></u></span></span>
+          </span>
+          <span class="wc-look-text">
+            <span class="wc-look-name">Match Windows</span>
+            <span class="wc-look-sub" id="system-sub">Follows your Windows app mode</span>
+          </span>
+          <span class="wc-check" aria-hidden="true">&#xE73E;</span>
+        </button>
+        <button class="wc-look" type="button" role="radio" aria-checked="false" data-mode="light" tabindex="-1">
+          <span class="wc-thumb" aria-hidden="true">
+            <span class="mw mw-light"><span class="mw-bar"><i></i><i></i></span><span class="mw-url"></span><span class="mw-body"><u></u><u></u><u></u></span></span>
+          </span>
+          <span class="wc-look-text">
+            <span class="wc-look-name">Light</span>
+            <span class="wc-look-sub">Always light</span>
+          </span>
+          <span class="wc-check" aria-hidden="true">&#xE73E;</span>
+        </button>
+        <button class="wc-look" type="button" role="radio" aria-checked="false" data-mode="dark" tabindex="-1">
+          <span class="wc-thumb" aria-hidden="true">
+            <span class="mw mw-dark"><span class="mw-bar"><i></i><i></i></span><span class="mw-url"></span><span class="mw-body"><u></u><u></u><u></u></span></span>
+          </span>
+          <span class="wc-look-text">
+            <span class="wc-look-name">Dark</span>
+            <span class="wc-look-sub">Always dark</span>
+          </span>
+          <span class="wc-check" aria-hidden="true">&#xE73E;</span>
+        </button>
+      </div>
+      <p class="wc-hint" id="look-note"></p>
+
+      <div class="wc-actions">
+        <button class="wc-btn wc-ghost" type="button" data-go="back">Back</button>
+        <span class="wc-spacer"></span>
+        <button class="wc-btn wc-primary" type="button" data-go="next">Continue</button>
+      </div>
+    </section>
+
+    <!-- 2. Search ------------------------------------------------------ -->
+    <section class="wc-step" data-step="search" aria-labelledby="h-search" hidden>
+      <p class="wc-eyebrow">Step 2 of 4</p>
+      <h1 id="h-search" class="wc-h" tabindex="-1">Choose a search engine</h1>
+      <p class="wc-lede">Used when you type words instead of an address in the address bar.</p>
+
+      <!-- welcome.js builds one row per engine Settings supports. -->
+      <div class="wc-engines" id="engines" role="radiogroup" aria-labelledby="h-search"></div>
+
+      <div class="wc-note" id="brave-note" role="status" hidden>
+        <span class="wc-pip" aria-hidden="true"></span>
+        <div class="wc-note-body">
+          <p class="wc-note-text" id="brave-text"></p>
+          <button class="wc-link" type="button" id="brave-settings">Open Settings &rsaquo; Search</button>
+        </div>
+      </div>
+
+      <div class="wc-actions">
+        <button class="wc-btn wc-ghost" type="button" data-go="back">Back</button>
+        <span class="wc-spacer"></span>
+        <button class="wc-btn wc-primary" type="button" data-go="next">Continue</button>
+      </div>
+    </section>
+
+    <!-- 3. Default browser --------------------------------------------- -->
+    <section class="wc-step" data-step="default" aria-labelledby="h-default" hidden>
+      <p class="wc-eyebrow">Step 3 of 4</p>
+      <h1 id="h-default" class="wc-h" tabindex="-1">Make Quartz your default browser?</h1>
+      <p class="wc-lede">Links you open from other apps, like mail or chat, will open here.</p>
+
+      <div class="wc-card wc-default" id="default-card" data-state="idle">
+        <span class="wc-default-icon" aria-hidden="true">&#xE774;</span>
+        <div class="wc-default-body">
+          <p class="wc-default-title" id="default-title">Quartz isn&rsquo;t your default browser</p>
+          <p class="wc-default-text" id="default-text">Windows asks you to confirm this yourself. Quartz opens the right page in Windows Settings for you.</p>
+          <ol class="wc-default-steps" id="default-steps" hidden>
+            <li>In the Windows Settings window that just opened, find <strong>Quartz</strong> at the top.</li>
+            <li>Press <strong>Set default</strong>.</li>
+            <li>Come back here. This page updates by itself when Windows says yes.</li>
+          </ol>
+          <div class="wc-default-actions">
+            <button class="wc-btn wc-primary" type="button" id="make-default">Make Quartz the default</button>
+            <button class="wc-btn wc-ghost" type="button" id="check-default" hidden>Check again</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wc-actions">
+        <button class="wc-btn wc-ghost" type="button" data-go="back">Back</button>
+        <span class="wc-spacer"></span>
+        <button class="wc-btn wc-ghost" type="button" data-go="next" id="default-next">Not now</button>
+      </div>
+    </section>
+
+    <!-- 4. Tour -------------------------------------------------------- -->
+    <section class="wc-step" data-step="tour" aria-labelledby="h-tour" hidden>
+      <p class="wc-eyebrow">Step 4 of 4</p>
+      <h1 id="h-tour" class="wc-h" tabindex="-1">What&rsquo;s different here</h1>
+      <p class="wc-lede">Four things Quartz does that other browsers don&rsquo;t, or not like this.</p>
+
+      <div class="wc-tour">
+        <article class="wc-card wc-feature">
+          <span class="wc-feature-icon" aria-hidden="true">&#xE7C4;</span>
+          <h2 class="wc-feature-h">Workspaces</h2>
+          <p class="wc-feature-p">Separate sets of tabs for school, work or anything else. Switch from the pill in the title bar, or step through them with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>&larr;</kbd> and <kbd>&rarr;</kbd>.</p>
+        </article>
+        <article class="wc-card wc-feature">
+          <span class="wc-feature-icon" aria-hidden="true">&#xE708;</span>
+          <h2 class="wc-feature-h">Tabs that sleep</h2>
+          <p class="wc-feature-p">A tab you haven&rsquo;t opened in 30 minutes sleeps and gives its memory back. Click it and it wakes where you left off. Change the timer in Settings &rsaquo; Tabs.</p>
+        </article>
+        <article class="wc-card wc-feature">
+          <span class="wc-feature-icon" aria-hidden="true">&#xE80F;</span>
+          <h2 class="wc-feature-h">Home, your way</h2>
+          <p class="wc-feature-p">Every new tab opens Home: the time, your saved and most-visited sites, and live system stats. Press the pencil in its corner to move or hide any piece.</p>
+        </article>
+        <article class="wc-card wc-feature">
+          <span class="wc-feature-icon" aria-hidden="true">&#xE721;</span>
+          <h2 class="wc-feature-h">Find anything</h2>
+          <p class="wc-feature-p"><kbd>Ctrl</kbd>+<kbd>K</kbd> finds any tab, app or command. <kbd>Ctrl</kbd>+<kbd>F</kbd> finds text on the page, and <kbd>Ctrl</kbd>+<kbd>H</kbd> opens your history.</p>
+        </article>
+      </div>
+
+      <div class="wc-actions">
+        <button class="wc-btn wc-ghost" type="button" data-go="back">Back</button>
+        <span class="wc-spacer"></span>
+        <button class="wc-btn wc-primary" type="button" id="finish">Start browsing</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- A choice the browser could not take, or a finish it could not save:
+       always said here, never swallowed. -->
+  <div class="wc-banner" id="banner" role="alert" hidden>
+    <span class="wc-pip" aria-hidden="true"></span>
+    <p class="wc-banner-text" id="banner-text"></p>
+    <button class="wc-link" type="button" id="banner-retry" hidden>Try again</button>
+  </div>
+
+  <p class="wc-sr" id="announce" aria-live="polite"></p>
+</div>
+
+</body>
+</html>

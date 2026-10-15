@@ -7015,6 +7015,23 @@
       'Closes and reopens the browser with your tabs restored. Use it after an update.'
     ));
     s.appendChild(restart);
+
+    /* The first-run welcome, on demand (firstrun.js opens it as a tab). */
+    var welcome = el('div', 'set-field');
+    welcome.setAttribute('data-field', 'welcome');
+    var fr = window.FirstRun;
+    var again = textButton('Show welcome again', 'set-btn', function () {
+      var f = window.FirstRun;
+      if (!f || typeof f.open !== 'function') { showToast('The welcome is not available in this window; restart Quartz'); return; }
+      closePanel();
+      f.open();
+    });
+    again.setAttribute('data-action', 'show-welcome');
+    welcome.appendChild(again);
+    welcome.appendChild(el('p', 'set-hint', fr && typeof fr.open === 'function'
+      ? 'Opens the first-run tab: look, search engine, default browser and a short tour.'
+      : 'The welcome is not available in this window; restart Quartz.'));
+    s.appendChild(welcome);
     return s;
   }
 
