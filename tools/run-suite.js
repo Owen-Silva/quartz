@@ -48,6 +48,7 @@ const TESTS = [
   { name: 'files', file: 'files-harness.js', launch: 9241, e2e: true },
   { name: 'keywords', file: 'keywords-harness.js' },
   { name: 'log', file: 'log-harness.js' },
+  { name: 'procfind', file: 'procfind-harness.js' },
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },

@@ -93,4 +93,11 @@ function running(exeName) {
 
 function reason() { return whyNot; }
 
-module.exports = { running, reason };
+// Test seam (procfind-harness.js): swap the kernel32 binding for a fake with the same shape
+// ({ size, nameAt, snapshot, first, next, close, address }), so the walk and the name match run
+// against a made-up process list. use(undefined) goes back to the real, lazily loaded one.
+const __test = {
+  use(fake) { api = fake; whyNot = ''; },
+};
+
+module.exports = { running, reason, __test };
