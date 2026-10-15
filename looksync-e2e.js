@@ -5,7 +5,7 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 //
 // Launches its own Quartz: --test-profile --profile-name=lse2e<pid> --offscreen --show-inactive
 // --measure-visible, with LOOK_SYNC_DIR pointing at an EMPTY temp dir (never the real
-// %APPDATA%\look-sync), drives the shared file with ~/look-sync/fake-writer.js and the window over CDP.
+// %APPDATA%\look-sync), drives the shared file with looksync/fake-writer.js (vendored from ~/look-sync) and the window over CDP.
 //
 // INVISIBLE: the user works at this machine while tests run. --offscreen creates the window at
 // -20000,-20000 with no taskbar button (main.js), so it is never on a monitor, not for one frame.
@@ -34,7 +34,8 @@ const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.ex
 const PROFILE = 'lse2e' + process.pid;
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'looksync-e2e-'));
 if (/AppData[\\/]Roaming[\\/]look-sync/i.test(DIR)) { console.error('never the real store'); process.exit(2); }
-const FW = path.join(os.homedir(), 'look-sync', 'fake-writer.js');
+// The fake writer vendored at the same look-sync commit as the module Quartz runs (looksync/vendor.js).
+const FW = path.join(APP, 'looksync', 'fake-writer.js');
 if (!fs.existsSync(FW)) { console.log('looksync-e2e: cannot run: the fake writer is missing at ' + FW); process.exit(2); }
 const BG = path.join(APP, 'assets', 'backgrounds');
 let MAINPID = 0;
@@ -156,7 +157,12 @@ async function test(name, fn) {
   }
   const t0 = Date.now();
   try { const detail = await fn(); results.push([name, true]); console.log('PASS ' + name + ' (' + (Date.now() - t0) + ' ms)' + (detail ? ' ' + detail : '')); }
-  catch (e) { results.push([name, false]); console.log('FAIL ' + name + ': ' + e.message); }
+  catch (e) {
+    results.push([name, false]);
+    // What the window held when it failed: "last false" alone says nothing about a cloud run.
+    const st = await ev("JSON.stringify({ desktop: (({ state, reason, stillUrl }) => ({ state, reason, stillUrl: String(stillUrl || '').slice(-40) }))(LookSync.desktop()), status: LookSync.status().state + ': ' + LookSync.status().reason, backdrop: (({ kind, state, reason }) => ({ kind, state, reason }))(Backdrop.state()) })").catch((x) => 'state unreadable: ' + x.message);
+    console.log('FAIL ' + name + ': ' + e.message + '\n     at failure: ' + String(st).slice(0, 700));
+  }
 }
 function must(r, what) { if (!r.ok) throw new Error(what + ' (waited ' + r.ms + ' ms, last ' + JSON.stringify(r.v) + ')'); return r.ms; }
 const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return m ? Number((m[1].split(/[ ,/]+/).filter(Boolean)[3]) || 1) : null; };
@@ -202,7 +208,7 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
 
   await test('desktop: missing still -> visible fallback to the Windows wallpaper', async () => {
     fw('--app', 'mantle', 'desktop', 'builtin:snow-peak', path.join(BG, 'snow-peak.jpg'), path.join(DIR, 'stills', 'wall-999.jpg'));
-    const why = must(await waitFor("LookSync.desktop().state === 'fallback' && /still is missing/.test(LookSync.desktop().reason) ? LookSync.desktop().reason : null", 1500), 'fallback state') && await ev('LookSync.desktop().reason');
+    const why = must(await waitFor("LookSync.desktop().state === 'fallback' && /still wall-999.jpg is missing/.test(LookSync.desktop().reason) ? LookSync.desktop().reason : null", 1500), 'fallback state') && await ev('LookSync.desktop().reason');
     const s = await waitFor("Backdrop.state().state === 'fallback' || (Backdrop.state().reason && /Windows/.test(Backdrop.state().reason)) ? Backdrop.state() : null", 3000);
     fw('--app', 'mantle', 'desktop', 'builtin:snow-peak', path.join(BG, 'snow-peak.jpg'), still(104, 'snow-peak'));
     must(await waitFor("LookSync.desktop().state === 'ok' && Backdrop.state().state === 'ok'", 2000), 'recovered');

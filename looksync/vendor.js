@@ -19,7 +19,8 @@ const { execFileSync } = require('child_process');
 
 const PINNED = '0b55b9c';
 const SRC_REPO = process.env.LOOK_SYNC_REPO || path.join(require('os').homedir(), 'look-sync');
-const FILES = ['look-sync.js', 'accent.js', 'windows-mode.js'];
+// fake-writer.js is the test tool looksync-e2e drives the shared file with (it needs ./look-sync).
+const FILES = ['look-sync.js', 'accent.js', 'windows-mode.js', 'fake-writer.js'];
 const HERE = __dirname;
 
 function header(commit, file) {
@@ -33,7 +34,12 @@ function show(commit, file) {
 
 function build(commit) {
   const out = {};
-  for (const f of FILES) out[f] = header(commit, f) + show(commit, f);
+  for (const f of FILES) {
+    const src = show(commit, f);
+    // a #! line must stay the first line, or node will not parse the file
+    const bang = /^#![^\n]*\n/.exec(src);
+    out[f] = bang ? bang[0] + header(commit, f) + src.slice(bang[0].length) : header(commit, f) + src;
+  }
   const acc = show(commit, 'accent.js');
   out['accent.browser.js'] = header(commit, 'accent.js, wrapped for <script> pages') +
     '(function () {\nvar module = { exports: {} };\n' + acc +

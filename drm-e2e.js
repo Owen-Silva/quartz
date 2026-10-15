@@ -152,7 +152,12 @@ async function waitTarget(pred, ms) {
 }
 async function guest(urlRe) {
   const t = await waitTarget((x) => x.type === 'webview' && urlRe.test(String(x.url)), 15000);
-  return new Cdp(t.webSocketDebuggerUrl).open();
+  const g = await new Cdp(t.webSocketDebuggerUrl).open();
+  // The target's url names the page as soon as the navigation starts, while the frame can still
+  // hold the guest's first about:blank (readyState "complete", not a secure context, so no EME
+  // at all). Wait until the document itself is the page before anything reads it.
+  await g.waitFor(`new RegExp(${JSON.stringify(urlRe.source)}).test(location.href)`, 15000);
+  return g;
 }
 
 /* ---- run ------------------------------------------------------------------------------------ */

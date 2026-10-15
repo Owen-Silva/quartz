@@ -216,6 +216,12 @@ async function pixels(name, limit) {
 }
 
 /** One scripted action: sent before the next frame, received by the fake Mantle. */
+/*
+ * Windows' "Animation effects" off reaches the chrome as prefers-reduced-motion: reduce, and then
+ * Home switches with no fade at all (backdrop.css): one hint, at the end value, is right. A GitHub
+ * runner has animations off; the user's laptop has them on, where the fade is followed frame by frame.
+ */
+const REDUCED = "matchMedia('(prefers-reduced-motion: reduce)').matches";
 async function step(name, src, expectKind, settleMs) {
   const mark = got.length;
   // The action runs inside this expression. A recorder rAF chain is registered FIRST, so in
@@ -268,6 +274,7 @@ async function step(name, src, expectKind, settleMs) {
   return { first, log, ours, final, recv, r };
 }
 
+
 (async () => {
   let child = null;
   let watcher = null;
@@ -295,7 +302,8 @@ async function step(name, src, expectKind, settleMs) {
     await connect();
     await waitFor('!!(window.Toprow && window.Backdrop && window.LookSync && window.Settings)', 20000);
     await ev(HELPERS);
-    await waitFor("Backdrop.state().kind === 'desktop' && Backdrop.state().state === 'ok' && document.querySelector('.bg-photo').hasAttribute('data-ready')", 15000);
+    await waitFor("Backdrop.state().kind === 'desktop' && Backdrop.state().state === 'ok' && document.querySelector('.bg-photo').hasAttribute('data-ready')", 15000)
+      .catch(async (e) => { const st = await ev("JSON.stringify({ desktop: LookSync.desktop(), status: LookSync.status(), backdrop: Backdrop.state() })").catch(() => 'unreadable'); throw new Error(e.message + ' | at failure: ' + String(st).slice(0, 900)); });
     const st0 = await ev('Toprow.status()');
     check(st0.main.state === 'connected', 'Settings status: connected', JSON.stringify(st0.main).slice(0, 160));
     const LINE = "(() => { const e = document.querySelector('[data-toprow-status]'); return e && e.textContent; })()";
@@ -318,14 +326,25 @@ async function step(name, src, expectKind, settleMs) {
     const s1 = await step('Home -> web page', 'createTab(' + JSON.stringify(page) + ')', 'wash', 700);
     const alphas = (s1.log || []).map((x) => x.top.alpha).filter((a) => typeof a === 'number');
     const endA = s1.final.top.alpha;
-    check(alphas.length >= 3 && alphas.every((a, i) => i === 0 || a <= alphas[i - 1] + 1e-9) && Math.abs(alphas[alphas.length - 1] - endA) < 0.002 && alphas[0] > endA + 0.1,
-      'Home fade-out followed frame by frame, falling to the page wash ' + endA, alphas.length + ' hints: ' + alphas.map((a) => a.toFixed(3)).join(' '));
+    const reduced = await ev(REDUCED);
+    if (!reduced) {
+      check(alphas.length >= 3 && alphas.every((a, i) => i === 0 || a <= alphas[i - 1] + 1e-9) && Math.abs(alphas[alphas.length - 1] - endA) < 0.002 && alphas[0] > endA + 0.1,
+        'Home fade-out followed frame by frame, falling to the page wash ' + endA, alphas.length + ' hints: ' + alphas.map((a) => a.toFixed(3)).join(' '));
+    } else {
+      skip++; console.log('SKIP Home fade-out frame by frame: animations are off on this machine (prefers-reduced-motion: reduce), so Home switches without a fade; checked: one hint, at the end value');
+      check(alphas.length === 1 && Math.abs(alphas[alphas.length - 1] - endA) < 0.002 && Math.abs(endA - home1.top.alpha) > 0.1, 'Home fade-out, animations off: one hint, the page wash ' + endA, alphas.length + ' hints: ' + alphas.map((a) => a.toFixed(3)).join(' '));
+    }
     await pixels('dark web page', 6);
 
     // web page -> Home: fades in (280 ms)
     const s2 = await step('web page -> Home', 'activateTab(' + JSON.stringify(ntId) + ')', 'wash', 700);
     const alphas2 = (s2.log || []).map((x) => x.top.alpha).filter((a) => typeof a === 'number');
-    check(alphas2.length >= 2 && alphas2.every((a, i) => i === 0 || a >= alphas2[i - 1] - 1e-9) && Math.abs(alphas2[alphas2.length - 1] - home1.top.alpha) < 0.002, 'Home fade-in followed frame by frame, rising to ' + home1.top.alpha, alphas2.length + ' hints: ' + alphas2.map((a) => a.toFixed(3)).join(' '));
+    if (!reduced) {
+      check(alphas2.length >= 2 && alphas2.every((a, i) => i === 0 || a >= alphas2[i - 1] - 1e-9) && Math.abs(alphas2[alphas2.length - 1] - home1.top.alpha) < 0.002, 'Home fade-in followed frame by frame, rising to ' + home1.top.alpha, alphas2.length + ' hints: ' + alphas2.map((a) => a.toFixed(3)).join(' '));
+    } else {
+      skip++; console.log('SKIP Home fade-in frame by frame: animations are off on this machine (prefers-reduced-motion: reduce); checked: one hint, at the end value');
+      check(alphas2.length === 1 && Math.abs(alphas2[alphas2.length - 1] - home1.top.alpha) < 0.002, 'Home fade-in, animations off: one hint, the Home wash ' + home1.top.alpha, alphas2.length + ' hints: ' + alphas2.map((a) => a.toFixed(3)).join(' '));
+    }
 
     // theme: light, then dark
     await step('dark -> light', "QuartzTheme.setMode('light')", 'wash', 700);

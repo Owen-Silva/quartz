@@ -14,8 +14,9 @@ const crypto = require('crypto');
 const childProcess = require('child_process');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
-// Absolute path to the Claude CLI.
-const CLAUDE_BIN = 'C:\\Users\\you\\.local\\bin\\claude.exe';
+// Absolute path to the Claude CLI: where its native installer puts it, under THIS user's home
+// (it was pinned to C:\Users\you, which broke the pane on any other account or machine).
+const CLAUDE_BIN = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
 
 // Fallback cwd when the caller does not supply one (or supplies garbage).
 const DEFAULT_CWD = 'C:\\Users\\you';
