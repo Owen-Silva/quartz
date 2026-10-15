@@ -7923,7 +7923,7 @@ function canSleepInWorkspace(tab, mode) {
   // loop (setTabAudible() never flags one anyway).
   if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return true;
   if (mode !== 'all') return false;
-  // A real page loses its scroll, its forms and its session on the way back,
+  // A real page loses its forms and its session on the way back (only its scroll is kept),
   // so 'all' spares exactly what the idle sweep spares.
   if (tab.pinned) return false;
   if (tab.audible) return false;
@@ -8123,6 +8123,12 @@ function wakeTab(tab) {
   }
   try { if (placeholder) placeholder.remove(); } catch (err) { /* already detached */ }
 
+  // The scroll it had when it went into the background, put back once the page
+  // has loaded again: only for the same url, and only once.
+  const keep = tab.savedScroll;
+  tab.savedScroll = null;
+  if (keep && keep.url === target && (keep.x || keep.y)) restoreScrollOnLoad(tab, viewEl, keep);
+
   tab.asleep = false;
   if (tab.chipEl) {
     tab.chipEl.classList.remove('asleep');
@@ -8132,6 +8138,37 @@ function wakeTab(tab) {
   logEvent('tab-woke', { url: tab.url, sleptMs: tab.sleptAt ? Date.now() - tab.sleptAt : null });
   tab.sleptAt = 0;
   return true;
+}
+
+/**
+ * Where a page is scrolled to, read as it goes into the background. That is
+ * the one moment the number is cheap and still true: a tab is only ever put to
+ * sleep from the background, where the user cannot scroll it. The guest has no
+ * preload, so this is one executeJavaScript, and it never blocks the switch.
+ */
+function rememberTabScroll(tab) {
+  if (!tab || tab.kind !== 'page' || tab.asleep || !isViewUsable(tab)) return;
+  const viewEl = tab.viewEl;
+  const url = readCurrentUrl(tab) || tab.url;
+  try {
+    viewEl.executeJavaScript('[Math.round(window.scrollX), Math.round(window.scrollY)]').then((xy) => {
+      // Still this guest, or slept from it a moment ago (a workspace switch sleeps at once).
+      if (!Array.isArray(xy) || (tab.viewEl !== viewEl && !tab.asleep)) return;
+      tab.savedScroll = { url, x: Number(xy[0]) || 0, y: Number(xy[1]) || 0 };
+    }, () => { /* a guest on its way out has no scroll to keep */ });
+  } catch (err) { /* not attached: nothing to keep */ }
+}
+
+/** One-shot: when the woken guest stops loading, scroll it back to keep. */
+function restoreScrollOnLoad(tab, viewEl, keep) {
+  const onStop = () => {
+    viewEl.removeEventListener('did-stop-loading', onStop);
+    if (tab.viewEl !== viewEl || tab.asleep) return;
+    try {
+      viewEl.executeJavaScript('window.scrollTo(' + keep.x + ', ' + keep.y + '), 1').catch(() => { /* gone */ });
+    } catch (err) { /* gone */ }
+  };
+  viewEl.addEventListener('did-stop-loading', onStop);
 }
 
 /**
@@ -9221,6 +9258,7 @@ function activateTab(id) {
   const outgoing = getActiveTab();
   if (outgoing && outgoing !== target) {
     outgoing.pageFocused = !!outgoing.viewEl && document.activeElement === outgoing.viewEl;
+    rememberTabScroll(outgoing); // what wakeTab() puts back if this tab is slept
   }
 
   // Synchronously, before the display swap: the tab in front is never asleep,
