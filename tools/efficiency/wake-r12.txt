@@ -1,0 +1,19 @@
+# wake-bisect.js round 12 (lane homestorm2), no bridge. Round 11 ruled out the boost alone: the
+# browser main thread runs at AboveNormal (9), Electron's libuv embed thread at Normal (8), so the
+# main thread preempts it whatever the boost. Which change stops the two waking each other?
+#   boost=main   main thread Normal + boost off (uvboost.js's default; Quartz rows get it inside)
+#   boost=level  main thread Normal only;  emb: the embed thread TimeCritical (found by the storm)
+home
+ff-off-1:focus,env=QUARTZ_UVBOOST=0
+ff-off-2:focus,env=QUARTZ_UVBOOST=0
+ff-mn-1:focus
+ff-mn-2:focus
+ff-mn-a1:focus,aff=1
+ff-emb:focus,env=QUARTZ_UVBOOST=0,emb
+r-con-a1:repro=con2s,aff=1
+r-con-a1-mn:repro=con2s,aff=1,boost=main
+r-con-a1-lvl:repro=con2s,aff=1,boost=level
+r-con-a1-emb:repro=con2s,aff=1,emb
+r-con:repro=con2s
+r-con-mn:repro=con2s,boost=main
+bare:BARE

@@ -1,0 +1,18 @@
+# wake-bisect.js round 11 (lane homestorm2), phase A: no Spotify bridge.
+# Is the storm Electron's main thread preempting its libuv embed thread (IOCP concurrency 1)?
+# uvboost.js turns the main thread's priority boost off from inside Quartz (QUARTZ_UVBOOST=0: not;
+# =process: the whole process). boost=main / aff=1 apply the same / a one-CPU affinity from outside.
+home
+ff-off-1:focus,env=QUARTZ_UVBOOST=0
+ff-off-2:focus,env=QUARTZ_UVBOOST=0
+ff-fix-1:focus
+ff-fix-2:focus
+ff-pfix:focus,env=QUARTZ_UVBOOST=process
+ff-fix-a1:focus,aff=1
+ff-notp:focus,env=QUARTZ_UVBOOST=0,no=typeperf
+r-con:repro=con2s
+r-con-nb:repro=con2s,boost=main
+r-con-a1:repro=con2s,aff=1
+r-con-a1-nb:repro=con2s,aff=1,boost=main
+r-t2s:repro=t2s-httpok-guardall
+bare:BARE

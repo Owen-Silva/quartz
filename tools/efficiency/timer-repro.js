@@ -55,6 +55,23 @@ function startTimers() {
   else if (mode === 'unref3s-async') keep(setInterval(() => { Promise.resolve((async () => { await null; push(); })()).then(() => {}); }, 3000));
   else if (m && m[1]) keep(setInterval(() => setImmediate(push), 3000));
   else if (m) keep(setInterval(push, 3000));
+  else if (mode === 't2s-http' || mode === 't2s-httpok') startTimerHttp(mode === 't2s-httpok');
+}
+
+//     t2s-http        a MAIN-PROCESS setInterval (a uv timer callback, not a Chromium task) makes an
+//                     http GET every 2 s to a closed loopback port, 600 ms timeout
+//     t2s-httpok      the same to a server in this process (a live bridge)
+function startTimerHttp(live) {
+  const http = require('http');
+  let port = 1;
+  const go = () => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/now', timeout: 600 }, (res) => { res.resume(); });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => {});
+  };
+  if (!live) { setInterval(go, 2000); return; }
+  const server = http.createServer((q, r) => r.end('{"ok":true,"status":"playing"}'));
+  server.listen(0, '127.0.0.1', () => { port = server.address().port; setInterval(go, 2000); });
 }
 
 // wvexec1s: a second off-screen window hosting a <webview>; its page calls the webview's
@@ -99,6 +116,10 @@ app.whenReady().then(() => {
   win.once('ready-to-show', () => win.showInactive());
   startTimers();
   if (/^con2s/.test(mode)) startConsolePoll(win);
+  // libuv's loop counters every 10 s (see wake-hook.js's QWAKE_UVM).
+  setInterval(() => { try { const m = require('perf_hooks').performance.nodeTiming.uvMetricsInfo; process.stdout.write('qwake-uvm ' + JSON.stringify({ t: Date.now(), loop: m.loopCount, ev: m.events, wait: m.eventsWaiting }) + '\n'); } catch { /* old Node */ } }, 10000).unref();
+  // uvboost's fix, applied to plain Electron (the bench's boost= option does the same from outside).
+  if (process.env.QREPRO_UVBOOST === '1') require(path.join(__dirname, '..', '..', 'uvboost.js')).install({ delayMs: 0 });
   if (mode === 'wvexec1s') startWebviewExec();
 });
 app.on('window-all-closed', () => app.quit());

@@ -1,0 +1,8 @@
+# wake-bisect.js round 11 (lane homestorm2), phase B: a live fake Spotify bridge (--bridge).
+ff-off-b1:focus,env=QUARTZ_UVBOOST=0
+ff-off-b2:focus,env=QUARTZ_UVBOOST=0
+ff-fix-b1:focus
+ff-fix-b2:focus
+r-t2s-nb:repro=t2s-httpok-guardall,boost=main
+r-con-b:repro=con2s
+r-con-nb-b:repro=con2s,boost=main

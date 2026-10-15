@@ -7,7 +7,7 @@
 //                     stub, every call returns the stub, `then` is undefined, iteration is empty.
 //                     ALL = every './x' require made by main.js itself.
 //   QWAKE_NO=fswatch,interval,...  neutralize one Node API for the whole process (fs.watch,
-//                     setInterval) -- a coarser cut than a module.
+//                     setInterval) -- a coarser cut than a module. typeperf: no typeperf child.
 //   QWAKE_DIAG=<file> at QWAKE_DIAG_AT s after start, count async_hooks inits by type and by stack
 //                     for QWAKE_DIAG_FOR s; snapshot the live handles / requests; write <file>.
 //   QWAKE_SCHOOL=...  change school.create()'s options, or load an older school.js (see below).
@@ -161,6 +161,25 @@ if (NO.has('unref')) {
 }
 if (NO.has('interval')) {
   global.setInterval = function qwakeInterval() { return { ref() { return this; }, unref() { return this; }, hasRef() { return false; }, refresh() { return this; }, [Symbol.toPrimitive]() { return 0; } }; };
+}
+// Every 10 s, libuv's own counters for the main process's loop (one stdout line, read back from
+// the condition's log by wake-bisect): loopCount = uv_run iterations (each UvRunOnce is one),
+// events = completion packets its poll took off the IOCP. A storm with loopCount climbing and
+// events flat is the main thread running UvRunOnce for a packet its poll never gets.
+if (process.env.QWAKE_UVM !== '0') {
+  const { performance } = require('perf_hooks');
+  const uvm = () => { try { const m = performance.nodeTiming.uvMetricsInfo; process.stdout.write('qwake-uvm ' + JSON.stringify({ t: Date.now(), loop: m.loopCount, ev: m.events, wait: m.eventsWaiting }) + '\n'); } catch { /* old Node */ } };
+  setInterval(uvm, 10000).unref();
+}
+if (NO.has('typeperf')) {
+  // No typeperf child at all: stats.js's spawn (bound when it loads, after this hook) throws, so
+  // the card subscribes and notes "typeperf could not start", with no pipe in the main process.
+  const cp = require('child_process');
+  const realSpawn = cp.spawn;
+  cp.spawn = function qwakeSpawn(cmd, ...rest) {
+    if (/^typeperf(\.exe)?$/i.test(String(cmd))) throw new Error('typeperf disabled (QWAKE_NO=typeperf)');
+    return realSpawn.call(this, cmd, ...rest);
+  };
 }
 
 function describeHandle(h) {

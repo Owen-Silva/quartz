@@ -66,6 +66,9 @@ function parseConds(s) {
       else if (o.startsWith('no=')) c.no = o.slice(3).split('+').join(',');
       else if (o.startsWith('sch=')) c.sch = o.slice(4).split('+').join(',');
       else if (o.startsWith('repro=')) { c.bare = true; c.repro = o.slice(6); }
+      else if (o.startsWith('aff=')) c.aff = Number(o.slice(4));
+      else if (o.startsWith('boost=')) c.boost = o.slice(6);
+      else if (o === 'emb') c.emb = true;
     }
     return c;
   });
@@ -89,6 +92,22 @@ function launch(c) {
   const child = spawn(ELECTRON, args, { cwd: REPO, env, stdio: ['ignore', log, log], windowsHide: true });
   c.pid = child.pid;
   c.launchedAt = Date.now();
+}
+
+// aff=<mask> / boost=main|boost|level|process (uvboost.js scopes): applied from OUTSIDE right after launch (PowerShell on the PID):
+// the process's CPU affinity, and Windows' dynamic priority boost off on its first thread (the
+// browser main thread) or on the whole process. uvboost.js does boost=main from inside Quartz;
+// these let plain Electron (repro=, BARE) and Quartz with QUARTZ_UVBOOST=0 get the same.
+function applyTweaks(c) {
+  if (!c.aff && !c.boost) return;
+  const ub = require(path.join(REPO, 'uvboost.js'));
+  const parts = [];
+  if (['main', 'boost', 'level', 'process'].includes(c.boost)) parts.push(ub.script(c.pid, c.boost));
+  if (c.aff) parts.push('(Get-Process -Id ' + c.pid + ').ProcessorAffinity = ' + Math.floor(c.aff) + "; 'aff ok ' + (Get-Process -Id " + c.pid + ').ProcessorAffinity');
+  try {
+    c.tweak = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', parts.join('; ')], { encoding: 'utf8', windowsHide: true, timeout: 60000 }).trim().replace(/\s+/g, ' ');
+  } catch (e) { c.tweak = 'tweak failed: ' + String(e && e.message).slice(0, 200); }
+  console.log('tweak ' + c.name + ': ' + c.tweak);
 }
 
 async function bootCheck(c) {
@@ -161,6 +180,45 @@ function rate(a, b, pid) {
     cpuSper10min: pa.cpu >= 0 && pb.cpu >= 0 ? +((pb.cpu - pa.cpu) / dt * 600).toFixed(2) : null, tree };
 }
 
+// libuv's loop counters over the window, from the qwake-uvm lines the instance printed to its log
+// (wake-hook.js / timer-repro.js): uv_run iterations/s and completion packets taken/s.
+function uvmRate(c, win) {
+  try {
+    const pts = fs.readFileSync(path.join(OUT, 'log-' + c.name + '.txt'), 'utf8').split(/\r?\n/)
+      .filter((l) => l.startsWith('qwake-uvm ')).map((l) => JSON.parse(l.slice(10)))
+      .filter((p) => p.t >= win[0] - 5000 && p.t <= win[1] + 5000);
+    if (pts.length < 2) return null;
+    const a = pts[0], b = pts[pts.length - 1], dt = (b.t - a.t) / 1000;
+    return { loopPerS: Math.round((b.loop - a.loop) / dt), eventsPerS: +((b.ev - a.ev) / dt).toFixed(1), s: Math.round(dt) };
+  } catch (e) { return null; }
+}
+
+// emb: at the end of the settle, find Electron's libuv embed thread as the one of the two threads
+// that wake each other that is not the process's first thread, and set it to TimeCritical, then
+// measure. Bench only: it needs the storm running to see which thread it is.
+async function raiseEmbed(list) {
+  if (!list.length) return;
+  const pids = list.map((c) => c.pid);
+  const a = readThreads(pids);
+  await sleep(8000);
+  const b = readThreads(pids);
+  for (const c of list) {
+    const pa = a && a.p[String(c.pid)], pb = b && b.p[String(c.pid)];
+    if (!pa || !pb) { c.tweak = (c.tweak ? c.tweak + ' ' : '') + 'emb: no sample'; continue; }
+    const old = new Map(pa.th.map((x) => [x[0], x[1]]));
+    const hot = pb.th.map((x) => [x[0], x[1] - (old.get(x[0]) || 0)]).sort((x, y) => y[1] - x[1]).slice(0, 2).map((x) => x[0]);
+    const ps = "$ErrorActionPreference = 'Stop'; $p = Get-Process -Id " + c.pid +
+      '; $m = ($p.Threads | Sort-Object { try { $_.StartTime } catch { [datetime]::MaxValue } } | Select-Object -First 1).Id' +
+      '; $e = @(' + hot.join(',') + ') | Where-Object { $_ -ne $m } | Select-Object -First 1' +
+      "; $t = $p.Threads | Where-Object { $_.Id -eq $e }; $was = [string]$t.PriorityLevel; $t.PriorityLevel = 'TimeCritical'" +
+      "; 'emb ok main=' + $m + ' embed=' + $e + ' was=' + $was + ' now=' + $t.PriorityLevel";
+    let out;
+    try { out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps], { encoding: 'utf8', windowsHide: true, timeout: 60000 }).trim(); } catch (e) { out = 'emb failed: ' + String(e && e.message).slice(0, 160); }
+    c.tweak = (c.tweak ? c.tweak + ' ' : '') + out + ' (hot ' + hot.join(',') + ')';
+    console.log('emb ' + c.name + ': ' + c.tweak);
+  }
+}
+
 (async () => {
   // --conds-file: one condition per line (# comments), so no shell has to carry ';' or ':'.
   const spec = argv['conds-file']
@@ -171,13 +229,14 @@ function rate(a, b, pid) {
   // --bridge: tools/efficiency/fake-bridge.js on 8787 for the whole run (every condition sees a
   // live Spotify bridge, as on the user's machine); killed with the instances.
   let bridge = null;
+  let winT = [0, 0];
   if (argv.bridge) {
     bridge = spawn(process.execPath, [path.join(__dirname, 'fake-bridge.js'), '--port=8787'], { cwd: REPO, stdio: ['ignore', fs.openSync(path.join(OUT, 'log-fake-bridge.txt'), 'w'), 'ignore'], windowsHide: true });
     await sleep(1000);
     console.log('wake-bisect: fake bridge up (pid ' + bridge.pid + ')');
   }
   try {
-    for (const c of conds) { launch(c); await sleep(STAGGER * 1000); }
+    for (const c of conds) { launch(c); await sleep(1500); applyTweaks(c); await sleep(Math.max(0, STAGGER * 1000 - 1500)); }
     await Promise.all(conds.map(bootCheck));
     if (conds.some((c) => c.focus)) {
       await sleep(FOCUS_AT * 1000);
@@ -188,12 +247,14 @@ function rate(a, b, pid) {
     }
     const since = Math.max(...conds.map((c) => c.launchedAt));
     await sleep(Math.max(0, SETTLE * 1000 - (Date.now() - since)));
+    await raiseEmbed(conds.filter((c) => c.emb));
     const pids = conds.map((c) => c.pid);
     const s0 = readThreads(pids);
     await sleep(WINDOW * 500);
     const s1 = readThreads(pids);
     await sleep(WINDOW * 500);
     const s2 = readThreads(pids);
+    winT = [s0 && s0.t, s2 && s2.t];
     for (const c of conds) {
       c.whole = rate(s0, s2, String(c.pid));
       c.half1 = rate(s0, s1, String(c.pid));
@@ -206,12 +267,13 @@ function rate(a, b, pid) {
   }
   const rows = conds.map((c) => ({ name: c.name, off: c.off, no: c.no, sch: c.sch, diag: c.diag, boot: c.boot,
     mainCtxPerS: c.whole && c.whole.ctxPerS, halves: [c.half1 && c.half1.ctxPerS, c.half2 && c.half2.ctxPerS],
-    topThreads: c.whole && c.whole.top, mainCpuSper10min: c.whole && c.whole.cpuSper10min, tree: c.whole && c.whole.tree, pages: c.pages, ab: c.ab, url: c.url, env: c.env, focus: c.focusResult }));
+    topThreads: c.whole && c.whole.top, mainCpuSper10min: c.whole && c.whole.cpuSper10min, tree: c.whole && c.whole.tree, pages: c.pages, ab: c.ab, url: c.url, env: c.env, focus: c.focusResult, tweak: c.tweak, uvm: uvmRate(c, winT) }));
   fs.writeFileSync(path.join(OUT, 'wake-result.json'), JSON.stringify({ settle: SETTLE, window: WINDOW, cpus: os.cpus().length, rows }, null, 1));
   console.log('name                 boot  main ctx/s [half1 half2]  top threads        main CPU s/10min  tree: procs ctx/s CPU s/10min  off / no');
   for (const r of rows) {
     console.log(String(r.name).padEnd(20) + ' ' + String(r.boot).slice(0, 5).padEnd(5) + ' ' + String(r.mainCtxPerS).padStart(6) + ' [' + r.halves.join(' ') + ']'.padEnd(4) +
-      '  ' + JSON.stringify(r.topThreads).padEnd(18) + ' ' + String(r.mainCpuSper10min).padStart(8) + '  ' + (r.tree ? String(r.tree.procs).padStart(3) + ' ' + String(r.tree.ctxPerS).padStart(6) + ' ' + String(r.tree.cpuSper10min).padStart(7) : '      -') + '  ' + (r.off || '-') + ' / ' + (r.no || '-') + (r.sch ? ' / school ' + r.sch : '') + (r.diag ? ' (diag)' : ''));
+      '  ' + JSON.stringify(r.topThreads).padEnd(18) + ' ' + String(r.mainCpuSper10min).padStart(8) + '  ' + (r.tree ? String(r.tree.procs).padStart(3) + ' ' + String(r.tree.ctxPerS).padStart(6) + ' ' + String(r.tree.cpuSper10min).padStart(7) : '      -') + '  ' + (r.off || '-') + ' / ' + (r.no || '-') + (r.sch ? ' / school ' + r.sch : '') + (r.diag ? ' (diag)' : '') +
+      (r.uvm ? '  uv ' + r.uvm.loopPerS + ' loops/s ' + r.uvm.eventsPerS + ' ev/s' : '') + (r.tweak ? '  [' + String(r.tweak).slice(0, 90) + ']' : ''));
   }
   for (const f of fs.readdirSync(OUT).filter((x) => /^(diag|snap)-/.test(x))) {
     const d = JSON.parse(fs.readFileSync(path.join(OUT, f), 'utf8'));
