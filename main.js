@@ -7,6 +7,10 @@
 // cannot do for itself: downloads, permission prompts, context menus, and the
 // keystrokes a focused page would otherwise swallow.
 
+// First, before anything arms a timer: no activateUvLoop() from inside Node's own loop (the idle
+// wakeup storms; see uvquiet.js).
+require('./uvquiet').install();
+
 const os = require('os');
 const fs = require('fs');
 const path = require('path');

@@ -49,6 +49,8 @@ const TESTS = [
   { name: 'keywords', file: 'keywords-harness.js' },
   { name: 'log', file: 'log-harness.js' },
   { name: 'procfind', file: 'procfind-harness.js' },
+  // The main-process guard on activateUvLoop (the idle wakeup storms).
+  { name: 'uvquiet', file: 'uvquiet-harness.js' },
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
