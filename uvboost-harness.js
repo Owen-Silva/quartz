@@ -1,5 +1,6 @@
-// uvboost-harness.js -- uvboost.js without Electron or PowerShell: the env switch, the script it
-// would run, the output parser, and install()'s states with a fake process and execFile.
+// uvboost-harness.js -- uvboost.js without Electron: the env switch, which thread it picks (and when
+// it refuses), install()'s states and quartz.log lines, and the CPU guard, against a fake Win32
+// thread table with the same calls the koffi bindings make.
 //   node uvboost-harness.js          -> "uvboost: N passed, M failed"
 'use strict';
 const fs = require('fs');
@@ -8,109 +9,182 @@ const ub = require('./uvboost');
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
-  if (cond) { pass++; console.log('ok   ' + name); } else { fail++; console.log('FAIL ' + name + (detail ? '  ' + detail : '')); }
+  // process.stdout, not console.log: one check below captures console.log.
+  if (cond) { pass++; process.stdout.write('ok   ' + name + '\n'); } else { fail++; process.stdout.write('FAIL ' + name + (detail ? '  ' + detail : '') + '\n'); }
 }
 
 // The env switch.
-for (const v of ['0', 'off', 'OFF', 'false', 'no']) ok('QUARTZ_UVBOOST=' + v + ' is off', ub.scopeFrom(v) === 'off');
-for (const v of ['process', 'proc']) ok('QUARTZ_UVBOOST=' + v + ' is the whole process', ub.scopeFrom(v) === 'process');
-for (const v of ['main', 'boost', 'level']) ok('QUARTZ_UVBOOST=' + v + ' is that main-thread variant', ub.scopeFrom(v) === v);
-for (const v of [undefined, '', '1', 'embed', 'yes']) ok('QUARTZ_UVBOOST=' + JSON.stringify(v) + ' is the embed thread (default)', ub.scopeFrom(v) === 'embed');
-
-// The scripts.
-const sEmb = ub.script(4321, 'embed');
-ok('embed script targets the pid and stops on errors', sEmb.includes('Get-Process -Id 4321') && sEmb.startsWith("$ErrorActionPreference = 'Stop'"));
-ok('embed script reads thread names and start addresses (GetThreadDescription, NtQueryInformationThread 9)', sEmb.includes('GetThreadDescription') && sEmb.includes('NtQueryInformationThread(h, 9,'));
-const cs = /Add-Type -TypeDefinition '([^']*)'/.exec(sEmb);
-ok('the C# is one single-quoted PowerShell string (no quote inside it)', !!cs && cs[1].includes('public static class QuartzUvThreads') && cs[1].endsWith('} }'));
-ok('embed script takes the start address of the threads Node and libuv name', sEmb.includes("'libuv-worker'") && sEmb.includes("'V8Worker'") && sEmb.includes("'DelayedTaskSchedulerWorker'"));
-ok('embed script needs exactly one start address and exactly one unnamed thread there', sEmb.includes('if ($uv.Count -ne 1) { throw') && sEmb.includes('if ($e.Count -ne 1) { throw'));
-ok('embed script sets that thread to TimeCritical and nothing else', sEmb.includes("$t.PriorityLevel = 'TimeCritical'") && !sEmb.includes('PriorityBoostEnabled') && !sEmb.includes("'Normal'"));
-const sMain = ub.script(4321, 'main');
-ok('main script picks the earliest-started thread', /Sort-Object \{ try \{ \$_\.StartTime \}/.test(sMain) && sMain.includes('Select-Object -First 1'));
-ok('main script: that thread Normal and boost off', sMain.includes('$t.PriorityBoostEnabled = $false') && sMain.includes("$t.PriorityLevel = 'Normal'"));
-ok('main script leaves the process setting alone', !sMain.includes('$p.PriorityBoostEnabled = $false'));
-const sBoost = ub.script(4321, 'boost'), sLevel = ub.script(4321, 'level');
-ok('boost script: boost off only', sBoost.includes('$t.PriorityBoostEnabled = $false') && !sBoost.includes("PriorityLevel = 'Normal'"));
-ok('level script: Normal only', !sLevel.includes('$t.PriorityBoostEnabled = $false') && sLevel.includes("$t.PriorityLevel = 'Normal'"));
-const sProc = ub.script(4321, 'process');
-ok('process script turns the process boost off', sProc.includes('$p.PriorityBoostEnabled = $false') && !sProc.includes('$t.'));
-let threw = 0;
-for (const bad of [0, -1, 'x', '12; Remove-Item C:\\', null, NaN]) { try { ub.script(bad, 'embed'); } catch (e) { threw++; } }
-ok('a pid that is not a positive number throws (nothing is spliced into PowerShell)', threw === 6, threw + ' of 6 threw');
-
-// The parser.
-const p0 = ub.parse('\r\nuvboost ok scope=embed tid=19832 was=Normal\r\n');
-ok('parse: embed line', p0.ok && p0.scope === 'embed' && p0.tid === 19832 && p0.was === 'Normal', JSON.stringify(p0));
-const p1 = ub.parse('uvboost ok scope=main tid=17812 was=True/AboveNormal');
-ok('parse: main line', p1.ok && p1.scope === 'main' && p1.tid === 17812 && p1.was === 'True/AboveNormal', JSON.stringify(p1));
-const p2 = ub.parse('uvboost ok scope=process pid=99 was=False');
-ok('parse: process line', p2.ok && p2.scope === 'process' && p2.tid === null && p2.was === 'False', JSON.stringify(p2));
-ok('parse: anything else is not ok', !ub.parse('').ok && !ub.parse('Get-Process : Cannot find a process').ok && !ub.parse(null).ok);
-
-// install() with a fake process.
-const winProc = (env, extra) => Object.assign({ platform: 'win32', type: 'browser', pid: 777, env: env || {} }, extra || {});
-function fakeExec(reply) {
-  const calls = [];
-  const fn = (file, args, opts, cb) => { calls.push({ file, args, opts }); if (reply.throws) throw new Error(reply.throws); setImmediate(() => cb(reply.err || null, reply.stdout || '', reply.stderr || '')); return {}; };
-  fn.calls = calls;
-  return fn;
+for (const v of ['0', 'off', 'OFF', 'false', 'no']) ok('QUARTZ_UVBOOST=' + v + ' is off', ub.settingFrom(v) === 'off');
+for (const [v, want] of [['abovenormal', 'abovenormal'], ['AboveNormal', 'abovenormal'], ['above-normal', 'abovenormal'], ['highest', 'highest'], ['TimeCritical', 'timecritical'], ['time_critical', 'timecritical']]) {
+  ok('QUARTZ_UVBOOST=' + v + ' is ' + want, ub.settingFrom(v) === want);
 }
+for (const v of [undefined, '', '1', 'embed', 'yes', 'realtime']) ok('QUARTZ_UVBOOST=' + JSON.stringify(v) + ' is the default level', ub.settingFrom(v) === ub.DEFAULT_LEVEL);
+ok('the default is a level, and one SetThreadPriority knows', Object.prototype.hasOwnProperty.call(ub.LEVELS, ub.DEFAULT_LEVEL));
+ok('levels are the Win32 values', ub.LEVELS.abovenormal === 1 && ub.LEVELS.highest === 2 && ub.LEVELS.timecritical === 15);
+
+// pickEmbed: the one unnamed thread at the start address of the threads Node names.
+const S = '7ff6a0012340', X = '7ffb11112222';
+const base = () => [
+  { tid: 10, start: 'aaaa', name: 'CrBrowserMain' },
+  { tid: 11, start: S, name: 'V8Worker' }, { tid: 12, start: S, name: 'V8Worker' },
+  { tid: 13, start: S, name: 'DelayedTaskSchedulerWorker' },
+  { tid: 14, start: S, name: 'libuv-worker' },
+  { tid: 15, start: S, name: '' },                  // the embed thread
+  { tid: 16, start: X, name: '' },                  // an unnamed thread elsewhere: ignored
+  { tid: 17, start: 'bbbb', name: 'Chrome_IOThread' },
+];
+const p0 = ub.pickEmbed(base());
+ok('picks the one unnamed thread at libuv\'s start address', p0.tid === 15 && p0.start === S && p0.named === 4, JSON.stringify(p0));
+const two = base().concat([{ tid: 18, start: S, name: '' }]);
+ok('two unnamed there: refuses, says how many', !ub.pickEmbed(two).tid && /2 unnamed threads/.test(ub.pickEmbed(two).why), JSON.stringify(ub.pickEmbed(two)));
+const none = base().filter((r) => r.tid !== 15);
+ok('none unnamed there: refuses, says 0', !ub.pickEmbed(none).tid && /^0 unnamed threads/.test(ub.pickEmbed(none).why));
+const split = base().map((r) => (r.tid === 14 ? Object.assign({}, r, { start: 'cccc' }) : r));
+ok('Node\'s named threads at two addresses: refuses', !ub.pickEmbed(split).tid && /2 different addresses/.test(ub.pickEmbed(split).why));
+const nonamed = base().filter((r) => !ub.LIBUV_NAMES.includes(r.name));
+ok('no named Node threads: refuses, names what it looked for', !ub.pickEmbed(nonamed).tid && /V8Worker/.test(ub.pickEmbed(nonamed).why));
+const unread = base().concat([{ tid: 19, start: S, name: null }]);
+ok('a thread there whose name cannot be read: refuses (it might be the other one)', !ub.pickEmbed(unread).tid && /could not be read/.test(ub.pickEmbed(unread).why));
+const gone = base().concat([{ tid: 20, start: null, name: null }]);
+ok('a thread that exited mid-walk (nothing readable) does not matter', ub.pickEmbed(gone).tid === 15);
+ok('garbage in: refuses, no throw', !ub.pickEmbed(null).tid && !ub.pickEmbed([null, 5]).tid);
+
+// A fake Win32 thread table with the calls uvboost's koffi bindings make.
+function fakeApi(rows, opts) {
+  const o = opts || {};
+  const th = new Map(rows.map((r) => [r.tid, Object.assign({ pid: 777, priority: 0, cpu: 0 }, r)]));
+  const handles = new Map();
+  let nextH = 1;
+  const w = {
+    calls: [], open: null, ptrSize: 8,
+    koffi: { decode: (p) => p.name },
+    address: (h) => BigInt.asUintN(64, BigInt(h)),
+    snapshot: () => (o.snapFails ? -1 : 9999),
+    first: (h, te) => { w.list = [...th.values()]; w.at = 0; return w.next(h, te); },
+    next: (h, te) => { const r = w.list[w.at++]; if (!r) return false; te.writeUInt32LE(r.tid, 8); te.writeUInt32LE(r.pid, 12); return true; },
+    close: (h) => { if (h !== 9999) handles.delete(h); return true; },
+    describe: (h, d) => { const r = th.get(handles.get(h)); if (r.name == null) return -1; d[0] = { name: r.name }; return 0; },
+    localFree: () => null,
+    queryThread: (h, cls, b) => { const r = th.get(handles.get(h)); if (cls !== 9 || r.start == null) return -1; b.writeBigUInt64LE(BigInt('0x' + r.start), 0); return 0; },
+    getPriority: (h) => th.get(handles.get(h)).priority,
+    setPriority: (h, p) => { w.calls.push(['set', handles.get(h), p]); if (o.setFails) return false; th.get(handles.get(h)).priority = o.sticky ? 0 : p; return true; },
+    times: (h, c, e, k, u) => { const r = th.get(handles.get(h)); k[0] = 0; u[0] = r.cpu; return true; },
+    cycles: (h, c) => { c[0] = th.get(handles.get(h)).cpu * 3; return true; },
+    th, handles,
+  };
+  w.open = (access, inherit, tid) => { const r = th.get(tid); if (!r || r.gone || o.openFails) return null; const h = nextH++; handles.set(h, tid); return h; };
+  return w;
+}
+
+const w0 = fakeApi(base());
+const f0 = ub.findEmbed(777, w0);
+ok('findEmbed: walks the snapshot, reads names and start addresses, picks thread 15', f0.tid === 15 && f0.threads === 8, JSON.stringify(f0));
+ok('findEmbed: every handle it opened is closed', w0.handles.size === 0, w0.handles.size + ' open');
+const wOther = fakeApi(base().map((r) => Object.assign({}, r, { pid: r.tid === 15 ? 778 : 777 })));
+ok('findEmbed: threads of other processes are not ours', !ub.findEmbed(777, wOther).tid);
+const b0 = ub.boostProcess(777, 'highest', fakeApi(base()));
+ok('boostProcess: thread 15 Normal -> Highest', b0.ok && b0.tid === 15 && b0.was === 0 && b0.now === 2, JSON.stringify(b0));
+const wSet = fakeApi(base());
+ub.boostProcess(777, 'timecritical', wSet);
+ok('boostProcess: SetThreadPriority called once, on that thread only', wSet.calls.length === 1 && wSet.calls[0][1] === 15 && wSet.calls[0][2] === 15, JSON.stringify(wSet.calls));
+ok('boostProcess: an unknown level changes nothing', !ub.boostProcess(777, 'realtime', fakeApi(base())).ok);
+const bRef = ub.boostProcess(777, 'highest', fakeApi(base(), { setFails: true }));
+ok('boostProcess: Windows refuses -> not ok, says so', !bRef.ok && /refused/.test(bRef.why), JSON.stringify(bRef));
+const bSticky = ub.boostProcess(777, 'highest', fakeApi(base(), { sticky: true }));
+ok('boostProcess: the level does not read back -> not ok, says what it reads', !bSticky.ok && /reads back as Normal/.test(bSticky.why), JSON.stringify(bSticky));
+const bSnap = ub.boostProcess(777, 'highest', fakeApi(base(), { snapFails: true }));
+ok('boostProcess: the snapshot fails -> not ok, no throw', !bSnap.ok && /snapshot failed/.test(bSnap.why), JSON.stringify(bSnap));
+ok('cpuShare: 600 ms of CPU in 60 s is 1% of a core', Math.abs(ub.cpuShare({ cpu100ns: 0 }, { cpu100ns: 6e6 }, 60000) - 0.01) < 1e-9);
+ok('cpuShare: no reading -> null', ub.cpuShare(null, { cpu100ns: 1 }, 1000) === null && ub.cpuShare({ cpu100ns: 0 }, { cpu100ns: 1 }, 0) === null);
+
+// install() with a fake process, fake api, fake timers and clock.
+const winProc = (env, extra) => Object.assign({ platform: 'win32', type: 'browser', pid: 777, env: env || {} }, extra || {});
+function fakeTimers() {
+  const t = { timeouts: [], intervals: [], cleared: [] };
+  t.setTimeout = (fn, ms) => { const h = { fn, ms, unref() { h.unrefd = true; } }; t.timeouts.push(h); return h; };
+  t.setInterval = (fn, ms) => { const h = { fn, ms, unref() { h.unrefd = true; } }; t.intervals.push(h); return h; };
+  t.clearInterval = (h) => { t.cleared.push(h); };
+  return t;
+}
+let now = 1000;
+const clock = () => now;
 const logs = [];
 const log = (l) => logs.push(l);
 
 ok('not Windows: skipped', ub.install({ proc: winProc({}, { platform: 'linux' }), log }).state === 'skipped');
 ok('a renderer: skipped', ub.install({ proc: winProc({}, { type: 'renderer' }), log }).state === 'skipped');
 ok('plain Node (no process.type): skipped', ub.install({ proc: winProc({}, { type: undefined }), log }).state === 'skipped');
-const exOff = fakeExec({ stdout: 'uvboost ok scope=embed tid=1 was=Normal' });
-const sOff = ub.install({ proc: winProc({ QUARTZ_UVBOOST: '0' }), execFile: exOff, delayMs: 0, log });
-ok('QUARTZ_UVBOOST=0: state off, no PowerShell', sOff.state === 'off' && exOff.calls.length === 0, JSON.stringify(sOff));
+logs.length = 0;
+const wOff = fakeApi(base());
+const sOff = ub.install({ proc: winProc({ QUARTZ_UVBOOST: '0' }), api: wOff, delayMs: 0, log });
+ok('QUARTZ_UVBOOST=0: state off, nothing set', sOff.state === 'off' && wOff.calls.length === 0, JSON.stringify(sOff));
+ok('QUARTZ_UVBOOST=0: one quartz.log line says it is off', logs.length === 1 && /^Idle wakeup-storm fix: off \(QUARTZ_UVBOOST=0\)/.test(logs[0]), logs.join(' | '));
 
-(async () => {
-  const tick = () => new Promise((r) => setTimeout(r, 30));
+logs.length = 0;
+const tm = fakeTimers();
+const wOk = fakeApi(base());
+const sOk = ub.install({ proc: winProc({}), api: wOk, timers: tm, clock, log });
+ok('default: pending behind an unref\'d timer of DEFAULT_DELAY_MS', sOk.state === 'pending' && tm.timeouts.length === 1 && tm.timeouts[0].ms === ub.DEFAULT_DELAY_MS && tm.timeouts[0].unrefd && wOk.calls.length === 0);
+tm.timeouts[0].fn();
+ok('default: applied to thread 15 at the default level', sOk.state === 'applied' && sOk.tid === 15 && sOk.level === ub.DEFAULT_LEVEL && wOk.th.get(15).priority === ub.LEVELS[ub.DEFAULT_LEVEL] && sOk.was === 0, JSON.stringify(sOk));
+ok('default: no other thread touched', [...wOk.th.values()].filter((r) => r.priority !== 0).length === 1);
+ok('default: one plain-words line names the thread, the level and what it was', logs.length === 1 && /^Idle wakeup-storm fix on: .*thread 15.* now runs at (Highest|AboveNormal|TimeCritical) priority, up from Normal/.test(logs[0]), logs.join(' | '));
+ok('the guard: one unref\'d interval of GUARD_EVERY_MS', tm.intervals.length === 1 && tm.intervals[0].ms === ub.GUARD_EVERY_MS && tm.intervals[0].unrefd);
+// a quiet minute: 0.6 s of CPU in 60 s
+now += 60000; wOk.th.get(15).cpu += 6e6; tm.intervals[0].fn();
+ok('the guard: a quiet minute (1% of a core) leaves it raised', sOk.state === 'applied' && Math.abs(sOk.share - 0.01) < 1e-9 && wOk.th.get(15).priority === ub.LEVELS[ub.DEFAULT_LEVEL] && tm.cleared.length === 0, JSON.stringify(sOk));
+// a spinning minute: 30 s of CPU in 60 s
+now += 60000; wOk.th.get(15).cpu += 3e8; tm.intervals[0].fn();
+ok('the guard: half a core for a minute puts the old priority back and stops', sOk.state === 'undone' && wOk.th.get(15).priority === 0 && tm.cleared.length === 1, JSON.stringify(sOk));
+ok('the guard: says so in words, with the share and the level', logs.length === 2 && /^Idle wakeup-storm fix undone: .*thread 15.* used 50% of a CPU core over the last 60 s .* is back at Normal/.test(logs[1]), logs.join(' | '));
+// the thread exits: the guard stops without a word
+const tm2 = fakeTimers(); const w2 = fakeApi(base());
+const s2 = ub.install({ proc: winProc({}), api: w2, timers: tm2, clock, log, delayMs: 0 });
+w2.th.get(15).gone = true; now += 60000; tm2.intervals[0].fn();
+ok('the guard: a gone thread stops it, state stays applied', s2.state === 'applied' && tm2.cleared.length === 1);
 
-  const exOk = fakeExec({ stdout: 'uvboost ok scope=embed tid=4242 was=Normal\r\n' });
-  const sOk = ub.install({ proc: winProc({}), execFile: exOk, delayMs: 0, log });
-  ok('applied: PowerShell started at once with delayMs 0', exOk.calls.length === 1);
-  const c = exOk.calls[0] || { args: [], opts: {} };
-  ok('runs powershell.exe hidden, non-interactive, with a timeout', c.file === 'powershell.exe' && c.args.includes('-NoProfile') && c.args.includes('-NonInteractive') && c.opts.windowsHide === true && c.opts.timeout > 0);
-  ok('the -Command is the embed-thread script for this pid', c.args[c.args.indexOf('-Command') + 1] === ub.script(777, 'embed'));
-  await tick();
-  ok('applied: state, thread id and reason', sOk.state === 'applied' && sOk.tid === 4242 && /was Normal/.test(sOk.reason) && sOk.ms >= 0, JSON.stringify(sOk));
-  ok('applied: one log line names the thread', logs.some((l) => /\[uvboost\] priority TimeCritical \(libuv embed thread 4242, was Normal\)/.test(l)), logs.join(' | '));
+logs.length = 0;
+const s3 = ub.install({ proc: winProc({ QUARTZ_UVBOOST: 'timecritical' }), api: fakeApi(base()), timers: fakeTimers(), clock, log, delayMs: 0 });
+ok('QUARTZ_UVBOOST=timecritical: that level', s3.state === 'applied' && s3.level === 'timecritical' && /TimeCritical priority/.test(logs[0]), JSON.stringify(s3));
 
-  const exProc = fakeExec({ stdout: 'uvboost ok scope=process pid=777 was=True' });
-  const sProc2 = ub.install({ proc: winProc({ QUARTZ_UVBOOST: 'process' }), execFile: exProc, delayMs: 0, log });
-  await tick();
-  ok('QUARTZ_UVBOOST=process: the process script, applied', sProc2.scope === 'process' && sProc2.state === 'applied' && exProc.calls[0].args.includes(ub.script(777, 'process')), JSON.stringify(sProc2));
+logs.length = 0;
+const wTwo = fakeApi(base().concat([{ tid: 18, start: S, name: '' }]));
+const sTwo = ub.install({ proc: winProc({}), api: wTwo, timers: fakeTimers(), clock, log, delayMs: 0 });
+ok('two candidates: failed, nothing set', sTwo.state === 'failed' && wTwo.calls.length === 0 && /2 unnamed threads/.test(sTwo.reason), JSON.stringify(sTwo));
+ok('two candidates: the line says NOT on, why, and that nothing changed', logs.length === 1 && /^Idle wakeup-storm fix NOT on: 2 unnamed threads .*Nothing was changed/.test(logs[0]), logs.join(' | '));
+logs.length = 0;
+const sZero = ub.install({ proc: winProc({}), api: fakeApi(base().filter((r) => r.tid !== 15)), timers: fakeTimers(), clock, log, delayMs: 0 });
+ok('zero candidates: failed and logged', sZero.state === 'failed' && /^Idle wakeup-storm fix NOT on: 0 unnamed/.test(logs[0]), logs.join(' | '));
+logs.length = 0;
+const wBoom = fakeApi(base()); wBoom.snapshot = () => { throw new Error('boom'); };
+const sBoom = ub.install({ proc: winProc({}), api: wBoom, timers: fakeTimers(), clock, log, delayMs: 0 });
+ok('a throwing Win32 call: failed with the reason, no throw out of install()', sBoom.state === 'failed' && /boom/.test(sBoom.reason) && /NOT on/.test(logs[0]), JSON.stringify(sBoom));
 
-  const exErr = fakeExec({ err: new Error('Command failed: unnamed libuv threads: 2'), stderr: 'unnamed libuv threads: 2' });
-  const sErr = ub.install({ proc: winProc({}), execFile: exErr, delayMs: 0, log });
-  await tick();
-  ok('PowerShell fails: state failed with the reason, logged', sErr.state === 'failed' && /unnamed libuv threads: 2/.test(sErr.reason) && logs.some((l) => /could not turn the priority boost off/.test(l)), JSON.stringify(sErr));
+// onLine: lines before and after subscribing (main.js subscribes once quartz.log is open).
+const got = [], printed = [];
+const realLog = console.log; console.log = (l) => printed.push(String(l));
+try {
+  const sReal = ub.install({ proc: winProc({ QUARTZ_UVBOOST: 'off' }), delayMs: 0 });
+  ok('harness proc: not the module\'s own status', ub.status() === null && sReal.state === 'off');
+  ok('a line with no log of its own is printed, tagged [uvboost]', printed.length === 1 && /^\[uvboost\] Idle wakeup-storm fix: off/.test(printed[0]), printed.join(' | '));
+  ub.onLine((l) => got.push(l));
+  ok('onLine: replays the lines from before it subscribed', got.length === 1 && /fix: off/.test(got[0]), got.join(' | '));
+  ub.install({ proc: winProc({}), api: fakeApi(base()), timers: fakeTimers(), clock, delayMs: 0 });
+  ok('onLine: and gets the later ones', got.length === 2 && /^Idle wakeup-storm fix on:/.test(got[1]), got.join(' | '));
+  ub.onLine(() => { throw new Error('broken sink'); });
+  ub.install({ proc: winProc({ QUARTZ_UVBOOST: '0' }), delayMs: 0 });
+  ok('onLine: a throwing subscriber does not stop the others', got.length === 3);
+} finally { console.log = realLog; }
 
-  const exNoLine = fakeExec({ stdout: 'something else\r\n' });
-  const sNo = ub.install({ proc: winProc({}), execFile: exNoLine, delayMs: 0, log });
-  await tick();
-  ok('no "uvboost ok" line: failed, not applied', sNo.state === 'failed' && /something else/.test(sNo.reason), JSON.stringify(sNo));
+// main.js installs it at the very top, right after uvquiet, and pipes its lines into quartz.log.
+const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+const iQuiet = main.indexOf("require('./uvquiet').install()"), iBoost = main.indexOf("require('./uvboost').install()"), iElectron = main.search(/require\('electron'\)/);
+ok('main.js installs uvboost right after uvquiet, before electron loads', iQuiet >= 0 && iBoost > iQuiet && (iElectron < 0 || iBoost < iElectron), [iQuiet, iBoost, iElectron].join(','));
+const iLog = main.indexOf('qlog = quartzLog.install('), iOn = main.indexOf("require('./uvboost').onLine(");
+ok('main.js sends uvboost\'s lines to quartz.log once it is open', iLog > 0 && iOn > iLog && /onLine\(\(t\) => \{ if \(qlog\) qlog\.log\.line\(t\); \}\)/.test(main), [iLog, iOn].join(','));
+ok('the real process: status() is null until install() runs here', ub.status() === null);
+ok('default delay keeps it off the boot path (>= 1 s)', ub.DEFAULT_DELAY_MS >= 1000);
+ok('the guard limit is a fraction of one core', ub.GUARD_MAX_SHARE > 0 && ub.GUARD_MAX_SHARE < 1);
 
-  const exThrow = fakeExec({ throws: 'spawn powershell.exe ENOENT' });
-  const sThrow = ub.install({ proc: winProc({}), execFile: exThrow, delayMs: 0, log });
-  ok('PowerShell cannot start: failed, no throw out of install()', sThrow.state === 'failed' && /ENOENT/.test(sThrow.reason), JSON.stringify(sThrow));
-
-  const exLate = fakeExec({ stdout: 'uvboost ok scope=main tid=5 was=True' });
-  const sLate = ub.install({ proc: winProc({}), execFile: exLate, delayMs: 60, log });
-  ok('with a delay: pending, nothing started yet', sLate.state === 'pending' && exLate.calls.length === 0);
-  await new Promise((r) => setTimeout(r, 150));
-  ok('with a delay: applied after it', sLate.state === 'applied' && exLate.calls.length === 1, JSON.stringify(sLate));
-  ok('default delay keeps it off the boot path (>= 1 s)', ub.DEFAULT_DELAY_MS >= 1000);
-
-  // main.js installs it at the very top, right after uvquiet, before the first electron require.
-  const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
-  const iQuiet = main.indexOf("require('./uvquiet').install()"), iBoost = main.indexOf("require('./uvboost').install()"), iElectron = main.search(/require\('electron'\)/);
-  ok('main.js installs uvboost right after uvquiet, before electron loads', iQuiet >= 0 && iBoost > iQuiet && (iElectron < 0 || iBoost < iElectron), [iQuiet, iBoost, iElectron].join(','));
-  ok('the real process: status() is null until install() runs here', ub.status() === null);
-
-  console.log(`uvboost: ${pass} passed, ${fail} failed`);
-  process.exit(fail ? 1 : 0);
-})();
+console.log(`uvboost: ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

@@ -12,7 +12,7 @@
 require('./uvquiet').install();
 // And the main thread (AboveNormal) must not preempt Electron's libuv poll thread, or the two lock
 // into waking each other thousands of times a second (focused Home; see uvboost.js): the poll
-// thread goes to TimeCritical ~3 s in.
+// thread's priority goes up ~3 s in.
 require('./uvboost').install();
 
 const os = require('os');
@@ -1049,6 +1049,8 @@ app.whenReady().then(() => {
   } catch (err) {
     console.error('[log] quartz.log is not being written:', (err && err.message) || err);
   }
+  // uvboost's line (fix on, NOT on and why, or undone by its CPU guard), whenever it comes.
+  require('./uvboost').onLine((t) => { if (qlog) qlog.log.line(t); });
   // Before the handlers: a request that arrives first must already see what
   // the user decided on a previous run.
   loadPermissionDecisions();

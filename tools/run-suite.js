@@ -61,7 +61,7 @@ const TESTS = [
   { name: 'toprow', file: 'toprow-harness.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
-  // uvboost in a real Electron: the boost goes off on the window's UI thread, and only there.
+  // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
   { name: 'uvboost-e2e', file: 'uvboost-e2e.js', e2e: true },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },

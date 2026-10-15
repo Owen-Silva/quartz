@@ -1,0 +1,19 @@
+# wake-bisect.js round 13 (lane homestorm3, 2026-10-15): which embed-thread priority is the lowest
+# that stops the storm? Run on the user's laptop ONE condition per call (back to back, lowrun.js:
+# BelowNormal, browser lock), settle 40, window 40; on a runner all of them can run at once.
+#   none = no change; an = AboveNormal (the main thread's own base); hi = Highest; tc = TimeCritical
+# Plain Electron (timer-repro con2s) pinned to one CPU, raised from outside with uvboost's finder:
+con-a1-none:repro=con2s,aff=1
+con-a1-an:repro=con2s,aff=1,emb=abovenormal
+con-a1-hi:repro=con2s,aff=1,emb=highest
+con-a1-tc:repro=con2s,aff=1,emb=timecritical
+# Quartz, Home focused (CDP), pinned to one CPU, raised inside by uvboost.js:
+ffa1-none:focus,aff=1,env=QUARTZ_UVBOOST=0
+ffa1-an:focus,aff=1,env=QUARTZ_UVBOOST=abovenormal
+ffa1-hi:focus,aff=1,env=QUARTZ_UVBOOST=highest
+ffa1-tc:focus,aff=1,env=QUARTZ_UVBOOST=timecritical
+# Quartz, Home focused, all CPUs:
+ff-none:focus,env=QUARTZ_UVBOOST=0
+ff-an:focus,env=QUARTZ_UVBOOST=abovenormal
+ff-hi:focus,env=QUARTZ_UVBOOST=highest
+ff-tc:focus,env=QUARTZ_UVBOOST=timecritical
