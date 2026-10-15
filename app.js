@@ -10068,6 +10068,12 @@ function sessionSnapshot() {
       // Which catalogue app this tab is, by id: the name, url and host are the
       // catalogue's to say, and it may have moved between runs.
       if (isAppTab(tab)) entry.app = tab.app.id;
+      // Where an ASLEEP page was scrolled to (rememberTabScroll, as it went into
+      // the background), so it still comes back there after a restart. Asleep
+      // only: with no guest nobody can have scrolled it since, so the number is
+      // still true. An awake tab's saved scroll may be stale and is not written.
+      const sc = tab.asleep && tab.savedScroll;
+      if (sc && sc.url === url && (sc.x || sc.y)) entry.scroll = [sc.x, sc.y];
     }
     // Every kind of tab can be collapsed, so this rides outside the branch
     // above — and only when true, so an older session reads back the same.
@@ -10259,12 +10265,17 @@ function sanitiseSession(parsed) {
     // falls back to the url exactly as it always did.
     const storedTitle = (entry && typeof entry.title === 'string')
       ? entry.title.trim().slice(0, SESSION_TITLE_MAX) : '';
+    // [x, y] in CSS px, whole and non-negative; anything else reads as none.
+    const sc = entry && Array.isArray(entry.scroll) && entry.scroll.length === 2
+      ? entry.scroll.map(Number) : null;
+    const scroll = sc && sc.every((v) => isFinite(v) && v >= 0 && v <= 1e7) && (sc[0] || sc[1])
+      ? [Math.round(sc[0]), Math.round(sc[1])] : null;
     entries.push({
       claude: false, cwd: '', url: href,
       pinned: !!(entry && entry.pinned), muted: !!(entry && entry.muted),
       collapsed: !!(entry && entry.collapsed), ws: ws,
       app: (appId && appId.length <= APP_ID_MAX) ? appId : '',
-      native: '', title: storedTitle
+      native: '', title: storedTitle, scroll: scroll
     });
     if (entries.length >= SESSION_MAX_TABS) break;
   }
@@ -10470,6 +10481,14 @@ function restoreSession(snapshot) {
       // The app flag comes back before anything is raised, so the chip is born
       // with the app's name on it and the strip order it was stored in holds.
       if (!entry.claude && !entry.native && entry.app) applyAppFlag(tab, entry.app);
+      // The scroll it was saved at (written for asleep tabs only). Born asleep,
+      // wakeTab() puts it back once the page has loaded, exactly as for a tab
+      // slept this run; born awake, the same one-shot runs on this first load.
+      if (entry.scroll && tab.kind === 'page' && entry.url !== SESSION_NEWTAB && entry.url !== SESSION_PHONE) {
+        const keep = { url: tab.url, x: entry.scroll[0], y: entry.scroll[1] };
+        if (tab.asleep) tab.savedScroll = keep;
+        else if (tab.viewEl) restoreScrollOnLoad(tab, tab.viewEl, keep);
+      }
       created.push(tab);
       bySeat.set(row.index, tab);
       if (row.index === session.active) wanted = tab;

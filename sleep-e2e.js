@@ -13,23 +13,26 @@
 //   - the idle sweep (sleepIdleTabs, what the 60 s timer runs) sleeps a tab idle past the limit.
 //   - scroll is kept: the woken page is back at 2400 (wakeTab puts back the scroll
 //     rememberTabScroll read when the tab went into the background).
+//   - and across a RESTART: a scrolled tab asleep in another workspace is written to session.json
+//     with its scroll, comes back asleep (not fetched), and wakes at that scroll.
 // One summary line: "sleep-e2e: N passed, M failed".
 'use strict';
 const { run, serve, html, sleep } = require('./tests/e2e-kit');
 
 const CDP = 9432;
 
-run('sleep-e2e', async ({ check, launch, say }) => {
+run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   const srv = await serve((req, res, p) => {
-    if (p === '/long.html') return html(res, '<!doctype html><title>Long page</title><style>body{margin:0}</style><div style="height:9000px;background:linear-gradient(#eee,#999)">top</div>');
+    if (p === '/long.html' || p === '/far.html') return html(res, '<!doctype html><title>Long page</title><style>body{margin:0}</style><div style="height:9000px;background:linear-gradient(#eee,#999)">top</div>');
     const m = /^\/([a-z0-9]+)\.html$/.exec(p);
     if (!m) return false;
     return html(res, `<!doctype html><title>Page ${m[1].toUpperCase()}</title><p>${m[1]}</p>`);
   });
   const B = 'http://127.0.0.1:' + srv.port;
   const LONG = B + '/long.html?keep=1#part-2';
+  const FAR = B + '/far.html';
   const q = await launch({ cdp: CDP });
-  const c = q.chrome;
+  let c = q.chrome;
 
   const open = async (name, url) => {
     await c.ev(`(() => { window.__t = window.__t || {}; const t = createTab(${JSON.stringify(url)}); window.__t[${JSON.stringify(name)}] = t; activateTab(t.id); return t.id; })()`);
@@ -116,7 +119,42 @@ run('sleep-e2e', async ({ check, launch, say }) => {
   const idleOk = await c.waitFor(`${T('idle')}.ready === true && !${T('idle')}.asleep && ${T('idle')}.title === 'Page IDLE'`, 15000).catch((e) => e.message);
   check(idleOk === true, 'the swept tab wakes and loads when raised', idleOk);
 
+  // ---- across a restart --------------------------------------------------------------------
+  // A tab in another workspace, scrolled, then asleep: what a restart brings back asleep.
+  const W2 = await c.ev("createWorkspace('Far', null)");
+  await c.ev(`switchWorkspace(${JSON.stringify(W2)}), 1`);
+  await open('far', FAR);
+  const farAt = await c.ev(`${T('far')}.viewEl.executeJavaScript('window.scrollTo(0, 3100); new Promise((r) => requestAnimationFrame(() => r(Math.round(window.scrollY))))')`);
+  check(farAt === 3100, 'restart case: the far tab scrolled to 3100', farAt);
+  await c.ev('switchWorkspace(DEFAULT_WORKSPACE_ID), 1');
+  if (!(await c.ev(`${T('far')}.asleep`))) await c.ev(`sleepTab(${T('far')}, 'asked')`);
+  const slept = await c.waitFor(`${T('far')}.asleep === true && ${T('far')}.savedScroll && ${T('far')}.savedScroll.y === 3100`, 5000).catch((e) => e.message);
+  check(slept === true, 'restart case: the far tab is asleep holding its scroll (3100)', slept);
+  const SESSION = require('path').join(profileDir, 'session.json');
+  const stored = () => { try { const j = JSON.parse(require('fs').readFileSync(SESSION, 'utf8')); return (j.tabs || []).find((e) => e && /far.html/.test(e.url || '')) || null; } catch (e) { return null; } };
+  await c.ev('saveSession(), 1');
+  let farEntry = null;
+  for (let i = 0; i < 60 && !(farEntry && farEntry.scroll); i++) { farEntry = stored(); if (!(farEntry && farEntry.scroll)) await sleep(100); }
+  check(!!(farEntry && Array.isArray(farEntry.scroll) && farEntry.scroll[1] === 3100), 'session.json: the asleep tab is stored with its scroll [0, 3100]', farEntry);
+
   check(await q.quit(), 'closing the window quit Quartz');
+  const farHits = srv.hits('/far.html');
+  const q2 = await launch({ cdp: CDP });
+  c = q2.chrome;
+  const FAR_TAB = "tabs.find((t) => t.kind === 'page' && /far.html/.test(String(t.url)))";
+  const back = await c.waitFor(`(() => { const t = ${FAR_TAB}; return t ? { asleep: !!t.asleep, y: t.savedScroll ? t.savedScroll.y : null } : null; })()`, 10000).catch((e) => e.message);
+  check(back && back.asleep === true && back.y === 3100, 'after the restart: the far tab came back asleep, holding scroll 3100', back);
+  check(srv.hits('/far.html') === farHits, 'after the restart: an asleep tab was not fetched', srv.hits('/far.html') - farHits);
+  await c.ev(`switchWorkspace(${JSON.stringify(W2)}), 1`);
+  const woke2 = await c.waitFor(`(() => { const t = ${FAR_TAB}; return !!(t && !t.asleep && t.ready && t.id === activeTabId); })()`, 15000).catch((e) => e.message);
+  check(woke2 === true, 'after the restart: switching to its workspace wakes it', woke2);
+  let y2 = null;
+  for (let i = 0; i < 50 && y2 !== 3100; i++) {
+    y2 = await c.ev(`${FAR_TAB}.viewEl.executeJavaScript('Math.round(window.scrollY)')`).catch(() => null);
+    if (y2 !== 3100) await sleep(100);
+  }
+  check(y2 === 3100, 'after the restart: the woken tab is back at 3100 (it used to come back at the top)', y2);
+  check(await q2.quit(), 'closing the window quit Quartz (boot 2)');
   say('server hits: long ' + srv.hits('/long.html') + ', idle ' + srv.hits('/idle.html'));
   srv.close();
 });
