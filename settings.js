@@ -880,10 +880,42 @@
     }).catch(function () { /* no db: the panel just offers the picker */ });
   }
 
+  /**
+   * What the toast says when a picked picture can't become the background: what happened and
+   * why, in plain words. Never the raw error text (that goes to quartz.log). BG_REJECT (the
+   * wrong kind of file) is already plain and stays as it is.
+   */
+  function bgFailureWords(err) {
+    if (err && err.message === BG_REJECT) return BG_REJECT;
+    var name = String((err && err.name) || '');
+    var step = err && err.bgStep;
+    if (name === 'QuotaExceededError') {
+      return 'Couldn’t save that picture: the disk is too full for Quartz to keep it. The background was not changed.';
+    }
+    if (step === 'read') {
+      return 'Couldn’t open that picture: the file looks damaged, or it is in a format Quartz can’t read. ' +
+        'The background was not changed. ' + BG_REJECT + '.';
+    }
+    if (step === 'save') {
+      return 'Couldn’t save that picture: Quartz’s picture storage refused it. The background was not changed; ' +
+        'the details are in quartz.log.';
+    }
+    return 'Couldn’t use that picture as the background, so it was not changed. The details are in quartz.log.';
+  }
+
   /** Downscale, store, and switch the new tab over to it. */
   function chooseBackgroundImage(file) {
-    return downscaleImage(file).then(function (blob) {
-      return assetStore.put(BG_ASSET_KEY, blob).then(function () {
+    // A failure says which step failed (err.bgStep 'read' | 'save') so the toast can say why in
+    // plain words; the error itself goes to quartz.log (bgFailureWords).
+    var step = function (name) {
+      return function (err) {
+        var e = err instanceof Error || (err && typeof err === 'object') ? err : new Error(String(err));
+        try { if (!e.bgStep) e.bgStep = name; } catch (x) { /* frozen: no step, generic words */ }
+        throw e;
+      };
+    };
+    return downscaleImage(file).then(null, step('read')).then(function (blob) {
+      return assetStore.put(BG_ASSET_KEY, blob).then(null, step('save')).then(function () {
         bgDataUrl = null;                 // the memo is a different picture now
         revokePreview();
         bgPreviewBlob = blob;
@@ -1900,6 +1932,21 @@
      Toast
      ============================================================ */
 
+  /**
+   * A failure's raw text (an Error, a string) goes to quartz.log through the chrome's log channel
+   * (log.js uiError; `where` must be one it knows), never into a toast. The toast says in plain
+   * words what happened and why; this keeps the exact error for later.
+   */
+  function logUiError(where, err) {
+    var raw = '';
+    if (err && typeof err === 'object' && err.message) raw = (err.name && err.name !== 'Error' ? err.name + ': ' : '') + err.message;
+    else if (err != null) raw = String(err);
+    try {
+      var lg = window.api && window.api.log;
+      if (lg && typeof lg.event === 'function') lg.event('ui-error', { where: where, detail: raw.slice(0, 400) });
+    } catch (e) { /* no log channel: the toast still said what happened */ }
+  }
+
   function showToast(text, ms) {
     if (!document.body) return;
     if (!toastEl) {
@@ -2557,8 +2604,17 @@
         [{ id: 'system', name: 'System' }, { id: 'light', name: 'Light' }, { id: 'dark', name: 'Dark' }],
         mode,
         function (next) {
-          try { QT.setMode(next); } catch (err) {
-            showToast('Could not change the theme: ' + ((err && err.message) || 'unknown reason'));
+          // Plain words on screen; the raw error goes to quartz.log. setMode answers a Promise of
+          // { ok, reason }: a refusal or a rejection is a failure too, not only a throw.
+          var words = 'Couldn’t switch the theme to ' + ({ system: 'System', light: 'Light', dark: 'Dark' }[next] || next) +
+            ': Quartz hit an error, so the window keeps its current look. The details are in quartz.log.';
+          var failed = function (raw) { logUiError('theme', raw); showToast(words, 4000); };
+          var answer;
+          try { answer = QT.setMode(next); } catch (err) { failed(err); return; }
+          if (answer && typeof answer.then === 'function') {
+            answer.then(function (res) {
+              if (res && res.ok === false) failed(res.reason || 'setMode said no without a reason');
+            }, failed);
           }
         }
       ));
@@ -4309,11 +4365,14 @@
         Promise.resolve().then(function () { return ls.openMantleWallpapers(); }).then(function (res) {
           open.disabled = false;
           if (!res || res.ok !== true) {
-            showToast('Could not open Mantle’s Wallpapers: ' + ((res && res.reason) || 'no answer from Mantle'));
+            // reason = plain words (looksync-main.js); detail = the raw text, quartz.log only.
+            if (res && res.detail) logUiError('mantle-wallpapers', res.detail);
+            showToast('Couldn’t open Mantle’s Wallpapers: ' + ((res && res.reason) || 'Mantle gave no answer') + '.', 4000);
           }
         }, function (err) {
           open.disabled = false;
-          showToast('Could not open Mantle’s Wallpapers: ' + ((err && err.message) || 'unknown reason'));
+          logUiError('mantle-wallpapers', err);
+          showToast('Couldn’t open Mantle’s Wallpapers: Quartz could not send the request. The details are in quartz.log.', 4000);
         });
       });
       row.appendChild(open);
@@ -4448,7 +4507,9 @@
       chooseBackgroundImage(file).then(function () {
         showToast('Background set');
       }).catch(function (err) {
-        showToast((err && err.message) || BG_REJECT);
+        var words = bgFailureWords(err);
+        if (words !== BG_REJECT) logUiError('background-image', err);
+        showToast(words, words === BG_REJECT ? 1800 : 4500);
       });
     });
 
@@ -7836,6 +7897,7 @@
     _normalizeUrl: normalizeUrl,
     _hostnameOf: hostnameOf,
     _normalizeHost: normalizeHost,
+    _bgFailureWords: bgFailureWords,   // log-e2e: the background toast's words, per failure kind
     _sleepTimes: SLEEP_TIMES,
     _chipSources: CHIP_SOURCES,
     _assetStore: assetStore,

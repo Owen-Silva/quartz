@@ -40,6 +40,14 @@ const MEMORY_EVERY_MS = 30 * 60 * 1000;
 const FAIL_LINES_PER_WINDOW = 30;
 /** Node warnings per run (a warning that repeats is a counting job, not a log flood). */
 const WARNING_LINES_PER_RUN = 20;
+// The chrome's own failures (log:event kind 'ui-error'): the plain-words message is on screen,
+// the raw error text comes here. Only these places may write one.
+const UI_ERROR_WORDS = {
+  theme: 'Settings could not change the theme',
+  'mantle-wallpapers': 'Settings could not open Mantle\'s Wallpapers',
+  'background-image': 'Settings could not use the picked picture as the background',
+};
+const UI_ERROR_LINES_PER_RUN = 20;
 /** How long a guest's 'responsive' waits to see whether it was really a close (log.js watchGuest). */
 const RESPONSIVE_SETTLE_MS = 1000;
 
@@ -306,7 +314,7 @@ function createQuartzLog(opts) {
   const writer = makeRotatingFile(o.fs, o.file, { maxBytes: o.maxBytes, keep: o.keep, now: o.now, clock: o.clock, say: o.say });
   const scrub = makeScrubber(o.home, o.user);
   const startedAt = o.clock();
-  const run = { tabCrashes: 0, windowCrashes: 0, childGone: 0, hangs: 0, failedLoads: 0, slept: 0, woke: 0, warnings: 0, errors: 0 };
+  const run = { tabCrashes: 0, windowCrashes: 0, childGone: 0, hangs: 0, failedLoads: 0, slept: 0, woke: 0, warnings: 0, errors: 0, uiErrors: 0 };
   let windowFails = new Map(); // words -> count since the last check
   let windowFailLines = 0;
   let windowFailExtra = 0;
@@ -449,6 +457,20 @@ function createQuartzLog(opts) {
     power(what) {
       line(what === 'suspend' ? 'The PC went to sleep.' : 'The PC woke up.');
     },
+
+    /**
+     * A failure the chrome told the user about in plain words; the raw error text lives HERE, not
+     * on screen. `where` must be one of UI_ERROR_WORDS (anything else writes nothing); `detail` is
+     * the raw text, one line. Capped per run like warnings, so a stuck button can't fill the file.
+     */
+    uiError({ where, detail }) {
+      const what = Object.prototype.hasOwnProperty.call(UI_ERROR_WORDS, where) ? UI_ERROR_WORDS[where] : '';
+      if (!what) return false;
+      run.uiErrors++;
+      if (run.uiErrors > UI_ERROR_LINES_PER_RUN) return false;
+      return line(`${what}. The error was: ${oneLine(String(detail == null ? '' : detail).replace(/\s+/g, ' ').trim(), 240) || 'no error text was given'}`
+        + (run.uiErrors === UI_ERROR_LINES_PER_RUN ? ' (Further errors like this one this run are not written.)' : ''));
+    },
   };
 }
 
@@ -487,6 +509,7 @@ function install(deps) {
     if (p.kind === 'tab-crashed') log.tabCrashed({ url, reason: oneLine(p.reason, 40), exitCode: Number(p.exitCode) });
     else if (p.kind === 'tab-slept') log.tabSlept({ url, why: oneLine(p.why, 20) });
     else if (p.kind === 'tab-woke') log.tabWoke({ url, sleptMs: Number(p.sleptMs) });
+    else if (p.kind === 'ui-error') log.uiError({ where: String(p.where || ''), detail: oneLine(p.detail, 240) });
   });
 
   d.app.on('child-process-gone', (_e, details) => log.childGone(details || {}));

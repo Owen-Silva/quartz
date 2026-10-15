@@ -380,7 +380,8 @@
     openMantleWallpapers: function () {
       if (!api) return Promise.resolve({ ok: false, reason: OLD_WINDOW });
       return Promise.resolve().then(function () { return api.openMantle(); }).catch(function (err) {
-        return { ok: false, reason: (err && err.message) || 'could not ask Mantle' };
+        // Plain words for the screen; the raw IPC error is the detail (quartz.log).
+        return { ok: false, reason: 'Quartz’s main process did not answer the request', detail: String((err && err.message) || err || '') };
       });
     },
     setEnabled: setEnabled,

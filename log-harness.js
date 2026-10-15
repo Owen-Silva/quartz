@@ -197,6 +197,20 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
     check(/ A tab on b\.example\.org went to sleep with its workspace, to free its memory\.$/.test(lines(file).pop()), 'IPC tab-slept', lines(file).pop());
     ipc.emit('log:event', { sender: chrome }, { kind: 'tab-woke', url: 'https://b.example.org/', sleptMs: null });
     check(/ A sleeping tab on b\.example\.org woke up\.$/.test(lines(file).pop()), 'IPC tab-woke without a known sleep time', lines(file).pop());
+    // ui-error: the chrome showed plain words; the raw text lands here, one line, known places only.
+    ipc.emit('log:event', { sender: chrome }, { kind: 'ui-error', where: 'theme', detail: 'TypeError: x is not a function\n    at setMode (app.js:1:2)' });
+    check(/ Settings could not change the theme\. The error was: TypeError: x is not a function at setMode \(app\.js:1:2\)$/.test(lines(file).pop()), 'IPC ui-error: plain lead, then the raw error on one line', lines(file).pop());
+    ipc.emit('log:event', { sender: chrome }, { kind: 'ui-error', where: 'mantle-wallpapers', detail: '' });
+    check(/ Settings could not open Mantle's Wallpapers\. The error was: no error text was given$/.test(lines(file).pop()), 'IPC ui-error with no text says so', lines(file).pop());
+    const nUi = lines(file).length;
+    ipc.emit('log:event', { sender: chrome }, { kind: 'ui-error', where: 'constructor', detail: 'x' });
+    ipc.emit('log:event', { sender: chrome }, { kind: 'ui-error', where: 'made-up', detail: 'x' });
+    ipc.emit('log:event', { sender: { id: 'a page' } }, { kind: 'ui-error', where: 'theme', detail: 'from a page' });
+    check(lines(file).length === nUi, 'ui-error from an unknown place (even "constructor") or from a page writes nothing');
+    for (let i = 0; i < 25; i++) ipc.emit('log:event', { sender: chrome }, { kind: 'ui-error', where: 'background-image', detail: 'EncodingError ' + i });
+    const uiLines = lines(file).filter((l) => / Settings could not /.test(l));
+    check(uiLines.length === 20 && / Settings could not use the picked picture as the background\. The error was: EncodingError 17 \(Further errors like this one this run are not written\.\)$/.test(uiLines[19]),
+      'ui-error: 20 lines a run at most, the last one says so', uiLines.length + ' | ' + uiLines[19]);
     // A guest: hang, recovery, failed loads (main frame only, not aborted).
     const g = new EventEmitter();
     g.id = 5; g.getURL = () => 'https://hang.example.net/x'; g.isDestroyed = () => false; g.getType = () => 'webview';

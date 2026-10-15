@@ -52,20 +52,23 @@ function openMantleWallpapers() {
     let err = '';
     let child = null;
     const finish = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+    // `reason` is plain words for the screen; `detail` is the raw text (an error message, Mantle's
+    // stderr) for quartz.log only. Mantle's stderr never becomes the reason.
     const timer = setTimeout(() => {
-      finish({ ok: false, reason: 'Mantle did not answer within 10 s' });
+      finish({ ok: false, reason: 'Mantle did not answer within 10 seconds; it may be busy or stuck', detail: err.trim().slice(0, 400) });
       try { child && child.kill(); } catch (_) {}
     }, 10000);
+    const couldNotStart = (e) => ({ ok: false, reason: 'Quartz could not start Mantle to ask it (its program in ~/mantle-live would not run)', detail: String((e && e.message) || e || '').slice(0, 400) });
     try {
       child = require('child_process').spawn(MANTLE_CMD.exe, MANTLE_CMD.args, { cwd: MANTLE_CMD.cwd, windowsHide: true });
     } catch (e) {
-      finish({ ok: false, reason: 'Could not start Mantle: ' + e.message });
+      finish(couldNotStart(e));
       return;
     }
-    child.stderr.on('data', (d) => { err += d; });
-    child.on('error', (e) => finish({ ok: false, reason: 'Could not start Mantle: ' + e.message }));
+    child.stderr.on('data', (d) => { if (err.length < 4000) err += d; });
+    child.on('error', (e) => finish(couldNotStart(e)));
     child.on('exit', (code) => finish(code === 0 ? { ok: true }
-      : { ok: false, reason: err.trim() || MANTLE_EXIT[code] || ('Mantle exited with code ' + code) }));
+      : { ok: false, reason: MANTLE_EXIT[code] || ('Mantle stopped with an error before opening its Wallpapers (exit code ' + code + ')'), detail: err.trim().slice(0, 400) }));
   });
 }
 

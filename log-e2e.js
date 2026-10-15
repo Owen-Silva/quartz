@@ -226,6 +226,32 @@ async function waitTarget(pred, ms) {
     const wk = await waitLine(/ woke up/, 4000);
     check(wk.length === 1 && / A sleeping tab on 127\.0\.0\.1:\d+ woke up after sleeping \d+ s\.$/.test(wk[0]), 'wake line, with how long it slept', wk[0]);
 
+    // ---- 6b. a Settings failure: plain words on screen, the raw error only in quartz.log -----------
+    const RAW = 'E2E_RAW_THEME_ERR at fake.js:9';
+    await chrome.ev(`(() => { window.__e2eSetMode = QuartzTheme.setMode; QuartzTheme.setMode = () => Promise.reject(new TypeError(${JSON.stringify(RAW)})); Settings.open(); return 1; })()`);
+    const lightBtn = await chrome.waitFor(`(() => { const b = [...document.querySelectorAll('#settings-panel [data-field="theme"] .set-seg-opt')].find((x) => x.textContent === 'Light'); return b ? (b.click(), true) : null; })()`, 8000).catch((e) => e.message);
+    check(lightBtn === true, 'Settings: the theme switch is there and Light was pressed', lightBtn);
+    const toast = await chrome.waitFor(`(() => { const t = document.getElementById('settings-toast'); return t && !t.hidden && /theme/.test(t.textContent) ? t.textContent : null; })()`, 5000).catch((e) => e.message);
+    check(/^Couldn’t switch the theme to Light: Quartz hit an error, so the window keeps its current look\. The details are in quartz\.log\.$/.test(toast) && toast.indexOf('E2E_RAW') < 0,
+      'theme failure: the toast says what happened in plain words, no raw error text', toast);
+    const uiErr = await waitLine(/ Settings could not change the theme\. The error was: /, 4000);
+    check(uiErr.length === 1 && uiErr[0].endsWith('The error was: TypeError: ' + RAW), 'theme failure: the raw error is ONE quartz.log line', uiErr[0]);
+    await chrome.ev('(() => { QuartzTheme.setMode = window.__e2eSetMode; return 1; })()');
+    const bgWords = await chrome.ev(`(() => { const W = Settings._bgFailureWords; const named = (n, m, step) => { const e = new Error(m); e.name = n; if (step) e.bgStep = step; return e; };
+      return { kind: W(new Error('Pick a JPG, PNG or WebP')), decode: W(named('InvalidStateError', 'E2E_RAW The source image could not be decoded.', 'read')),
+        save: W(named('UnknownError', 'E2E_RAW transaction failed', 'save')), full: W(named('QuotaExceededError', 'E2E_RAW quota', 'save')), other: W('E2E_RAW what') }; })()`);
+    check(bgWords.kind === 'Pick a JPG, PNG or WebP' && /^Couldn’t open that picture: the file looks damaged/.test(bgWords.decode) && /^Couldn’t save that picture: Quartz’s picture storage refused it/.test(bgWords.save)
+      && /^Couldn’t save that picture: the disk is too full/.test(bgWords.full) && /^Couldn’t use that picture as the background/.test(bgWords.other)
+      && Object.values(bgWords).every((w) => w.indexOf('E2E_RAW') < 0), 'background picture failures: plain words per cause, never the raw error', JSON.stringify(bgWords));
+
+    // ---- 6c. the tab palette's field matches Helm's .palette-input (52px, 0 14px 0 16px, --fs-l) ---
+    await chrome.ev('TabSearch.open(), 1');
+    const field = await chrome.waitFor(`(() => { const f = document.querySelector('#tabsearch .ts-field'); const i = document.getElementById('tabsearch-input');
+      if (!f || !i || !TabSearch.isOpen()) return null; const s = getComputedStyle(f);
+      return s.height + ' ' + s.paddingLeft + ' ' + s.paddingRight + ' ' + getComputedStyle(i).fontSize; })()`, 5000).catch((e) => e.message);
+    check(field === '52px 16px 14px 16px', 'tab palette field = Helm\'s palette input (height, padding, type size)', field);
+    await chrome.ev('TabSearch.close(), 1');
+
     // ---- 7. the memory line --------------------------------------------------------------------
     const mem = await waitLine(/ Memory: /, 12000);
     check(mem.length >= 1 && / Memory: [\d,]+ MB in use across \d+ processes \(Quartz itself [\d,]+ MB, the window [\d,]+ MB, \d+ tab process(es)? [\d,]+ MB, GPU [\d,]+ MB, other helpers [\d,]+ MB\)\. \d+ tabs? awake\. Running for /.test(mem[0]), 'memory line', mem[0]);
