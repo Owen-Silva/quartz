@@ -3878,7 +3878,7 @@ function createNativeTab(appId, options) {
     ready: true,
     loading: false,
     iconEl: null,
-    favEl: null,   // the 16px logo box: buildTabFavicon()
+    favEl: null,   // the 14px logo box (--tab-fav): buildTabFavicon()
     cardEl: null,
     app: null,
     noteEl: null,
@@ -7767,7 +7767,7 @@ function createTab(url, options) {
     // Collapsed to its icon in the strip. Sticky and independent of pinned:
     // the chip still expands while this tab is the active one.
     collapsed: false,
-    favEl: null,   // the 16px logo box: buildTabFavicon()
+    favEl: null,   // the 14px logo box (--tab-fav): buildTabFavicon()
     asleep: false,
     // Whether this tab's page held the keyboard when the user last left the tab
     // (activateTab() records it on the way out). A new-tab page coming back

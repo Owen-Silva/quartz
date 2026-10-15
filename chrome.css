@@ -507,17 +507,26 @@ button:focus-visible,
 
 /* --- tab chip states (classes set by app.js) ------------------ */
 
-/* The logo box (app.js buildTabFavicon): one 16px square on every page and
+/* The logo box (app.js buildTabFavicon): one var(--tab-fav) square (14px) on every page and
    app chip, in EVERY state, sitting where the Claude chip keeps its dot. Its
    size never changes, so nothing moves when an icon arrives. Inside it, laid
    over each other: the monogram, the site's icon, and the state badge.
    data-state: pending (held empty for the few ms the disk cache takes, so a
    restored chip never flashes its letter first), icon, mono. */
+/* 14px since 2026-10-14 (The user: the 16px logos looked oversized next to the
+   tab titles). 14 CSS px is a whole number of device px at 100/150/200%
+   (14/21/28); at 125% (his laptop) it would be 17.5, so that scale uses
+   14.4px = 18 device px and the logo stays crisp. */
+:root { --tab-fav: 14px; }
+@media (min-resolution: 1.2dppx) and (max-resolution: 1.3dppx) {
+  :root { --tab-fav: 14.4px; }
+}
+
 .tab-fav {
   position: relative;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: var(--tab-fav);
+  height: var(--tab-fav);
   margin-right: 2px;   /* + the chip's 6px gap: 8px to the title */
 }
 
@@ -526,12 +535,12 @@ button:focus-visible,
   position: absolute;
   left: 0;
   top: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--tab-fav);
+  height: var(--tab-fav);
 }
 
 /* The icon is a data: URL (a 32px PNG, or the site's own SVG), drawn into
-   16 CSS px: 16/20/24/32 device px at 100/125/150/200%. Not rounded — a
+   var(--tab-fav): 14/18/21/28 device px at 100/125/150/200%. Not rounded — a
    logo's corners are the site's to draw. Hidden until it has DECODED, so a
    half-loaded image never shows. */
 .tab-fav > img.tab-icon {
@@ -554,7 +563,7 @@ button:focus-visible,
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--text-2);
   font-family: var(--font);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   line-height: 1;
 }
@@ -563,27 +572,27 @@ button:focus-visible,
   background: transparent;
   box-shadow: none;
   font-family: var(--icon-font);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 400;
 }
 
 .tab-fav[data-state="mono"] > .tab-mono { display: flex; }
 
-/* The state badge: ON the logo's corner, never instead of it. A 10px disc
+/* The state badge: ON the logo's corner, never instead of it. A 9px disc
    with a hairline ring, so it reads on any logo in either look. */
 .tab-fav > .tab-badge {
   display: none;
   position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 10px;
-  height: 10px;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--overlay);
   box-shadow: 0 0 0 1px var(--hairline-strong);
   color: var(--text-2);
   font-family: var(--icon-font);
-  font-size: 8px;
+  font-size: 7px;
   line-height: 1;
   align-items: center;
   justify-content: center;

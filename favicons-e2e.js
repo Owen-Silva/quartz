@@ -229,12 +229,12 @@ function exited(child, ms) {
     await waitFor(`(${CHIP})('alpha') && (${CHIP})('alpha').state === 'icon'`, 15000);
     let c = await chip('alpha');
     check(c.state === 'icon' && c.natural > 0 && c.imgVis === 'visible' && !c.monoShown, 'alpha: declared PNG shows', JSON.stringify(c));
-    check(c.w === 16 && c.h === 16, 'alpha: the logo box is 16x16 CSS px', c.w + 'x' + c.h);
+    check(c.w === 14 && c.h === 14, 'alpha: the logo box is 14x14 CSS px', c.w + 'x' + c.h);
     check(/^data:image\//.test(c.src), 'alpha: the chip wears a data: URL (no remote URL to lose)', c.src);
 
     await waitFor(`(${CHIP})('bravo').state === 'mono' && (${CHIP})('bravo').title !== ''`, 20000);
     c = await chip('bravo');
-    check(c.state === 'mono' && c.mono === 'B' && c.monoShown && c.w === 16, 'bravo: no icon anywhere -> the "B" monogram', JSON.stringify(c));
+    check(c.state === 'mono' && c.mono === 'B' && c.monoShown && c.w === 14, 'bravo: no icon anywhere -> the "B" monogram', JSON.stringify(c));
     check(/No site icon/.test(c.title), 'bravo: the monogram says why on hover', c.title.slice(0, 140));
 
     await waitFor(`(${CHIP})('charlie').state === 'icon'`, 15000);
@@ -250,7 +250,7 @@ function exited(child, ms) {
     await waitFor(`(${CHIP})('delta').state === 'icon'`, 15000);
     const dlog = await ev('window.__deltaLog');
     const widths = new Set(dlog.map((x) => x.w)); const titleXs = new Set(dlog.map((x) => x.tw));
-    check(widths.size === 1 && [...widths][0] === 16 && titleXs.size === 1, 'delta (slow icon): box and title never moved while the icon arrived',
+    check(widths.size === 1 && [...widths][0] === 14 && titleXs.size === 1, 'delta (slow icon): box and title never moved while the icon arrived',
       'states ' + dlog.map((x) => x.s).join('>') + ' widths ' + [...widths] + ' titleX ' + [...titleXs]);
     check(dlog.some((x) => x.s === 'mono') && dlog[dlog.length - 1].s === 'icon', 'delta: the "D" monogram held the place until the slow icon came');
 
@@ -296,7 +296,7 @@ function exited(child, ms) {
     // Pinned: a 40px chip that is nothing but the logo.
     await ev(`setTabPinned(tabs.find((x) => String(x.url).indexOf('charlie.') !== -1), true) || true`);
     c = await chip('charlie');
-    check(c.state === 'icon' && c.chipW === 40 && c.w === 16, 'charlie pinned: 40px chip, 16px logo', JSON.stringify({ chipW: c.chipW, w: c.w, s: c.state }));
+    check(c.state === 'icon' && c.chipW === 40 && c.w === 14, 'charlie pinned: 40px chip, 14px logo', JSON.stringify({ chipW: c.chipW, w: c.w, s: c.state }));
     await shot('3-pinned-100');
     await ev(`document.documentElement.setAttribute('data-theme', 'light') || true`);
     await sleep(300);
@@ -334,7 +334,7 @@ function exited(child, ms) {
     check(cachedOk.length === 6, 'restart: restored chips show their logos from the disk cache before the pages load',
       cachedOk.join(',') + ' (' + (Date.now() - t0) + ' ms after launch) states ' + order.map((s) => s + '=' + (early[s] && early[s].state)).join(' '));
     check(early.bravo && early.bravo.state === 'mono' && early.bravo.mono === 'B', 'restart: bravo shows its monogram, not a blank', early.bravo && early.bravo.state);
-    check(Object.values(early).every((x) => x && x.w === 16 && x.h === 16), 'restart at 150%: every logo box is still 16x16 CSS px');
+    check(Object.values(early).every((x) => x && x.w === 14 && x.h === 14), 'restart at 150%: every logo box is still 14x14 CSS px');
     const dpr = await ev('devicePixelRatio');
     check(dpr === 1.5, 'run 2 renders at 150%', String(dpr));
     await shot('5-restored-150');
