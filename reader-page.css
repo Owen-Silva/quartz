@@ -199,7 +199,7 @@ body {
 .title {
   margin: 0 0 10px;
   font-family: var(--font-display);
-  font-size: clamp(26px, 3.4vw, 34px);
+  font-size: clamp(26px, 3.4vw, 34px);   /* the article's title: reading type, not the UI scale */
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -.01em;
@@ -256,6 +256,8 @@ body {
   color: var(--text);
 }
 
+/* The article's sizes are em of --body-size, the reader's own size setting
+   (16 px and up), so they sit outside the UI's --fs-* scale on purpose. */
 .content-root h1 { font-size: 1.4em; }
 .content-root h2 { font-size: 1.25em; }
 .content-root h3 { font-size: 1.1em; }

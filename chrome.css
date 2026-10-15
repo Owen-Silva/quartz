@@ -255,6 +255,8 @@ body.booted .navrow {
 }
 
 /* --- icon glyphs --------------------------------------------- */
+/* Glyph sizes are icon sizes, not type: each is sized to the button, circle
+   or tile it sits in, so they stay literal and off the --fs-* text scale. */
 .glyph {
   font-family: var(--icon-font);
   font-size: 12px;
@@ -477,7 +479,7 @@ button:focus-visible,
   height: 18px;
   border-radius: var(--radius-xs);
   font-family: var(--icon-font);
-  font-size: 10px;
+  font-size: 10px;  /* icon glyph in an 18 px button */
   line-height: 1;
   opacity: 0;
   transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
@@ -491,7 +493,7 @@ button:focus-visible,
   height: 18px;
   border-radius: var(--radius-xs);
   font-family: var(--icon-font);
-  font-size: 9px;
+  font-size: 9px;  /* icon glyph: the dash reads heavy any larger in an 18 px button */
   line-height: 1;
   opacity: 0;
   transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
@@ -563,7 +565,7 @@ button:focus-visible,
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--text-2);
   font-family: var(--font);
-  font-size: 9px;
+  font-size: 9px;  /* a letter inside the 16 px favicon tile, sized to the tile */
   font-weight: 600;
   line-height: 1;
 }
@@ -601,7 +603,7 @@ button:focus-visible,
   box-shadow: 0 0 0 1px var(--hairline-strong), 0 1px 2px rgba(0, 0, 0, 0.28);
   color: var(--text);
   font-family: var(--icon-font);
-  font-size: 7px;
+  font-size: 7px;  /* icon glyph inside the 10 px badge circle */
   line-height: 1;
   align-items: center;
   justify-content: center;
@@ -755,7 +757,7 @@ button:focus-visible,
   color: var(--text);
   box-shadow: 0 0 0 1px var(--hairline-strong);
   font-family: var(--icon-font);
-  font-size: 8px;
+  font-size: 8px;  /* icon glyph inside a 12 px circle */
   line-height: 1;
   opacity: 0;
   transition: opacity var(--dur) var(--ease), background-color var(--dur) var(--ease), color var(--dur) var(--ease);
@@ -821,7 +823,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
   border-radius: 0;
 }
 
-#win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
+#win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }  /* Windows caption-button glyph size */
 
 #win-min:hover, #win-max:hover { background: var(--surface-3); color: var(--text); }
 #win-min:active, #win-max:active { background: var(--surface-2); }
@@ -998,7 +1000,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 .tab-attn {
   flex: 0 0 auto;
   color: var(--warn);
-  font-size: 8px;
+  font-size: 8px;  /* a ● mark, not text */
   line-height: 1;
 }
 

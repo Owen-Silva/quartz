@@ -226,7 +226,7 @@ html[data-theme="light"] .sr-brave-on-light { display: block; }
   overflow: hidden;
 }
 .sr-fav img { position: absolute; width: 14px; height: 14px; }
-.sr-fav-letter { font-size: 10px; font-weight: 600; color: var(--text-3); }
+.sr-fav-letter { font-size: 10px; font-weight: 600; color: var(--text-3); }  /* a letter inside the 22 px favicon tile, sized to the tile */
 .sr-fav.has-img .sr-fav-letter { visibility: hidden; }
 
 .sr-title {

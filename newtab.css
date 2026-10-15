@@ -553,7 +553,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 14px;  /* the × glyph, sized to its 22 px circle, not text */
 }
 
 .home-box:hover .home-box-tag,
@@ -817,7 +817,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .mod-time-value {
   color: var(--text);
-  font: 600 44px/1.1 var(--font-display);
+  font: 600 44px/1.1 var(--font-display);   /* the clock: a display readout, off the text scale on purpose */
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.015em;
   text-shadow: var(--home-shadow);
@@ -944,7 +944,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .mod-media-title {
   height: 18px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -964,7 +964,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .mod-media-artist {
   height: 16px;
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 16px;
@@ -1091,7 +1091,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .mod-music-caption {
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1111,7 +1111,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   flex: 1 1 auto;
   min-width: 0;                    /* so a long track name ellipsises */
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--fs-m);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1150,7 +1150,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-align: center;
@@ -1190,7 +1190,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin: 4px 0 0;
   min-height: 16px;
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 16px;
@@ -1242,7 +1242,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin: 0;
   height: 28px;
   color: var(--fg);
-  font-size: 20px;
+  font-size: var(--fs-xl);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
@@ -1253,11 +1253,11 @@ html.home-measure .home { grid-template-rows: 100vh; }
 }
 
 /* "8.9 / 15.8 GB" is a long readout for a 120px column. */
-.stat-value-sm { font-size: 16px; }
+.stat-value-sm { font-size: var(--fs-l); }
 
 /* Network states two rates, so it spends the same 28px on two lines. */
 .stat-value-pair {
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-weight: 400;
   line-height: 14px;
 }
@@ -1272,7 +1272,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin: 4px 0 0;
   height: 16px;
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 16px;
@@ -1355,7 +1355,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-3);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 16px;
@@ -1413,7 +1413,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin-top: 8px;
   padding-right: 8px;              /* the body's scrollbar gutter */
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
@@ -1503,7 +1503,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   height: 32px;
   box-sizing: border-box;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
@@ -1635,7 +1635,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .proc-row.proc-child {
   height: 28px;
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 /* 40px is where the group's own name starts (caret + icon); the extra 8
@@ -1670,7 +1670,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .proc-row.proc-child-note {
   height: 24px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
 }
 
 /* One sentence, so it takes the whole width rather than the name column. */
@@ -1693,7 +1693,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   white-space: nowrap;
@@ -1742,7 +1742,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border-radius: var(--radius-ctl);
   background: var(--proc-note);
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   letter-spacing: .01em;
   white-space: nowrap;
 }
@@ -1765,7 +1765,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   cursor: pointer;
@@ -1834,7 +1834,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-caption {
   margin: 0;
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1852,7 +1852,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-3);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 20px;
@@ -1965,7 +1965,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--edge);
   border-radius: 4px;
   color: var(--fg-3);
-  font-size: 13px;
+  font-size: 13px;  /* a letter inside the 32 px icon tile, sized to the tile */
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-transform: uppercase;
@@ -1979,7 +1979,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    no icon exists for "a shell", and a letter would be a lie. */
 .dock-term {
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
+  font-size: 12px;  /* ">_" inside the 32 px icon tile, sized to the tile */
   font-stretch: normal;
   letter-spacing: 0;
   text-transform: none;
@@ -1997,7 +1997,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border-radius: 2px;
   background: var(--proc-note);
   color: var(--fg-3);
-  font-size: 9px;
+  font-size: 10px;                 /* under the 11 px step on purpose: a word in the corner of a 56 px tile, beside the icon */
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
   line-height: 12px;
@@ -2038,7 +2038,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: none;
   color: var(--fg-3);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 10px;                 /* under the 11 px step on purpose: "web" has 20 px of a 60 px band; at 11 px it meets the dividers */
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
   line-height: 14px;
@@ -2171,7 +2171,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: var(--proc-note);
   color: var(--fg-2);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 11px;  /* the × glyph, sized to its button, not text */
   line-height: 1;
   cursor: pointer;
   transition:
@@ -2206,7 +2206,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border-radius: 0 0 var(--radius-ctl) var(--radius-ctl);
   background: var(--proc-note);
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   white-space: nowrap;
@@ -2241,7 +2241,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: var(--glass);
   color: var(--fg);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
@@ -2269,7 +2269,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-group {
   padding: 0 6px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 22px;
@@ -2288,7 +2288,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0 6px;
   border-radius: var(--radius-ctl);
   color: var(--fg-2);
-  font-size: 13px;
+  font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   white-space: nowrap;
@@ -2310,7 +2310,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   width: 16px;
   color: var(--fg-3);
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 11px;
+  font-size: 11px;  /* ">_" inside the result row's icon tile, sized to the tile */
   letter-spacing: 0;
   text-align: center;
 }
@@ -2327,7 +2327,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   flex: 0 1 auto;
   min-width: 0;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -2339,7 +2339,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--edge);
   border-radius: 2px;
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   letter-spacing: .02em;
   line-height: 14px;
 }
@@ -2522,7 +2522,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
           backdrop-filter: blur(14px) saturate(1.1);
   color: var(--text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-decoration: none;
@@ -2621,7 +2621,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: var(--proc-note);
   color: var(--fg-2);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 11px;  /* the × glyph, sized to its button, not text */
   line-height: 1;
   cursor: pointer;
   visibility: hidden;
@@ -2662,7 +2662,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   justify-content: center;
   width: 30px;
   padding: 0;
-  font-size: 16px;
+  font-size: 16px;  /* the + glyph, sized to the tile, not text */
   font-weight: 500;
   line-height: 1;
 }
@@ -2690,7 +2690,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   background: var(--home-glass-hover);
   color: var(--fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
@@ -2711,7 +2711,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .saved-hint {
   padding-left: 2px;
   color: var(--fg-3);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-align: left;
@@ -2803,8 +2803,9 @@ body.home-unfold { --home-fold: 0; }
    height never moves. */
 @media (max-width: 620px) {
   .stats-strip { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
-  .stat-value    { font-size: 18px; }
-  .stat-value-sm { font-size: 15px; }
+  /* The readouts keep their 20 / 16 px here: the old 18 / 15 px fold sat off
+     the type scale, and a column after the fold is no narrower than one of
+     the five before it, so the readout that fit then still fits. */
 
   /* The I/O column is the first thing a narrow window can do without:
      the header and the rows lose it together, so the grid still agrees. */
@@ -2847,8 +2848,6 @@ body.home-unfold { --home-fold: 0; }
 
 @container (max-width: 600px) {
   .stats-strip { grid-template-columns: repeat(3, 1fr); gap: 12px 4px; }
-  .stat-value    { font-size: 18px; }
-  .stat-value-sm { font-size: 15px; }
   .procs { --proc-grid: minmax(0, 1fr) 48px 72px 76px; }
   .proc-io { display: none; }
   .stats-open {
@@ -2915,7 +2914,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-caption {
   margin: 0;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -2929,7 +2928,7 @@ body.home-unfold { --home-fold: 0; }
   align-items: center;
   gap: 5px;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   line-height: 16px;
@@ -2955,7 +2954,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-note {
   margin: 10px 0 2px;
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   line-height: 17px;
 }
@@ -2992,7 +2991,7 @@ body.home-unfold { --home-fold: 0; }
   justify-content: center;
   margin: 0;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
 }
 
@@ -3036,7 +3035,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-sym {
   flex: 0 0 46px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
@@ -3059,7 +3058,7 @@ body.home-unfold { --home-fold: 0; }
   flex: 0 0 auto;
   min-width: 56px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -3072,7 +3071,7 @@ body.home-unfold { --home-fold: 0; }
   flex: 0 0 auto;
   min-width: 54px;
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -3097,7 +3096,7 @@ body.home-unfold { --home-fold: 0; }
   border-radius: 3px;
   background: none;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 11px;  /* the × glyph, sized to its button, not text */
   line-height: 14px;
   text-align: center;
   visibility: hidden;
@@ -3128,7 +3127,7 @@ body.home-unfold { --home-fold: 0; }
   border-radius: 6px;
   background: none;
   color: var(--fg-2);
-  font-size: 13px;
+  font-size: 13px;  /* the + glyph, sized to its button, not text */
   line-height: 18px;
   text-align: center;
 }
@@ -3144,7 +3143,7 @@ body.home-unfold { --home-fold: 0; }
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--fg);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -3155,7 +3154,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-as-of {
   flex: 1 1 auto;
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
   text-align: right;

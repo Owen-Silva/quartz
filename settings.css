@@ -203,7 +203,7 @@
   padding-bottom: 6px;
   color: var(--text);
   font-size: var(--fs-s);
-  font-weight: 700;
+  font-weight: 600;          /* semibold: weights stay on 400 / 500 / 600 */
   background: linear-gradient(var(--hairline), var(--hairline))
               left bottom / 100% 1px no-repeat;
 }
@@ -244,7 +244,7 @@
 #settings-panel .set-h-chev {
   margin-left: auto;         /* out at the right edge */
   color: var(--text-3);
-  font-size: 15px;
+  font-size: 15px;  /* the › glyph, not text */
   line-height: 1;
   transform: rotate(0deg);   /* '›' points along the fold while closed */
   transition: transform 140ms ease, color 140ms ease;
@@ -608,7 +608,7 @@
   transform: translateY(-50%);
   color: var(--text-3);
   font-family: var(--icon-font);
-  font-size: 9px;
+  font-size: 9px;  /* icon glyph: the select chevron */
   line-height: 1;
   pointer-events: none;
 }

@@ -309,7 +309,7 @@ body {
   background: transparent;
   color: var(--text-2);
   font-family: inherit;
-  font-size: 15px;
+  font-size: 15px;            /* the × glyph, sized to its 22 px button, not text */
   line-height: 1;
   opacity: 0;
   cursor: pointer;

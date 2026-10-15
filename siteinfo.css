@@ -233,7 +233,7 @@
   transform: translateY(-50%);
   color: var(--text-3);
   font-family: var(--icon-font);
-  font-size: 9px;
+  font-size: 9px;  /* icon glyph: the select chevron */
   line-height: 1;
   pointer-events: none;
 }
