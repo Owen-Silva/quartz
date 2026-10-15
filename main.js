@@ -10,6 +10,10 @@
 // First, before anything arms a timer: no activateUvLoop() from inside Node's own loop (the idle
 // wakeup storms; see uvquiet.js).
 require('./uvquiet').install();
+// And the main thread (AboveNormal) must not preempt Electron's libuv poll thread, or the two lock
+// into waking each other thousands of times a second (focused Home; see uvboost.js): the poll
+// thread goes to TimeCritical ~3 s in.
+require('./uvboost').install();
 
 const os = require('os');
 const fs = require('fs');

@@ -53,10 +53,16 @@ const TESTS = [
   { name: 'school', file: 'school-harness.js' },
   // The main-process guard on activateUvLoop (the idle wakeup storms).
   { name: 'uvquiet', file: 'uvquiet-harness.js' },
+  // The main thread's priority boost off (the focused-Home wakeup storm): env switch, script, states.
+  { name: 'uvboost', file: 'uvboost-harness.js' },
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
+  // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
+  { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
+  // uvboost in a real Electron: the boost goes off on the window's UI thread, and only there.
+  { name: 'uvboost-e2e', file: 'uvboost-e2e.js', e2e: true },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
