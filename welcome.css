@@ -76,7 +76,8 @@ html[data-step="welcome"] .wc-brand { visibility: hidden; }
   gap: 6px;
   justify-self: center;
 }
-.wc-progress[hidden] { display: none; }
+/* Hidden on the hello step but still holding its grid column, so Skip stays right. */
+.wc-progress[hidden] { display: flex; visibility: hidden; }
 .wc-seg {
   width: 32px;
   height: 4px;
@@ -477,7 +478,15 @@ html[data-step="welcome"] .wc-brand { visibility: hidden; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
-.wc-feature { padding: 18px 20px 20px; }
+.wc-feature {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  padding: 16px 18px 18px;
+}
+.wc-feature-p { grid-column: 1 / -1; }
 .wc-feature-icon {
   display: grid;
   place-items: center;
@@ -489,7 +498,7 @@ html[data-step="welcome"] .wc-brand { visibility: hidden; }
   font-family: var(--icon-font);
   font-size: 16px;
 }
-.wc-feature-h { margin: var(--space-3) 0 4px; font-size: var(--fs-l); font-weight: 600; color: var(--text); }
+.wc-feature-h { margin: 0; font-size: var(--fs-l); font-weight: 600; color: var(--text); }
 .wc-feature-p { margin: 0; color: var(--text-2); font-size: var(--fs-s); line-height: 1.55; }
 kbd {
   display: inline-block;

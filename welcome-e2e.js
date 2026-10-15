@@ -22,17 +22,24 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { run, Cdp, KEYS, sleep, APP } = require('./tests/e2e-kit');
+const { run, Cdp, sleep, APP } = require('./tests/e2e-kit');
 
 const PORT = 9447;
 const SHOTS = process.env.WELCOME_SHOTS
   || (process.env.CI ? path.join(APP, 'suite-out', 'shots', 'welcome') : path.join(os.tmpdir(), 'quartz-welcome-shots'));
 const NARROW = { width: 560, height: 860 };
-const TAB = { code: 'Tab', vk: 9 };
-const END = { code: 'End', vk: 35 };
-const HOME = { code: 'Home', vk: 36 };
-const LEFT = { code: 'ArrowLeft', vk: 37 };
-const RIGHT = { code: 'ArrowRight', vk: 39 };
+const KEYSPEC = {
+  Enter: ['Enter', 13, '\r'], Tab: ['Tab', 9], Home: ['Home', 36], End: ['End', 35],
+  ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ArrowUp: ['ArrowUp', 38], ArrowDown: ['ArrowDown', 40],
+};
+/** One key into a page: keyDown (with its text, so Enter presses a focused button), then keyUp. */
+async function key(cdp, name) {
+  const [code, vk, text] = KEYSPEC[name];
+  const base = { key: name, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0 };
+  await cdp.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, base, text ? { text, unmodifiedText: text } : {}));
+  await cdp.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
+  await sleep(40);
+}
 const HAS_QUARTZ_EXE = fs.existsSync(path.join(APP, 'node_modules', 'electron', 'dist', 'Quartz.exe'));
 
 run('welcome-e2e', async (k) => {
@@ -63,12 +70,12 @@ run('welcome-e2e', async (k) => {
   const welcomeCount = (c) => c.ev('window.FirstRun ? FirstRun._debug().welcomeTabs.length : -1');
   const activeIsWelcome = (c) => c.ev('!!(getActiveTab() && FirstRun.isWelcomeUrl(getActiveTab().url))');
   const step = (g) => g.ev('window.__welcome.step()');
-  const focused = (g) => g.ev('(() => { const a = document.activeElement; return a ? (a.id || a.getAttribute("data-mode") || a.getAttribute("data-id") || a.getAttribute("data-go") || a.textContent.trim()).slice(0, 40) : ""; })()');
+  const focused = (g) => g.ev('(() => { const a = document.activeElement; if (!a || a === document.body) return ""; const sec = a.closest(".wc-step"); return (sec ? sec.getAttribute("data-step") + ":" : "") + (a.id || a.getAttribute("data-mode") || a.getAttribute("data-id") || a.getAttribute("data-go") || a.textContent.trim()).slice(0, 40); })()');
   /** Tab until `want` (a focused() value) has the keyboard; at most `max` presses. */
   async function tabTo(g, want, max) {
     for (let i = 0; i < (max || 8); i++) {
       if ((await focused(g)) === want) return true;
-      await g.key('Tab', TAB);
+      await key(g, 'Tab');
       await sleep(60);
     }
     return (await focused(g)) === want;
@@ -81,7 +88,8 @@ run('welcome-e2e', async (k) => {
     return most;
   }
   async function narrowShot(g, name) {
-    await g.send('Emulation.setDeviceMetricsOverride', { width: NARROW.width, height: NARROW.height, deviceScaleFactor: 1, mobile: false });
+    const h = Math.min(NARROW.height, await g.ev('window.innerHeight'));
+    await g.send('Emulation.setDeviceMetricsOverride', { width: NARROW.width, height: h, deviceScaleFactor: 1, mobile: false });
     await sleep(350);
     await shot(g, name);
     await g.send('Emulation.clearDeviceMetricsOverride');
@@ -104,60 +112,66 @@ run('welcome-e2e', async (k) => {
 
   let g = await guest(a);
   check((await step(g)) === 'welcome', 'A: starts on the hello step');
-  check((await focused(g)) === 'next' || (await focused(g)) === 'Get started', 'A: Get started has the keyboard', await focused(g));
-  check((await a.chrome.ev('QuartzTheme.mode()')) === 'dark', 'A: a fresh profile starts dark (Quartz default)');
-  await shot(a.chrome, 'A1-hello-dark');
+  check((await focused(g)) === 'welcome:next', 'A: Get started has the keyboard', await focused(g));
+  const mode0 = await a.chrome.ev('QuartzTheme.mode()');
+  say('a fresh profile starts in look mode ' + mode0 + ' (resolved ' + (await a.chrome.ev('QuartzTheme.resolved()')) + ')');
+  await shot(a.chrome, 'A1-hello');
 
   // Hello -> Look, by Enter.
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   check(await g.waitFor('window.__welcome.step() === "look"', 4000).catch(() => false), 'A: Enter -> the Look step');
-  check((await focused(g)) === 'dark', 'A: the keyboard lands on the current look (Dark)', await focused(g));
-  await shot(a.chrome, 'A2-look-dark');
+  check((await focused(g)) === 'look:' + mode0, 'A: the keyboard lands on the current look (' + mode0 + ')', await focused(g));
+  check((await g.ev('document.querySelector(\'[data-mode="' + mode0 + '"]\').getAttribute("aria-checked")')) === 'true', 'A: the current look reads as checked');
 
   // Arrows move AND pick, and the whole chrome follows at once (the live preview).
-  await g.key('ArrowLeft', LEFT);
-  check(await a.chrome.waitFor('QuartzTheme.mode() === "light" && document.documentElement.getAttribute("data-theme") === "light"', 4000).catch(() => false), 'A: ArrowLeft picks Light; the chrome turns light now');
-  check(await g.waitFor('document.documentElement.getAttribute("data-theme") === "light"', 4000).catch(() => false), 'A: the welcome page turns light with it');
-  check((await g.ev('document.querySelector(\'[data-mode="light"]\').getAttribute("aria-checked")')) === 'true', 'A: Light reads as checked (aria-checked)');
-  await shot(a.chrome, 'A3-look-light');
-  await g.key('ArrowLeft', LEFT);
-  check(await a.chrome.waitFor('QuartzTheme.mode() === "system"', 4000).catch(() => false), 'A: ArrowLeft again picks Match Windows (mode system)');
+  await key(g, 'Home');
+  check(await a.chrome.waitFor('QuartzTheme.mode() === "system"', 4000).catch(() => false), 'A: Home picks Match Windows (mode system)');
   const sysSub = await g.waitFor('(() => { const t = document.getElementById("system-sub").textContent; return /Windows is using|didn.t say/.test(t) ? t : ""; })()', 5000).catch(() => '');
   check(!!sysSub, 'A: Match Windows says what Windows answered', sysSub);
-  await shot(a.chrome, 'A4-look-system');
-  await g.key('ArrowRight', RIGHT);
-  check(await a.chrome.waitFor('QuartzTheme.mode() === "light"', 4000).catch(() => false), 'A: ArrowRight goes back to Light');
+  await shot(a.chrome, 'A2-look-system');
+  await key(g, 'ArrowRight');
+  check(await a.chrome.waitFor('QuartzTheme.mode() === "light" && document.documentElement.getAttribute("data-theme") === "light"', 4000).catch(() => false), 'A: ArrowRight picks Light; the chrome turns light now');
+  check(await g.waitFor('document.documentElement.getAttribute("data-theme") === "light"', 4000).catch(() => false), 'A: the welcome page turns light with it');
+  check((await g.ev('document.querySelector(\'[data-mode="light"]\').getAttribute("aria-checked")')) === 'true', 'A: Light reads as checked (aria-checked)');
+  check((await focused(g)) === 'look:light', 'A: the keyboard moved with the pick', await focused(g));
+  await shot(a.chrome, 'A3-look-light');
+  await key(g, 'End');
+  check(await a.chrome.waitFor('QuartzTheme.mode() === "dark" && document.documentElement.getAttribute("data-theme") === "dark"', 4000).catch(() => false), 'A: End picks Dark; the chrome turns dark now');
+  check(await g.waitFor('document.documentElement.getAttribute("data-theme") === "dark"', 4000).catch(() => false), 'A: the welcome page turns dark with it');
+  await shot(a.chrome, 'A4-look-dark');
+  await key(g, 'ArrowLeft');
+  check(await a.chrome.waitFor('QuartzTheme.mode() === "light"', 4000).catch(() => false), 'A: ArrowLeft goes back to Light');
   check((await a.chrome.ev('localStorage.getItem("themeMode")')) === 'light', 'A: the look is stored where Settings > Look keeps it (themeMode)');
 
   // Look -> Search, by Tab to Continue + Enter.
-  check(await tabTo(g, 'next'), 'A: Tab reaches Continue on the Look step');
-  await g.key('Enter', KEYS.Enter);
+  check(await tabTo(g, 'look:next'), 'A: Tab reaches Continue on the Look step');
+  await key(g, 'Enter');
   check(await g.waitFor('window.__welcome.step() === "search"', 4000).catch(() => false), 'A: -> the Search step');
   const engines = await g.ev('Array.from(document.querySelectorAll(".wc-engine")).map((b) => b.getAttribute("data-id"))');
   const settingsEngines = await a.chrome.ev('Settings.engines().map((e) => e.id)');
   check(JSON.stringify(engines) === JSON.stringify(settingsEngines), 'A: the engine list is exactly what Settings supports', engines);
-  check((await focused(g)) === 'google', 'A: the keyboard lands on the current engine (Google)', await focused(g));
-  await g.key('ArrowDown', KEYS.ArrowDown);
+  check((await focused(g)) === 'search:google', 'A: the keyboard lands on the current engine (Google)', await focused(g));
+  await key(g, 'ArrowDown');
   check(await a.chrome.waitFor('Settings.get("searchEngine") === "duckduckgo"', 4000).catch(() => false), 'A: ArrowDown picks DuckDuckGo (Settings.searchEngine)');
   check((await g.ev('document.getElementById("brave-note").hidden')) === true, 'A: no Brave note for a keyless engine');
-  await g.key('End', END);
+  await key(g, 'End');
   check(await a.chrome.waitFor('Settings.get("searchEngine") === "brave-api"', 4000).catch(() => false), 'A: End picks Quartz results (Brave)');
   const braveText = await g.waitFor('(() => { const n = document.getElementById("brave-note"); return n.hidden ? "" : document.getElementById("brave-text").textContent; })()', 4000).catch(() => '');
   check(/API key/.test(braveText) && /Settings/.test(braveText), 'A: Quartz results explains the Brave key in plain words', braveText);
   await shot(a.chrome, 'A5-search-brave-light');
-  await g.key('Home', HOME);
-  await g.key('ArrowDown', KEYS.ArrowDown);
+  await key(g, 'Home');
+  await key(g, 'ArrowDown');
   check(await a.chrome.waitFor('Settings.get("searchEngine") === "duckduckgo"', 4000).catch(() => false), 'A: Home then ArrowDown -> DuckDuckGo again');
   await shot(a.chrome, 'A6-search-light');
 
   // Search -> Default browser.
-  check(await tabTo(g, 'next'), 'A: Tab reaches Continue on the Search step');
-  await g.key('Enter', KEYS.Enter);
+  check(await tabTo(g, 'search:next'), 'A: Tab reaches Continue on the Search step');
+  await key(g, 'Enter');
   check(await g.waitFor('window.__welcome.step() === "default"', 4000).catch(() => false), 'A: -> the Default browser step');
-  check((await focused(g)) === 'make-default', 'A: the keyboard lands on "Make Quartz the default"', await focused(g));
+  check((await focused(g)) === 'default:make-default', 'A: the keyboard lands on "Make Quartz the default"', await focused(g));
   check((await g.ev('document.getElementById("default-next").textContent')) === 'Not now', 'A: the way past it says Not now');
   await shot(a.chrome, 'A7-default-idle-light');
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   const dstate = await g.waitFor('(() => { const s = document.getElementById("default-card").getAttribute("data-state"); return /settings-opened|registered|failed|confirmed/.test(s) ? s : ""; })()', 40000).catch(() => '');
   const dtext = await g.ev('document.getElementById("default-title").textContent + " | " + document.getElementById("default-text").textContent');
   say('default browser answered: ' + dstate + ' -- ' + dtext);
@@ -175,12 +189,12 @@ run('welcome-e2e', async (k) => {
 
   // Default -> Tour.
   await g.ev('document.getElementById("default-next").focus(), 1');
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   check(await g.waitFor('window.__welcome.step() === "tour"', 4000).catch(() => false), 'A: -> the tour');
   const cards = await g.ev('Array.from(document.querySelectorAll(".wc-feature-h")).map((h) => h.textContent)');
   check(cards.length >= 3 && cards.length <= 4, 'A: the tour is 3-4 cards', cards);
   check((await g.ev('document.getElementById("skip").hidden')) === true, 'A: no Skip on the last step');
-  check((await focused(g)) === 'finish', 'A: the keyboard lands on Start browsing', await focused(g));
+  check((await focused(g)) === 'tour:finish', 'A: the keyboard lands on Start browsing', await focused(g));
 
   // Every step, dark and light, wide (the whole window) and narrow (the page at 560 px).
   for (const theme of ['dark', 'light']) {
@@ -194,7 +208,7 @@ run('welcome-e2e', async (k) => {
     }
   }
   // The narrowest a window gets: nothing may scroll sideways.
-  await g.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 760, deviceScaleFactor: 1, mobile: false });
+  await g.send('Emulation.setDeviceMetricsOverride', { width: 360, height: Math.min(760, await g.ev('window.innerHeight')), deviceScaleFactor: 1, mobile: false });
   await sleep(300);
   const w360 = await g.ev('window.innerWidth');
   const scrollW = [];
@@ -211,7 +225,7 @@ run('welcome-e2e', async (k) => {
   await g.ev('window.__welcome.go("tour")');
   await sleep(300);
   await g.ev('document.getElementById("finish").focus(), 1');
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   check(await a.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 0', 6000).catch(() => false), 'A: Start browsing closes the welcome');
   check(await a.chrome.waitFor('!!(getActiveTab() && isNewTabUrl(getActiveTab().url))', 6000).catch(() => false), 'A: Home is the tab in front afterwards');
   flag = readFlag();
@@ -257,7 +271,7 @@ run('welcome-e2e', async (k) => {
   await g.ev('window.__welcome.go("default")');
   await sleep(300);
   await g.ev('document.getElementById("make-default").focus(), 1');
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   const cState = await g.waitFor('document.getElementById("default-card").getAttribute("data-state") === "failed"', 20000).catch(() => false);
   const cText = await g.ev('document.getElementById("default-text").textContent');
   check(cState && /simulated: the registry refused the write/.test(cText), 'C: a failed registration shows Windows\' own reason', cText);
@@ -266,7 +280,7 @@ run('welcome-e2e', async (k) => {
   await narrowShot(g, 'C1-default-failed-dark-narrow');
   // Skip setup by keyboard: Shift+Tab back up to it is long; focus it the way a Tab would land.
   await g.ev('document.getElementById("skip").focus(), 1');
-  await g.key('Enter', KEYS.Enter);
+  await key(g, 'Enter');
   check(await c.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 0', 6000).catch(() => false), 'C: Skip setup (Enter) closes the welcome');
   flag = readFlag();
   check(flag && flag.state === 'done' && flag.how === 'skipped', 'C: skip sets the flag (done / skipped)', flag);
