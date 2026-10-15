@@ -1,4 +1,4 @@
-require('C:/Users/you/tools/lowcpu.js');   // first: one capped browser at a time (The user, 2026-09-17)
+try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
 // toprow-e2e.js — top-row hints end to end, against a REAL test instance of Quartz.
 //
 //   node toprow-e2e.js [--port 9417] [--keep]

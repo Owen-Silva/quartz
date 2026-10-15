@@ -328,6 +328,13 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('spell:changed', handler);
     }
   },
+  // quartz.log (log.js): the chrome reports what only it decides -- a crash
+  // card it showed, a tab it put to sleep or woke. Plain data; main writes the
+  // words. kind: 'tab-crashed' { url, reason, exitCode } | 'tab-slept' { url, why }
+  // | 'tab-woke' { url, sleptMs }.
+  log: {
+    event: (kind, details) => ipcRenderer.send('log:event', Object.assign({}, details || {}, { kind: String(kind || '') })),
+  },
   // Protected video (drm-main.js). DrmState:
   //   { widevine: { available, reason }, edge: { found, how, path },
   //     alwaysEdge: [{ key, name }], detection, extraSites, lastLaunch }

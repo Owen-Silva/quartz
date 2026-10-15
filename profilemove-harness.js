@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
-const pm = require('C:/Users/you/browser/profilemove.js');
+const pm = require(require('path').join(__dirname, 'profilemove.js'));
 
 let pass = 0, fail = 0;
 function ok(cond, label) {

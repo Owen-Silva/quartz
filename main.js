@@ -47,6 +47,11 @@ const profileMove = require('./profilemove');
 const { urlFromArgv } = require('./argvurl');
 const spellModule = require('./spell');
 const drmModule = require('./drm-main');
+// quartz.log (log.js): start/quit, crashes, hangs, failed loads, adblock, tab
+// sleep, memory. Installed in whenReady, once userData is final.
+const quartzLog = require('./log');
+/** @type {ReturnType<typeof quartzLog.install> | null} */
+let qlog = null;
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -911,6 +916,8 @@ function createWindow() {
     syncNativeFocusPoll();   // nothing hosted, and no renderer to send to
     console.warn('[embed] chrome renderer gone:', (details && details.reason) || '?');
   });
+  // quartz.log: this window's renderer crashing or hanging (log.js).
+  if (qlog) qlog.watchWindow(win);
 
   // The chrome itself only ever needs an editing menu (address bar, find box).
   // This IS the focused window, so the built-in roles are the right wiring.
@@ -1014,6 +1021,23 @@ app.on('second-instance', (_event, argv) => {
 });
 
 app.whenReady().then(() => {
+  // First of all: the log's start line says how the LAST run ended, and every
+  // later hook (the window, each guest, the adblock engine) writes through it.
+  // A log that cannot start leaves qlog null; Quartz runs exactly as before.
+  try {
+    const testRun = process.argv.includes('--test-profile');
+    const named = process.argv.find((a) => a.startsWith('--profile-name='));
+    const everyMs = Number(process.env.QUARTZ_LOG_MEMORY_MS);
+    qlog = quartzLog.install({
+      app, ipcMain, isChromeSender, webContents: require('electron').webContents,
+      powerMonitor: require('electron').powerMonitor, appDir: __dirname,
+      profile: testRun ? (named ? named.slice('--profile-name='.length) : 'default') : '',
+      // A test run may check the memory line without waiting 30 min.
+      memoryEveryMs: testRun && everyMs >= 1000 ? everyMs : undefined,
+    });
+  } catch (err) {
+    console.error('[log] quartz.log is not being written:', (err && err.message) || err);
+  }
   // Before the handlers: a request that arrives first must already see what
   // the user decided on a previous run.
   loadPermissionDecisions();
@@ -2648,6 +2672,10 @@ function setBlockingEnabled(on) {
  */
 async function initAdblock() {
   adblockPrefs = readAdblockPrefs();
+  // For quartz.log: how long the engine took, and whether it came off disk.
+  const t0 = Date.now();
+  let fromCache = false;
+  try { fromCache = fs.existsSync(adblockCachePath()); } catch { /* unknown: says downloaded */ }
   try {
     blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
       path: adblockCachePath(),
@@ -2656,10 +2684,12 @@ async function initAdblock() {
     });
   } catch (err) {
     console.error('[adblock] engine unavailable:', (err && err.message) || err);
+    if (qlog) qlog.adblock({ ok: false, reason: (err && err.message) || String(err) });
     blocker = null;
     send('adblock:state-changed', adblockState());
     return;
   }
+  if (qlog) qlog.adblock({ ok: true, ms: Date.now() - t0, fromCache, enabled: adblockPrefs.enabled });
 
   blocker.on('request-blocked', (request) => {
     // request.tabId is the webContents id of the frame that made the request.
@@ -5050,8 +5080,59 @@ function adoptPopupWindow(child) {
   });
 }
 
+/*
+ * The "MaxListenersExceededWarning: 11 did-stop-loading listeners added to
+ * [WebContents]" on every new tab.
+ *
+ * Electron's WebContents.executeJavaScript waits for a guest that is still
+ * loading by adding its own once('did-stop-loading') listener PER CALL. The
+ * chrome pushes a dozen things into a fresh new tab (readout, stats, markets,
+ * background, settings...) before it has finished loading, so the 11th call
+ * tripped Node's leak warning. It was never a leak (each listener fires once
+ * and goes), but the warning fired on every new tab and buried real ones.
+ *
+ * A first version shared ONE wait per load among the calls; it changed WHEN
+ * some pushes landed (bravesearch-e2e's "Next keeps the look" failed with it
+ * and passed without), so Electron's own waits are left exactly as they are.
+ * Instead the limit makes room for them: just before a call, if Electron's
+ * once() could be the one over the line, the limit goes up by 10; once the
+ * page stops loading and the waits have drained it goes back to what it was.
+ * So a guest still warns for any OTHER listener that piles up, at the usual
+ * limit, every moment it is not mid-load with pushes queued.
+ *
+ * The <webview> element's executeJavaScript reaches this object by a method
+ * lookup on the guest, so an own property here is what it calls.
+ */
+function roomForExecuteJavaScriptWaits(contents) {
+  const original = contents.executeJavaScript;
+  if (typeof original !== 'function') return;
+  const base = contents.getMaxListeners();
+  contents.executeJavaScript = function executeJavaScriptWithRoom(...args) {
+    try {
+      const limit = contents.getMaxListeners();
+      if (limit > 0 && contents.listenerCount('did-stop-loading') + 1 >= limit) contents.setMaxListeners(limit + 10);
+    } catch { /* the call goes on as it always did */ }
+    return original.apply(contents, args);
+  };
+  // After every listener of this did-stop-loading has run (setImmediate), and
+  // only when the queue has drained back under the usual limit.
+  contents.on('did-stop-loading', () => setImmediate(() => {
+    try {
+      if (!contents.isDestroyed() && contents.getMaxListeners() !== base
+        && contents.listenerCount('did-stop-loading') < base) contents.setMaxListeners(base);
+    } catch { /* destroyed meanwhile */ }
+  }));
+}
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
+
+  // A test run can turn this off to show the warning it prevents (log-e2e.js --no-gate).
+  if (!(process.argv.includes('--test-profile') && process.env.QUARTZ_TEST_NO_JS_GATE === '1')) {
+    roomForExecuteJavaScriptWaits(contents);
+  }
+  // quartz.log: this guest's hangs and failed main-frame loads (log.js).
+  if (qlog) qlog.watchGuest(contents);
 
   /*
    * window.open(), target="_blank", and anything else that wants a second

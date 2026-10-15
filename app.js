@@ -7955,7 +7955,7 @@ function sleepWorkspaceTabs(id, mode) {
   let slept = 0;
   // A copy: sleepTab() swaps an element inside #views while we walk the list.
   for (const tab of workspaceTabs(id).slice()) {
-    if (canSleepInWorkspace(tab, use) && sleepTab(tab)) slept++;
+    if (canSleepInWorkspace(tab, use) && sleepTab(tab, 'workspace')) slept++;
   }
   return slept;
 }
@@ -8041,11 +8041,22 @@ function canSleepTab(tab) {
 }
 
 /**
+ * quartz.log (log.js, through preload's api.log): the chrome forwards what only
+ * it decides. Never throws and never blocks: a log that is not there is not a
+ * reason for a crash card or a sleeping tab to go wrong.
+ */
+function logEvent(kind, details) {
+  try {
+    if (window.api && window.api.log && typeof window.api.log.event === 'function') window.api.log.event(kind, details);
+  } catch (err) { /* the log is best effort */ }
+}
+
+/**
  * Put one tab to sleep. The url is snapshotted first: it can only be read while
  * the guest is still attached, and it is the whole of what wakeTab() needs.
  * @returns {boolean} true when the tab actually went to sleep.
  */
-function sleepTab(tab) {
+function sleepTab(tab, why) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   if (tab.id === activeTabId) return false; // the tab on screen is never asleep
   if (!viewsEl || !tab.viewEl) return false;
@@ -8081,6 +8092,8 @@ function sleepTab(tab) {
     tab.chipEl.title = chipTooltip(tab);
   }
   saveSession(); // the snapshotted url may be newer than the last write
+  tab.sleptAt = Date.now();
+  logEvent('tab-slept', { url: tab.url, why: why || 'asked' }); // quartz.log
   return true;
 }
 
@@ -8115,6 +8128,9 @@ function wakeTab(tab) {
     tab.chipEl.classList.remove('asleep');
     tab.chipEl.title = chipTooltip(tab);
   }
+  // quartz.log. A tab restored asleep from the session has no sleptAt.
+  logEvent('tab-woke', { url: tab.url, sleptMs: tab.sleptAt ? Date.now() - tab.sleptAt : null });
+  tab.sleptAt = 0;
   return true;
 }
 
@@ -8131,7 +8147,7 @@ function sleepIdleTabs() {
   for (const tab of tabs.slice()) {
     if (!canSleepTab(tab)) continue;
     if (tabIdleSince(tab) > cutoff) continue;
-    if (sleepTab(tab)) slept++;
+    if (sleepTab(tab, 'idle')) slept++;
   }
   return slept;
 }
@@ -10613,16 +10629,18 @@ function wireViewEvents(tab) {
 
   // The guest's renderer died. 'crashed' is the pre-Electron-22 spelling and is
   // kept so the card still appears on an older runtime.
-  const onGone = (reason) => {
+  const onGone = (reason, exitCode) => {
     if (stale()) return; // we took the guest away ourselves: not a crash
     if (reason === 'clean-exit') return; // an ordinary teardown, not a crash
+    // quartz.log: one line per crash card, with the same filters as the card.
+    logEvent('tab-crashed', { url: tab.url, reason: reason || 'crashed', exitCode });
     tab.ready = false;
     setTabLoading(tab, false);
     forgetTabAudio(tab); // the sound died with the renderer; the flag must too
     showTabCard(tab, 'crash', hostLabel(tab.url));
   };
   viewEl.addEventListener('render-process-gone', (event) => {
-    onGone(event && event.details && event.details.reason);
+    onGone(event && event.details && event.details.reason, event && event.details && event.details.exitCode);
   });
   viewEl.addEventListener('crashed', () => onGone(null));
 

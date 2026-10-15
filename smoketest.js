@@ -1,4 +1,4 @@
-require('C:/Users/you/tools/lowcpu.js');   // first: one capped browser at a time (The user, 2026-09-17)
+try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
 // Runtime smoke test. Launches the app, drives it over CDP, proves the
 // Claude Code terminal actually spawns and renders.
 // The window is created OFF-SCREEN (--offscreen, see main.js and testwatch.js) and a 25 ms
