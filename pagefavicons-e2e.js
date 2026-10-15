@@ -347,6 +347,18 @@ WATCHDOG.unref();
     check(boxes && boxes[0] > 0 && boxes[0] === boxes[1], 'history: every row\'s logo box holds a tile', JSON.stringify(boxes));
     await guestShot(IS_HISTORY, 'history-dark');
     await windowShot('bookmarks-dark', true);
+    // The theme each page is WEARING: its data-theme and the luminance (0..1) of the ground it paints.
+    const LOOK = `(() => { const l = (c) => { const m = String(c).match(/[\\d.]+/g) || []; return m.length >= 3 && (m.length < 4 || +m[3] > 0) ? (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255 : null; };
+      const lum = [document.body, document.documentElement].map((e) => l(getComputedStyle(e).backgroundColor)).find((v) => v !== null);
+      return { theme: document.documentElement.getAttribute('data-theme'), lum: lum === undefined ? null : Math.round(lum * 100) / 100 }; })()`;
+    const looks = async () => ({ history: await inGuest(IS_HISTORY, LOOK), newtab: await inGuest(IS_NEWTAB, LOOK) });
+    // The history page paints a plain --bg ground, so its luminance is judged too. The new tab page
+    // paints a picture behind a transparent body (lum null): the control there is its data-theme.
+    const isDark = (x) => !!(x && x.theme === 'dark' && (x.lum === null || x.lum < 0.35));
+    const isLight = (x) => !!(x && x.theme === 'light' && (x.lum === null || x.lum > 0.65));
+    const painted = (x) => !!(x && x.lum !== null);
+    let lk = await looks();
+    check(isDark(lk.history) && painted(lk.history) && isDark(lk.newtab), 'theme: dark, the history page paints dark (and the new tab page is dark)', JSON.stringify(lk));
 
     // 5. The light look: the same tiles, re-captured.
     await ev("setThemeMode('light') || true");
@@ -356,6 +368,14 @@ WATCHDOG.unref();
     await guestShot(IS_NEWTAB, 'newtab-light');
     const ntLight = (await inGuest(IS_NEWTAB, TILES('.qfav'))) || [];
     judgeTiles('new tab (light)', ntLight, 0);
+    lk = await looks();
+    check(isLight(lk.newtab), 'theme: switched to light, the new tab page is light', JSON.stringify(lk.newtab));
+    check(isLight(lk.history) && painted(lk.history), 'theme: switched to light, the open history page follows (it used to stay dark)', JSON.stringify(lk.history));
+    // ...and back: a history page opened in light follows the switch to dark as well.
+    await ev("setThemeMode('dark') || true");
+    await sleep(1200);
+    lk = await looks();
+    check(isDark(lk.history) && painted(lk.history) && isDark(lk.newtab), 'theme: and back to dark, both follow again', JSON.stringify(lk));
 
     // 6. The network: zero requests to a Google favicon host, by every count.
     const perf = [].concat(

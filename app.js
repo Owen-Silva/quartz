@@ -5318,7 +5318,10 @@ function getTheme() {
 function pushThemeToTab(tab, theme) {
   // The Files page wears the same tokens and follows the same switch: without
   // this, flipping to light leaves an open folder browser dark until a reload.
-  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url))) return;
+  // The history page too: its ?theme= is only the first-paint hint, so without
+  // the push it kept the theme it was opened in (and a restored one, the theme
+  // it was SAVED in) whatever the switch said afterwards.
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url) || isHistoryTab(tab))) return;
   if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(

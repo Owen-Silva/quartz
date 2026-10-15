@@ -54,6 +54,9 @@ const TESTS = [
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
   { name: 'favicons-e2e', file: 'favicons-e2e.js', e2e: true },
+  // Site logos outside the tab strip (bookmarks bar, new tab page, history page), and no request
+  // to a Google favicon host anywhere.
+  { name: 'pagefavicons-e2e', file: 'pagefavicons-e2e.js', e2e: true },
   { name: 'bravesearch-e2e', file: 'bravesearch-e2e.js', e2e: true },
   { name: 'toprow-e2e', file: 'toprow-e2e.js', e2e: true },
   // The daily paths (tests/e2e-kit.js): session restore across restarts, tab sleep and wake,
