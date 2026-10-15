@@ -16,13 +16,16 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.setPath('userData', path.join(os.tmpdir(), 'bare-electron-' + process.pid));
 const acrylic = process.argv.includes('--acrylic');
 const webview = process.argv.includes('--webview');
+// --url=<u> (mem-bench.js): the guest loads a real page instead of the static one.
+const urlArg = process.argv.find((a) => a.startsWith('--url='));
+const guestSrc = urlArg ? urlArg.slice('--url='.length) : 'data:text/html,<h1>tab</h1>';
 
 app.whenReady().then(() => {
   const opts = { width: 1280, height: 820, x: -20000, y: -20000, show: false, skipTaskbar: true,
     webPreferences: { contextIsolation: true, sandbox: false, webviewTag: webview } };
   if (acrylic) Object.assign(opts, { titleBarStyle: 'hidden', backgroundMaterial: 'acrylic', backgroundColor: '#00000000' });
   const win = new BrowserWindow(opts);
-  const inner = webview ? '<webview src="data:text/html,<h1>tab</h1>" style="position:fixed;inset:80px 0 0 0"></webview>' : '';
+  const inner = webview ? '<webview src="' + guestSrc + '" style="position:fixed;inset:80px 0 0 0"></webview>' : '';
   win.loadURL('data:text/html,' + encodeURIComponent('<!doctype html><title>bare</title><body style="background:transparent;color:#ccc;font:14px sans-serif"><p>bare electron</p>' + inner + '</body>'));
   win.once('ready-to-show', () => win.showInactive());
 });
