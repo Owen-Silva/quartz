@@ -136,6 +136,14 @@ function create(opts) {
 
   /** Is Quartz what Windows opens https links with right now? Asked of Windows itself. */
   async function defaultStatus() {
+    // Test profiles never read the machine's real default browser: the answer comes from
+    // QUARTZ_TEST_DEFAULT_STATUS ('default' = Quartz is it; anything else = it is not), so a
+    // harness passes the same whatever the person running it has picked in Windows.
+    if (test) {
+      return String(env.QUARTZ_TEST_DEFAULT_STATUS || '') === 'default'
+        ? { isDefault: true, app: 'Quartz', path: quartzExe, reason: '', simulated: true }
+        : { isDefault: false, app: 'Test stand-in browser', path: '', reason: '', simulated: true };
+    }
     if (process.platform !== 'win32') return { isDefault: null, app: '', reason: 'only Windows has a default-browser setting Quartz can read' };
     if (!app || typeof app.getApplicationInfoForProtocol !== 'function') {
       return { isDefault: null, app: '', reason: 'this Electron cannot ask Windows which app opens links' };
@@ -172,8 +180,17 @@ function create(opts) {
 
   function runScript() {
     let script = path.join(appDir, 'register-default-browser.ps1');
-    // Tests only: a stand-in script (a failure on purpose, say).
-    if (test && env.QUARTZ_TEST_DEFAULT_SCRIPT) script = String(env.QUARTZ_TEST_DEFAULT_SCRIPT);
+    // Tests only: a stand-in script (a failure on purpose, say). A test profile NEVER runs the
+    // real one: it writes HKCU and points Quartz's registration at whatever folder it runs from,
+    // so a test from a worktree once re-pointed the machine's real default browser at it.
+    if (test) {
+      if (!env.QUARTZ_TEST_DEFAULT_SCRIPT) {
+        const reason = 'test profiles never run the real registration script (set QUARTZ_TEST_DEFAULT_SCRIPT to a stand-in)';
+        console.error('[firstrun] REFUSED: ' + reason);
+        return Promise.resolve({ ok: false, refused: true, reason });
+      }
+      script = String(env.QUARTZ_TEST_DEFAULT_SCRIPT);
+    }
     return new Promise((resolve) => {
       if (!fs.existsSync(script)) {
         resolve({ ok: false, reason: 'the registration script is missing (' + path.basename(script) + ')', detail: script });

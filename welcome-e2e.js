@@ -5,16 +5,19 @@
 // Boots (all on this harness's own temp profile, wiped between the "fresh" ones):
 //   A  fresh profile + --first-run: the welcome is the tab in front; walked by KEYBOARD (Enter, Tab,
 //      arrows, Home/End): look (live: the chrome flips as the radios move), search engine (the Brave
-//      key note), default browser (the REAL register-default-browser.ps1 when Quartz.exe exists, its
-//      plain failure when it does not), the tour, Start browsing. Screenshots of every step in dark
+//      key note), default browser (a stand-in registration script that succeeds; Windows Settings
+//      is never opened and the REAL script never runs), the tour, Start browsing. Screenshots of every step in dark
 //      and light, at the window's size and at a narrow width. The flag says finished.
 //   B  the same profile again: no welcome; the look and the engine stuck. Settings > About > Show
-//      welcome again opens it; Skip setup closes it; the flag stays done.
+//      welcome again opens it; with the stand-in Windows saying Quartz IS the default, its default
+//      step says so; Skip setup closes it; the flag stays done.
 //   C  fresh again, with a stand-in registration script that fails: the default step says why, in
-//      words; Skip setup (keyboard) sets the flag; a restart shows no welcome.
+//      words, whole (a long throw PowerShell wraps); Skip setup (keyboard) sets the flag; a restart shows no welcome.
 //   D  an EXISTING profile (a session.json from "before") + --first-run: the welcome never appears,
 //      not even for a frame; the flag says existing-profile with the evidence.
-//   E  fresh, WITHOUT --first-run: test profiles never see it (every other harness boots as before).
+//   E  fresh, WITHOUT --first-run: test profiles never see it (every other harness boots as before);
+//      and with no stand-in script, main refuses to run the real one.
+// Then: the machine's real default-browser registration is byte-for-byte what it was before the run.
 //
 // Shots go to $WELCOME_SHOTS, else suite-out/shots/welcome on CI, else %TEMP%/quartz-welcome-shots.
 'use strict';
@@ -40,7 +43,31 @@ async function key(cdp, name) {
   await cdp.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
   await sleep(40);
 }
-const HAS_QUARTZ_EXE = fs.existsSync(path.join(APP, 'node_modules', 'electron', 'dist', 'Quartz.exe'));
+// The default-browser step NEVER touches this machine's real setting. The real
+// register-default-browser.ps1 points Quartz's HKCU registration at the folder it runs from, so a
+// run from a worktree once re-pointed the user's real default browser at that worktree. Every boot
+// gets a stand-in script, and Windows' answer to "is Quartz the default?" is the stand-in
+// QUARTZ_TEST_DEFAULT_STATUS (unset = not the default), so the run is the same on any machine.
+const STANDIN = {
+  ok: path.join(os.tmpdir(), 'welcome-e2e-ok-' + process.pid + '.ps1'),
+  fail: path.join(os.tmpdir(), 'welcome-e2e-fail-' + process.pid + '.ps1'),
+};
+// The long tail stands in for the real script's "Quartz.exe not found ... run 'npm run quartz-exe'
+// ... first" throw: PowerShell wraps a throw that long over several lines, and it must arrive whole.
+const FAIL_TAIL = 'run the quartz-exe step in the app folder first. You can try again once that has finished.';
+fs.writeFileSync(STANDIN.ok, "Write-Output 'pretending to register'\r\nWrite-Output 'Registered.'\r\nexit 0\r\n");
+fs.writeFileSync(STANDIN.fail, "Write-Output 'pretending to register'\r\nthrow 'simulated: the registry refused the write - " + FAIL_TAIL + "'\r\n");
+process.env.QUARTZ_TEST_DEFAULT_SCRIPT = STANDIN.ok;
+delete process.env.QUARTZ_TEST_DEFAULT_STATUS;
+/** The machine's real Quartz registration, read only: before and after must match. */
+function realRegistration() {
+  const out = [];
+  for (const k of ['HKCU\\Software\\Classes\\QuartzURL\\shell\\open\\command', 'HKCU\\Software\\Clients\\StartMenuInternet\\Quartz\\shell\\open\\command', 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice']) {
+    try { out.push(execFileSync('reg', ['query', k], { encoding: 'utf8', windowsHide: true }).trim()); } catch (e) { out.push(k + ': none'); }
+  }
+  return out.join('\n');
+}
+const REG_BEFORE = process.platform === 'win32' ? realRegistration() : '';
 
 run('welcome-e2e', async (k) => {
   const { check, launch, say, profileDir } = k;
@@ -175,17 +202,9 @@ run('welcome-e2e', async (k) => {
   const dstate = await g.waitFor('(() => { const s = document.getElementById("default-card").getAttribute("data-state"); return /settings-opened|registered|failed|confirmed/.test(s) ? s : ""; })()', 40000).catch(() => '');
   const dtext = await g.ev('document.getElementById("default-title").textContent + " | " + document.getElementById("default-text").textContent');
   say('default browser answered: ' + dstate + ' -- ' + dtext);
-  if (HAS_QUARTZ_EXE) {
-    check(dstate === 'settings-opened', 'A: the real script registered Quartz; Windows Settings step shown', dstate + ' ' + dtext);
-    check((await g.ev('!document.getElementById("default-steps").hidden && /Set default/.test(document.getElementById("default-steps").textContent)')), 'A: it says, in words, to press Set default in Windows Settings');
-    let reg = '';
-    try { reg = execFileSync('reg', ['query', 'HKCU\\Software\\RegisteredApplications', '/v', 'Quartz'], { encoding: 'utf8' }); } catch (e) { reg = String(e.message); }
-    check(/StartMenuInternet\\Quartz\\Capabilities/.test(reg), 'A: Windows really lists Quartz (HKCU RegisteredApplications)', reg.trim().split(/\r?\n/).pop());
-    check((await g.ev('document.getElementById("default-next").textContent')) === 'Continue', 'A: after the hand-off the way on says Continue');
-  } else {
-    check(dstate === 'failed' && /Quartz\.exe/.test(dtext), 'A: no Quartz.exe here -> the step says so, plainly (never silent)', dstate + ' ' + dtext);
-    check(/quartz-exe.*first\. You can try again/.test(dtext), 'A: the whole reason arrives (PowerShell wraps it over lines)', dtext);
-  }
+  check(dstate === 'settings-opened', 'A: the (stand-in) registration went through; Windows Settings step shown', dstate + ' ' + dtext);
+  check((await g.ev('!document.getElementById("default-steps").hidden && /Set default/.test(document.getElementById("default-steps").textContent)')), 'A: it says, in words, to press Set default in Windows Settings');
+  check((await g.ev('document.getElementById("default-next").textContent')) === 'Continue', 'A: after the hand-off the way on says Continue');
   await shot(a.chrome, 'A8-default-' + (dstate || 'none') + '-light');
 
   // Default -> Tour.
@@ -236,7 +255,8 @@ run('welcome-e2e', async (k) => {
 
   /* ================= B: the same profile again ============================================== */
   say('boot B: same profile, --first-run again');
-  const b = await launch({ cdp: PORT, args: ['--first-run'] });
+  // B's stand-in Windows says Quartz IS the default: the re-opened welcome's default step says so.
+  const b = await launch({ cdp: PORT, args: ['--first-run'], env: { QUARTZ_TEST_DEFAULT_STATUS: 'default' } });
   const mostB = await watchNoWelcome(b.chrome, 4000);
   check(mostB === 0, 'B: a finished profile never shows the welcome again', mostB);
   dbg = await b.chrome.ev('FirstRun._debug()');
@@ -254,6 +274,10 @@ run('welcome-e2e', async (k) => {
   check((await g.ev('window.__welcome.state().reopened')) === true, 'B: the page knows it was re-opened');
   check((await g.ev('document.querySelector(\'[data-mode="light"]\').getAttribute("aria-checked")')) === 'true', 'B: it shows the current look (Light) as picked');
   await shot(b.chrome, 'B1-reopened-light');
+  await g.ev('window.__welcome.go("default")');
+  const bConfirmed = await g.waitFor('document.getElementById("default-card").getAttribute("data-state") === "confirmed"', 8000).catch(() => false);
+  const bText = await g.ev('document.getElementById("default-title").textContent + " | hidden make-default: " + document.getElementById("make-default").hidden');
+  check(bConfirmed && /Quartz is your default browser/.test(bText) && /hidden make-default: true/.test(bText), 'B: when Windows says Quartz is the default, the step says so and offers nothing to press', bText);
   await g.ev('document.getElementById("skip").click(), 1');
   check(await b.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 0', 6000).catch(() => false), 'B: Skip setup closes the re-opened welcome');
   flag = readFlag();
@@ -263,10 +287,8 @@ run('welcome-e2e', async (k) => {
 
   /* ================= C: fresh, the registration fails, skip =================================== */
   await wipe();
-  const failScript = path.join(os.tmpdir(), 'welcome-e2e-fail-' + process.pid + '.ps1');
-  fs.writeFileSync(failScript, "Write-Output 'pretending to register'\r\n[Console]::Error.WriteLine('simulated: the registry refused the write')\r\nexit 1\r\n");
   say('boot C: fresh profile, a registration script that fails');
-  const c = await launch({ cdp: PORT, args: ['--first-run'], env: { QUARTZ_TEST_DEFAULT_SCRIPT: failScript } });
+  const c = await launch({ cdp: PORT, args: ['--first-run'], env: { QUARTZ_TEST_DEFAULT_SCRIPT: STANDIN.fail } });
   check(await c.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 1', 15000).catch(() => false), 'C: a wiped profile shows the welcome again');
   const cBefore = { mode: await c.chrome.ev('QuartzTheme.mode()'), engine: await c.chrome.ev('Settings.get("searchEngine")') };
   g = await guest(c);
@@ -277,6 +299,7 @@ run('welcome-e2e', async (k) => {
   const cState = await g.waitFor('document.getElementById("default-card").getAttribute("data-state") === "failed"', 20000).catch(() => false);
   const cText = await g.ev('document.getElementById("default-text").textContent');
   check(cState && /simulated: the registry refused the write/.test(cText), 'C: a failed registration shows Windows\' own reason', cText);
+  check(/quartz-exe step.*first\. You can try again once that has finished\./.test(cText), 'C: the whole reason arrives (PowerShell wraps a long throw over lines)', cText);
   check((await g.ev('document.getElementById("make-default").textContent')) === 'Try again', 'C: and offers Try again');
   await shot(c.chrome, 'C1-default-failed-dark');
   await narrowShot(g, 'C1-default-failed-dark-narrow');
@@ -290,7 +313,6 @@ run('welcome-e2e', async (k) => {
   check(cAfter.mode === cBefore.mode && cAfter.engine === cBefore.engine, 'C: skipping changes nothing it did not ask about (look and engine as the fresh profile had them)', { before: cBefore, after: cAfter });
   g.close();
   await c.quit();
-  try { fs.rmSync(failScript, { force: true }); } catch (e) { /* tmp */ }
   say('boot C2: the skipped profile again');
   const c2 = await launch({ cdp: PORT, args: ['--first-run'] });
   check((await watchNoWelcome(c2.chrome, 4000)) === 0, 'C2: a skipped profile never shows the welcome again');
@@ -316,12 +338,27 @@ run('welcome-e2e', async (k) => {
   /* ================= E: a test profile without --first-run ================================== */
   await wipe();
   say('boot E: fresh test profile, no --first-run');
-  const e = await launch({ cdp: PORT });
+  // E boots with NO stand-in script: the guard must refuse the real one, out loud.
+  const e = await launch({ cdp: PORT, env: { QUARTZ_TEST_DEFAULT_SCRIPT: '' } });
   check((await watchNoWelcome(e.chrome, 4000)) === 0, 'E: other harnesses never see the welcome');
   dbg = await e.chrome.ev('FirstRun._debug()');
   check(dbg.decision && dbg.decision.reason === 'test-profile', 'E: main says test-profile', dbg.decision);
   check(readFlag() === null, 'E: and writes no flag');
+  const guard = await e.chrome.ev('window.api.firstrun.makeDefault()');
+  check(guard && guard.state === 'failed' && /never run the real registration script/.test(guard.reason || ''), 'E: a test profile with no stand-in REFUSES the real registration script, with the reason', guard);
   await e.quit();
+
+  // The machine's real default-browser registration: untouched by this run.
+  if (process.platform === 'win32') {
+    const regAfter = realRegistration();
+    check(regAfter === REG_BEFORE, 'the real default-browser registration is exactly as before the run', regAfter === REG_BEFORE ? 'unchanged' : { before: REG_BEFORE, after: regAfter });
+    const LIVE = 'C:\\Users\\you\\browser';
+    if (fs.existsSync(path.join(LIVE, 'register-default-browser.ps1')) && /QuartzURL\\shell\\open\\command/.test(regAfter)) {
+      const cmd = (regAfter.match(/QuartzURL\\shell\\open\\command\s+\(Default\)\s+REG_SZ\s+(.*)/) || [])[1] || '';
+      check(cmd.toLowerCase().indexOf(LIVE.toLowerCase() + '\\node_modules\\electron\\dist\\quartz.exe') !== -1, 'the user\'s QuartzURL link handler still runs the live checkout (' + LIVE + ')', cmd);
+    }
+  }
+  for (const f of Object.values(STANDIN)) { try { fs.rmSync(f, { force: true }); } catch (err) { /* tmp */ } }
 
   say('shots: ' + shots.length + ' in ' + SHOTS);
 });

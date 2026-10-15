@@ -119,7 +119,22 @@
 
   function pushTo(tab) {
     if (!tab || !tab.viewEl || typeof tab.viewEl.executeJavaScript !== 'function') return;
-    if (typeof window.isViewUsable === 'function' && !window.isViewUsable(tab)) return;
+    if (typeof window.isViewUsable === 'function' && !window.isViewUsable(tab)) {
+      // The page's "hello" can arrive before the chrome has marked the guest ready (dom-ready),
+      // and then this answer would be dropped. The default-browser check used to cover that by
+      // pushing again a moment later, but only while Quartz was NOT the default: with Quartz the
+      // default there was no second push and the page said "Quartz isn't answering". So answer
+      // once the guest is ready instead (the chrome's own dom-ready handler runs first).
+      var v = tab.viewEl;
+      if (v && !tab.asleep && typeof v.addEventListener === 'function' && !v.__welcomeWaitsReady) {
+        v.__welcomeWaitsReady = true;
+        v.addEventListener('dom-ready', function () {
+          v.__welcomeWaitsReady = false;
+          setTimeout(function () { if (tab.viewEl === v) pushTo(tab); }, 0);
+        }, { once: true });
+      }
+      return;
+    }
     var payload = state();
     st.lastPush = payload;
     try {

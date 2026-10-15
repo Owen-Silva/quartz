@@ -360,27 +360,42 @@ WATCHDOG.unref();
     const isDark = (x) => !!(x && x.theme === 'dark' && (x.lum === null || x.lum < 0.35));
     const isLight = (x) => !!(x && x.theme === 'light' && (x.lum === null || x.lum > 0.65));
     const painted = (x) => !!(x && x.lum !== null);
+    // Waits on the real signal, not a clock: both pages wearing `want` (their data-theme, which the
+    // chrome's push sets), and then, with the history page brought on screen, its painted ground.
+    // The ground has to be judged ON SCREEN: the body's 200 ms background fade only runs while the
+    // tab paints, so a history tab in the background keeps the old ground in getComputedStyle until
+    // it is shown, then fades (a back-to-dark run once read {"theme":"dark","lum":0.91} that way).
+    const settle = async (want, judge, ms) => {
+      const t0 = Date.now(); let l = await looks();
+      while (!judge(l) && Date.now() - t0 < (ms || 6000)) { await sleep(100); l = await looks(); }
+      return l;
+    };
+    const wearing = (want) => (l) => !!(l.history && l.newtab && l.history.theme === want && l.newtab.theme === want);
     let lk = await looks();
     check(isDark(lk.history) && painted(lk.history) && isDark(lk.newtab), 'theme: dark, the history page paints dark (and the new tab page is dark)', JSON.stringify(lk));
 
     // 5. The light look: the same tiles, re-captured.
     await ev("setThemeMode('light') || true");
-    await sleep(1500);
+    lk = await settle('light', wearing('light'));
+    check(wearing('light')(lk), 'theme: the switch to light reaches both pages, the background history tab included', JSON.stringify(lk));
     await windowShot('bookmarks-light', true);
     await guestShot(IS_HISTORY, 'history-light');
     await guestShot(IS_NEWTAB, 'newtab-light');
     const ntLight = (await inGuest(IS_NEWTAB, TILES('.qfav'))) || [];
     judgeTiles('new tab (light)', ntLight, 0);
-    lk = await looks();
+    await guestShot(IS_HISTORY, 'history-light-front');
+    lk = await settle('light', (l) => isLight(l.history) && painted(l.history) && isLight(l.newtab));
     check(isLight(lk.newtab), 'theme: switched to light, the new tab page is light', JSON.stringify(lk.newtab));
     const lsProblems = await ev("window.__lsProblems.concat(LookSync.status().state === 'error' ? [String(LookSync.status().reason)] : [])");
     check(lsProblems.length === 0, 'Look Sync: no Problem through two theme flips (dark, then light)', lsProblems.slice(0, 3).join(' | ') || 'none');
     check(isLight(lk.history) && painted(lk.history), 'theme: switched to light, the open history page follows (it used to stay dark)', JSON.stringify(lk.history));
     // ...and back: a history page opened in light follows the switch to dark as well.
     await ev("setThemeMode('dark') || true");
-    await sleep(1200);
-    lk = await looks();
-    check(isDark(lk.history) && painted(lk.history) && isDark(lk.newtab), 'theme: and back to dark, both follow again', JSON.stringify(lk));
+    lk = await settle('dark', wearing('dark'));
+    check(wearing('dark')(lk), 'theme: the switch back to dark reaches both pages, the background history tab included', JSON.stringify(lk));
+    await guestShot(IS_HISTORY, 'history-dark-again');
+    lk = await settle('dark', (l) => isDark(l.history) && painted(l.history) && isDark(l.newtab));
+    check(isDark(lk.history) && painted(lk.history) && isDark(lk.newtab), 'theme: and back to dark, both follow again (the history page paints dark on screen)', JSON.stringify(lk));
 
     // 6. The network: zero requests to a Google favicon host, by every count.
     const perf = [].concat(
