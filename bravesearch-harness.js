@@ -104,6 +104,10 @@ function fakeFetch(url, opts) {
     status, headers: Object.assign({}, headers || {}), text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
   });
   if (mode === 'offline') return Promise.reject(refused);
+  if (mode === 'reset' || mode === 'reset-once') {
+    if (mode === 'reset-once') mode = 'ok';
+    return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'read ECONNRESET' } }));
+  }
   if (mode === 'badkey') return respond(422, F.ERRORS.badKey());
   if (mode === 'rate') return respond(429, F.ERRORS.rate(), F.rateHeaders(1985));
   if (mode === 'notjson') return respond(200, '<html>');
@@ -171,11 +175,23 @@ const mod = B.create({
     clock += 5000; mode = 'offline';
     a = await mod.search({ q: 'other3', kind: 'web', offset: 0, seq: 9 });
     eq('offline answer', a.state, 'offline');
+    let n0 = calls.length;
+    clock += 5000; mode = 'offline';
+    a = await mod.search({ q: 'other3b', kind: 'web', offset: 0, seq: 9 });
+    eq('refused: no second try', calls.length - n0, 1);
+    // a kept-alive connection that dropped under the request: one more try on a fresh one
+    n0 = calls.length; clock += 5000; mode = 'reset-once';
+    a = await mod.search({ q: 'reset1', kind: 'web', offset: 0, seq: 9 });
+    eq('reset once: second try answers', [a.ok, calls.length - n0], [true, 2]);
+    n0 = calls.length; clock += 5000; mode = 'reset';
+    a = await mod.search({ q: 'reset2', kind: 'web', offset: 0, seq: 9 });
+    eq('reset twice: offline, says dropped, two tries only', [a.state, /connection dropped \(ECONNRESET\)/.test(a.detail), calls.length - n0], ['offline', true, 2]);
+    ok('dropped-connection test', B.isDroppedConnection(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET', message: 'other side closed' } })) && !B.isDroppedConnection(refused) && !B.isDroppedConnection(Object.assign(new Error('t'), { name: 'TimeoutError' })));
     clock += 5000; mode = 'notjson';
     a = await mod.search({ q: 'other4', kind: 'web', offset: 0, seq: 10 });
     eq('not JSON -> bad-answer', a.state, 'bad-answer');
     mode = 'ok';
-    eq('failures are not cached', mod.state().cacheEntries, cachedBefore);
+    eq('failures are not cached (the one answer is reset1, which answered on its second try)', mod.state().cacheEntries, cachedBefore + 1);
 
     // check key
     clock += 5000;

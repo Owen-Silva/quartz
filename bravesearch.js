@@ -309,6 +309,16 @@ function classifyStatus(status, json, headers, keyMask) {
   };
 }
 
+/** A connection that dropped under the request (reset / closed pipe), as opposed to refused,
+ * unresolvable, timed out or aborted: the one failure worth a second try (on a fresh connection). */
+function isDroppedConnection(err) {
+  if (!err || err.name === 'TimeoutError' || err.name === 'AbortError') return false;
+  const cause = err.cause;
+  const code = String((cause && cause.code) || err.code || '');
+  const text = String(err.message || '') + ' ' + String((cause && cause.message) || '');
+  return /ECONNRESET|EPIPE|UND_ERR_SOCKET|CONNECTION_RESET|other side closed/i.test(code + ' ' + text);
+}
+
 /**
  * A request that never got an answer -> the 'offline' state, with the actual reason: no network,
  * a name that does not resolve, a refused connection, or Brave too slow. Covers Node fetch's
@@ -436,14 +446,21 @@ function create(deps) {
     const params = new URLSearchParams({ q: req.q, count: String(count || COUNT), offset: String(req.offset), safesearch: 'moderate' });
     const url = apiBase + ENDPOINTS[req.kind] + '?' + params.toString();
     if (!fetchImpl) return fail(req, classifyNetworkError(new Error('no fetch in this build')));
-    await waitTurn();
     let res;
-    try {
-      const opts = { headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': key } };
-      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(TIMEOUT_MS);
-      res = await fetchImpl(url, opts);
-    } catch (err) {
-      return fail(req, classifyNetworkError(err));
+    // A kept-alive connection that the far end closed while it sat idle fails on reuse with a
+    // reset, though a fresh connection would work (or be refused, which is the true answer).
+    // Chromium retries that case once; so does this, through the same rate-limit slot.
+    for (let attempt = 0; ; attempt++) {
+      await waitTurn();
+      try {
+        const opts = { headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': key } };
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(TIMEOUT_MS);
+        res = await fetchImpl(url, opts);
+        break;
+      } catch (err) {
+        if (attempt === 0 && isDroppedConnection(err)) continue;
+        return fail(req, classifyNetworkError(err));
+      }
     }
     const u = monthUsage(res.headers);
     if (u) usage = Object.assign(u, { at: now() });
@@ -599,6 +616,7 @@ module.exports = {
   monthUsage,
   classifyStatus,
   classifyNetworkError,
+  isDroppedConnection,
   API_BASE,
   SIGNUP_URL,
   LINE_PREFIX,

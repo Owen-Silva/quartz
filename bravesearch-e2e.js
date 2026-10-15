@@ -255,11 +255,14 @@ async function guest(urlRe, notId) {
     const dur = await page.ev("[...document.querySelectorAll('.sr-duration')].map((d) => d.textContent).join(',')");
     check(s.results === 5 && dur === '3:00,4:01,5:02,6:03,7:04', 'Videos tab: 5 videos with durations', dur);
     await shot('videos-light');
-    await chrome.ev("setThemeMode('dark'), 1");
+    // The web tab renders light; the flip to dark comes AFTER its links are built, and the Next
+    // link must follow it (search.js relinkLook). Wait on the page wearing dark, not on a timer.
     await page.ev("document.querySelector('.sr-tab[data-kind=web]').click(), 1");
     s = await settle("s.kind === 'web' && s.phase === 'ok'");
+    await chrome.ev("setThemeMode('dark'), 1");
+    await page.waitFor("document.documentElement.getAttribute('data-theme') === 'dark'", 5000);
     const nextHref = await page.ev("document.querySelector('#sr-pager').hidden ? '' : document.querySelector('#sr-next').getAttribute('href')");
-    check(/page=1/.test(nextHref) && /theme=dark/.test(nextHref), 'pager: Next keeps the look', nextHref);
+    check(/page=1/.test(nextHref) && /theme=dark/.test(nextHref), 'pager: Next keeps the look, even after a flip', nextHref);
     await page.ev("document.querySelector('#sr-next').click(), 1");
     s = await settle("s.page === 1 && s.phase === 'ok'");
     check(apiLog[apiLog.length - 1].offset === '1', 'Next page asks Brave for offset 1', JSON.stringify(apiLog[apiLog.length - 1]));

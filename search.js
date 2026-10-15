@@ -404,6 +404,18 @@
         try { window.__applyAccent(hue); } catch (err) { /* keep the authored accent */ }
       }
     }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    /* The tab and pager links carry the look in their URL (pageUrl). They are built when the
+       page renders, so a flip after that would leave them pointing at the old look: rebuild them. */
+    new MutationObserver(relinkLook)
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette'] });
+  }
+
+  function relinkLook() {
+    var tabs = document.querySelectorAll('.sr-tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].href = pageUrl(tabs[i].getAttribute('data-kind'), 0);
+    if ($('sr-pager').hidden) return;
+    if (!$('sr-prev').hidden && page > 0) $('sr-prev').href = pageUrl(kind, page - 1);
+    if (!$('sr-next').hidden) $('sr-next').href = pageUrl(kind, page + 1);
   }
 
   document.addEventListener('DOMContentLoaded', function () {
