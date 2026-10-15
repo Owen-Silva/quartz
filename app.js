@@ -1971,6 +1971,88 @@ function handleEndTaskLine(tab, viewEl, text) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Site logos for the new tab and history pages                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Both pages are preload-less guests, so they cannot reach window.api. They
+ * ask for logos the way they ask for everything else, on a console line
+ * (pagefavicons.js):
+ *
+ *   quartz:favicons {"origins":["https://x.com", ...]}
+ *
+ * and get window.__applyFavicons({ origin: dataUrl | null }) back. This is
+ * deliberately NOT a new IPC or protocol: it reuses the tab strip's own
+ * resolver (TabIcons.lookup over window.api.favicons), so the guest can only
+ * NAME origins and can only RECEIVE data:image URLs. It cannot write the
+ * store, pick a URL to fetch, or read anything but a logo. Heard only from a
+ * new tab or history guest whose viewEl is still the one listened to; origins
+ * must be canonical http(s) origins, at most FAVICONS_MAX per line.
+ */
+const FAVICONS_PREFIX = 'quartz:favicons ';
+const FAVICONS_MAX = 200;
+
+function parseFaviconsLine(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.trim();
+  if (line.indexOf(FAVICONS_PREFIX) !== 0) return null;
+  let msg = null;
+  try { msg = JSON.parse(line.slice(FAVICONS_PREFIX.length)); } catch (err) { return null; }
+  if (!msg || !Array.isArray(msg.origins)) return null;
+  const icons = window.TabIcons;
+  const out = [];
+  const seen = new Set();
+  for (const o of msg.origins) {
+    if (out.length >= FAVICONS_MAX) break;
+    if (typeof o !== 'string' || o.length > 300 || !/^https?:\/\//i.test(o)) continue;
+    const origin = icons && typeof icons.originOf === 'function' ? icons.originOf(o) : null;
+    if (!origin || origin !== o || seen.has(origin)) continue;
+    seen.add(origin);
+    out.push(origin);
+  }
+  return out.length ? out : null;
+}
+
+function handleFaviconsLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl) return false;
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isHistoryTab(tab))) return false;
+  const origins = parseFaviconsLine(text);
+  if (!origins) return false;
+  const icons = window.TabIcons;
+
+  // Answers trickle in (the disk cache, then a probe of the site's own icon
+  // for a miss): gather a tick's worth into one push.
+  let batch = null;
+  const send = (origin, data) => {
+    if (!batch) {
+      batch = {};
+      setTimeout(() => {
+        const map = batch;
+        batch = null;
+        if (tab.viewEl !== viewEl || !isViewUsable(tab)) return;
+        let payload = '';
+        try { payload = JSON.stringify(map); } catch (err) { return; }
+        try {
+          const pending = viewEl.executeJavaScript(
+            'window.__applyFavicons && window.__applyFavicons(' + payload + ')'
+          );
+          if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+        } catch (err) { /* guest went away mid-call */ }
+      }, 0);
+    }
+    // A logo already in this batch is never replaced by a later "nothing".
+    if (typeof batch[origin] === 'string' && !data) return;
+    batch[origin] = (typeof data === 'string' && /^data:image\//i.test(data)) ? data : null;
+  };
+
+  for (const origin of origins) {
+    if (!icons || typeof icons.lookup !== 'function') { send(origin, null); continue; }
+    try { icons.lookup(origin, (data) => send(origin, data)); } catch (err) { send(origin, null); }
+  }
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
 /* Native apps on the new tab page                                     */
 /* ------------------------------------------------------------------ */
 
@@ -10705,6 +10787,12 @@ function wireViewEvents(tab) {
   // console line per press, answered on window.__applyEndTask.
   viewEl.addEventListener('console-message', (event) => {
     handleEndTaskLine(tab, viewEl, event && event.message);
+  });
+
+  // Site logos for the new tab and history pages, `quartz:favicons {json}`,
+  // answered on window.__applyFavicons from the tab strip's own store.
+  viewEl.addEventListener('console-message', (event) => {
+    handleFaviconsLine(tab, viewEl, event && event.message);
   });
 
   // ...and to launch, focus, pin, unpin or re-index a native app, on

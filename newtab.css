@@ -1,4 +1,5 @@
 @import url("tokens.css");
+@import url("favtile.css");
 
 /* ============================================================
    newtab.css — Quartz's Home (the new tab page).
@@ -2402,9 +2403,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
     box-shadow       var(--dur-slow) var(--ease);
 }
 
-/* the chip's favicon. Sits before the label and touches nothing else:
-   the glass recipe above is unchanged. newtab.js drops the <img> when it
-   fails to load, so a chip without an icon keeps its normal padding. */
+/* the chip's logo (a favtile.css tile: the site's icon or its monogram).
+   Sits before the label and touches nothing else: the glass recipe above
+   is unchanged. */
 .chip-icon {
   flex: 0 0 auto;
   width: 16px;

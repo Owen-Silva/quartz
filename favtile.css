@@ -1,0 +1,61 @@
+/* favtile.css — a site's logo outside the tab strip (TabIcons.tile in tabicons.js).
+
+   Used by the bookmarks bar (chrome), the new tab page and the history page.
+   It is the tab chip's logo box (chrome.css, .tab-fav) at whatever size the
+   surface already used: one --qfav square that never changes size, with the
+   monogram tile and the site's icon laid over each other.
+   data-state: pending (held empty for the moment the store takes, so a known
+   logo never flashes its letter first), icon, mono.
+   The monogram matches .tab-fav > .tab-mono: the site's first letter on a
+   quiet neutral tile, no per-site colour. Radius and letter scale with the
+   box (4px and 9px at the chip's 14px). */
+
+.qfav {
+  --qfav: 16px;
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: var(--qfav);
+  height: var(--qfav);
+  vertical-align: middle;
+  /* The surface's own icon class may round an <img>; the tile draws its own corners. */
+  border-radius: 0;
+  overflow: visible;
+}
+
+.qfav > .qfav-img,
+.qfav > .qfav-mono {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--qfav);
+  height: var(--qfav);
+  box-sizing: border-box;
+}
+
+/* A data: icon, hidden until it has DECODED, so a half-loaded or broken
+   image never shows. Not rounded: a logo's corners are the site's. */
+.qfav > .qfav-img {
+  display: block;
+  object-fit: contain;
+  visibility: hidden;
+}
+.qfav[data-state="icon"] > .qfav-img { visibility: visible; }
+
+.qfav > .qfav-mono {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--qfav) * 0.2857);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: calc(var(--qfav) * 0.643);
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1;
+}
+.qfav[data-state="mono"] > .qfav-mono { display: flex; }

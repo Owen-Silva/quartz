@@ -38,8 +38,9 @@
   var GLYPH_GLOBE = '\uE774';   // "Globe": the favicon that did not load
   var GLYPH_MORE = '\uE712';    // "More": the overflow button
 
-  /* One shared favicon service, the same one the new tab page uses. */
-  var FAVICON_URL = 'https://www.google.com/s2/favicons?domain=';
+  /* Logos come from the tab strip's own per-origin store (TabIcons.chromeTile:
+     the disk cache, then the site's own /favicon.ico), never a third-party
+     favicon service, and a site with no icon gets the chip's monogram tile. */
 
   var BAR_ID = 'bookmarks-bar';
   var MENU_ID = 'bm-overflow';
@@ -173,8 +174,8 @@
   }
 
   /**
-   * One bookmark. The favicon may be blocked or missing, so the <img> hides
-   * itself and hands the row to a globe glyph rather than leaving a hole.
+   * One bookmark. Its logo is a tile that is never blank: the site's icon
+   * from the store, or the monogram when the site has none.
    */
   function makeItem(chip) {
     var url = String((chip && chip.url) || '');
@@ -190,29 +191,18 @@
     a.setAttribute('role', 'menuitem');
     a.draggable = false;
 
-    var icon = document.createElement('img');
-    icon.className = 'bm-icon';
-    icon.width = 16;
-    icon.height = 16;
-    icon.alt = '';
-    icon.loading = 'lazy';
-    icon.setAttribute('aria-hidden', 'true');
-
-    var fallback = el('span', 'glyph bm-fallback', GLYPH_GLOBE);
-    fallback.setAttribute('aria-hidden', 'true');
-    fallback.hidden = true;
-
-    if (host) {
-      icon.onerror = function () { icon.hidden = true; fallback.hidden = false; };
-      icon.src = FAVICON_URL + encodeURIComponent(host) + '&sz=32';
+    var icon = null;
+    var icons = window.TabIcons;
+    if (host && icons && typeof icons.chromeTile === 'function') {
+      icon = icons.chromeTile(url || host, { className: 'bm-icon', size: 16 });
     } else {
-      // Nothing to ask the service about: go straight to the glyph.
-      icon.hidden = true;
-      fallback.hidden = false;
+      // Not a web address (or no icon module): the globe, as the tab strip
+      // gives a bundled page its glyph rather than a letter.
+      icon = el('span', 'glyph bm-fallback', GLYPH_GLOBE);
+      icon.setAttribute('aria-hidden', 'true');
     }
 
     a.appendChild(icon);
-    a.appendChild(fallback);
     a.appendChild(el('span', 'bm-label', label));
 
     a.addEventListener('click', function (event) { activate(event, url); });

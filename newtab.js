@@ -102,8 +102,7 @@ const LINKS = [
   { label: 'Claude',    url: 'https://claude.ai' },
 ];
 
-/* One shared favicon service; the chip falls back to its label if it 404s. */
-const FAVICON_URL = 'https://www.google.com/s2/favicons?domain=';
+/* Site logos: faviconImg() below, from the tab strip's store. No favicon service. */
 
 
 /* ------------------------------------------------------------------ */
@@ -198,27 +197,20 @@ const linkRow = document.getElementById('links');
    does not rebuild the row (and re-request every favicon). */
 let renderedKey = null;
 
-function faviconUrl(host) {
-  return FAVICON_URL + encodeURIComponent(host) + '&sz=32';
-}
-
 /**
- * One 16px favicon. A blocked or missing icon must not leave a hole, so
- * the <img> removes itself on error and the row keeps its normal padding.
+ * One site logo, `size` CSS px (16 unless a surface says otherwise): the tab
+ * strip's own tile (pagefavicons.js + tabicons.js). The icon comes from the
+ * per-origin store the tabs use, through the chrome; a site with no icon
+ * shows the chip's monogram. Never blank, never a broken image, and never a
+ * request to a favicon service.
  */
-function faviconImg(host, className) {
-  const icon = document.createElement('img');
-  icon.className = className;
-  icon.src = faviconUrl(host);
-  icon.width = 16;
-  icon.height = 16;
-  icon.alt = '';
-  icon.loading = 'lazy';
-  icon.setAttribute('aria-hidden', 'true');
-  icon.onerror = function () {
-    if (icon.parentNode) icon.parentNode.removeChild(icon);
-  };
-  return icon;
+function faviconImg(host, className, size) {
+  if (window.PageFavicons) return window.PageFavicons.node(host, size || 16, className);
+  // No logo module (a stripped harness): an empty box keeps the layout.
+  const box = document.createElement('span');
+  box.className = className;
+  box.setAttribute('aria-hidden', 'true');
+  return box;
 }
 
 /** Identity of a chip list, cheap enough to compare on every push. */
@@ -242,7 +234,7 @@ function renderLinks() {
     chip.className = 'chip';
     chip.href = item.url;
 
-    if (item.host) chip.appendChild(faviconImg(item.host, 'chip-icon'));
+    if (item.host) chip.appendChild(faviconImg(item.url || item.host, 'chip-icon'));
 
     chip.appendChild(document.createTextNode(item.label));
     frag.appendChild(chip);
@@ -661,7 +653,7 @@ function buildSavedTile(entry) {
   link.title = entry.pending
     ? 'Saving ' + item.label + '…'
     : item.label + ' — ' + item.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  link.appendChild(faviconImg(item.host, 'rtile-icon'));
+  link.appendChild(faviconImg(item.url || item.host, 'rtile-icon'));
 
   const label = document.createElement('span');
   label.className = 'rtile-label';
@@ -3238,21 +3230,14 @@ function dockTermNode() {
 }
 
 /**
- * A web pin's icon: the same favicon service, and the same 32px request,
- * the chips row above already uses — one service for the whole page. The
- * chips drop a missing icon and keep their padding; a tile cannot, so this
- * one falls back to the lettered disc instead of leaving a hole.
+ * A web pin's icon: the same logo tile the chips row above uses, at the
+ * dock's 32px — the store's logo, or the monogram, never a hole.
  */
 function dockFaviconNode(pin) {
   if (!pin.host) return dockGlyphNode(pin.name, true);
 
-  const img = faviconImg(pin.host, 'dock-icon dock-icon-web');
-  img.width = 32;
-  img.height = 32;
-  img.onerror = function () {
-    if (img.parentNode) img.parentNode.replaceChild(dockGlyphNode(pin.name, true), img);
-  };
-  return img;
+  // The tile at the dock's 32px: the store's logo, or the tab strip's monogram.
+  return faviconImg(pin.host, 'dock-icon dock-icon-web', 32);
 }
 
 /**

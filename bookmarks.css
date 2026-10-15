@@ -111,8 +111,8 @@
   box-shadow: var(--focus-ring);
 }
 
-/* The favicon, and the globe that takes its place when the service is
-   blocked or the icon 404s. One of the two is always hidden. */
+/* The logo: a favtile.css tile (the site's icon from the tab strip's store,
+   or its monogram), or the globe for a bookmark that is not a web address. */
 #bookmarks-bar .bm-icon,
 #bm-overflow .bm-icon {
   width: 16px;

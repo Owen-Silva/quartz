@@ -350,9 +350,116 @@
     return browserResolver;
   }
 
+  /* ---- the logo tile, for every surface outside the tab strip ------------ */
+  /*
+   * The bookmarks bar (chrome), the new tab page and the history page (both
+   * preload-less guests) used to point an <img> at Google's favicon service:
+   * every site the user saved or visited went to Google, nothing showed offline,
+   * and a site Google had no icon for drew a grey globe. They now draw the
+   * tab chip's own layers, from the same per-origin store:
+   *
+   *   span.qfav[data-state=pending|icon|mono]   one --qfav square, never resized
+   *     span.qfav-mono                           the chip's monogram tile
+   *     img.qfav-img                             a data: icon, shown once DECODED
+   *
+   * favtile.css styles it as .tab-fav > .tab-mono is styled (chrome.css). The
+   * img is only ever given a data:image URL, so a tile never makes a request.
+   */
+
+  /** The origin for a bare host ("mail.google.com") or a full URL. */
+  function tileOrigin(urlOrHost) {
+    var s = String(urlOrHost == null ? '' : urlOrHost).trim();
+    if (!s) return null;
+    return originOf(/^https?:\/\//i.test(s) ? s : 'https://' + s);
+  }
+
+  /**
+   * A logo tile, `size` CSS px square, held empty ('pending') until paintTile.
+   * The caller's className rides along so its existing layout rules (margins,
+   * flex) keep applying unchanged.
+   */
+  function tile(urlOrHost, opts) {
+    var doc = root.document;
+    var o = opts || {};
+    var origin = tileOrigin(urlOrHost);
+    var el = doc.createElement('span');
+    el.className = 'qfav' + (o.className ? ' ' + o.className : '');
+    el.style.setProperty('--qfav', (o.size || 16) + 'px');
+    el.setAttribute('aria-hidden', 'true');
+    el.setAttribute('data-state', 'pending');
+    el.setAttribute('data-origin', origin || '');
+    var mono = doc.createElement('span');
+    mono.className = 'qfav-mono';
+    mono.textContent = monogramFor(origin || String(urlOrHost || '')) || '?';
+    var img = doc.createElement('img');
+    img.className = 'qfav-img';
+    img.alt = '';
+    img.draggable = false;
+    img.decoding = 'async';
+    el.appendChild(mono);
+    el.appendChild(img);
+    return el;
+  }
+
+  /**
+   * Give a tile its answer: a data:image URL shows the logo once it decodes;
+   * anything else (null: no icon) shows the monogram. A tile already showing
+   * a logo is never knocked back to its letter by a later "nothing".
+   */
+  function paintTile(el, data) {
+    if (!el || !el.querySelector) return;
+    var img = el.querySelector('img.qfav-img');
+    if (!img) return;
+    if (typeof data === 'string' && isDataImage(data)) {
+      if (img.getAttribute('src') === data) return;
+      // Pending stays pending (no letter flash) while it decodes; a letter
+      // already up stays up until the logo is ready to replace it.
+      img.onload = function () { el.setAttribute('data-state', 'icon'); };
+      img.onerror = function () {
+        img.removeAttribute('src');
+        el.setAttribute('data-state', 'mono');
+      };
+      img.src = data;
+      return;
+    }
+    if (el.getAttribute('data-state') !== 'icon') el.setAttribute('data-state', 'mono');
+  }
+
+  /**
+   * The logo for an origin, as the tab strip would find it with no page to
+   * ask: the disk cache, then the site's own well-known icons (once per
+   * origin per run). `onAnswer(data|null)` is called with the cache's answer
+   * and again if the site probe finds a logo later. Chrome renderer only.
+   */
+  function lookup(origin, onAnswer) {
+    if (!origin) { onAnswer(null); return; }
+    var r = resolver();
+    var known = r.peek(origin);
+    var first = known !== undefined ? Promise.resolve(known) : r.cached(origin);
+    first.then(function (hit) {
+      if (hit && hit.data) { onAnswer(hit.data); return null; }
+      onAnswer(null);
+      return r.probe(origin).then(function (pr) {
+        if (pr && pr.entry && pr.entry.data) onAnswer(pr.entry.data);
+      });
+    }).catch(function () { onAnswer(null); });
+  }
+
+  /** A tile wired straight to lookup(): the bookmarks bar's logos. Chrome only. */
+  function chromeTile(urlOrHost, opts) {
+    var el = tile(urlOrHost, opts);
+    lookup(el.getAttribute('data-origin') || null, function (data) { paintTile(el, data); });
+    return el;
+  }
+
   var exported = {
     originOf: originOf,
     monogramFor: monogramFor,
+    tile: tile,
+    chromeTile: chromeTile,
+    lookup: lookup,
+    paintTile: paintTile,
+    tileOrigin: tileOrigin,
     orderCandidates: orderCandidates,
     createResolver: createResolver,
     resolver: resolver,

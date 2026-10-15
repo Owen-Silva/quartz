@@ -35,7 +35,6 @@
   var DEBOUNCE = 60;          // ms of quiet before the list re-filters
   var HOUR = 3.6e6;
   var DAY = 86400000;
-  var FAVICON = 'https://www.google.com/s2/favicons?domain=';
 
   /* --- state ---------------------------------------------------- */
 
@@ -171,18 +170,9 @@
 
     var favbox = document.createElement('span');
     favbox.className = 'favbox';
-    if (host) {
-      var img = document.createElement('img');
-      img.className = 'fav';
-      img.width = 16;
-      img.height = 16;
-      img.alt = '';
-      img.loading = 'lazy';
-      img.referrerPolicy = 'no-referrer';
-      img.addEventListener('error', function () { img.hidden = true; });
-      img.src = FAVICON + encodeURIComponent(host) + '&sz=32';
-      favbox.appendChild(img);
-    }
+    // The tab strip's logo: the store's icon or the monogram, never blank
+    // and never a request to a favicon service (pagefavicons.js).
+    if (host && window.PageFavicons) favbox.appendChild(window.PageFavicons.node(item.url, 16, 'fav'));
     row.appendChild(favbox);
 
     var time = document.createElement('span');
