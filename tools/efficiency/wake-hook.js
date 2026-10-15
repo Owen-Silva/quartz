@@ -57,8 +57,12 @@ function makeStub(name) {
 //   noreg       spawn: refuses `reg` (the policy read), passes everything else to the real spawn
 const SCHOOL = new Set(list(process.env.QWAKE_SCHOOL));
 const KEEP = new Set([...OFF].filter((x) => x.startsWith('-')).map((x) => x.slice(1)));
+// QWAKE_AB=<name>: every './x' main.js requires is tools/efficiency/ab/x-<name>.js when that file
+// exists (a whole older build's changed modules, e.g. made with
+// `git show 5959017:stats.js > tools/efficiency/ab/stats-master.js`; not committed).
+const AB = String(process.env.QWAKE_AB || '').trim();
 
-if (OFF.size || SCHOOL.size) {
+if (OFF.size || SCHOOL.size || AB) {
   const load = Module._load;
   Module._load = function qwakeLoad(request, parent, isMain) {
     const rel = /^\.\.?[\\/]/.test(request);
@@ -70,6 +74,10 @@ if (OFF.size || SCHOOL.size) {
     }
     // ab-<name>: main.js's './school' is tools/efficiency/ab/school-<name>.js (an older school.js
     // for an A/B in one run); that copy's own './x' requires resolve against the app dir.
+    if (AB && rel && fromMain) {
+      const alt = path.join(__dirname, 'ab', base + '-' + AB + '.js');
+      if (fs.existsSync(alt)) { stubbed.push(base + '@' + AB); return load.call(this, alt, parent, isMain); }
+    }
     const ab = [...SCHOOL].find((x) => x.startsWith('ab-'));
     if (ab && base === 'school' && fromMain) {
       return load.call(this, path.join(__dirname, 'ab', 'school-' + ab.slice(3) + '.js'), parent, isMain);
@@ -107,6 +115,33 @@ if (OFF.size || SCHOOL.size) {
     }
     return mod;
   };
+}
+
+// QWAKE_GUARD=on: install ../../uvquiet.js before main.js runs (an A/B on a build without it).
+// QWAKE_GUARD=off: make main.js's own install a no-op (the guard is already in place, as a fake).
+// QWAKE_GUARD_LOG=<file>: every 10 s, write the guard's counters and where the activations that
+// still go through come from (top stack frames, tallied).
+if (process.env.QWAKE_GUARD === 'off' && typeof process.activateUvLoop === 'function') {
+  const real = process.activateUvLoop;
+  const passthrough = function activateUvLoop() { return real.apply(process, arguments); };
+  passthrough.__uvquiet = { skipped: 0, passed: 0, disabledByHook: true };
+  process.activateUvLoop = passthrough;
+} else if (process.env.QWAKE_GUARD === 'on' || process.env.QWAKE_GUARD_LOG) {
+  const stacks = {};
+  const logFile = process.env.QWAKE_GUARD_LOG;
+  const counts = require(path.join(__dirname, '..', '..', 'uvquiet.js')).install({
+    onPass: logFile ? () => {
+      const lines = String(new Error().stack).split('\n').slice(3, 7).map((l) => l.trim().replace(/\(.*[\\/]/, '(')).join(' < ');
+      stacks[lines] = (stacks[lines] || 0) + 1;
+    } : null,
+  });
+  if (logFile && counts) {
+    const t = setInterval(() => {
+      const top = Object.entries(stacks).sort((a, b) => b[1] - a[1]).slice(0, 15);
+      try { fs.writeFileSync(logFile, JSON.stringify({ atS: Math.round((Date.now() - T0) / 1000), counts, top }, null, 1)); } catch (e) { /* diag only */ }
+    }, 10000);
+    t.unref();
+  }
 }
 
 if (NO.has('fswatch')) {

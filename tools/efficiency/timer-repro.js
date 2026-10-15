@@ -17,17 +17,29 @@ const os = require('os');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.setPath('userData', path.join(os.tmpdir(), 'timer-repro-' + process.pid));
 const arg = process.argv.find((a) => a.startsWith('--timers='));
-const mode = arg ? arg.slice('--timers='.length) : 'none';
+const full = arg ? arg.slice('--timers='.length) : 'none';
+const guard = /-guard$/.test(full);
+const mode = full.replace(/-guard$/, '');
+if (guard) require(path.join(__dirname, '..', '..', 'uvquiet.js')).install();
 
 //     unref3s-push<N>     the push is N ms instead of 100
 //     unref3s-pushimm     the push is armed from a setImmediate, outside the timer callback
+//     child1s             a typeperf child streaming one CSV row a second to a 'data' listener
+//                         (stats.js's sampler without the rest of Quartz)
+//     <mode>-guard        <mode> with ../../uvquiet.js installed first (no activateUvLoop from
+//                         inside Node's own callbacks)
 function startTimers() {
   const unref = !/^ref/.test(mode);
   const keep = (t) => { if (unref && t.unref) t.unref(); return t; };
   const m = /-push(imm)?(\d+)?$/.exec(mode);
   const pushMs = m && m[2] ? Number(m[2]) : 100;
   const push = () => keep(setTimeout(() => {}, pushMs));
-  if (mode === 'unref3s' || mode === 'ref3s') keep(setInterval(() => {}, 3000));
+  if (mode === 'child1s') {
+    const child = require('child_process').spawn('typeperf', [String.raw`\Processor(_Total)\% Processor Time`, '-si', '1'], { windowsHide: true });
+    child.stdout.on('data', () => {});
+    child.stderr.on('data', () => {});
+    app.on('before-quit', () => { try { child.kill(); } catch (e) { /* gone */ } });
+  } else if (mode === 'unref3s' || mode === 'ref3s') keep(setInterval(() => {}, 3000));
   // The push through timers/promises: the same Node timer, WITHOUT Electron's setTimeout wrapper
   // (which calls process.activateUvLoop(), a uv_async_send, on every call).
   else if (mode === 'unref3s-pushpromise') keep(setInterval(() => { require('timers/promises').setTimeout(100, null, { ref: false }).then(() => {}); }, 3000));

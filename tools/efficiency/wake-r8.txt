@@ -1,0 +1,13 @@
+# wake-bisect.js round 8 (lane idle2): what in "Home focused" makes 1,900-3,700 main wakeups/s.
+# Each focus=<part> starts one piece of what the focus edge starts (see FOCUS_PART). The repro
+# conditions are plain Electron: does a typeperf child streaming 1 row/s storm on its own, and
+# does uvquiet.js's guard stop the known activateUvLoop-from-a-timer storm?
+fs-stats:focus=stats
+fs-board:focus=board
+fs-idle:focus=idle
+fs-full:focus
+r-child:repro=child1s
+r-child-g:repro=child1s-guard
+r-act:repro=unref3s-activate
+r-act-g:repro=unref3s-activate-guard
+bare:BARE

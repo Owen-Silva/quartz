@@ -16,6 +16,14 @@
 //   snap         a live handles dump only (cheap; rate stays comparable)
 //   nohook       launch without -r at all
 //   BARE         plain Electron (bare-main.js --acrylic --webview), the framework's floor
+//   ab=<name>    every module main.js requires that has tools/efficiency/ab/<mod>-<name>.js loads that
+//                copy instead (QWAKE_AB): an older build in the same run
+//   url=<u>      open one tab on <u> (the argv URL), on top of Home
+//   env=K=V      one extra environment variable (e.g. TOPROW_PIPE=<a pipe nobody serves>: toprow
+//                then retries every 2 s, as it does on a machine without Mantle)
+//   focus        --focus-at s after boot, tell the chrome its window is focused (CDP: windowBlurred =
+//                false, then the same sync calls the real focus edge makes), so Home's stats card
+//                subscribes and the 1 s sampler runs. The OS-level focus itself is not simulated.
 // After --settle s the main process's per-thread context switches are read at the start, the
 // middle and the end of a --window s window. ctx/s of the main process is the wakeup rate.
 'use strict';
@@ -27,7 +35,7 @@ const { spawn, execFileSync } = require('child_process');
 const REPO = path.join(__dirname, '..', '..');
 const argv = Object.fromEntries(process.argv.slice(2).map((a) => { const m = /^--([^=]+)(?:=(.*))?$/.exec(a); return m ? [m[1], m[2] === undefined ? true : m[2]] : [a, true]; }));
 const num = (k, d) => (argv[k] !== undefined && isFinite(Number(argv[k])) ? Number(argv[k]) : d);
-const SETTLE = num('settle', 45), WINDOW = num('window', 60), STAGGER = num('stagger', 3);
+const SETTLE = num('settle', 45), WINDOW = num('window', 60), STAGGER = num('stagger', 3), FOCUS_AT = num('focus-at', 12);
 const OUT = path.resolve(argv.out || 'wake-out');
 const ELECTRON = path.join(REPO, 'node_modules', 'electron', 'dist', 'electron.exe');
 const HOOK = path.join(__dirname, 'wake-hook.js');
@@ -41,11 +49,17 @@ fs.mkdirSync(OUT, { recursive: true });
 
 function parseConds(s) {
   return String(s || 'base;bare:BARE').split(';').map((x) => x.trim()).filter(Boolean).map((spec, i) => {
-    const [name, opts = ''] = spec.split(':');
-    const c = { i, name, off: '', no: '', sch: '', diag: false, snap: false, nohook: false, bare: false, port: 9600 + i };
+    const cut = spec.indexOf(':');
+    const name = cut < 0 ? spec : spec.slice(0, cut), opts = cut < 0 ? '' : spec.slice(cut + 1);
+    const c = { i, name, off: '', no: '', sch: '', ab: '', url: '', env: {}, focus: false, diag: false, snap: false, nohook: false, bare: false, port: 9600 + i };
     for (const o of opts.split(',').map((y) => y.trim()).filter(Boolean)) {
       if (o === 'BARE') c.bare = true;
       else if (o === 'diag') c.diag = true;
+      else if (o === 'focus') c.focus = 'full';
+      else if (o.startsWith('focus=')) c.focus = o.slice(6);
+      else if (o.startsWith('ab=')) c.ab = o.slice(3);
+      else if (o.startsWith('url=')) c.url = o.slice(4);
+      else if (o.startsWith('env=')) { const kv = o.slice(4); const e = kv.indexOf('='); c.env[kv.slice(0, e)] = kv.slice(e + 1); }
       else if (o === 'snap') c.snap = true;
       else if (o === 'nohook') c.nohook = true;
       else if (o.startsWith('off=')) c.off = o.slice(4).split('+').join(',');
@@ -58,7 +72,7 @@ function parseConds(s) {
 }
 
 function launch(c) {
-  const env = Object.assign({}, process.env, { QWAKE_OFF: c.off, QWAKE_NO: c.no, QWAKE_SCHOOL: c.sch });
+  const env = Object.assign({}, process.env, { QWAKE_OFF: c.off, QWAKE_NO: c.no, QWAKE_SCHOOL: c.sch, QWAKE_AB: c.ab }, c.env);
   const at = SETTLE + 5;
   if (c.diag) Object.assign(env, { QWAKE_DIAG: path.join(OUT, 'diag-' + c.name + '.json'), QWAKE_DIAG_AT: String(at), QWAKE_DIAG_FOR: '20' });
   if (c.snap) Object.assign(env, { QWAKE_SNAP: path.join(OUT, 'snap-' + c.name + '.json'), QWAKE_DIAG_AT: String(at) });
@@ -69,6 +83,7 @@ function launch(c) {
     args = c.nohook ? [] : ['-r', HOOK];
     args.push('.', '--remote-debugging-port=' + c.port, '--test-profile', '--profile-name=wake' + c.i + 'p' + process.pid,
       '--offscreen', '--show-inactive', '--measure-visible');
+    if (c.url) args.push(c.url);
   }
   const log = fs.openSync(path.join(OUT, 'log-' + c.name + '.txt'), 'w');
   const child = spawn(ELECTRON, args, { cwd: REPO, env, stdio: ['ignore', log, log], windowsHide: true });
@@ -88,6 +103,36 @@ async function bootCheck(c) {
   }
   c.boot = 'NO CHROME PAGE';
 }
+
+// One Runtime.evaluate in the chrome page (index.html) of a condition's instance.
+async function cdpEval(port, expr) {
+  const WebSocket = require(path.join(REPO, 'node_modules', 'ws'));
+  const list = await (await fetch('http://127.0.0.1:' + port + '/json')).json();
+  const page = list.find((t) => t.type === 'page' && /index\.html/.test(String(t.url)));
+  if (!page) return 'no chrome page';
+  const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
+  await new Promise((r, j) => { ws.on('open', r); ws.on('error', j); });
+  const out = await new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const m = JSON.parse(raw.toString());
+      if (m.id === 1) resolve(m.result && m.result.result && 'value' in m.result.result ? m.result.result.value : JSON.stringify(m.error || m.result).slice(0, 300));
+    });
+    ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
+    setTimeout(() => resolve('cdp timeout'), 5000);
+  });
+  try { ws.close(); } catch (e) { /* gone */ }
+  return out;
+}
+// focus=<part>: only one of the things the real focus edge starts. stats = the stats sampler alone
+// (subscribe through the chrome's API, the window stays blurred); board = Home's board un-paused;
+// idle = the music player and the now-playing poll (syncIdlePresence).
+const FOCUS_PART = {
+  stats: '(statsApi().subscribe(), "stats subscribed")',
+  board: '(windowBlurred = false, syncBoardPause(), "board un-paused")',
+  idle: '(windowBlurred = false, syncIdlePresence(), "idle presence synced")',
+};
+const FOCUS_EXPR = '(windowBlurred = false, syncBoardPause(), syncStatsSubscription(), ' +
+  'JSON.stringify({ statsSubscribed, tabs: tabs.length, active: String((getActiveTab() || {}).url || "").slice(-40) }))';
 
 function readThreads(pids) {
   const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'wake-threads.ps1'), '-Pids', pids.join(',')], { encoding: 'utf8', windowsHide: true, timeout: 90000 });
@@ -123,6 +168,13 @@ function rate(a, b, pid) {
   try {
     for (const c of conds) { launch(c); await sleep(STAGGER * 1000); }
     await Promise.all(conds.map(bootCheck));
+    if (conds.some((c) => c.focus)) {
+      await sleep(FOCUS_AT * 1000);
+      for (const c of conds.filter((x) => x.focus && x.boot === 'ok')) {
+        try { c.focusResult = await cdpEval(c.port, FOCUS_PART[c.focus] || FOCUS_EXPR); } catch (e) { c.focusResult = 'focus failed: ' + (e && e.message); }
+        console.log('focus ' + c.name + ': ' + c.focusResult);
+      }
+    }
     const since = Math.max(...conds.map((c) => c.launchedAt));
     await sleep(Math.max(0, SETTLE * 1000 - (Date.now() - since)));
     const pids = conds.map((c) => c.pid);
@@ -142,7 +194,7 @@ function rate(a, b, pid) {
   }
   const rows = conds.map((c) => ({ name: c.name, off: c.off, no: c.no, sch: c.sch, diag: c.diag, boot: c.boot,
     mainCtxPerS: c.whole && c.whole.ctxPerS, halves: [c.half1 && c.half1.ctxPerS, c.half2 && c.half2.ctxPerS],
-    topThreads: c.whole && c.whole.top, mainCpuSper10min: c.whole && c.whole.cpuSper10min, tree: c.whole && c.whole.tree, pages: c.pages }));
+    topThreads: c.whole && c.whole.top, mainCpuSper10min: c.whole && c.whole.cpuSper10min, tree: c.whole && c.whole.tree, pages: c.pages, ab: c.ab, url: c.url, env: c.env, focus: c.focusResult }));
   fs.writeFileSync(path.join(OUT, 'wake-result.json'), JSON.stringify({ settle: SETTLE, window: WINDOW, cpus: os.cpus().length, rows }, null, 1));
   console.log('name                 boot  main ctx/s [half1 half2]  top threads        main CPU s/10min  tree: procs ctx/s CPU s/10min  off / no');
   for (const r of rows) {

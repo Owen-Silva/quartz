@@ -1,0 +1,13 @@
+# wake-bisect.js round 7 (lane idle2): uvquiet.js (main.js installs it first thing) on top of
+# round 6's timer fixes. f- = this branch as it ships; n- = the same with the guard switched off
+# by the hook (QWAKE_GUARD=off). Home with no tabs unless url=; focus = stats card subscribed.
+f-home-1:
+f-home-2:
+f-tab:url=https://example.com/
+f-focus-1:focus
+f-focus-2:focus,env=QWAKE_GUARD_LOG=wake-out/guard-f-focus-2.json
+f-focus-nostats:focus,off=stats
+f-toprow:env=TOPROW_PIPE=\\.\pipe\qwake-no-mantle
+n-home:env=QWAKE_GUARD=off
+n-focus:focus,env=QWAKE_GUARD=off
+bare:BARE
