@@ -112,6 +112,25 @@ a { color: inherit; text-decoration: none; }
 }
 .sr-attrib:hover { color: var(--text); border-color: var(--hairline-strong); }
 
+/* "plus Provider's logo" (same clause): Brave's own lockup, shipped in
+   assets/brave/ (SOURCE.md), never redrawn or recoloured. The light
+   wordmark on dark, the dark wordmark on light; one is display:none. */
+.sr-attrib {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+.sr-brave {
+  display: block;
+  flex: none;
+  width: auto;
+  height: 13px;
+}
+.sr-brave-on-light,
+html[data-theme="light"] .sr-brave-on-dark { display: none; }
+html[data-theme="light"] .sr-brave-on-light { display: block; }
+
 .sr-row2 {
   display: flex;
   align-items: center;

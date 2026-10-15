@@ -114,7 +114,8 @@ function webHref(value) {
   } catch { return ''; }
 }
 
-/** Images (favicons, thumbnails) must be https: the page's CSP allows nothing else. */
+/** Images (favicons, thumbnails) must be https. The page's CSP also allows file:, but only for
+ *  its own Brave logo (assets/brave/); a result never gets a file: or any other image URL. */
 function imageHref(value) {
   const href = webHref(value);
   return href.indexOf('https:') === 0 ? href : '';

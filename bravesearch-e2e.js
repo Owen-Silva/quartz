@@ -35,7 +35,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9418'));
 const INSPECT_PORT = Number(opt('inspect', '9419'));
-const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-search-shots'));
+const SHOTS = path.resolve(opt('shots', process.env.QUARTZ_SHOTS || path.join(os.tmpdir(), 'quartz-search-shots')));   // QUARTZ_SHOTS: a cloud run brings them back
 const KEEP = argv.includes('--keep');
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -235,12 +235,29 @@ async function guest(urlRe, notId) {
     const darkBg = await page.ev('getComputedStyle(document.body).backgroundColor');
     const darkText = await page.ev("getComputedStyle(document.querySelector('.sr-desc')).color");
     check(darkBg === 'rgb(20, 21, 22)', 'dark: page wears --bg #141516', darkBg + ' / text ' + darkText);
+    // Brave's terms 4(d): "POWERED BY BRAVE" plus their logo. Each attribution shows exactly one
+    // logo, the theme's own file, loaded from assets/brave/ (the CSP allows it), 13 px tall, right
+    // after the words. naturalWidth 0 = blocked or missing.
+    const logoExpr = `(() => [...document.querySelectorAll('.sr-attrib')].map((a) => {
+      const shown = [...a.querySelectorAll('img.sr-brave')].filter((i) => getComputedStyle(i).display !== 'none');
+      const i = shown[0]; const t = a.querySelector('.sr-attrib-text');
+      if (!i || !t) return shown.length + ':none';
+      const ir = i.getBoundingClientRect(); const tr = t.getBoundingClientRect();
+      return shown.length + ':' + i.getAttribute('src') + ':' + (i.complete && i.naturalWidth > 0) + ':' + Math.round(ir.height) + ':' + (ir.left - tr.right >= 0 && ir.left - tr.right <= 12 && Math.abs((ir.top + ir.bottom) / 2 - (tr.top + tr.bottom) / 2) <= 3);
+    }))()`;
+    const logoOk = (want) => `${logoExpr}.every((x) => x === '1:assets/brave/${want}:true:13:true') ? ${logoExpr} : null`;
+    const logosDark = await page.waitFor(logoOk('brave-logo-on-dark.svg'), 5000).catch(() => null) || await page.ev(logoExpr);
+    check(Array.isArray(logosDark) && logosDark.length === 2 && logosDark.every((x) => x === '1:assets/brave/brave-logo-on-dark.svg:true:13:true'),
+      'dark: Brave\'s logo (light wordmark) loads beside "POWERED BY BRAVE", header and footer', JSON.stringify(logosDark));
     const shotDark = await shot('results-dark');
     await chrome.ev("setThemeMode('light'), 1");
     await page.waitFor("document.documentElement.getAttribute('data-theme') === 'light'", 5000);
     const lightBg = await page.ev('getComputedStyle(document.body).backgroundColor');
     const lightText = await page.ev("getComputedStyle(document.querySelector('.sr-desc')).color");
     check(lightBg === 'rgb(233, 233, 231)' && lightText !== darkText, 'light: the chrome\'s flip reaches the page (--bg #e9e9e7)', lightBg + ' / text ' + lightText);
+    const logosLight = await page.waitFor(logoOk('brave-logo-on-light.svg'), 5000).catch(() => null) || await page.ev(logoExpr);
+    check(Array.isArray(logosLight) && logosLight.length === 2 && logosLight.every((x) => x === '1:assets/brave/brave-logo-on-light.svg:true:13:true'),
+      'light: the logo swaps to Brave\'s dark-wordmark file, header and footer', JSON.stringify(logosLight));
     const shotLight = await shot('results-light');
     console.log('[e2e] screenshots: ' + shotDark + ' , ' + shotLight);
 

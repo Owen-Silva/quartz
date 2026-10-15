@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Nothing on this page is fetched but its own files and Brave's https
      thumbnails / favicons: no connect, no frames, no forms posting out.
-     Results are built with createElement + textContent only (search.js). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
+     Results are built with createElement + textContent only (search.js).
+     img-src file: is for Brave's logo in assets/brave/ (its API terms,
+     section 4(d)); result images stay https only (bravesearch.js imageHref). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data: file:; base-uri 'none'; form-action 'none'">
 <title>Search</title>
 <!-- Quartz's own results page. A bundled, preload-less file:// guest like
      files.html: the theme, palette and accent arrive in the URL (read by
@@ -22,7 +24,7 @@
   <div class="sr-head-in">
     <div class="sr-row1">
       <h1 class="sr-query" id="sr-query"></h1>
-      <a class="sr-attrib" id="sr-attrib-top" href="https://brave.com/search/api/" title="Results come from the Brave Search API">Powered by Brave</a>
+      <a class="sr-attrib" id="sr-attrib-top" href="https://brave.com/search/api/" title="Results come from the Brave Search API"><span class="sr-attrib-text">Powered by Brave</span><img class="sr-brave sr-brave-on-dark" src="assets/brave/brave-logo-on-dark.svg" alt="" width="42" height="13"><img class="sr-brave sr-brave-on-light" src="assets/brave/brave-logo-on-light.svg" alt="" width="42" height="13"></a>
     </div>
     <div class="sr-row2">
       <nav class="sr-tabs" id="sr-tabs" aria-label="Kind of results">
@@ -52,7 +54,7 @@
 </main>
 
 <footer class="sr-foot">
-  <p><a class="sr-attrib" href="https://brave.com/search/api/">Powered by Brave</a>
+  <p><a class="sr-attrib" href="https://brave.com/search/api/"><span class="sr-attrib-text">Powered by Brave</span><img class="sr-brave sr-brave-on-dark" src="assets/brave/brave-logo-on-dark.svg" alt="" width="42" height="13"><img class="sr-brave sr-brave-on-light" src="assets/brave/brave-logo-on-light.svg" alt="" width="42" height="13"></a>
   <span id="sr-foot-note">Results from the Brave Search API, in Brave's order. Quartz keeps them in memory for a few minutes so Back and reload are free, and never writes them to disk.</span></p>
 </footer>
 </body>
