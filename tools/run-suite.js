@@ -56,6 +56,13 @@ const TESTS = [
   { name: 'favicons-e2e', file: 'favicons-e2e.js', e2e: true },
   { name: 'bravesearch-e2e', file: 'bravesearch-e2e.js', e2e: true },
   { name: 'toprow-e2e', file: 'toprow-e2e.js', e2e: true },
+  // The daily paths (tests/e2e-kit.js): session restore across restarts, tab sleep and wake,
+  // find in page, downloads, the address bar.
+  { name: 'sessions-e2e', file: 'sessions-e2e.js', e2e: true },
+  { name: 'sleep-e2e', file: 'sleep-e2e.js', e2e: true },
+  { name: 'find-e2e', file: 'find-e2e.js', e2e: true },
+  { name: 'downloads-e2e', file: 'downloads-e2e.js', e2e: true },
+  { name: 'omnibox-e2e', file: 'omnibox-e2e.js', e2e: true },
   {
     name: 'looksync-e2e', file: 'looksync-e2e.js', e2e: true,
     needs: () => (exists(path.join(os.homedir(), 'look-sync', 'fake-writer.js')) ? null : 'needs ~/look-sync/fake-writer.js (the Look Sync repo), not on this machine'),
