@@ -1,0 +1,14 @@
+# wake-bisect.js round 1: name:options (see wake-bisect.js). All Home, no tabs.
+nohook:nohook
+base:snap
+bare:BARE
+all:off=ALL+@ghostery/adblocker-electron
+diag:diag
+school:off=school+procfind
+phone:off=phone
+looksync:off=looksync-main
+statsap:off=stats+autopause
+log:off=log
+adblock:off=@ghostery/adblocker-electron
+toprow:off=toprow-main
+misc:off=apps+stocks+bravesearch+budget+bgfiles+pty+spell+drm-main+profilemove+faviconstore
