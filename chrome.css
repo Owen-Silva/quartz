@@ -611,14 +611,14 @@ button:focus-visible,
 .tab.asleep .tab-fav > .tab-badge,
 .tab.broken .tab-fav > .tab-badge { display: flex; }
 
-/* the crescent: one filled shape, tilted the way a waning moon sits */
+/* the crescent: a disc minus an offset disc (thin, classic), lit side left */
 .tab.asleep .tab-fav > .tab-badge::before {
   content: '';
-  width: 66%;
-  height: 66%;
+  width: 72%;
+  height: 72%;
   background: currentColor;
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='2 2 20 20'><path fill='black' d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'/></svg>") center / contain no-repeat;
-          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='2 2 20 20'><path fill='black' d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'/></svg>") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><mask id='m'><rect width='16' height='16' fill='white'/><circle cx='10.2' cy='6.6' r='5.6' fill='black'/></mask><circle cx='8' cy='8' r='6.5' fill='black' mask='url(%23m)'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><mask id='m'><rect width='16' height='16' fill='white'/><circle cx='10.2' cy='6.6' r='5.6' fill='black'/></mask><circle cx='8' cy='8' r='6.5' fill='black' mask='url(%23m)'/></svg>") center / contain no-repeat;
 }
 .tab.broken .tab-fav > .tab-badge::before { content: '\E7BA'; }   /* warning */
 
