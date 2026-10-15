@@ -328,6 +328,27 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('spell:changed', handler);
     }
   },
+  // Protected video (drm-main.js). DrmState:
+  //   { widevine: { available, reason }, edge: { found, how, path },
+  //     alwaysEdge: [{ key, name }], detection, extraSites, lastLaunch }
+  drm: {
+    state: () => ipcRenderer.invoke('drm:state'),
+    // Resolves { ok, how, reason }; `reason` is plain words for the bar.
+    openInEdge: (url) => ipcRenderer.invoke('drm:open-in-edge', { url: String(url || '') }),
+    // key: 'prime' | 'host:example.com' (DrmSites.ruleKeyFor). Resolves { ok, reason, state }.
+    setAlways: (key, on) => ipcRenderer.invoke('drm:set-always', { key: String(key || ''), on: !!on }),
+    // A guest reported what it did with EME: { wcId, url, kind, keySystem?, granted? }
+    onSignal: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('drm:signal', handler);
+      return () => ipcRenderer.removeListener('drm:signal', handler);
+    },
+    onChanged: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('drm:changed', handler);
+      return () => ipcRenderer.removeListener('drm:changed', handler);
+    }
+  },
   // Everything behind the padlock for one page: how the connection is secured,
   // the explicit permission decisions for its origin, and the two destructive
   // actions. Every call resolves -- a failure comes back as { error: string }

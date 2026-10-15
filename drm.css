@@ -1,0 +1,102 @@
+/*
+ * drm.css -- the info bar drm.js puts over a tab whose video needs DRM.
+ *
+ * Reads like a big browser's info bar, in Quartz's own look: an opaque strip
+ * over the top of the tab's well (a pane over a <webview> has nothing behind
+ * it to blur, so it is --surface-solid, never glass), one hairline under it,
+ * one accent-filled primary button, quiet text buttons, a close glyph. It
+ * floats OVER the page, so the page never jumps when it appears. Fixed height
+ * so the text never reflows the bar either; a long line ends in an ellipsis
+ * with the full sentence in its tooltip. No motion: it is simply there.
+ */
+.drm-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 6;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 0 14px;
+  font-family: var(--font);
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--hairline-strong);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.drm-bar-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--accent);
+}
+.drm-bar[data-drm-mode="failed"] .drm-bar-icon { color: var(--warn); }
+.drm-bar[data-drm-mode="opened"] .drm-bar-icon,
+.drm-bar[data-drm-mode="sent"] .drm-bar-icon { color: var(--ok); }
+
+.drm-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.drm-bar-acts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drm-bar-btn {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--radius-s, 6px);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.drm-bar-btn:disabled { opacity: 0.55; cursor: default; }
+
+/* The one action the bar is for. */
+.drm-bar-primary {
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid transparent;
+}
+.drm-bar-primary:hover:not(:disabled) { background: var(--accent-strong); }
+
+/* Everything else: text that becomes a button under the pointer. */
+.drm-bar-quiet {
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.drm-bar-quiet:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.drm-bar-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  cursor: pointer;
+}
+.drm-bar-close:hover { color: var(--text); background: var(--surface-3); }
+
+.drm-bar-btn:focus-visible,
+.drm-bar-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }

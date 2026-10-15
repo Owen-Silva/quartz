@@ -46,6 +46,7 @@ const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
 const { urlFromArgv } = require('./argvurl');
 const spellModule = require('./spell');
+const drmModule = require('./drm-main');
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -389,6 +390,29 @@ const spell = spellModule.create({
  * `claude -p` call and parks itself near the limits). School registers its own
  * IPC; main only hands it the gate, the push function and the budget reader.
  */
+/**
+ * Protected video (drm-main.js + drm-preload.js + drm.js). Stock Electron has
+ * no Widevine, so Prime Video, Netflix and the rest cannot play here; this
+ * spots those pages and offers the same page in Microsoft Edge. A TEST profile
+ * may swap the Edge launch for a file (QUARTZ_EDGE_STUB) and add one local host
+ * to the list of streaming sites (QUARTZ_DRM_TEST_SITE), so the e2e never
+ * starts Edge and never needs the internet. A live Quartz ignores both.
+ */
+const DRM_TEST = process.argv.includes('--test-profile');
+const drm = drmModule.create({
+  app,
+  ipcMain,
+  session,
+  shell: require('electron').shell,
+  electron: require('electron'),
+  isChromeSender: (event) => isChromeSender(event),
+  send: (channel, payload) => send(channel, payload),
+  edgeStub: DRM_TEST && process.env.QUARTZ_EDGE_STUB ? process.env.QUARTZ_EDGE_STUB : '',
+  extraSites: DRM_TEST && process.env.QUARTZ_DRM_TEST_SITE
+    ? [{ id: 'test', name: 'Test Stream', exact: [String(process.env.QUARTZ_DRM_TEST_SITE).toLowerCase()] }]
+    : [],
+});
+
 const budget = budgetModule.create({ app });
 const school = schoolModule.create({
   app,
@@ -997,6 +1021,7 @@ app.whenReady().then(() => {
   // Before the first window: a session preload only reaches frames created
   // after it is registered, and the chrome's own document is one of them.
   spell.start();
+  drm.start(); // the DRM page watcher: a session preload too, so also before the window
   lookSync = lookSyncMain.install({
     app, ipcMain, send, liveWin, isChromeSender, nativeTheme,
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,

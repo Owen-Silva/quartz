@@ -3498,6 +3498,99 @@
     return open === host ? tab : null;
   }
 
+  /* ============================================================
+     Protected video -- drm.js / drm-main.js
+
+     Stock Electron cannot play DRM video (Prime Video, Netflix, ...). This
+     says so plainly, says whether Edge was found for the bar's button, and
+     lists the sites set to "Always use Edge" with a way to take each back.
+     The state lives in MAIN (<userData>/drm.json); window.Drm keeps the last
+     copy and fires 'drmchange' on document when it moves.
+     ============================================================ */
+
+  var drmErr = '';   // the last failed write, shown until the next one
+
+  function drmApi() {
+    var api = window.api && window.api.drm;
+    return api && typeof api.setAlways === 'function' ? api : null;
+  }
+
+  function buildDrm() {
+    var s = section('Protected video');
+    s.setAttribute('data-section', 'drm');
+    var main = el('div', 'set-field');
+    main.setAttribute('data-field', 'drm');
+    s.appendChild(main);
+    var list = el('div', 'set-field');
+    list.setAttribute('data-field', 'drmsites');
+    s.appendChild(list);
+    return s;
+  }
+
+  function renderDrm() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="drm"]');
+    var listField = bodyEl && bodyEl.querySelector('[data-field="drmsites"]');
+    if (!field || !listField) return;
+    field.textContent = '';
+    listField.textContent = '';
+    var mod = window.Drm;
+    var st = mod && typeof mod.state === 'function' ? mod.state() : null;
+    if (!mod || !drmApi()) {
+      var none = el('p', 'set-typing-notice', 'Protected video settings cannot be shown: this window has no channel to the browser. Restarting Quartz usually brings it back.');
+      none.setAttribute('role', 'status');
+      field.appendChild(none);
+      return;
+    }
+    if (!st) {
+      field.appendChild(el('p', 'set-hint', 'Reading protected video settings…'));
+      mod.refresh().then(function () { renderDrm(); refreshFilter(); }, function (err) {
+        field.textContent = '';
+        field.appendChild(el('p', 'set-note', 'Protected video settings could not be read: ' + ((err && err.message) || 'no reason given') + '.'));
+      });
+      return;
+    }
+    var wv = st.widevine || {};
+    field.appendChild(el('p', 'set-hint', wv.available
+      ? 'This build of Quartz can play DRM-protected video. ' + (wv.reason || '')
+      : 'Quartz can’t play DRM-protected video yet (Prime Video, Netflix, Disney+, Spotify and similar). ' +
+        'On those pages a bar offers to open the same page in Microsoft Edge.'));
+    var edge = st.edge || {};
+    field.appendChild(el('p', 'set-hint', edge.found
+      ? 'Microsoft Edge: found' + (edge.path ? ' (' + edge.path + ')' : '') + '.'
+      : (edge.how === 'protocol'
+        ? 'Microsoft Edge: msedge.exe was not found in its usual folders; Quartz will ask Windows to open Edge instead.'
+        : 'Microsoft Edge was not found on this PC, so the bar’s button will say it could not open it.')));
+    if (st.detection) field.appendChild(el('p', 'set-hint', st.detection));
+    if (st.lastLaunch && !st.lastLaunch.ok) {
+      field.appendChild(el('p', 'set-note', 'The last attempt to open Edge failed: ' + (st.lastLaunch.reason || 'no reason given') + '.'));
+    }
+    if (drmErr) field.appendChild(el('p', 'set-note', drmErr));
+
+    listField.appendChild(el('p', 'set-label', 'Always open in Microsoft Edge'));
+    var rows = el('div', 'set-chips');
+    rows.setAttribute('data-drm-rows', 'always');
+    var list = Array.isArray(st.alwaysEdge) ? st.alwaysEdge : [];
+    if (!list.length) {
+      rows.appendChild(el('p', 'set-empty', 'None. Choose “Always use Edge” on a protected video page to add one.'));
+    }
+    list.forEach(function (item, i) {
+      var row = typingRow('drm', item.name || item.key, i, 'Open ' + (item.name || item.key) + ' in Quartz again', function () {
+        drmApi().setAlways(item.key, false).then(function (r) {
+          drmErr = r && r.ok ? '' : (item.name || item.key) + ' could not be taken off the list: ' + ((r && r.reason) || 'no reason given') + '.';
+          return mod.refresh();
+        }, function (err) {
+          drmErr = (item.name || item.key) + ' could not be taken off the list: ' + ((err && err.message) || 'no reason given') + '.';
+          renderDrm();
+        }).then(function () { renderDrm(); });
+      });
+      row.setAttribute('data-drm-key', item.key);
+      rows.appendChild(row);
+    });
+    listField.appendChild(rows);
+  }
+
+  document.addEventListener('drmchange', function () { if (bodyEl) { renderDrm(); refreshFilter(); } });
+
   function buildSiteStyles() {
     var s = section('Site styles and scripts');
     var field = el('div', 'set-field');
@@ -7278,6 +7371,7 @@
     bodyEl.appendChild(buildSearch());
     bodyEl.appendChild(buildTyping());
     bodyEl.appendChild(buildSites());
+    bodyEl.appendChild(buildDrm());
     bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
@@ -7310,6 +7404,7 @@
     renderKeywords();
     renderTyping();
     renderSites();
+    renderDrm();
     renderSiteStyles();
     renderUserStyle();
     renderNewtabBg();

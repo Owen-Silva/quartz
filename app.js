@@ -3175,6 +3175,20 @@ function launchDesktopApp(id) {
 function syncAppNote(tab) {
   if (!isAppTab(tab)) { clearAppNote(tab); return; }
   const entry = findWebAppEntry(tab.app.id);
+  // A DRM app is drm.js's: its bar offers Edge (and the desktop twin when one
+  // is installed), and goes away for good once this build has Widevine.
+  if (entry && entry.drm && window.Drm) {
+    const wanted = tab.app.id;
+    window.Drm.syncAppTab(tab, '');
+    if (entry.exe) {
+      ensureAppsIndex().then(() => {
+        if (tabs.indexOf(tab) === -1 || !isAppTab(tab) || tab.app.id !== wanted) return;
+        const desktop = installedAppForExe(entry.exe);
+        if (desktop) window.Drm.syncAppTab(tab, desktop.id);
+      }, () => {});
+    }
+    return;
+  }
   if (!entry || !entry.drm || tab.noteDismissed) { clearAppNote(tab); return; }
   const wanted = tab.app.id;
   ensureAppsIndex().then(() => {
@@ -10427,6 +10441,9 @@ function wireViewEvents(tab) {
     if (event && event.isMainFrame === false) return;
     onNavigate(event);
   });
+  // Protected video (drm.js): its own listeners, added after these so tab.url
+  // is already the new address when it looks.
+  if (window.Drm) window.Drm.attach(tab, viewEl, stale);
 
   viewEl.addEventListener('did-start-loading', () => {
     if (stale()) return;
