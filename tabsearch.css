@@ -74,8 +74,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
-  padding: 0 14px;
+  /* Helm's .palette-input box exactly (shell.css: 52px, 0 14px 0 16px). It was
+     46px to echo the rows; matched 2026-10-15 since no reason was on record. */
+  height: 52px;
+  padding: 0 14px 0 16px;
   /* Helm's palette input: one plain hairline under the field */
   border-bottom: 1px solid var(--hairline);
 }
@@ -97,7 +99,7 @@
   background: none;
   color: var(--text);
   font-family: var(--font);
-  font-size: var(--fs-s);
+  font-size: var(--fs-l);      /* Helm's .palette-input input */
   font-weight: 400;
   -webkit-user-select: text;
   user-select: text;
