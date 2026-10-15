@@ -40,9 +40,9 @@
     google: 'The results most people know.',
     duckduckgo: 'Private search from DuckDuckGo.',
     bing: 'Microsoft’s search engine.',
-    brave: 'Brave’s own index, on search.brave.com. No key needed.',
-    startpage: 'Google’s results, with Startpage in between for privacy.',
-    'brave-api': 'Results on Quartz’s own page, from the Brave Search API. Needs a key.'
+    brave: 'Brave’s own index. No key needed.',
+    startpage: 'Google’s results, through Startpage.',
+    'brave-api': 'Quartz’s own page, from Brave. Needs a key.'
   };
 
   var state = null;

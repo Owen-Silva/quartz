@@ -267,6 +267,7 @@ run('welcome-e2e', async (k) => {
   say('boot C: fresh profile, a registration script that fails');
   const c = await launch({ cdp: PORT, args: ['--first-run'], env: { QUARTZ_TEST_DEFAULT_SCRIPT: failScript } });
   check(await c.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 1', 15000).catch(() => false), 'C: a wiped profile shows the welcome again');
+  const cBefore = { mode: await c.chrome.ev('QuartzTheme.mode()'), engine: await c.chrome.ev('Settings.get("searchEngine")') };
   g = await guest(c);
   await g.ev('window.__welcome.go("default")');
   await sleep(300);
@@ -284,7 +285,8 @@ run('welcome-e2e', async (k) => {
   check(await c.chrome.waitFor('FirstRun._debug().welcomeTabs.length === 0', 6000).catch(() => false), 'C: Skip setup (Enter) closes the welcome');
   flag = readFlag();
   check(flag && flag.state === 'done' && flag.how === 'skipped', 'C: skip sets the flag (done / skipped)', flag);
-  check((await c.chrome.ev('QuartzTheme.mode()')) === 'dark' && (await c.chrome.ev('Settings.get("searchEngine")')) === 'google', 'C: skipping changes nothing it did not ask about (dark, Google)');
+  const cAfter = { mode: await c.chrome.ev('QuartzTheme.mode()'), engine: await c.chrome.ev('Settings.get("searchEngine")') };
+  check(cAfter.mode === cBefore.mode && cAfter.engine === cBefore.engine, 'C: skipping changes nothing it did not ask about (look and engine as the fresh profile had them)', { before: cBefore, after: cAfter });
   g.close();
   await c.quit();
   try { fs.rmSync(failScript, { force: true }); } catch (e) { /* tmp */ }

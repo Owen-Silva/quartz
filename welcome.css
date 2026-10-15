@@ -523,6 +523,10 @@ kbd {
   .wc-hello { padding-top: var(--space-5); }
   .wc-logo { width: 72px; height: 72px; margin-bottom: var(--space-4); }
   .wc-lede { margin-bottom: var(--space-5); }
+  .wc-engines { gap: 8px; }
+  .wc-engine { padding: 10px 14px; }
+  .wc-note { margin-top: var(--space-3); padding: 10px 14px; }
+  .wc-actions { margin-top: var(--space-5); }
 }
 
 @media (max-width: 680px) {
