@@ -1788,9 +1788,15 @@ function handleWillDownload(_event, item) {
 
   item.on('updated', (_e, state) => {
     // 'interrupted' here means stalled-but-resumable, not finished.
-    entry.state = state === 'interrupted' ? 'interrupted' : 'progressing';
+    const next = state === 'interrupted' ? 'interrupted' : 'progressing';
+    const wasPaused = entry.paused;
+    const changed = next !== entry.state;
+    entry.state = next;
     syncDownloadItem(entry);
-    sendDownloadUpdate(entry, false);
+    // A change of state (or of paused) is never throttled away: an interrupted
+    // download gets no further 'updated' and no 'done', so a dropped update
+    // left its row showing "1.0 MB of 2.0 MB" with Pause/Cancel for good.
+    sendDownloadUpdate(entry, changed || entry.paused !== wasPaused);
   });
 
   item.once('done', (_e, state) => {
