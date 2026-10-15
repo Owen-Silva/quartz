@@ -281,7 +281,7 @@
     } else if (s === 'failed') {
       text = state.canDefault === false
         ? 'This window can’t reach Windows’ default-app settings. Restart Quartz and try again.'
-        : 'Quartz couldn’t add itself to Windows’ list of browsers: ' + (db.reason || 'no reason given') + '. You can try again, or skip this; nothing else depends on it.';
+        : 'Quartz couldn’t add itself to Windows’ list of browsers: ' + String(db.reason || 'no reason given').replace(/[.\s]+$/, '') + '. You can try again, or skip this; nothing else depends on it.';
     }
     $('default-text').textContent = text;
     $('default-steps').hidden = s !== 'settings-opened';

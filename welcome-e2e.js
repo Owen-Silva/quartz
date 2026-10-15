@@ -184,6 +184,7 @@ run('welcome-e2e', async (k) => {
     check((await g.ev('document.getElementById("default-next").textContent')) === 'Continue', 'A: after the hand-off the way on says Continue');
   } else {
     check(dstate === 'failed' && /Quartz\.exe/.test(dtext), 'A: no Quartz.exe here -> the step says so, plainly (never silent)', dstate + ' ' + dtext);
+    check(/quartz-exe.*first\. You can try again/.test(dtext), 'A: the whole reason arrives (PowerShell wraps it over lines)', dtext);
   }
   await shot(a.chrome, 'A8-default-' + (dstate || 'none') + '-light');
 

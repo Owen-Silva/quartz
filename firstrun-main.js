@@ -156,10 +156,15 @@ function create(opts) {
 
   /** The script's last useful line from stderr (PowerShell wraps a throw in position noise). */
   function errorLine(stderr, stdout, code) {
-    const lines = String(stderr || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      .filter((l) => !/^(At |\+ |CategoryInfo|FullyQualifiedErrorId|~)/.test(l) && !/^[+~\s]*$/.test(l));
+    // PowerShell wraps a long message over several lines, then adds "At <file>:<line>" and
+    // "+ ..." position noise: keep the message lines, joined, and drop the rest.
+    const msg = [];
+    for (const l of String(stderr || '').split(/\r?\n/).map((x) => x.trim())) {
+      if (/^(At |\+ |\+$|CategoryInfo|FullyQualifiedErrorId)/.test(l)) break;
+      if (l) msg.push(l);
+    }
     // "C:\...\register-default-browser.ps1 : <message>" -> "<message>"
-    if (lines.length) return lines[0].replace(/^\S.*?\.ps1\s*:\s*/i, '').slice(0, 300);
+    if (msg.length) return msg.join(' ').replace(/^\S.*?\.ps1\s*:\s*/i, '').slice(0, 300);
     const bad = String(stdout || '').split(/\r?\n/).filter((l) => /BAD|NOT registered/i.test(l));
     if (bad.length) return bad[bad.length - 1].trim().slice(0, 300);
     return 'the registration script stopped with exit code ' + code;
