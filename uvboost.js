@@ -26,7 +26,7 @@
 // typeperf pipe, the now-playing HTTP poll), uv_async_send, libuv's own handle-start interrupts.
 // That is why focus "causes" it: focus starts those Home pollers.
 //
-// How: in this process, a few seconds after start (koffi, no child process), find the embed
+// How: in this process, 15 s after start (koffi, no child process), find the embed
 // thread and raise its priority, so the main thread cannot preempt it between its post and its
 // semaphore wait. It is identified as the one UNNAMED thread that starts at the same address as the
 // threads Node and libuv create and name (V8Worker, DelayedTaskSchedulerWorker, libuv-worker):
@@ -39,7 +39,10 @@
 //   QUARTZ_UVBOOST=abovenormal|highest|timecritical   that level instead of the default (bench)
 'use strict';
 
-const DEFAULT_DELAY_MS = 3000;
+// 15 s: the find (koffi load + a system-wide thread snapshot) holds the main thread ~50 ms, up to
+// ~230 ms on a loaded machine; at 15 s that is past the boot and first paint. The storm needs Home
+// focused and idle for a while, so nothing is lost before then.
+const DEFAULT_DELAY_MS = 15000;
 /** Win32 SetThreadPriority values by the names QUARTZ_UVBOOST takes. */
 const LEVELS = { abovenormal: 1, highest: 2, timecritical: 15 };
 /**
@@ -240,7 +243,7 @@ const listeners = [];
  *   opts.proc      process object (harness)
  *   opts.env       env object (harness; default proc.env)
  *   opts.api       the Win32 bindings stand-in (harness; default koffi's)
- *   opts.delayMs   wait before applying (default 3 s: off the boot path, and Node's threads are named by then)
+ *   opts.delayMs   wait before applying (default 15 s: off the boot path; Node's threads are named by then)
  *   opts.guardEveryMs / opts.guardMaxShare / opts.clock / opts.timers   the guard (harness)
  *   opts.log       (line) => void; default: kept for onLine() subscribers, and console.log
  */

@@ -12,7 +12,7 @@
 require('./uvquiet').install();
 // And the main thread (AboveNormal) must not preempt Electron's libuv poll thread, or the two lock
 // into waking each other thousands of times a second (focused Home; see uvboost.js): the poll
-// thread's priority goes up ~3 s in.
+// thread's priority goes up 15 s in.
 require('./uvboost').install();
 
 const os = require('os');
