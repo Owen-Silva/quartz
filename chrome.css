@@ -1415,8 +1415,24 @@ body,
               box-shadow var(--dur) var(--ease);
 }
 
+/* --- popovers arrive ------------------------------------------- */
+/* Every popover anchored to the chrome lifts in from 4 px above at 98.5%,
+   on the spring: one compositor-only run per open (opacity + translate +
+   scale, the individual properties, so a panel already centred with
+   transform keeps its own). Shown again after [hidden] = runs again. */
+@keyframes q-pop-in {
+  from { opacity: 0; translate: 0 -4px; scale: 0.985; }
+}
+#siteinfo-panel:not([hidden]), #shield-panel:not([hidden]), #downloads-panel:not([hidden]),
+#workspaces-panel:not([hidden]), #tabsearch:not([hidden]), #tabmenu:not([hidden]),
+#bm-overflow:not([hidden]) {
+  animation: q-pop-in var(--dur-spring) var(--ease-spring) both;
+}
+
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
+  #siteinfo-panel, #shield-panel, #downloads-panel, #workspaces-panel, #tabsearch, #tabmenu,
+  #bm-overflow { animation: none !important; }
   body:not(.booted) .chrome-layer { opacity: 1; transform: none; }
   body:not(.booted) .navrow { opacity: 1; }
   body.booted .chrome-layer { transition: none; }

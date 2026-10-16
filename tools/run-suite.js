@@ -86,6 +86,10 @@ const TESTS = [
   // The first-run welcome: fresh profile shows it, choices persist, skip sets the flag, an existing
   // profile never sees it, Settings re-opens it. Screenshots of every step, light and dark.
   { name: 'welcome-e2e', file: 'welcome-e2e.js', e2e: true },
+  // Hover highlights, focus rings and boxes that run into their neighbours, clipped text, crowded
+  // small targets: every surface, light and dark, wide and at the 720 px minimum. Its own limit:
+  // it forces a state on every control and shoots it, a few thousand shots.
+  { name: 'overlap-audit', file: 'tools/overlap-audit.js', e2e: true, timeout: 1500 },
   {
     name: 'smoke', file: 'smoketest.js', args: [path.join(os.tmpdir(), 'quartz-suite-smoke')], e2e: true,
     // Not on a cloud runner: the terminal needs node-pty built for Electron, and there is no
@@ -153,7 +157,7 @@ function runOne(t, env) {
     const t0 = Date.now();
     const out = [];
     const child = spawn(process.execPath, [path.join(ROOT, t.file), ...(t.args || [])], { cwd: ROOT, env: env || process.env, windowsHide: true });
-    const limit = (TIMEOUT_S || (t.e2e ? 300 : 90)) * 1000;
+    const limit = (TIMEOUT_S || t.timeout || (t.e2e ? 300 : 90)) * 1000;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch (e) { child.kill(); } }, limit);
     const take = (d) => { const s = String(d); out.push(s); if (process.env.SUITE_ECHO === '1') process.stdout.write(s); };

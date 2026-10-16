@@ -350,6 +350,11 @@ html[data-theme="light"] [data-palette="mono"] {
   --dur: 120ms;
   --dur-slow: 200ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* A sampled spring (stiffness ~380, damping ~26): settles with a ~4% overshoot, no bounce.
+     For things that ARRIVE (a popover opening), never for colour changes. */
+  --ease-spring: linear(0, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 20.1%, 1.04 22.8%,
+                        1.042 26.2%, 1.024 31.4%, 1.006 37.2%, 0.998 44.3%, 1);
+  --dur-spring: 320ms;
 
   /* the background layer (backdrop.js may override per the user's setting) */
   --bg-blur: 5px;                        /* the user's Helm setting (Helm settings.json background.blur) */
