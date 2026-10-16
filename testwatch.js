@@ -18,7 +18,8 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 
 const OFFSCREEN_ARGS = ['--offscreen', '--show-inactive', '--measure-visible'];
-const MIN_FREE_GB = 2.5;
+// 2.5 GB unless the run says otherwise (QUARTZ_TEST_MIN_FREE_GB, e.g. a day the user allows less).
+const MIN_FREE_GB = (process.env.QUARTZ_TEST_MIN_FREE_GB || "") !== "" && Number(process.env.QUARTZ_TEST_MIN_FREE_GB) >= 0 ? Number(process.env.QUARTZ_TEST_MIN_FREE_GB) : 2.5;
 
 const WATCH_PS = String.raw`param([string]$PidFile)
 Add-Type @"
