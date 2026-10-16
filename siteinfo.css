@@ -70,7 +70,7 @@
 #siteinfo.is-insecure { color: var(--text-3); }
 
 #siteinfo:hover { background: var(--surface-3); color: var(--text); }
-#siteinfo:active { background: var(--surface-2); }
+#siteinfo:active { background: var(--surface-press); }
 
 /* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #siteinfo:focus-visible {
@@ -289,7 +289,7 @@
 }
 
 #siteinfo-panel .si-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
-#siteinfo-panel .si-btn:active { background: var(--surface-2); }
+#siteinfo-panel .si-btn:active { background: var(--surface-press); }
 
 #siteinfo-panel .si-btn:focus-visible,
 #siteinfo-panel .si-step:focus-visible,
@@ -402,7 +402,7 @@
 }
 
 #siteinfo-panel .si-step:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
-#siteinfo-panel .si-step:active { background: var(--surface-2); }
+#siteinfo-panel .si-step:active { background: var(--surface-press); }
 
 /* ============================================================
    Reduced motion: the transitions are already short, but the

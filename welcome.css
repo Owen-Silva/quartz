@@ -113,11 +113,14 @@ html[data-step="welcome"] .wc-brand { visibility: hidden; }
   justify-content: center;
 }
 .wc-step[hidden] { display: none; }
-.wc-step.is-on { animation: wc-in 240ms var(--ease) both; }
-@keyframes wc-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
+/* Each step arrives on the shared motion (next-week/motion-unison.md): an 8 px rise on the
+   spring over --m-dur-s, the fade over the first 40 % of it. */
+.wc-step.is-on {
+  animation: wc-in-move var(--m-dur-s) var(--m-spring) both,
+             wc-in-fade calc(var(--m-dur-s) * var(--m-fade-k)) var(--m-fade-in) both;
 }
+@keyframes wc-in-move { from { translate: 0 8px; } }
+@keyframes wc-in-fade { from { opacity: 0; } }
 
 .wc-eyebrow {
   margin: 0 0 var(--space-2);
@@ -222,7 +225,7 @@ html[data-step="welcome"] .wc-brand { visibility: hidden; }
   color: var(--text);
 }
 .wc-ghost:hover { background: var(--surface-3); }
-.wc-btn:disabled { opacity: 0.6; cursor: default; }
+.wc-btn:disabled { opacity: var(--disabled-opacity); cursor: default; }
 .wc-btn[hidden] { display: none; }
 .wc-hello .wc-primary { height: 42px; padding: 0 32px; font-size: var(--fs-l); }
 
@@ -553,6 +556,6 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wc-step.is-on { animation: none; }
+  .wc-step.is-on { animation: wc-in-fade var(--m-dur-rm) var(--m-fade-in) both; }
   .wc-seg, .wc-check, .wc-dot::after { transition: none; }
 }

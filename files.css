@@ -126,7 +126,7 @@ body {
   border-color: var(--hairline-strong);
 }
 
-.barbtn:active:not(:disabled) { background: var(--surface-2); }
+.barbtn:active:not(:disabled) { background: var(--surface-press); }
 
 .barbtn:disabled {
   opacity: .45;

@@ -113,9 +113,9 @@ body {
 @media (hover: hover) {
   .status-action:hover:not([disabled]) { background: var(--surface-3); border-color: var(--hairline-strong); }
 }
-.status-action:active:not([disabled]) { background: var(--surface-2); }
+.status-action:active:not([disabled]) { background: var(--surface-press); }
 .status-action:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.status-action[disabled] { opacity: 0.45; cursor: default; }
+.status-action[disabled] { opacity: var(--disabled-opacity); cursor: default; }
 
 /* --- the stage and the phone frame -------------------------------------- */
 
@@ -233,9 +233,9 @@ body {
 @media (hover: hover) {
   .rail-btn:hover:not([disabled]) { color: var(--text); background: var(--surface-3); border-color: var(--hairline-strong); }
 }
-.rail-btn:active:not([disabled]) { background: var(--surface-2); border-color: var(--accent-line); }
+.rail-btn:active:not([disabled]) { background: var(--surface-press); border-color: var(--accent-line); }
 .rail-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.rail-btn[disabled] { opacity: 0.4; cursor: default; }
+.rail-btn[disabled] { opacity: var(--disabled-opacity); cursor: default; }
 .rail-btn[data-on="1"] { color: var(--text); background: var(--accent-soft); border-color: var(--accent-line); }
 .rail-btn.wide { grid-column: 1 / -1; }
 
@@ -290,9 +290,9 @@ body {
   background: var(--accent-soft);
   border-color: var(--accent-line);
 }
-.rail-seg-btn[aria-disabled="true"] { opacity: 0.45; }
+.rail-seg-btn[aria-disabled="true"] { opacity: var(--disabled-opacity); }
 .rail-seg-btn[disabled] { cursor: progress; }
-.rail-seg-btn[disabled]:not([data-busy="1"]) { opacity: 0.4; }
+.rail-seg-btn[disabled]:not([data-busy="1"]) { opacity: var(--disabled-opacity); }
 .rail-seg-btn[data-busy="1"] {
   color: var(--text);
   border-color: var(--accent-line);

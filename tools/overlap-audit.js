@@ -67,7 +67,7 @@ ${Array.from({ length: 14 }, (_, i) => `<p>Paragraph ${i + 1}. The path leaves t
 </article></body></html>`;
 
 run('overlap-audit', async (k) => {
-  const { check, launch, say } = k;
+  const { check, launch, say, profileDir } = k;
   let dead = false;
   const t0 = Date.now();
   fs.mkdirSync(path.join(OUT, 'sheets'), { recursive: true });
@@ -78,23 +78,26 @@ run('overlap-audit', async (k) => {
     return false;
   });
   const B = 'http://127.0.0.1:' + srv.port;
-  const q = await launch({ cdp: 9437 });
-  const chrome = q.chrome;
+  // ONE INSTANCE PER VIEW (size x theme), on a wiped profile, so every view starts from the same
+  // state. The 10-16 run lost 53 of 64 scenes to one stall: after wide-light settings-open the
+  // chrome renderer answered evaluate but never another Page.captureScreenshot, and every scene
+  // after it waited out its capture and failed. A capture that stalls now (stalled() below)
+  // relaunches the instance and runs that scene again, once, and says why it did.
+  let q = null, chrome = null, homeTab = null, pageTab = null, relaunches = 0;
   // The whole-run watchdog: past the budget the instance is killed (every pending call then
   // fails fast), the run stops at the next scene, and the summary still prints. If even that
   // does not end it, the process goes 60 s later with its own FAIL line.
   const watchdog = setTimeout(async () => {
     dead = true;
     check(false, 'WATCHDOG: the run passed its ' + BUDGET_S + ' s budget; the test instance was killed');
-    try { await q.kill(); } catch (e) { /* gone */ }
+    try { if (q) await q.kill(); } catch (e) { /* gone */ }
     setTimeout(() => {
-      try { require('child_process').execFileSync('taskkill', ['/PID', String(q.child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ }
+      try { if (q) require('child_process').execFileSync('taskkill', ['/PID', String(q.child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ }
       console.log('overlap-audit: 0 passed, 1 failed');
       process.exit(1);
     }, 60000).unref();
   }, BUDGET_S * 1000);
   watchdog.unref();
-  await chrome.send('Page.enable');
   const findings = [];
   const guests = new Map();
   let cropSeq = 0;
@@ -109,6 +112,14 @@ run('overlap-audit', async (k) => {
         if (had && had.ws && had.ws.readyState === 1) return had;
         const c = await new Cdp(t.webSocketDebuggerUrl).open();
         await c.send('Page.enable');
+        // A guest draws at the DISPLAY's scale (125 % on the user's laptop), not the 1x the chrome page is
+        // pinned to, so its shots came back 1.25x the CSS boxes the judge maps them onto, and every
+        // highlight seemed to run into the neighbour to its right or below (reader, phone, Home,
+        // history: all 'into' the next control). Pin it to 1x too; if that does not take, shoot at
+        // 1/dpr so one image pixel is still one CSS pixel.
+        await c.send('Emulation.setDeviceMetricsOverride', { width: 0, height: 0, deviceScaleFactor: 1, mobile: false });
+        c.__dpr = Number(await c.ev('devicePixelRatio').catch(() => 1)) || 1;
+        if (c.__dpr !== 1) say('guest ' + t.url + ' stays at devicePixelRatio ' + c.__dpr + '; shots scaled by 1/' + c.__dpr);
         guests.set(t.id, c);
         return c;
       }
@@ -118,7 +129,7 @@ run('overlap-audit', async (k) => {
   }
   async function shotB64(c, clip) {
     const m = await Promise.race([
-      c.send('Page.captureScreenshot', { format: 'png', fromSurface: true, clip: Object.assign({ scale: 1 }, clip) }),
+      c.send('Page.captureScreenshot', { format: 'png', fromSurface: true, clip: Object.assign({ scale: 1 / (c.__dpr || 1) }, clip) }),
       sleep(15000).then(() => ({ error: { message: 'capture timed out' } })),
     ]);
     if (m.error || !m.result) throw new Error('capture: ' + (m.error && m.error.message));
@@ -194,12 +205,38 @@ run('overlap-audit', async (k) => {
   /* ---- the scenes ---- */
   const ev = (s) => chrome.ev(s);
   const openTab = async (url) => ev(`(() => { const t = createTab(${JSON.stringify(url)}); activateTab(t.id); return t.id; })()`);
-  // the base state: Home and two pages
-  await openTab(B + '/p/1.html');
-  await openTab(B + '/p/2.html');
-  await chrome.waitFor('tabs.every((t) => t.kind !== "page" || t.ready !== false)', 15000).catch(() => 0);
-  const homeTab = await ev('(() => { const t = tabs.find((x) => /newtab\\.html/.test(x.url || "")); return t ? t.id : null; })()') || await openTab('');
-  const pageTab = await ev(`tabs.find((x) => /\\/p\\/1\\.html/.test(x.url || "")).id`);
+  /**
+   * A fresh instance on a wiped profile, at this view's size and theme, in the base state: Home and
+   * two pages. Any instance before it is quit (killed if quitting fails) and its guests dropped.
+   */
+  async function boot(size, theme, why) {
+    if (q) {
+      for (const g of guests.values()) g.close();
+      guests.clear();
+      try { await Promise.race([q.quit(), sleep(15000).then(() => { throw new Error('quit timed out'); })]); } catch (e) { try { await q.kill(); } catch (e2) { /* gone */ } }
+      q = null;
+      for (let i = 0; i < 10; i++) { try { fs.rmSync(profileDir, { recursive: true, force: true }); break; } catch (e) { await sleep(400); } }
+    }
+    if (why) say('relaunch #' + (++relaunches) + ': ' + why);
+    q = await launch({ cdp: 9437 });
+    chrome = q.chrome;
+    await chrome.send('Page.enable');
+    await openTab(B + '/p/1.html');
+    await openTab(B + '/p/2.html');
+    await chrome.waitFor('tabs.every((t) => t.kind !== "page" || t.ready !== false)', 15000).catch(() => 0);
+    homeTab = await ev('(() => { const t = tabs.find((x) => /newtab\\.html/.test(x.url || "")); return t ? t.id : null; })()') || await openTab('');
+    pageTab = await ev(`tabs.find((x) => /\\/p\\/1\\.html/.test(x.url || "")).id`);
+    await chrome.send('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: false });
+    await sleep(600);
+    await ev('QuartzTheme.setMode(' + JSON.stringify(theme) + ').then(() => 1)');
+    await sleep(700);
+  }
+  /** What a stalled capture looked like from inside, for the log: is the page hidden, do frames tick? */
+  async function stallProbe() {
+    const r = await chrome.ev('new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { if (++n < 5) requestAnimationFrame(f); else r({ vis: document.visibilityState, focus: document.hasFocus(), raf5: Math.round(performance.now() - t0) }); }; requestAnimationFrame(f); setTimeout(() => r({ vis: document.visibilityState, focus: document.hasFocus(), raf5: "none in 1 s (" + n + ")" }), 1000); })').catch((e) => ({ err: e.message }));
+    return JSON.stringify(r);
+  }
+  const stalled = (e) => /capture timed out|captureScreenshot timed out/.test(String(e && e.message || e));
   const activate = (id) => ev(`(activateTab(${JSON.stringify(id)}), 1)`);
   const PINS = [
     { id: 'spotify', name: 'Spotify', native: true, running: true },
@@ -276,48 +313,59 @@ run('overlap-audit', async (k) => {
   ].filter((s) => !ONLY.length || ONLY.includes(s.name));
 
   for (const size of SIZES) {
-    await chrome.send('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: false });
-    await sleep(600);
     for (const theme of THEMES) {
-      await ev('QuartzTheme.setMode(' + JSON.stringify(theme) + ').then(() => 1)');
-      await sleep(700);
+      if (dead) break;
+      await boot(size, theme);
       const viewTag = size.name + '-' + theme;
       const sheetItems = [];
       for (const s of SCENES) {
         if (dead) break;
         if (s.wideOnly && size.name !== 'wide') continue;
-        const tok = { cancelled: false, limit: SCENE_S * (s.pages ? 2 : 1) };
-        const limitTimer = setTimeout(() => { tok.cancelled = true; }, tok.limit * 1000);
         const tag = viewTag + ' ' + s.name;
-        let g = null, n = 0, bad = 0;
-        try {
-          await closeAll();
-          const r = await s.setup();
-          g = s.guest ? (r && r.ev ? r : await guest(s.guest)) : null;
-          const c = g || chrome;
-          if (g) await g.waitFor('document.documentElement.getAttribute("data-theme") === ' + JSON.stringify(theme) + ' || !document.documentElement.hasAttribute("data-theme")', 4000).catch(() => 0);
-          const pages = s.pages ? 14 : 1;
-          for (let pg = 0; pg < pages; pg++) {
-            const res = await audit(c, s.name, tag, s.roots, viewTag, tok);
-            n += res.n;
-            const mine = res.out.map((f) => Object.assign(f, { allowed: !!allowed(f), why: (allowed(f) || {}).why }));
-            findings.push(...mine);
-            bad += mine.filter((f) => !f.allowed && !ADVISORY.has(f.kind)).length;
-            sheetItems.push({ b64: res.full, label: s.name + (pages > 1 ? ' p' + (pg + 1) : '') + ' - ' + mine.filter((f) => !f.allowed).length + ' findings', bad: mine.some((f) => !f.allowed), boxes: mine.filter((f) => !f.allowed).map((f) => f.r) });
-            if (pages > 1) {
-              const more = await c.ev(`(() => { const p = document.querySelector('#settings-panel .set-body') || document.querySelector('#settings-panel'); const before = p.scrollTop; p.scrollTop += p.clientHeight * 0.85; return p.scrollTop > before + 4; })()`);
-              if (!more) break;
-              await sleep(250);
+        // Twice at most: a capture that stalls relaunches the instance and runs the scene again.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const tok = { cancelled: false, limit: SCENE_S * (s.pages ? 2 : 1) };
+          const limitTimer = setTimeout(() => { tok.cancelled = true; }, tok.limit * 1000);
+          let g = null, n = 0, err = null;
+          const mineAll = [], sheetsHere = [];
+          try {
+            await closeAll();
+            const r = await s.setup();
+            g = s.guest ? (r && r.ev ? r : await guest(s.guest)) : null;
+            const c = g || chrome;
+            if (g) await g.waitFor('document.documentElement.getAttribute("data-theme") === ' + JSON.stringify(theme) + ' || !document.documentElement.hasAttribute("data-theme")', 4000).catch(() => 0);
+            const pages = s.pages ? 14 : 1;
+            for (let pg = 0; pg < pages; pg++) {
+              const res = await audit(c, s.name, tag, s.roots, viewTag, tok);
+              n += res.n;
+              const mine = res.out.map((f) => Object.assign(f, { allowed: !!allowed(f), why: (allowed(f) || {}).why }));
+              mineAll.push(...mine);
+              sheetsHere.push({ b64: res.full, label: s.name + (pages > 1 ? ' p' + (pg + 1) : '') + ' - ' + mine.filter((f) => !f.allowed).length + ' findings', bad: mine.some((f) => !f.allowed), boxes: mine.filter((f) => !f.allowed).map((f) => f.r) });
+              if (pages > 1) {
+                const more = await c.ev(`(() => { const p = document.querySelector('#settings-panel .set-body') || document.querySelector('#settings-panel'); const before = p.scrollTop; p.scrollTop += p.clientHeight * 0.85; return p.scrollTop > before + 4; })()`);
+                if (!more) break;
+                await sleep(250);
+              }
             }
+          } catch (e) { err = e; }
+          clearTimeout(limitTimer);
+          if (err && stalled(err) && attempt === 0 && !dead) {
+            say(tag + ': capture stalled, probe ' + await stallProbe());
+            await boot(size, theme, tag + ' capture stalled');
+            continue;
           }
-          check(n > 0 && bad === 0, `${tag}: ${n} controls, nothing painted over a neighbour, no clipped text or controls`, bad ? findings.filter((f) => f.tag === tag && !f.allowed && !ADVISORY.has(f.kind)).slice(0, 4).map((f) => f.kind + ' ' + f.d + ' ' + (f.detail || '')).join(' | ') : (n ? undefined : 'the scene did not open (no controls under ' + s.roots.join(',') + ')'));
-        } catch (e) {
-          check(false, `${tag}: HARNESS ERROR ${e && e.message || e}`);
+          findings.push(...mineAll);
+          sheetItems.push(...sheetsHere);
+          const badList = mineAll.filter((f) => !f.allowed && !ADVISORY.has(f.kind));
+          if (err) check(false, `${tag}: HARNESS ERROR ${err && err.message || err}` + (attempt ? ' (after a relaunch)' : ''));
+          else check(n > 0 && badList.length === 0, `${tag}: ${n} controls, nothing painted over a neighbour, no clipped text or controls` + (attempt ? ' (after a relaunch)' : ''), badList.length ? badList.slice(0, 4).map((f) => f.kind + ' ' + f.d + ' ' + (f.detail || '')).join(' | ') : (n ? undefined : 'the scene did not open (no controls under ' + s.roots.join(',') + ')'));
+          try { if (s.teardown) await s.teardown(g); } catch (e) { say('teardown ' + s.name + ': ' + e.message); }
+          if (g) { await g.ev('(window.__ov && __ov.still(false), 1)').catch(() => 0); }
+          say(tag + ' done at ' + Math.round((Date.now() - t0) / 1000) + ' s');
+          // stalled twice: the next scene still gets a working instance
+          if (err && stalled(err) && !dead) await boot(size, theme, tag + ' capture stalled again');
+          break;
         }
-        clearTimeout(limitTimer);
-        try { if (s.teardown) await s.teardown(g); } catch (e) { say('teardown ' + s.name + ': ' + e.message); }
-        if (g) { await g.ev('(window.__ov && __ov.still(false), 1)').catch(() => 0); }
-        say(tag + ' done at ' + Math.round((Date.now() - t0) / 1000) + ' s');
       }
       await closeAll();
       try {
@@ -328,6 +376,7 @@ run('overlap-audit', async (k) => {
     }
   }
   clearTimeout(watchdog);
+  say('relaunches after a stalled capture: ' + relaunches);
   await chrome.send('Emulation.clearDeviceMetricsOverride');
   const byKind = {};
   for (const f of findings.filter((x) => !x.allowed)) byKind[f.kind] = (byKind[f.kind] || 0) + 1;

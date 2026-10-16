@@ -63,7 +63,7 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.drm-bar-btn:disabled { opacity: 0.55; cursor: default; }
+.drm-bar-btn:disabled { opacity: var(--disabled-opacity); cursor: default; }
 
 /* The one action the bar is for. */
 .drm-bar-primary {

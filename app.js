@@ -6000,7 +6000,56 @@ function buildChip(tab) {
   });
 
   wireChipDrag(tab, chip);
+  // A tab opened after boot ARRIVES (chrome.css .tab.is-born, the shared motion). The ones a
+  // session restores at launch are simply there.
+  if (document.body && document.body.classList.contains('booted')) {
+    chip.classList.add('is-born');
+    const done = () => chip.classList.remove('is-born');
+    chip.addEventListener('animationend', (e) => { if (e.target === chip && e.animationName === 'q-tab-born-move') done(); });
+    setTimeout(done, 800);
+  }
   return chip;
+}
+
+/*
+ * THE STRIP CLOSES ITS GAP (motion only; next-week/motion-unison.md). When a chip leaves, the
+ * chips that take its place glide there on the shared spring instead of jumping. Call it BEFORE
+ * the chip goes. Every visible chip's drawn box is read once then, and once more in a microtask
+ * after the whole change (a "close others" of thirty tabs is still two layouts, not sixty); then
+ * only translate moves, on the compositor, nothing laid out while it runs. A close in the middle
+ * of a glide measures where the chips are DRAWN, so the glide carries on from there instead of
+ * snapping back. Reduced motion: no glide.
+ */
+let stripGlideBefore = null;
+function stripGlide() {
+  try {
+    if (stripGlideBefore || !tabstripEl || typeof Element.prototype.animate !== 'function') return;
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const before = new Map();
+    for (const c of tabstripEl.children) {
+      if (!c.classList.contains('tab') || c.hidden) continue;
+      const r = c.getBoundingClientRect();
+      before.set(c, { x: r.left, y: r.top });
+    }
+    stripGlideBefore = before;
+    queueMicrotask(() => {
+      stripGlideBefore = null;
+      try {
+        const root = getComputedStyle(document.documentElement);
+        const easing = root.getPropertyValue('--m-spring').trim() || 'ease-out';
+        const duration = parseFloat(root.getPropertyValue('--m-dur-xs')) || 240;
+        for (const c of before.keys()) for (const a of c.getAnimations()) if (a.id === 'q-strip-glide') a.cancel();
+        for (const [c, p] of before) {
+          if (!c.isConnected || c.hidden) continue;
+          const r = c.getBoundingClientRect();
+          const dx = p.x - r.left, dy = p.y - r.top;
+          if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+          const a = c.animate([{ translate: dx + 'px ' + dy + 'px' }, { translate: '0 0' }], { duration, easing });
+          a.id = 'q-strip-glide';
+        }
+      } catch (err) { /* motion only: the strip is already right */ }
+    });
+  } catch (err) { stripGlideBefore = null; }
 }
 
 /** The chip's hover text: the page title, and the host it is showing. */
@@ -9536,6 +9585,7 @@ function closeTab(id, options) {
   // stored exception keeps the detached <webview> (and so the tab object)
   // alive until the entries are discarded. Fix belongs upstream.
   try { tab.viewEl.remove(); } catch (err) { /* already detached */ }
+  stripGlide(); // motion only: the chips after it glide into the gap
   try { if (tab.chipEl) tab.chipEl.remove(); } catch (err) { /* already detached */ }
   tabs.splice(index, 1);
   pushAppRunningUpdate(); // an app tab or a terminal just stopped being open
@@ -9670,7 +9720,11 @@ function tabMenuIsOpen() {
 function closeTabMenu() {
   if (!tabMenuEl || tabMenuEl.hidden) return;
   tabMenuEl.hidden = true;
-  tabMenuEl.textContent = '';
+  // The rows stay drawn through the fade out (chrome.css, the shared motion: closed is
+  // [hidden] at once, and takes no clicks); they go when it has ended, unless the menu has
+  // opened again by then.
+  const menu = tabMenuEl;
+  setTimeout(() => { if (menu.hidden) menu.textContent = ''; }, 250);
   tabMenuRows = [];
   tabMenuIndex = -1;
 }
@@ -9701,6 +9755,7 @@ function runTabMenuRow(index) {
 function openTabMenu(x, y, items) {
   if (!tabMenuEl || !Array.isArray(items) || !items.length) return;
   closeTabMenu();
+  tabMenuEl.textContent = ''; // the last menu's rows, if they were still fading out
 
   for (const item of items) {
     if (!item) {

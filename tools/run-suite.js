@@ -86,6 +86,10 @@ const TESTS = [
   // The first-run welcome: fresh profile shows it, choices persist, skip sets the flag, an existing
   // profile never sees it, Settings re-opens it. Screenshots of every step, light and dark.
   { name: 'welcome-e2e', file: 'welcome-e2e.js', e2e: true },
+  // The motion Quartz shares with Mantle and Helm (next-week/motion-unison.md): the tokens, every
+  // surface opening and closing on opacity/translate/scale only, cut short and toggled, reduced
+  // motion, the tab strip's arrival and glide.
+  { name: 'motion-e2e', file: 'motion-e2e.js', e2e: true },
   // Hover highlights, focus rings and boxes that run into their neighbours, clipped text, crowded
   // small targets: every surface, light and dark, wide and at the 720 px minimum. Its own limit:
   // it forces a state on every control and shoots it, a few thousand shots.

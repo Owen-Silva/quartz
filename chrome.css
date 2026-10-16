@@ -231,19 +231,20 @@ html:not([data-theme="light"]) :is(#titlebar, .navrow) {
   flex: 0 0 auto;
 }
 
-/* The entrance is a short fade and a 2px settle — Helm's --dur-slow (200ms),
-   no blur (a filter on the whole chrome would have to be rasterised
+/* The entrance is the shared motion for a whole-edge surface (next-week/motion-unison.md,
+   Mantle's bar load-in): a 6 px settle on --m-spring over --m-dur-l, the fade done in the
+   first 40 % of it (224 ms, about the old 200). No blur (a filter on the whole chrome would have to be rasterised
    twice for a flourish nobody waits for). */
 body:not(.booted) .chrome-layer {
   opacity: 0;
-  transform: translateY(-2px);
+  transform: translateY(-6px);
 }
 
 body.booted .chrome-layer {
   opacity: 1;
   transform: none;
   /* the entrance, plus the theme tempo (see "theme transition") */
-  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease),
+  transition: opacity calc(var(--m-dur-l) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-l) var(--m-spring),
               background-color var(--dur) var(--ease), color var(--dur) var(--ease),
               border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
@@ -251,7 +252,7 @@ body.booted .chrome-layer {
 body:not(.booted) .navrow { opacity: 0; }
 body.booted .navrow {
   opacity: 1;
-  transition: opacity var(--dur-slow) var(--ease);
+  transition: opacity calc(var(--m-dur-l) * var(--m-fade-k)) var(--m-fade-in);
 }
 
 /* --- icon glyphs --------------------------------------------- */
@@ -346,7 +347,7 @@ button:focus-visible,
 }
 
 #newtab:hover { background: var(--surface-3); color: var(--text); }
-#newtab:active { background: var(--surface-2); }
+#newtab:active { background: var(--surface-press); }
 
 /* --- tabs (chips injected at runtime) ------------------------- */
 /* Helm's tab (ui/shell/tabs.css): quiet at rest, a faint fill on hover,
@@ -827,7 +828,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #win-min:focus-visible, #win-max:focus-visible, #win-close:focus-visible { box-shadow: var(--focus-ring-inset); }
 
 #win-min:hover, #win-max:hover { background: var(--surface-3); color: var(--text); }
-#win-min:active, #win-max:active { background: var(--surface-2); }
+#win-min:active, #win-max:active { background: var(--surface-press); }
 
 /* the one earned exception to monochrome: the Windows close convention */
 #win-close:hover { background: rgba(232,17,35,.9); color: #ffffff; }
@@ -864,7 +865,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 .iconbtn.glass:focus-visible { box-shadow: var(--focus-ring); }
 
 #back:hover, #forward:hover, #reload:hover, .iconbtn:hover { background: var(--surface-3); color: var(--text); }
-#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--surface-2); }
+#back:active, #forward:active, #reload:active, .iconbtn:active { background: var(--surface-press); }
 #back:disabled, #forward:disabled { background: none; color: var(--text-3); }
 
 /* the theme toggle: glyph swapped by app.js (moon in dark, sun in light) */
@@ -933,7 +934,7 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 }
 
 #zoom-badge:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
-#zoom-badge:active { background: var(--surface-2); }
+#zoom-badge:active { background: var(--surface-press); }
 #zoom-badge:focus-visible { box-shadow: var(--focus-ring); }
 #zoom-badge[hidden] { display: none; }
 
@@ -1382,7 +1383,7 @@ body:has(> .split-scrim) #views > .split-divider {
 }
 
 .tab-card .card-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
-.tab-card .card-btn:active { background: var(--surface-2); }
+.tab-card .card-btn:active { background: var(--surface-press); }
 .tab-card .card-btn:focus-visible { box-shadow: var(--focus-ring); }
 
 /* --- scrollbars (chrome only) --------------------------------- */
@@ -1418,28 +1419,103 @@ body,
               box-shadow var(--dur) var(--ease);
 }
 
-/* --- popovers arrive ------------------------------------------- */
-/* Every popover anchored to the chrome lifts in from 4 px above at 98.5%,
-   on the spring: one compositor-only run per open (opacity + translate +
-   scale, the individual properties, so a panel already centred with
-   transform keeps its own). Shown again after [hidden] = runs again. */
-@keyframes q-pop-in {
-  from { opacity: 0; translate: 0 -4px; scale: 0.985; }
+/* --- surfaces arrive and leave (next-week/motion-unison.md) ---------
+   The motion Mantle, Quartz and Helm share: IN on --m-spring with a
+   short fade, OUT on --m-accel at ~45 % of the IN time. Compositor only:
+   opacity plus the individual translate/scale properties (a pane already
+   placed with transform, like the centred palette, keeps its own).
+
+   [hidden] stays THE switch and flips at once, so every "is it open?"
+   check (anyOverlayOpen, nativeCovered, the tests) reads the truth the
+   moment a pane is closed. Only the paint lingers: display waits out the
+   fade (allow-discrete) and the leaving box takes no clicks. A close in
+   the middle of an open, or an open in the middle of a close, is a
+   transition reversing from wherever it is; nothing is left half-drawn.
+   Each surface sets how far it travels and for how long:
+     popovers (site info, shield, downloads, workspaces)  s, drop 8 px
+     the palette (centred)                                 s, scale .96
+     Settings (a tall panel)                               m, drop 12 px
+     menus (the tab menu, the bookmarks overflow)         xs, scale .96 from the corner
+     the find bar                                         xs, drop 6 px */
+#siteinfo-panel, #shield-panel, #downloads-panel, #workspaces-panel,
+#tabsearch, #settings-panel, #tabmenu, #bm-overflow {
+  --m-in: var(--m-dur-s);
+  --m-out: var(--m-dur-s-out);
+  --m-from-y: -8px;
+  --m-from-s: 1;
+  transition:
+    opacity var(--m-out) var(--m-fade-out),
+    translate var(--m-out) var(--m-accel),
+    scale var(--m-out) var(--m-accel),
+    display var(--m-out) allow-discrete;
+}
+#tabsearch { --m-from-y: 0px; --m-from-s: .96; transform-origin: 0 0; }  /* x 0 = its visual centre (translateX(-50%)) */
+#settings-panel { --m-in: var(--m-dur-m); --m-out: var(--m-dur-m-out); --m-from-y: -12px; }
+#tabmenu, #bm-overflow { --m-in: var(--m-dur-xs); --m-out: var(--m-dur-xs-out); --m-from-y: 0px; --m-from-s: .96; }
+#tabmenu { transform-origin: top left; }      /* it opens at the pointer */
+#bm-overflow { transform-origin: top right; } /* it hangs under the chevron at the bar's end */
+
+#siteinfo-panel[hidden], #shield-panel[hidden], #downloads-panel[hidden], #workspaces-panel[hidden],
+#tabsearch[hidden], #settings-panel[hidden], #tabmenu[hidden], #bm-overflow[hidden] {
+  opacity: 0;
+  translate: 0 calc(var(--m-from-y) / 2);
+  scale: calc((1 + var(--m-from-s)) / 2);
+  pointer-events: none;
 }
 #siteinfo-panel:not([hidden]), #shield-panel:not([hidden]), #downloads-panel:not([hidden]),
-#workspaces-panel:not([hidden]), #tabsearch:not([hidden]), #tabmenu:not([hidden]),
-#bm-overflow:not([hidden]) {
-  animation: q-pop-in var(--dur-spring) var(--ease-spring) both;
+#workspaces-panel:not([hidden]), #tabsearch:not([hidden]), #settings-panel:not([hidden]),
+#tabmenu:not([hidden]), #bm-overflow:not([hidden]) {
+  transition:
+    opacity calc(var(--m-in) * var(--m-fade-k)) var(--m-fade-in),
+    translate var(--m-in) var(--m-spring),
+    scale var(--m-in) var(--m-spring);
+}
+@starting-style {
+  #siteinfo-panel:not([hidden]), #shield-panel:not([hidden]), #downloads-panel:not([hidden]),
+  #workspaces-panel:not([hidden]), #tabsearch:not([hidden]), #settings-panel:not([hidden]),
+  #tabmenu:not([hidden]), #bm-overflow:not([hidden]) {
+    opacity: 0;
+    translate: 0 var(--m-from-y);
+    scale: var(--m-from-s);
+  }
+}
+
+/* A tab opened after boot arrives: a 6 px rise and a fade, xs (app.js buildChip adds .is-born
+   and takes it off at the end). Closing is instant for the chip itself (leaving is not an
+   event); the chips that close the gap glide there (app.js stripGlide, translate only). */
+@keyframes q-tab-born-move { from { translate: 0 6px; } }
+@keyframes q-tab-born-fade { from { opacity: 0; } }
+.tab.is-born {
+  animation: q-tab-born-move var(--m-dur-xs) var(--m-spring) backwards,
+             q-tab-born-fade calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in) backwards;
+}
+
+/* The School pane (#sidepane) arrives sliding 12 px in from the window edge, m. It sits in the
+   flow, so leaving stays instant: the well takes its width back at once, never a frame late. */
+#sidepane:not([hidden]) {
+  transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in),
+              translate var(--m-dur-m) var(--m-spring);
+}
+@starting-style {
+  #sidepane:not([hidden]) { opacity: 0; translate: 12px 0; }
 }
 
 /* --- reduced motion ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  #siteinfo-panel, #shield-panel, #downloads-panel, #workspaces-panel, #tabsearch, #tabmenu,
-  #bm-overflow { animation: none !important; }
-  body:not(.booted) .chrome-layer { opacity: 1; transform: none; }
-  body:not(.booted) .navrow { opacity: 1; }
-  body.booted .chrome-layer { transition: none; }
-  body.booted .navrow { transition: none; }
+  /* the shared motion keeps its fade (120 ms) and drops all travel */
+  #siteinfo-panel, #shield-panel, #downloads-panel, #workspaces-panel, #tabsearch, #settings-panel,
+  #tabmenu, #bm-overflow, #findbar {
+    translate: none !important;
+    scale: none !important;
+    animation: none !important;
+    transition: opacity var(--m-dur-rm) var(--m-fade-in), display var(--m-dur-rm) allow-discrete !important;
+  }
+  #sidepane { translate: none !important; transition: opacity var(--m-dur-rm) var(--m-fade-in) !important; }
+  .tab.is-born { animation: q-tab-born-fade var(--m-dur-rm) var(--m-fade-in) backwards !important; }
+  /* the launch entrance: a 120 ms fade, no settle */
+  body:not(.booted) .chrome-layer { transform: none; }
+  body.booted .chrome-layer { transition: opacity var(--m-dur-rm) var(--m-fade-in); }
+  body.booted .navrow { transition: opacity var(--m-dur-rm) var(--m-fade-in); }
   .tab.live .dot { animation: none; will-change: auto; }
   .tab.claude.needs-you .dot { animation: none; will-change: auto; }
   .tab.active.loading::after { animation: none; }

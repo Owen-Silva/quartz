@@ -154,7 +154,7 @@ body {
 @media (hover: hover) {
   .barbtn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
 }
-.barbtn:active { background: var(--surface-2); }
+.barbtn:active { background: var(--surface-press); }
 
 .clearwrap { position: relative; flex: 0 0 auto; }
 

@@ -505,7 +505,7 @@
 }
 
 #settings-panel .set-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); color: var(--text); }
-#settings-panel .set-btn:active { background: var(--surface-2); }
+#settings-panel .set-btn:active { background: var(--surface-press); }
 #settings-panel .set-btn:disabled { color: var(--text-3); background: var(--surface-2); }
 
 /* the small icon buttons: close, move, remove, add */
@@ -518,7 +518,7 @@
 }
 
 #settings-panel .set-act:hover { background: var(--surface-3); color: var(--text); }
-#settings-panel .set-act:active { background: var(--surface-2); }
+#settings-panel .set-act:active { background: var(--surface-press); }
 #settings-panel .set-act:disabled { color: var(--text-3); background: none; }
 
 #settings-panel .set-act .glyph {
@@ -1708,13 +1708,15 @@
     var(--shadow-2);
   opacity: 0;
   transform: translate(-50%, 6px);
-  /* 150 ms in, 150 ms out, then it holds still */
-  transition: opacity var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease);
+  /* The shared motion (next-week/motion-unison.md), a chip-sized surface: in on the spring over
+     --m-dur-xs with a short fade, out on the accelerate at 45 %, then it holds still. */
+  transition: opacity var(--m-dur-xs-out) var(--m-fade-out), transform var(--m-dur-xs-out) var(--m-accel);
 }
 
 #settings-toast.is-up {
   opacity: 1;
   transform: translate(-50%, 0);
+  transition: opacity calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-xs) var(--m-spring);
 }
 
 /* ============================================================
@@ -1773,5 +1775,6 @@
   #settings-panel .set-switch-knob,
   #settings-panel .set-h-chev { transition: none; }
 
-  #settings-toast { transition: none; }
+  /* reduced motion: it still fades (120 ms), it does not travel */
+  #settings-toast, #settings-toast.is-up { transform: translate(-50%, 0); transition: opacity var(--m-dur-rm) var(--m-fade-in); }
 }

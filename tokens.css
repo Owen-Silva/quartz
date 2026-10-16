@@ -52,6 +52,8 @@
   --surface-1: rgba(22, 23, 24, 0.66);   /* panels: side panes, settings, history */
   --surface-2: rgba(40, 41, 43, 0.62);   /* cards, inputs, rows inside a panel */
   --surface-3: rgba(62, 63, 66, 0.62);   /* hover / pressed / raised inside a card */
+  /* PRESSED is one step past hover, never back toward rest, as in Mantle (--lg-press) and Helm. */
+  --surface-press: rgba(84, 85, 89, 0.66);
   --surface-solid: #1f2021;              /* opaque: anything floating over a web page */
   --overlay: rgba(29, 30, 31, 0.93);     /* menus, popovers, modals (legible with or without blur) */
   --scrim: rgba(6, 7, 8, 0.48);          /* behind modals */
@@ -135,6 +137,7 @@ html[data-theme="light"] {
   --surface-1: rgba(255, 255, 255, 0.76);   /* panels */
   --surface-2: rgba(255, 255, 255, 0.70);   /* cards, inputs inside a panel */
   --surface-3: rgba(233, 235, 240, 0.86);   /* pressed / raised on a white card: a cool grey */
+  --surface-press: rgba(219, 222, 229, 0.92);  /* pressed: one step past the hover grey */
   --surface-solid: #fbfbfc;
   --overlay: rgba(255, 255, 255, 0.95);     /* menus, popovers, sheets */
   --scrim: rgba(11, 14, 26, 0.22);
@@ -322,6 +325,8 @@ html[data-theme="light"] [data-palette="mono"] {
   /* The ring for controls packed edge to edge (segments, stacked rows): drawn INSIDE the box,
      so it never paints over the neighbour the way the outer --focus-ring would. */
   --focus-ring-inset: inset 0 0 0 2px color-mix(in srgb, var(--ion) 62%, transparent);
+  /* A control that cannot be used right now: the same in Mantle (--lg-disabled) and Helm. */
+  --disabled-opacity: .45;
 
   --radius-xs: 4px;
   --radius-s: 6px;
@@ -354,11 +359,30 @@ html[data-theme="light"] [data-palette="mono"] {
   --dur: 120ms;
   --dur-slow: 200ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  /* A sampled spring (stiffness ~380, damping ~26): settles with a ~4% overshoot, no bounce.
-     For things that ARRIVE (a popover opening), never for colour changes. */
-  --ease-spring: linear(0, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 20.1%, 1.04 22.8%,
-                        1.042 26.2%, 1.024 31.4%, 1.006 37.2%, 0.998 44.3%, 1);
-  --dur-spring: 320ms;
+  /* ONE MOTION SET, SHARED WITH MANTLE AND HELM (next-week/motion-unison.md, 2026-10-16). Same
+     names, same values in all three apps; only these tokens may time a surface that arrives or
+     leaves. --m-spring is Mantle's bar load-in, copied point for point (ui/bar/bar.css, body.up
+     --bar-move): a damped spring, damping ratio 0.8, 41 points over normalised time, so the same
+     points over a shorter duration are the same spring, only quicker. 90 % in 35 % of the time,
+     a 1.5 % overshoot that settles by itself. For transform only (opacity takes --m-fade-in). */
+  --m-spring: linear(0, 0.0208, 0.0739, 0.1478, 0.2337, 0.3245, 0.4153, 0.5025, 0.5838, 0.6577, 0.7235,
+    0.7808, 0.8301, 0.8716, 0.906, 0.9341, 0.9566, 0.9742, 0.9876, 0.9977, 1.0049, 1.0098, 1.0128, 1.0145,
+    1.0151, 1.015, 1.0143, 1.0132, 1.012, 1.0106, 1.0092, 1.0079, 1.0066, 1.0055, 1.0044, 1.0035, 1.0028,
+    1.0021, 1.0015, 1.0011, 1);
+  --m-accel: cubic-bezier(.3, 0, .8, .15);     /* leaving: a plain accelerate, not an event */
+  --m-fade-in: cubic-bezier(.2, 0, 0, 1);
+  --m-fade-out: cubic-bezier(.4, 0, 1, 1);
+  /* IN durations scale with how far a thing travels; OUT is ~45 % of IN. */
+  --m-dur-xs: 240ms;                           /* tooltips, chips, small menus */
+  --m-dur-s: 320ms;                            /* pop-ups, popovers, flyouts */
+  --m-dur-m: 440ms;                            /* panels, sheets, dialogs */
+  --m-dur-l: 560ms;                            /* the bar, docks, whole-edge surfaces */
+  --m-dur-xs-out: calc(var(--m-dur-xs) * .45);
+  --m-dur-s-out: calc(var(--m-dur-s) * .45);
+  --m-dur-m-out: calc(var(--m-dur-m) * .45);
+  --m-dur-l-out: calc(var(--m-dur-l) * .45);
+  --m-dur-rm: 120ms;                           /* prefers-reduced-motion: opacity only, this long */
+  --m-fade-k: .4;                              /* the fade-in takes this share of the IN duration */
 
   /* the background layer (backdrop.js may override per the user's setting) */
   --bg-blur: 5px;                        /* the user's Helm setting (Helm settings.json background.blur) */

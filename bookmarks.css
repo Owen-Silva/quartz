@@ -102,7 +102,7 @@
 #bm-overflow .bm:hover { background: var(--surface-3); color: var(--text); }
 
 #bookmarks-bar .bm:active,
-#bm-overflow .bm:active { background: var(--surface-2); }
+#bm-overflow .bm:active { background: var(--surface-press); }
 
 /* Helm's one focus treatment: the --focus-ring box-shadow, no outline */
 #bookmarks-bar .bm:focus-visible,
@@ -165,7 +165,7 @@
 
 #bookmarks-bar .bm-more .glyph { font-family: var(--icon-font); }
 #bookmarks-bar .bm-more:hover { background: var(--surface-3); color: var(--text); }
-#bookmarks-bar .bm-more:active { background: var(--surface-2); }
+#bookmarks-bar .bm-more:active { background: var(--surface-press); }
 #bookmarks-bar .bm-more[aria-expanded="true"] {
   background: var(--surface-3);
   color: var(--text);

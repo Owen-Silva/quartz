@@ -24,7 +24,7 @@
 }
 
 #tabsearch-btn:hover { background: var(--surface-3); color: var(--text); }
-#tabsearch-btn:active { background: var(--surface-2); }
+#tabsearch-btn:active { background: var(--surface-press); }
 
 /* while the pane is open the button stays lit, so it reads as the thing
    holding it open rather than a button that did nothing */
@@ -284,7 +284,7 @@
 }
 
 #tabsearch .ts-close:hover { background: var(--surface-3); color: var(--text); }
-#tabsearch .ts-close:active { background: var(--surface-3); }
+#tabsearch .ts-close:active { background: var(--surface-press); }
 
 #tabsearch .ts-close:focus-visible {
   opacity: 1;

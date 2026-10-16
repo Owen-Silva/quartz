@@ -43,17 +43,29 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   box-shadow: inset 0 1px 0 var(--hairline-inner), var(--shadow-3);
-  /* One short entrance, never a loop. */
-  animation: findbar-in var(--dur) var(--ease) both;
-  /* the theme swap is a colour change, nothing more */
+  /* The theme swap is a colour change, nothing more. Arriving and leaving take the shared
+     motion (chrome.css "surfaces arrive and leave"): xs, a 6 px drop, OUT at 45 %. */
   transition: background-color var(--dur-slow) var(--ease),
               color var(--dur-slow) var(--ease),
-              border-color var(--dur-slow) var(--ease);
+              border-color var(--dur-slow) var(--ease),
+              opacity var(--m-dur-xs-out) var(--m-fade-out),
+              translate var(--m-dur-xs-out) var(--m-accel),
+              display var(--m-dur-xs-out) allow-discrete;
+}
+#findbar:not([hidden]) {
+  transition: background-color var(--dur-slow) var(--ease),
+              color var(--dur-slow) var(--ease),
+              border-color var(--dur-slow) var(--ease),
+              opacity calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in),
+              translate var(--m-dur-xs) var(--m-spring);
+}
+@starting-style {
+  #findbar:not([hidden]) { opacity: 0; translate: 0 -6px; }
 }
 
 /* The reset in this app does not carry [hidden]{display:none}, and a
    flex container would otherwise ignore the attribute entirely. */
-#findbar[hidden] { display: none; }
+#findbar[hidden] { display: none; opacity: 0; translate: 0 -3px; pointer-events: none; }
 
 /* No chrome layer to hang from (it is missing, or fullscreen has taken it
    out): the bar re-hangs itself off <body> and measures from the viewport. */
@@ -66,11 +78,6 @@
 /* In fullscreen there is no chrome above it, so it sits at the top edge. */
 body.fullscreen #findbar.find-detached,
 body.page-fullscreen #findbar.find-detached { top: 8px; }
-
-@keyframes findbar-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: none; }
-}
 
 /* --- the lens glyph ------------------------------------------- */
 #findbar .find-lens {

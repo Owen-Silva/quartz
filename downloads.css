@@ -168,7 +168,7 @@
 }
 
 #downloads-panel .dl-text:hover { background: var(--surface-3); color: var(--text); }
-#downloads-panel .dl-text:active { background: var(--surface-2); }
+#downloads-panel .dl-text:active { background: var(--surface-press); }
 
 /* Open folder wears its glyph ahead of the word. */
 #downloads-panel .dl-folder {
@@ -325,7 +325,7 @@
 }
 
 #downloads-panel .dl-act:hover { background: var(--hairline-strong); color: var(--text); }
-#downloads-panel .dl-act:active { background: var(--hairline); }
+#downloads-panel .dl-act:active { background: var(--surface-press); }
 
 #downloads-panel .dl-act .glyph {
   font-family: var(--icon-font);

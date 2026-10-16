@@ -148,7 +148,7 @@ body {
   }
 }
 
-.barbtn:active { background: var(--surface-2); }
+.barbtn:active { background: var(--surface-press); }
 
 /* Focus is Helm's ring, the only glow on the page. */
 .barbtn:focus-visible {

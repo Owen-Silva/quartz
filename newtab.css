@@ -656,7 +656,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   box-shadow: var(--focus-ring);
 }
 
-.home-edit-btn[disabled] { opacity: 0.5; cursor: default; }
+.home-edit-btn[disabled] { opacity: var(--disabled-opacity); cursor: default; }
 
 .home-edit-icon { width: 14px; height: 14px; }
 .home-edit-done { display: none; }
