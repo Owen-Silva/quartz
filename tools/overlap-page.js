@@ -52,7 +52,7 @@
   }
   function inView(r) { return r.width >= 1 && r.height >= 1 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight; }
   /** The part of el actually drawn: its box cut by every clipping ancestor. */
-  function seen(el) {
+  function drawn(el) {
     const b = el.getBoundingClientRect();
     let v = { x: b.left, y: b.top, w: b.width, h: b.height };
     for (let e = el.parentElement; e && e !== document.documentElement && v; e = e.parentElement) {
@@ -191,7 +191,7 @@
     }
 
     // 3. overlaps: control on control, text on text, icon on text
-    const rects = all.map((el) => ({ el, r: seen(el) }));
+    const rects = all.map((el) => ({ el, r: drawn(el) }));
     for (let a = 0; a < rects.length; a++) {
       for (let b = a + 1; b < rects.length; b++) {
         const A = rects[a], B = rects[b];
@@ -284,7 +284,7 @@
     const own = r4(el.getBoundingClientRect());
     const nbr = [];
     const layer = fixedRoot(el);
-    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; const or = seen(o); if (hosts(or, own)) continue; if (fixedRoot(o) !== layer) continue; nbr.push({ d: desc(o), r: or, text: false }); }
+    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; const or = drawn(o); if (hosts(or, own)) continue; if (fixedRoot(o) !== layer) continue; nbr.push({ d: desc(o), r: or, text: false }); }
     for (const t of ov.state.texts) { if (el.contains(t.owner) || t.owner === el) continue; if (fixedRoot(t.owner) !== layer) continue; nbr.push({ d: desc(t.owner) + ' text "' + t.text + '"', r: t.r, text: true }); }
     const clipBox = { x: cx, y: cy, w: img.width, h: img.height };
     const near = nbr.filter((n) => inter(n.r, clipBox) > 0);
@@ -358,6 +358,6 @@
     } else if (!on && st) st.remove();
     return 1;
   }
-  const ov = { seen, collect, staticChecks, setBase, judge, sheet, still, desc };
+  const ov = { drawn, collect, staticChecks, setBase, judge, sheet, still, desc };
   window.__ov = ov;
 })();
