@@ -49,6 +49,8 @@ const TESTS = [
   { name: 'keywords', file: 'keywords-harness.js' },
   { name: 'log', file: 'log-harness.js' },
   { name: 'procfind', file: 'procfind-harness.js' },
+  // What school.js asks school-reader.ps1 for (probe forces a walk) and the gate-off reason.
+  { name: 'school', file: 'school-harness.js' },
   // The main-process guard on activateUvLoop (the idle wakeup storms).
   { name: 'uvquiet', file: 'uvquiet-harness.js' },
   { name: 'profilemove', file: 'profilemove-harness.js' },
@@ -58,6 +60,8 @@ const TESTS = [
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
+  // school-reader.ps1's change gate against a Chromium stand-in for LessonPlayer (never LessonPlayer itself).
+  { name: 'school-reader-e2e', file: 'school-reader-e2e.js', e2e: true },
   { name: 'favicons-e2e', file: 'favicons-e2e.js', e2e: true },
   // Site logos outside the tab strip (bookmarks bar, new tab page, history page), and no request
   // to a Google favicon host anywhere.
