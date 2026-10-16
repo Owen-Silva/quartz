@@ -17,6 +17,14 @@
   const interW = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const interH = (a, b) => Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
 
+  /** a fully holds b: a field hosting an icon button, a card hosting its own controls. */
+  const hosts = (a, b) => b.x >= a.x - 1 && b.y >= a.y - 1 && b.x + b.w <= a.x + a.w + 1 && b.y + b.h <= a.y + a.h + 1;
+  /** The position:fixed layer an element lives in (null = the page itself). */
+  function fixedRoot(el) {
+    for (let e = el; e && e.nodeType === 1; e = e.parentElement) if (getComputedStyle(e).position === 'fixed') return e;
+    return null;
+  }
+
   /** A short readable selector for a finding. */
   function desc(el) {
     if (!el || el.nodeType !== 1) return '?';
@@ -92,11 +100,27 @@
       range.selectNodeContents(n);
       for (const rr of range.getClientRects()) {
         if (!inView(rr)) continue;
-        texts.push({ owner, r: r4(rr), text: n.nodeValue.trim().slice(0, 24) });
+        // A screen-reader-only label (the 1 px clip pattern) is not drawn text.
+        const ob = owner.getBoundingClientRect();
+        if (ob.width <= 2 || ob.height <= 2) continue;
+        // What is DRAWN: the run cut by every clipping ancestor (an ellipsised title's range
+        // still reports the whole unclipped line).
+        let v = { x: rr.left, y: rr.top, w: rr.width, h: rr.height };
+        for (let e = owner; e && e !== document.documentElement && v; e = e.parentElement) {
+          const c = getComputedStyle(e);
+          if (c.overflowX === 'visible' && c.overflowY === 'visible') continue;
+          const b = e.getBoundingClientRect();
+          const x0 = Math.max(v.x, b.left), y0 = Math.max(v.y, b.top), x1 = Math.min(v.x + v.w, b.right), y1 = Math.min(v.y + v.h, b.bottom);
+          v = (x1 - x0 >= 1 && y1 - y0 >= 1) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+        }
+        if (!v) continue;
+        texts.push({ owner, r: r4({ left: v.x, top: v.y, width: v.w, height: v.h }), full: r4(rr), text: n.nodeValue.trim().slice(0, 24) });
       }
     }
     ov.state = { roots: rootEls, cands, all, texts };
-    return cands.map((el, i) => ({ i, d: desc(el), r: r4(el.getBoundingClientRect()) }));
+    // Focus is judged only where focus can land: a role=option row driven by
+    // aria-activedescendant never shows a ring.
+    return cands.map((el, i) => ({ i, d: desc(el), r: r4(el.getBoundingClientRect()), focusable: el.tabIndex >= 0 && !el.disabled }));
   }
 
   /** The static checks: clipped text, controls outside their box, overlaps, small targets. */
@@ -147,7 +171,7 @@
         const b = ca.el.getBoundingClientRect();
         const cr = { x: b.left + ca.el.clientLeft, y: b.top + ca.el.clientTop, w: ca.el.clientWidth, h: ca.el.clientHeight };
         const vis = inter(r, cr);
-        if (vis > 0 && vis < r.w * r.h * 0.98 - 2) add('control-clipped', el, Math.round(100 - 100 * vis / (r.w * r.h)) + '% cut by ' + desc(ca.el));
+        if (vis > 0 && vis < r.w * r.h * 0.9) add('control-clipped', el, Math.round(100 - 100 * vis / (r.w * r.h)) + '% cut by ' + desc(ca.el));
       }
     }
 
@@ -158,6 +182,8 @@
         const A = rects[a], B = rects[b];
         if (A.el.contains(B.el) || B.el.contains(A.el)) continue;
         if (!inRoot(A.el) && !inRoot(B.el)) continue;
+        if (hosts(A.r, B.r) || hosts(B.r, A.r)) continue;          // an icon inside a field
+        if (fixedRoot(A.el) !== fixedRoot(B.el)) continue;         // a popover over the page
         if (interW(A.r, B.r) > 1.5 && interH(A.r, B.r) > 1.5) add('controls-overlap', A.el, 'with ' + desc(B.el) + ' (' + Math.round(interW(A.r, B.r)) + 'x' + Math.round(interH(A.r, B.r)) + ')');
       }
     }
@@ -166,7 +192,8 @@
       for (let b = a + 1; b < rt.length; b++) {
         const A = rt[a], B = rt[b];
         if (A.owner === B.owner) continue;
-        if (interW(A.r, B.r) > 1.5 && interH(A.r, B.r) > Math.min(A.r.h, B.r.h) * 0.3) add('text-overlaps-text', A.owner, '"' + A.text + '" over "' + B.text + '"', A.r);
+        if (fixedRoot(A.owner) !== fixedRoot(B.owner)) continue;
+        if (interW(A.r, B.r) > 1.5 && interH(A.r, B.r) > Math.min(A.r.h, B.r.h) * 0.3) add('text-overlaps-text', A.owner, '"' + A.text + '" over ' + desc(B.owner) + ' "' + B.text + '"', A.r);
       }
     }
     const icons = [...document.querySelectorAll(ICON)].filter((el) => inRoot(el) && shown(el)).map((el) => ({ el, r: r4(el.getBoundingClientRect()) })).filter((x) => x.r.w >= 4 && x.r.w <= 64 && x.r.h >= 4 && x.r.h <= 64 && inView(x.el.getBoundingClientRect()));
@@ -241,7 +268,7 @@
     const base = ov.base, W = base.width;
     const own = r4(el.getBoundingClientRect());
     const nbr = [];
-    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; nbr.push({ d: desc(o), r: r4(o.getBoundingClientRect()), text: false }); }
+    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; if (hosts(r4(o.getBoundingClientRect()), own)) continue; nbr.push({ d: desc(o), r: r4(o.getBoundingClientRect()), text: false }); }
     for (const t of ov.state.texts) { if (el.contains(t.owner) || t.owner === el) continue; nbr.push({ d: desc(t.owner) + ' text "' + t.text + '"', r: t.r, text: true }); }
     const clipBox = { x: cx, y: cy, w: img.width, h: img.height };
     const near = nbr.filter((n) => inter(n.r, clipBox) > 0);

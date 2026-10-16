@@ -257,10 +257,14 @@
    outline. chrome.css rings every button already; these repeat it so
    the panel keeps it even if that rule moves. The open instrument's
    inset hairline gives way to the ring while it holds focus. */
-#shield:focus-visible,
-#shield-panel .sh-row:focus-visible {
+#shield:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+/* The rows stack 2 px apart: an outer ring would paint over the next one. */
+#shield-panel .sh-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
 }
 
 /* --- reduced motion --------------------------------------------

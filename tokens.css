@@ -319,6 +319,10 @@ html[data-theme="light"] [data-palette="mono"] {
 
 /* --- theme-independent scale --------------------------------- */
 :root {
+  /* The ring for controls packed edge to edge (segments, stacked rows): drawn INSIDE the box,
+     so it never paints over the neighbour the way the outer --focus-ring would. */
+  --focus-ring-inset: inset 0 0 0 2px color-mix(in srgb, var(--ion) 62%, transparent);
+
   --radius-xs: 4px;
   --radius-s: 6px;
   --radius-m: 10px;

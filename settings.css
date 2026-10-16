@@ -296,6 +296,10 @@
 
 #settings-panel .set-seg-opt:hover { color: var(--text); }
 
+/* Segments touch: the ring goes inside, or it paints over the next one. */
+#settings-panel .set-seg-opt:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); color: var(--text); }
+#settings-panel .set-seg-opt.is-on:focus-visible { box-shadow: var(--shadow-1), var(--focus-ring-inset); }
+
 /* the chosen half is raised out of the well, as Helm's pressed segment */
 #settings-panel .set-seg-opt.is-on {
   background: var(--surface-3);

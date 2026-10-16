@@ -35,6 +35,19 @@ const SIZES = [{ name: 'wide', w: 1280, h: 800 }, { name: 'narrow', w: 720, h: 6
 const THEMES = (flag('themes') || 'light,dark').split(',');
 const LIB = fs.readFileSync(path.join(__dirname, 'overlap-page.js'), 'utf8');
 const MAX_PER_SCENE = 140;
+const SCENE_S = 300;                                   // one scene (settings-open: twice that)
+const BUDGET_S = Number(flag('budget')) || 1380;       // the whole run; run-suite allows 1500
+
+/*
+ * No CDP call may wait for ever. ws's send() on a socket that already closed (a guest whose tab
+ * was just closed) neither throws nor answers, which is exactly how the first run hung; every
+ * call now answers within 20 s, with an error if it must.
+ */
+const rawSend = Cdp.prototype.send;
+Cdp.prototype.send = function (method, params) {
+  if (!this.ws || this.ws.readyState !== 1) return Promise.resolve({ error: { message: 'connection closed (' + method + ')' } });
+  return Promise.race([rawSend.call(this, method, params), sleep(20000).then(() => ({ error: { message: method + ' timed out after 20 s' } }))]);
+};
 
 /*
  * Reviewed and kept on purpose. Each entry: kind, a regex on the element (d), optionally one on
@@ -51,6 +64,8 @@ ${Array.from({ length: 14 }, (_, i) => `<p>Paragraph ${i + 1}. The path leaves t
 
 run('overlap-audit', async (k) => {
   const { check, launch, say } = k;
+  let dead = false;
+  const t0 = Date.now();
   fs.mkdirSync(path.join(OUT, 'sheets'), { recursive: true });
   fs.mkdirSync(path.join(OUT, 'crops'), { recursive: true });
   const srv = await serve((req, res, p) => {
@@ -61,6 +76,20 @@ run('overlap-audit', async (k) => {
   const B = 'http://127.0.0.1:' + srv.port;
   const q = await launch({ cdp: 9437 });
   const chrome = q.chrome;
+  // The whole-run watchdog: past the budget the instance is killed (every pending call then
+  // fails fast), the run stops at the next scene, and the summary still prints. If even that
+  // does not end it, the process goes 60 s later with its own FAIL line.
+  const watchdog = setTimeout(async () => {
+    dead = true;
+    check(false, 'WATCHDOG: the run passed its ' + BUDGET_S + ' s budget; the test instance was killed');
+    try { await q.kill(); } catch (e) { /* gone */ }
+    setTimeout(() => {
+      try { require('child_process').execFileSync('taskkill', ['/PID', String(q.child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ }
+      console.log('overlap-audit: 0 passed, 1 failed');
+      process.exit(1);
+    }, 60000).unref();
+  }, BUDGET_S * 1000);
+  watchdog.unref();
   await chrome.send('Page.enable');
   const findings = [];
   const guests = new Map();
@@ -71,7 +100,8 @@ run('overlap-audit', async (k) => {
       const list = await q.targets();
       const t = list.find((x) => x.type === 'webview' && re.test(String(x.url)));
       if (t) {
-        if (guests.has(t.id)) return guests.get(t.id);
+        const had = guests.get(t.id);
+        if (had && had.ws && had.ws.readyState === 1) return had;
         const c = await new Cdp(t.webSocketDebuggerUrl).open();
         await c.send('Page.enable');
         guests.set(t.id, c);
@@ -93,7 +123,7 @@ run('overlap-audit', async (k) => {
   const closeAll = () => chrome.ev(`(() => { for (const f of [() => Settings.close(), () => SiteInfo.close(), () => Shield.close(), () => Downloads.close(), () => History.close(), () => FindBar.close(), () => TabSearch.close(), () => Workspaces.close(), () => closeTabMenu()]) { try { f(); } catch (e) {} } try { document.activeElement && document.activeElement.blur(); } catch (e) {} return 1; })()`);
 
   /** One scene on one page: static checks, then every control hovered and focused. */
-  async function audit(c, scene, tag, roots, viewTag) {
+  async function audit(c, scene, tag, roots, viewTag, tok) {
     await c.ev(LIB + ';1');
     await c.ev('__ov.still(true)');
     await sleep(120);
@@ -117,6 +147,8 @@ run('overlap-audit', async (k) => {
       if (ix >= 0) ids.set(Number(at[ix + 1]), nodeId);
     }
     for (const cand of cands.slice(0, MAX_PER_SCENE)) {
+      if (tok && tok.cancelled) throw new Error('scene passed its ' + tok.limit + ' s limit');
+      if (dead) throw new Error('watchdog');
       const nodeId = ids.get(cand.i);
       if (!nodeId) continue;
       const pad = 12;
@@ -125,6 +157,7 @@ run('overlap-audit', async (k) => {
       if (x1 - x0 < 2 || y1 - y0 < 2) continue;
       const clip = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
       for (const [kind, states] of [['hover', ['hover']], ['focus', ['focus', 'focus-visible']]]) {
+        if (kind === 'focus' && !cand.focusable) continue;
         await c.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: states });
         await frame(c);
         const b64 = await shotB64(c, clip);
@@ -241,7 +274,10 @@ run('overlap-audit', async (k) => {
       const viewTag = size.name + '-' + theme;
       const sheetItems = [];
       for (const s of SCENES) {
+        if (dead) break;
         if (s.wideOnly && size.name !== 'wide') continue;
+        const tok = { cancelled: false, limit: SCENE_S * (s.pages ? 2 : 1) };
+        const limitTimer = setTimeout(() => { tok.cancelled = true; }, tok.limit * 1000);
         const tag = viewTag + ' ' + s.name;
         let g = null, n = 0, bad = 0;
         try {
@@ -252,7 +288,7 @@ run('overlap-audit', async (k) => {
           if (g) await g.waitFor('document.documentElement.getAttribute("data-theme") === ' + JSON.stringify(theme) + ' || !document.documentElement.hasAttribute("data-theme")', 4000).catch(() => 0);
           const pages = s.pages ? 14 : 1;
           for (let pg = 0; pg < pages; pg++) {
-            const res = await audit(c, s.name, tag, s.roots, viewTag);
+            const res = await audit(c, s.name, tag, s.roots, viewTag, tok);
             n += res.n;
             const mine = res.out.map((f) => Object.assign(f, { allowed: !!allowed(f), why: (allowed(f) || {}).why }));
             findings.push(...mine);
@@ -268,8 +304,10 @@ run('overlap-audit', async (k) => {
         } catch (e) {
           check(false, `${tag}: HARNESS ERROR ${e && e.message || e}`);
         }
+        clearTimeout(limitTimer);
         try { if (s.teardown) await s.teardown(g); } catch (e) { say('teardown ' + s.name + ': ' + e.message); }
         if (g) { await g.ev('(window.__ov && __ov.still(false), 1)').catch(() => 0); }
+        say(tag + ' done at ' + Math.round((Date.now() - t0) / 1000) + ' s');
       }
       await closeAll();
       try {
@@ -279,6 +317,7 @@ run('overlap-audit', async (k) => {
       } catch (e) { say('sheet failed: ' + e.message); }
     }
   }
+  clearTimeout(watchdog);
   await chrome.send('Emulation.clearDeviceMetricsOverride');
   const byKind = {};
   for (const f of findings.filter((x) => !x.allowed)) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
