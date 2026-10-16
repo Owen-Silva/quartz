@@ -42,7 +42,13 @@
 const DEFAULT_DELAY_MS = 3000;
 /** Win32 SetThreadPriority values by the names QUARTZ_UVBOOST takes. */
 const LEVELS = { abovenormal: 1, highest: 2, timecritical: 15 };
-/** The level the embed thread gets unless QUARTZ_UVBOOST says otherwise (round 4 measured it). */
+/**
+ * The level the embed thread gets unless QUARTZ_UVBOOST says otherwise. Round 4 (local, n=2 per
+ * cell, pinned to one CPU; storm = uv_run loops far above packets taken): AboveNormal, the main
+ * thread's own base, stormed in 2 of 4 runs (the main thread's wake boost still lifts it above);
+ * Highest and TimeCritical stopped it in 4 of 4, the thread then using under 0.1% of a core.
+ * Highest is the lowest level that works.
+ */
 const DEFAULT_LEVEL = 'highest';
 const LEVEL_WORDS = { '-15': 'Idle', '-2': 'Lowest', '-1': 'BelowNormal', 0: 'Normal', 1: 'AboveNormal', 2: 'Highest', 15: 'TimeCritical' };
 /** The threads Node and libuv create with uv_thread_create and then name. */
