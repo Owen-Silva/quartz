@@ -1931,7 +1931,8 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-tile:hover::before,
 .dock-tile:active::before { border-color: var(--hairline-strong); }
 
-.dock-tile:active { background-color: var(--glass); }
+/* pressed is one step past hover, never back toward rest (Mantle --lg-press, Helm) */
+.dock-tile:active { background-color: var(--surface-press); }
 
 .dock-tile:focus-visible {
   outline: none;
@@ -2420,7 +2421,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border-color: var(--hairline-strong);
   color: var(--fg);
 }
-.chip:active { background-color: var(--home-glass); }
+.chip:active { background-color: color-mix(in srgb, var(--home-glass-hover), var(--text) 8%); }
 
 :root[data-bg="video"] .chip {
   -webkit-backdrop-filter: none;
@@ -2578,7 +2579,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .rtile:hover::before,
 .rtile:active::before { border-color: var(--hairline-strong); }
 
-.rtile:active { background-color: var(--home-glass); }
+.rtile:active { background-color: color-mix(in srgb, var(--home-glass-hover), var(--text) 8%); }
 
 .rtile:focus-visible {
   outline: none;

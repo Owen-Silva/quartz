@@ -106,15 +106,26 @@ run('motion-e2e', async ({ check, launch, say }) => {
     check(gone(r.cutClose), sf.id + ': opened mid-close and closed again: ends fully gone', r.cutClose);
     check(gone(r.toggled), sf.id + ': twelve toggles a frame apart end in the last state asked for', r.toggled);
     frameReport.push(sf.id + ' ' + r.over20 + '/' + r.frames + ' over 20 ms (worst ' + r.worst + ')');
-    // No layout in the middle of an open: compositor work only.
-    await ev('(' + sf.open + ', 1)');
-    await ev('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))');
-    const l0 = await layouts();
-    await sleep(Math.round(DUR[sf.d] * 0.6));
-    const l1 = await layouts();
-    check(l1 - l0 === 0, sf.id + ': no layout while it arrives', { layouts: l1 - l0 });
-    await ev('(' + sf.close + ', 1)');
-    await sleep(400);
+    // The motion adds no layout: the same open with this surface's transitions switched off is
+    // the control (a surface may lay out its own content as it fills, e.g. site info's
+    // permissions); the animated open may not lay out more than that, give or take the
+    // chrome's own once-a-second tick.
+    const win = Math.round(DUR[sf.d] * 0.6);
+    const count = async (still) => {
+      if (still) await ev(`(() => { const st = document.createElement('style'); st.id = '__m_still'; st.textContent = '#${sf.id} { transition: none !important; }'; document.head.appendChild(st); return 1; })()`);
+      await ev('(' + sf.open + ', 1)');
+      await ev('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))');
+      const l0 = await layouts();
+      await sleep(win);
+      const l1 = await layouts();
+      await ev('(' + sf.close + ', 1)');
+      await sleep(400);
+      await ev("(() => { const st = document.getElementById('__m_still'); if (st) st.remove(); return 1; })()");
+      await sleep(100);
+      return l1 - l0;
+    };
+    const control = await count(true), animated = await count(false);
+    check(animated - control <= 1, sf.id + ': the motion adds no layout while it arrives (' + animated + ' animated, ' + control + ' without transitions, in ' + win + ' ms)', { animated, control });
   }
   say('frames: ' + frameReport.join('; '));
 

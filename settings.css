@@ -569,7 +569,7 @@
 #settings-panel .set-path:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
 }
 
 #settings-panel .set-path::selection { background: var(--ion-select); color: var(--text); }
@@ -637,7 +637,7 @@
 #settings-panel .set-sel:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
 }
 
 /* the open list is drawn by the OS: hand it opaque ground, not glass */
@@ -1238,7 +1238,7 @@
 /* the same ring the hue slider takes: on the thumb, not the track */
 #settings-panel .set-range:focus-visible { outline: none; box-shadow: none; }
 #settings-panel .set-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);   /* sliders stack: an outer ring reached the next one */
 }
 
 #settings-panel .set-chips {
@@ -1736,6 +1736,7 @@
 #settings-panel .set-opt:focus-visible,
 #settings-panel .set-row:focus-visible,
 #settings-panel .set-act:focus-visible,
+#settings-panel .set-btn:focus-visible,
 #settings-panel .set-chip-text:focus { box-shadow: var(--focus-ring-inset); }
 
 /* The panel itself (tabindex -1) is focused on open so keys land in it.

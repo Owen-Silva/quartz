@@ -284,7 +284,8 @@ body {
 @media (hover: hover) {
   .rail-seg-btn:hover:not([disabled]) { color: var(--text); background: var(--surface-3); }
 }
-.rail-seg-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* segments sit edge to edge: the ring is drawn inside, never over the neighbour */
+.rail-seg-btn:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
 .rail-seg-btn[aria-pressed="true"] {
   color: var(--text);
   background: var(--accent-soft);

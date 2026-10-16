@@ -345,10 +345,6 @@ html[data-theme="light"] {
 #workspaces-panel .ws-act:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
 #workspaces-panel .ws-act:active { background: var(--surface-press); }
 
-#workspaces-panel .ws-act:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
 
 /* the second press of the two-step delete */
 #workspaces-panel .ws-confirm {
