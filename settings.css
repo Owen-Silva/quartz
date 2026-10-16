@@ -1728,6 +1728,14 @@
   box-shadow: var(--focus-ring);
 }
 
+/* Packed controls: option pills 1 px apart, rows stacked edge to edge, the
+   chip editor's fields and its icon buttons. The outer ring would paint
+   over the neighbour, so theirs is drawn inside the box. */
+#settings-panel .set-opt:focus-visible,
+#settings-panel .set-row:focus-visible,
+#settings-panel .set-act:focus-visible,
+#settings-panel .set-chip-text:focus { box-shadow: var(--focus-ring-inset); }
+
 /* The panel itself (tabindex -1) is focused on open so keys land in it.
    Without this Chromium paints its own orange UA outline round the whole
    pane, which is no part of Helm's look; the controls inside carry the

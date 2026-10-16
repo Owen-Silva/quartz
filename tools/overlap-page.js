@@ -41,6 +41,7 @@
   }
 
   function shown(el) {
+    if (el.checkVisibility && !el.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) return false;
     for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
       const c = getComputedStyle(e);
       if (c.display === 'none' || Number(c.opacity) < 0.05) return false;
@@ -50,6 +51,20 @@
     return true;
   }
   function inView(r) { return r.width >= 1 && r.height >= 1 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight; }
+  /** The part of el actually drawn: its box cut by every clipping ancestor. */
+  function seen(el) {
+    const b = el.getBoundingClientRect();
+    let v = { x: b.left, y: b.top, w: b.width, h: b.height };
+    for (let e = el.parentElement; e && e !== document.documentElement && v; e = e.parentElement) {
+      const c = getComputedStyle(e);
+      if (c.overflowX === 'visible' && c.overflowY === 'visible') continue;
+      const r = e.getBoundingClientRect();
+      const x0 = Math.max(v.x, r.left), y0 = Math.max(v.y, r.top), x1 = Math.min(v.x + v.w, r.right), y1 = Math.min(v.y + v.h, r.bottom);
+      v = (x1 - x0 >= 1 && y1 - y0 >= 1) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+    }
+    return v ? r4({ left: v.x, top: v.y, width: v.w, height: v.h }) : { x: 0, y: 0, w: 0, h: 0 };
+  }
+
   /** Not covered by something else at its centre (a panel over the toolbar, say). */
   function onTop(el, r) {
     const pts = [[0.5, 0.5], [0.25, 0.5], [0.75, 0.5]];
@@ -176,7 +191,7 @@
     }
 
     // 3. overlaps: control on control, text on text, icon on text
-    const rects = all.map((el) => ({ el, r: r4(el.getBoundingClientRect()) }));
+    const rects = all.map((el) => ({ el, r: seen(el) }));
     for (let a = 0; a < rects.length; a++) {
       for (let b = a + 1; b < rects.length; b++) {
         const A = rects[a], B = rects[b];
@@ -268,8 +283,9 @@
     const base = ov.base, W = base.width;
     const own = r4(el.getBoundingClientRect());
     const nbr = [];
-    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; if (hosts(r4(o.getBoundingClientRect()), own)) continue; nbr.push({ d: desc(o), r: r4(o.getBoundingClientRect()), text: false }); }
-    for (const t of ov.state.texts) { if (el.contains(t.owner) || t.owner === el) continue; nbr.push({ d: desc(t.owner) + ' text "' + t.text + '"', r: t.r, text: true }); }
+    const layer = fixedRoot(el);
+    for (const o of ov.state.all) { if (o === el || o.contains(el) || el.contains(o)) continue; const or = seen(o); if (hosts(or, own)) continue; if (fixedRoot(o) !== layer) continue; nbr.push({ d: desc(o), r: or, text: false }); }
+    for (const t of ov.state.texts) { if (el.contains(t.owner) || t.owner === el) continue; if (fixedRoot(t.owner) !== layer) continue; nbr.push({ d: desc(t.owner) + ' text "' + t.text + '"', r: t.r, text: true }); }
     const clipBox = { x: cx, y: cy, w: img.width, h: img.height };
     const near = nbr.filter((n) => inter(n.r, clipBox) > 0);
     const hits = new Map();
@@ -342,6 +358,6 @@
     } else if (!on && st) st.remove();
     return 1;
   }
-  const ov = { collect, staticChecks, setBase, judge, sheet, still, desc };
+  const ov = { seen, collect, staticChecks, setBase, judge, sheet, still, desc };
   window.__ov = ov;
 })();

@@ -822,6 +822,9 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 }
 
 #win-min .glyph, #win-max .glyph, #win-close .glyph { font-size: 10px; }
+/* The three sit edge to edge (the Windows caption convention): the ring goes
+   inside, or it paints over the button beside it. */
+#win-min:focus-visible, #win-max:focus-visible, #win-close:focus-visible { box-shadow: var(--focus-ring-inset); }
 
 #win-min:hover, #win-max:hover { background: var(--surface-3); color: var(--text); }
 #win-min:active, #win-max:active { background: var(--surface-2); }
