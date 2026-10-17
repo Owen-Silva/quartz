@@ -25,7 +25,7 @@
   var ROW_CAP = 40;
   var GROUPS_PER_SERVICE = 4;
   var GROUP_MIN = 3;          // a named row with fewer items than this folds into the service's "More" row
-  var ROUND_ROBIN = ['youtube', 'disney', 'prime', 'espn'];
+  var ROUND_ROBIN = ['youtube', 'disney', 'hulu', 'prime', 'espn'];
 
   /** Lower-case, accents folded, punctuation gone: for de-duplicating titles and for search. */
   function fold(s) {

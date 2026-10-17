@@ -33,6 +33,14 @@
  *     /userState (POST), /hydration (POST).
  * Matching rows by their visible name or style, never by a fixed set id, is
  * the design: ids and the explore version both churn.
+ *
+ * Hulu inside Disney+ (FEASIBILITY.md "Hulu (10-17)"): a second, optional view
+ * loads Disney+'s own Hulu hub (/browse/hulu, which Disney+ answers with
+ * /browse/page-<id>, "Hulu Movies and Shows | Disney+", public logged-out probe
+ * 2026-10-17). Everything that hub lists is Hulu content, so (1) its rows come in
+ * as picks badged Hulu, and (2) any home-row title the hub also lists is badged
+ * Hulu: a confident tag from Disney+'s own grouping, not a guess from a name.
+ * When Hulu is locked, missing or not linked, a warning says so and how to fix it.
  */
 var shape = require('../shape');
 
@@ -43,6 +51,10 @@ var IMG = 'https://disney.images.edge.bamgrid.com/ripcut-delivery/v2/variant/dis
 var IMG_TAIL = '/scale?width=640&aspectRatio=1.78';
 var BUDGET_MS = 20000;
 var PER_SET = 50;
+var HULU_HUB = SITE + '/browse/hulu';
+var HUB_BUDGET_MS = 15000;
+var HUB_ROWS = 4;        // the Hulu hub's own rows Watch takes, in page order
+var HUB_PER_ROW = 20;
 
 /* PATH patterns (no hosts), so a local mock server matches as well as bamgrid. */
 var EXPLORE_RE = /\/explore\/v[\d.]+\/(page|set|userState|hydration)\b/i;
@@ -63,12 +75,32 @@ var REC_RE = /for[\s_-]*you|recommend|because[\s_-]*you|becauseyou|top[\s_-]*pic
 var HULU_RE = /\bhulu\b/i;
 var ESPN_RE = /\bespn\b/i;
 
+/* What Watch says about Hulu inside Disney+ when it shows nothing (each reads after "Note: "). */
+var LINK_HOW = 'Disney+ → Profile → Link Hulu';
+var HULU_NOT_LINKED = "Hulu isn't linked in Disney+, so your Hulu Keep Watching and My Stuff stay on hulu.com (" + LINK_HOW + ')';
+var HULU_LOCKED = 'Hulu titles are locked in this Disney+ plan (add Hulu to it, or link your Hulu profile: ' + LINK_HOW + ')';
+var HULU_NO_HUB = "Disney+ shows no Hulu hub for this profile: Hulu isn't linked or isn't in the plan (" + LINK_HOW + ')';
+var HULU_HUB_EMPTY = 'the Hulu hub in Disney+ loaded but none of its rows matched (Disney+ changed its layout?)';
+
 /* The page reads: where the view ended up, its title, and a cheap sign-in CTA check. */
 var EXTRACT = '(function () {' +
   ' try {' +
   '  var q = function (s) { try { return document.querySelector(s); } catch (e) { return null; } };' +
   '  var cta = q(\'a[href*="/login"], a[href*="/sign-up"], a[href*="/signup"], [data-testid="login-button"], [data-testid="signup-button"]\');' +
   '  return { url: String(location.href || \'\'), title: String(document.title || \'\').slice(0, 300), login: !!cta };' +
+  ' } catch (e) {' +
+  '  return { url: \'\', title: \'\', login: null, error: String((e && e.message) || e).slice(0, 200) };' +
+  ' }' +
+  '})()';
+
+/* The Hulu hub page: the same, plus whether Disney+ is offering to link a Hulu profile there. */
+var EXTRACT_HUB = '(function () {' +
+  ' try {' +
+  '  var q = function (s) { try { return document.querySelector(s); } catch (e) { return null; } };' +
+  '  var cta = q(\'a[href*="/login"], a[href*="/sign-up"], a[href*="/signup"], [data-testid="login-button"], [data-testid="signup-button"]\');' +
+  '  var text = String((document.body && document.body.innerText) || \'\').slice(0, 20000);' +
+  '  return { url: String(location.href || \'\'), title: String(document.title || \'\').slice(0, 300), login: !!cta,' +
+  '    linkPrompt: /\\blink (your )?hulu\\b|\\bconnect (your )?hulu\\b/i.test(text) };' +
   ' } catch (e) {' +
   '  return { url: \'\', title: \'\', login: null, error: String((e && e.message) || e).slice(0, 200) };' +
   ' }' +
@@ -206,6 +238,18 @@ function classify(set) {
   var espn = ESPN_RE.test(set.name || '');
   if (REC_RE.test(text) || hulu || espn) return { kind: 'rec', badge: hulu ? 'Hulu' : (espn ? 'ESPN' : '') };
   return null;
+}
+
+/** A row on Disney+'s Hulu hub: everything on it is Hulu, so any named non-promo row is a Hulu pick. */
+function classifyHub(set) {
+  if (!set || DECOY_STYLE_RE.test(set.style || '')) return null;
+  var name = set.name || '';
+  var text = name + ' ' + (set.style || '') + ' ' + (set.hint || '');
+  var group = !name ? '' : (HULU_RE.test(name) ? name : 'Hulu: ' + name);
+  if (RESUME_RE.test(text)) return { kind: 'resume', badge: 'Hulu', group: name };
+  if (WATCHLIST_RE.test(text)) return { kind: 'watchlist', badge: 'Hulu', group: name };
+  if (!name) return null;
+  return { kind: 'rec', badge: 'Hulu', group: group };
 }
 
 /* ---------- progress ---------- */
@@ -397,6 +441,15 @@ function parseItem(raw, set, cls, states) {
   var badge = HULU_RE.test(attr) ? 'Hulu' : ((ESPN_RE.test(attr) || obj(meta.sportsLeague)) ? 'ESPN' : '');
   if (!badge) badge = cls.badge;
 
+  // year + type, from Disney's own fields only (for telling the same title on hulu.com apart).
+  var yearRange = obj(meta.releaseYearRange);
+  var year = yearRange ? num(yearRange.startYear) : null;
+  var typeHint = [str(raw.programType), str(raw.contentType), str(raw.entityType), str(v.programType), typeof raw.type === 'string' ? raw.type : ''].join(' ');
+  var type = '';
+  if (/movie|film/i.test(typeHint)) type = 'movie';
+  else if (/series|episode|show/i.test(typeHint) || isEpisode || sn !== null || obj(meta.seasonsAvailable) || obj(meta.seasons)) type = 'show';
+  else if (obj(meta.runtime)) type = 'movie';
+
   var startsAt = null;
   var badging = obj(v.badging);
   var airing = badging && obj(badging.airingEventState);
@@ -418,7 +471,9 @@ function parseItem(raw, set, cls, states) {
     startsAt: startsAt,
     durationSec: durationMs !== null && durationMs > 0 ? Math.round(durationMs / 1000) : null,
     badge: badge,
-    group: set.name || ''
+    group: cls.group !== undefined ? cls.group : (set.name || ''),
+    year: year !== null && year >= 1880 ? year : null,
+    type: type
   };
 }
 
@@ -468,6 +523,51 @@ function fail(reason, extra) {
   return out;
 }
 
+/**
+ * Disney+'s Hulu hub (the optional 'hulu' step): its rows as Hulu picks, every entity it lists
+ * (to badge the same titles in the home rows), and a warning when Hulu shows nothing, saying why.
+ * No step at all (an older read) is no Hulu part and no warning.
+ */
+function readHuluHub(step, states) {
+  var out = { items: [], entities: {}, warning: '' };
+  if (!step) return out;
+  var ex = obj(step.extracted) || {};
+  var finalUrl = str(step.finalUrl) || str(ex.url) || '';
+  var e = obj(step.error);
+  var captures = Array.isArray(step.captures) ? step.captures.filter(function (c) { return obj(c); }) : [];
+  if (signedOutByUrl(finalUrl)) { out.warning = 'the Hulu hub in Disney+ asked Quartz to sign in again'; return out; }
+  var p = corePath(finalUrl);
+  // Disney+ answers /browse/hulu with the hub's /browse/page-<id>; landing anywhere else is no hub.
+  if (!e && p !== null && !/^\/browse\//.test(p)) { out.warning = HULU_NO_HUB; return out; }
+
+  var rows = 0;
+  var raw = 0;
+  var locked = 0;
+  collectSets(captures).forEach(function (set) {
+    set.items.forEach(function (it) {
+      var ent = obj(it) && entityOf(it);
+      if (ent) out.entities[ent] = true;
+    });
+    var cls = classifyHub(set);
+    if (!cls) return;
+    if (cls.kind === 'rec' && rows >= HUB_ROWS) return;
+    if (cls.kind === 'rec') rows++;
+    var n = 0;
+    for (var i = 0; i < set.items.length && n < HUB_PER_ROW; i++) {
+      raw++;
+      if (cls.kind === 'rec' && obj(set.items[i]) && hasUpsell(set.items[i])) locked++;
+      var item = parseItem(set.items[i], set, cls, states);
+      if (item) { out.items.push(item); n++; }
+    }
+  });
+  if (ex.linkPrompt === true) out.warning = HULU_NOT_LINKED;
+  else if (!out.items.length && locked > 0 && locked === raw) out.warning = HULU_LOCKED;
+  else if (!out.items.length && e) out.warning = "the Hulu hub in Disney+ didn't load (" + errorReason(e, step).replace(/after \d+ s/, 'after ' + Math.round(HUB_BUDGET_MS / 1000) + ' s') + ')';
+  else if (!out.items.length && !captures.some(isExplore)) out.warning = HULU_NO_HUB;
+  else if (!out.items.length) out.warning = HULU_HUB_EMPTY;
+  return out;
+}
+
 function parseRead(read) {
   var r = obj(read);
   var steps = r && obj(r.steps);
@@ -507,11 +607,20 @@ function parseRead(read) {
       if (it) { items.push(it); n++; }
     }
   });
+  // 3b. Hulu inside Disney+: the hub's rows, and a Hulu badge on every home title the hub lists.
+  var hub = readHuluHub(obj(steps.hulu), states);
+  var homeCount = items.length;
+  items.forEach(function (it) {
+    if (!it.badge && hub.entities[it.id.slice(ID.length + 1)]) it.badge = 'Hulu';
+  });
+  items = items.concat(hub.items);
   counts.sets = matched;
   counts.items = items.length;
+  counts.hulu = hub.items.length + items.slice(0, homeCount).filter(function (it) { return it.badge === 'Hulu'; }).length;
   var profile = profileOf(captures);
+  var warnings = hub.warning ? [hub.warning] : [];
 
-  if (items.length) return { state: 'ok', reason: '', items: items, profile: profile, counts: counts };
+  if (items.length) return { state: 'ok', reason: '', items: items, profile: profile, counts: counts, warnings: warnings };
 
   // 4. Signed out, told by the data rather than the URL (before a timeout: a
   //    marketing page that never fetches rows would otherwise read as slow).
@@ -522,7 +631,7 @@ function parseRead(read) {
   if (e) return fail(errorReason(e, step), counts);
 
   // 5. Disney+ sent his rows and they are simply empty (a new profile): not a failure.
-  if (matched > 0 && matchedRaw === 0) return { state: 'ok', reason: '', items: [], profile: profile, counts: counts };
+  if (matched > 0 && matchedRaw === 0) return { state: 'ok', reason: '', items: [], profile: profile, counts: counts, warnings: warnings };
 
   // 6. Data came back and none of it matched.
   var n = captures.length;
@@ -571,7 +680,29 @@ function steps(ctx) {
     settleMs: 4000,
     scroll: 3,
     budgetMs: BUDGET_MS
+  }, {
+    // Hulu inside Disney+: Disney+'s own Hulu hub. Optional: the home rows stand without it.
+    name: 'hulu',
+    type: 'view',
+    url: HULU_HUB,
+    extract: EXTRACT_HUB,
+    ready: ready,
+    capture: [EXPLORE_RE],
+    enough: enoughHub,
+    settleMs: 3000,
+    scroll: 2,
+    budgetMs: HUB_BUDGET_MS,
+    optional: true
   }];
+}
+
+/* The hub has said enough once two of its named rows have items. */
+function enoughHub(captures) {
+  try {
+    return collectSets(captures).filter(function (set) { var c = classifyHub(set); return !!c && set.items.length > 0; }).length >= 2;
+  } catch (err) {
+    return false;
+  }
 }
 
 module.exports = {
@@ -579,5 +710,9 @@ module.exports = {
   steps: steps,
   parse: parse,
   // For the tests.
-  _internal: { EXTRACT: EXTRACT, EXPLORE_RE: EXPLORE_RE, classify: classify, collectSets: collectSets, signedOutByUrl: signedOutByUrl }
+  _internal: {
+    EXTRACT: EXTRACT, EXTRACT_HUB: EXTRACT_HUB, EXPLORE_RE: EXPLORE_RE, classify: classify, classifyHub: classifyHub,
+    collectSets: collectSets, signedOutByUrl: signedOutByUrl,
+    HULU_NOT_LINKED: HULU_NOT_LINKED, HULU_LOCKED: HULU_LOCKED, HULU_NO_HUB: HULU_NO_HUB, HULU_HUB_EMPTY: HULU_HUB_EMPTY
+  }
 };

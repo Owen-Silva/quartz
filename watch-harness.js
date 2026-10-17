@@ -66,7 +66,7 @@ function shapeTests() {
     for (const h of (s.hosts || []).concat(s.exact || [])) if (!Shape.opensInEdge('https://' + h + '/x')) drift.push(h);
   }
   check(drift.length === 0, 'shape: in step with drm-sites.js', drift);
-  check(Shape.serviceForUrl('https://youtu.be/x') === 'youtube' && Shape.serviceForUrl('https://www.hulu.com/x') === 'disney'
+  check(Shape.serviceForUrl('https://youtu.be/x') === 'youtube' && Shape.serviceForUrl('https://www.hulu.com/x') === 'hulu' && Shape.serviceForUrl('https://www.disneyplus.com/x') === 'disney'
     && Shape.serviceForUrl('https://tv.youtube.com/') === '' && Shape.serviceForUrl('https://example.com/') === '', 'shape: serviceForUrl');
   const ev = Shape.cleanEvent({ id: '401', league: 'nhl', state: 'in', startsAt: 1, home: { name: 'Leafs', score: 2 }, away: { abbr: 'MTL', score: '1' }, broadcasts: ['ESPN+', 'ESPN+', 'TNT'], watchUrl: 'https://www.espn.com/watch/player?id=9' });
   check(ev && ev.id === 'espn:401' && ev.home.score === '2' && ev.broadcasts.length === 2 && ev.edge === true, 'shape: event cleaned', ev);
@@ -83,7 +83,7 @@ function shapeTests() {
 
 /* ------------------------------------------------------------------ 2. merge */
 function mk(service, kind, n, extra) {
-  const host = { youtube: 'https://www.youtube.com/watch?v=', disney: 'https://www.disneyplus.com/browse/entity-', prime: 'https://www.primevideo.com/detail/', espn: 'https://www.espn.com/nhl/game/_/gameId/' }[service];
+  const host = { youtube: 'https://www.youtube.com/watch?v=', disney: 'https://www.disneyplus.com/browse/entity-', hulu: 'https://www.hulu.com/series/', prime: 'https://www.primevideo.com/detail/', espn: 'https://www.espn.com/nhl/game/_/gameId/' }[service];
   const out = [];
   for (let i = 0; i < n; i++) out.push(Shape.cleanItem(Object.assign({ service, kind, title: service + ' ' + kind + ' ' + i, url: host + service + kind + i, id: kind + i }, extra ? extra(i) : {})));
   return out;
@@ -142,7 +142,7 @@ function mergeTests() {
   check(Merge.searchLocal(pool, 'comedie').length === 1, 'merge: accents folded');
   check(Merge.searchLocal(pool, '   ').length === 0 && Merge.searchLocal(null, 'x').length === 0, 'merge: empty query or pool');
   const links = Merge.searchLinks('the bear');
-  check(links.length === 4 && links[0].url === 'https://www.youtube.com/results?search_query=the%20bear', 'merge: per-service search links', links.map((l) => l.url));
+  check(links.length === Shape.SERVICES.length && links[0].url === 'https://www.youtube.com/results?search_query=the%20bear', 'merge: per-service search links', links.map((l) => l.url));
   check(links.find((l) => l.service === 'espn').url.indexOf('the-bear') !== -1 && links.find((l) => l.service === 'disney').edge === true, 'merge: ESPN slug and Disney+ to Edge');
 }
 
@@ -188,6 +188,7 @@ function fakeWorld(opts) {
       parseSearch: (html) => (html.indexOf('RESULTS') !== -1 ? [{ service: 'youtube', kind: 'search', title: 'Found it', url: 'https://www.youtube.com/watch?v=f', id: 'f' }] : []),
     }),
     disney: adapter('disney', 'view'),
+    hulu: adapter('hulu', 'view'),
     prime: adapter('prime', 'view'),
     espn: adapter('espn', 'fetch'),
   };
@@ -505,7 +506,7 @@ async function reviewFixTests() {
   try {
     const g = w.guest();
     g.say('quartz-watch:hello {"visible":false}');
-    check(g.pushed[0] && g.pushed[0].fn === '__applyWatch' && g.pushed[0].payload.services.length === 4, 'fix5: a hidden page still gets the cache snapshot at once');
+    check(g.pushed[0] && g.pushed[0].fn === '__applyWatch' && g.pushed[0].payload.services.length === Shape.SERVICE_IDS.length, 'fix5: a hidden page still gets the cache snapshot at once');
     await w.settle();
     check(w.calls.length === 0 && w.wm.state().timerAt === 0, 'fix5: a hidden page starts no read and arms no timer', { calls: w.calls, timerAt: w.wm.state().timerAt });
     w.wm.windowShown();
@@ -513,7 +514,7 @@ async function reviewFixTests() {
     check(w.calls.length === 0, 'fix5: the window coming back reads nothing for a hidden page');
     g.say('quartz-watch:visible {"visible":true}');
     await w.settle();
-    check(w.calls.length === 4 && w.wm.state().timerAt > 0, 'fix5: turning visible reads what is due and arms the timer', w.calls);
+    check(w.calls.length === Shape.SERVICE_IDS.length && w.wm.state().timerAt > 0, 'fix5: turning visible reads what is due and arms the timer', w.calls);
     g.say('quartz-watch:visible {"visible":false}');
     await w.settle();
     check(w.wm.state().timerAt === 0, 'fix5: turning hidden stops the timer');
@@ -576,7 +577,7 @@ async function reviewFixTests() {
     w.advance(1000);
     await w.fire();
     s = g.last('__applyWatch');
-    check(w.calls.length === 4 && w.maxConcurrent === 1 && s.services.every((x) => x.state === 'ok' && !x.queued), 'fix6: the first reader starts at the end of the grace, then the rest, one at a time', w.calls);
+    check(w.calls.length === Shape.SERVICE_IDS.length && w.maxConcurrent === 1 && s.services.every((x) => x.state === 'ok' && !x.queued), 'fix6: the first reader starts at the end of the grace, then the rest, one at a time', w.calls);
   } finally { w.cleanup(); }
 
   // --- 5b. reads queued while in sight leave the queue when the page goes behind another tab;
@@ -621,7 +622,7 @@ async function reviewFixTests() {
     g.say('quartz-watch:refresh {"service":null}');
     await w.settle();
     let st = w.wm.state();
-    check(st.searchCache === 1 && Object.keys(st.paused).length === 4 && st.lastForced >= 1, '(setup) a cached search, pauses and Retry stamps exist', st);
+    check(st.searchCache === 1 && Object.keys(st.paused).length === Shape.SERVICE_IDS.length && st.lastForced >= 1, '(setup) a cached search, pauses and Retry stamps exist', st);
     w.game = '';
     g.say('quartz-watch:search {"q":"zeta","seq":2}');   // in flight across the Forget
     g.say('quartz-watch:forget {}');
@@ -705,7 +706,7 @@ async function reviewFixTests() {
     game = '';
     w.advance(5 * 60e3 + 1000);
     await w.fire();
-    check(w.calls.length === 4, 'fix6b: the game over, the next look reads everything', w.calls);
+    check(w.calls.length === Shape.SERVICE_IDS.length, 'fix6b: the game over, the next look reads everything', w.calls);
     // a page coming back on screen does not wait out the backoff (that look is the user's)
     game = 'valorant';
     w.advance(61 * 60e3);
@@ -715,7 +716,7 @@ async function reviewFixTests() {
     g.say('quartz-watch:visible {"visible":false}');
     g.say('quartz-watch:visible {"visible":true}');
     await w.settle();
-    check(w.calls.length === 4, 'fix6b: a page turning visible looks at once, backoff or not', w.calls);
+    check(w.calls.length === Shape.SERVICE_IDS.length, 'fix6b: a page turning visible looks at once, backoff or not', w.calls);
   } finally { w.cleanup(); }
 }
 
@@ -752,13 +753,13 @@ async function mainTests() {
     const g = w.guest();
     g.say('quartz-watch:hello {}');
     const first = g.pushed[0];
-    check(first && first.fn === '__applyWatch' && first.payload.services.length === 4 && first.payload.services.every((s) => s.state === 'never'), 'main: hello answers at once from the (empty) cache', first && first.payload.services.map((s) => s.state));
+    check(first && first.fn === '__applyWatch' && first.payload.services.length === Shape.SERVICE_IDS.length && first.payload.services.every((s) => s.state === 'never'), 'main: hello answers at once from the (empty) cache', first && first.payload.services.map((s) => s.state));
     await w.settle();
     const snap = g.last('__applyWatch');
     check(snap.services.every((s) => s.state === 'ok'), 'main: every service read after hello', snap.services.map((s) => s.state + ':' + s.reason));
     check(w.maxConcurrent === 1, 'main: one read at a time', w.maxConcurrent);
-    check(w.calls.length === 4, 'main: one step per service', w.calls);
-    check(snap.rows.find((r) => r.id === 'continue').items.length === 9, 'main: rows built from every service', snap.rows.map((r) => r.id + ':' + r.items.length));
+    check(w.calls.length === Shape.SERVICE_IDS.length, 'main: one step per service', w.calls);
+    check(snap.rows.find((r) => r.id === 'continue').items.length === 3 * (Shape.SERVICE_IDS.length - 1), 'main: rows built from every service', snap.rows.map((r) => r.id + ':' + r.items.length));
     check(w.svc(snap, 'disney').profile === 'the user', 'main: the profile name travels');
     check(g.pushed.some((p) => p.fn === '__applyWatch' && p.payload.services.some((s) => s.reading)), 'main: the page is told what is reading');
     check(w.timers.length >= 1, 'main: a timer is armed while the page is open');
@@ -857,7 +858,7 @@ async function mainTests() {
     g.say('quartz-watch:hello {}');
     await w.settle();
     s = g.last('__applyWatch');
-    check(w.calls.length === 3 && !w.calls.some((c) => c.indexOf('espn') === 0),
+    check(w.calls.length === Shape.SERVICE_IDS.length - 1 && !w.calls.some((c) => c.indexOf('espn') === 0),
       'main: hidden window: only the never-read (stale) services read; ESPN, read a minute ago, waits', w.calls);
     check(w.svc(s, 'youtube').state === 'ok', 'main: hidden window: a stale service still reads');
     w.advance(16 * 60e3);
@@ -958,7 +959,7 @@ async function mainTests() {
     let a = g.last('__applyWatchSearch');
     check(a && a.seq === 1 && a.youtube.ok && a.youtube.items[0].title === 'Found it' && a.youtube.items[0].kind === 'search', 'main: YouTube search answers', a && a.youtube);
     check(a.tmdb && a.tmdb.state === 'no-key' && a.tmdb.reason === 'Add a free TMDB key in Settings to search every service', 'main: no key -> the TMDB slot says how to add one', a.tmdb);
-    check(a.links.length === 4, 'main: the per-service links come along');
+    check(a.links.length === Shape.SERVICES.length, 'main: the per-service links come along');
     const n = w.calls.length;
     g.say('quartz-watch:search {"q":"Bluey","seq":2}');
     await w.settle();
@@ -971,7 +972,7 @@ async function mainTests() {
     w.advance(2000);
     await w.fire();
     a = g.last('__applyWatchSearch');
-    check(a.youtube.ok === false && a.youtube.reason === "you're offline" && a.links.length === 4, 'main: a failed search says why and keeps the links', a.youtube);
+    check(a.youtube.ok === false && a.youtube.reason === "you're offline" && a.links.length === Shape.SERVICES.length, 'main: a failed search says why and keeps the links', a.youtube);
     w.behaviour.search = () => ({ text: '<html>nothing</html>' });
     g.say('quartz-watch:search {"q":"empty","seq":4}');
     await w.settle();

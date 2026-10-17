@@ -1,0 +1,87 @@
+{
+  "_fixture": "shape from disneyplus.com public logged-out behaviour probed 2026-10-17 (/browse/hulu answers 307 to /browse/page-ff723d29-20d5-4303-9cce-4a9aac8e269e, titled 'Hulu Movies and Shows | Disney+'), Disney's own 'Hulu has its own dedicated Hub on Disney+' (thewaltdisneycompany.com, 2026-05-19) and the same explore v1.x page/set shape as disney-home.json (Disney-Plus-api-wrapper, slyguy.disney.plus), unverified against a live account",
+  "finalPath": "/browse/page-ff723d29-20d5-4303-9cce-4a9aac8e269e",
+  "title": "Hulu Movies and Shows | Disney+",
+  "captures": [
+    {
+      "path": "/explore/v1.10/page/page-ff723d29-20d5-4303-9cce-4a9aac8e269e",
+      "json": {
+        "data": {
+          "page": {
+            "id": "page-ff723d29-20d5-4303-9cce-4a9aac8e269e",
+            "visuals": { "title": "Hulu" },
+            "containers": [
+              {
+                "id": "f0000000-0000-4000-8000-0000000001a1",
+                "type": "set",
+                "style": { "name": "hero_carousel" },
+                "visuals": { "name": "Featured" },
+                "items": [
+                  { "id": "9a1b2c3d-4e5f-4061-8a7b-8c9d0e1f2a31", "visuals": { "title": "Paradise" }, "actions": [{ "type": "browse", "pageId": "entity-9a1b2c3d-4e5f-4061-8a7b-8c9d0e1f2a31" }] }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000001b2",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Hulu Originals" },
+                "items": [
+                  { "id": "3f8da7cb-f6e8-491a-9fc6-3b4c5d6e7f13", "visuals": { "title": "Shōgun", "metastringParts": { "genres": { "values": ["Drama"] }, "releaseYearRange": { "startYear": 2024 } } }, "actions": [{ "type": "browse", "pageId": "entity-3f8da7cb-f6e8-491a-9fc6-3b4c5d6e7f13" }] },
+                  { "id": "9a1b2c3d-4e5f-4061-8a7b-8c9d0e1f2a31", "visuals": { "title": "Paradise", "metastringParts": { "genres": { "values": ["Drama", "Thriller"] }, "releaseYearRange": { "startYear": 2025 }, "seasonsAvailable": { "seasons": 2 } }, "artwork": { "standard": { "tile": { "1.78": { "imageId": "PARADISETILE178" } } } } }, "actions": [{ "type": "browse", "pageId": "entity-9a1b2c3d-4e5f-4061-8a7b-8c9d0e1f2a31" }] },
+                  { "id": "ab2c3d4e-5f60-4172-9b8c-9d0e1f2a3b32", "visuals": { "title": "Locked Hulu Title" }, "actions": [{ "type": "upsell" }, { "type": "browse", "pageId": "entity-ab2c3d4e-5f60-4172-9b8c-9d0e1f2a3b32" }] }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000001c3",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Trending on Hulu" }
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000001d4",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Comedies" },
+                "items": [
+                  { "id": "bc3d4e5f-6071-4283-8c9d-0e1f2a3b4c33", "visuals": { "title": "King of the Hill", "metastringParts": { "genres": { "values": ["Animation", "Comedy"] }, "releaseYearRange": { "startYear": 1997 } } }, "actions": [{ "type": "browse", "pageId": "entity-bc3d4e5f-6071-4283-8c9d-0e1f2a3b4c33" }] }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000001e5",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Movies" },
+                "items": [
+                  { "id": "cd4e5f60-7182-4394-9d0e-1f2a3b4c5d34", "visuals": { "title": "Prey", "metastringParts": { "genres": { "values": ["Action", "Thriller"] }, "releaseYearRange": { "startYear": 2022 }, "runtime": { "runtimeMs": 6000000 } } }, "actions": [{ "type": "browse", "pageId": "entity-cd4e5f60-7182-4394-9d0e-1f2a3b4c5d34" }] }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000001f6",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Dramas" },
+                "items": [
+                  { "id": "de5f6071-8293-44a5-8e1f-2a3b4c5d6e35", "visuals": { "title": "Fifth Row Show" }, "actions": [{ "type": "browse", "pageId": "entity-de5f6071-8293-44a5-8e1f-2a3b4c5d6e35" }] }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v1.10/set/f0000000-0000-4000-8000-0000000001c3",
+      "json": {
+        "data": {
+          "set": {
+            "id": "f0000000-0000-4000-8000-0000000001c3",
+            "items": [
+              { "id": "2e7c96ba-e5d7-4809-8eb5-2a3b4c5d6e12", "visuals": { "title": "The Simpsons" }, "actions": [{ "type": "browse", "pageId": "entity-2e7c96ba-e5d7-4809-8eb5-2a3b4c5d6e12" }] },
+              { "id": "ef607182-93a4-45b6-9f2a-3b4c5d6e7f36", "visuals": { "title": "Abbott Elementary", "metastringParts": { "genres": { "values": ["Comedy"] }, "releaseYearRange": { "startYear": 2021 } } }, "actions": [{ "type": "browse", "pageId": "entity-ef607182-93a4-45b6-9f2a-3b4c5d6e7f36" }] }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

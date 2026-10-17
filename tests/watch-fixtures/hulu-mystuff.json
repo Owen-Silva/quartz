@@ -1,0 +1,59 @@
+{
+  "_fixture": "shape from hulu.com public logged-out behaviour probed 2026-10-17 (/my-stuff exists and asks a signed-out visitor to log in) and the same hub shape as hulu-home.json (discover.hulu.com /content/v5/hubs: components[].items[] views, entity_metadata, actions.browse), unverified against a live account",
+  "finalPath": "/my-stuff",
+  "title": "My Stuff | Hulu",
+  "captures": [
+    {
+      "path": "/content/v5/hubs/my-stuff?schema=1&limit=999&referralHost=production",
+      "json": {
+        "_type": "hub",
+        "id": "my-stuff",
+        "name": "My Stuff",
+        "components": [
+          {
+            "_type": "collection",
+            "id": "301",
+            "name": "TV",
+            "items": [
+              {
+                "_type": "view",
+                "id": "c1a0a5f2-3b1d-4e43-9b66-0d2c7f6b9a01",
+                "entity_metadata": { "entity_type": "series", "name": "Paradise", "premiere_date": "2025-01-26T08:00:00Z", "genre_names": ["Drama", "Thriller"] },
+                "visuals": { "headline": "Paradise" },
+                "actions": { "browse": { "target_type": "series", "target_id": "c1a0a5f2-3b1d-4e43-9b66-0d2c7f6b9a01" } }
+              }
+            ]
+          },
+          {
+            "_type": "collection",
+            "id": "302",
+            "name": "Movies",
+            "items": [
+              {
+                "_type": "view",
+                "id": "5c6d7e8f-9012-4b3c-8d4e-5f6a7b8c9d11",
+                "entity_metadata": { "entity_type": "movie", "name": "Anora", "premiere_date": "2024-10-18T07:00:00Z", "genre_names": ["Drama", "Comedy"] },
+                "visuals": { "headline": "Anora" },
+                "actions": { "browse": { "target_type": "movie", "target_id": "5c6d7e8f-9012-4b3c-8d4e-5f6a7b8c9d11" } }
+              }
+            ]
+          },
+          {
+            "_type": "collection",
+            "id": "303",
+            "name": "You May Also Like",
+            "items": [
+              {
+                "_type": "view",
+                "id": "6d7e8f90-1234-4c5d-9e6f-7a8b9c0d1e12",
+                "entity_metadata": { "entity_type": "series", "name": "Not In My Stuff", "premiere_date": "2020-01-01T08:00:00Z" },
+                "visuals": { "headline": "Not In My Stuff" },
+                "actions": { "browse": { "target_type": "series", "target_id": "6d7e8f90-1234-4c5d-9e6f-7a8b9c0d1e12" } }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

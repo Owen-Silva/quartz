@@ -18,7 +18,7 @@
  * ITEM (what an adapter returns, what the cache keeps, what the page draws):
  *   {
  *     id:        'youtube:dQw4w9WgXcQ'    service + ':' + the service's own id (unique per service)
- *     service:   'youtube' | 'disney' | 'prime' | 'espn'
+ *     service:   'youtube' | 'disney' | 'hulu' | 'prime' | 'espn'
  *     kind:      'resume' | 'rec' | 'watchlist' | 'live' | 'upcoming' | 'replay' | 'search'
  *     title:     plain text, <= 200 chars                       (required)
  *     subtitle:  plain text, <= 200 chars ('S2 E4', channel, network)
@@ -30,7 +30,11 @@
  *     badge:     short label <= 24 chars ('Rent', 'ESPN+', 'Hulu', 'Live') or ''
  *     group:     the service's own row name ('Because you watched Bluey') or ''
  *     edge:      true when the click opens Microsoft Edge (protected video); set by cleanItem
+ *     year:      the film's release year, or the show's first year, or null when the service did not say
+ *     type:      'movie' | 'show' (a series, or an episode of one: the tile's title is the show) | ''
  *   }
+ *   year + type + title are what tells two services' copies of one title apart (Hulu on hulu.com and
+ *   the same title inside Disney+): an adapter sets them only from the service's own fields, never a guess.
  *
  * SPORTS EVENT (ESPN; the Live & Upcoming strip):
  *   {
@@ -71,6 +75,15 @@
       covers: 'Includes Hulu (once your Hulu profile is linked) and the ESPN hub'
     },
     {
+      // hulu.com's own web app (still separate in Oct 2026; FEASIBILITY.md "Hulu (10-17)"). everyMin
+      // is Disney+'s, set below the table, so the two Disney services always read on one floor.
+      id: 'hulu', name: 'Hulu', short: 'Hulu', edge: true, everyMin: null, needsSignIn: true,
+      home: 'https://www.hulu.com/hub/home',
+      signIn: 'https://www.hulu.com/login',
+      searchUrl: 'https://www.hulu.com/search?q=',
+      covers: 'hulu.com’s own Keep Watching, My Stuff and picks. Hulu titles inside Disney+ show under Disney+'
+    },
+    {
       id: 'prime', name: 'Prime Video', short: 'Prime', edge: true, everyMin: 60, needsSignIn: true,
       home: 'https://www.primevideo.com/',
       signIn: 'https://www.primevideo.com/',
@@ -85,6 +98,9 @@
       covers: 'Scores and schedules are public: no sign-in needed'
     }
   ];
+
+  // Hulu reads on Disney+'s floor, whatever that floor is (one Disney account, one politeness budget).
+  SERVICES.forEach(function (s) { if (s.id === 'hulu') s.everyMin = serviceById('disney').everyMin; });
 
   var SERVICE_IDS = SERVICES.map(function (s) { return s.id; });
   var KINDS = ['resume', 'rec', 'watchlist', 'live', 'upcoming', 'replay', 'search'];
@@ -171,12 +187,13 @@
     return false;
   }
 
-  /** The service a URL belongs to, by host: 'youtube' | 'disney' | 'prime' | 'espn' | ''. */
+  /** The service a URL belongs to, by host: 'youtube' | 'disney' | 'hulu' | 'prime' | 'espn' | ''. */
   function serviceForUrl(url) {
     var host = hostOf(url);
     if (!host) return '';
     if (hostIs(host, 'youtube.com') || host === 'youtu.be') return host === 'tv.youtube.com' ? '' : 'youtube';
-    if (hostIs(host, 'disneyplus.com') || hostIs(host, 'hulu.com')) return 'disney';
+    if (hostIs(host, 'disneyplus.com')) return 'disney';
+    if (hostIs(host, 'hulu.com')) return 'hulu';
     if (hostIs(host, 'primevideo.com')) return 'prime';
     if (hostIs(host, 'espn.com')) return 'espn';
     return '';
@@ -208,6 +225,9 @@
     }
     var startsAt = finiteOrNull(raw.startsAt);
     var duration = finiteOrNull(raw.durationSec);
+    var year = finiteOrNull(raw.year);
+    if (year !== null && (year !== Math.round(year) || year < 1880 || year > 2100)) year = null;
+    var type = raw.type === 'movie' || raw.type === 'show' ? raw.type : '';
     return {
       id: id,
       service: service,
@@ -221,7 +241,9 @@
       durationSec: duration !== null && duration > 0 ? Math.round(duration) : null,
       badge: cleanText(raw.badge, BADGE_MAX),
       group: cleanText(raw.group, 120),
-      edge: opensInEdge(url)
+      edge: opensInEdge(url),
+      year: year,
+      type: type
     };
   }
 

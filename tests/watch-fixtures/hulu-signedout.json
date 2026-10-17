@@ -1,0 +1,6 @@
+{
+  "_fixture": "shape from hulu.com public logged-out behaviour probed 2026-10-17 with no cookies (/hub/home answers 302 to /welcome, titled 'Stream TV and Movies Live and Online | Hulu', with log-in links to auth.hulu.com), unverified against a live account",
+  "finalPath": "/welcome",
+  "title": "Stream TV and Movies Live and Online | Hulu",
+  "captures": []
+}

@@ -1,0 +1,31 @@
+{
+  "_fixture": "shape from hulu-home.json's hub shape (discover.hulu.com /content/v5/hubs) with every row renamed to words Watch does not know, as a layout change would leave it, unverified against a live account",
+  "finalPath": "/hub/home",
+  "title": "Home | Hulu",
+  "captures": [
+    {
+      "path": "/content/v5/hubs/home?schema=1&limit=999&referralHost=production",
+      "json": {
+        "_type": "hub",
+        "id": "home",
+        "components": [
+          {
+            "_type": "collection",
+            "id": "901",
+            "name": "Row Alpha",
+            "items": [
+              {
+                "_type": "view",
+                "id": "7e8f9012-3456-4d6e-8f70-8b9c0d1e2f13",
+                "entity_metadata": { "entity_type": "series", "name": "Some Show" },
+                "visuals": { "headline": "Some Show" },
+                "actions": { "browse": { "target_type": "series", "target_id": "7e8f9012-3456-4d6e-8f70-8b9c0d1e2f13" } }
+              }
+            ]
+          },
+          { "_type": "collection", "id": "902", "name": "Row Beta", "items": [] }
+        ]
+      }
+    }
+  ]
+}
