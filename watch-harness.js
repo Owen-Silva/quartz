@@ -210,7 +210,9 @@ function fakeWorld(opts) {
       await new Promise((r) => setImmediate(r));
       concurrent--;
       const b = world.behaviour[svc];
-      return Object.assign(okStep(step), b ? b(step) : {});
+      const extra = b ? b(step) : {};
+      if (extra === 'HANG') return new Promise(() => { /* a reader that never answers */ });
+      return Object.assign(okStep(step), extra);
     },
   });
   world.guest = (url) => {
@@ -338,6 +340,28 @@ async function mainTests() {
     check(w.svc(s, 'espn').state === 'ok' && s.rows.length > 0, 'main: the others still draw');
     check(w.logs.filter((l) => /Watch could not read/.test(l)).length === 3, 'main: one log line per failed service', w.logs);
     check(w.logs.some((l) => /Disney\+: timed out after 20 s \(1 page, 0 responses captured\)/.test(l)), 'main: the log line says what was read', w.logs);
+  } finally { w.cleanup(); }
+
+  // --- a reader that never answers hits the watchdog; the queue moves on (watch-e2e found this)
+  w = fakeWorld();
+  try {
+    w.behaviour.disney = () => 'HANG';
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    let s = g.last('__applyWatch');
+    check(w.svc(s, 'disney').reading === true && w.svc(s, 'prime').state === 'never', 'main: a hung Disney+ step holds the queue only until its watchdog', s.services.map((x) => x.id + ':' + x.state + (x.reading ? '*' : '')));
+    w.advance(26e3);
+    await w.fire();
+    s = g.last('__applyWatch');
+    check(w.svc(s, 'disney').state === 'error' && /stopped answering/.test(w.svc(s, 'disney').reason), 'main: the hung step ends as an error with its reason', w.svc(s, 'disney').reason);
+    check(w.svc(s, 'prime').state === 'ok' && w.svc(s, 'espn').state === 'ok', 'main: the services after it still read', s.services.map((x) => x.id + ':' + x.state));
+    check(w.logs.some((l) => /hit the watchdog/.test(l)), 'main: the watchdog writes a log line');
+    w.behaviour.disney = null;
+    w.advance(31e3);
+    g.say('quartz-watch:refresh {"service":"disney"}');
+    await w.settle();
+    check(w.svc(g.last('__applyWatch'), 'disney').state === 'ok', 'main: Retry works after a hang (the queue is not stuck)');
   } finally { w.cleanup(); }
 
   // --- pauses: game, memory, hidden window -- each shown with its reason

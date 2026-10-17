@@ -70,6 +70,7 @@ const PREFS_FILE = 'watch.json';
 const CACHE_VERSION = 1;
 
 const STEP_BUDGET_MS = 20000;
+const WATCHDOG_GRACE_MS = 5000;     // a step that outlives its budget by this much is ended from outside
 const POLL_MS = 500;
 const DEFAULT_SETTLE_MS = 2500;
 const MAX_CAPTURES = 40;
@@ -534,7 +535,11 @@ function create(deps) {
             }, () => { /* evicted or gone */ }));
           }
         });
-        await dbg.sendCommand('Network.enable', { maxTotalBufferSize: 40 * 1024 * 1024, maxResourceBufferSize: 12 * 1024 * 1024 });
+        // Sent, NOT awaited: on a page that has never navigated, Electron 44 does not answer
+        // Network.enable until the first load starts (watch-e2e found the read hanging here
+        // forever). The command is queued ahead of the load, so capture still sees every response.
+        const enabled = dbg.sendCommand('Network.enable', { maxTotalBufferSize: 40 * 1024 * 1024, maxResourceBufferSize: 12 * 1024 * 1024 });
+        if (enabled && typeof enabled.catch === 'function') enabled.catch(() => { /* reported by the capture count */ });
       }
       const loadP = wc.loadURL(url).then(() => { loaded = true; }, (err) => {
         if (err && (err.errno === -3 || /ERR_ABORTED/.test(String(err.code || err.message)))) { loaded = true; return; }
@@ -556,7 +561,7 @@ function create(deps) {
         let enough = !patterns.length;
         while (now() < deadline && !crashed) {
           if (step.extract) {
-            out.extracted = await extractFrom(wc, step.extract);
+            out.extracted = await extractFrom(wc, step.extract, Math.min(5000, Math.max(0, deadline - now())));
             try { isReady = !!ready(out.extracted); } catch { isReady = false; }
           }
           if (patterns.length) {
@@ -567,7 +572,7 @@ function create(deps) {
           if (isReady && enough) break;
           if (step.scroll && scrolled < step.scroll) {
             scrolled++;
-            try { await wc.executeJavaScript('window.scrollBy(0, Math.round(window.innerHeight * 0.9)), 1', true); } catch { /* gone */ }
+            try { await within(wc.executeJavaScript('window.scrollBy(0, Math.round(window.innerHeight * 0.9)), 1', true), Math.min(2000, Math.max(0, deadline - now()))); } catch { /* gone */ }
           }
           await sleep(POLL_MS);
         }
@@ -589,9 +594,16 @@ function create(deps) {
     return out;
   }
 
-  async function extractFrom(wc, expr) {
+  /** p, or `fallback` once ms have passed: no await in a read may outlive its budget. */
+  function within(p, ms, fallback) {
+    let h = null;
+    const cap = new Promise((r) => { h = setTimer(() => r(fallback === undefined ? null : fallback), ms); if (h && h.unref) h.unref(); });
+    return Promise.race([Promise.resolve(p).finally(() => clearTimer(h)), cap]);
+  }
+
+  async function extractFrom(wc, expr, ms) {
     try {
-      const v = await wc.executeJavaScript('(function(){try{return (' + expr + ');}catch(e){return null;}})()', true);
+      const v = await within(wc.executeJavaScript('(function(){try{return (' + expr + ');}catch(e){return null;}})()', true), ms || 5000);
       if (v === undefined) return null;
       // A page cannot hand back something absurd: past the cap it is dropped, not truncated.
       try { if (JSON.stringify(v).length > MAX_EXTRACT_CHARS) return null; } catch { return null; }
@@ -600,9 +612,21 @@ function create(deps) {
   }
 
   async function runStep(step) {
-    if (typeof d.runStep === 'function') return d.runStep(step, rebase);
-    if (step.type === 'fetch') return runFetchStep(step);
-    return runViewStep(step);
+    const budget = Number.isFinite(step.budgetMs) ? step.budgetMs : STEP_BUDGET_MS;
+    const run = typeof d.runStep === 'function' ? d.runStep(step, rebase)
+      : (step.type === 'fetch' ? runFetchStep(step) : runViewStep(step));
+    // The watchdog: a step gets its budget plus WATCHDOG_GRACE_MS, then it is over, whatever
+    // inside it is still waiting. Its window is destroyed so nothing leaks, and the queue moves.
+    const late = Object.assign(blankStep(step, rebase(String(step.url || ''))), {
+      error: { code: 'timeout', detail: 'timed out after ' + Math.round(budget / 1000) + ' s (the reader stopped answering)' },
+    });
+    const r = await within(run, budget + WATCHDOG_GRACE_MS, late);
+    if (r === late) {
+      log('Watch reader step ' + step.name + ' hit the watchdog after ' + Math.round((budget + WATCHDOG_GRACE_MS) / 1000) + ' s');
+      try { if (currentView && !currentView.isDestroyed()) currentView.destroy(); } catch { /* gone */ }
+      currentView = null;
+    }
+    return r;
   }
 
   async function readService(id) {
