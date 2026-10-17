@@ -860,7 +860,9 @@ if (require.main === module) {
     await sleep(500);
     say('boot 2 after Forget twice: ' + JSON.stringify(await fState()));
     let emptied = false;
-    try { emptied = await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length === 0', 8000); } catch (e) { emptied = false; }
+    // His rows are cards that carry an item; a skeleton row (placeholders, no item) is not his data.
+    const MINE = '[...document.querySelectorAll("#stack .lrow .rt > .card")].filter((c) => c._item && c._item.title).length';
+    try { emptied = await g.waitFor(MINE + ' === 0', 8000); } catch (e) { emptied = false; }
     // What the page was last told and what it still draws: tells "main never pushed" from "the page kept rows".
     const afterForget = await g.ev(`(() => { const s = window.__e2eSnap || {}; const rows = Array.isArray(s.rows) ? s.rows : [];
       return { snaps: window.__e2eSnaps || 0, snapAge: s.now ? Date.now() - s.now : null, snapRows: rows.length, snapItems: rows.reduce((n, r) => n + ((r && r.items) || []).length, 0),
@@ -868,7 +870,10 @@ if (require.main === module) {
         cards: [...document.querySelectorAll('#stack .lrow .rt > .card')].slice(0, 8).map((c) => ((c._item || {}).service || '?') + ':' + ((c._item || {}).title || '').slice(0, 20)) }; })()`).catch((e) => 'ev failed: ' + e.message.slice(0, 80));
     say('boot 2 after Forget, the page: ' + JSON.stringify(afterForget));
     await sleep(500);
-    check(emptied, 'Forget: the Watch page empties', await g.ev('document.querySelectorAll("#stack .lrow .rt > .card").length'));
+    check(emptied, 'Forget: the Watch page empties (no card carries one of his rows)', await g.ev(MINE));
+    // After Forget nothing reads until its floor (or a Retry): the page must not say it is reading.
+    const claim = await g.ev('(() => { const s = window.__e2eSnap || {}; const busy = (s.services || []).some((x) => x.enabled !== false && (x.reading || x.queued)); const heads = [...document.querySelectorAll("#stack .lrow h2, h1")].map((h) => h.textContent.trim()).join(" | ").slice(0, 160); return { busy, heads, says: /Reading/.test(heads) }; })()').catch(() => null);
+    check(!!claim && !(claim.says && !claim.busy), 'Forget: the page does not say "Reading" while nothing reads', claim);
     check(!fs.existsSync(CACHE), 'Forget: <profile>/watch-cache.json is deleted');
     // Electron's own sandbox bundle can fail on a second boot ("preloadScripts of
     // binding.startupData is null"). It counts against Watch only if NO other bundled page of the
