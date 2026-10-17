@@ -452,7 +452,7 @@ const watch = (() => {
     }
     // The background refresh's gates and cadence, for watch-e2e (a TEST profile only).
     if (env.QUARTZ_WATCH_SAVER_FILE) { const sf = env.QUARTZ_WATCH_SAVER_FILE; test.saverOn = () => fs.existsSync(sf); }
-    for (const [k, name] of [['bgMinFreeGb', 'QUARTZ_WATCH_BG_MIN_FREE_GB'], ['bgEveryMs', 'QUARTZ_WATCH_BG_EVERY_MS'], ['bgGapMs', 'QUARTZ_WATCH_BG_GAP_MS'], ['bgBootDelayMs', 'QUARTZ_WATCH_BG_BOOT_MS'], ['bgPauseMs', 'QUARTZ_WATCH_BG_PAUSE_MS'], ['watchedAwayMs', 'QUARTZ_WATCH_WATCHED_AWAY_MS'], ['readLimitMs', 'QUARTZ_WATCH_READ_LIMIT_MS']]) {
+    for (const [k, name] of [['bgMinFreeGb', 'QUARTZ_WATCH_BG_MIN_FREE_GB'], ['bgEveryMs', 'QUARTZ_WATCH_BG_EVERY_MS'], ['bgGapMs', 'QUARTZ_WATCH_BG_GAP_MS'], ['bgBootDelayMs', 'QUARTZ_WATCH_BG_BOOT_MS'], ['bgPauseMs', 'QUARTZ_WATCH_BG_PAUSE_MS'], ['bgTimerMinMs', 'QUARTZ_WATCH_BG_TIMER_MIN_MS'], ['watchedAwayMs', 'QUARTZ_WATCH_WATCHED_AWAY_MS'], ['readLimitMs', 'QUARTZ_WATCH_READ_LIMIT_MS']]) {
       if (env[name] !== undefined && Number.isFinite(Number(env[name]))) test[k] = Number(env[name]);
     }
   }

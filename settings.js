@@ -5765,7 +5765,7 @@
     s.appendChild(el('p', 'set-hint',
       'Watch (Ctrl+Alt+W, or “Watch” in the command palette) shows Continue watching, ' +
       'picks and live sports from the services you are signed in to in Quartz. Reading happens ' +
-      'in a hidden page: when Watch comes on screen (anything over 10 min old), every 15 min while it ' +
+      'in a hidden page: when it comes on screen (anything over 10 min old), every 15 min while it ' +
       'stays there, and hourly in the background if the switch below is on; nothing leaves this PC.'));
     var svc = el('div', 'set-field');
     svc.setAttribute('data-field', 'watchservices');
@@ -6156,7 +6156,7 @@
     if (b.on && b.waiting) st = 'Background updates are ' + b.waiting + '.';
     else if (b.on && b.lastAt) st = 'Last background update ' + watchAgo(b.lastAt) + '.';
     else if (b.on) st = 'No background update yet this session.';
-    else st = 'Off: Watch updates only while it is on screen.';
+    else st = 'Off: it updates only while it is on screen.';
     field.appendChild(el('p', 'set-hint set-watch-bg-state', st));
     var res = watchResultRow('background');
     if (res) field.appendChild(res);

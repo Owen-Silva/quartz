@@ -293,6 +293,7 @@ function create(deps) {
   const bgEveryMs = Number.isFinite(test.bgEveryMs) && test.bgEveryMs > 0 ? test.bgEveryMs : BG_EVERY_MS;
   const bgGapMs = Number.isFinite(test.bgGapMs) && test.bgGapMs >= 0 ? test.bgGapMs : BG_GAP_MS;
   const bgBootDelayMs = Number.isFinite(test.bgBootDelayMs) && test.bgBootDelayMs >= 0 ? test.bgBootDelayMs : BG_BOOT_DELAY_MS;
+  const bgTimerMinMs = Number.isFinite(test.bgTimerMinMs) && test.bgTimerMinMs > 0 ? test.bgTimerMinMs : TIMER_MIN_MS;
   const bgPauseMs = Number.isFinite(test.bgPauseMs) && test.bgPauseMs > 0 ? test.bgPauseMs : BG_PAUSE_MS;
   const watchedAwayMs = Number.isFinite(test.watchedAwayMs) && test.watchedAwayMs >= 0 ? test.watchedAwayMs : WATCHED_AWAY_MS;
   // Battery saver on? true / false / null (cannot say: counts as off). powersaver.js is one kernel32 call.
@@ -963,7 +964,7 @@ function create(deps) {
           for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'watchdog');
           const s = loadCache().services[id];
           s.state = 'error';
-          s.reason = 'it took longer than ' + Math.round(readLimit / 1000) + ' s, so Watch stopped it';
+          s.reason = 'it took longer than ' + Math.round(readLimit / 1000) + ' s, so the read was stopped';
           s.readAt = now();
           s.warnings = [];
           log('Watch stopped reading ' + Shape.serviceById(id).name + ' after its ' + Math.round(readLimit / 1000) + ' s limit');
@@ -972,6 +973,9 @@ function create(deps) {
         reading = null;
         readStartedAt = 0;
         readLimit = 0;
+        // A read that failed (or ran out of time) can be retried at once: the 30-s gap only
+        // folds a double click on a read still on its way.
+        if (loadCache().services[id].state === 'error') delete lastForced[id];
         pushAll();
       }
     } catch (err) {
@@ -1113,7 +1117,7 @@ function create(deps) {
     }
     if (soonest === Infinity) return;
     soonest = Math.max(soonest, bgEarliest());
-    const delay = Math.max(TIMER_MIN_MS, Math.min(TIMER_MAX_MS, soonest - now()));
+    const delay = Math.max(bgTimerMinMs, Math.min(TIMER_MAX_MS, soonest - now()));
     bgTimerAt = now() + delay;
     bgTimer = setTimer(bgTick, delay);
     if (bgTimer && typeof bgTimer.unref === 'function') bgTimer.unref();
@@ -1651,8 +1655,8 @@ function create(deps) {
   if (d.ipcMain) registerIpc(d.ipcMain, d.isChromeSender);
   // The background refresh's first look, at the end of its boot delay (no Watch page needs to
   // be open). Nothing is loaded now: bgTick reads the prefs and the cache when it fires.
-  bgTimerAt = now() + Math.max(TIMER_MIN_MS, bgBootDelayMs);
-  bgTimer = setTimer(bgTick, Math.max(TIMER_MIN_MS, bgBootDelayMs));
+  bgTimerAt = now() + Math.max(bgTimerMinMs, bgBootDelayMs);
+  bgTimer = setTimer(bgTick, Math.max(bgTimerMinMs, bgBootDelayMs));
   if (bgTimer && typeof bgTimer.unref === 'function') bgTimer.unref();
 
   return {
