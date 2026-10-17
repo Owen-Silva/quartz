@@ -443,6 +443,8 @@ async function measureMotion(g, o) {
   const inRow = "(() => { const a = document.activeElement; return !!(a && a.closest && a.closest('#stack .lrow') && a.matches('.card, .gc')); })()";
   for (let i = 0; i < 30 && !(await g.ev(inRow).catch(() => false)); i++) await press(g, 'Tab');
   if (o.say) o.say('motion: keys go to a card in the rows: ' + await g.ev(inRow).catch(() => false));
+  // What the page is carrying when it starts stepping (a long session vs a fresh launch).
+  if (o.say) o.say('motion: the page before stepping: ' + await g.ev("JSON.stringify({ els: document.getElementsByTagName('*').length, imgs: document.images.length, anims: document.getAnimations().length, view: innerWidth + 'x' + innerHeight + '@' + devicePixelRatio, theme: document.documentElement.getAttribute('data-theme'), body: document.body.className, stage: (document.getElementById('stage') || {}).className })").catch(() => '?'));
   const l0 = await layouts();
   const WHERE = "(() => { const a = document.activeElement; const r = document.querySelector('#stack .lrow[data-d=\"0\"]'); return (r ? String(r.dataset.key).slice(0, 8) : '-') + '/' + (a && a.dataset ? String(a.dataset.key || a.tagName).slice(-6) : '-'); })()";
   const seen = [await g.ev(WHERE).catch(() => '?')];
@@ -1027,7 +1029,7 @@ if (require.main === module) {
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
 
     // Motion: frames over 20 ms while the lens steps rows (the focus band) and the wash cross-fades.
-    const mm = await measureMotion(g, { say });
+    const mm = await measureMotion(g, { say, trace: TRACE });   // --trace F: trace the long session's stepping too
     const fr = mm.fr;
     const l0 = 0, l1 = mm.layouts;
     say('motion [' + (fs.existsSync(path.join(os.tmpdir(), 'claude-heavytest.mutex2')) ? 'UNDER LOAD (mutex2 held)' : 'clean (mutex2 absent)') + ']: ' + fr.n + ' frames, ' + fr.over + ' over 20 ms (max ' + fr.max.toFixed(1) + ' ms), ' + fr.wash + ' wash cross-fades, ' + (l1 - l0) + ' layouts over 10 steps');

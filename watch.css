@@ -308,7 +308,10 @@ html[data-theme="light"] .wash::after {
 .row { position: relative; }
 .rv { position: relative; height: calc(var(--row-h) - var(--row-head)); overflow-x: clip; overflow-y: visible; padding: 10px 0 0;
   clip-path: inset(calc(-1 * (var(--row-head) + 13px)) calc(var(--gutter) - 29px) -7px); }
-.rt { display: flex; gap: 16px; width: max-content; padding: 0 var(--gutter);
+/* The track is a layer for life (one per row): promoted only while it slid, it folded back into the
+   row's layer when the slide ended and the whole visible row (cards, art, shadows) rastered again in
+   one frame (a 33-41 ms GPU flush at +465 ms of an ArrowRight that pages the row; watch-step6 trace). */
+.rt { display: flex; gap: 16px; width: max-content; padding: 0 var(--gutter); will-change: transform;
   transition: transform var(--m-dur-m) var(--m-spring); }
 /* prev/next sit inside the panel, each centred on the cards' outer edge (the gutter line), 12px in from the rim */
 .row-nav { position: absolute; top: 10px; height: var(--art-h); z-index: 6; display: grid; place-items: center; width: 60px; pointer-events: none; }
