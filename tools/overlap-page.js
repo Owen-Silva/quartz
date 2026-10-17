@@ -276,8 +276,13 @@
   /**
    * The state shot of candidate i (clip at cx,cy) against the base: every changed pixel that is
    * outside i's own box and inside a neighbour (another control, or text i does not own).
+   * The "hidden" shot (i invisible, same state) only ever discounts, so it counts fainter change:
+   * a parent's :focus-within row tint sits right on the 24 cut (dark Settings chip: 37 -> 45 a
+   * channel), and one level of blue between the two shots counted it as i's paint in one and not
+   * in the other. With i hidden its own ring is gone, so a lower cut there can never hide one.
    */
   async function judge(i, b64, cx, cy, kind) {
+    const cut = kind === 'hidden' ? 12 : 24;
     const el = ov.state.cands[i];
     const img = await decode(b64);
     const base = ov.base, W = base.width;
@@ -298,7 +303,7 @@
         const p = Y * W + X; if (ov.noise[p]) continue;
         const i1 = (y * img.width + x) * 4, i0 = p * 4;
         const d = Math.abs(img.data[i1] - base.data[i0]) + Math.abs(img.data[i1 + 1] - base.data[i0 + 1]) + Math.abs(img.data[i1 + 2] - base.data[i0 + 2]);
-        if (d <= 24) continue;
+        if (d <= cut) continue;
         changed++;
         if (X < bx0) bx0 = X; if (Y < by0) by0 = Y; if (X > bx1) bx1 = X; if (Y > by1) by1 = Y;
         const px = X + 0.5, py = Y + 0.5;
@@ -309,7 +314,9 @@
         }
       }
     }
-    const into = [...hits.entries()].filter(([, c]) => c >= 4).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    // A finding names its top three; the hidden shot keeps every neighbour, or a fainter hit it
+    // counts can push the one it should discount out of a top three (narrow workspaces row).
+    const into = [...hits.entries()].filter(([, c]) => c >= 4).sort((a, b) => b[1] - a[1]).slice(0, kind === 'hidden' ? Infinity : 3);
     return {
       i, kind, d: desc(el), own, changed, outside,
       painted: changed ? { x: bx0, y: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1 } : null,
