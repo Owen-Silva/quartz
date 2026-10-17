@@ -64,12 +64,13 @@ function seedCache(dir, ages, dflt) {
   }
   fs.mkdirSync(dir, { recursive: true });
   const off = Shape.SERVICE_IDS.filter((id) => IDS.indexOf(id) === -1);
-  if (off.length) { const enabled = {}; for (const id of off) enabled[id] = false; fs.writeFileSync(path.join(dir, 'watch.json'), JSON.stringify({ enabled })); }
+  const enabled = {}; for (const id of off) enabled[id] = false;
+  fs.writeFileSync(path.join(dir, 'watch.json'), JSON.stringify({ enabled, background: true }));   // boot 1 turns it off; each boot starts at the default
   fs.writeFileSync(path.join(dir, 'watch-cache.json'), JSON.stringify({ v: 1, services }));
 }
 
 /* ---- the process tree's working set and CPU, sampled (for --measure) ------------------------------ */
-const SAMPLER_PS = String.raw`param([int]$Root, [int]$Seconds, [int]$EveryMs)
+const SAMPLER_PS = String.raw`param([int]$Root, [int]$Seconds, [int]$EveryMs, [string]$Exe, [string]$Exe2)
 function Tree {
   $all = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId)
   $ids = New-Object System.Collections.Generic.HashSet[int]; [void]$ids.Add($Root)
@@ -78,11 +79,13 @@ function Tree {
   return $ids
 }
 $sw = [Diagnostics.Stopwatch]::StartNew()
-$ids = Tree; $treeAt = 0
+$last = @{}   # the electron.exe of this worktree, by path: no process-tree walk per sample
 while ($sw.Elapsed.TotalSeconds -lt $Seconds) {
-  if ($sw.Elapsed.TotalMilliseconds - $treeAt -gt 1000) { $ids = Tree; $treeAt = $sw.Elapsed.TotalMilliseconds }
   $ws = 0; $cpu = 0; $n = 0
-  foreach ($id in $ids) { $p = Get-Process -Id $id -ErrorAction SilentlyContinue; if ($p) { $ws += $p.WorkingSet64; $cpu += $p.TotalProcessorTime.TotalMilliseconds; $n++ } }
+
+  $live = @(Get-Process -Name electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $Exe -or $_.Path -eq $Exe2 })
+  foreach ($p in $live) { $ws += $p.WorkingSet64; $last[$p.Id] = $p.TotalProcessorTime.TotalMilliseconds; $n++ }
+  foreach ($v in $last.Values) { $cpu += $v }
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   '{"t":' + $now + ',"ws":' + $ws + ',"cpu":' + [math]::Round($cpu) + ',"n":' + $n + '}'
   Start-Sleep -Milliseconds $EveryMs
@@ -90,7 +93,7 @@ while ($sw.Elapsed.TotalSeconds -lt $Seconds) {
 /** Sample the tree of `pid` every `everyMs` until stop(); returns { stop(): Promise<samples[]> }. */
 function sampler(pid, everyMs, maxS) {
   fs.writeFileSync(SAMPLER, SAMPLER_PS);
-  const proc = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SAMPLER, '-Root', String(pid), '-Seconds', String(maxS || 600), '-EveryMs', String(everyMs)], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  const proc = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SAMPLER, '-Root', String(pid), '-Seconds', String(maxS || 600), '-EveryMs', String(everyMs), '-Exe', path.join(__dirname, 'node_modules', 'electron', 'dist', 'electron.exe'), '-Exe2', (() => { try { return fs.realpathSync(path.join(__dirname, 'node_modules', 'electron', 'dist', 'electron.exe')); } catch (e) { return ''; } })()], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
   try { require('child_process').execFileSync('powershell', ['-NoProfile', '-Command', '(Get-Process -Id ' + proc.pid + ').PriorityClass = "BelowNormal"'], { stdio: 'ignore', windowsHide: true }); } catch (e) { /* fine */ }
   const out = [];
   let buf = '';
@@ -231,7 +234,7 @@ run('watch-auto-e2e', async (k) => {
   if (MEASURE) {
     measured = {};
     const pid = q.child.pid;
-    const sm = sampler(pid, 500, 900);
+    const sm = sampler(pid, 200, 900);
     await sleep(3000);
     // Idle, Watch not on screen, nothing due: background refresh on vs off, ABAB, 45 s each.
     const legs = [];
@@ -283,6 +286,7 @@ run('watch-auto-e2e', async (k) => {
   const readsDoneAtSeed = IDS.filter((id) => mock.hits(id, t2) > 0).length;
   check(!!seedDrawn, 'open: the cached rows draw at once (' + seedDrawn + ' seed cards; reads started for ' + readsDoneAtSeed + ' service(s) by then)');
   // While the reads run: the header's words, the rows never blank, no scroll jump.
+  await g.ev("(() => { const f = document.getElementById('fresh'); window.__freshSeen = [f.textContent.replace(/\\s+/g, ' ').trim()]; new MutationObserver(() => { const x = f.textContent.replace(/\\s+/g, ' ').trim(); const a = window.__freshSeen; if (a[a.length - 1] !== x) a.push(x); }).observe(f, { childList: true, subtree: true, characterData: true }); return 1; })()").catch(() => 0);
   const seen = new Set();
   const samples = { blank: 0, n: 0, scroll: new Set(), rowKey: new Set() };
   const startKey = await g.ev("(document.querySelector('#stack .lrow[data-d=\"0\"]') || {}).dataset ? document.querySelector('#stack .lrow[data-d=\"0\"]').dataset.key : ''").catch(() => '');
@@ -297,7 +301,7 @@ run('watch-auto-e2e', async (k) => {
   const order2 = startOrder(mock, t2).map((x) => x.id);
   check(order2.join(',') === openWant.join(','), 'open: every service over 10 min old reads, oldest first', { got: order2, want: openWant });
   check(poll.max <= 1, 'open: one hidden reader at a time', poll.max);
-  const words = Array.from(seen);
+  const words = Array.from(new Set(Array.from(seen).concat(await g.ev('window.__freshSeen || []').catch(() => []))));
   check(words.some((w) => /^Updating Disney\+…$/.test(w)) && words.some((w) => /^Updating Prime Video…$/.test(w)), 'header: "Updating Disney+…" / "Updating Prime Video…" while each reads', words);
   const final = await g.ev(FRESH);
   check(/^Updated (just now|1 min ago)$/.test(final), 'header: idle after the reads: "' + final + '"');

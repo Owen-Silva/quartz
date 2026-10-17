@@ -6150,7 +6150,7 @@
     if (wtBusy === 'background') row.disabled = true;
     field.appendChild(row);
     field.appendChild(el('p', 'set-hint',
-      'Costs one hidden page per service at most once an hour, one at a time (about 0.3 GB and a few seconds of CPU each, then closed); ' +
+      'Costs one hidden page per service at most once an hour, one at a time, closed when done (a few seconds and roughly 150–300 MB while it runs); ' +
       'skipped while a game runs, Quartz is minimised, battery saver is on or under 2.5 GB of memory is free.'));
     var st = '';
     if (b.on && b.waiting) st = 'Background updates are ' + b.waiting + '.';
