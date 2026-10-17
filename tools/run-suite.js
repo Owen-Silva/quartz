@@ -93,6 +93,10 @@ const TESTS = [
   // surface opening and closing on opacity/translate/scale only, cut short and toggled, reduced
   // motion, the tab strip's arrival and glide.
   { name: 'motion-e2e', file: 'motion-e2e.js', e2e: true },
+  // Watch end to end: a hidden reader against a local mock of every service (tests/watch-mock.js),
+  // every failure mode on its own tile, the game pause, opens, search, keyboard, reduced motion, a
+  // cache-first second boot and Forget. ~6 min (four Retry rounds 30 s apart, one 20 s timeout).
+  { name: 'watch-e2e', file: 'watch-e2e.js', e2e: true, timeout: 900 },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,
