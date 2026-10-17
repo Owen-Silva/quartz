@@ -55,7 +55,8 @@ function Run([string]$exe, [string[]]$argList) {
   $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
   Push-Location $Repo
   try { & $exe @argList *> $log; $code = $LASTEXITCODE } finally { Pop-Location; $ErrorActionPreference = $old }
-  $text = [string](Get-Content $log -Raw -ErrorAction SilentlyContinue)
+  $text = Get-Content $log -Raw -ErrorAction SilentlyContinue
+  if ($null -eq $text) { $text = '' } else { $text = [string]$text }
   Remove-Item $log -ErrorAction SilentlyContinue
   return @{ code = $code; text = $text }
 }
