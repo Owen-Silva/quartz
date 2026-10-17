@@ -40,6 +40,7 @@ const bgFiles = require('./bgfiles');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
 const braveSearchModule = require('./bravesearch');
+const claudeAnswerModule = require('./claudeanswer');
 const budgetModule = require('./budget');
 const lookSyncMain = require('./looksync-main');
 // Look Sync (looksync-main.js): installed once the app is ready (it needs
@@ -377,6 +378,26 @@ const braveSearch = braveSearchModule.create({
   isBundledPage: (url) => isBundledPageUrl(url),
   apiBase: process.argv.includes('--test-profile') && process.env.QUARTZ_BRAVE_API
     ? process.env.QUARTZ_BRAVE_API
+    : undefined,
+});
+
+/**
+ * The AI answer at the top of Quartz results (claudeanswer.js), from Claude
+ * through the user's own Anthropic API key. It listens to the same search.html
+ * guests as braveSearch, on its own console lines. The key lives in
+ * <userData>/claude-answer.json ENCRYPTED with safeStorage (DPAPI) and never
+ * comes back out over IPC. Only a TEST profile may point it somewhere else (a
+ * mock server, via QUARTZ_CLAUDE_API), so a live Quartz always talks to
+ * api.anthropic.com itself.
+ */
+const claudeAnswer = claudeAnswerModule.create({
+  app,
+  ipcMain,
+  safeStorage: require('electron').safeStorage,
+  isChromeSender: (event) => isChromeSender(event),
+  isBundledPage: (url) => isBundledPageUrl(url),
+  apiBase: process.argv.includes('--test-profile') && process.env.QUARTZ_CLAUDE_API
+    ? process.env.QUARTZ_CLAUDE_API
     : undefined,
 });
 
@@ -5351,6 +5372,8 @@ app.on('before-quit', (event) => {
   stocks.stop();
   // The search page's in-memory answers (Brave's terms: transient only).
   try { braveSearch.stop(); } catch { /* best effort */ }
+  // An answer still streaming from Claude: abort it (its in-memory cache goes too).
+  try { claudeAnswer.stop(); } catch { /* best effort */ }
   // Watch: its timer, a hidden reader window mid-read, and the cache's last write.
   try { watch.stop(); } catch { /* best effort */ }
   // The favicon cache: a logo learned a moment ago must be there next start.

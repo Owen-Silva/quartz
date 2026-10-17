@@ -805,6 +805,25 @@ apps on the new tab's dock, and `music` with the idle-music preferences); missin
 defaults, so an older stored object still reads. Section titles are set at full text colour,
 13.5px and bold, with the fading rule under each one, so the pane reads as headings and rows rather than one long list.
 
+**AI answers (Claude).** Quartz results (the Brave-fed page, `search.html`) can carry an answer at
+the top, like Google's AI Overviews, written by Claude through your own Anthropic API key
+(`claudeanswer.js`, main process). Settings → Search has the "Claude API key (AI answers)" field
+next to Brave's: Save, Check key (GET `/v1/models`, which costs nothing), Remove. The key is stored
+ENCRYPTED with Electron `safeStorage` (Windows DPAPI) in `<userData>/claude-answer.json`; if Windows
+cannot encrypt it, Quartz refuses to store it. No IPC channel returns it, it is never logged, and it
+leaves the process only as the `x-api-key` header to `api.anthropic.com`. **What is sent where:**
+without a key, nothing goes to Anthropic. With one, each web search on Quartz results (or only
+those that read as questions, or only the ones you press "Ask Claude" on, per the AI answers
+setting) and any follow-up typed into the answer box go to Anthropic, so Claude can answer and run
+Anthropic's own web search for its sources; Brave still supplies the results list, and Brave's
+results are never sent to Claude (Brave's API terms grant no AI use of them). Quick answers use
+Claude Haiku 5.5 at low effort with at most 2 searches; "Deeper answer" uses Claude Sonnet 5.5 with
+at most 4 (both changeable). Every answer's cost is estimated from the usage Anthropic returns at the
+published prices plus $0.01 a search, added to "This month: $X.XX estimated · N answers", and
+answers stop at the monthly cap (default $150). That is Quartz's own estimate; it cannot see the
+real credit balance. Tests run only against a mock (`QUARTZ_CLAUDE_API`, honoured for
+`--test-profile` instances only): `claudeanswer-harness.js` and `claudeanswer-e2e.js`.
+
 **Browser style.** Site styles paint web pages across an async boundary; this paints the chrome —
 titlebar, tabs, omnibox, panels — the document the script is already running in, so there is no
 IPC and nothing to wait for. userstyle.js owns one string in `localStorage['userstyle']` and one
