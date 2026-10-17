@@ -24,15 +24,23 @@
   /* The content column: at most 1720 px, so 1920 composes instead of stretching; the rows
      still bleed to both edges, so a wide window simply shows more of each row. */
   --gutter: max(clamp(40px, 4.2vw, 64px), calc((100vw - 1720px) / 2));
+  /* ONE bar: the services sit in it as a quiet status cluster (no second strip under it) */
   --top-h: 56px;
-  --strip-h: 44px;
-  --head-h: calc(var(--top-h) + var(--strip-h));
-  --card-w: clamp(248px, 14.6vw, 300px);
+  --head-h: var(--top-h);
+  --find-w: min(340px, 28vw);
+  --lead-w: calc(150px + var(--find-w));   /* the brand + the search field, for the cluster's room */
+  /* tiles sized to the window: --per across the content column (5 wide, 4 mid, 3 narrow) */
+  --per: 5;
+  --card-gap: 16px;
+  --card-w: calc((100vw - 2 * var(--gutter) - (var(--per) - 1) * var(--card-gap)) / var(--per));
   --art-h: calc(var(--card-w) * 9 / 16);
-  --row-head: 30px;
-  --row-h: calc(var(--row-head) + 10px + var(--art-h) + 48px);
-  --row-gap: 26px;
-  --lens-top: max(392px, 48vh);
+  --row-head: 34px;
+  --row-meta: 54px;
+  --row-h: calc(var(--row-head) + 10px + var(--art-h) + var(--row-meta));
+  --row-gap: 22px;
+  /* the hero: the first row starts here at the top; past it (body.is-compact) the lens rises to --lens-c */
+  --lens-top: clamp(330px, 40vh, 480px);
+  --lens-c: calc(var(--top-h) + 22px);
   /* the far layer's strength: ONE variable per theme */
   --wash-a: .5;
   /* ink that always sits on artwork, in both themes */
@@ -154,10 +162,15 @@ html[data-theme="light"] .wash::after {
 /* ===== top bar ===== */
 .top { position: fixed; z-index: 30; top: 0; left: 0; right: 0; height: var(--top-h);
   display: flex; align-items: center; gap: 18px; padding: 0 var(--gutter); }
+/* its fill: a layer of its own that fades (opacity only; never a backdrop-filter) */
+.top::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: color-mix(in srgb, var(--bg) 96%, transparent); box-shadow: 0 1px 0 var(--hairline);
+  opacity: 0; transition: opacity var(--m-dur-s-out) var(--m-fade-out); }
+body.is-compact .top::before, body.searching .top::before { opacity: 1; transition: opacity calc(var(--m-dur-s) * var(--m-fade-k)) var(--m-fade-in); }
 .brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
 .brand-name { font: 600 20px/1 var(--font-display); letter-spacing: -.02em; }
 .brand-sub { color: var(--text-3); font-size: var(--fs-xs); }
-.find { position: relative; margin-left: 14px; width: min(340px, 34vw); }
+.find { position: relative; margin-left: 14px; width: var(--find-w); }
 .find-i { position: absolute; left: 12px; top: 50%; margin-top: -8px; color: var(--text-2); pointer-events: none; }
 .find input {
   width: 100%; height: 36px; padding: 0 40px 0 36px;
@@ -176,24 +189,29 @@ html[data-theme="light"] .wash::after {
 .top-end { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 /* ===== the services strip ===== */
-.strip { position: fixed; z-index: 29; top: var(--top-h); left: 0; right: 0; height: var(--strip-h);
-  display: flex; align-items: center; gap: 8px; padding: 0 var(--gutter) 8px; }
-.strip-l { flex: none; color: var(--text-3); font-size: var(--fs-xs); margin-right: 2px; }
-.pills { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding: 2px 0; }
-.sp { display: inline-flex; align-items: center; flex: none; height: 28px; border-radius: var(--radius-pill);
-  background: var(--surface-0); box-shadow: inset 0 0 0 1px var(--hairline); font-size: var(--fs-xs); color: var(--text); }
-.sp > button { display: inline-flex; align-items: center; gap: 7px; height: 28px; border: 0; background: transparent; cursor: pointer; outline: none;
+/* In the bar's own line, right-aligned before Settings: a dot and a name per service (the state's
+   words are in each one's tooltip, label and popover), an action only when one is needed
+   (Sign in, Retry), then the read status and Read now. Same in both states of the top. */
+.strip { position: fixed; z-index: 31; top: 0; left: auto; right: calc(var(--gutter) + 40px); height: var(--top-h);
+  max-width: calc(100vw - 2 * var(--gutter) - 40px - var(--lead-w));
+  display: flex; align-items: center; gap: 6px; padding: 0; }
+.strip-l { display: none; }
+.pills { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding: 2px 0; }
+.sp { display: inline-flex; align-items: center; flex: none; height: 30px; border-radius: var(--radius-pill);
+  background: transparent; font-size: var(--fs-xs); color: var(--text-2); }
+.sp > button { display: inline-flex; align-items: center; gap: 6px; height: 30px; border: 0; background: transparent; cursor: pointer; outline: none;
   border-radius: var(--radius-pill); color: inherit; font-size: var(--fs-xs); white-space: nowrap;
   transition: background-color var(--dur) var(--ease); }
-.sp > .sp-main { padding: 0 10px 0 10px; }
-.sp > .sp-act { padding: 0 10px 0 8px; margin-left: -6px; color: var(--accent); font-weight: 600; }
+.sp > .sp-main { padding: 0 9px; }
+.sp > .sp-act { padding: 0 9px 0 7px; margin-left: -6px; color: var(--accent); font-weight: 600; }
 .sp > button:hover { background: var(--surface-3); }
 .sp > button:active { background: var(--surface-press); }
 .sp > button:focus-visible { box-shadow: var(--focus-ring-inset); }
-.sp-name { font-weight: 600; }
-.sp small { color: var(--text-3); font-size: var(--fs-2xs); max-width: 210px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-name { font-weight: 500; }
+.sp > button:hover .sp-name { color: var(--text); }
+.sp small { display: none; }
 .sp .warn-mark { color: var(--warn); font-weight: 600; }
-.sp.st-error { background: var(--danger-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+.sp.st-error .sp-name { color: var(--danger); font-weight: 600; }
 .sp.st-error small { color: var(--danger); font-weight: 600; }
 .sp.st-error > button:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
 .sp.st-signed-out small { color: var(--text-2); }
@@ -201,20 +219,23 @@ html[data-theme="light"] .wash::after {
 .sp.st-off { background: transparent; color: var(--text-3); }
 .sp.st-off .sp-name { font-weight: 500; }
 .sp.st-busy small { color: var(--text-2); }
-.sp.add { background: transparent; color: var(--text-2); }
-.sp.add > button { padding: 0 11px 0 9px; gap: 5px; }
+.sp.add { background: transparent; color: var(--text-3); }
+/* Manage: the + alone (its words stay its accessible name; the tooltip says where it goes) */
+.sp.add > button { width: 30px; padding: 0; gap: 0; justify-content: center; font-size: 0; }
 .sp[aria-busy="true"] .sp-main { cursor: pointer; }
-.strip-end { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.strip-end { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; color: var(--text-3); font-size: var(--fs-xs);
+  margin-left: 4px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--hairline); }
 .fresh { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fresh.paused { color: var(--warn); font-weight: 600; }
 
 /* ===== the stage: what the lens is on ===== */
-.stage { position: fixed; z-index: 10; top: var(--head-h); left: 0; right: 0; height: calc(var(--lens-top) - var(--head-h) - 26px); pointer-events: none; }
+.stage { position: fixed; z-index: 10; top: 0; left: 0; right: 0; height: calc(var(--lens-top) - 24px); pointer-events: none; }
 .stage .txt.special { width: min(780px, 62vw); }
 .stage .txt.special .lede { max-width: 72ch; }
-.stage .txt { position: absolute; left: var(--gutter); bottom: 4px; width: min(600px, 46vw); pointer-events: auto;
+.stage .txt { position: absolute; left: var(--gutter); bottom: 4px; width: min(560px, 42vw); pointer-events: auto;
   transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
-.stage .pic { position: absolute; right: var(--gutter); top: 6px; bottom: 12px; display: flex; align-items: flex-end; justify-content: flex-end;
+/* the still, unboxed: from the window's top and right edge, fading into the page on its left and its foot */
+.stage .pic { position: absolute; right: 0; top: 0; bottom: 0; width: min(64vw, 1240px); display: flex; align-items: flex-end; justify-content: flex-end;
   transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring);
   /* its own layer for life: the artwork and its deep shadow raster once per title, not again
      when the entry animation ends and a promoted layer would fold back into the stage */
@@ -223,16 +244,18 @@ html[data-theme="light"] .wash::after {
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-s-out) var(--m-accel); }
 .stage.pre .txt { opacity: 0; transform: translateY(10px); transition: none; }
 .stage.pre .pic { opacity: 0; transform: translateY(12px) scale(.98); transition: none; }
-.stage .pic .w { position: relative; height: 100%; max-width: 40vw; aspect-ratio: 16 / 9; border-radius: var(--radius-xl); overflow: hidden;
-  box-shadow: var(--shadow-3), inset 0 0 0 1px var(--hairline); background: var(--surface-3); }
-.stage .pic .w > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.stage .pic .w { position: absolute; inset: 0; overflow: hidden; background: transparent;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 44%), linear-gradient(0deg, transparent 0%, #000 38%);
+  -webkit-mask-composite: source-in; mask-composite: intersect; }
+.stage .pic .w > .noart { opacity: .5; }
+.stage .pic .w > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
 .stage .pic .w.stale > img { opacity: .8; }
 .eyebrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
 .eyebrow .rn { text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
-.stage h1 { margin: 10px 0 8px; font: 650 clamp(38px, 3.7vw, 60px)/1.04 var(--font-display); letter-spacing: -.028em;
+.stage h1 { margin: 10px 0 8px; font: 650 clamp(32px, 2.6vw, 50px)/1.05 var(--font-display); letter-spacing: -.026em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.stage h1.mid { font-size: clamp(32px, 3vw, 48px); }
-.stage h1.long { font-size: clamp(26px, 2.4vw, 38px); }
+.stage h1.mid { font-size: clamp(28px, 2.2vw, 42px); }
+.stage h1.long { font-size: clamp(24px, 1.9vw, 34px); }
 .stage .meta { color: var(--text-2); font-size: var(--fs-m); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .stage .meta i { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); flex: none; }
 .stage .pbar { width: 220px; height: 4px; border-radius: 2px; background: var(--hairline-strong); margin-top: 12px; overflow: hidden; }
@@ -246,7 +269,7 @@ html[data-theme="light"] .wash::after {
 .stage .warnl .dot { transform: translateY(-1px); }
 .stage .warnl.err { color: var(--danger); }
 /* a scoreboard for a game: neutral, the logos carry the colour */
-.board { position: relative; height: 100%; max-width: 40vw; aspect-ratio: 16 / 9; border-radius: var(--radius-xl); overflow: hidden;
+.board { position: absolute; right: var(--gutter); top: calc(var(--top-h) + 6px); bottom: 14px; height: auto; max-width: 36vw; aspect-ratio: 16 / 9; border-radius: var(--radius-xl); overflow: hidden;
   background: var(--card-fill); box-shadow: var(--shadow-3), inset 0 0 0 1px var(--hairline), inset 0 1px 0 var(--panel-edge);
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 6%; }
 .board .side { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; text-align: center; font-weight: 600; }
@@ -260,9 +283,10 @@ html[data-theme="light"] .wash::after {
 .sk { display: block; border-radius: var(--radius-s); background: var(--surface-3); opacity: .7; }
 
 /* ===== the lens ===== */
+/* the lens band is no longer a drawn box (a card around one row, none around the rest): the focused
+   row is the one at full strength; the element stays as the band's measure */
 .lens { position: fixed; z-index: 2; left: calc(var(--gutter) - 30px); right: calc(var(--gutter) - 30px); top: calc(var(--lens-top) - 14px);
-  height: calc(var(--row-h) + 22px); border-radius: 22px; pointer-events: none;
-  background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--hairline), inset 0 1px 0 var(--panel-edge), var(--shadow-2); }
+  height: calc(var(--row-h) + 22px); pointer-events: none; visibility: hidden; }
 .lens-ctl { position: fixed; z-index: 12; right: calc(var(--gutter) - 16px); top: calc(var(--lens-top) - 6px); display: flex; align-items: center; gap: 2px;
   color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .lens-ctl .lpos { margin-right: 6px; }
@@ -273,21 +297,25 @@ html[data-theme="light"] .wash::after {
    dimming runs on its imagery (.row) only, so its head keeps full ink (>= 4.5:1). Both move on every step,
    so both are permanent layers: promoted per animation, each would repaint its cards (and their shadows)
    on the step's first frame. Never on the cards themselves (there are ~50). */
-.lrow { height: var(--row-h); margin-bottom: var(--row-gap); transform-origin: 50% 0; will-change: transform, opacity;
+.lrow { height: var(--row-h); margin-bottom: var(--row-gap); transform-origin: var(--gutter) 0; will-change: transform, opacity;
   transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
-.lrow[data-d="1"] { transform: scale(.965); }
-.lrow[data-d="2"] { transform: scale(.93); }
-.lrow[data-d="far"] { opacity: 0; transform: scale(.9); pointer-events: none; }
+.lrow[data-d="1"] { transform: scale(.97); }
+.lrow[data-d="2"] { transform: scale(.94); }
+.lrow[data-d="3"] { transform: scale(.91); }
+.lrow[data-d="4"] { transform: scale(.88); }
+.lrow[data-d="far"] { opacity: 0; transform: scale(.86); pointer-events: none; }
 .lrow[data-d="-1"], .lrow[data-d="-far"] { opacity: 0; transform: translateY(-24px) scale(.97); pointer-events: none;
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring); }
 .lrow > .row { will-change: opacity; transition: opacity var(--m-dur-m) var(--m-fade-in); }
-.lrow[data-d="1"] > .row { opacity: .5; }
-/* "far" keeps d=2's dim, so far <-> 2 is only the whole-row fade (no brightening on the way out) */
-.lrow[data-d="2"] > .row, .lrow[data-d="far"] > .row { opacity: .22; }
+.lrow[data-d="1"] > .row { opacity: .62; }
+.lrow[data-d="2"] > .row { opacity: .42; }
+/* "far" keeps d=4's dim, so far <-> 4 is only the whole-row fade (no brightening on the way out) */
+.lrow[data-d="3"] > .row { opacity: .3; }
+.lrow[data-d="4"] > .row, .lrow[data-d="far"] > .row { opacity: .22; }
 .lrow:not([data-d="0"]) { cursor: pointer; }
 .lrow:not([data-d="0"]) .card, .lrow:not([data-d="0"]) .gc, .lrow:not([data-d="0"]) .lr-h button { pointer-events: none; }
 .lr-h { display: flex; align-items: center; gap: 10px; height: var(--row-head); padding: 0 var(--gutter); margin-right: 96px; }
-.lr-h h2 { margin: 0; font: 600 var(--fs-l)/1.2 var(--font-display); white-space: nowrap; }
+.lr-h h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--font-display); letter-spacing: -.01em; white-space: nowrap; }
 .lr-h .sub { color: var(--row-sub); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .lr-h .sub.err { color: var(--row-err); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
 .lr-h .sub.warn { color: var(--row-warn); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
@@ -307,11 +335,11 @@ html[data-theme="light"] .wash::after {
    in its 14px/8px margins, so a card reaches a curve by at most ~2px at the very bottom corners. */
 .row { position: relative; }
 .rv { position: relative; height: calc(var(--row-h) - var(--row-head)); overflow-x: clip; overflow-y: visible; padding: 10px 0 0;
-  clip-path: inset(calc(-1 * (var(--row-head) + 13px)) calc(var(--gutter) - 29px) -7px); }
+  clip-path: inset(calc(-1 * (var(--row-head) + 13px)) 0 -7px); }
 /* The track is a layer for life (one per row): promoted only while it slid, it folded back into the
    row's layer when the slide ended and the whole visible row (cards, art, shadows) rastered again in
    one frame (a 33-41 ms GPU flush at +465 ms of an ArrowRight that pages the row; watch-step6 trace). */
-.rt { display: flex; gap: 16px; width: max-content; padding: 0 var(--gutter); will-change: transform;
+.rt { display: flex; gap: var(--card-gap); width: max-content; padding: 0 var(--gutter); will-change: transform;
   transition: transform var(--m-dur-m) var(--m-spring); }
 /* prev/next sit inside the panel, each centred on the cards' outer edge (the gutter line), 12px in from the rim */
 .row-nav { position: absolute; top: 10px; height: var(--art-h); z-index: 6; display: grid; place-items: center; width: 60px; pointer-events: none; }
@@ -344,7 +372,19 @@ html[data-theme="light"] .wash::after {
 html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion), inset 0 0 0 4px rgb(255 255 255 / .6); }
 .card:focus-visible .ring { opacity: 1; }
 .art .grad { position: absolute; inset: 0; z-index: 1; background: linear-gradient(180deg, transparent 52%, rgb(0 0 0 / .55)); }
-.art .chips { position: absolute; right: 8px; top: 8px; z-index: 2; display: flex; gap: 4px; max-width: calc(100% - 16px); }
+.art .chips { position: absolute; left: 8px; top: 8px; z-index: 2; display: flex; gap: 4px; max-width: calc(100% - 48px); }
+/* the service mark: small, the same on every tile and in the hero */
+.chip.mk, .chip.bd { height: 18px; padding: 0 6px; border-radius: 5px; font: 700 10px/1 var(--font); letter-spacing: .04em; }
+.chip.oa.mk, .chip.oa.bd { background: var(--art-chip); color: var(--on-art); box-shadow: none; }
+.chip.oa.bd { color: var(--on-art-2); font-weight: 600; }
+/* the play disc: fades in on hover and focus, centred on the picture */
+.frame::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; z-index: 6;
+  border-radius: 50%; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16);
+  background: rgb(12 13 14 / .6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5.5 3.6v8.8l7-4.4z' fill='%23f4f3ef'/%3E%3C/svg%3E") 55% 50% / 18px no-repeat;
+  opacity: 0; transform: scale(.9); transition: opacity var(--m-dur-xs-out) var(--m-fade-out), transform var(--m-dur-xs-out) var(--m-accel); }
+.card:hover .frame::after, .card:focus-visible .frame::after { opacity: 1; transform: none;
+  transition: opacity calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-xs) var(--m-spring); }
+.card.sk-card .frame::after { display: none; }
 .art .chip.stale .dot { width: 6px; height: 6px; background: var(--warn); }
 .art .prog { position: absolute; left: 10px; right: 10px; bottom: 9px; height: 3px; border-radius: 2px; z-index: 2; overflow: hidden;
   background: rgb(255 255 255 / .28); }
@@ -354,13 +394,15 @@ html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion)
 .art .live { position: absolute; left: 8px; bottom: 8px; z-index: 2; }
 .card.stale .art > img { opacity: .78; }
 /* the quiet "Opens in Edge" line, on hover and focus only */
-.hint { position: absolute; left: 50%; top: 50%; z-index: 3; display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 11px; border-radius: var(--radius-pill);
-  background: rgb(250 250 248 / .94); color: #0b0e1a; font: 600 12px/1 var(--font); white-space: nowrap;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / .08), 0 4px 18px rgb(0 0 0 / .45);
-  opacity: 0; transform: translate(-50%, -50%) translateY(6px); pointer-events: none;
+/* "Opens in Edge" is a small mark in the top-right corner on hover and focus, not a pill over the
+   picture; its words stay its text (the card's label says it too) */
+.hint { position: absolute; right: 8px; top: 8px; z-index: 3; display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0; border-radius: 50%; overflow: hidden;
+  background: var(--art-chip); color: var(--on-art); font-size: 0; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .12);
+  opacity: 0; transform: translateY(2px); pointer-events: none;
   transition: opacity var(--m-dur-xs-out) var(--m-fade-out), transform var(--m-dur-xs-out) var(--m-accel); }
-.card:hover .hint, .card:focus-visible .hint { opacity: 1; transform: translate(-50%, -50%);
+.card:hover .hint, .card:focus-visible .hint { opacity: 1; transform: none;
   transition: opacity calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-xs) var(--m-spring); }
 /* no image (or it failed): a neutral tile with the service and the title, never a broken icon */
 .noart { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 9% 9% 11%;
@@ -369,7 +411,7 @@ html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion)
 .noart b { font: 650 var(--ka-fs, 20px)/1.06 var(--font-display); letter-spacing: -.02em; text-wrap: balance;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .m { display: block; padding: 9px 2px 0; }
-.m b { display: block; font-size: var(--fs-s); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m b { display: block; font-size: var(--fs-m); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .m > span { display: block; margin-top: 1px; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .m > span.stale { color: var(--warn); }
 /* skeleton card */
@@ -382,7 +424,7 @@ html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion)
 .gw { flex: none; width: var(--card-w); }
 .gc { position: relative; display: flex; flex-direction: column; width: 100%; height: var(--art-h); padding: 12px 14px 11px; margin: 0;
   border: 0; border-radius: var(--radius-l); text-align: left; color: inherit; cursor: pointer; outline: none; font-size: var(--fs-s);
-  background: var(--card-fill); box-shadow: inset 0 0 0 1px var(--hairline), inset 0 1px 0 var(--panel-edge), var(--shadow-1);
+  background: linear-gradient(155deg, var(--noart-a), var(--noart-b)); box-shadow: inset 0 0 0 1px var(--hairline), inset 0 1px 0 var(--panel-edge);
   transition: transform var(--m-dur-s-out) var(--m-accel), background-color var(--dur) var(--ease); }
 .gc:hover, .gc:focus-visible, .lrow[data-d="0"] .gc.cur { transform: translateY(-5px); transition: transform var(--m-dur-s) var(--m-spring), background-color var(--dur) var(--ease); }
 .gc:active { background: color-mix(in srgb, var(--surface-solid) 80%, var(--text) 6%); }
@@ -412,6 +454,20 @@ html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion)
 body.searching .stage, body.searching .lens, body.searching .lens-ctl, body.searching .stack {
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), visibility 0s linear var(--m-dur-s-out); }
+/* ===== the top, two states (watch.js setCompact) =====
+   At the first row: the hero and the bar over it, as Watch opens. Past it: the hero fades up and
+   away, the bar's fill fades in, and the lens (the rows and their controls) rises by --lift under
+   the bar on the shared spring. Opacity and transform only: nothing changes size or position in
+   layout, so nothing reflows and nothing jumps. top-instant: the same, with no motion (a resize,
+   a first draw). */
+body { --lift: 0px; }
+body.is-compact { --lift: calc(var(--lens-c) - var(--lens-top)); }
+.stage { transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring), visibility 0s; }
+body.is-compact:not(.searching) .stage { opacity: 0; visibility: hidden; transform: translateY(-28px); pointer-events: none;
+  transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring), visibility 0s linear var(--m-dur-s-out); }
+.lens-ctl { transform: translateY(var(--lift)); transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring); }
+body.top-instant .stage, body.top-instant .lens-ctl, body.top-instant .top::before { transition: none !important; }
+
 .results { position: fixed; z-index: 20; top: var(--head-h); left: 0; right: 0; bottom: 0; overflow: auto; padding: 18px var(--gutter) 56px;
   opacity: 1; transform: none; transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
 .results.pre { opacity: 0; transform: translateY(10px); transition: none; }
@@ -528,12 +584,18 @@ body.searching .stage, body.searching .lens, body.searching .lens-ctl, body.sear
 body.is-empty .lens, body.is-empty .lens-ctl { display: none; }
 body.one-row .lens-ctl .icon-btn { visibility: hidden; }
 
+@media (max-width: 1599px) { :root { --per: 4; } }
+@media (max-width: 1099px) { :root { --per: 3; } }
+/* the cluster's names step aside before anything crowds: a dot per service (its name is its label) */
+@media (max-width: 1199px) {
+  .sp-name { display: none; }
+  .sp > .sp-main { padding: 0 8px; }
+}
 /* narrow windows: the stage keeps its words, the picture steps aside */
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .stage .pic { display: none; }
   .stage .txt { width: auto; right: var(--gutter); }
-  .find { width: min(300px, 40vw); }
-  .strip-l { display: none; }
+  :root { --find-w: min(260px, 36vw); }
 }
 /* short windows: a one-line title, the lens a little higher */
 @media (max-height: 720px) {
@@ -553,5 +615,9 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
   .failbar { animation: wf-in-fade var(--m-dur-rm) linear both !important; }
   .lrow[data-d], .stage.pre .txt, .stage.pre .pic, .stage.out .txt, .stage.out .pic, .card:hover, .card:focus-visible, .lrow[data-d="0"] .card.cur,
   .gc:hover, .gc:focus-visible, .lrow[data-d="0"] .gc.cur, .results.pre, .pop.pre, .toast.pre, .toast.out, .gc .ft, .row-nav button { transform: none !important; }
-  .hint, .card:hover .hint, .card:focus-visible .hint { transform: translate(-50%, -50%) !important; }
+  .hint, .card:hover .hint, .card:focus-visible .hint, .frame::after, .card:hover .frame::after, .card:focus-visible .frame::after { transform: none !important; }
+  .frame::after, .top::before { transition: opacity var(--m-dur-rm) linear !important; }
+  .stage, body.is-compact:not(.searching) .stage { transform: none !important;
+    transition: opacity var(--m-dur-rm) linear, visibility 0s linear var(--m-dur-rm) !important; }
+  .lens-ctl { transition: none !important; }
 }
