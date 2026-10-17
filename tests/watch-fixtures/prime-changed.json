@@ -1,0 +1,43 @@
+{
+  "_fixture": "shape from primevideo.com public logged-out HTML (the init/preparations/body wrapper), with the containers[] list replaced by an invented 'sections/tiles' layout that matches nothing; signed-in store; unverified against a live account",
+  "finalPath": "/",
+  "title": "Prime Video: Watch movies, TV shows, sports, and live TV",
+  "hydration": {
+    "init": {
+      "path": "/storefront",
+      "preparations": {
+        "body": {
+          "sections": [
+            {
+              "sectionKind": "Rail",
+              "heading": "Continue watching",
+              "tiles": [
+                { "name": "The Boys", "art": "https://m.media-amazon.com/images/S/pv-target-images/fixture-boys-s4._UR1920,1080_.jpg", "href": "/watch/0BOYSFIXTURE0000000000S04X" }
+              ]
+            },
+            {
+              "sectionKind": "Rail",
+              "heading": "Recommended movies",
+              "tiles": [
+                { "name": "Air", "art": "https://m.media-amazon.com/images/S/pv-target-images/fixture-air._UR1920,1080_.jpg", "href": "/watch/0AIRFIXTURE000000000000XXX" }
+              ]
+            }
+          ],
+          "hasFailed": false
+        }
+      },
+      "route": { "name": "landing", "path": {} }
+    },
+    "config": { "clientTTLMins": 180 }
+  },
+  "store": {
+    "RequestContext": {
+      "customerID": "A1FIXTURECUSTOMER00",
+      "domain": "Fogg",
+      "marketplaceID": "ATVPDKIKX0DER",
+      "identityContext": "68|IhNQVklDU19BVVRIRU5USUNBVEVEOhl1YTpGSVhUVVJFMDAwMDAwMDAwMDAwMDAwMDA=",
+      "locale": "en_US"
+    },
+    "Profile": { "ageGroup": "ADULT", "isChild": false }
+  }
+}

@@ -1,0 +1,571 @@
+{
+  "_fixture": "shape from primevideo.com public logged-out HTML (dv-web-page-hydration-data and dv-web-global-store-data, fetched 2026-10-16, reduced to 4 containers; request ids, IP and geo token scrubbed), unverified against a live account",
+  "finalPath": "/",
+  "title": "Prime Video: Watch movies, TV shows, sports, and live TV",
+  "hydration": {
+    "init": {
+      "path": "/storefront",
+      "preparations": {
+        "body": {
+          "containers": [
+            {
+              "containerType": "StandardHero",
+              "entities": [
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "Carrie",
+                  "entitlementCues": {
+                    "compactFocusMessage": {
+                      "icon": "ENTITLED_ICON",
+                      "message": "Watch for free"
+                    },
+                    "entitlementType": "Entitled",
+                    "focusMessage": {
+                      "icon": "ENTITLED_ICON",
+                      "message": "Watch for free"
+                    },
+                    "glanceMessage": {
+                      "message": ""
+                    },
+                    "highValueMessage": {
+                      "icon": "TRENDING_ICON",
+                      "message": "#1 in the US"
+                    },
+                    "providerLogo": {},
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "TOP 10"
+                    }
+                  },
+                  "entityType": "TV Show",
+                  "images": {
+                    "hero": {
+                      "alternateText": "Carrie - Season 1",
+                      "height": 1440,
+                      "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_Carrie_Season1_Prom/5527d400-5712-44c1-ba3c-5e0f8916b961._UR3840,1440_.jpeg",
+                      "width": 3840
+                    },
+                    "titleLogo": {
+                      "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_SVOD_Carrie_Season1_Prom/58378773-f74d-4b5f-8263-5f369667d668.png"
+                    }
+                  },
+                  "isClosedCaption": false,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/B0H8V6XRQJ?ref_=atv_hm_hom_c_bCxerx_HS85ed33_1_1"
+                  },
+                  "releaseYear": "2026",
+                  "synopsis": "Season 1・Based on Stephen King's debut novel, Carrie is a bold reimagining of the classic coming-of-age story, adapted for television by Mike Flanagan.",
+                  "title": "Carrie - Season 1",
+                  "titleID": "B0H8V6XRQJ",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&token=g6EjQxfXuTRp9yGFvynz5wCBL8gqLj4q4KlnVd4eoiopAAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&tag=Add&titleID=0QHLPZ8O1W9VTEDNG03QCGAPI2&ref_=atv_hm_hom_c_bCxerx_1_wtl_add_hov&titleType=season&returnUrl=%2Fdetail%2F0QHLPZ8O1W9VTEDNG03QCGAPI2%3Fref_%3Datv_hm_wtl_sign_in_hov",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "seas",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add Season to Watchlist"
+                    }
+                  },
+                  "widgetType": "HeroTitle"
+                },
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "Spider-Man: Brand New Day",
+                  "entitlementCues": {
+                    "compactFocusMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Rent or buy"
+                    },
+                    "entitlementType": "Unentitled",
+                    "focusMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Available to rent or buy"
+                    },
+                    "glanceMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Rent or buy"
+                    },
+                    "highValueMessage": {
+                      "message": ""
+                    },
+                    "providerLogo": {},
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "MOST LIKED"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "hero": {
+                      "alternateText": "Spider-Man: Brand New Day",
+                      "height": 1440,
+                      "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_SpiderManBrandNewDay_PVOD_SH/552ddf92-d216-410b-a1e6-6179306b232f._UR3840,1440_.jpeg",
+                      "width": 3840
+                    },
+                    "titleLogo": {
+                      "url": "https://m.media-amazon.com/images/S/sonata-images-prod/US_TVOD_SpiderManBrandNewDay_PVOD_SH/58c41851-62a4-4289-bb7b-bbe6ac35fcec.png"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/B0H8PJM68W?ref_=atv_hm_hom_c_bCxerx_HS73d938_1_7"
+                  },
+                  "releaseYear": "2026",
+                  "runtime": "2 h 25 min",
+                  "synopsis": "A powerful change in Peter may be the only thing that can stop a shocking new threat to the city.",
+                  "title": "Spider-Man: Brand New Day",
+                  "titleID": "B0H8PJM68W",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&returnUrl=%2Fdetail%2F0MH84EJKE2M4I598UISANJRS1X%3Fref_%3Datv_hm_wtl_sign_in_hov&token=g3o06byz8lVZw5V4ObuF9cvnZCMyxJbJhsUJjPCnPi03AAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&tag=Add&ref_=atv_hm_hom_c_bCxerx_1_wtl_add_hov&titleType=movie&titleID=0MH84EJKE2M4I598UISANJRS1X",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "HeroTitle"
+                }
+              ],
+              "entitlementCues": {
+                "entitledCarousel": "Mixed",
+                "offerType": "Mixed"
+              },
+              "estimatedTotal": 2,
+              "isContinueWatching": false,
+              "text": "Carousel Title",
+              "webUid": "fbb63f61"
+            },
+            {
+              "containerType": "StandardCarousel",
+              "entities": [
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "The Secret of Moonacre",
+                  "entitlementCues": {
+                    "compactFocusMessage": {},
+                    "entitlementType": "Entitled",
+                    "focusMessage": {
+                      "icon": "ENTITLED_ICON",
+                      "message": "Watch for free"
+                    },
+                    "glanceMessage": {
+                      "message": ""
+                    },
+                    "highValueMessage": {
+                      "icon": "TRENDING_ICON",
+                      "message": "#4 movie in the US"
+                    },
+                    "providerLogo": {
+                      "imageUrl": "https://m.media-amazon.com/images/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white._CB538065739_.png",
+                      "logoScalarHorizontal": "emphasis"
+                    },
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "TRENDING"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "cover": {
+                      "url": "https://m.media-amazon.com/images/S/pv-target-images/a7e994f765af58ec63b63e83b6a06b9ae7836054eb254d1fb3e60caa8cc72c2f._UR1920,1080_CLs%7C1920,1080%7C/G/bundle/BottomRightCardGradient16x9.png,/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white.png%7C0,0,1920,1080+0,0,1920,1080+1578,847,263,156_kv053498f62d21803ffcbf28da234cfe9f_.jpg"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/0JP3YPUKPPI2J2DUBNLKW6Z9KH?ref_=atv_hm_hom_c_rVC5eJ_brws_2_1"
+                  },
+                  "releaseYear": "2009",
+                  "runtime": "1 h 42 min",
+                  "synopsis": "An orphaned girl is sent to live with her eccentric uncle and becomes embroiled in a long-standing feud between fantastical families.",
+                  "title": "The Secret of Moonacre",
+                  "titleID": "B0C4XHFFDH",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?returnUrl=%2Fdetail%2F0JP3YPUKPPI2J2DUBNLKW6Z9KH%3Fref_%3Datv_hm_wtl_sign_in_hov&authReturn=1&tag=Add&titleID=0JP3YPUKPPI2J2DUBNLKW6Z9KH&token=g5UJyPCIqXKI4KgAh7nOWhsdB4FUS0KWwh7tr5DDj3nkAAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&titleType=movie&ref_=atv_hm_hom_c_rVC5eJ_2_wtl_add_hov",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "TitleCard"
+                },
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "Sing 2",
+                  "entitlementCues": {
+                    "compactFocusMessage": {},
+                    "entitlementType": "Entitled",
+                    "focusMessage": {
+                      "icon": "ENTITLED_ICON",
+                      "message": "Watch for free"
+                    },
+                    "glanceMessage": {
+                      "message": ""
+                    },
+                    "highValueMessage": {
+                      "message": ""
+                    },
+                    "providerLogo": {
+                      "imageUrl": "https://m.media-amazon.com/images/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white._CB538065739_.png",
+                      "logoScalarHorizontal": "emphasis"
+                    },
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "MOST REWATCHED"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "cover": {
+                      "url": "https://m.media-amazon.com/images/S/pv-target-images/3601d630d08ca56314fcc4a7a5548d4f5589d3b5154167936574dd02b4d31a1b._UR1920,1080_CLs%7C1920,1080%7C/G/bundle/BottomRightCardGradient16x9.png,/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white.png%7C0,0,1920,1080+0,0,1920,1080+1578,847,263,156_kv053498f62d21803ffcbf28da234cfe9f_.jpg"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/0K04DMLEJSTE354379LLPZ9ZAN?ref_=atv_hm_hom_c_rVC5eJ_brws_2_2"
+                  },
+                  "releaseYear": "2021",
+                  "runtime": "1 h 49 min",
+                  "synopsis": "The Sing franchise continues as returning favorites join new characters in an uplifting musical adventure celebrating the healing potential of song.",
+                  "title": "Sing 2",
+                  "titleID": "B09PMKBRJ7",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&tag=Add&token=g5p7qtAacpS0whZ2RakzGWVMevYgTVh3BTsktHDjLqohAAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&titleID=0K04DMLEJSTE354379LLPZ9ZAN&titleType=movie&ref_=atv_hm_hom_c_rVC5eJ_2_wtl_add_hov&returnUrl=%2Fdetail%2F0K04DMLEJSTE354379LLPZ9ZAN%3Fref_%3Datv_hm_wtl_sign_in_hov",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "TitleCard"
+                },
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "DAMAGED (2024)",
+                  "entitlementCues": {
+                    "compactFocusMessage": {},
+                    "entitlementType": "Entitled",
+                    "focusMessage": {
+                      "icon": "ENTITLED_ICON",
+                      "message": "Watch for free"
+                    },
+                    "glanceMessage": {
+                      "message": ""
+                    },
+                    "highValueMessage": {
+                      "message": ""
+                    },
+                    "providerLogo": {
+                      "imageUrl": "https://m.media-amazon.com/images/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white._CB538065739_.png",
+                      "logoScalarHorizontal": "emphasis"
+                    },
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "MOST LIKED"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "cover": {
+                      "url": "https://m.media-amazon.com/images/S/pv-target-images/611737c4d11a0ef533f4ebe87dbfef8d8ead77644313efdaa4dab85ec876398d._UR1920,1080_CLs%7C1920,1080%7C/G/bundle/BottomRightCardGradient16x9.png,/G/01/digital/video/merch/subs/benefit-id/a-f/freewithads/logos/channels-logo-white.png%7C0,0,1920,1080+0,0,1920,1080+1578,847,263,156_kv053498f62d21803ffcbf28da234cfe9f_.jpg"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/0S6UU0HEYV4WYG177ANWGG39GS?ref_=atv_hm_hom_c_rVC5eJ_brws_2_3"
+                  },
+                  "releaseYear": "2024",
+                  "runtime": "1 h 34 min",
+                  "synopsis": "When a sadistic murderer surfaces in Scotland; a Chicago police detective joins the hunt in hopes of stopping this ritualistic serial killer before...",
+                  "title": "DAMAGED (2024)",
+                  "titleID": "B0CVKZHM88",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&tag=Add&titleType=movie&token=g8PWQkvkiVKuk0VNZCSsyGG2U6lHzvos9Mes%2BUiT8eDMAAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&ref_=atv_hm_hom_c_rVC5eJ_2_wtl_add_hov&titleID=0S6UU0HEYV4WYG177ANWGG39GS&returnUrl=%2Fdetail%2F0S6UU0HEYV4WYG177ANWGG39GS%3Fref_%3Datv_hm_wtl_sign_in_hov",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "TitleCard"
+                }
+              ],
+              "entitlementCues": {
+                "entitledCarousel": "Entitled",
+                "offerType": "Subscription"
+              },
+              "estimatedTotal": 3,
+              "isContinueWatching": false,
+              "paginationStartIndex": 20,
+              "text": "Free action and adventure movies",
+              "title": "Free action and adventure movies",
+              "webUid": "1dffacc4"
+            },
+            {
+              "containerType": "BeardSupportedCarousel",
+              "entities": [
+                {
+                  "widgetType": "LinearStationCard",
+                  "title": "Local PBS station",
+                  "entitlementCues": {
+                    "entitlementType": "Entitled"
+                  },
+                  "images": {}
+                }
+              ],
+              "entitlementCues": {
+                "entitledCarousel": "Entitled",
+                "offerType": "Mixed"
+              },
+              "estimatedTotal": 1,
+              "isContinueWatching": false,
+              "paginationStartIndex": 20,
+              "text": "On now",
+              "title": "On now",
+              "webUid": "15e96c99"
+            },
+            {
+              "containerType": "StandardCarousel",
+              "entities": [
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "Now You See Me: Now You Don't",
+                  "entitlementCues": {
+                    "compactFocusMessage": {},
+                    "entitlementType": "Unentitled",
+                    "focusMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Watch with a free Prime trial"
+                    },
+                    "glanceMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Free trial, rent, or buy"
+                    },
+                    "highValueMessage": {
+                      "icon": "TRENDING_ICON",
+                      "message": "#7 in the US"
+                    },
+                    "providerLogo": {
+                      "imageUrl": "https://m.media-amazon.com/images/G/01/digital/video/merch/subs/benefit-id/m-r/Prime/logos/channels-logo-white._CB554929912_.png",
+                      "logoScalarHorizontal": "emphasis"
+                    },
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "DEAL"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "cover": {
+                      "url": "https://m.media-amazon.com/images/S/pv-target-images/db9832b5abca47c208fa4eeac0efde763480f2da314fc898aa2240caa88789d6._UR1920,1080_CLs%7C1920,1080%7C/G/bundle/BottomRightCardGradient16x9.png,/G/01/digital/video/merch/subs/benefit-id/m-r/Prime/logos/channels-logo-white.png%7C0,0,1920,1080+0,0,1920,1080+1578,847,263,156_kvf21cb47db8d34aa971cd86f57a65cf8d_.jpg"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/0O32IIK1Y8R61HBV1PNLBUJ3JC?ref_=atv_hm_hom_c_OB131ede_brws_7_1"
+                  },
+                  "releaseYear": "2025",
+                  "runtime": "1 h 48 min",
+                  "synopsis": "The Four Horsemen of magic return with a new generation of illusionists to face their biggest foe.",
+                  "title": "Now You See Me: Now You Don't",
+                  "titleID": "B0FZLW2HCF",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&returnUrl=%2Fdetail%2F0O32IIK1Y8R61HBV1PNLBUJ3JC%3Fref_%3Datv_hm_wtl_sign_in_hov&tag=Add&ref_=atv_hm_hom_c_OB131ede_7_wtl_add_hov&titleID=0O32IIK1Y8R61HBV1PNLBUJ3JC&titleType=movie&token=gy87BPd%2B5LSF6Z1YPQKC9asIQ%2F2ceN3Pfj5dOOyek%2BzBAAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "TitleCard"
+                },
+                {
+                  "buyBoxActions": [],
+                  "displayTitle": "Now You See Me 2",
+                  "entitlementCues": {
+                    "compactFocusMessage": {},
+                    "entitlementType": "Unentitled",
+                    "focusMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Watch with a free Prime trial"
+                    },
+                    "glanceMessage": {
+                      "icon": "OFFER_ICON",
+                      "message": "Free trial, rent, or buy"
+                    },
+                    "highValueMessage": {
+                      "icon": "TRENDING_ICON",
+                      "message": "#7 in action movies"
+                    },
+                    "providerLogo": {
+                      "imageUrl": "https://m.media-amazon.com/images/G/01/digital/video/merch/subs/benefit-id/m-r/Prime/logos/channels-logo-white._CB554929912_.png",
+                      "logoScalarHorizontal": "emphasis"
+                    },
+                    "titleMetadataBadge": {
+                      "entryType": "badge",
+                      "level": "info",
+                      "message": "DEAL"
+                    }
+                  },
+                  "entityType": "Movie",
+                  "images": {
+                    "cover": {
+                      "url": "https://m.media-amazon.com/images/S/pv-target-images/20e441c1faa20cfd3123ccdfd625a9c83df14b8dcd8323b70657b488894029d5._UR1920,1080_CLs%7C1920,1080%7C/G/bundle/BottomRightCardGradient16x9.png,/G/01/digital/video/merch/subs/benefit-id/m-r/Prime/logos/channels-logo-white.png%7C0,0,1920,1080+0,0,1920,1080+1578,847,263,156_kvf21cb47db8d34aa971cd86f57a65cf8d_.jpg"
+                    }
+                  },
+                  "isClosedCaption": true,
+                  "link": {
+                    "analytics": {},
+                    "metadata": {},
+                    "url": "/detail/0U8DQYAYH8VCIZN85XGJBV8IQU?ref_=atv_hm_hom_c_OB131ede_brws_7_2"
+                  },
+                  "releaseYear": "2016",
+                  "runtime": "2 h 3 min",
+                  "synopsis": "The illusionists known as the Four Horseman try to expose the unethical practices of a tech magnate.",
+                  "title": "Now You See Me 2",
+                  "titleID": "B0GZVDLNG9",
+                  "watchlistAction": {
+                    "ajaxEnabled": false,
+                    "endpoint": {
+                      "partialURL": "/auth-redirect",
+                      "query": {
+                        "signin": "1",
+                        "returnUrl": "/api/watchlistToggle?authReturn=1&token=g0%2FQhzA2fmRo2TCrTHA0g997VGvzg0LpGqqZqfNFnML1AAAAAQAAAABq0w5ScmF3AAAAAPgWC9WfHH8iB%2BolH%2FE9xQ%3D%3D&tag=Add&titleID=0U8DQYAYH8VCIZN85XGJBV8IQU&returnUrl=%2Fdetail%2F0U8DQYAYH8VCIZN85XGJBV8IQU%3Fref_%3Datv_hm_wtl_sign_in_hov&ref_=atv_hm_hom_c_OB131ede_7_wtl_add_hov&titleType=movie",
+                        "ref_": "atv_wl_tog_sign_in"
+                      }
+                    },
+                    "formatCode": "mv",
+                    "tag": "Add",
+                    "text": {
+                      "attrs": {},
+                      "string": "Add to Watchlist"
+                    }
+                  },
+                  "widgetType": "TitleCard"
+                }
+              ],
+              "entitlementCues": {
+                "entitledCarousel": "NotEntitled",
+                "offerType": "SVOD"
+              },
+              "estimatedTotal": 2,
+              "isContinueWatching": false,
+              "paginationStartIndex": 20,
+              "text": "Mystery and thriller movies",
+              "title": "Mystery and thriller movies",
+              "webUid": "e8928d8c"
+            }
+          ],
+          "hasFailed": false
+        }
+      },
+      "route": {
+        "name": "landing",
+        "path": {}
+      }
+    },
+    "config": {
+      "clientTTLMins": 180
+    }
+  },
+  "store": {
+    "RequestContext": {
+      "customerID": null,
+      "isInternal": false,
+      "path": "/hp/video/storefront",
+      "domain": "Fogg",
+      "marketplaceID": "ATVPDKIKX0DER",
+      "originalURI": "/",
+      "osLocale": "en-US",
+      "recordTerritory": "US",
+      "currentTerritory": "US",
+      "deviceID": null,
+      "requestID": "FIXTUREREQUEST000000",
+      "sessionID": "000-0000000-0000000",
+      "customerIPAddress": "0.0.0.0",
+      "identityContext": "68|IhVQVklDU19VTkFVVEhFTlRJQ0FURUQ6GXVhOkZJWFRVUkUwMDAwMDAwMDAwMDAwMDAwMA==",
+      "locale": "en_US"
+    },
+    "ClickstreamData": {
+      "pageType": "ATVHome",
+      "subPageType": "Home"
+    },
+    "SiteVariant": "Desktop Web Browser",
+    "Profile": {
+      "ageGroup": "ADULT",
+      "isChild": false
+    },
+    "HomeRegion": "NA"
+  }
+}

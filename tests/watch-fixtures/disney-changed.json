@@ -1,0 +1,47 @@
+{
+  "_fixture": "shape from Disney-Plus-api-wrapper (pam-param-pam, explore v1.7 paths) with a made-up future payload that renames every field the parser keys on (rails/tiles instead of sets/items), unverified against a live account",
+  "finalPath": "/home",
+  "title": "Home | Disney+",
+  "captures": [
+    {
+      "path": "/explore/v2.0/page/home",
+      "json": {
+        "data": {
+          "screen": {
+            "modules": [
+              {
+                "kind": "rail",
+                "heading": "Continue Watching",
+                "tiles": [
+                  { "contentId": "1d8f3a52-7c4e-4b8a-9f3e-0b5c6a7d8e01", "label": "Bluey", "watched": 0.42 }
+                ]
+              },
+              {
+                "kind": "rail",
+                "heading": "For You",
+                "tiles": [
+                  { "contentId": "5d0b2f43-7e60-4192-9d4e-5f6a7b8c9d05", "label": "Inside Out 2" }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v2.0/set/a0000000-0000-4000-8000-0000000000c2",
+      "json": {
+        "data": {
+          "rail": {
+            "heading": "Watchlist",
+            "tiles": [ { "contentId": "1d6b85a9-d4c6-47f8-9da4-1f2a3b4c5d11", "label": "Andor" } ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v2.0/set/a0000000-0000-4000-8000-0000000000b1",
+      "json": { "data": { "rail": { "heading": "Because You Watched Bluey", "tiles": [] } } }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "_fixture": "shape from disneyplus.com public logged-out behaviour (a signed-out /home lands on /login, and no explore calls are made) and the Disney+ web paths in Disney-Plus-api-wrapper (pam-param-pam), unverified against a live account",
+  "finalPath": "/login",
+  "title": "Log In | Disney+",
+  "captures": []
+}

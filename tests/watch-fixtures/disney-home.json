@@ -1,0 +1,354 @@
+{
+  "_fixture": "shape from Disney-Plus-api-wrapper (pam-param-pam, explore v1.7: data.page.containers, data.set.items, visuals.title/metastringParts/artwork, me.account.activeProfile), slyguy.disney.plus (Paco8, explore v1.10: style.name, visuals.name, actions browse/upsell, personalization.pid, userState entityStates progress, networkAttribution, sportsLeague, airingEventState, ripcut art) and the public BAM SDK config (explore endpoints), unverified against a live account",
+  "finalPath": "/home",
+  "title": "Home | Disney+",
+  "captures": [
+    {
+      "path": "/explore/v1.7/page/home",
+      "json": {
+        "data": {
+          "page": {
+            "id": "home",
+            "visuals": { "title": "Home" },
+            "containers": [
+              {
+                "id": "f0000000-0000-4000-8000-0000000000a1",
+                "type": "set",
+                "style": { "name": "hero_carousel" },
+                "visuals": { "name": "Featured" },
+                "items": [
+                  {
+                    "id": "5b0fc9ed-180a-4b3c-9be8-5d6e7f8a9b15",
+                    "visuals": {
+                      "title": "Daredevil: Born Again",
+                      "artwork": { "hero": { "background": { "3.91": { "imageId": "DAREDEVILHERO391" } } } }
+                    },
+                    "actions": [ { "type": "browse", "pageId": "entity-5b0fc9ed-180a-4b3c-9be8-5d6e7f8a9b15" } ]
+                  }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000000b2",
+                "type": "set",
+                "style": { "name": "brand_six" },
+                "visuals": { "name": "Brands" },
+                "items": [
+                  { "id": "b1000000-0000-4000-8000-000000000001", "visuals": { "title": "Disney" }, "actions": [ { "type": "browse", "pageId": "page-b1000000-0000-4000-8000-000000000001" } ] },
+                  { "id": "b1000000-0000-4000-8000-000000000002", "visuals": { "title": "Pixar" }, "actions": [ { "type": "browse", "pageId": "page-b1000000-0000-4000-8000-000000000002" } ] },
+                  { "id": "b1000000-0000-4000-8000-000000000003", "visuals": { "title": "Marvel" }, "actions": [ { "type": "browse", "pageId": "page-b1000000-0000-4000-8000-000000000003" } ] },
+                  { "id": "b1000000-0000-4000-8000-000000000004", "visuals": { "title": "Hulu" }, "actions": [ { "type": "browse", "pageId": "page-b1000000-0000-4000-8000-000000000004" } ] },
+                  { "id": "b1000000-0000-4000-8000-000000000005", "visuals": { "title": "ESPN" }, "actions": [ { "type": "browse", "pageId": "page-b1000000-0000-4000-8000-000000000005" } ] }
+                ]
+              },
+              {
+                "id": "76aed686-1837-49bd-b4f5-5d2a27c0c8d4",
+                "type": "set",
+                "style": { "name": "continue_watching" },
+                "visuals": { "name": "Continue Watching" },
+                "items": [
+                  {
+                    "id": "e1a2b3c4-0001-4a5b-8c6d-000000000001",
+                    "type": "standard",
+                    "visuals": {
+                      "title": "Bluey",
+                      "episodeTitle": "Sleepytime",
+                      "seasonNumber": 2,
+                      "episodeNumber": 26,
+                      "durationMs": 420000,
+                      "artwork": {
+                        "standard": {
+                          "tile": { "0.71": { "imageId": "BLUEYPOSTER071" }, "1.78": { "imageId": "BLUEYTILE178" } },
+                          "thumbnail": { "1.78": { "imageId": "BLUEYS2E26THUMB178" } },
+                          "title": { "1.78": { "imageId": "BLUEYLOGO178" } }
+                        }
+                      }
+                    },
+                    "actions": [
+                      { "type": "playback", "deeplinkId": "e1a2b3c4-0001-4a5b-8c6d-000000000001", "resourceId": "eyJtZWRpYSI6ImJsdWV5In0=" },
+                      { "type": "browse", "pageId": "entity-1d8f3a52-7c4e-4b8a-9f3e-0b5c6a7d8e01" }
+                    ],
+                    "personalization": { "pid": "pid-bluey-s2e26" }
+                  },
+                  {
+                    "id": "e1a2b3c4-0002-4a5b-8c6d-000000000002",
+                    "visuals": {
+                      "title": "The Bear",
+                      "episodeTitle": "Tomorrow",
+                      "seasonNumber": "3",
+                      "episodeNumber": "1",
+                      "durationMs": 1800000,
+                      "networkAttribution": {
+                        "ttsText": "Hulu",
+                        "artwork": { "brand": { "logo": { "2.00": { "imageId": "HULULOGO200" } } } }
+                      },
+                      "artwork": {
+                        "standard": {
+                          "thumbnail": { "1.78": { "imageId": "BEARS3E1THUMB178" } },
+                          "background": { "1.78": { "imageId": "BEARBG178" } }
+                        }
+                      }
+                    },
+                    "actions": [
+                      { "type": "playback", "deeplinkId": "e1a2b3c4-0002-4a5b-8c6d-000000000002" },
+                      { "type": "browse", "pageId": "entity-2a7e9c10-4b3d-4e6f-8a1b-2c3d4e5f6a02" }
+                    ],
+                    "personalization": { "pid": "pid-bear-s3e1" }
+                  },
+                  {
+                    "id": "3b8f0d21-5c4e-4f70-9b2c-3d4e5f6a7b03",
+                    "visuals": {
+                      "title": "Moana 2",
+                      "metastringParts": {
+                        "genres": { "values": [ "Animation", "Family", "Musical" ] },
+                        "releaseYearRange": { "startYear": "2024" },
+                        "runtime": { "runtimeMs": 6000000 }
+                      },
+                      "artwork": {
+                        "standard": {
+                          "tile": { "0.71": { "imageId": "MOANA2POSTER071" }, "1.78": { "imageId": "MOANA2TILE178" } },
+                          "background": { "1.78": { "imageId": "MOANA2BG178" } }
+                        }
+                      }
+                    },
+                    "bookmark": { "playheadMs": 4800000, "runtimeMs": 6000000 }
+                  },
+                  {
+                    "id": "e1a2b3c4-0004-4a5b-8c6d-000000000004",
+                    "visuals": {
+                      "title": "Percy Jackson and the Olympians",
+                      "episodeTitle": "I Accidentally Vaporize My Pre-Algebra Teacher",
+                      "seasonNumber": 1,
+                      "episodeNumber": 1,
+                      "artwork": { "standard": { "tile": { "0.71": { "imageId": "PERCYPOSTER071" } } } }
+                    },
+                    "actions": [ { "type": "browse", "pageId": "entity-4c9a1e32-6d5f-4081-8c3d-4e5f6a7b8c04" } ]
+                  }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000000c3",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "For You" },
+                "items": [
+                  {
+                    "id": "5d0b2f43-7e60-4192-9d4e-5f6a7b8c9d05",
+                    "visuals": {
+                      "title": "Inside Out 2",
+                      "metastringParts": { "genres": { "values": [ "Animation", "Comedy" ] }, "releaseYearRange": { "startYear": 2024 }, "runtime": { "runtimeMs": 5760000 } },
+                      "artwork": { "standard": { "tile": { "1.78": { "imageId": "INSIDEOUT2TILE178" } } } }
+                    },
+                    "actions": [ { "type": "browse", "pageId": "entity-5d0b2f43-7e60-4192-9d4e-5f6a7b8c9d05" } ]
+                  },
+                  {
+                    "id": "6e1c3054-8f71-42a3-8e5f-6a7b8c9d0e06",
+                    "visuals": {
+                      "title": "Only Murders in the Building",
+                      "metastringParts": { "genres": { "values": [ "Comedy", "Mystery" ] } },
+                      "networkAttribution": { "ttsText": "Hulu" },
+                      "artwork": { "standard": { "tile": { "1.78": { "imageId": "OMITBTILE178" } } } }
+                    },
+                    "actions": [ { "type": "browse", "pageId": "entity-6e1c3054-8f71-42a3-8e5f-6a7b8c9d0e06" } ]
+                  },
+                  {
+                    "id": "7f2d4165-9082-43b4-9f60-7b8c9d0e1f07",
+                    "visuals": { "title": "Tron: Ares", "artwork": { "standard": { "tile": { "1.78": { "imageId": "TRONTILE178" } } } } },
+                    "actions": [ { "type": "upsell" }, { "type": "browse", "pageId": "entity-7f2d4165-9082-43b4-9f60-7b8c9d0e1f07" } ]
+                  },
+                  {
+                    "id": "7f2d4165-9082-43b4-9f60-7b8c9d0e1f99",
+                    "visuals": { "description": { "brief": "A tile with no title" } },
+                    "actions": [ { "type": "browse", "pageId": "entity-7f2d4165-9082-43b4-9f60-7b8c9d0e1f99" } ]
+                  },
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000001",
+                    "visuals": { "title": "Halloween Collection" },
+                    "actions": [ { "type": "browse", "pageId": "page-c0000000-0000-4000-8000-000000000001" } ]
+                  }
+                ]
+              },
+              {
+                "id": "a0000000-0000-4000-8000-0000000000b1",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Because You Watched Bluey" },
+                "items": [],
+                "pagination": { "hasMore": true, "hasPrev": false, "currentOffset": 0 }
+              },
+              {
+                "id": "a0000000-0000-4000-8000-0000000000e5",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "ESPN: Live and Upcoming" },
+                "items": [],
+                "pagination": { "hasMore": true, "hasPrev": false, "currentOffset": 0 }
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000000d4",
+                "type": "set",
+                "style": { "name": "standard_regular" },
+                "visuals": { "name": "Hulu Originals" },
+                "items": [
+                  {
+                    "id": "3f8da7cb-f6e8-491a-9fc6-3b4c5d6e7f13",
+                    "visuals": {
+                      "title": "Shōgun",
+                      "metastringParts": { "genres": { "values": [ "Drama" ] }, "releaseYearRange": { "startYear": 2024 } },
+                      "artwork": { "standard": { "tile": { "1.78": { "imageId": "SHOGUNTILE178" } } } }
+                    },
+                    "actions": [ { "type": "browse", "pageId": "entity-3f8da7cb-f6e8-491a-9fc6-3b4c5d6e7f13" } ]
+                  }
+                ]
+              },
+              {
+                "id": "f0000000-0000-4000-8000-0000000000e6",
+                "type": "set",
+                "style": { "name": "standard_regular" },
+                "visuals": { "name": "Disney+ Originals" },
+                "items": [
+                  {
+                    "id": "4a9eb8dc-07f9-4a2b-8ad7-4c5d6e7f8a14",
+                    "visuals": { "title": "The Mandalorian", "artwork": { "standard": { "tile": { "1.78": { "imageId": "MANDOTILE178" } } } } },
+                    "actions": [ { "type": "browse", "pageId": "entity-4a9eb8dc-07f9-4a2b-8ad7-4c5d6e7f8a14" } ]
+                  }
+                ]
+              },
+              {
+                "id": "a0000000-0000-4000-8000-0000000000c2",
+                "type": "set",
+                "style": { "name": "standard_regular" },
+                "visuals": { "name": "Watchlist" },
+                "items": [],
+                "pagination": { "hasMore": true, "hasPrev": false, "currentOffset": 0 }
+              },
+              {
+                "id": "a0000000-0000-4000-8000-0000000000f7",
+                "type": "set",
+                "style": { "name": "standard_compact" },
+                "visuals": { "name": "Trending" },
+                "items": []
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v1.7/set/a0000000-0000-4000-8000-0000000000b1",
+      "json": {
+        "data": {
+          "set": {
+            "id": "a0000000-0000-4000-8000-0000000000b1",
+            "type": "set",
+            "style": { "name": "standard_compact" },
+            "visuals": { "name": "Because You Watched Bluey" },
+            "items": [
+              {
+                "id": "8a3e5276-a193-44c5-8a71-8c9d0e1f2a08",
+                "visuals": {
+                  "title": "Mickey Mouse Clubhouse",
+                  "metastringParts": { "genres": { "values": [ "Kids", "Animation" ] }, "releaseYearRange": { "startYear": 2006 } },
+                  "artwork": { "standard": { "tile": { "1.78": { "imageId": "MICKEYTILE178" } } } }
+                },
+                "actions": [ { "type": "browse", "pageId": "entity-8a3e5276-a193-44c5-8a71-8c9d0e1f2a08" } ]
+              },
+              {
+                "id": "5d0b2f43-7e60-4192-9d4e-5f6a7b8c9d05",
+                "visuals": { "title": "Inside Out 2", "artwork": { "standard": { "tile": { "1.78": { "imageId": "INSIDEOUT2TILE178" } } } } },
+                "actions": [ { "type": "browse", "pageId": "entity-5d0b2f43-7e60-4192-9d4e-5f6a7b8c9d05" } ]
+              }
+            ],
+            "pagination": { "hasMore": false, "hasPrev": false, "currentOffset": 0 }
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v1.7/set/a0000000-0000-4000-8000-0000000000e5",
+      "json": {
+        "data": {
+          "set": {
+            "id": "a0000000-0000-4000-8000-0000000000e5",
+            "type": "set",
+            "style": { "name": "standard_compact" },
+            "visuals": { "name": "ESPN: Live and Upcoming" },
+            "items": [
+              {
+                "id": "9b4f6387-b2a4-45d6-9b82-9d0e1f2a3b09",
+                "visuals": {
+                  "title": "Bruins at Maple Leafs",
+                  "metastringParts": { "sportsLeague": { "name": "NHL" } },
+                  "badging": { "airingEventState": { "state": "upcoming", "timeline": { "startTime": "2026-10-17T23:00:00Z", "endTime": "2026-10-18T02:00:00Z" } } },
+                  "artwork": { "standard": { "thumbnail": { "1.78": { "imageId": "BOSTORTHUMB178" } } } }
+                },
+                "actions": [ { "type": "browse", "pageId": "entity-9b4f6387-b2a4-45d6-9b82-9d0e1f2a3b09" } ]
+              },
+              {
+                "id": "0c5a7498-c3b5-46e7-8c93-0e1f2a3b4c10",
+                "visuals": {
+                  "title": "SportsCenter",
+                  "networkAttribution": { "ttsText": "ESPN" },
+                  "artwork": { "standard": { "tile": { "1.78": { "imageId": "SPORTSCENTERTILE178" } } } }
+                },
+                "actions": [ { "type": "browse", "pageId": "entity-0c5a7498-c3b5-46e7-8c93-0e1f2a3b4c10" } ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v1.7/set/a0000000-0000-4000-8000-0000000000c2",
+      "json": {
+        "data": {
+          "set": {
+            "items": [
+              {
+                "id": "1d6b85a9-d4c6-47f8-9da4-1f2a3b4c5d11",
+                "visuals": {
+                  "title": "Andor",
+                  "metastringParts": { "genres": { "values": [ "Science Fiction", "Action and Adventure" ] }, "releaseYearRange": { "startYear": 2022 } },
+                  "artwork": { "standard": { "tile": { "1.78": { "imageId": "ANDORTILE178" } } } }
+                },
+                "actions": [ { "type": "browse", "pageId": "entity-1d6b85a9-d4c6-47f8-9da4-1f2a3b4c5d11" } ]
+              },
+              {
+                "id": "2e7c96ba-e5d7-4809-8eb5-2a3b4c5d6e12",
+                "visuals": { "title": "The Simpsons" },
+                "actions": [ { "type": "browse", "pageId": "entity-2e7c96ba-e5d7-4809-8eb5-2a3b4c5d6e12" } ]
+              }
+            ],
+            "pagination": { "hasMore": false, "hasPrev": false, "currentOffset": 0 }
+          }
+        }
+      }
+    },
+    {
+      "path": "/explore/v1.7/userState",
+      "json": {
+        "data": {
+          "entityStates": {
+            "pid-bluey-s2e26": { "progress": { "progressPercentage": 42 } },
+            "pid-bear-s3e1": { "progress": { "secondsRemaining": 600 } }
+          }
+        }
+      }
+    },
+    {
+      "path": "/graph/v1/device/graphql",
+      "json": {
+        "data": {
+          "me": {
+            "account": {
+              "activeProfile": { "id": "prof-1" },
+              "profiles": [
+                { "id": "prof-1", "name": "the user", "attributes": { "isDefault": true, "kidsModeEnabled": false } },
+                { "id": "prof-2", "name": "Kids", "attributes": { "isDefault": false, "kidsModeEnabled": true } }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

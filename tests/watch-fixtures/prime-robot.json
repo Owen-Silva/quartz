@@ -1,0 +1,8 @@
+{
+  "_fixture": "shape from Amazon's classic robot-check page as publicly documented (title 'Amazon.com' / 'Robot Check', form action /errors/validateCaptcha, 'Enter the characters you see below'); no page hydration; unverified against a live account",
+  "finalPath": "/errors/validateCaptcha",
+  "title": "Amazon.com",
+  "robot": true,
+  "hydration": null,
+  "store": null
+}

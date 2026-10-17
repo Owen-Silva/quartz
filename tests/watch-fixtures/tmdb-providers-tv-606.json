@@ -1,0 +1,10 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 606,
+  "results": {
+    "CA": {
+      "link": "https://www.themoviedb.org/tv/606-letterkenny/watch?locale=CA",
+      "flatrate": [ { "logo_path": "/crave.jpg", "provider_id": 230, "provider_name": "Crave", "display_priority": 1 } ]
+    }
+  }
+}

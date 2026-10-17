@@ -869,10 +869,12 @@ function create(deps) {
     for (const id of Shape.SERVICE_IDS) cache.services[id].attemptAt = now();
     const file = fileIn(CACHE_FILE);
     let ok = true;
+    let freed = 0;
+    if (file) { try { freed = fs.statSync(file).size; } catch { freed = 0; } }
     if (file) { try { fs.rmSync(file, { force: true }); } catch (err) { ok = false; log('Watch cache could not be deleted: ' + ((err && err.code) || 'unknown')); } }
     if (saveTimer) { clearTimer(saveTimer); saveTimer = null; }
     pushAll();
-    return { ok, reason: ok ? '' : 'the cache file could not be deleted' };
+    return { ok, freed: ok ? freed : 0, reason: ok ? '' : 'the cache file could not be deleted' };
   }
 
   /* --- search ------------------------------------------------------------------------- */
@@ -1055,7 +1057,7 @@ function create(deps) {
     ipc.handle('watch:set-tmdb-key', (e, k) => (gate(e) ? setTmdbKey(k) : null));
     ipc.handle('watch:forget', (e) => (gate(e) ? Object.assign(describe(), { forgot: forget() }) : null));
     ipc.handle('watch:test-tmdb', (e) => (gate(e) ? testTmdb() : null));
-    ipc.handle('watch:refresh', (e, id) => (gate(e) ? (refresh(Shape.SERVICE_IDS.indexOf(id) !== -1 ? id : null), describe()) : null));
+    ipc.handle('watch:refresh', (e, id) => (gate(e) ? Object.assign(describe(), { started: refresh(Shape.SERVICE_IDS.indexOf(id) !== -1 ? id : null) }) : null));
   }
 
   /** The Quartz window came back on screen: whatever fell due while it was away reads now. */

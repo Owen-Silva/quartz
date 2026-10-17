@@ -1,0 +1,12 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 505,
+  "results": {
+    "US": {
+      "link": "https://www.themoviedb.org/movie/505-night-of-the-living-dead/watch?locale=US",
+      "free": [ { "logo_path": "/ytfree.jpg", "provider_id": 235, "provider_name": "YouTube Free", "display_priority": 20 } ],
+      "ads": [ { "logo_path": "/tubi.jpg", "provider_id": 73, "provider_name": "Tubi TV", "display_priority": 8 } ],
+      "rent": [ { "logo_path": "/youtube.jpg", "provider_id": 192, "provider_name": "YouTube", "display_priority": 10 } ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 707,
+  "results": {
+    "US": {
+      "link": "https://www.themoviedb.org/movie/707-the-two-escobars/watch?locale=US",
+      "flatrate": [ { "logo_path": "/espnplus.jpg", "provider_id": 531, "provider_name": "ESPN Plus", "display_priority": 6 } ]
+    }
+  }
+}

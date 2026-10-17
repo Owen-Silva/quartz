@@ -1,0 +1,16 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 404,
+  "results": {
+    "US": {
+      "link": "https://evil.example/not-tmdb?locale=US",
+      "flatrate": [
+        { "logo_path": "/hulu.jpg", "provider_id": 15, "provider_name": "Hulu", "display_priority": 1 },
+        { "logo_path": "javascript:alert(1)", "provider_id": 77, "provider_name": "Odd Logo Network", "display_priority": 2 },
+        { "provider_id": 78, "display_priority": 3 },
+        null,
+        "junk"
+      ]
+    }
+  }
+}

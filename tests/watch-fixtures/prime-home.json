@@ -1,0 +1,370 @@
+{
+  "_fixture": "shape from primevideo.com public logged-out HTML (dv-web-page-hydration-data containers/entities/entitlementCues/images/link, dv-web-global-store-data RequestContext, fetched 2026-10-16) and iptv-org/epg #2866 (containers[].entities); the signed-in rows (Continue watching flag isContinueWatching=true, the Watchlist row title, the progress fields, season/episode fields, customerID/identityContext signed-in values) are inferred, unverified against a live account",
+  "finalPath": "/",
+  "title": "Prime Video: Watch movies, TV shows, sports, and live TV",
+  "hydration": {
+    "init": {
+      "path": "/storefront",
+      "preparations": {
+        "body": {
+          "containers": [
+            {
+              "containerType": "StandardHero",
+              "entitlementCues": { "entitledCarousel": "Mixed", "offerType": "Mixed" },
+              "estimatedTotal": 0,
+              "isContinueWatching": false,
+              "text": "Carousel Title",
+              "webUid": "fx000001",
+              "entities": [
+                {
+                  "titleID": "B0HEROFX01",
+                  "title": "Reacher - Season 3",
+                  "displayTitle": "Reacher",
+                  "entityType": "TV Show",
+                  "widgetType": "HeroTitle",
+                  "link": { "url": "/detail/0HEROFIXTURE00000000000001?ref_=atv_hm_hom_c_hero_1_1" },
+                  "images": {
+                    "hero": { "url": "https://m.media-amazon.com/images/S/sonata-images-prod/FX_Reacher_S3/hero-fixture._UR3840,1440_.jpeg", "width": 3840, "height": 1440 },
+                    "titleLogo": { "url": "https://m.media-amazon.com/images/S/sonata-images-prod/FX_Reacher_S3/logo-fixture.png" }
+                  },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "icon": "ENTITLED_ICON", "message": "Included with Prime" } },
+                  "releaseYear": "2025"
+                },
+                {
+                  "titleID": "B0HEROFX02",
+                  "title": "Thursday Night Football",
+                  "displayTitle": "Thursday Night Football",
+                  "entityType": "Event",
+                  "widgetType": "HeroTitle",
+                  "link": { "url": "/detail/0HEROFIXTURE00000000000002?ref_=atv_hm_hom_c_hero_1_2" },
+                  "images": { "hero": { "url": "https://m.media-amazon.com/images/S/sonata-images-prod/FX_TNF/hero-fixture._UR3840,1440_.jpeg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } }
+                }
+              ]
+            },
+            {
+              "containerType": "StandardCarousel",
+              "entitlementCues": { "entitledCarousel": "Mixed", "offerType": "Mixed" },
+              "estimatedTotal": 5,
+              "isContinueWatching": true,
+              "title": "Continue watching",
+              "text": "Continue watching",
+              "webUid": "fx000002",
+              "entities": [
+                {
+                  "titleID": "B0BOYSFX04",
+                  "title": "The Boys - Season 4",
+                  "displayTitle": "The Boys",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "seasonNumber": 4,
+                  "episodeNumber": 3,
+                  "episodeTitle": "We'll Keep the Red Flag Flying Here",
+                  "progress": { "percentage": 42 },
+                  "runtime": "1 h 4 min",
+                  "link": { "url": "/detail/0BOYSFIXTURE0000000000S04X?ref_=atv_hm_hom_c_cw_2_1" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-boys-s4._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "icon": "ENTITLED_ICON", "message": "Included with Prime" } },
+                  "releaseYear": "2024"
+                },
+                {
+                  "titleID": "B0REACHFX2",
+                  "title": "Reacher - Season 2",
+                  "displayTitle": "Reacher",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "contextualMetadata": { "seasonNumber": 2, "episodeNumber": 5 },
+                  "watchProgress": 0.25,
+                  "link": { "url": "/detail/0REACHERFIXTURE000000000S2?ref_=atv_hm_hom_c_cw_2_2" },
+                  "images": {
+                    "poster2x3": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-reacher-s2-poster._UR1000,1500_.jpg" },
+                    "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-reacher-s2._UR1920,1080_.jpg" }
+                  },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } }
+                },
+                {
+                  "titleID": "B0ROADHFX1",
+                  "title": "Road House",
+                  "displayTitle": "Road House",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "playbackActions": [ { "label": "Resume", "timecodeSeconds": 5400, "runtimeSeconds": 7200 } ],
+                  "runtime": "2 h",
+                  "link": { "url": "/detail/0ROADHOUSEFIXTURE0000000XX?ref_=atv_hm_hom_c_cw_2_3" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-roadhouse._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2024"
+                },
+                {
+                  "titleID": "B0FALLFX01",
+                  "title": "Fallout - Season 1",
+                  "displayTitle": "Fallout",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0FALLOUTFIXTURE00000000S01?ref_=atv_hm_hom_c_cw_2_4" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-fallout._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2024"
+                },
+                {
+                  "titleID": "B0DUNEFX02",
+                  "title": "Dune: Part Two",
+                  "displayTitle": "Dune: Part Two",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "percentComplete": 90,
+                  "link": { "url": "/detail/0DUNE2FIXTURE0000000000XXX?ref_=atv_hm_hom_c_cw_2_5" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-dune2._UR1920,1080_.jpg" } },
+                  "entitlementCues": {
+                    "entitlementType": "Unentitled",
+                    "focusMessage": { "icon": "OFFER_ICON", "message": "Available to rent or buy" },
+                    "glanceMessage": { "icon": "OFFER_ICON", "message": "Rent or buy" }
+                  },
+                  "releaseYear": "2024"
+                }
+              ]
+            },
+            {
+              "containerType": "StandardCarousel",
+              "entitlementCues": { "entitledCarousel": "Mixed", "offerType": "Mixed" },
+              "estimatedTotal": 3,
+              "isContinueWatching": false,
+              "title": "Your Watchlist",
+              "text": "Your Watchlist",
+              "webUid": "fx000003",
+              "entities": [
+                {
+                  "titleID": "B0INVINFX3",
+                  "title": "Invincible - Season 3",
+                  "displayTitle": "Invincible",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0INVINCIBLEFIXTURE00000S03?ref_=atv_hm_hom_c_wl_3_1" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-invincible._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2025"
+                },
+                {
+                  "titleID": "B0OPPENFX1",
+                  "title": "Oppenheimer",
+                  "displayTitle": "Oppenheimer",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0OPPENHEIMERFIXTURE000000X?ref_=atv_hm_hom_c_wl_3_2" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-oppenheimer._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Unentitled", "focusMessage": { "icon": "OFFER_ICON", "message": "Available to rent or buy" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0YELLOFX1",
+                  "title": "Yellowstone - Season 1",
+                  "displayTitle": "Yellowstone",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0YELLOWSTONEFIXTURE00000S1?ref_=atv_hm_hom_c_wl_3_3" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-yellowstone._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Unentitled", "focusMessage": { "icon": "OFFER_ICON", "message": "Free trial of Paramount+" } },
+                  "releaseYear": "2018"
+                }
+              ]
+            },
+            {
+              "containerType": "StandardCarousel",
+              "entitlementCues": { "entitledCarousel": "Mixed", "offerType": "Mixed" },
+              "estimatedTotal": 6,
+              "isContinueWatching": false,
+              "title": "Recommended movies",
+              "text": "Recommended movies",
+              "webUid": "fx000004",
+              "entities": [
+                {
+                  "titleID": "B0AIRFX001",
+                  "title": "Air",
+                  "displayTitle": "Air",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "primaryGenre": "Drama",
+                  "runtime": "1 h 52 min",
+                  "link": { "url": "/detail/0AIRFIXTURE000000000000XXX?ref_=atv_hm_hom_c_rec_4_1" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-air._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "icon": "ENTITLED_ICON", "message": "Included with Prime" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0OPPENFX1",
+                  "title": "Oppenheimer",
+                  "displayTitle": "Oppenheimer",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0OPPENHEIMERFIXTURE000000X?ref_=atv_hm_hom_c_rec_4_2" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-oppenheimer._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Unentitled", "focusMessage": { "icon": "OFFER_ICON", "message": "Available to rent or buy" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0HOLDOFX1",
+                  "title": "The Holdovers",
+                  "displayTitle": "The Holdovers",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0HOLDOVERSFIXTURE00000000X?ref_=atv_hm_hom_c_rec_4_3" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-holdovers._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "glanceMessage": { "icon": "OFFER_ICON", "message": "Rent or buy" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0TULSAFX1",
+                  "title": "Tulsa King - Season 1",
+                  "displayTitle": "Tulsa King",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0TULSAKINGFIXTURE0000000S1?ref_=atv_hm_hom_c_rec_4_4" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-tulsa._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Unentitled", "focusMessage": { "icon": "OFFER_ICON", "message": "Free trial of Paramount+" } },
+                  "releaseYear": "2022"
+                },
+                {
+                  "titleID": "B0SALTBFX1",
+                  "title": "Saltburn",
+                  "displayTitle": "Saltburn",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0SALTBURNFIXTURE000000000X?ref_=atv_hm_hom_c_rec_4_5" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-saltburn._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "focusMessage": { "icon": "OFFER_ICON", "message": "Subscribe to MGM+" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0AIRFX001",
+                  "title": "Air",
+                  "displayTitle": "Air",
+                  "entityType": "Movie",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0AIRFIXTURE000000000000XXX?ref_=atv_hm_hom_c_rec_4_6" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-air._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } }
+                }
+              ]
+            },
+            {
+              "containerType": "PromotionalBanner",
+              "isContinueWatching": false,
+              "title": "Start your MGM+ free trial",
+              "webUid": "fx000005",
+              "entities": [
+                {
+                  "titleID": "B0PROMOFX1",
+                  "title": "MGM+ free trial",
+                  "widgetType": "PromotionalBannerCard",
+                  "link": { "url": "/detail/0PROMOFIXTURE00000000000XX?ref_=atv_hm_hom_c_promo_5_1" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-promo._UR1920,1080_.jpg" } }
+                }
+              ]
+            },
+            {
+              "containerType": "BeardSupportedCarousel",
+              "entitlementCues": { "entitledCarousel": "Entitled", "offerType": "Subscription" },
+              "estimatedTotal": 3,
+              "isContinueWatching": false,
+              "title": { "attrs": {}, "string": "Because you watched The Boys" },
+              "text": "Because you watched The Boys",
+              "webUid": "fx000006",
+              "entities": [
+                {
+                  "titleID": "B0GENVFX01",
+                  "title": "Gen V - Season 1",
+                  "displayTitle": "Gen V",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0GENVFIXTURE00000000000S01?ref_=atv_hm_hom_c_byw_6_1" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-genv._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2023"
+                },
+                {
+                  "titleID": "B0INVINFX3",
+                  "title": "Invincible - Season 3",
+                  "displayTitle": "Invincible",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0INVINCIBLEFIXTURE00000S03?ref_=atv_hm_hom_c_byw_6_2" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-invincible._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2025"
+                },
+                {
+                  "titleID": "B0TERMLFX1",
+                  "title": "The Terminal List",
+                  "displayTitle": "The Terminal List",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "primaryGenre": "Action",
+                  "link": { "url": "/detail/0TERMINALLISTFIXTURE00000X?ref_=atv_hm_hom_c_byw_6_3" },
+                  "images": { "cover": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-terminal._UR1920,1080_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2022"
+                }
+              ]
+            },
+            {
+              "containerType": "BeardSupportedCarousel",
+              "entitlementCues": { "entitledCarousel": "Entitled", "offerType": "Mixed" },
+              "estimatedTotal": 1,
+              "isContinueWatching": false,
+              "title": "On now",
+              "webUid": "fx000007",
+              "entities": [
+                { "widgetType": "LinearStationCard", "title": "Local PBS station", "entitlementCues": { "entitlementType": "Entitled" }, "images": {} }
+              ]
+            },
+            {
+              "containerType": "SuperCarousel",
+              "entitlementCues": { "entitledCarousel": "Entitled", "offerType": "Subscription" },
+              "estimatedTotal": 1,
+              "isContinueWatching": false,
+              "title": "Amazon Originals",
+              "webUid": "fx000008",
+              "entities": [
+                {
+                  "titleID": "B0RINGSFX2",
+                  "title": "The Lord of the Rings: The Rings of Power - Season 2",
+                  "displayTitle": "The Lord of the Rings: The Rings of Power",
+                  "entityType": "TV Show",
+                  "widgetType": "TitleCard",
+                  "link": { "url": "/detail/0RINGSFIXTURE0000000000S02?ref_=atv_hm_hom_c_orig_8_1" },
+                  "images": { "poster2x3": { "url": "https://m.media-amazon.com/images/S/pv-target-images/fixture-rings-poster._UR1000,1500_.jpg" } },
+                  "entitlementCues": { "entitlementType": "Entitled", "focusMessage": { "message": "Included with Prime" } },
+                  "releaseYear": "2024"
+                }
+              ]
+            }
+          ],
+          "hasFailed": false
+        }
+      },
+      "route": { "name": "landing", "path": {} }
+    },
+    "config": { "clientTTLMins": 180 }
+  },
+  "store": {
+    "RequestContext": {
+      "customerID": "A1FIXTURECUSTOMER00",
+      "isInternal": false,
+      "path": "/hp/video/storefront",
+      "domain": "Fogg",
+      "marketplaceID": "ATVPDKIKX0DER",
+      "originalURI": "/",
+      "osLocale": "en-US",
+      "recordTerritory": "US",
+      "currentTerritory": "US",
+      "requestID": "FIXTUREREQUEST000000",
+      "sessionID": "000-0000000-0000000",
+      "identityContext": "68|IhNQVklDU19BVVRIRU5USUNBVEVEOhl1YTpGSVhUVVJFMDAwMDAwMDAwMDAwMDAwMDA=",
+      "locale": "en_US"
+    },
+    "ClickstreamData": { "pageType": "ATVHome", "subPageType": "Home" },
+    "SiteVariant": "Desktop Web Browser",
+    "Profile": { "ageGroup": "ADULT", "isChild": false },
+    "HomeRegion": "NA"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 202,
+  "results": {
+    "GB": {
+      "link": "https://www.themoviedb.org/tv/202-bluey/watch?locale=GB",
+      "flatrate": [ { "logo_path": "/iplayer.jpg", "provider_id": 38, "provider_name": "BBC iPlayer", "display_priority": 1 } ]
+    },
+    "US": {
+      "link": "https://www.themoviedb.org/tv/202-bluey/watch?locale=US",
+      "flatrate": [
+        { "logo_path": "/hulu.jpg", "provider_id": 15, "provider_name": "Hulu", "display_priority": 4 },
+        { "logo_path": "/disney.jpg", "provider_id": 337, "provider_name": "Disney Plus", "display_priority": 1 }
+      ],
+      "buy": [ { "logo_path": "/apple.jpg", "provider_id": 2, "provider_name": "Apple TV", "display_priority": 5 } ]
+    }
+  }
+}

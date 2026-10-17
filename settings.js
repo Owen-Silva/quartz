@@ -119,6 +119,7 @@
     'Privacy': '\uE72E',                  // Lock
     'Spotify': '\uE7F6',                  // Headphone
     'Stocks': '\uEAFC',                   // Market
+    'Watch': '\uE7F4',                    // TVMonitor
     'Phone': '\uE8EA',                    // CellPhone
     'Shortcuts': '\uE765',                // KeyboardClassic
     'About': '\uE946'                     // Info
@@ -5730,6 +5731,447 @@
   }
 
   /* ============================================================
+     Watch — the streaming hub (watch.html, Ctrl+Alt+W)
+
+     Like Stocks, nothing here is in localStorage: watch-main.js owns the
+     prefs, the cache and the TMDB key, and every call over window.api.watch
+     answers the same describe() shape (services, leagues, allLeagues, tmdb,
+     cacheBytes, reading). The key goes one way only: describe() answers
+     `hasKey` and a mask, so the field is never pre-filled.
+
+     Nothing fails quietly (The user's rule): each service's line says what its
+     last read did, in words, and every button's answer is printed under it.
+     While a read is in flight the section asks again every few seconds, and
+     stops the moment nothing is reading or the sheet closes.
+     ============================================================ */
+
+  var wtState = null;        // the last describe(), or null before the first
+  var wtShowKey = false;     // the eye: reveals what is being TYPED only
+  var wtBusy = '';           // which action is out: 'check' | 'forget' | 'leagues' | 'svc:<id>' | ''
+  var wtFocus = '';
+  var wtResult = {};         // slot -> { ok, text }: the last answer to each action
+  var wtForgetArmed = false;
+  var wtForgetTimer = 0;
+  var wtPollTimer = 0;
+  var wtAskFailed = '';      // why the last describe() did not land
+
+  function watchApi() {
+    var api = window.api && window.api.watch;
+    return api && typeof api.describe === 'function' ? api : null;
+  }
+
+  function buildWatch() {
+    var s = section('Watch');
+    s.appendChild(el('p', 'set-hint',
+      'Watch (Ctrl+Alt+W, or “Watch” in the command palette) shows Continue watching, ' +
+      'picks and live sports from the services you are signed in to in Quartz. Reading happens ' +
+      'in a hidden page, at most every 15–60 min while Watch is open; nothing leaves this PC.'));
+    var svc = el('div', 'set-field');
+    svc.setAttribute('data-field', 'watchservices');
+    s.appendChild(svc);
+    var lg = el('div', 'set-field set-field-gap');
+    lg.setAttribute('data-field', 'watchleagues');
+    s.appendChild(lg);
+    var key = el('div', 'set-field set-field-gap');
+    key.setAttribute('data-field', 'watchtmdb');
+    s.appendChild(key);
+    var fg = el('div', 'set-field set-field-gap');
+    fg.setAttribute('data-field', 'watchforget');
+    s.appendChild(fg);
+    return s;
+  }
+
+  function renderWatch() {
+    renderWatchServices();
+    renderWatchLeagues();
+    renderWatchKey();
+    renderWatchForget();
+  }
+
+  function watchField(name) {
+    var f = bodyEl && bodyEl.querySelector('[data-field="' + name + '"]');
+    if (f) f.textContent = '';
+    return f;
+  }
+
+  /** '5 min ago', '2 h ago', 'yesterday'... from a ms timestamp; '' for none. */
+  function watchAgo(ms) {
+    var t = Number(ms);
+    if (!isFinite(t) || t <= 0) return '';
+    var mins = Math.round((Date.now() - t) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    var hours = Math.round(mins / 60);
+    if (hours < 24) return hours + ' h ago';
+    var days = Math.round(hours / 24);
+    return days === 1 ? 'yesterday' : days + ' days ago';
+  }
+
+  function watchBytes(n) {
+    var b = Number(n);
+    if (!isFinite(b) || b <= 0) return '0 KB';
+    if (b < 1024 * 1024) return Math.max(1, Math.round(b / 1024)) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  /** One service's state as a light and a sentence. Never blank. */
+  function watchStatus(v) {
+    var ago = watchAgo(v.state === 'ok' ? (v.lastOkAt || v.readAt) : v.readAt);
+    if (!v.enabled || v.state === 'off') return { light: '', text: 'Off' };
+    if (!v.hasReader) return { light: ' is-hold', text: 'This build has no reader for ' + v.name + '.' };
+    if (v.reading) return { light: ' is-live', text: 'Reading now…' };
+    if (v.paused) return { light: ' is-hold', text: 'Paused: ' + v.paused };
+    if (v.queued) return { light: '', text: 'Waiting to read (another service is reading first)' };
+    if (v.state === 'ok') {
+      var t = 'Connected';
+      if (ago) t += ' · read ' + ago;
+      if (v.profile) t += ' · ' + v.profile;
+      return { light: ' is-live', text: t };
+    }
+    if (v.state === 'signed-out') {
+      return { light: ' is-hold', text: 'Signed out' + (v.reason ? ': ' + v.reason : '') + (ago ? ' (checked ' + ago + ')' : '') };
+    }
+    if (v.state === 'error') {
+      return { light: ' is-hold', text: 'Couldn’t read: ' + (v.reason || 'no reason given') + (ago ? ' (' + ago + ')' : '') };
+    }
+    return { light: '', text: 'Not read yet' };
+  }
+
+  function watchReadout(light, text) {
+    var p = el('p', 'set-readout');
+    p.appendChild(el('span', 'set-pip' + (light || '')));
+    p.appendChild(el('span', 'set-readout-text', text));
+    return p;
+  }
+
+  function watchResultRow(slot) {
+    var r = wtResult[slot];
+    if (!r) return null;
+    return watchReadout(r.ok ? ' is-live' : ' is-hold', r.text);
+  }
+
+  function watchTake(answer) {
+    if (!answer || typeof answer !== 'object') return;
+    wtState = answer;
+    wtAskFailed = '';
+    renderWatch();
+    refreshFilter();
+    if (wtFocus) {
+      var back = panelEl && panelEl.querySelector(wtFocus);
+      wtFocus = '';
+      if (back) { try { back.focus(); } catch (err) { /* re-rendered away */ } }
+    }
+    watchPollIfBusy();
+  }
+
+  /**
+   * Every write: call, take the describe() it answers, and hand the answer to
+   * `after` (which writes the action's result line). A null answer, a throw or
+   * a rejection is printed as `failed` in that same slot, never dropped.
+   */
+  function watchCall(method, args, slot, failed, after) {
+    var api = watchApi();
+    if (!api || typeof api[method] !== 'function') {
+      wtResult[slot] = { ok: false, text: failed + ': this build has no Watch support.' };
+      renderWatch();
+      return;
+    }
+    wtBusy = slot;
+    renderWatch();
+    var answer;
+    try { answer = api[method].apply(api, args || []); } catch (err) {
+      wtBusy = '';
+      wtResult[slot] = { ok: false, text: failed + ': ' + ((err && err.message) || 'no reason given') + '.' };
+      renderWatch();
+      return;
+    }
+    Promise.resolve(answer).then(function (value) {
+      wtBusy = '';
+      if (!value || typeof value !== 'object') {
+        wtResult[slot] = { ok: false, text: failed + ': Quartz did not answer.' };
+        renderWatch();
+        return;
+      }
+      if (typeof after === 'function') after(value);
+      else if (value.error) wtResult[slot] = { ok: false, text: value.error };
+      else wtResult[slot] = { ok: true, text: 'Saved.' };
+      watchTake(value);
+    }, function (err) {
+      wtBusy = '';
+      wtResult[slot] = { ok: false, text: failed + ': ' + ((err && err.message) || 'no reason given') + '.' };
+      renderWatch();
+    });
+  }
+
+  /** One describe() when the pane opens; again while a read is in flight. */
+  function watchRefresh() {
+    var api = watchApi();
+    if (!api) { wtState = null; renderWatch(); return; }
+    var answer;
+    try { answer = api.describe(); } catch (err) {
+      wtAskFailed = (err && err.message) || 'no reason given';
+      renderWatch();
+      return;
+    }
+    Promise.resolve(answer).then(function (value) {
+      if (value) watchTake(value);
+      else { wtAskFailed = 'Quartz did not answer'; renderWatch(); }
+    }, function (err) {
+      wtAskFailed = (err && err.message) || 'no reason given';
+      renderWatch();
+    });
+  }
+
+  function watchPollIfBusy() {
+    window.clearTimeout(wtPollTimer);
+    wtPollTimer = 0;
+    if (!open_ || !wtState || !Array.isArray(wtState.services)) return;
+    var busy = !!wtState.reading || wtState.services.some(function (v) { return v && (v.reading || v.queued); });
+    if (busy) wtPollTimer = window.setTimeout(function () { if (open_) watchRefresh(); }, 3000);
+  }
+
+  function watchRelease() {
+    window.clearTimeout(wtPollTimer);
+    wtPollTimer = 0;
+    window.clearTimeout(wtForgetTimer);
+    wtForgetArmed = false;
+  }
+
+  function watchOpenUrl(url, what) {
+    if (!/^https:\/\//.test(url || '')) return;
+    if (typeof window.createTab === 'function') window.createTab(url);
+    else showToast('Could not open ' + what + ': no tab strip in this window');
+  }
+
+  function renderWatchServices() {
+    var field = watchField('watchservices');
+    if (!field) return;
+    if (!watchApi()) {
+      field.appendChild(el('p', 'set-typing-notice',
+        'This build has no Watch support. Restart Quartz to pick up the newer build.'));
+      return;
+    }
+    if (!wtState || !Array.isArray(wtState.services)) {
+      field.appendChild(el('p', wtAskFailed ? 'set-note' : 'set-hint',
+        wtAskFailed ? 'Watch settings could not be read: ' + wtAskFailed + '.' : 'Reading Watch settings…'));
+      return;
+    }
+    wtState.services.forEach(function (v, i) {
+      if (!v || !v.id) return;
+      var box = el('div', i ? 'set-field-gap' : '');
+      box.appendChild(switchRow(v.name, !!v.enabled, function (next) {
+        wtFocus = '[data-field="watchservices"] [data-watch-svc="' + v.id + '"]';
+        watchCall('setEnabled', [v.id, next], 'svc:' + v.id, 'That switch could not be saved', function (ans) {
+          wtResult['svc:' + v.id] = ans.error ? { ok: false, text: ans.error }
+            : { ok: true, text: v.name + ' is ' + (next ? 'on.' : 'off. Its rows leave Watch.') };
+        });
+      }));
+      var sw = box.lastChild;
+      if (sw && sw.setAttribute) sw.setAttribute('data-watch-svc', v.id);
+      if (v.covers) box.appendChild(el('p', 'set-hint', v.covers));
+      var st = watchStatus(v);
+      box.appendChild(watchReadout(st.light, st.text));
+
+      var row = el('div', 'set-path-row');
+      var busy = wtBusy === 'read:' + v.id;
+      var read = textButton(busy ? 'Asking…' : 'Read now', 'set-text set-watch-read', function () {
+        if (wtBusy) return;
+        wtFocus = '[data-watch-read="' + v.id + '"]';
+        watchCall('refresh', [v.id], 'read:' + v.id, 'The read could not be started', function (ans) {
+          var now = null;
+          (ans.services || []).forEach(function (x) { if (x && x.id === v.id) now = x; });
+          if (!now) wtResult['read:' + v.id] = { ok: false, text: 'Quartz answered without ' + v.name + '.' };
+          else if (!now.enabled) wtResult['read:' + v.id] = { ok: false, text: 'Turn ' + v.name + ' on first.' };
+          else if (now.paused) wtResult['read:' + v.id] = { ok: false, text: 'Not read: ' + now.paused };
+          else if (now.reading || now.queued) wtResult['read:' + v.id] = { ok: true, text: 'Reading ' + v.name + '; the line above updates when it finishes.' };
+          else wtResult['read:' + v.id] = { ok: false, text: 'Not started: it was read under 30 s ago. Try again in a moment.' };
+        });
+      });
+      read.setAttribute('data-watch-read', v.id);
+      read.disabled = !v.enabled || !!v.reading;
+      row.appendChild(read);
+      if (v.needsSignIn && v.enabled && v.state === 'signed-out' && v.signIn) {
+        row.appendChild(textButton('Sign in', 'set-text set-watch-signin', function () {
+          watchOpenUrl(v.signIn, v.name + '’s sign-in page');
+        }));
+      }
+      box.appendChild(row);
+      var res = watchResultRow('read:' + v.id) || watchResultRow('svc:' + v.id);
+      if (res) box.appendChild(res);
+      field.appendChild(box);
+    });
+  }
+
+  function renderWatchLeagues() {
+    var field = watchField('watchleagues');
+    if (!field) return;
+    if (!watchApi() || !wtState || !Array.isArray(wtState.allLeagues)) return;
+    field.appendChild(el('span', 'set-label', 'Sports leagues'));
+    var on = Array.isArray(wtState.leagues) ? wtState.leagues.slice() : [];
+    var chipsEl = el('div', 'set-gal-chips');
+    chipsEl.setAttribute('role', 'group');
+    chipsEl.setAttribute('aria-label', 'Leagues in the sports strip');
+    wtState.allLeagues.forEach(function (l) {
+      if (!l || !l.id) return;
+      var pressed = on.indexOf(l.id) !== -1;
+      var chip = textButton(l.name || l.id, 'set-gal-chip', function () {
+        // Kept in allLeagues order (NHL first), whatever order they were clicked in.
+        var next = wtState.allLeagues.map(function (x) { return x.id; }).filter(function (id) {
+          return id === l.id ? !pressed : on.indexOf(id) !== -1;
+        });
+        wtFocus = '[data-watch-league="' + l.id + '"]';
+        watchCall('setLeagues', [next], 'leagues', 'The leagues could not be saved', function (ans) {
+          wtResult.leagues = ans.error ? { ok: false, text: ans.error }
+            : { ok: true, text: (ans.leagues && ans.leagues.length) ? 'Saved: ' + ans.leagues.length + ' league' + (ans.leagues.length === 1 ? '' : 's') + '.' : 'Saved: no leagues, so the sports strip is empty.' };
+        });
+      });
+      chip.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+      chip.setAttribute('data-watch-league', l.id);
+      chipsEl.appendChild(chip);
+    });
+    field.appendChild(chipsEl);
+    field.appendChild(el('p', 'set-hint', 'Games from these leagues fill the sports strip, from ESPN’s public scoreboard.'));
+    var res = watchResultRow('leagues');
+    if (res) field.appendChild(res);
+  }
+
+  function renderWatchKey() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="watchtmdb"]');
+    if (!field) return;
+    var typed = '';
+    var live = field.querySelector('.set-path');
+    if (live) typed = live.value;
+    field.textContent = '';
+    if (!watchApi() || !wtState) return;
+
+    var label = el('label', 'set-label', 'TMDB key (search every service)');
+    label.setAttribute('for', 'set-watch-key');
+    field.appendChild(label);
+
+    var tm = wtState.tmdb || {};
+    var has = !!tm.hasKey;
+    var row = el('div', 'set-path-row');
+    var input = document.createElement('input');
+    input.type = wtShowKey ? 'text' : 'password';
+    input.id = 'set-watch-key';
+    input.className = 'set-path';
+    input.value = typed;
+    input.placeholder = has ? (tm.keyMask || 'A key is saved') : 'Paste your key';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.title = has ? 'A key is saved. Type to replace it.' : 'Paste the API key or the API Read Access Token from your TMDB settings';
+    row.appendChild(input);
+
+    row.appendChild(textButton(wtShowKey ? 'Hide' : 'Show', 'set-text set-watch-eye', function () {
+      wtShowKey = !wtShowKey;
+      renderWatchKey();
+      var again = field.querySelector('.set-path');
+      if (again) { try { again.focus(); } catch (err) { /* gone */ } }
+    }));
+
+    row.appendChild(textButton('Save', 'set-btn set-watch-save', function () {
+      var now = field.querySelector('.set-path');
+      var next = now ? now.value.trim() : '';
+      if (!next) return;
+      wtShowKey = false;
+      wtFocus = '.set-watch-save';
+      if (now) now.value = '';
+      watchCall('setTmdbKey', [next], 'key', 'That key could not be saved', function (ans) {
+        wtResult.key = ans.error ? { ok: false, text: ans.error } : { ok: true, text: 'Key saved. Check key makes one small request to TMDB.' };
+      });
+    }));
+
+    if (has) {
+      var check = textButton(wtBusy === 'key' ? 'Checking…' : 'Check key', 'set-text set-watch-check', function () {
+        if (wtBusy) return;
+        wtFocus = '.set-watch-check';
+        watchCall('testTmdb', [], 'key', 'The key could not be checked', function (ans) {
+          var c = ans.check || {};
+          wtResult.key = c.ok ? { ok: true, text: 'Checked: ' + (c.title || 'TMDB accepted the key') + '.' }
+            : { ok: false, text: 'Check failed: ' + (c.title || 'no answer') + '.' + (c.detail ? ' ' + c.detail : '') };
+        });
+      });
+      check.title = 'Makes one small request to TMDB with the saved key';
+      row.appendChild(check);
+      row.appendChild(textButton('Remove', 'set-text set-watch-clear', function () {
+        wtShowKey = false;
+        wtFocus = '#set-watch-key';
+        watchCall('setTmdbKey', [''], 'key', 'That key could not be removed', function (ans) {
+          wtResult.key = ans.error ? { ok: false, text: ans.error } : { ok: true, text: 'Key removed. Watch searches YouTube and the rows it has read.' };
+        });
+      }));
+    }
+    field.appendChild(row);
+
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var save = field.querySelector('.set-watch-save');
+      if (save) save.click();
+    });
+
+    var res = watchResultRow('key');
+    if (res) field.appendChild(res);
+
+    var hint = el('p', 'set-hint');
+    hint.appendChild(document.createTextNode(has
+      ? 'Watch’s search also finds where any film or show streams, across every service. '
+      : 'Without a key, Watch searches YouTube and the rows it has read. A free TMDB key adds searching every service: where any film or show streams, rents or is free. '));
+    var signup = (tm.signupUrl && /^https:\/\//.test(tm.signupUrl)) ? tm.signupUrl : 'https://www.themoviedb.org/settings/api';
+    var a = el('a', 'set-gal-link', 'Get a free key');
+    a.href = signup;
+    a.title = signup;
+    a.addEventListener('click', function (e) { e.preventDefault(); watchOpenUrl(signup, 'the TMDB sign-up page'); });
+    hint.appendChild(a);
+    hint.appendChild(document.createTextNode(' (a TMDB account, then Settings › API). Stored by the browser itself and never given to a page.'));
+    field.appendChild(hint);
+    field.appendChild(el('p', 'set-hint', 'This product uses the TMDB API but is not endorsed or certified by TMDB.'));
+    field.appendChild(el('p', 'set-hint', 'Where-to-watch data is provided by JustWatch.'));
+  }
+
+  function renderWatchForget() {
+    var field = watchField('watchforget');
+    if (!field) return;
+    if (!watchApi() || !wtState) return;
+    var size = watchBytes(wtState.cacheBytes);
+    var row = el('div', 'set-path-row');
+    var label = wtForgetArmed ? 'Press again to forget Watch data' : 'Forget Watch data (' + size + ')';
+    var b = textButton(wtBusy === 'forget' ? 'Forgetting…' : label, 'set-text set-watch-forget', function () {
+      if (wtBusy) return;
+      if (!wtForgetArmed) {
+        wtForgetArmed = true;
+        wtFocus = '.set-watch-forget';
+        renderWatchForget();
+        var again = field.querySelector('.set-watch-forget');
+        if (again) { try { again.focus(); } catch (err) { /* gone */ } }
+        window.clearTimeout(wtForgetTimer);
+        wtForgetTimer = window.setTimeout(function () {
+          if (!wtForgetArmed) return;
+          wtForgetArmed = false;
+          renderWatchForget();
+        }, 4000);
+        return;
+      }
+      wtForgetArmed = false;
+      window.clearTimeout(wtForgetTimer);
+      var freed = size;
+      wtFocus = '.set-watch-forget';
+      watchCall('forget', [], 'forget', 'Watch data could not be forgotten', function (ans) {
+        var f = ans.forgot || {};
+        wtResult.forget = f.ok === false ? { ok: false, text: 'Could not forget: ' + (f.reason || 'no reason given') + '.' }
+          : { ok: true, text: 'Forgot ' + freed + ' of Watch data. Settings and the key stay.' };
+      });
+    });
+    row.appendChild(b);
+    field.appendChild(row);
+    field.appendChild(el('p', 'set-hint',
+      'Deletes the rows Watch has read and cached on this PC. The services keep your history; the next read fills it again.'));
+    var res = watchResultRow('forget');
+    if (res) field.appendChild(res);
+  }
+
+  /* ============================================================
      Stocks — the new tab page's live price tile
 
      THE ONE SECTION WITH NOTHING IN localStorage. Everything here lives in
@@ -7630,6 +8072,7 @@
     bodyEl.appendChild(buildTyping());
     bodyEl.appendChild(buildSites());
     bodyEl.appendChild(buildDrm());
+    bodyEl.appendChild(buildWatch());
     bodyEl.appendChild(buildSiteStyles());
     bodyEl.appendChild(buildUserStyle());
     bodyEl.appendChild(buildNewTab());
@@ -7669,6 +8112,7 @@
     renderTyping();
     renderSites();
     renderDrm();
+    renderWatch();
     renderSiteStyles();
     renderUserStyle();
     renderNewtabBg();
@@ -7757,6 +8201,9 @@
     stocksRefresh();
     /* And one for the Brave key under Search, for the same reason. */
     braveRefresh();
+    /* And one for Watch: main owns its state. While a read is in flight it
+       asks again every few seconds (watchPollIfBusy); closePanel() stops that. */
+    watchRefresh();
     /* And the Phone section, which unlike Stocks DOES move on its own: a
        download's progress, a device coming and going, a stream's bitrate.
        So it takes a subscription as well as one describe(), and gives both
@@ -7806,6 +8253,7 @@
     autopauseRelease();
     phoneRelease();
     spellRelease();
+    watchRelease();
     if (buttonEl) {
       buttonEl.classList.remove('is-open');
       buttonEl.setAttribute('aria-expanded', 'false');

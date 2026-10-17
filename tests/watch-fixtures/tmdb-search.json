@@ -1,0 +1,49 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "page": 1,
+  "results": [
+    {
+      "adult": false, "backdrop_path": "/bk101.jpg", "id": 101, "title": "Inside Out 2", "original_language": "en",
+      "original_title": "Inside Out 2",
+      "overview": "Teenager Riley's mind headquarters is undergoing a sudden demolition to make room for something entirely unexpected: new Emotions! Joy, Sadness, Anger, Fear and Disgust, who've long been running a successful operation by all accounts, aren't sure how to feel when Anxiety shows up. And it looks like she's not alone. This sentence only exists to push the overview well past the two hundred and forty character cap that Watch puts on it.",
+      "poster_path": "/p101.jpg", "media_type": "movie", "genre_ids": [16, 10751], "popularity": 912.5,
+      "release_date": "2024-06-11", "video": false, "vote_average": 7.6, "vote_count": 4100
+    },
+    {
+      "adult": false, "id": 900, "name": "Amy Poehler", "original_name": "Amy Poehler", "media_type": "person",
+      "popularity": 40.1, "gender": 1, "known_for_department": "Acting", "profile_path": "/amy.jpg"
+    },
+    {
+      "adult": false, "backdrop_path": null, "id": 202, "name": "Bluey", "original_language": "en", "original_name": "Bluey",
+      "overview": "Bluey is an inexhaustible six year-old Blue Heeler dog.", "poster_path": "/p202.jpg", "media_type": "tv",
+      "genre_ids": [16, 10762], "popularity": 300.2, "first_air_date": "2018-10-01", "vote_average": 8.7, "vote_count": 400,
+      "origin_country": ["AU"]
+    },
+    {
+      "adult": false, "backdrop_path": null, "id": 303, "title": "The Boys in the Boat", "original_title": "The Boys in the Boat",
+      "overview": "A group of underdogs rows for gold.", "poster_path": null, "media_type": "movie", "release_date": "2023-12-25"
+    },
+    {
+      "adult": false, "backdrop_path": "/bk404.jpg", "id": 404, "name": "The Bear", "original_name": "The Bear",
+      "overview": "A young chef returns to Chicago.", "poster_path": "/p404.jpg", "media_type": "tv", "first_air_date": "2022-06-23"
+    },
+    {
+      "adult": false, "backdrop_path": "/bk505.jpg", "id": 505, "title": "Night of the Living Dead", "original_title": "Night of the Living Dead",
+      "overview": "Strangers barricade a farmhouse.", "poster_path": "/p505.jpg", "media_type": "movie", "release_date": "1968-10-04"
+    },
+    {
+      "adult": false, "backdrop_path": "/bk606.jpg", "id": 606, "name": "Letterkenny", "original_name": "Letterkenny",
+      "overview": "Canadian small-town life.", "poster_path": "/p606.jpg", "media_type": "tv", "first_air_date": "2016-02-07"
+    },
+    {
+      "adult": false, "backdrop_path": "/bk707.jpg", "id": 707, "title": "30 for 30: The Two Escobars", "original_title": "The Two Escobars",
+      "overview": "Soccer and Colombia.", "poster_path": "/p707.jpg", "media_type": "movie", "release_date": "2010-06-22"
+    },
+    {
+      "adult": false, "backdrop_path": "/bk808.jpg", "id": 808, "title": "One Past The Cap", "original_title": "One Past The Cap",
+      "overview": "Should never be shown with max 6.", "poster_path": "/p808.jpg", "media_type": "movie", "release_date": "2020-01-01"
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 9
+}

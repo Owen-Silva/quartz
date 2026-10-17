@@ -1,0 +1,12 @@
+{
+  "_fixture": "shape from developer.themoviedb.org reference (search/multi, watch/providers), unverified against a live key",
+  "id": 303,
+  "results": {
+    "US": {
+      "link": "https://www.themoviedb.org/movie/303-the-boys-in-the-boat/watch?locale=US",
+      "flatrate": [ { "logo_path": "/prime.jpg", "provider_id": 9, "provider_name": "Amazon Prime Video", "display_priority": 2 } ],
+      "ads": [ { "logo_path": "/primeads.jpg", "provider_id": 2100, "provider_name": "Amazon Prime Video with Ads", "display_priority": 3 } ],
+      "rent": [ { "logo_path": "/apple.jpg", "provider_id": 2, "provider_name": "Apple TV", "display_priority": 5 } ]
+    }
+  }
+}
