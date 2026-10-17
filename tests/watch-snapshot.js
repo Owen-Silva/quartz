@@ -524,6 +524,75 @@ function searchAnswerTmdb(q, seq) {
   return a;
 }
 
+/* --- dense: as much as the user's real accounts carry (2026-10-17) --------------------------------
+ * YouTube 3 resume + 40 picks + 17 watch later; Disney+ 15 resume + 15 picks; Prime 11 resume +
+ * 77 picks; ESPN 2 live, 11 upcoming, 12 finals. Made-up titles where the counts outrun the real
+ * fixture lists. One title is on BOTH Disney+ and Prime with the same year ("The Martian", 2015:
+ * watching it on Prime, Disney+ recommends it): Merge shows ONE tile with both marks. "Dune"
+ * 1984 (Prime) and "Dune" 2021 (Disney+) differ by year and stay two tiles. */
+const DENSE_WORDS = ['Northern', 'Silent', 'Glass', 'Harbor', 'Echo', 'Paper', 'Iron', 'Summer', 'Hollow', 'Wild', 'Distant', 'Golden',
+  'Quiet', 'Broken', 'Last', 'Hidden', 'Velvet', 'Copper', 'Midnight', 'Open'];
+const DENSE_NOUNS = ['Line', 'Signal', 'Coast', 'Kingdom', 'Season', 'Run', 'Garden', 'Machine', 'Road', 'Hours', 'Light', 'River',
+  'Hotel', 'Club', 'Station', 'Frontier', 'Letters', 'Theory', 'Island', 'Circle'];
+function denseTitle(i, salt) {
+  const a = DENSE_WORDS[(i + salt) % DENSE_WORDS.length], b = DENSE_NOUNS[(i * 7 + salt * 3 + Math.floor(i / 20)) % DENSE_NOUNS.length];
+  return (i % 3 === 0 ? 'The ' : '') + a + ' ' + b;
+}
+function denseYouTube() {
+  const raws = [];
+  const vid = (n) => (YT_VIDEOS[n] ? YT_VIDEOS[n] : ['d' + alnum('ytv' + n, 10), denseTitle(n, 1) + ' (Full Breakdown)', ['Kurzgesagt - In a Nutshell', 'Veritasium', 'Blender Studio', 'Marques Brownlee', 'Mark Rober'][n % 5], (4 + (n * 7) % 31) + ':' + String((n * 13) % 60).padStart(2, '0')]);
+  [0, 4, 5].forEach((n, i) => raws.push(ytRaw(vid(n), 'resume', [0.42, 0.18, 0.77][i])));
+  for (let n = 0; n < 40; n++) raws.push(ytRaw(vid(n < 9 ? [1, 2, 3, 6, 7, 8, 9, 10, 11][n] : 20 + n), 'rec'));
+  for (let n = 0; n < 17; n++) raws.push(ytRaw(vid(80 + n), 'watchlist'));
+  return cleanAll(raws, 'dense youtube');
+}
+function denseDisney() {
+  const raws = [];
+  for (let i = 0; i < 15; i++) raws.push(disneyRaw('resume', i === 0 ? 'Andor' : denseTitle(i, 2), { subtitle: 'S' + (1 + i % 4) + ' E' + (2 + i % 8), durationSec: 1500 + (i * 311) % 2400, progress: 0.1 + (i * 0.13) % 0.8, badge: i % 5 === 3 ? 'Hulu' : '' }));
+  const g1 = 'Because you watched Andor', g2 = 'Hulu Originals';
+  raws.push(disneyRaw('rec', 'The Martian', { subtitle: '2015 · PG-13' }));
+  raws.push(disneyRaw('rec', 'Dune', { subtitle: '2021 · PG-13' }));
+  for (let i = 0; i < 13; i++) raws.push(disneyRaw('rec', denseTitle(i, 9), { group: i < 7 ? g1 : g2, subtitle: i % 2 ? (1 + i % 4) + ' seasons' : (2008 + i) + ' · PG-13', badge: i >= 7 ? 'Hulu' : '' }));
+  return cleanAll(raws, 'dense disney');
+}
+function densePrime() {
+  const raws = [];
+  raws.push(primeRaw('resume', 'The Martian', { subtitle: '2015 · PG-13', durationSec: 8640, progress: 0.4 }));
+  for (let i = 1; i < 11; i++) raws.push(primeRaw('resume', i === 1 ? 'Rust' : denseTitle(i, 4), { subtitle: i % 2 ? (2018 + i % 7) + '' : 'S' + (1 + i % 3) + ' E' + (1 + i % 9), durationSec: 2400 + (i * 517) % 4800, progress: 0.15 + (i * 0.11) % 0.75 }));
+  const groups = ['Top movies', 'Prime originals', 'Because you watched Rust', 'Thrillers', 'Comedy'];
+  raws.push(primeRaw('rec', 'Dune', { subtitle: '1984 · PG-13', group: 'Top movies' }));
+  for (let i = 0; i < 76; i++) raws.push(primeRaw('rec', denseTitle(i, 13), { group: groups[i % 5], subtitle: (1995 + (i * 3) % 30) + ' · ' + ['R', 'PG-13', 'TV-MA', 'PG'][i % 4], badge: i % 9 === 4 ? 'Rent' : '' }));
+  return cleanAll(raws, 'dense prime');
+}
+function denseEvents(now) {
+  const T = [['nhl', 'Montreal Canadiens', 'MTL'], ['nhl', 'Toronto Maple Leafs', 'TOR'], ['nhl', 'Boston Bruins', 'BOS'], ['nhl', 'Seattle Kraken', 'SEA'],
+    ['nhl', 'Edmonton Oilers', 'EDM'], ['nhl', 'Vancouver Canucks', 'VAN'], ['nba', 'Boston Celtics', 'BOS'], ['nba', 'New York Knicks', 'NY'],
+    ['nba', 'Denver Nuggets', 'DEN'], ['nba', 'Golden State Warriors', 'GS'], ['nfl', 'Kansas City Chiefs', 'KC'], ['nfl', 'Buffalo Bills', 'BUF']];
+  const evs = [];
+  const mk = (n, state, startsAt, detail, sa, sh) => {
+    const a = T[(n * 2) % T.length], h = T[(n * 2 + 1) % T.length];
+    const id = String(401900000 + n);
+    evs.push({ id, league: a[0], state, startsAt, detail, away: team(a[0], a[1], a[2], sa, (3 + n % 4) + '-' + (2 + n % 3) + '-1'),
+      home: team(h[0], h[1], h[2], sh, (4 + n % 3) + '-' + (1 + n % 4) + '-0'), broadcasts: [['ESPN+'], ['ESPN'], ['ESPN+', 'SN'], ['TSN']][n % 4],
+      watchUrl: 'https://www.espn.com/watch/player/_/id/' + uuid('espn-watch:' + id), gamecastUrl: 'https://www.espn.com/' + a[0] + '/game/_/gameId/' + id, locked: n % 2 === 0 });
+  };
+  mk(0, 'in', now - 70 * MIN, '2nd 08:41', 1, 2);
+  mk(3, 'in', now - 135 * MIN, '4th 3:12', 88, 91);
+  for (let i = 0; i < 11; i++) mk(10 + i, 'pre', now + (1 + i * 3) * HOUR, (7 + i % 4) + ':00 PM EDT', '', '');
+  for (let i = 0; i < 12; i++) mk(30 + i, 'post', now - (1 + i) * HOUR, 'Final', 1 + i % 5, 2 + (i * 3) % 4);
+  return cleanEventsLoud(evs);
+}
+function dense(now) {
+  const t = typeof now === 'number' ? now : Date.now();
+  const events = denseEvents(t);
+  return build(t, {
+    youtube: okEntry(t, 3, 'the user', denseYouTube()),
+    disney: okEntry(t, 12, 'the user', denseDisney()),
+    prime: okEntry(t, 41, 'the user', densePrime()),
+    espn: okEntry(t, 1, '', espnItems(events, t), { events })
+  }, null);
+}
+
 module.exports = {
-  full, firstRun, mixedFailures, searchAnswer, searchAnswerFailed, searchAnswerTmdb, allPaused, empty
+  full, firstRun, mixedFailures, searchAnswer, searchAnswerFailed, searchAnswerTmdb, allPaused, empty, dense
 };

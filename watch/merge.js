@@ -12,7 +12,13 @@
  *   foryou     For you: recommendations round-robin across services, so the
  *              YouTube home feed does not drown Disney+ and Prime. Titles that
  *              two services both recommend appear once.
- *   watchlist  Watchlist: the same, for saved titles.
+ *   watchlist  Your list: the same, for saved titles (YouTube's Watch later and
+ *              the Disney+ and Prime watchlists, as one list).
+ * The same title on two services (same folded title AND the same year in the
+ * subtitle, Disney+/Prime only) is ONE tile: the first in the row's order is
+ * kept (in Continue watching, the one he is watching it on) and the others'
+ * services ride along in its `also` [{ service, url }]. Without a year on both,
+ * nothing merges: a confident match or none.
  *   per service, the service's OWN named rows ("Because you watched Bluey"),
  *              at most GROUPS_PER_SERVICE of them.
  * The sports strip is not a row of items: it is buildSports(events, now).
@@ -58,12 +64,55 @@
     return ROUND_ROBIN.map(function (id) { return lists[id] || []; });
   }
 
+  /** The year a catalog subtitle carries ("2016 · PG-13"), or ''. */
+  function yearOf(it) {
+    var m = /\b(19[0-9]{2}|20[0-9]{2})\b/.exec(String((it && it.subtitle) || ''));
+    return m ? m[1] : '';
+  }
+  var CATALOG = { disney: true, prime: true };
+  /** The key two services' copies of one film or show share, or '' when a match would be a guess. */
+  function sameKey(it) {
+    if (!it || !CATALOG[it.service]) return '';
+    var t = fold(it.title), y = yearOf(it);
+    return t && y ? t + '|' + y : '';
+  }
+  /** out[i] gains other's service in `also` (a copy: the cache's own items are never changed). */
+  function addAlso(out, i, other) {
+    var keep = out[i];
+    if (!other || other.service === keep.service) return;
+    var also = keep.also || [];
+    for (var j = 0; j < also.length; j++) if (also[j].service === other.service) return;
+    out[i] = Object.assign({}, keep, { also: also.concat([{ service: other.service, url: other.url }]) });
+  }
+  /**
+   * One tile per title across services: a later copy with the same sameKey() folds into the first
+   * (its service joins `also`). `pool` (optional): every other item, whose services join the
+   * matching tiles' `also` without being drawn here (a title he is watching on Prime that Disney+
+   * also carries shows both marks in Continue watching).
+   */
+  function mergeSame(list, pool) {
+    var at = {};
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var k = sameKey(list[i]);
+      if (k && Object.prototype.hasOwnProperty.call(at, k)) { addAlso(out, at[k], list[i]); continue; }
+      if (k) at[k] = out.length;
+      out.push(list[i]);
+    }
+    if (pool) for (var p = 0; p < pool.length; p++) {
+      var pk = sameKey(pool[p]);
+      if (pk && Object.prototype.hasOwnProperty.call(at, pk)) addAlso(out, at[pk], pool[p]);
+    }
+    return out;
+  }
+
   function dedupe(list, byTitle) {
     var seen = {};
     var out = [];
     for (var i = 0; i < list.length; i++) {
       var it = list[i];
-      var key = byTitle ? 't:' + fold(it.title) : 'i:' + it.id;
+      // by title: two different years are two different titles ("Dune" 1984 and "Dune" 2021)
+      var key = byTitle ? 't:' + fold(it.title) + '|' + yearOf(it) : 'i:' + it.id;
       if (!key || seen[key]) continue;
       seen[key] = true;
       out.push(it);
@@ -87,18 +136,18 @@
     }
 
     var rows = [];
-    var cont = dedupe(roundRobin(byService(all, 'resume'), ROW_CAP), false);
+    var cont = mergeSame(dedupe(roundRobin(byService(all, 'resume'), ROW_CAP), false), all);
     if (cont.length) rows.push({ id: 'continue', title: 'Continue watching', items: cont });
 
     // Something already in Continue watching is not "for you" a second time.
     var inCont = {};
     cont.forEach(function (it) { inCont[fold(it.title)] = true; });
     var recs = roundRobin(byService(all, 'rec'), ROW_CAP * 2).filter(function (it) { return !inCont[fold(it.title)]; });
-    recs = dedupe(recs, true).slice(0, ROW_CAP);
+    recs = dedupe(mergeSame(recs), true).slice(0, ROW_CAP);
     if (recs.length) rows.push({ id: 'foryou', title: 'For you', items: recs });
 
-    var wl = dedupe(roundRobin(byService(all, 'watchlist'), ROW_CAP), true);
-    if (wl.length) rows.push({ id: 'watchlist', title: 'Watchlist', items: wl });
+    var wl = dedupe(mergeSame(roundRobin(byService(all, 'watchlist'), ROW_CAP)), true);
+    if (wl.length) rows.push({ id: 'watchlist', title: 'Your list', items: wl });
 
     // The services' own rows, in the services' order. YouTube's home feed has
     // no named shelves worth a row each, so it gets one "From YouTube" row.
@@ -216,6 +265,8 @@
     searchLocal: searchLocal,
     searchLinks: searchLinks,
     roundRobin: roundRobin,
+    mergeSame: mergeSame,
+    sameKey: sameKey,
     fold: fold,
     ROW_CAP: ROW_CAP
   };
