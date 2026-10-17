@@ -126,7 +126,7 @@
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-l);
   background: var(--surface-solid);
-  box-shadow: inset 0 1px 0 var(--panel-edge), var(--shadow-3);
+  box-shadow: var(--elev-float);
   color: var(--text-2);
   font-family: var(--font);
   font-size: var(--fs-s);
@@ -191,12 +191,35 @@
   padding: 4px;
 }
 
-/* Helm's .empty-note */
+/* Helm's empty state (lane quartz-premium): the panel's own glyph in one quiet raised tile, then
+   the line as its title, so an empty panel reads as a designed state, not missing content. */
 #downloads-panel .dl-empty {
-  padding: 26px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 12px 26px;
   text-align: center;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--fs-s);
+  font-weight: 500;
+}
+#downloads-panel .dl-empty::before {
+  content: '\E896';
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  box-shadow: var(--elev-raised);
+  font-family: var(--icon-font);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--text-3);
 }
 
 /* A row is a Helm list row: transparent at rest, the raised fill
@@ -274,18 +297,26 @@
   overflow: hidden;
 }
 
+/* The run is the track's full width, slid in from the left (translateX(p - 100%), set by
+   downloads.js) inside the track's clip, so a new reading GLIDES in on the shared spring and lands,
+   transform only: no layout per reading and nothing at idle (as Helm's meters). The rounded end
+   stays round at any value. */
 #downloads-panel .dl-fill {
   display: block;
-  width: 0;
+  width: 100%;
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--accent);
+  transform: translateX(-100%);
+  transition: transform var(--m-dur-m) var(--m-spring);
 }
 
 /* total unknown: a short bead stepped across the track, same 10fps
    budget (and the same "only while it runs") as the ring. */
 #downloads-panel .dl-bar.is-indeterminate .dl-fill {
   width: 28%;
+  transform: none;             /* reduced motion: a still bead at the start, as before */
+  transition: none;
   animation: dl-bar-sweep 1.2s steps(12) infinite;
 }
 
@@ -350,6 +381,7 @@
   #downloads.indeterminate::before,
   #downloads.pulse .glyph,
   #downloads-panel .dl-bar.is-indeterminate .dl-fill { animation: none; }
+  #downloads-panel .dl-fill { transition: none; }
 
   #downloads-panel .dl-row,
   #downloads-panel .dl-act,

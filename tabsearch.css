@@ -60,9 +60,7 @@
   font-family: var(--font);
   color: var(--text);
   overflow: hidden;            /* the rows' corners never poke the radius */
-  box-shadow:
-    inset 0 1px 0 var(--panel-edge),
-    var(--shadow-3);
+  box-shadow: var(--elev-float);
 }
 
 /* There is no CSS reset in this app, so [hidden] is spelled out. */

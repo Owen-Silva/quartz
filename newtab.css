@@ -677,7 +677,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--hairline);
   border-radius: var(--radius-l);
   background: var(--overlay);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--elev-float);
   color: var(--text);
   text-align: left;
 }

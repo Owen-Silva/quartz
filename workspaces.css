@@ -184,9 +184,7 @@ html[data-theme="light"] {
      gives a backdrop-filter nothing it can sample, so --overlay (legible on
      its own) carries it and there is no blur. Its list also scrolls. */
   background: var(--overlay);
-  box-shadow:
-    inset 0 1px 0 var(--panel-edge),
-    var(--shadow-3);
+  box-shadow: var(--elev-float);
 }
 
 #workspaces-panel:focus { outline: none; }

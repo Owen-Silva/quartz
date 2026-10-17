@@ -84,7 +84,7 @@ run('downloads-e2e', async ({ check, launch, say }) => {
     const row = (id) => c.ev(`(() => { const r = document.querySelector('#downloads-panel .dl-row[data-id="${id}"]'); if (!r) return null;
       const q = (s) => r.querySelector(s); const btns = [...r.querySelectorAll('.dl-actions button')];
       return { name: (q('.dl-name') || {}).textContent || '', meta: (q('.dl-meta') || {}).textContent || '', dim: !!(q('.dl-meta') && q('.dl-meta').classList.contains('is-dim')),
-        bar: !!q('.dl-bar'), fill: q('.dl-fill') ? q('.dl-fill').style.width || getComputedStyle(q('.dl-fill')).width : null,
+        bar: !!q('.dl-bar'), fill: q('.dl-fill') ? q('.dl-fill').style.transform || q('.dl-fill').style.width || getComputedStyle(q('.dl-fill')).transform : null,
         actions: btns.map((b) => (b.getAttribute('aria-label') || b.textContent || '').trim() + (b.disabled ? ' (disabled)' : '')) }; })()`);
     const button = () => c.ev(`(() => { const b = document.getElementById('downloads'); return { hidden: b.hidden, active: b.classList.contains('active'), indeterminate: b.classList.contains('indeterminate'), pulse: b.classList.contains('pulse'), progress: b.style.getPropertyValue('--progress') }; })()`);
     const ensurePanel = () => c.ev('window.Downloads.isOpen() || window.Downloads.open(), 1');

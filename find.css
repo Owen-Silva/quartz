@@ -42,7 +42,7 @@
   background: var(--overlay);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: inset 0 1px 0 var(--hairline-inner), var(--shadow-3);
+  box-shadow: var(--elev-float);
   /* The theme swap is a colour change, nothing more. Arriving and leaving take the shared
      motion (chrome.css "surfaces arrive and leave"): xs, a 6 px drop, OUT at 45 %. */
   transition: background-color var(--dur-slow) var(--ease),

@@ -384,10 +384,10 @@
     if (item.total > 0) {
       rec.bar.classList.remove('is-indeterminate');
       var pct = Math.max(0, Math.min(1, item.received / item.total)) * 100;
-      rec.fill.style.width = pct.toFixed(1) + '%';
+      rec.fill.style.transform = 'translateX(' + (pct - 100).toFixed(1) + '%)';   // downloads.css: it glides
     } else {
       rec.bar.classList.add('is-indeterminate');
-      rec.fill.style.width = '';
+      rec.fill.style.transform = '';
     }
   }
 

@@ -109,6 +109,12 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.16);
   --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.30), 0 12px 32px rgba(0, 0, 0, 0.32);
   --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.34), 0 24px 64px rgba(0, 0, 0, 0.42);
+  /* small controls that sit ON a surface (a badge, a knob, a bar's edge): Helm's values, so a
+     control casts the same shadow in all three apps. -tight is a 1 px blur for things packed
+     1 px apart, where a 2 px blur would reach the neighbour. */
+  --shadow-ctl: 0 1px 2px rgba(0, 0, 0, 0.26);
+  --shadow-ctl-tight: 0 1px 1px rgba(0, 0, 0, 0.22);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.36);
   /* a box-shadow value, not a colour: box-shadow: var(--focus-ring) */
   --focus-ring: 0 0 0 1px rgba(20, 21, 22, 0.9), 0 0 0 3px color-mix(in srgb, var(--ion) 55%, transparent);
 
@@ -179,9 +185,15 @@ html[data-theme="light"] {
 
   --code-bg: rgba(0, 0, 0, 0.045);
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.08), 0 12px 32px rgba(0, 0, 0, 0.12);
-  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.10), 0 24px 64px rgba(0, 0, 0, 0.18);
+  /* Light drops are Mantle's ink, not black (glass-light.css --lg-shadow, the same values as Helm's
+     light theme): a cool, tight contact line and a long soft fall that starts below the edge
+     (the negative spread), so a white menu reads as lifted, not smudged grey. */
+  --shadow-1: 0 1px 1px rgba(14, 18, 38, 0.05), 0 2px 8px rgba(14, 18, 38, 0.06);
+  --shadow-2: 0 1px 1px rgba(14, 18, 38, 0.05), 0 10px 28px -12px rgba(14, 18, 38, 0.22);
+  --shadow-3: 0 1px 1px rgba(14, 18, 38, 0.05), 0 10px 28px -12px rgba(14, 18, 38, 0.22), 0 26px 56px -28px rgba(14, 18, 38, 0.30);
+  --shadow-ctl: 0 1px 2px rgba(14, 18, 38, 0.14);
+  --shadow-ctl-tight: 0 1px 1px rgba(14, 18, 38, 0.14);
+  --shadow-knob: 0 0 0 0.5px rgba(14, 18, 38, 0.10), 0 1px 3px rgba(14, 18, 38, 0.20);
   --focus-ring: 0 0 0 1px rgba(255, 255, 255, 0.9), 0 0 0 3px color-mix(in srgb, var(--ion) 50%, transparent);
 
   --scroll-thumb: rgba(11, 14, 26, 0.16);
@@ -327,6 +339,21 @@ html[data-theme="light"] [data-palette="mono"] {
   --focus-ring-inset: inset 0 0 0 2px color-mix(in srgb, var(--ion) 62%, transparent);
   /* A control that cannot be used right now: the same in Mantle (--lg-disabled) and Helm. */
   --disabled-opacity: .45;
+
+  /* ELEVATION: ONE recipe per level, the same names and values as Helm (lane quartz-premium,
+     2026-10-16; Helm ui/styles/tokens.css). Every level is a 1 px top lip (light catching the
+     upper edge) plus that level's drop. A surface takes the level of WHERE it sits:
+       --elev-raised  inside a panel or on the strip: the active tab, a dragged tab, Home's cards
+       --elev-panel   a pane of the window itself (the side view)
+       --elev-tip     small transient floats
+       --elev-float   anything over the page or the panels: menus, popovers, the suggestions,
+                      find, the palette, downloads, the shield, site info, workspaces
+     A modal is a float plus a scrim; the scrim, not a bigger shadow, says "modal". */
+  --elev-lip: inset 0 1px 0 var(--hairline-inner);
+  --elev-raised: var(--elev-lip), var(--shadow-1);
+  --elev-panel: inset 0 1px 0 var(--panel-edge, var(--hairline-inner)), var(--shadow-2);
+  --elev-tip: var(--elev-lip), var(--shadow-2);
+  --elev-float: var(--elev-lip), var(--shadow-3);
 
   --radius-xs: 4px;
   --radius-s: 6px;

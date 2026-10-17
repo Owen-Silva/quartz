@@ -708,7 +708,7 @@ body {
   background: var(--overlay);
   -webkit-backdrop-filter: blur(24px) saturate(1.05);
   backdrop-filter: blur(24px) saturate(1.05);
-  box-shadow: var(--shadow-3);
+  box-shadow: var(--elev-float);
   color: var(--text);
 }
 
