@@ -200,6 +200,10 @@ if (process.argv.includes('--test-profile')) {
   const named = process.argv.find((a) => a.startsWith('--profile-name='));
   const suffix = named ? '-' + named.slice('--profile-name='.length).replace(/[^a-z0-9-]/gi, '') : '';
   app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile' + suffix));
+  // QUARTZ_TEST_CDM=missing: a castlabs test copy with NO Widevine for real. The CDM is a
+  // component downloaded into userData on first run; a fresh test profile with the
+  // component updater off never gets it, so pages are refused exactly as on stock.
+  if (process.env.QUARTZ_TEST_CDM === 'missing') app.commandLine.appendSwitch('disable-component-update');
 }
 
 /*

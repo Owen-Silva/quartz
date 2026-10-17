@@ -34,6 +34,12 @@ const TIMEOUT_S = Number(flag('timeout')) || 0;
 
 const exists = (p) => { try { return fs.existsSync(p); } catch (e) { return false; } };
 const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
+/** null on a castlabs ECS build (Widevine), else why the castlabs-only e2e cannot run here. */
+function castlabsBuild() {
+  let v = '';
+  try { v = String(JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules', 'electron', 'package.json'), 'utf8')).version || ''); } catch (e) { v = ''; }
+  return /\+wvcus$/.test(v) ? null : 'needs the castlabs ECS build of Electron (installed: ' + (v || 'none') + ')';
+}
 
 /*
  * The manifest. `needs` returns why a test cannot run HERE (it is then SKIP, with the reason),
@@ -69,6 +75,13 @@ const TESTS = [
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
+  // castlabs ECS only (package.json's electron = a +wvcus tag): the CDM loads, a public Widevine test
+  // stream plays in a real tab (needs the internet: Shaka + Google's test licence proxy), the bar says
+  // "not signed for streaming" on a known site, and a refused licence gets its own bar.
+  { name: 'drm-castlabs-e2e', file: 'drm-castlabs-e2e.js', e2e: true, timeout: 300, needs: () => castlabsBuild() },
+  // Watch's routing for protected titles, both ways: Widevine ready -> a Quartz tab; missing -> Edge
+  // (stubbed, never launched) with the reason in the toast. Three launches.
+  { name: 'drm-route-e2e', file: 'drm-route-e2e.js', e2e: true, timeout: 300, needs: () => castlabsBuild() },
   // school-reader.ps1's change gate against a Chromium stand-in for LessonPlayer (never LessonPlayer itself).
   { name: 'school-reader-e2e', file: 'school-reader-e2e.js', e2e: true },
   { name: 'favicons-e2e', file: 'favicons-e2e.js', e2e: true },

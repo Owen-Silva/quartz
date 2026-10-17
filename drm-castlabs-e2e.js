@@ -1,9 +1,14 @@
 try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* a cloud runner: no cap needed */ }
-// drm-castlabs-e2e.js -- Quartz ITSELF on castlabs ECS (branch wk/quartz-drm only, never master):
-// the Widevine CDM loads before the window, a real Quartz <webview> tab (Quartz's hardening intact,
-// plugins=false) plays a public Widevine test stream (Shaka's Angel One + Google's test licence proxy,
-// which accepts the development VMP signature), and the "needs DRM" bar stays DOWN, also on a known
-// streaming site, because this build has Widevine. Off-screen, Edge stubbed, temp profile.
+// drm-castlabs-e2e.js -- Quartz ITSELF on castlabs ECS, in the state a test copy really is in:
+// the Widevine CDM loads before the window, but Quartz carries only castlabs' DEVELOPMENT signature
+// (no EVS production signature: that needs the user's account). Checks:
+//   - a real Quartz <webview> tab (hardening intact, plugins=false) plays a public Widevine test stream
+//     (Shaka's Angel One + Google's test licence proxy, which accepts the development signature), and
+//     no bar goes up on it;
+//   - a known streaming site DOES get the bar, and it says why: not signed for streaming services;
+//   - a page whose licence is rejected (update() with junk), and one whose licence never comes, get the
+//     'refused' bar with Open in Edge, because the key system was granted and playback still failed.
+// Off-screen, Edge stubbed (never launched), temp profile.
 //   node drm-castlabs-e2e.js [--cdp 9427]
 // One summary line: "drm-castlabs-e2e: N passed, M failed".
 'use strict';
@@ -28,10 +33,30 @@ function check(cond, name, detail) {
   if (cond) pass++; else fail++;
   console.log((cond ? 'PASS ' : 'FAIL ') + name + (detail !== undefined ? '  ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400) : ''));
 }
-const PLAY = fs.readFileSync(path.join(__dirname, 'proto', 'play.html'), 'utf8');
+const PLAY = fs.readFileSync(path.join(__dirname, 'tests', 'drm-fixtures', 'widevine-play.html'), 'utf8');
+// A page that gets Widevine, asks for a licence, then hands the CDM junk (mode=junk) or never answers
+// (mode=silent): what a service that refuses this build looks like from inside the page.
+const LICENCE_PAGE = `<!doctype html><title>Licence test</title><video id="v"></video><script>
+(async () => {
+  const mode = new URLSearchParams(location.search).get('mode');
+  const say = (o) => console.log('lic:' + JSON.stringify(o));
+  try {
+    const access = await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{ initDataTypes: ['webm', 'cenc'], videoCapabilities: [{ contentType: 'video/webm; codecs="vp8"' }] }]);
+    const keys = await access.createMediaKeys();
+    await document.getElementById('v').setMediaKeys(keys);
+    const s = keys.createSession();
+    s.addEventListener('message', (e) => {
+      say({ message: e.messageType });
+      if (mode === 'junk') s.update(new Uint8Array([8, 1, 18, 3, 1, 2, 3])).then(() => say({ update: 'accepted' }), (err) => say({ update: 'rejected', name: err.name }));
+    });
+    await s.generateRequest('webm', new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
+    say({ requested: true });
+  } catch (err) { say({ error: String(err && err.name) + ': ' + String(err && err.message) }); }
+})();
+</script>`;
 const server = http.createServer((req, res) => {
   const p = String(req.url || '').split('?')[0];
-  const body = p === '/play.html' ? PLAY : p === '/watch.html' ? '<!doctype html><title>Test Stream</title><p>watch</p>' : null;
+  const body = p === '/play.html' ? PLAY : p === '/watch.html' ? '<!doctype html><title>Test Stream</title><p>watch</p>' : p === '/licence.html' ? LICENCE_PAGE : null;
   if (!body) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(body);
@@ -95,6 +120,7 @@ async function guest(urlRe) {
     await chrome.waitFor('!!(window.Drm && typeof createTab === "function" && window.Drm.state())', 20000);
     const st = await chrome.ev('window.Drm.state()');
     check(st.widevine && st.widevine.available === true, 'castlabs build: Widevine reported available', st.widevine);
+    check(st.widevine && st.widevine.services === false && st.widevine.vmp === 'development', 'test copy: development signature only, so services are reported unable to play', st.widevine && { services: st.widevine.services, vmp: st.widevine.vmp });
 
     // A real Quartz tab plays the Widevine test stream.
     await chrome.ev('(() => { window.__p = createTab("http://127.0.0.1:' + port + '/play.html?ms=40000"); activateTab(window.__p.id); return 1; })()');
@@ -121,11 +147,29 @@ async function guest(urlRe) {
     const bar = await chrome.ev('window.Drm._tab(window.__p).bar');
     check(bar === null, 'Quartz tab: no "needs DRM" bar on a page that plays', bar);
 
-    // A known streaming site: no bar either, because this build can play it.
+    // A known streaming site: the bar, saying why (the test copy is not signed for streaming).
     await chrome.ev('(() => { window.__k = createTab("http://localhost:' + port + '/watch.html"); activateTab(window.__k.id); return 1; })()');
-    await sleep(2500);
-    const kb = await chrome.ev('window.Drm._tab(window.__k).bar');
-    check(kb === null, 'known streaming site: no bar on a Widevine build', kb);
+    const kb = await chrome.waitFor('(() => { const b = window.Drm._tab(window.__k).bar; return b && b.mode === "need" ? b : null; })()', 10000).catch(() => null);
+    check(!!kb && /can’t play yet: this copy of Quartz isn’t signed for streaming services yet\./.test(kb.text) && kb.buttons.indexOf('Open in Edge') !== -1,
+      'known streaming site: the bar says it is not signed for streaming services, and offers Edge', kb);
+
+    // Licence refused (junk licence), then no licence at all: the 'refused' bar, with Edge.
+    for (const mode of ['junk', 'silent']) {
+      await chrome.ev('(() => { window.__l = createTab("http://127.0.0.1:' + port + '/licence.html?mode=' + mode + '"); activateTab(window.__l.id); return 1; })()');
+      const lg = await guest(/licence\.html/);
+      const lines = [];
+      lg.ws.on('message', (raw) => { const m = JSON.parse(String(raw)); if (m.method === 'Runtime.consoleAPICalled') { const s = String((m.params.args[0] || {}).value || ''); if (s.startsWith('lic:')) lines.push(s.slice(4)); } });
+      await lg.send('Runtime.enable');
+      const want = mode === 'junk' ? /refused to license this video to Quartz: this copy of Quartz isn’t signed/ : /didn’t send a licence for this video: this copy of Quartz isn’t signed/;
+      const rb = await chrome.waitFor('(() => { const b = window.Drm._tab(window.__l).bar; return b && b.mode === "refused" ? b : null; })()', mode === 'silent' ? 25000 : 10000).catch(() => null);
+      console.log('[e2e] licence page (' + mode + '): ' + lines.join(' ').slice(0, 300));
+      check(!!rb && want.test(rb.text) && rb.buttons.indexOf('Open in Edge') !== -1,
+        'licence ' + (mode === 'junk' ? 'rejected' : 'never sent') + ': the refused bar says so and offers Edge', rb || lines);
+      lg.close();
+      await chrome.ev('(() => { closeTab(window.__l.id); return 1; })()').catch(() => 0);
+    }
+    const stubText = (() => { try { return fs.readFileSync(STUB, 'utf8'); } catch (e) { return ''; } })();
+    check(stubText === '', 'Edge never opened by itself (stub empty)', stubText.slice(0, 200));
 
     // RAM per process (the CDM is a utility process of its own).
     try {
