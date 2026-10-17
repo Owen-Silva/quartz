@@ -1,5 +1,5 @@
 'use strict';
-// tests/watch-mock.js -- the four services Watch reads, served from tests/watch-fixtures/ on 127.0.0.1,
+// tests/watch-mock.js -- the five services Watch reads, served from tests/watch-fixtures/ on 127.0.0.1,
 // for watch-e2e.js. Never a real service, never the user's accounts.
 //
 // One HTTP server per service, each on its own port so every page sits at its real path (a reader
@@ -10,6 +10,11 @@
 //   disney   /home   an HTML page whose script fetch()es every capture path of the fixture from this same
 //            host (the reader captures them over CDP by path), each answered with that capture's JSON.
 //            Signed out, /home redirects to /login (a page with a log-in link), as the real site does.
+//            /browse/hulu redirects to the Hulu hub's /browse/page-<id> (as the real site does), whose
+//            script fetch()es disney-hulu-hub.json's capture paths the same way.
+//   hulu     /hub/home and /my-stuff: HTML pages whose script fetch()es the hulu-home / hulu-mystuff
+//            capture paths from this host. Signed out, both redirect to /welcome (a page with a log-in
+//            link), as hulu.com does; changed-layout serves hulu-changed.
 //   prime    /   HTML embedding <script id="dv-web-page-hydration-data" type="application/json"> and
 //            dv-web-global-store-data from the fixture. Robot: / redirects to /errors/validateCaptcha.
 //   espn     the scoreboard JSON per league and the WatchESPN home JSON. BOTH ESPN hosts
@@ -31,16 +36,18 @@ const http = require('http');
 const path = require('path');
 
 const FIX = path.join(__dirname, 'watch-fixtures');
-const SERVICES = ['youtube', 'disney', 'prime', 'espn'];
+const SERVICES = ['youtube', 'disney', 'hulu', 'prime', 'espn'];
 const MODES = {
   youtube: ['ok', 'signed-out', 'changed-layout', 'slow', 'down'],
   disney: ['ok', 'signed-out', 'changed-layout', 'slow', 'down'],
+  hulu: ['ok', 'signed-out', 'changed-layout', 'slow', 'down'],
   prime: ['ok', 'signed-out', 'changed-layout', 'robot', 'slow', 'down'],
   espn: ['ok', 'changed-layout', 'slow', 'down'],
 };
 const ORIGINS = {
   youtube: ['https://www.youtube.com'],
   disney: ['https://www.disneyplus.com'],
+  hulu: ['https://www.hulu.com'],
   prime: ['https://www.primevideo.com'],
   espn: ['https://site.api.espn.com', 'https://watch.product.api.espn.com'],
 };
@@ -100,7 +107,7 @@ function youtube(mode, req, res, p, q) {
 /* ---- Disney+ ---------------------------------------------------------------------------------- */
 function disneyCaptures() {
   const out = new Map();
-  for (const name of ['disney-home', 'disney-changed']) {
+  for (const name of ['disney-home', 'disney-changed', 'disney-hulu-hub']) {
     for (const c of fx(name).captures || []) if (!out.has(c.path)) out.set(c.path, c.json);
   }
   return out;
@@ -121,8 +128,50 @@ function disney(mode, req, res, p) {
     const f = fx('disney-signedout');
     return html(res, page(f.title || 'Log In | Disney+', '', '<a href="/login" data-testid="login-button">Log In</a>'));
   }
+  if (p === '/browse/hulu') return redirect(res, fx('disney-hulu-hub').finalPath);
+  if (p === fx('disney-hulu-hub').finalPath) {
+    const f = fx('disney-hulu-hub');
+    return html(res, page(f.title, fetchAll((f.captures || []).map((c) => c.path)), '<main id="app">mock Disney+ Hulu hub</main>'));
+  }
   if (DISNEY_CAPTURES.has(p)) return json(res, DISNEY_CAPTURES.get(p));
   if (/^\/browse\//.test(p)) return html(res, page('Mock Disney+ title', '', '<h1>mock Disney+ title</h1>'));
+  return false;
+}
+
+/** A page script that fetch()es every path (the reader captures them over CDP by path). */
+function fetchAll(paths) {
+  return '<script>(function(){var p=' + inScript(paths) + ';'
+    + 'Promise.all(p.map(function(u){return fetch(u,{cache:"no-store"}).then(function(r){return r.text();},function(){return "";});}))'
+    + '.then(function(){document.body.setAttribute("data-loaded",String(p.length));});})();</script>';
+}
+
+/* ---- Hulu (hulu.com) ------------------------------------------------------------------------- */
+function huluCaptures() {
+  const out = new Map();
+  for (const name of ['hulu-home', 'hulu-mystuff']) {
+    for (const c of fx(name).captures || []) if (!out.has(c.path.split('?')[0])) out.set(c.path.split('?')[0], c.json);
+  }
+  return out;
+}
+let HULU_CAPTURES = null;
+function hulu(mode, req, res, p) {
+  if (!HULU_CAPTURES) HULU_CAPTURES = huluCaptures();
+  if (p === '/hub/home' || p === '/my-stuff') {
+    if (mode === 'signed-out') return redirect(res, '/welcome');
+    const name = p === '/my-stuff' ? 'hulu-mystuff' : (mode === 'changed-layout' ? 'hulu-changed' : 'hulu-home');
+    const f = fx(name);
+    return html(res, page(f.title, fetchAll((f.captures || []).map((c) => c.path)), '<main id="app">mock Hulu ' + esc(p) + '</main>'));
+  }
+  if (p === '/welcome' || p === '/login') {
+    const f = fx('hulu-signedout');
+    return html(res, page(f.title, '', '<a href="https://auth.hulu.com/web/login" data-automationid="login-button">Log In</a>'));
+  }
+  if (mode === 'changed-layout') {
+    const c = (fx('hulu-changed').captures || []).find((x) => x.path.split('?')[0] === p);
+    if (c) return json(res, c.json);
+  }
+  if (HULU_CAPTURES.has(p)) return json(res, HULU_CAPTURES.get(p));
+  if (/^\/(series|movie)\//.test(p)) return html(res, page('Mock Hulu title', '', '<h1>mock Hulu title</h1>'));
   return false;
 }
 
@@ -165,7 +214,7 @@ function espn(mode, req, res, p) {
   return false;
 }
 
-const HANDLERS = { youtube, disney, prime, espn };
+const HANDLERS = { youtube, disney, hulu, prime, espn };
 
 /* ---- the servers -------------------------------------------------------------------------------- */
 async function start(opts) {
