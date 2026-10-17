@@ -111,7 +111,7 @@ const CAP_MAX = 10000;
 /** What one request may spend. Thinking is adaptive (the default on these models) and counts
  *  toward max_tokens, so the ceiling leaves it room while still keeping a runaway answer short. */
 const PLAN = {
-  quick: { maxTokens: 1024, maxUses: 2, effort: 'low' },
+  quick: { maxTokens: 4096, maxUses: 2, effort: 'high' }, // the user 10-17: Haiku at HIGH effort; 4096 leaves thinking room
   deep: { maxTokens: 2048, maxUses: 4, effort: 'medium' },
 };
 

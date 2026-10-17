@@ -165,9 +165,9 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
       { n: 2, url: M.URL_B, title: 'Quartz | Britannica', host: 'britannica.com' }]);
     eq('answer: usage', [done.usage.input, done.usage.output, done.usage.searches, done.usage.cacheWrite], [5800, 120, 1, 600]);
     near('answer: cost from usage x published prices + $0.01/search', done.costUsd, (5200 * 0.10 + 600 * 0.125 + 120 * 0.50) / 1e6 + 0.01);
-    ok('request: model, stream, modest max_tokens', r1.body.model === 'claude-haiku-5-5' && r1.body.stream === true && r1.body.max_tokens === 1024, r1.body);
+    ok('request: model, stream, modest max_tokens', r1.body.model === 'claude-haiku-5-5' && r1.body.stream === true && r1.body.max_tokens === 4096, r1.body);
     eq('request: Anthropic web search, small max_uses', r1.body.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]);
-    eq('request: low effort for the quick answer', r1.body.output_config, { effort: 'low' });
+    eq('request: high effort for the quick answer (The user, 10-17)', r1.body.output_config, { effort: 'high' });
     ok('request: cached system prompt first, date after the breakpoint', r1.body.system[0].text === C.SYSTEM_PROMPT && r1.body.system[0].cache_control.type === 'ephemeral' && !r1.body.system[1].cache_control && /^Today is /.test(r1.body.system[1].text), r1.body.system);
     eq('request: just the query', r1.body.messages, [{ role: 'user', content: 'what is quartz' }]);
     ok('request: no fallbacks on Haiku, no beta header', !('fallbacks' in r1.body) && r1.beta === '' && r1.key === KEY && r1.version === '2023-06-01', r1);
