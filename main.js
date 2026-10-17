@@ -438,6 +438,41 @@ const drm = drmModule.create({
 });
 
 /**
+ * The Watch player layer (watch-player-main.js + watch-player.js): a title from
+ * Watch plays INSIDE Watch, in a <webview> laid over the Watch tab, instead of a
+ * new tab. Created before Watch, which hands it every title it would have opened
+ * in a tab. A TEST profile may add sign-in hosts that stay in the layer
+ * (QUARTZ_PLAYER_AUTH_HOSTS, comma separated) and move the multiview RAM floor
+ * (QUARTZ_PLAYER_FLOOR_GB). A live Quartz ignores both.
+ */
+const watchPlayer = (() => {
+  const t = process.argv.includes('--test-profile');
+  const env = process.env;
+  const test = {};
+  if (t && env.QUARTZ_PLAYER_AUTH_HOSTS) test.authHosts = String(env.QUARTZ_PLAYER_AUTH_HOSTS).split(',').map((s) => s.trim()).filter(Boolean);
+  if (t && env.QUARTZ_PLAYER_FLOOR_GB !== undefined && Number.isFinite(Number(env.QUARTZ_PLAYER_FLOOR_GB))) test.floorGb = Number(env.QUARTZ_PLAYER_FLOOR_GB);
+  try {
+    const p = require('./watch-player-main').create({
+      app,
+      ipcMain,
+      webContents,
+      WebContentsView: require('electron').WebContentsView,
+      send: (channel, payload) => send(channel, payload),
+      getWindow: () => win,
+      isChromeSender: (event) => isChromeSender(event),
+      windowOpenDecision: (details) => windowOpenDecision(details),
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch-player] ' + line); },
+      test,
+    });
+    p.registerIpc();
+    return p;
+  } catch (err) {
+    console.error('[watch-player] the player layer could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+
+/**
  * Watch, the streaming hub (watch-main.js + watch.html). It reads the user's own
  * rows from the services he is signed in to here, in one hidden reader at a
  * time on the default session, and opens a title on the service's own page:
@@ -484,6 +519,8 @@ const watch = (() => {
       // A protected title opens HERE when Widevine is in and Quartz is signed for
       // streaming, and in Edge (with the reason) when not, or when the person chose Edge.
       drmRoute: (url) => drm.route(url),
+      // The player layer: titles play inside Watch when "Play inside Watch" is on.
+      player: watchPlayer,
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,
@@ -499,6 +536,11 @@ const watch = (() => {
     return { failed: why, stop() {}, windowShown() {}, isReaderContents() { return false; } };
   }
 })();
+// Fresh after watching: the layer closing re-reads what was playing; the setting relabels the tiles.
+if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
+  watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
+  watchPlayer.setOnInside(() => { try { watch.drmChanged(); } catch { /* Watch gone */ } });
+}
 
 const budget = budgetModule.create({ app });
 // The first-run welcome's flag and its default-browser step (firstrun-main.js).
@@ -912,6 +954,11 @@ function createWindow() {
     // A guest must not host a <webview> of its own: this hook belongs to the
     // chrome's webContents, so a NESTED attach would never reach it.
     webPreferences.webviewTag = false;
+    // TEST ONLY (QUARTZ_TEST_NO_WINDOW_FULLSCREEN=1, watch-player-e2e.js): a video's own
+    // fullscreen stays inside the off-screen test window instead of moving it onto a monitor.
+    if (process.argv.includes('--test-profile') && process.env.QUARTZ_TEST_NO_WINDOW_FULLSCREEN === '1') {
+      webPreferences.disableHtmlFullscreenWindowResize = true;
+    }
     if (params) {
       params.nodeintegration = 'false';
       // allowpopups is FORCED ON, not stripped. It is the only switch that

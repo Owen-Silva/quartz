@@ -1,0 +1,400 @@
+try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+// watch-player-e2e.js -- the Watch player layer (watch-player.js + watch-player-main.js), end to end, in a
+// REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen, watched by testwatch.js).
+// Watch's rows come from the LOCAL service mock (tests/watch-mock.js); every service origin is rebased
+// to a local "front" server here that serves the player fixtures (an HTML5 video page, a page that
+// refuses framing, a licence-refusing page, the public Widevine test stream page) and hands every
+// other path to the mock. Never a real account, cookie or profile; Edge is a stub file, never launched.
+//
+//   node watch-player-e2e.js [--cdp 9471] [--shots <dir>] [--no-widevine] [--only-shots]
+//
+// Checks: a card click opens the layer over the Watch tab (no new tab), the bar (title, mark, Edge
+// button), the view adopted by main; in-layer navigation (a link, a target=_blank link, both in place);
+// Back walks the layer's own history, then closes; the Watch page's scroll position survives; the view's
+// webContents is gone after close; the re-read ("fresh after watching") fires; a link to another site
+// opens a normal tab with a log line; an app link is stopped and said; a sign-in popup opens as a sheet
+// in the layer (opener kept, no window) and closes itself; fullscreen in/out and the Esc order; Alt+Left;
+// the mouse back button; the media key; one player at a time; a page that refuses framing plays here; a
+// licence refusal shows the refused state with Open in Edge; Settings > Watch "Play inside Watch" off
+// gives the old new-tab behaviour; DRM not ready sends Disney+ to the Edge stub (second boot); RAM before,
+// during and after a play; the public Widevine test stream inside the layer; screenshots.
+// One summary line: "watch-player-e2e: N passed, M failed".
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const http = require('http');
+const path = require('path');
+const { run, Cdp, sleep } = require('./tests/e2e-kit');
+const Mock = require('./tests/watch-mock');
+
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+const CDP_PORT = Number(opt('cdp', '9471'));
+const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-player-shots'));
+const WIDEVINE = !argv.includes('--no-widevine');
+const TAG = 'quartz-player-e2e-' + process.pid;
+const EDGE_STUB = path.join(os.tmpdir(), TAG + '-edge.txt');
+const CLIP = process.env.QUARTZ_PLAYER_CLIP || path.join(os.homedir(), 'Videos', 'Roblox', 'Roblox-2026-07-24T03_40_51.629Z.mp4');
+const PLAY_HTML = fs.readFileSync(path.join(__dirname, 'tests', 'drm-fixtures', 'widevine-play.html'), 'utf8');
+// drm-castlabs-e2e.js's licence page: Widevine granted, then a junk licence -- a service refusing this build.
+const LICENCE_PAGE = `<!doctype html><title>Licence test</title><video id="v"></video><script>
+(async () => {
+  try {
+    const access = await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{ initDataTypes: ['webm', 'cenc'], videoCapabilities: [{ contentType: 'video/webm; codecs="vp8"' }] }]);
+    const keys = await access.createMediaKeys();
+    await document.getElementById('v').setMediaKeys(keys);
+    const s = keys.createSession();
+    s.addEventListener('message', () => { s.update(new Uint8Array([8, 1, 18, 3, 1, 2, 3])).catch(() => {}); });
+    await s.generateRequest('webm', new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
+  } catch (err) { console.log('lic: ' + err.name); }
+})();
+</script>`;
+
+/* ---- the local servers ----------------------------------------------------------------------- */
+function listen(handler) {
+  return new Promise((resolve) => {
+    const s = http.createServer(handler);
+    s.keepAliveTimeout = 2000;
+    s.listen(0, '127.0.0.1', () => resolve({ server: s, port: s.address().port, origin: 'http://127.0.0.1:' + s.address().port }));
+  });
+}
+function sendHtml(res, body, headers) {
+  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, headers || {}));
+  res.end(body);
+}
+function sendClip(req, res) {
+  let st;
+  try { st = fs.statSync(CLIP); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
+  const m = /bytes=(\d+)-(\d*)/.exec(String(req.headers.range || ''));
+  if (m) {
+    const start = Number(m[1]);
+    const end = m[2] ? Math.min(Number(m[2]), st.size - 1) : Math.min(start + 4 * 1024 * 1024 - 1, st.size - 1);
+    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size, 'Content-Length': end - start + 1 });
+    fs.createReadStream(CLIP, { start, end }).pipe(res);
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
+  fs.createReadStream(CLIP).pipe(res);
+}
+/** The fixture "service watch page": a playing HTML5 video and every kind of link a service page has. */
+function playerPage(name, other, auth) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title>
+<style>body{margin:0;background:#0d0e10;color:#ddd;font:14px/1.4 "Segoe UI",sans-serif} video{display:block;width:100%;height:calc(100vh - 120px);background:#000;object-fit:contain}
+nav{display:flex;gap:16px;padding:14px 20px} a,button{color:#9cc8e0;font:inherit} h1{font-size:16px;margin:12px 20px 0}</style></head>
+<body><video id="v" src="/__media/clip.mp4" muted autoplay loop playsinline></video><h1 id="name">${name}</h1>
+<nav><a id="next" href="/__p/next">More episodes</a><a id="blank" href="/__p/blank" target="_blank">Go to channel</a>
+<a id="away" href="${other}/away">A link to another site</a><button id="pop" onclick="window.open('${auth}/signin','signin','width=480,height=600')">Sign in (popup)</button>
+<button id="app" onclick="location.href='disneyplus://open/x'">Open in the app</button></nav>
+<script>window.addEventListener('message', (e) => { window.__got = e.data; });</script></body></html>`;
+}
+const PLAYER_PATH = /^\/(?:watch$|watch\/player|video\/|play\/|detail\/|movies\/|series\/|__p\/)/;
+
+async function startServers(mock) {
+  const other = await listen((req, res) => sendHtml(res, '<!doctype html><title>Another site</title><p>another site</p>'));
+  const auth = await listen((req, res) => sendHtml(res, '<!doctype html><title>Sign in</title><body style="font:14px sans-serif;padding:20px"><h2>Sign in</h2>' +
+    '<button id="done" onclick="opener && opener.postMessage(\'signed-in\', \'*\'); window.close()">Continue</button></body>'));
+  const fronts = {};
+  for (const svc of Mock.SERVICES) {
+    fronts[svc] = await listen((req, res) => {
+      const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
+      const p = u.pathname;
+      if (p === '/__media/clip.mp4') return sendClip(req, res);
+      if (p === '/__p/noframe') return sendHtml(res, '<!doctype html><title>No framing</title><p id="nf">This page refuses to be framed.</p>', { 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'" });
+      if (p === '/__p/licence') return sendHtml(res, LICENCE_PAGE);
+      if (p === '/__p/widevine') return sendHtml(res, PLAY_HTML);
+      if (PLAYER_PATH.test(p)) return sendHtml(res, playerPage(svc + ' ' + (p === '/watch' ? 'video' : p.replace(/^\/(__p\/)?/, '')), other.origin, auth.origin));
+      // Everything else is the reader's: the mock answers.
+      const up = http.request({ host: '127.0.0.1', port: mock.ports[svc], path: req.url, method: req.method, headers: Object.assign({}, req.headers, { host: '127.0.0.1:' + mock.ports[svc] }) }, (r) => {
+        res.writeHead(r.statusCode || 502, r.headers);
+        r.pipe(res);
+      });
+      up.on('error', () => { if (!res.headersSent) { res.writeHead(502); res.end('mock gone'); } });
+      req.pipe(up);
+    });
+  }
+  const rebase = [];
+  for (const svc of Mock.SERVICES) for (const from of Mock.ORIGINS[svc]) rebase.push([from, fronts[svc].origin]);
+  return { other, auth, fronts, rebase, close: () => { other.server.close(); auth.server.close(); for (const f of Object.values(fronts)) f.server.close(); } };
+}
+
+/* ---- CDP helpers ------------------------------------------------------------------------------ */
+async function targetWhere(q, pred, ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < (ms || 15000)) {
+    let list = [];
+    try { list = await q.targets(); } catch (e) { list = []; }
+    const t = list.find((x) => x.webSocketDebuggerUrl && pred(x));
+    if (t) return t;
+    await sleep(100);
+  }
+  return null;
+}
+async function cdpTo(t) { const c = await new Cdp(t.webSocketDebuggerUrl).open(); await c.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0); return c; }
+async function gesture(c, expr) {
+  const m = await c.send('Runtime.evaluate', { expression: expr, userGesture: true, awaitPromise: true, returnByValue: true });
+  return m && m.result && m.result.result ? m.result.result.value : undefined;
+}
+async function keyIn(c, key, code, vk, mods) {
+  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: mods || 0 };
+  await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, base));
+  await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
+}
+const ST = 'WatchPlayer._state()';
+
+run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
+  fs.mkdirSync(SHOTS, { recursive: true });
+  try { fs.unlinkSync(EDGE_STUB); } catch (e) { /* none */ }
+  const mock = await Mock.start({ log: () => {} });
+  const srv = await startServers(mock);
+  const env = (extra) => Object.assign({
+    QUARTZ_WATCH_BOOT_GRACE_MS: '0',
+    QUARTZ_WATCH_REBASE: JSON.stringify(srv.rebase),
+    QUARTZ_EDGE_STUB: EDGE_STUB,
+    QUARTZ_WATCH_MIN_FREE_GB: '0',
+    QUARTZ_PLAYER_AUTH_HOSTS: '127.0.0.1:' + srv.auth.port,
+    QUARTZ_TEST_NO_WINDOW_FULLSCREEN: '1',
+    QUARTZ_TEST_VMP: 'signed',
+  }, extra || {});
+  const LOG = path.join(profileDir, 'quartz.log');
+  const logHas = (re) => { try { return re.test(fs.readFileSync(LOG, 'utf8')); } catch (e) { return false; } };
+  const FY = srv.fronts.youtube.origin, FD = srv.fronts.disney.origin;
+
+  try {
+    /* ============================ boot A: Widevine ready, signed (stubbed) ============================ */
+    let q = await launch({ cdp: CDP_PORT, env: env() });
+    const chrome = q.chrome;
+    // A window going fullscreen would leave the off-screen spot: the chrome's half is a counter here.
+    await chrome.ev('window.__fsCalls = 0; window.toggleFullscreen = function () { window.__fsCalls++; }; 1');
+    check(await chrome.ev('typeof window.openInLumen === "function" && !!window.WatchPlayer'), 'window.openInLumen and WatchPlayer exist');
+    const wv = await chrome.waitFor('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine && s.widevine.available ? s.widevine : null; })()', 120000).catch(() => null);
+    check(!!wv && wv.services === true, 'Widevine available and (test) signed: protected titles may play here', wv && { available: wv.available, services: wv.services });
+
+    // Watch, with rows from the mock.
+    await chrome.ev('openWatchTab(), 1');
+    const gt = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
+    const g = await cdpTo(gt);
+    const card = (svc) => `[...document.querySelectorAll('*')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent)`;
+    await g.waitFor(`!!(${card('youtube')}) && !!(${card('disney')})`, 60000);
+    check(await g.ev(`/Plays in Watch/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'a YouTube tile says it plays in Watch');
+    const memBefore = await chrome.ev('window.api.watchPlayer.memory()');
+
+    // Scroll the rows, then open a YouTube title with a real click.
+    const scroller = `(document.scrollingElement && document.scrollingElement.scrollHeight > innerHeight + 40 ? document.scrollingElement : [...document.querySelectorAll('*')].find((n) => n.scrollHeight > n.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(n).overflowY)))`;
+    const scrolled = await g.ev(`(() => { const s = ${scroller}; if (!s) return -1; s.scrollTop = 260; return s.scrollTop; })()`);
+    const ytTitle = await g.ev(`(${card('youtube')})._item.title`);
+    const tabsBefore = await chrome.ev('tabs.length');
+    await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    const s1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].wcId !== null ? s : null; })()`, 15000).catch(() => null);
+    check(!!s1, 'a click on a YouTube tile opens the player layer', s1 && { title: s1.title, url: s1.slots[0].url });
+    check(s1 && s1.title === ytTitle && s1.mark === 'YT' && !s1.edge, 'the bar: the title, the YouTube mark, no Edge button', s1 && { title: s1.title, mark: s1.mark, edge: s1.edge });
+    check(s1 && s1.slots[0].url.indexOf(FY + '/watch?v=') === 0, 'YouTube plays its FULL watch page in the layer (not the embed)', s1 && s1.slots[0].url);
+    check((await chrome.ev('tabs.length')) === tabsBefore, 'no new tab was opened');
+    const box = await chrome.ev('(() => { const a = document.querySelector(".wp-layer").getBoundingClientRect(); const b = findWatchTab().viewEl.getBoundingClientRect(); return [Math.round(a.left - b.left), Math.round(a.top - b.top), Math.round(a.width - b.width), Math.round(a.height - b.height)]; })()');
+    check(box.every((n) => Math.abs(n) <= 1), 'the layer covers the Watch tab exactly', box);
+    const wc1 = s1 && s1.slots[0].wcId;
+    check(wc1 && (await chrome.ev(`window.api.watchPlayer.alive(${wc1}).then((r) => r.alive)`)), 'main adopted a live player webContents');
+    let pt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=') === 0, 10000);
+    let p = await cdpTo(pt);
+    await p.waitFor('(() => { const v = document.getElementById("v"); return v && !v.paused && v.currentTime > 0.3; })()', 20000).catch(() => 0);
+    const memPlaying = await chrome.ev('window.api.watchPlayer.memory()');
+    check(await p.ev('(() => { const v = document.getElementById("v"); return !!v && !v.paused && v.readyState >= 2; })()'), 'the fixture video plays inside the layer');
+
+    // Shots of the layer open (dark, then light), at 1920x1000 and 1280x800.
+    const shoot = async (name, w, h) => {
+      await chrome.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await sleep(900);
+      try { await chrome.shot(path.join(SHOTS, 'lumen-player-' + name + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
+      await chrome.send('Emulation.clearDeviceMetricsOverride');
+      await sleep(300);
+    };
+    await shoot('dark-1920x1000', 1920, 1000);
+    await shoot('dark-1280x800', 1280, 800);
+    const themeWas = await chrome.ev('document.documentElement.getAttribute("data-theme") || "dark"');
+    await chrome.ev('window.Settings && window.Settings.set({ siteTheme: "light" }), document.documentElement.setAttribute("data-theme", "light"), 1');
+    await sleep(500);
+    await shoot('light-1920x1000', 1920, 1000);
+    await shoot('light-1280x800', 1280, 800);
+    await chrome.ev(`window.Settings && window.Settings.set({ siteTheme: "system" }), document.documentElement.setAttribute("data-theme", ${JSON.stringify(themeWas)}), 1`);
+
+    // In-layer navigation: a link, then a target=_blank link; both stay in this layer, in place.
+    await p.ev('document.getElementById("next").click(), 1');
+    await chrome.waitFor(`${ST}.slots[0].url === ${JSON.stringify(FY + '/__p/next')}`, 10000).catch(() => 0);
+    check((await chrome.ev(ST)).slots[0].url === FY + '/__p/next', 'a link to another page of the service stays in the layer');
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/next', 8000); p = await cdpTo(pt);
+    await gesture(p, 'document.getElementById("blank").click(), 1');
+    await chrome.waitFor(`${ST}.slots[0].url === ${JSON.stringify(FY + '/__p/blank')}`, 10000).catch(() => 0);
+    const s2 = await chrome.ev(ST);
+    check(s2.slots[0].url === FY + '/__p/blank' && s2.n === 1 && (await chrome.ev('tabs.length')) === tabsBefore, 'a target=_blank link on the service loads in place in the layer (no tab)', s2.slots[0].url);
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/blank', 8000); p = await cdpTo(pt);
+
+    // A sign-in popup: a sheet inside the layer, window.opener kept, closes itself.
+    await gesture(p, 'document.getElementById("pop").click(), 1');
+    const sh = await chrome.waitFor(`(() => { const s = ${ST}; return s.sheet && s.sheet.shown ? s.sheet : null; })()`, 10000).catch(() => null);
+    check(!!sh && /127\.0\.0\.1/.test(sh.host), 'a sign-in popup opens as a sheet in the layer', sh);
+    const at = await targetWhere(q, (x) => String(x.url).indexOf(srv.auth.origin + '/signin') === 0, 8000);
+    if (at) {
+      const a = await cdpTo(at);
+      await gesture(a, 'document.getElementById("done").click(), 1').catch(() => 0);
+      a.close();
+    }
+    await chrome.waitFor(`!${ST}.sheet`, 8000).catch(() => 0);
+    check(!(await chrome.ev(ST)).sheet && (await p.ev('window.__got')) === 'signed-in', 'the sheet posted back to its opener and closed itself', { got: await p.ev('window.__got') });
+    check(logHas(/player: a sign-in popup opened as a sheet/), 'quartz.log: the sheet has its line');
+
+    // An app link: stopped, said in the bar, logged; the page stays.
+    await gesture(p, 'document.getElementById("app").click(), 1');
+    await chrome.waitFor(`/tried to open an app/.test(${ST}.note)`, 6000).catch(() => 0);
+    check(/tried to open an app \(disneyplus:\)/.test((await chrome.ev(ST)).note) && (await chrome.ev(ST)).slots[0].url === FY + '/__p/blank', 'an app link (disneyplus://) is stopped and said in the bar', (await chrome.ev(ST)).note);
+    check(logHas(/stopped an app link \(disneyplus:\)/), 'quartz.log: the app link has its line');
+
+    // Fullscreen: in, the layer fills the window; Esc leaves fullscreen and keeps the layer; Esc closes.
+    const fsIn = await gesture(p, 'document.getElementById("v").requestFullscreen().then(() => 1, (e) => String(e))');
+    const f1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.fs ? s : null; })()`, 6000).catch(() => null);
+    const fill = await chrome.ev('(() => { const r = document.querySelector(".wp-layer").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), innerWidth, innerHeight, document.body.classList.contains("page-fullscreen"), window.__fsCalls]; })()');
+    check(!!f1 && fill[0] === fill[2] && fill[1] === fill[3] && fill[4] === true, 'the video\'s fullscreen fills the window (the chrome steps aside)', { fsIn, fill });
+    await keyIn(p, 'Escape', 'Escape', 27);
+    await chrome.waitFor(`!${ST}.fs`, 6000).catch(() => 0);
+    await sleep(700);
+    const f2 = await chrome.ev(ST);
+    check(!f2.fs && f2.open, 'Esc #1 leaves fullscreen and keeps the layer', { fs: f2.fs, open: f2.open });
+    check(!(await chrome.ev('document.body.classList.contains("page-fullscreen")')), 'back in the layer, the chrome is back');
+
+    // Back walks the layer's history: blank -> next -> video, then Alt+Left / the mouse back button.
+    await chrome.ev('document.querySelector(".wp-layer .wp-back").click(), 1');
+    await chrome.waitFor(`${ST}.slots[0].url === ${JSON.stringify(FY + '/__p/next')}`, 8000).catch(() => 0);
+    check((await chrome.ev(ST)).slots[0].url === FY + '/__p/next', 'Back (the bar) walks the layer\'s own history first');
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/next', 8000); p = await cdpTo(pt);
+    await keyIn(p, 'ArrowLeft', 'ArrowLeft', 37, 1);
+    await chrome.waitFor(`${ST}.slots[0].url.indexOf(${JSON.stringify(FY + '/watch?v=')}) === 0`, 8000).catch(() => 0);
+    check((await chrome.ev(ST)).slots[0].url.indexOf(FY + '/watch?v=') === 0, 'Alt+Left inside the page is Back too');
+    // The media key: play/pause on the playing video.
+    pt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=') === 0, 8000); p = await cdpTo(pt);
+    await p.waitFor('(() => { const v = document.getElementById("v"); return v && !v.paused; })()', 10000).catch(() => 0);
+    await keyIn(p, 'MediaPlayPause', 'MediaPlayPause', 0xB3);
+    await sleep(600);
+    check(await p.ev('document.getElementById("v").paused'), 'the play/pause media key pauses the player', await chrome.ev(ST + '.lastMedia'));
+    await keyIn(p, 'MediaPlayPause', 'MediaPlayPause', 0xB3);
+    await sleep(600);
+    check(await p.ev('!document.getElementById("v").paused'), 'and plays it again');
+    // The mouse back button over the bar: at the first page, Back closes.
+    const bb = await chrome.ev('(() => { const r = document.querySelector(".wp-layer .wp-title").getBoundingClientRect(); return [r.left + 4, r.top + r.height / 2]; })()');
+    await chrome.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bb[0], y: bb[1], button: 'back', buttons: 8, clickCount: 1 });
+    await chrome.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bb[0], y: bb[1], button: 'back', buttons: 0, clickCount: 1 });
+    await chrome.waitFor(`!${ST}.open`, 6000).catch(() => 0);
+    const c1 = await chrome.ev(ST);
+    check(!c1.open, 'the mouse back button at the first page closes the layer', c1.lastClosed);
+
+    // After close: the view is gone, the scroll position is where he left it, the re-read fired.
+    await sleep(1500);
+    check(!(await chrome.ev(`window.api.watchPlayer.alive(${wc1}).then((r) => r.alive)`)), 'the player\'s webContents is destroyed on close');
+    check(!(await targetWhere(q, (x) => String(x.url).indexOf(FY + '/') === 0 && x.type !== 'page', 1500)), 'no player target is left');
+    const scrollNow = await g.ev(`(() => { const s = ${scroller}; return s ? s.scrollTop : -1; })()`);
+    check(scrolled > 0 && scrollNow === scrolled, 'Back returns to the rows at the same scroll position', { before: scrolled, after: scrollNow });
+    const asked = await chrome.waitFor(`(() => { const c = ${ST}.lastClosed; return c && c.asked ? c.asked : null; })()`, 5000).catch(() => null);
+    check(Array.isArray(asked) && asked.indexOf('youtube') !== -1 && logHas(/re-reading youtube after watching/), 'closing asks Watch to re-read YouTube (fresh after watching)', asked);
+    await sleep(2500);
+    const memAfter = await chrome.ev('window.api.watchPlayer.memory()');
+    say('RAM (all Quartz processes, working set): before ' + memBefore.totalMb + ' MB / ' + memBefore.processes + ' procs; playing ' + memPlaying.totalMb + ' MB / ' + memPlaying.processes + ' procs (player ' + JSON.stringify(memPlaying.players) + '); after close ' + memAfter.totalMb + ' MB / ' + memAfter.processes + ' procs');
+    check(memAfter.processes < memPlaying.processes && memAfter.totalMb < memPlaying.totalMb, 'closing frees the player\'s memory', { before: memBefore.totalMb, playing: memPlaying.totalMb, after: memAfter.totalMb });
+
+    // A link to another site: a normal tab, with a log line; the layer waits behind the Watch tab.
+    await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/away-test')}, { service: 'youtube', title: 'Away test' }), 1`);
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/away-test', 10000); p = await cdpTo(pt);
+    const nTabs = await chrome.ev('tabs.length');
+    await gesture(p, 'document.getElementById("away").click(), 1');
+    await chrome.waitFor(`tabs.length === ${nTabs + 1}`, 8000).catch(() => 0);
+    check((await chrome.ev(`tabs.length === ${nTabs + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/away')}) === 0)`)), 'a link to another site opens a normal Quartz tab');
+    check(logHas(/left the layer \(link to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: the way out has its line');
+    check((await chrome.ev(ST)).open && (await chrome.ev(ST)).hidden, 'the layer stays open behind the Watch tab (hidden while another tab is in front)');
+    await chrome.ev('activateTab(findWatchTab().id), 1');
+    await sleep(400);
+    check(!(await chrome.ev(ST)).hidden, 'back on the Watch tab, the layer is on screen again');
+
+    // One player at a time: a Disney+ title replaces the YouTube one, and its view is destroyed.
+    const wcA = (await chrome.ev(ST)).slots[0].wcId;
+    await chrome.ev(`openInLumen(${JSON.stringify(FD + '/__p/noframe')}, { service: 'disney', title: 'No framing' }), 1`);
+    await chrome.waitFor(`(() => { const s = ${ST}; return s.n === 1 && s.slots[0].service === 'disney' && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);
+    await sleep(800);
+    const s3 = await chrome.ev(ST);
+    check(s3.n === 1 && !(await chrome.ev(`window.api.watchPlayer.alive(${wcA}).then((r) => r.alive)`)), 'one player at a time: the old view is destroyed when another title opens', { n: s3.n, old: wcA });
+    pt = await targetWhere(q, (x) => String(x.url) === FD + '/__p/noframe', 8000);
+    const nf = pt ? await cdpTo(pt) : null;
+    check(!!nf && (await nf.ev('!!document.getElementById("nf")')), 'a page that refuses framing (X-Frame-Options DENY, frame-ancestors none) plays in the layer');
+    check(s3.edge && s3.mark === 'D+', 'a Disney+ page: the D+ mark and an Open in Edge button', { edge: s3.edge, mark: s3.mark });
+
+    // A licence refusal inside the layer: the refused state, with Open in Edge (the stub).
+    await chrome.ev(`openInLumen(${JSON.stringify(FD + '/__p/licence')}, { service: 'disney', title: 'Licence test' }), 1`);
+    const rf = await chrome.waitFor(`(() => { const s = ${ST}; return s.slots[0] && s.slots[0].state === 'refused' ? s.slots[0] : null; })()`, 25000).catch(() => null);
+    check(!!rf && /refused to license/.test(rf.stateText) && /Open in Edge/.test(rf.stateText), 'a licence refusal shows the refused state with Open in Edge', rf && rf.stateText);
+    if (rf) {
+      await chrome.ev('[...document.querySelectorAll(".wp-state .wp-btn")].find((b) => b.textContent === "Open in Edge").click(), 1');
+      await sleep(1200);
+      let stub = ''; try { stub = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub = ''; }
+      check(stub.indexOf(FD + '/__p/licence') !== -1, 'its Open in Edge goes to Edge (the stub), never launched for real');
+      check(logHas(/left the layer \(Open in Edge: licence refused\)/), 'quartz.log: the Edge way out has its line');
+    }
+    if ((await chrome.ev(ST)).open) await chrome.ev('WatchPlayer.close("e2e"), 1');
+
+    // The public Widevine test stream, inside the layer (castlabs CDM, the services' way).
+    if (WIDEVINE) {
+      await chrome.ev(`openInLumen(${JSON.stringify(FD + '/__p/widevine?ms=30000')}, { service: 'disney', title: 'Widevine test stream' }), 1`);
+      pt = await targetWhere(q, (x) => String(x.url).indexOf(FD + '/__p/widevine') === 0, 10000);
+      const w = pt ? await cdpTo(pt) : null;
+      let res = null;
+      if (w) {
+        const got = [];
+        w.ws.on('message', (raw) => { let m; try { m = JSON.parse(String(raw)); } catch (e) { return; } if (m.method === 'Runtime.consoleAPICalled') { const a = m.params.args && m.params.args[0]; if (a && typeof a.value === 'string' && a.value.indexOf('proto:') === 0) got.push(a.value.slice(6)); } });
+        await w.send('Runtime.enable');
+        const t0 = Date.now();
+        while (Date.now() - t0 < 60000 && !res) {
+          for (const line of got) { try { const o = JSON.parse(line); if (o && o.done) res = o; } catch (e) { /* partial */ } }
+          await sleep(500);
+        }
+      }
+      check(!!res && res.ok === true, 'the public Widevine test stream plays inside the layer', res && { ok: res.ok, error: res.error, shaka: res.shakaError, last: res.last || res.final });
+      await chrome.ev('WatchPlayer.close("e2e"), 1');
+    }
+
+    // Settings > Watch: "Play inside Watch" off = the old behaviour (a new tab).
+    await g.ev('console.log("quartz-watch:settings {}"), 1');
+    const sw = await chrome.waitFor('(() => { const b = document.querySelector("[data-field=\\"watchplayer\\"] [role=switch]"); return b ? b.getAttribute("aria-checked") : null; })()', 8000).catch(() => null);
+    check(sw === 'true', 'Settings > Watch has "Play inside Watch", on by default', sw);
+    await chrome.ev('document.querySelector("[data-field=\\"watchplayer\\"] [role=switch]").click(), 1');
+    await chrome.waitFor('window.api.watchPlayer.get().then((r) => r.inside === false)', 5000).catch(() => 0);
+    check(await chrome.ev('window.api.watchPlayer.get().then((r) => r.inside === false)'), 'the switch turns it off (main has it)');
+    await chrome.ev('window.Settings && window.Settings.close && window.Settings.close(), activateTab(findWatchTab().id), 1');
+    await g.waitFor(`/Opens in a new tab/.test((${card('youtube')}).getAttribute('aria-label') || '')`, 8000).catch(() => 0);
+    check(await g.ev(`/Opens in a new tab/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'off: the tiles say "Opens in a new tab" again');
+    const nT = await chrome.ev('tabs.length');
+    await g.ev(`(${card('youtube')}).click(), 1`);
+    await chrome.waitFor(`tabs.length === ${nT + 1}`, 8000).catch(() => 0);
+    check((await chrome.ev(`tabs.length === ${nT + 1}`)) && !(await chrome.ev(ST)).open, 'off: a YouTube tile opens a new tab, no layer');
+    await chrome.ev('activateTab(findWatchTab().id), 1');
+    await chrome.ev('window.api.watchPlayer.setInside(true)');
+    check(await chrome.ev('window.__fsCalls') >= 1, 'the window fullscreen path was asked (stubbed: the test window never left its spot)', await chrome.ev('window.__fsCalls'));
+    g.close();
+    await q.quit();
+
+    /* ============================ boot B: DRM not ready (unsigned) ============================ */
+    try { fs.unlinkSync(EDGE_STUB); } catch (e) { /* none */ }
+    q = await launch({ cdp: CDP_PORT, env: env({ QUARTZ_TEST_VMP: 'unsigned' }) });
+    const c2 = q.chrome;
+    await c2.ev('window.toggleFullscreen = function () {}; 1');
+    await c2.ev('openWatchTab(), 1');
+    const gt2 = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
+    const g2 = await cdpTo(gt2);
+    await g2.waitFor(`!!(${card('disney')})`, 60000);
+    await g2.ev(`(${card('disney')}).click(), 1`);
+    await sleep(2500);
+    let stub2 = ''; try { stub2 = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub2 = ''; }
+    check(stub2.indexOf(FD) !== -1 && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ tile goes to Edge (the stub), no layer', stub2.trim().slice(0, 120));
+    await g2.ev(`(${card('youtube')}).click(), 1`);
+    const y2 = await c2.waitFor(`${ST}.open`, 8000).catch(() => false);
+    check(!!y2, 'DRM not ready: YouTube still plays in the layer');
+    g2.close();
+    await q.quit();
+  } finally {
+    srv.close();
+    try { await mock.close(); } catch (e) { /* gone */ }
+  }
+});

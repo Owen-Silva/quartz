@@ -768,6 +768,28 @@ contextBridge.exposeInMainWorld('api', {
   // readAt, profile, paused, ... }], leagues, allLeagues, tmdb: { hasKey,
   // keyMask, signupUrl }, cacheBytes, reading } -- and the TMDB key itself
   // never comes back out (a mask only).
+  // The Watch player layer (watch-player.js <-> watch-player-main.js).
+  watchPlayer: {
+    get: () => ipcRenderer.invoke('watch-player:get'),
+    setInside: (on) => ipcRenderer.invoke('watch-player:set-inside', { on: !!on }),
+    adopt: (wcId, service, origin) => ipcRenderer.invoke('watch-player:adopt', { wcId: Number(wcId), service: String(service || ''), origin: String(origin || '') }),
+    mode: (mode) => ipcRenderer.invoke('watch-player:mode', { mode: String(mode || '') }),
+    free: () => ipcRenderer.invoke('watch-player:free'),
+    alive: (wcId) => ipcRenderer.invoke('watch-player:alive', { wcId: Number(wcId) }),
+    memory: () => ipcRenderer.invoke('watch-player:memory'),
+    escape: (why, url) => ipcRenderer.invoke('watch-player:escape', { why: String(why || ''), url: String(url || '') }),
+    closed: (services) => ipcRenderer.invoke('watch-player:closed', { services: Array.isArray(services) ? services.map(String) : [] }),
+    sheetRect: (id, rect) => ipcRenderer.invoke('watch-player:sheet-rect', { id: Number(id), rect: rect && typeof rect === 'object' ? { x: +rect.x || 0, y: +rect.y || 0, width: +rect.width || 0, height: +rect.height || 0 } : null }),
+    sheetClose: (id, why) => ipcRenderer.invoke('watch-player:sheet-close', { id: Number(id), why: String(why || '') }),
+    // main -> chrome: play / command / key / left / blocked / gone / sheet / sheet-gone
+    on: (name, cb) => {
+      const ch = 'watch-player:' + String(name || '');
+      if (!/^watch-player:(play|command|key|left|blocked|gone|sheet|sheet-gone)$/.test(ch)) return () => {};
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on(ch, handler);
+      return () => ipcRenderer.removeListener(ch, handler);
+    }
+  },
   watch: {
     describe: () => ipcRenderer.invoke('watch:describe'),
     setEnabled: (id, on) => ipcRenderer.invoke('watch:set-enabled', String(id == null ? '' : id), !!on),
