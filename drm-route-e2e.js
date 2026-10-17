@@ -131,7 +131,11 @@ async function run(mode, port, watcher) {
     for (const [id, url] of TITLES) {
       const before = await chrome.ev('tabs.length');
       await g.ev('(console.log("quartz-watch:open " + ' + JSON.stringify(JSON.stringify({ url })) + '), 1)');
-      const recorded = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const line = readText(openStub).split('\n').find((l) => l.indexOf(JSON.stringify(url)) !== -1); if (line) return JSON.parse(line); await sleep(100); } return null; })();
+      // The first open of a run can land before main has the Watch page wired: say it once more then.
+      const say = () => g.ev('(console.log("quartz-watch:open " + ' + JSON.stringify(JSON.stringify({ url })) + '), 1)');
+      let recorded = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const line = readText(openStub).split('\n').find((l) => l.indexOf(JSON.stringify(url)) !== -1); if (line) return JSON.parse(line); await sleep(100); } return null; })();
+      if (!recorded) { console.log('[e2e] ' + mode + ': ' + id + ' open not heard in 8 s, said again'); await say(); }
+      if (!recorded) recorded = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const line = readText(openStub).split('\n').find((l) => l.indexOf(JSON.stringify(url)) !== -1); if (line) return JSON.parse(line); await sleep(100); } return null; })();
       if (mode === 'ready') {
         const rebased = url.replace(/^https:\/\/www\.[a-z]+\.com/, (m) => base + '/' + m.split('.')[1].replace('disneyplus', 'disney').replace('primevideo', 'prime'));
         const opened = await chrome.waitFor('(() => tabs.length > ' + before + ' && tabs.some((t) => String(t.url || "").indexOf(' + JSON.stringify(rebased) + ') === 0))()', 8000).catch(() => false);

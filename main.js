@@ -1150,7 +1150,8 @@ app.whenReady().then(async () => {
   const cdm = await drm.whenCdmReady(4000);
   if (!cdm.available) {
     console.log('[drm] ' + cdm.reason);
-    if (qlog) qlog.log.line('[drm] ' + cdm.reason);
+    // quartz.log lines are sentences (log-e2e checks every one).
+    if (qlog) qlog.log.line('Protected video is not available at start: ' + cdm.reason);
   }
   createWindow();
 
