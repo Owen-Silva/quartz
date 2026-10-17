@@ -37,11 +37,12 @@ const Merge = require('./watch/merge');
 const ADAPTERS = {
   youtube: require('./watch/adapters/youtube'),
   disney: require('./watch/adapters/disney'),
+  hulu: require('./watch/adapters/hulu'),
   prime: require('./watch/adapters/prime'),
   espn: require('./watch/adapters/espn'),
 };
-const IDS = ['youtube', 'disney', 'prime', 'espn'];
-const NAMES = { youtube: 'YouTube', disney: 'Disney+', prime: 'Prime Video', espn: 'ESPN' };
+const IDS = ['youtube', 'disney', 'hulu', 'prime', 'espn'];
+const NAMES = { youtube: 'YouTube', disney: 'Disney+', hulu: 'Hulu', prime: 'Prime Video', espn: 'ESPN' };
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -78,7 +79,23 @@ function expectedItems() {
     const read = { now, steps: { home: { ok: true, status: 200, url: 'https://www.disneyplus.com/home', finalUrl: 'https://www.disneyplus.com/home', title: f.title,
       extracted: { url: 'https://www.disneyplus.com/home', title: f.title, login: false }, error: null,
       captures: f.captures.map((c) => ({ url: 'https://disney.api.edge.bamgrid.com' + c.path, status: 200, json: c.json })) } } };
+    const hub = fxJson('disney-hulu-hub');
+    const hubUrl = 'https://www.disneyplus.com' + hub.finalPath;
+    read.steps.hulu = { ok: true, status: 200, url: 'https://www.disneyplus.com/browse/hulu', finalUrl: hubUrl, title: hub.title,
+      extracted: { url: hubUrl, title: hub.title, login: false, linkPrompt: false }, error: null,
+      captures: hub.captures.map((c) => ({ url: 'https://disney.api.edge.bamgrid.com' + c.path, status: 200, json: c.json })) };
     out.disney = Shape.cleanResult(ADAPTERS.disney.parse(read, ctx));
+  }
+  {
+    // Hulu: the home hub, then My Stuff, from the same fixtures the mock serves.
+    const read = { now, steps: {} };
+    for (const [name, fixture] of [['home', 'hulu-home'], ['mystuff', 'hulu-mystuff']]) {
+      const f = fxJson(fixture);
+      const u = 'https://www.hulu.com' + f.finalPath;
+      read.steps[name] = { ok: true, status: 200, url: u, finalUrl: u, title: f.title, extracted: { url: u, title: f.title, login: false }, error: null,
+        captures: f.captures.map((c) => ({ url: 'https://discover.hulu.com' + c.path, status: 200, json: c.json })) };
+    }
+    out.hulu = Shape.cleanResult(ADAPTERS.hulu.parse(read, ctx));
   }
   {
     const f = fxJson('prime-home');
@@ -862,14 +879,14 @@ if (require.main === module) {
 
     // Every service's rows, with the titles the adapters make of the same fixtures.
     const items = (snap1 && snap1.items) || [];
-    for (const id of ['youtube', 'disney', 'prime']) {
+    for (const id of ['youtube', 'disney', 'hulu', 'prime']) {
       const want = expect[id].items.map((it) => it.title).sort();
       const got = items.filter((it) => it.service === id).map((it) => it.title).sort();
       check(want.length > 0 && JSON.stringify(want) === JSON.stringify(got), NAMES[id] + ': the ' + want.length + ' fixture titles reached the page, exactly', { missing: want.filter((t) => got.indexOf(t) === -1).slice(0, 4), extra: got.filter((t) => want.indexOf(t) === -1).slice(0, 4) });
     }
     const cards1 = await g.ev(UI.cards);
     const rowsWant = Merge.buildRows({ youtube: { enabled: true, items: items.filter((i) => i.service === 'youtube'), state: 'ok' }, disney: { enabled: true, items: items.filter((i) => i.service === 'disney'), state: 'ok' }, prime: { enabled: true, items: items.filter((i) => i.service === 'prime'), state: 'ok' }, espn: { enabled: true, items: items.filter((i) => i.service === 'espn'), state: 'ok' } });
-    for (const id of ['youtube', 'disney', 'prime']) {
+    for (const id of ['youtube', 'disney', 'hulu', 'prime']) {
       const drawn = cards1.filter((c) => c.service === id && c.drawn).map((c) => c.title);
       const firsts = expect[id].items.slice(0, 3).map((it) => it.title);
       check(firsts.every((t) => drawn.indexOf(t) !== -1), NAMES[id] + ': its first titles are drawn on cards (' + drawn.length + ' cards)', { want: firsts, drawnSample: drawn.slice(0, 4) });
@@ -903,7 +920,7 @@ if (require.main === module) {
     check(readText(OPEN_STUB).indexOf(JSON.stringify({ url: ytUrl, edge: false })) !== -1, 'the YouTube open is recorded with edge:false');
     await chrome.ev(`(() => { const t = tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube'))}) === 0); if (t) closeTab(t.id); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
-    for (const id of ['disney', 'prime']) {
+    for (const id of ['disney', 'hulu', 'prime']) {
       const u = await openCardOf(id);
       let inEdge = false;
       try { inEdge = await new Promise((r) => { const t0 = Date.now(); const tk = setInterval(() => { if (u && readText(EDGE_STUB).indexOf(u) !== -1) { clearInterval(tk); r(true); } else if (Date.now() - t0 > 6000) { clearInterval(tk); r(false); } }, 150); }); } catch (e) { inEdge = false; }
@@ -1123,10 +1140,12 @@ if (require.main === module) {
       return t;
     }
     const cardsOfSvc = (c, id) => c.filter((x) => x.service === id);
-    const baseCount = { disney: cardsOfSvc(cards1, 'disney').length, prime: cardsOfSvc(cards1, 'prime').length, youtube: cardsOfSvc(cards1, 'youtube').length };
+    const baseCount = { disney: cardsOfSvc(cards1, 'disney').length, hulu: cardsOfSvc(cards1, 'hulu').length, prime: cardsOfSvc(cards1, 'prime').length, youtube: cardsOfSvc(cards1, 'youtube').length };
     const failLine = (p, id, re) => !!p[id] && re.test(p[id].title + ' ' + p[id].aria);
 
-    const t1 = await round('round 1', { youtube: 'signed-out', prime: 'robot' }, (p, c) => {
+    const t1 = await round('round 1', { youtube: 'signed-out', hulu: 'signed-out', prime: 'robot' }, (p, c) => {
+      check(failLine(p, 'hulu', /Signed out: sign in to hulu\.com in Quartz/i) && p.hulu.act === 'Sign in', 'signed-out (Hulu): its tile says sign in to hulu.com, and offers Sign in', p.hulu);
+      check(cardsOfSvc(c, 'hulu').length === 0, 'signed-out (Hulu): its rows are no longer shown as his', cardsOfSvc(c, 'hulu').length);
       check(failLine(p, 'youtube', /Signed out: sign in to YouTube/i) && p.youtube.act === 'Sign in', 'signed-out (YouTube): its tile says so with the reason and offers Sign in', p.youtube);
       check(cardsOfSvc(c, 'youtube').length === 0, 'signed-out (YouTube): its rows are no longer shown as his', cardsOfSvc(c, 'youtube').length);
       check(failLine(p, 'prime', /robot check/i) && p.prime.act === 'Retry' && /Couldn't read/.test(p.prime.small), 'robot check (Prime Video): its tile says "Couldn\'t read", the reason, and Retry', p.prime);
@@ -1134,7 +1153,8 @@ if (require.main === module) {
       check(cardsOfSvc(c, 'disney').length === baseCount.disney && cardsOfSvc(c, 'disney').every((x) => !x.stale) && p.disney && p.disney.cls.indexOf('st-ok') !== -1, 'while YouTube and Prime fail, Disney+ keeps its rows', cardsOfSvc(c, 'disney').length);
     });
     await sleep(Math.max(0, t1 + FORCE_GAP_MS - Date.now()));
-    const t2 = await round('round 2', { youtube: 'changed-layout', disney: 'down', prime: 'slow', espn: 'changed-layout' }, (p, c, sn) => {
+    const t2 = await round('round 2', { youtube: 'changed-layout', disney: 'down', hulu: 'changed-layout', prime: 'slow', espn: 'changed-layout' }, (p, c, sn) => {
+      check(failLine(p, 'hulu', /Couldn.t read: the page loaded but no Keep Watching data matched \(Hulu changed its layout\?\)/i) && p.hulu.act === 'Retry', 'couldn\'t read (Hulu, changed layout): the reason and Retry', p.hulu);
       check(failLine(p, 'youtube', /layout/i) && p.youtube.act === 'Retry', 'changed layout (YouTube): "Couldn\'t read" with the layout reason and Retry', p.youtube);
       check(failLine(p, 'disney', /offline|didn.t answer|refused|connect/i) && p.disney.act === 'Retry', 'down (Disney+, connection refused): the reason and Retry', p.disney);
       check(failLine(p, 'prime', /timed out after 20 s/i) && p.prime.act === 'Retry', 'slow (Prime Video, never answers): "timed out after 20 s" and Retry', p.prime);
@@ -1149,16 +1169,17 @@ if (require.main === module) {
     await shot(g, 'failures-1280', 1280, 800, 'failure states: YouTube changed layout, Disney+ down (popover open), Prime timed out, ESPN changed shape; cached rows dimmed', say);
     await press(g, 'Escape');
     await sleep(Math.max(0, t2 + FORCE_GAP_MS - Date.now()));
-    const t3 = await round('round 3', { disney: 'signed-out', espn: 'down', youtube: 'down', prime: 'changed-layout' }, (p, c) => {
+    const t3 = await round('round 3', { disney: 'signed-out', hulu: 'down', espn: 'down', youtube: 'down', prime: 'changed-layout' }, (p, c) => {
+      check(failLine(p, 'hulu', /offline|didn.t answer|refused|connect/i) && p.hulu.act === 'Retry', 'down (Hulu): the reason and Retry', p.hulu);
       check(failLine(p, 'disney', /Signed out: sign in to Disney\+/i) && p.disney.act === 'Sign in', 'signed-out (Disney+): the reason and Sign in', p.disney);
       check(failLine(p, 'espn', /offline|didn.t answer|refused|connect/i) && p.espn.act === 'Retry', 'down (ESPN): the reason and Retry', p.espn);
       check(failLine(p, 'youtube', /offline|didn.t answer|refused|connect/i) && p.youtube.act === 'Retry', 'down (YouTube): the reason and Retry', p.youtube);
       check(failLine(p, 'prime', /layout/i) && p.prime.act === 'Retry', 'changed layout (Prime Video): the reason and Retry', p.prime);
     });
     await sleep(Math.max(0, t3 + FORCE_GAP_MS - Date.now()));
-    const t4 = await round('round 4 (recovery)', { youtube: 'ok', disney: 'ok', prime: 'ok', espn: 'ok' }, (p, c) => {
+    const t4 = await round('round 4 (recovery)', { youtube: 'ok', disney: 'ok', hulu: 'ok', prime: 'ok', espn: 'ok' }, (p, c) => {
       for (const id of IDS) check(!!p[id] && p[id].cls.indexOf('st-ok') !== -1 && !p[id].act, 'recovery: ' + NAMES[id] + ' reads OK again after Retry', p[id]);
-      for (const id of ['youtube', 'disney', 'prime']) check(cardsOfSvc(c, id).length === baseCount[id] && cardsOfSvc(c, id).every((x) => !x.stale), 'recovery: ' + NAMES[id] + ' rows are back and current', cardsOfSvc(c, id).length + ' of ' + baseCount[id]);
+      for (const id of ['youtube', 'disney', 'hulu', 'prime']) check(cardsOfSvc(c, id).length === baseCount[id] && cardsOfSvc(c, id).every((x) => !x.stale), 'recovery: ' + NAMES[id] + ' rows are back and current', cardsOfSvc(c, id).length + ' of ' + baseCount[id]);
     });
 
     // A quartz.log line for every forced failure.

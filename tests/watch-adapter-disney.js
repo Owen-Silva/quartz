@@ -247,7 +247,7 @@ module.exports = async function (check) {
   /* ---------- steps() ---------- */
   var steps = disney.steps(CTX);
   var s0 = steps && steps[0] || {};
-  check(disney.id === 'disney' && Array.isArray(steps) && steps.length === 1 && s0.name === 'home' && s0.type === 'view', 'steps: one view step named home', js(steps && steps.map(function (s) { return s.name; })));
+  check(disney.id === 'disney' && Array.isArray(steps) && steps.length === 2 && s0.name === 'home' && s0.type === 'view' && !s0.optional, 'steps: the home view first (required), then the Hulu hub', js(steps && steps.map(function (s) { return s.name; })));
   check(s0.url === 'https://www.disneyplus.com/home' && s0.budgetMs === 20000 && s0.scroll === 3 && typeof s0.settleMs === 'number', 'steps: home url, 20 s budget, scrolls 3 times', s0.url);
   var compiled = null;
   try { compiled = new Function('return (' + s0.extract + ')'); } catch (e) { compiled = e; }
@@ -286,4 +286,86 @@ module.exports = async function (check) {
   check(s0.enough(caps) === true, 'enough: true once Continue Watching and the Watchlist both have items', '');
   check(s0.enough(caps.slice(0, 1)) === false, 'enough: false while the Watchlist is still a lazy empty set', '');
   check(s0.enough([]) === false && s0.enough(null) === false && s0.enough('x') === false && s0.enough([null, 1, { url: 3 }]) === false, 'enough: false (never throws) on junk', '');
+
+  /* ---------- year + type (what tells two services' copies of a title apart) ---------- */
+  var moanaY = byTitle(res, 'Moana 2') || {};
+  check(moanaY.year === 2024 && moanaY.type === 'movie', 'year/type: a film with a runtime -> movie, its release year', moanaY.year + ' ' + moanaY.type);
+  check((byTitle(res, 'Bluey') || {}).type === 'show' && (byTitle(res, 'Mickey Mouse Clubhouse') || {}).year === 2006, 'year/type: an episode -> show; a series row keeps its start year', '');
+  var omitbY = byTitle(res, 'Only Murders in the Building') || {};
+  check(omitbY.year === null && omitbY.type === '', 'year/type: nothing in Disney+\'s fields -> null and "" (no guess)', omitbY.year + ' ' + js(omitbY.type));
+
+  /* ---------- Hulu inside Disney+: the Hulu hub ---------- */
+  var hubFx = fixture('disney-hulu-hub.json');
+  check(/^shape from /.test(hubFx._fixture) && hubFx._fixture.indexOf('unverified against a live account') !== -1, 'fixture disney-hulu-hub.json has an honest _fixture label', '');
+  function hubStep(fx, over) {
+    var finalUrl = SITE + fx.finalPath;
+    var st = {
+      ok: true, url: SITE + '/browse/hulu', finalUrl: finalUrl, title: fx.title, status: 200,
+      extracted: { url: finalUrl, title: fx.title, login: false, linkPrompt: false },
+      captures: (fx.captures || []).map(function (c) { return { url: API_HOST + c.path, status: c.status || 200, json: c.json }; }),
+      error: null
+    };
+    for (var k in (over || {})) st[k] = over[k];
+    return st;
+  }
+  function withHub(st) { var rd = readFrom(home); rd.steps.hulu = st; return rd; }
+  var h = run(withHub(hubStep(hubFx)));
+  check(h.state === 'ok' && h.warnings.length === 0, 'hub: ok, no warning when Hulu reads', h.state + ' ' + js(h.warnings));
+  check(js(titles(h).slice(0, expectTitles.length)) === js(expectTitles), 'hub: the home rows come first, unchanged', js(titles(h)));
+  var hubTitles = titles(h).slice(expectTitles.length);
+  check(js(hubTitles) === js(['Paradise', 'The Simpsons', 'Abbott Elementary', 'King of the Hill', 'Prey']),
+    'hub: its rows in page order (promo strip, locked title and duplicates out; 4 rows max)', js(hubTitles));
+  var huluItems = h.items.slice(expectTitles.length);
+  check(huluItems.every(function (i) { return i.badge === 'Hulu' && i.service === 'disney' && i.kind === 'rec'; }), 'hub: every hub item is a Disney+ pick badged Hulu', js(huluItems.map(function (i) { return i.badge + '/' + i.kind; })));
+  var paradise = byTitle(h, 'Paradise') || {};
+  check(paradise.group === 'Hulu Originals' && paradise.year === 2025 && paradise.type === 'show' && paradise.subtitle === 'Drama, Thriller · 2025',
+    'hub: Paradise keeps its row name (already says Hulu), year, show', js(paradise));
+  check(paradise.url === SITE + '/browse/entity-9a1b2c3d-4e5f-4061-8a7b-8c9d0e1f2a31' && paradise.image === RIPCUT + 'PARADISETILE178/scale?width=640&aspectRatio=1.78', 'hub: Paradise opens its Disney+ page, ripcut art', paradise.url);
+  check((byTitle(h, 'King of the Hill') || {}).group === 'Hulu: Comedies' && (byTitle(h, 'Prey') || {}).group === 'Hulu: Movies', 'hub: a row whose name does not say Hulu is named "Hulu: <row>"', '');
+  var prey = byTitle(h, 'Prey') || {};
+  check(prey.type === 'movie' && prey.year === 2022, 'hub: Prey is a 2022 movie', prey.type + ' ' + prey.year);
+  check(!byTitle(h, 'Locked Hulu Title') && !byTitle(h, 'Fifth Row Show'), 'hub: an upsell title and a fifth row are left out', '');
+  check(h.items.filter(function (i) { return i.title === 'Shōgun' && i.kind === 'rec'; }).length === 1, 'hub: Shōgun (on home and the hub) shows once', '');
+  var simpsonsWl = h.items.filter(function (i) { return i.title === 'The Simpsons' && i.kind === 'watchlist'; })[0] || {};
+  check(simpsonsWl.badge === 'Hulu', 'hub: a Watchlist title the Hulu hub lists is badged Hulu (Disney+\'s own grouping)', simpsonsWl.badge);
+  check((byTitle(h, 'Bluey') || {}).badge === '' && (byTitle(h, 'Bruins at Maple Leafs') || {}).badge === 'ESPN', 'hub: titles the hub does not list keep their own badge', '');
+
+  var hl = run(withHub(hubStep(hubFx, { extracted: { url: SITE + hubFx.finalPath, title: hubFx.title, login: false, linkPrompt: true } })));
+  check(hl.state === 'ok' && js(hl.warnings) === js([disney._internal.HULU_NOT_LINKED]) && titles(hl).indexOf('Paradise') !== -1,
+    'hub: Disney+ offering "Link your Hulu profile" -> the hub still reads, and a note says Hulu is not linked and how', js(hl.warnings));
+  check(/Disney\+ → Profile → Link Hulu/.test(disney._internal.HULU_NOT_LINKED) && disney._internal.HULU_NOT_LINKED.length <= 160, 'hub: the not-linked note names the fix and fits a warning', '');
+
+  var lockedFx = JSON.parse(JSON.stringify(hubFx));
+  shape.walk(lockedFx.captures, function (node) {
+    if (node && Array.isArray(node.actions)) node.actions = [{ type: 'upsell' }].concat(node.actions.filter(function (a) { return a.type !== 'upsell'; }));
+  });
+  var hk = run(withHub(hubStep(lockedFx)));
+  check(hk.state === 'ok' && js(hk.warnings) === js([disney._internal.HULU_LOCKED]) && titles(hk).length === expectTitles.length,
+    'hub: every hub title locked -> no Hulu picks, and a note says Hulu is not in the plan', js(hk.warnings));
+
+  var hn = run(withHub(hubStep(hubFx, { finalUrl: SITE + '/home', extracted: { url: SITE + '/home', title: 'Home | Disney+', login: false }, captures: [] })));
+  check(js(hn.warnings) === js([disney._internal.HULU_NO_HUB]) && hn.items.length === res.items.length, 'hub: /browse/hulu landing back on /home -> "no Hulu hub" note, home rows kept', js(hn.warnings));
+  var ht = run(withHub(hubStep(hubFx, { ok: false, captures: [], error: { code: 'timeout', detail: 'timed out' } })));
+  check(ht.state === 'ok' && ht.warnings.length === 1 && /Hulu hub in Disney\+ didn.t load \(timed out after 15 s\)/.test(ht.warnings[0]), 'hub: a timed-out hub is a note with the reason, never silence', js(ht.warnings));
+  var hc = run(withHub(hubStep(hubFx, { captures: [] })));
+  check(js(hc.warnings) === js([disney._internal.HULU_NO_HUB]), 'hub: a hub page that fetched no rows at all -> "no Hulu hub" note', js(hc.warnings));
+  var unnamed = JSON.parse(JSON.stringify(hubFx));
+  unnamed.captures = unnamed.captures.slice(0, 1);
+  unnamed.captures[0].json.data.page.containers.forEach(function (c) { c.visuals = {}; c.style = { name: 'standard_compact' }; });
+  var hu = run(withHub(hubStep(unnamed)));
+  check(js(hu.warnings) === js([disney._internal.HULU_HUB_EMPTY]), 'hub: rows with no names -> "none of its rows matched" note', js(hu.warnings));
+  var hs = run(withHub(hubStep(hubFx, { finalUrl: SITE + '/login', captures: [] })));
+  check(hs.state === 'ok' && /sign in again/.test(hs.warnings[0] || ''), 'hub: a hub that bounced to /login is a note; the home rows still count', js(hs.warnings));
+  var so = readFrom(signedOut);
+  so.steps.hulu = hubStep(hubFx);
+  check(run(so).state === 'signed-out', 'hub: a signed-out home is signed out, whatever the hub step holds', '');
+
+  var s1 = steps[1] || {};
+  check(s1.name === 'hulu' && s1.type === 'view' && s1.optional === true && s1.url === SITE + '/browse/hulu' && s1.budgetMs === 15000,
+    'steps: the Hulu hub view (optional, /browse/hulu, 15 s)', js({ name: s1.name, url: s1.url, optional: s1.optional, budget: s1.budgetMs }));
+  var hubCaps = hubStep(hubFx).captures;
+  check(s1.enough(hubCaps) === true && s1.enough([]) === false && s1.enough(null) === false, 'enough (hub): true once two named rows have items; false on nothing', '');
+  var hx = vm.runInNewContext(s1.extract, { document: { title: 'Hulu Movies and Shows | Disney+', body: { innerText: 'Hulu\nLink your Hulu profile to see your shows' }, querySelector: function () { return null; } }, location: { href: SITE + '/browse/page-x' } }, { timeout: 1000 });
+  var hy = vm.runInNewContext(s1.extract, { document: { title: 'Hulu', body: { innerText: 'Hulu Originals\nTrending on Hulu' }, querySelector: function () { return null; } }, location: { href: SITE + '/browse/page-x' } }, { timeout: 1000 });
+  check(hx && hx.linkPrompt === true && hy && hy.linkPrompt === false && hy.login === false, 'extract (hub): sees a "Link your Hulu profile" prompt, and only that', js([hx, hy]));
 };
