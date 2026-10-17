@@ -75,15 +75,6 @@
       covers: 'Includes Hulu (once your Hulu profile is linked) and the ESPN hub'
     },
     {
-      // hulu.com's own web app (still separate in Oct 2026; FEASIBILITY.md "Hulu (10-17)"). everyMin
-      // is Disney+'s, set below the table, so the two Disney services always read on one floor.
-      id: 'hulu', name: 'Hulu', short: 'Hulu', edge: true, everyMin: null, needsSignIn: true,
-      home: 'https://www.hulu.com/hub/home',
-      signIn: 'https://www.hulu.com/login',
-      searchUrl: 'https://www.hulu.com/search?q=',
-      covers: 'hulu.com’s own Keep Watching, My Stuff and picks. Hulu titles inside Disney+ show under Disney+'
-    },
-    {
       id: 'prime', name: 'Prime Video', short: 'Prime', edge: true, everyMin: 60, needsSignIn: true,
       home: 'https://www.primevideo.com/',
       signIn: 'https://www.primevideo.com/',
@@ -99,8 +90,19 @@
     }
   ];
 
-  // Hulu reads on Disney+'s floor, whatever that floor is (one Disney account, one politeness budget).
-  SERVICES.forEach(function (s) { if (s.id === 'hulu') s.everyMin = serviceById('disney').everyMin; });
+  /*
+   * Hulu: hulu.com's own web app (still separate in Oct 2026; FEASIBILITY.md "Hulu (10-17)"),
+   * right after Disney+ in the strip. It reads on Disney+'s floor, whatever that floor is (one
+   * Disney account, one politeness budget). Added here, not in the table, so it never sits on a
+   * line another lane edits.
+   */
+  SERVICES.splice(SERVICES.indexOf(serviceById('disney')) + 1, 0, {
+    id: 'hulu', name: 'Hulu', short: 'Hulu', edge: true, everyMin: serviceById('disney').everyMin, needsSignIn: true,
+    home: 'https://www.hulu.com/hub/home',
+    signIn: 'https://www.hulu.com/login',
+    searchUrl: 'https://www.hulu.com/search?q=',
+    covers: 'hulu.com’s own Keep Watching, My Stuff and picks. Hulu titles inside Disney+ show under Disney+'
+  });
 
   var SERVICE_IDS = SERVICES.map(function (s) { return s.id; });
   var KINDS = ['resume', 'rec', 'watchlist', 'live', 'upcoming', 'replay', 'search'];
