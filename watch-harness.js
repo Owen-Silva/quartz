@@ -579,6 +579,31 @@ async function reviewFixTests() {
     check(w.calls.length === 4 && w.maxConcurrent === 1 && s.services.every((x) => x.state === 'ok' && !x.queued), 'fix6: the first reader starts at the end of the grace, then the rest, one at a time', w.calls);
   } finally { w.cleanup(); }
 
+  // --- 5b. reads queued while in sight leave the queue when the page goes behind another tab;
+  //         a Read now still reads out of sight
+  w = fakeWorld({ bootGraceMs: 10000 });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    check(g.last('__applyWatch').services.every((x) => x.queued === true), 'fix5b: in sight during the grace: every due read queued');
+    g.say('quartz-watch:visible {"visible":false}');
+    await w.settle();
+    check(g.last('__applyWatch').services.every((x) => !x.queued), 'fix5b: behind another tab: the queue empties', g.last('__applyWatch').services.map((x) => x.id + ':' + x.queued));
+    w.advance(11000);
+    await w.fire();
+    await w.settle();
+    check(w.calls.length === 0, 'fix5b: the grace ends out of sight: nothing reads', w.calls);
+    w.wm.refresh('youtube');
+    w.advance(1);
+    await w.fire();
+    await w.settle();
+    check(w.calls.length > 0 && w.calls.every((c) => c.indexOf('youtube') === 0), 'fix5b: Read now reads YouTube even out of sight, and only it', w.calls);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.some((c) => c.indexOf('disney') === 0) && w.calls.some((c) => c.indexOf('espn') === 0), 'fix5b: back in sight, the rest reads', w.calls);
+  } finally { w.cleanup(); }
+
   // --- 7. Forget clears memory too: search answers, the search gap, pauses, Retry stamps
   w = fakeWorld();
   try {

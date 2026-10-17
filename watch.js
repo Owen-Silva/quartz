@@ -5,7 +5,8 @@
    (watch-main.js) the way search.html does: console lines out,
    window.__apply* calls in.
 
-     out  quartz-watch:hello    {}                       on load
+     out  quartz-watch:hello    {"visible":bool}         on load (and a Retry)
+          quartz-watch:visible  {"visible":bool}         whenever "in sight" changes
           quartz-watch:refresh  {"service":"youtube"|null} Retry / Read now
           quartz-watch:open     {"url":"https://..."}     a card, a cell, a button
           quartz-watch:signin   {"service":"disney"}      Sign in
@@ -14,6 +15,8 @@
      in   window.__applyWatch(snapshot)
           window.__applyWatchSearch(answer)               stale seq = ignored
           window.__applyWatchResult({ action, ok, how, reason })
+          window.__watchFront(bool)                       app.js: is this tab on screen
+     e2e  window.__watchVisible()                         read-only: what main was told
 
    Layout ("Lens"): the stage at the top shows the title the lens is
    on; the rows move through one still band on the shared spring;
@@ -31,7 +34,8 @@
      heads, the stage, the grid); one failing service never blanks
      the page; its cached rows stay, dimmed, "as of 3 h ago".
    - Nothing moves at rest: no infinite animation, one minute timer
-     (stopped while hidden) for the "3 min ago" words.
+     (stopped while out of sight: hidden, or a background tab) for the
+     "3 min ago" words.
    ============================================================ */
 (function () {
   'use strict';
@@ -43,6 +47,7 @@
   var SEARCH_DEBOUNCE_MS = 300;
   var SEARCH_MIN_CHARS = 2;     // a shorter query searches his own rows only, never YouTube
   var BOOT_TIMEOUT_MS = 5000;   // no first answer from Quartz by then: say so, with a Retry
+  var FRONT_WAIT_MS = 3000;     // no word from the chrome on front/back by then (an older Quartz): in front
   var HOVER_MS = 140;
   var WHEEL_GAP_MS = 380;
   var STAGE_SWAP_MS = 150;
@@ -88,7 +93,11 @@
     failEl: null,
     answered: false,        // any answer from Quartz since the page loaded
     pendingFail: '',        // a failure that arrived before the DOM
-    resizeQueued: false
+    resizeQueued: false,
+    front: null,            // the chrome's word: this tab is on screen (true) / behind another (false); null = not told yet
+    frontTimer: 0,
+    told: null,             // "in sight" as main last heard it (hello / visible); null before the first hello
+    said: []                // the last few of those lines, for the e2e (__watchVisible)
   };
   var $ = {};
 
@@ -144,8 +153,66 @@
       showFailure('Quartz didn’t answer', 'Watch asked Quartz for your rows ' + Math.round(BOOT_TIMEOUT_MS / 1000) +
         ' seconds ago and heard nothing back. Watch may have failed to start; Quartz’s log says why.');
     }, BOOT_TIMEOUT_MS);
-    send('hello', { visible: !document.hidden });
+    // An older Quartz never says front or back: after FRONT_WAIT_MS the tab counts as in front.
+    if (S.front === null && !S.frontTimer) {
+      S.frontTimer = setTimeout(function () {
+        S.frontTimer = 0;
+        if (S.front !== null) return;
+        S.front = true;
+        sightChanged();
+      }, FRONT_WAIT_MS);
+    }
+    tellSight('hello');
   }
+
+  /* In sight = Quartz may read for this page. document.hidden alone is not enough: Quartz hides
+     a background tab with display:none, and that <webview>'s guest still says "visible" (it
+     only turns hidden while the whole window is minimised). So the chrome tells the page
+     whether its tab is on screen (app.js syncWatchFront: the tab in front, or either half of
+     the pair in front) and the page folds that into its own hidden flag.
+
+     Until the chrome has spoken the page does NOT claim to be in sight: main queues every due
+     read on a visible hello and runs the queue whatever the page says next, so a Watch tab
+     restored in the background must say "not visible" in its hello. The cache still draws at
+     once (main answers every hello with its snapshot); the chrome's word comes right after
+     dom-ready, and an older chrome that never speaks counts as "in front" after FRONT_WAIT_MS. */
+  function inSight() { return !document.hidden && S.front === true; }
+
+  /** hello always goes; visible only when the answer changed since main last heard it. */
+  function tellSight(verb) {
+    var v = inSight();
+    if (verb !== 'hello' && v === S.told) return;
+    S.told = v;
+    S.said.push({ verb: verb, visible: v, at: Date.now() });
+    if (S.said.length > 20) S.said.shift();
+    send(verb, { visible: v });
+  }
+
+  /** The window was minimised / shown, or the chrome moved this tab: tell main, and run the
+      minute timer only while the page is in sight. Before the first hello: hello carries it. */
+  function sightChanged() {
+    if (S.told === null) return;
+    var was = S.told;
+    tellSight('visible');
+    if (S.told === was) return;
+    if (!S.told) { clearTimeout(S.tickTimer); S.tickTimer = 0; }
+    else { refreshAgo(); scheduleTick(); }
+  }
+
+  window.__watchFront = function (on) {
+    S.front = on !== false;
+    clearTimeout(S.frontTimer);
+    S.frontTimer = 0;
+    try { sightChanged(); } catch (err) { /* the page keeps what it showed; main was told first */ }
+  };
+
+  /** Read-only, for the e2e: what main was last told, and why. */
+  window.__watchVisible = function () {
+    return {
+      visible: S.told === true, front: S.front, hidden: !!document.hidden,
+      said: S.said.map(function (x) { return { verb: x.verb, visible: x.visible, at: x.at }; })
+    };
+  };
   function retryHello() {
     clearFailure();
     S.answered = false;
@@ -1963,12 +2030,12 @@
   function scheduleTick() {
     clearTimeout(S.tickTimer);
     S.tickTimer = 0;
-    if (document.hidden || !S.snap) return;
+    if (!inSight() || !S.snap) return;
     S.tickTimer = setTimeout(tick, TICK_MS);
   }
   function tick() {
     S.tickTimer = 0;
-    if (document.hidden) return;
+    if (!inSight()) return;
     refreshAgo();
     scheduleTick();
   }
@@ -2165,10 +2232,9 @@
       closePop(false);
     });
     document.addEventListener('visibilitychange', function () {
-      // Quartz reads only while a Watch page is on screen (and pauses timed re-reads while not).
-      send('visible', { visible: !document.hidden });
-      if (document.hidden) { clearTimeout(S.tickTimer); S.tickTimer = 0; }
-      else { refreshAgo(); scheduleTick(); }
+      // Quartz reads only while a Watch page is in sight (and pauses timed re-reads while not):
+      // a minimised window here, a background tab through window.__watchFront.
+      sightChanged();
     });
 
     S.ready = true;

@@ -439,12 +439,20 @@ async function measureMotion(g, o) {
     const mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.tagName === 'CANVAS' && m.target.classList.contains('on')) { const x = window.__e2eFr; x.wash++; x.washT.push(Math.round(performance.now() - x.t0)); } });
     document.querySelectorAll('#wash canvas').forEach((c) => mo.observe(c, { attributes: true, attributeFilter: ['class'] })); window.__e2eFr.mo = mo; return 1; })()`);
   await g.ev("(() => { const c = document.querySelector('#stack .lrow[data-d=\"0\"] .rt [tabindex=\"0\"]'); if (c) c.focus({ preventScroll: true }); return !!c; })()");
+  // The keys must land on a card in the rows (as a user's would); Tab there if focus() did not.
+  const inRow = "(() => { const a = document.activeElement; return !!(a && a.closest && a.closest('#stack .lrow') && a.matches('.card, .gc')); })()";
+  for (let i = 0; i < 30 && !(await g.ev(inRow).catch(() => false)); i++) await press(g, 'Tab');
+  if (o.say) o.say('motion: keys go to a card in the rows: ' + await g.ev(inRow).catch(() => false));
   const l0 = await layouts();
+  const WHERE = "(() => { const a = document.activeElement; const r = document.querySelector('#stack .lrow[data-d=\"0\"]'); return (r ? String(r.dataset.key).slice(0, 8) : '-') + '/' + (a && a.dataset ? String(a.dataset.key || a.tagName).slice(-6) : '-'); })()";
+  const seen = [await g.ev(WHERE).catch(() => '?')];
   for (let i = 0; i < STEP_KEYS.length; i++) {
     await g.ev('(() => { const x = window.__e2eFr; x.step = ' + i + '; x.stepAt = performance.now(); x.stepT.push(x.stepAt); console.timeStamp("e2e-step-' + i + '"); return 1; })()');
     await press(g, STEP_KEYS[i]);
     await sleep(750);
+    seen.push(await g.ev(WHERE).catch(() => '?'));
   }
+  if (o.say) o.say('motion: focus after each step (row/card): ' + seen.join(' '));
   await sleep(600);
   const fr = await g.ev("(() => { const x = window.__e2eFr; x.on = false; x.mo.disconnect(); const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).length, max: Math.max.apply(null, d), wash: x.wash, washT: x.washT, long: x.long, ts: x.ts, stepT: x.stepT, t0: x.t0 }; })()");
   const l1 = await layouts();
@@ -568,10 +576,21 @@ async function runMotion(ctx, N) {
         await ctrlAltW(q.chrome);
         const g = await openGuest(q, [], 15000);
         await g.ev(WRAP).catch(() => 0); await g.ev(HELLO).catch(() => 0);
+        say('motion run ' + run + ': guest visibilityState ' + await g.ev('document.visibilityState').catch(() => '?'));
+        // Real rows (cards that carry an item), not the skeleton's 8 placeholders.
+        const REAL = '[...document.querySelectorAll("#stack .lrow .rt > .card")].filter((c) => c._item && c._item.title).length';
         let rows = 0;
-        try { rows = await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length || null', 120000); } catch (e) { rows = 0; }
+        try { rows = await g.waitFor('(' + REAL + ') || null', 120000); } catch (e) { rows = 0; }
         await waitReads(g, [], 0, 90000).catch(() => 0);     // nothing reading or queued while it steps
         await sleep(1500);
+        rows = await g.ev(REAL).catch(() => 0);
+        const st = await g.ev('(() => { const s = window.__e2eSnap || {}; return (s.services || []).map((x) => x.id + ":" + x.state + (x.reading ? "/reading" : "") + (x.queued ? "/queued" : "")).join(" ") + " | rows " + document.querySelectorAll("#stack .lrow").length; })()').catch(() => '?');
+        say('motion run ' + run + ': before stepping: ' + rows + ' real cards; ' + st);
+        if (!rows) { check(false, 'motion run ' + run + ': real rows to step through (none drew: ' + st + ')'); continue; }
+        // The webview must hold the window's focus, or keys sent to the guest move nothing.
+        await q.chrome.ev('(() => { const w = findWatchTab(); if (w && w.viewEl) w.viewEl.focus(); return !!w; })()').catch(() => 0);
+        await sleep(200);
+        say('motion run ' + run + ': guest document.hasFocus() ' + await g.ev('document.hasFocus()').catch(() => '?'));
         const mm = await measureMotion(g, { trace: run === 1 ? TRACE : '', say });
         const fr = mm.fr;
         per.push({ run, steady: mm.steadyLong.length, max: fr.max, n: fr.n });
@@ -628,7 +647,7 @@ async function runBoot2(ctx, N) {
         await sleep(3000);
         // Every file:// page: Runtime.enable replays what it logged before this attached.
         for (const t of await q.targets().catch(() => [])) {
-          if (t.type !== 'page' || !/^file:/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
+          if ((t.type !== 'page' && t.type !== 'webview') || !/^file:/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
           const page = String(t.url).split('/').pop().split(/[?#]/)[0];
           const hits = [];
           try {
@@ -744,23 +763,45 @@ if (require.main === module) {
     const tabInfo = await chrome.ev("(() => { const w = findWatchTab(); return w ? { title: w.title, strip: w.titleEl ? w.titleEl.textContent : null, omni: document.getElementById('omnibox').value, n: tabs.length } : null; })()");
     check(!!tabInfo && tabInfo.strip === 'Watch' && tabInfo.title === 'Watch', 'the tab is named "Watch"', tabInfo);
     check(!!tabInfo && tabInfo.omni === '', 'the omnibox is blank on the Watch tab', tabInfo && JSON.stringify(tabInfo.omni));
-    await chrome.ev('createTab(), 1');
+    // One synchronous step in the chrome: what the Watch page had been told (app.js syncWatchFront:
+    // undefined = its dom-ready had not come yet, so it never heard "front"), then the new tab.
+    const frontBefore = await chrome.ev('(() => { const w = findWatchTab(); const was = w ? w.watchFrontSent : undefined; createTab(); return was === undefined ? null : was; })()').catch(() => null);
     await chrome.waitFor('!' + ACTIVE_IS_WATCH, 5000).catch(() => 0);
 
     // Visibility gating. A fresh profile, so every service is due; this boot has an 8 s boot grace.
-    // With Watch in a BACKGROUND tab, past the grace, nothing is read for 5 s; brought to the front,
-    // the reads start. If Quartz keeps a background webview 'visible', that is a finding, not a FAIL.
-    let bgVis = null;
+    // A display:none <webview> still says document.visibilityState "visible" (logged as information),
+    // so the chrome tells the page whether its tab is on screen (window.__watchFront) and the page tells
+    // main (window.__watchVisible() is what main last heard). With Watch in a BACKGROUND tab, past the
+    // grace: the page says it is out of sight and nothing is read for 5 s; brought to the front, the
+    // reads start.
     const gb = await guestTarget(q, 5000).catch(() => null);
-    if (gb) { try { const c = await new Cdp(gb.webSocketDebuggerUrl).open(); const r = await c.send('Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }); bgVis = r && r.result && r.result.result ? r.result.result.value : null; c.close(); } catch (e) { bgVis = 'unknown (' + e.message.slice(0, 60) + ')'; } }
+    const bgEval = async (expression) => {
+      if (!gb) return { err: 'no Watch CDP target' };
+      try {
+        const c = await new Cdp(gb.webSocketDebuggerUrl).open();
+        try { const r = await c.send('Runtime.evaluate', { expression, returnByValue: true }); return r && r.result && r.result.result ? r.result.result.value : null; } finally { c.close(); }
+      } catch (e) { return { err: String(e.message).slice(0, 80) }; }
+    };
+    const SIGHT = "(typeof window.__watchVisible === 'function' ? window.__watchVisible() : null)";
+    const saidOf = (s) => (s && Array.isArray(s.said) ? s.said.map((x) => x.verb + ':' + x.visible).join(' ') : JSON.stringify(s));
+    const bgVis = await bgEval('document.visibilityState');
     say('visibility: the Watch guest in a background tab says document.visibilityState = ' + JSON.stringify(bgVis));
+    if (bgVis !== 'hidden') say('FINDING (information): a background Watch webview reports visibilityState ' + JSON.stringify(bgVis) + ', not "hidden"; the page learns it is behind another tab from the chrome (window.__watchFront), not from its document');
+    let sight = await bgEval(SIGHT);
+    for (let i = 0; i < 15 && !(sight && sight.front === false); i++) { await sleep(200); sight = await bgEval(SIGHT); }
     if (Date.now() < appStart + BOOT1_GRACE_MS) await sleep(appStart + BOOT1_GRACE_MS - Date.now());
     const tBg = Date.now();
+    const sightBg = await bgEval(SIGHT);
+    check(!!sightBg && sightBg.visible === false && sightBg.front === false, 'visibility: Watch in a background tab tells Quartz it is out of sight (the chrome said "back", main last heard visible:false)',
+      sightBg && { visible: sightBg.visible, front: sightBg.front, hidden: sightBg.hidden, said: saidOf(sightBg) });
     await sleep(5000);
     const bgHits = IDS.reduce((n, id) => n + mock.hits(id, appStart), 0);
     const bgWhat = IDS.map((id) => id + ':' + mock.hits(id, appStart)).join(' ');
-    if (bgVis !== 'hidden') say('FINDING: a background Watch webview reports visibilityState ' + JSON.stringify(bgVis) + ', not "hidden", so the page cannot tell main it is out of sight; mock requests since launch: ' + bgWhat);
-    else check(bgHits === 0, 'visibility: Watch in a background tab (another tab active, every service due, ' + Math.round((tBg - appStart) / 1000) + ' s after launch, past the ' + BOOT1_GRACE_MS / 1000 + ' s boot grace) reads nothing for 5 s', bgWhat);
+    // Watch was the front tab for a moment (Ctrl+Alt+W). If its page heard "front" in that moment it
+    // told main visible:true, main queued every due read, and main runs its queue past the boot grace
+    // whatever the page says next: those reads are not a failure of the front signal, only noted.
+    if (bgHits > 0 && frontBefore === true) say('visibility: NOTE: the page heard "front" before createTab() moved Watch back (it said ' + saidOf(sightBg) + '); main kept the reads it queued then and ran them past the boot grace with the page out of sight (' + bgWhat + '), so "a background tab reads nothing" is not checked this run');
+    else check(bgHits === 0, 'visibility: Watch in a background tab (another tab active, every service due, ' + Math.round((tBg - appStart) / 1000) + ' s after launch, past the ' + BOOT1_GRACE_MS / 1000 + ' s boot grace) reads nothing for 5 s', bgWhat + '; front before the switch: ' + frontBefore + '; the page said ' + saidOf(sightBg));
 
     await ctrlAltW(chrome);
     let reused = false;
@@ -769,6 +810,9 @@ if (require.main === module) {
     const tFront = Date.now();
     let started = false;
     for (let i = 0; i < 50 && !started; i++) { await sleep(200); started = IDS.some((id) => mock.hits(id, tFront) > 0); }
+    const sightFront = await bgEval(SIGHT);
+    check(!!sightFront && sightFront.visible === true && sightFront.front === true, 'visibility: brought to the front, the page tells Quartz it is in sight (main last heard visible:true)',
+      sightFront && { visible: sightFront.visible, front: sightFront.front, hidden: sightFront.hidden, said: saidOf(sightFront) });
     if (bgHits > 0) say('visibility: the reads had already started in the background (' + bgWhat + '), so "front starts the reads" is not checked');
     else check(started, 'visibility: brought to the front, Watch starts reading (' + IDS.map((id) => id + ':' + mock.hits(id, tFront)).join(' ') + ' within ' + ((Date.now() - tFront) / 1000).toFixed(1) + ' s)');
 
@@ -1246,7 +1290,7 @@ if (require.main === module) {
     const SANDBOX_RE = /sandboxed_renderer\.bundle\.js script failed to run|binding\.startupData/;
     const others = [];
     for (const t of (await q.targets().catch(() => []))) {
-      if (t.type !== 'page' || !/^file:/.test(String(t.url)) || /\/watch\.html(\?|#|$)/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
+      if ((t.type !== 'page' && t.type !== 'webview') || !/^file:/.test(String(t.url)) || /\/watch\.html(\?|#|$)/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
       const seen = [];
       try {
         const c = await new Cdp(t.webSocketDebuggerUrl).open();

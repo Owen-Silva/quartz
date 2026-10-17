@@ -4621,6 +4621,41 @@ function findWatchTab() {
   return null;
 }
 
+/*
+ * Watch reads the user's services only while its page says it is in sight, and a
+ * display:none <webview> still reports itself visible to its guest (see
+ * syncBoardPause): a background Watch tab would keep reading. So the chrome
+ * tells the page whether its tab is on screen -- the tab in front, or either
+ * half of the pair in front -- and watch.js folds that into its own hidden
+ * flag (which does turn true while the window is minimised) before it tells
+ * main. Called on every edge that moves a view's display (activateTab,
+ * showTabAsWell) and on every new Watch document (dom-ready); each guest
+ * remembers the last flag it was sent (tab.watchFrontSent), so only a change
+ * reaches it. Watch tabs only, and it never throws into its caller.
+ */
+function syncWatchFront() {
+  try {
+    for (const tab of tabs) {
+      if (!tab || tab.kind !== 'page' || !isWatchUrl(tab.url)) continue;
+      const want = isTabOnScreen(tab);
+      if (tab.watchFrontSent === want) continue;
+      if (pushWatchFront(tab, want)) tab.watchFrontSent = want;
+    }
+  } catch (err) { /* a tab mid-teardown: the next edge sends it */ }
+}
+
+/** @returns {boolean} true when the flag actually went to the guest. */
+function pushWatchFront(tab, front) {
+  if (!isViewUsable(tab) || !isWatchUrl(tab.url)) return false;
+  try {
+    const pending = tab.viewEl.executeJavaScript(
+      'window.__watchFront && window.__watchFront(' + (front ? 'true' : 'false') + ')'
+    );
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+    return true;
+  } catch (err) { return false; /* guest went away */ }
+}
+
 /** Ctrl+Alt+W and the palette's "Watch" row: one Watch tab, reused when open. */
 function openWatchTab() {
   const existing = findWatchTab();
@@ -8791,6 +8826,7 @@ function showTabAsWell(tab) {
   if (tab.cardEl) tab.cardEl.style.display = shown ? 'flex' : 'none';
   if (tab.noteEl) tab.noteEl.style.display = shown ? 'flex' : 'none';
   syncBoardPause(); // a new tab leaving the pair goes off screen: freeze its board
+  syncWatchFront(); // ...and a Watch page leaving it stops reading
 }
 
 /**
@@ -9505,6 +9541,9 @@ function activateTab(id) {
     // Raising a waiting chamber IS answering it — and a split raises both.
     if (shown && isClaudeTab(tab) && tab.needsYou) clearClaudeNeedsYou(tab);
   }
+  // The display swap above is invisible to a <webview>'s guest: a Watch page
+  // is told itself whether it is on screen, so a background one stops reading.
+  syncWatchFront();
 
   if (isClaudeTab(target)) {
     // Synchronously first: the display swap above already landed, and a window
@@ -10725,6 +10764,7 @@ function wireViewEvents(tab) {
     if (stale()) return;
     dropNavCache(tab);  // a new document: everything remembered about the old one is gone
     dropPushMemo(tab);  // ...and it has none of the state the chrome pushed it
+    tab.watchFrontSent = undefined;  // a new Watch document has not been told front or back yet
     tab.ready = true;
     // The guest only exists from here: a restored mute is re-applied to it, and
     // the new-tab page gets the saved list it cannot read for itself.
@@ -10765,6 +10805,9 @@ function wireViewEvents(tab) {
     // Per-document, once the guest exists: this is the only point where the
     // page is there to take CSS and is not yet on screen.
     applySiteStyles(tab);
+    // A Watch page does not claim to be in sight until it hears this (a tab
+    // restored in the background must not start reads): front or back, now.
+    syncWatchFront();
     emitTabEvent('tabready', tab);
     // The workspace sleep policy could not reach this tab while it was still
     // loading: sleepTab() has nothing to give back before dom-ready, so a tab

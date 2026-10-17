@@ -282,6 +282,7 @@ function create(deps) {
   const guests = new Set();
   const guestVisible = new Map(); // guest webContents -> its page's last visibilityState === 'visible'
   const queue = [];
+  const forcedQueued = new Set(); // ids in the queue by a Retry or Read now: they read even out of sight
   let reading = null;            // service id being read now
   let starting = null;           // service id taken off the queue, waiting on checkGame() before it reads
   let pumping = false;
@@ -815,6 +816,7 @@ function create(deps) {
     if (why) { setPaused(id, why); pushAll(); return false; }
     delete paused[id];
     delete pausedUntil[id];
+    if (forced) forcedQueued.add(id);
     queue.push(id);
     pushAll();    // the page shows it queued at once (it may wait out the boot grace)
     pump();
@@ -840,6 +842,10 @@ function create(deps) {
       while (queue.length && !stopped) {
         const id = queue.shift();
         const gen = epoch;
+        // A due read that was queued while a page was in sight waits for one to be in sight again
+        // (the page went behind another tab, or the boot grace outlasted its front time); a Retry
+        // or Read now (forced) reads regardless.
+        if (!forcedQueued.delete(id) && !anyVisible()) { pushAll(); continue; }
         starting = id;
         // Conditions can change while earlier services read (a game starts): look again.
         try { await checkGame(); } finally { starting = null; }
@@ -1062,7 +1068,14 @@ function create(deps) {
     guestVisible.set(contents, !!visible);
     try {
       if (visible && !was) readDue();
-      else if (!visible) schedule();
+      else if (!visible) {
+        // Out of sight: due reads not yet started leave the queue (they stay due for next time).
+        if (!anyVisible()) {
+          const keep = queue.filter((id) => forcedQueued.has(id));
+          if (keep.length !== queue.length) { queue.length = 0; queue.push(...keep); pushAll(); }
+        }
+        schedule();
+      }
     } catch (err) { failLoud('start its reads', err); }
   }
 
@@ -1109,6 +1122,7 @@ function create(deps) {
     // one is cancelled; and nothing reads again until its normal floor (or a Retry), so
     // "Forget" leaves the page empty instead of refilling it a second later.
     queue.length = 0;
+    forcedQueued.clear();
     for (const id of Shape.SERVICE_IDS) cache.services[id].attemptAt = now();
     // Nothing of his stays in memory either: the search answers (keyed by what he typed; a
     // search in flight still answers the page but is not cached), the pause reasons and Retry
@@ -1302,6 +1316,7 @@ function create(deps) {
     if (!on) {
       const i = queue.indexOf(id);
       if (i !== -1) queue.splice(i, 1);
+      forcedQueued.delete(id);
       delete paused[id];
       delete pausedUntil[id];
       delete lastForced[id];
@@ -1376,6 +1391,7 @@ function create(deps) {
     if (timer) { clearTimer(timer); timer = null; }
     if (bootTimer) { clearTimer(bootTimer); bootTimer = null; }
     queue.length = 0;
+    forcedQueued.clear();
     for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     for (const job of searchLive.values()) cancelSearch(job);
     searchLive.clear();
