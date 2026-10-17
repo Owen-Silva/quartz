@@ -140,7 +140,7 @@ svg.i.fill { fill: currentColor; stroke: none; }
 /* ===== the far layer ===== */
 .wash { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .wash canvas { position: absolute; left: -6%; top: -6%; width: 112%; height: 112%; opacity: 0;
-  transition: opacity var(--m-dur-l-out) var(--m-fade-out); }
+  transition: opacity var(--m-dur-l-out) var(--m-fade-out); will-change: opacity; }
 .wash canvas.on { opacity: var(--wash-a); transition: opacity var(--m-dur-l) var(--m-fade-in); }
 .wash::after { content: ""; position: absolute; inset: 0;
   background:
@@ -215,7 +215,10 @@ html[data-theme="light"] .wash::after {
 .stage .txt { position: absolute; left: var(--gutter); bottom: 4px; width: min(600px, 46vw); pointer-events: auto;
   transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
 .stage .pic { position: absolute; right: var(--gutter); top: 6px; bottom: 12px; display: flex; align-items: flex-end; justify-content: flex-end;
-  transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
+  transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring);
+  /* its own layer for life: the artwork and its deep shadow raster once per title, not again
+     when the entry animation ends and a promoted layer would fold back into the stage */
+  will-change: transform, opacity; }
 .stage.out .txt, .stage.out .pic { opacity: 0; transform: translateY(-4px);
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-s-out) var(--m-accel); }
 .stage.pre .txt { opacity: 0; transform: translateY(10px); transition: none; }
