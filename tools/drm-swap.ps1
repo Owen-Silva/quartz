@@ -108,14 +108,18 @@ function Sign-And-Mark {
   if (Test-Path $devSig) { Copy-Item $devSig $keep -Force }
   Say 'signing Quartz.exe with castlabs EVS (sign-pkg -H Quartz) ...'
   $s = Run 'py' @('-3', '-m', 'castlabs_evs.vmp', '-n', 'sign-pkg', '-H', 'Quartz', $Dist)
-  if ((-not (Test-Path $devSig)) -and (Test-Path $keep)) { Copy-Item $keep $devSig -Force }
+  # castlabs moves (or deletes) electron.exe.sig whenever it signs OR verifies another exe in the
+  # folder; electron.exe gets its shipped development signature back once both are done.
+  $restore = { if ((-not (Test-Path $devSig)) -and (Test-Path $keep)) { Copy-Item $keep $devSig -Force } }
   if ($s.code -ne 0) {
+    & $restore
     if ($s.text -match 'NonInteractive|[Aa]uth|Unauthori|[Tt]oken|[Cc]redential|[Pp]asswd|[Pp]assword|Forbidden|[Aa]ccount') {
       Stop-Swap ("EVS refused: not signed in (" + (Tail $s.text 1) + '). The user: py -3 -m castlabs_evs.account reauth, then tools\drm-swap.ps1 -ResignOnly.')
     }
     Stop-Swap ('sign-pkg failed: ' + (Tail $s.text 3))
   }
   $vf = Run 'py' @('-3', '-m', 'castlabs_evs.vmp', '-n', 'verify-pkg', '-H', 'Quartz', $Dist)
+  & $restore
   if ($vf.code -ne 0) { Stop-Swap ('verify-pkg says the signature is not valid for streaming: ' + (Tail $vf.text 2)) }
   $sig = Join-Path $Dist 'Quartz.exe.sig'
   if (-not (Test-Path $sig)) { Stop-Swap 'Quartz.exe.sig does not exist after signing.' }
