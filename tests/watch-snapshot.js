@@ -354,6 +354,12 @@ function serviceView(id, s, readingId, now) {
 }
 
 function build(now, cache, readingId) {
+  // A service a fixture doesn't name (Hulu joined after these fixtures were written) is off:
+  // the fixture's own services keep their exact counts.
+  cache = Object.assign({}, cache);
+  for (const id of Shape.SERVICE_IDS) if (!cache[id]) {
+    cache[id] = { enabled: false, state: 'off', reason: '', readAt: 0, lastOkAt: 0, attemptAt: 0, profile: '', items: [], queued: false, paused: '', warnings: [] };
+  }
   const services = {};
   for (const id of Shape.SERVICE_IDS) services[id] = { enabled: cache[id].enabled, items: cache[id].items, state: cache[id].state };
   const events = cache.espn.enabled ? (cache.espn.events || []) : [];
@@ -425,7 +431,7 @@ function mixedFailures(now) {
 function allPaused(now) {
   const t = typeof now === 'number' ? now : Date.now();
   const c = fullCache(t);
-  for (const id of Shape.SERVICE_IDS) if (c[id].enabled) c[id].paused = 'paused while VALORANT is running';
+  for (const id of Shape.SERVICE_IDS) if (c[id] && c[id].enabled) c[id].paused = 'paused while VALORANT is running';
   return build(t, c, null);
 }
 
