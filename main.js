@@ -1097,7 +1097,7 @@ app.on('second-instance', (_event, argv) => {
   w.focus();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // First of all: the log's start line says how the LAST run ended, and every
   // later hook (the window, each guest, the adblock engine) writes through it.
   // A log that cannot start leaves qlog null; Quartz runs exactly as before.
@@ -1130,6 +1130,14 @@ app.whenReady().then(() => {
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
   });
   toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
+  // castlabs ECS: the Widevine CDM must be ready before the first window
+  // (components.whenReady). Capped at 4 s so a first run offline still opens;
+  // on stock Electron this returns at once.
+  const cdm = await drm.whenCdmReady(4000);
+  if (!cdm.available) {
+    console.log('[drm] ' + cdm.reason);
+    if (qlog) qlog.log.line('[drm] ' + cdm.reason);
+  }
   createWindow();
 
   // A link that STARTED the browser: its tab goes in on top of the session the

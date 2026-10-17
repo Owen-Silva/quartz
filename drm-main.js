@@ -53,6 +53,7 @@ function create(o) {
   let preloadTrouble = '';   // why the preload could not be added, '' when it was
   let hookTrouble = '';      // a page said the EME hook could not be installed
   let lastLaunch = null;     // { ok, how, reason, at } for Settings
+  let cdmTrouble = '';       // components.whenReady() failed, and why
 
   // ---- the "always use Edge" rules ----------------------------------------
 
@@ -125,6 +126,7 @@ function create(o) {
     if (!components || typeof components.status !== 'function') {
       return { available: false, reason: 'This Electron build has no Widevine module (stock Electron never ships one).' };
     }
+    if (cdmTrouble) return { available: false, reason: 'Widevine could not be installed: ' + cdmTrouble };
     try {
       const all = components.status() || {};
       for (const id of Object.keys(all)) {
@@ -141,6 +143,27 @@ function create(o) {
     } catch (err) {
       return { available: false, reason: 'Widevine status could not be read: ' + err.message };
     }
+  }
+
+  /*
+   * castlabs ECS only (stock Electron: returns at once). Waits for the
+   * Widevine CDM component before the first window, as castlabs requires, but
+   * never longer than `ms`: a first run offline must still open Quartz. If the
+   * CDM lands later, the chrome hears drm:changed and the bars go away.
+   */
+  async function whenCdmReady(ms) {
+    const electron = opts.electron || null;
+    const components = electron && electron.components;
+    if (!components || typeof components.whenReady !== 'function') return widevine();
+    let timer = null;
+    const ready = Promise.resolve()
+      .then(() => components.whenReady())
+      .then(() => { cdmTrouble = ''; return 'ready'; },
+        (err) => { cdmTrouble = String((err && err.message) || err || 'no reason given').slice(0, 300); return 'failed'; });
+    const outcome = await Promise.race([ready, new Promise((r) => { timer = setTimeout(() => r('timeout'), ms || 4000); })]);
+    clearTimeout(timer);
+    if (outcome === 'timeout') ready.then(() => push());
+    return widevine();
   }
 
   // ---- Microsoft Edge -----------------------------------------------------
@@ -287,7 +310,7 @@ function create(o) {
     });
   }
 
-  return { start, state, openInEdge, setAlways, edge, widevine, _preloadId: () => preloadId };
+  return { start, state, openInEdge, setAlways, edge, widevine, whenCdmReady, _preloadId: () => preloadId };
 }
 
 module.exports = { create, PRELOAD_FILE };
