@@ -51,7 +51,7 @@
   /*
    * The services Watch knows. `order` is the accounts strip and the per-service
    * rows. `everyMin` is the polite floor between two reads while Watch is open
-   * (FEASIBILITY.md: YouTube 15, Disney+/Prime 60, ESPN 15 -- 2 while a game
+   * (every service 15 min since 10-17, measured in watch-auto; ESPN 2 while a game
    * it shows is live). `edge` = its player needs Widevine, so a click opens
    * Microsoft Edge (Quartz's existing "Open in Edge" path, drm-main.js).
    */
@@ -64,14 +64,14 @@
       covers: ''
     },
     {
-      id: 'disney', name: 'Disney+', short: 'Disney+', edge: true, everyMin: 60, needsSignIn: true,
+      id: 'disney', name: 'Disney+', short: 'Disney+', edge: true, everyMin: 15, needsSignIn: true,
       home: 'https://www.disneyplus.com/home',
       signIn: 'https://www.disneyplus.com/login',
       searchUrl: 'https://www.disneyplus.com/search?q=',
       covers: 'Includes Hulu (once your Hulu profile is linked) and the ESPN hub'
     },
     {
-      id: 'prime', name: 'Prime Video', short: 'Prime', edge: true, everyMin: 60, needsSignIn: true,
+      id: 'prime', name: 'Prime Video', short: 'Prime', edge: true, everyMin: 15, needsSignIn: true,
       home: 'https://www.primevideo.com/',
       signIn: 'https://www.primevideo.com/',
       searchUrl: 'https://www.primevideo.com/search/ref=atv_nb_sr?phrase=',

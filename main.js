@@ -450,6 +450,11 @@ const watch = (() => {
       const flag = env.QUARTZ_WATCH_GAME_FILE;
       test.gameRunning = () => (fs.existsSync(flag) ? 'valorant' : '');
     }
+    // The background refresh's gates and cadence, for watch-e2e (a TEST profile only).
+    if (env.QUARTZ_WATCH_SAVER_FILE) { const sf = env.QUARTZ_WATCH_SAVER_FILE; test.saverOn = () => fs.existsSync(sf); }
+    for (const [k, name] of [['bgMinFreeGb', 'QUARTZ_WATCH_BG_MIN_FREE_GB'], ['bgEveryMs', 'QUARTZ_WATCH_BG_EVERY_MS'], ['bgGapMs', 'QUARTZ_WATCH_BG_GAP_MS'], ['bgBootDelayMs', 'QUARTZ_WATCH_BG_BOOT_MS'], ['bgPauseMs', 'QUARTZ_WATCH_BG_PAUSE_MS'], ['watchedAwayMs', 'QUARTZ_WATCH_WATCHED_AWAY_MS'], ['readLimitMs', 'QUARTZ_WATCH_READ_LIMIT_MS']]) {
+      if (env[name] !== undefined && Number.isFinite(Number(env[name]))) test[k] = Number(env[name]);
+    }
   }
   // The first reader waits this long after start, so a restored Watch tab never adds a hidden
   // page load to Quartz's own boot. A TEST profile may change it (QUARTZ_WATCH_BOOT_GRACE_MS).
@@ -479,10 +484,10 @@ const watch = (() => {
     const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);
     console.error('[watch] Watch could not start: ' + why);
     setImmediate(() => { try { if (qlog) qlog.log.line('Watch could not start: ' + why); } catch { /* log not ready */ } });
-    for (const ch of ['watch:describe', 'watch:set-enabled', 'watch:set-leagues', 'watch:set-tmdb-key', 'watch:forget', 'watch:test-tmdb', 'watch:refresh']) {
+    for (const ch of ['watch:describe', 'watch:set-enabled', 'watch:set-leagues', 'watch:set-tmdb-key', 'watch:forget', 'watch:test-tmdb', 'watch:refresh', 'watch:set-background']) {
       try { ipcMain.handle(ch, () => { throw new Error('Watch could not start: ' + why); }); } catch { /* already registered */ }
     }
-    return { failed: why, stop() {}, windowShown() {}, isReaderContents() { return false; } };
+    return { failed: why, stop() {}, windowShown() {}, windowFocused() {}, isReaderContents() { return false; } };
   }
 })();
 
@@ -1039,6 +1044,8 @@ function createWindow() {
   // Watch reads only while Quartz is on screen; whatever fell due while it was
   // hidden or minimised reads when it comes back.
   for (const ev of ['show', 'restore']) win.on(ev, () => { try { watch.windowShown(); } catch { /* best effort */ } });
+  // Back from Edge (a title Watch opened there): what went stale, and that service, reads now.
+  win.on('focus', () => { try { if (typeof watch.windowFocused === 'function') watch.windowFocused(); } catch { /* best effort */ } });
 }
 
 // ---------------------------------------------------------------------------

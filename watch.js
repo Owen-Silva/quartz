@@ -55,6 +55,8 @@
   var TOAST_MS = 4200;
   var TOAST_MAX = 3;
   var TICK_MS = 60 * 1000;
+  var READ_LIMIT_GRACE_MS = 15 * 1000;   // the header's own limit: main's read limit plus this (main ends a read at its limit)
+  var READ_LIMIT_FALLBACK_MS = 90 * 1000; // an older main that sends no limit
   var STATES = ['ok', 'signed-out', 'error', 'off', 'never'];
   var KIND_WORD = { resume: 'Continue watching', rec: 'Recommended', watchlist: 'On your watchlist', live: 'Live now', upcoming: 'Upcoming', replay: 'Replay', search: 'Video' };
 
@@ -96,6 +98,8 @@
     resizeQueued: false,
     front: null,            // the chrome's word: this tab is on screen (true) / behind another (false); null = not told yet
     frontTimer: 0,
+    freshTimer: 0,          // the header's read-limit check (renderFresh)
+    busySeen: null,         // { id, at }: the read in flight as this page first saw it
     told: null,             // "in sight" as main last heard it (hello / visible); null before the first hello
     said: []                // the last few of those lines, for the e2e (__watchVisible)
   };
@@ -437,6 +441,8 @@
       profile: cleanText(s.profile, 60),
       reading: s.reading === true,
       queued: s.queued === true,
+      readingSince: s.reading === true ? num(s.readingSince) : 0,
+      readLimitMs: s.reading === true ? num(s.readLimitMs) : 0,
       paused: cleanText(s.paused, 200),
       next: num(s.next),
       live: num(counts.live),
@@ -673,10 +679,35 @@
     return (a && $.pills.contains(a) && a.dataset) ? (a.dataset.k || '') : '';
   }
 
+  /* The header's status: what is happening and when, never a silent "Reading…".
+       idle      "Updated 3 min ago" (the oldest of the services that read fine; the minute tick keeps it true)
+       reading   "Updating Disney+…" -- and past the read's time limit (main's + READ_LIMIT_GRACE_MS)
+                 "Updating Disney+ didn't finish after 50 s" with Retry, in case main never says it ended
+       queued    "Waiting to update Disney+"
+       failed    "Couldn't update Disney+: <reason>" with Retry (main stops a read at its limit and says so)
+       paused    the shared pause, as before. */
+  function freshText(f, text, title) {
+    var t = el('span', '', text);
+    t.style.overflow = 'hidden';
+    t.style.textOverflow = 'ellipsis';
+    t.style.minWidth = '0';
+    if (title) t.title = title;
+    f.appendChild(t);
+    return t;
+  }
+  function freshRetry(f, label, onClick) {
+    var b = button('btn sm ghost fresh-retry', 'Retry', onClick);
+    b.setAttribute('aria-label', label);
+    b.style.flex = 'none';
+    f.appendChild(b);
+  }
   function renderFresh(boot, shared) {
     var f = $.fresh;
+    clearTimeout(S.freshTimer);
+    S.freshTimer = 0;
     f.replaceChildren();
     f.className = 'fresh';
+    f.removeAttribute('title');
     $.readAll.disabled = boot;
     if (boot) return;
     var en = enabledSvcs();
@@ -688,15 +719,58 @@
       return;
     }
     var busy = en.filter(function (s) { return s.reading; })[0];
-    if (busy) { f.textContent = 'Reading ' + busy.name + '\u2026'; return; }
-    var allOk = en.every(function (s) { return s.state === 'ok' && s.readAt; });
-    if (allOk) {
-      var oldest = Math.min.apply(null, en.map(function (s) { return s.readAt; }));
-      f.appendChild(agoSpan('', oldest, 'All read '));
+    if (busy) {
+      var limit = (busy.readLimitMs || READ_LIMIT_FALLBACK_MS) + READ_LIMIT_GRACE_MS;
+      // An older main sends no start: count from when this page first saw the read.
+      if (!S.busySeen || S.busySeen.id !== busy.id) S.busySeen = { id: busy.id, at: nowMs() };
+      var since = busy.readingSince || S.busySeen.at;
+      var left = since + limit - nowMs();
+      if (left > 0) {
+        f.classList.add('busy');
+        f.appendChild(el('span', 'dot busy'));
+        freshText(f, 'Updating ' + busy.name + '…');
+        // Past the limit with no word from Quartz: say so (the read is overdue), never wait forever.
+        S.freshTimer = setTimeout(function () { S.freshTimer = 0; if (S.snap) renderFresh(!S.snap, sharedPause()); }, left + 50);
+        return;
+      }
+      f.classList.add('failed');
+      f.appendChild(el('span', 'dot err'));
+      var secs = Math.round((nowMs() - since) / 1000);
+      freshText(f, 'Updating ' + busy.name + ' didn’t finish after ' + secs + ' s', 'Quartz has not said this read ended. Retry asks Quartz for everything again.');
+      freshRetry(f, 'Retry updating ' + busy.name, function () { retryHello(); });
+      return;
+    }
+    S.busySeen = null;
+    var failed = en.filter(function (s) { return s.state === 'error'; });
+    if (failed.length) {
+      f.classList.add('failed');
+      f.appendChild(el('span', 'dot err'));
+      var names = listWords(failed.map(function (s) { return s.name; }));
+      var why = failed[0].reason || 'no reason given';
+      var full = failed.map(function (s) { return s.name + ': ' + (s.reason || 'no reason given'); }).join('\n');
+      freshText(f, 'Couldn’t update ' + names + (failed.length === 1 ? ': ' + why : ''), full);
+      freshRetry(f, 'Retry ' + names, function () {
+        failed.forEach(function (s) { send('refresh', { service: s.id }); });
+      });
+      return;
+    }
+    var waiting = en.filter(function (s) { return s.queued; })[0];
+    if (waiting) {
+      f.classList.add('busy');
+      f.appendChild(el('span', 'dot busy'));
+      freshText(f, 'Waiting to update ' + waiting.name);
+      return;
+    }
+    var ok = en.filter(function (s) { return s.state === 'ok' && s.lastOkAt; });
+    if (ok.length) {
+      var oldest = Math.min.apply(null, ok.map(function (s) { return s.lastOkAt; }));
+      f.appendChild(agoSpan('', oldest, 'Updated '));
+      f.title = ok.map(function (s) { return s.name + ': updated ' + ago(s.lastOkAt); }).join('\n');
       return;
     }
     var latest = Math.max.apply(null, en.map(function (s) { return s.readAt || 0; }));
     if (latest) f.appendChild(agoSpan('', latest, 'Last read '));
+    else freshText(f, 'Not updated yet');
   }
 
   /* ------------------------------------------------------------ popover */

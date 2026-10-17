@@ -776,6 +776,7 @@ contextBridge.exposeInMainWorld('api', {
     // One small TMDB request with the saved key: describe() + { check: { ok, title, detail } }.
     testTmdb: () => ipcRenderer.invoke('watch:test-tmdb'),
     forget: () => ipcRenderer.invoke('watch:forget'),
+    setBackground: (on) => ipcRenderer.invoke('watch:set-background', !!on),
     refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
   },
   // The Files tab. files.html is a guest with no preload, so app.js reaches

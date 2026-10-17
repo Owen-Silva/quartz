@@ -160,7 +160,7 @@ function fakeWorld(opts) {
   const calls = [];
   const world = {
     dir, timers, sent, edge, logs, calls,
-    game: '', free: 8, showing: true,
+    game: '', free: 8, showing: true, saver: false,
     behaviour: {},   // service -> (step) => step result fields
     get maxConcurrent() { return maxConcurrent; },
     now: () => t,
@@ -203,7 +203,7 @@ function fakeWorld(opts) {
     openInEdge: (url) => { edge.push(url); return Promise.resolve(world.edgeFail ? { ok: false, how: 'msedge', reason: 'Edge did not start' } : { ok: true, how: 'msedge', reason: '' }); },
     isBundledPage: (url) => typeof url === 'string' && url.indexOf('file:///app/') === 0,
     log: (l) => logs.push(l),
-    test: Object.assign({ gameRunning: () => world.game, windowShowing: () => world.showing }, o.test || {}),
+    test: Object.assign({ gameRunning: () => world.game, windowShowing: () => world.showing, saverOn: () => world.saver }, o.test || {}),
     runStep: async (step, rebase) => {
       concurrent++; maxConcurrent = Math.max(maxConcurrent, concurrent);
       const svc = step.name === 'search' ? 'search' : (Shape.SERVICE_IDS.find((id) => (step.url || '').indexOf(new URL(Shape.serviceById(id).home).hostname) !== -1) || '?');
@@ -214,6 +214,7 @@ function fakeWorld(opts) {
       const b = world.behaviour[svc];
       const extra = b ? b(step) : {};
       if (extra === 'HANG') return new Promise(() => { /* a reader that never answers */ });
+      if (extra && extra.delayMs) { const ms = extra.delayMs; await new Promise((r) => deps.setTimeout(r, ms)); delete extra.delayMs; }
       return Object.assign(okStep(step), extra);
     },
   };
@@ -224,6 +225,11 @@ function fakeWorld(opts) {
   if (o.realSteps) delete deps.runStep;
   for (const k of ['fetch', 'BrowserWindow', 'session']) if (o[k]) deps[k] = o[k];
   if (o.adapters) deps.adapters = Object.assign({}, adapters, o.adapters);
+  // The background refresh is off unless a test turns it on (bgTests): the visible-only tests
+  // below keep their exact read counts.
+  if (o.cache) fs.writeFileSync(path.join(dir, WM.CACHE_FILE), JSON.stringify(o.cache));
+  if (!o.background) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(Object.assign({ background: false }, o.prefs || {})));
+  else if (o.prefs) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(o.prefs));
   world.wm = WM.create(deps);
   world.guest = (url) => {
     const pushed = [];
@@ -523,8 +529,8 @@ async function reviewFixTests() {
     check(w.calls.length === 0, 'fix5: no YouTube 15-min re-read while hidden', w.calls);
     g.say('quartz-watch:visible {"visible":true}');
     await w.settle();
-    check(w.calls.some((c) => c.indexOf('youtube') === 0) && w.calls.some((c) => c.indexOf('espn') === 0) && !w.calls.some((c) => c.indexOf('disney') === 0),
-      'fix5: back on screen, what fell due reads (YouTube, ESPN), the rest waits', w.calls);
+    check(w.calls.length === 4,
+      'fix5: back on screen 16 min later, everything over 10 min old reads (fresh on open)', w.calls);
     // two pages: the visible one keeps the timer; when it closes, the hidden one gets none
     const g2 = w.guest();
     g2.say('quartz-watch:hello {"visible":true}');
@@ -766,7 +772,7 @@ async function mainTests() {
     const onDisk = JSON.parse(fs.readFileSync(path.join(w.dir, 'watch-cache.json'), 'utf8'));
     check(onDisk.services.youtube.items.length === 3 && !JSON.stringify(onDisk).includes('captures'), 'main: the cache file holds items only, never raw captures');
 
-    // cadence: nothing is due a minute later; YouTube at 16 min; Disney+ not until 60
+    // cadence: nothing is due a minute later; every service at its 15-min floor (Disney+/Prime 15 since 10-17)
     w.calls.length = 0;
     w.advance(60e3);
     g.say('quartz-watch:hello {}');
@@ -774,7 +780,7 @@ async function mainTests() {
     check(w.calls.length === 0, 'main: a second hello inside the floor reads nothing', w.calls);
     w.advance(15 * 60e3);
     await w.fire();
-    check(w.calls.some((c) => c.indexOf('youtube') === 0) && w.calls.some((c) => c.indexOf('espn') === 0) && !w.calls.some((c) => c.indexOf('disney') === 0), 'main: at 16 min YouTube and ESPN are due, Disney+ is not', w.calls);
+    check(['youtube', 'disney', 'prime', 'espn'].every((id) => w.calls.some((c) => c.indexOf(id) === 0)), 'main: at 16 min every service is due (15-min floors)', w.calls);
 
     // a cache-first restart: a new instance draws the old rows before reading
     w.wm.flush();
@@ -1034,12 +1040,259 @@ async function moduleTests() {
   }
 }
 
+/* ---- watch-auto: fresh on open, fresh after watching, the background refresh, the read limit ---- */
+
+const T0 = Date.parse('2026-10-16T20:00:00Z');   // fakeWorld's clock starts here
+
+/** A cache file where every service read fine `ageMin` ago (state per service overridable). */
+function seededCache(ageMin, over) {
+  const o = over || {};
+  const services = {};
+  for (const id of Shape.SERVICE_IDS) {
+    const at = T0 - ((o.age && o.age[id] !== undefined ? o.age[id] : ageMin) * 60e3);
+    const state = (o.state && o.state[id]) || 'ok';
+    services[id] = {
+      state, reason: '', readAt: at, attemptAt: at, lastOkAt: state === 'never' ? 0 : at,
+      items: state === 'ok' ? mk(id, id === 'espn' ? 'live' : 'resume', 2) : [], profile: '', events: id === 'espn' ? [] : null, captured: 0, warnings: [],
+    };
+  }
+  return { v: 1, services };
+}
+
+/** Advance the fake clock in 1-s steps for `ms`, firing every timer that falls due. */
+async function runFor(w, ms) {
+  const end = w.now() + ms;
+  while (w.now() < end) { w.advance(Math.min(1000, end - w.now())); await w.fire(); }
+}
+
+const svcOf = (c) => c.split(':')[0];
+
+async function autoTests() {
+  // 1. Fresh on open: under 10 min nothing reads; past it everything stale reads, one at a time, oldest first.
+  let w = fakeWorld({ cache: seededCache(5, { age: { youtube: 30, disney: 12, prime: 4, espn: 20 } }) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    const first = g.pushed[0] && g.pushed[0].payload;
+    check(first && first.rows.length > 0 && w.calls.length === 0, 'auto: the cached rows go out at once, before any read', first && first.rows.length);
+    await w.settle();
+    check(w.calls.map(svcOf).join(',') === 'youtube,espn,disney', 'auto: on open, every service over 10 min old reads, oldest first (Prime at 4 min waits)', w.calls);
+    check(w.maxConcurrent === 1, 'auto: on open, one service at a time', w.maxConcurrent);
+    w.calls.length = 0;
+    g.say('quartz-watch:visible {"visible":false}');
+    w.advance(5 * 60e3);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 0, 'auto: back on screen 5 min later: nothing under 10 min old re-reads', w.calls);
+    g.say('quartz-watch:visible {"visible":false}');
+    w.advance(6 * 60e3);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.map(svcOf).join(',') === 'prime,youtube,disney,espn', 'auto: back on screen 11 min later: all four, staggered oldest first', w.calls);
+    check(w.maxConcurrent === 1, 'auto: still one at a time', w.maxConcurrent);
+  } finally { w.cleanup(); }
+
+  // 2. Fresh after watching: the service he opened a title on reads first when he comes back.
+  w = fakeWorld({ cache: seededCache(1) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 0, 'auto: everything fresh: opening Watch reads nothing', w.calls);
+    g.say('quartz-watch:open {"url":"https://www.disneyplus.com/play/abc"}');
+    await w.settle();
+    check(w.wm.state().watched.disney > 0, 'auto: opening a Disney+ title marks Disney+ to re-read');
+    g.say('quartz-watch:visible {"visible":false}');
+    w.advance(10e3);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 0 && w.wm.state().watched.disney > 0, 'auto: back after 10 s (a mis-click): no read yet, the mark stays', w.calls);
+    g.say('quartz-watch:visible {"visible":false}');
+    w.advance(5 * 60e3);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.map(svcOf).join(',') === 'disney', 'auto: back after 5 min: Disney+ re-reads (its Continue watching moved), nothing else', w.calls);
+    check(!w.wm.state().watched.disney, 'auto: the read clears the mark');
+    // A title that opened in Edge: Watch never left the screen, Quartz got focus back.
+    w.calls.length = 0;
+    g.say('quartz-watch:open {"url":"https://www.primevideo.com/detail/xyz"}');
+    w.advance(3 * 60e3);
+    w.wm.windowFocused();
+    await w.settle();
+    check(w.calls.map(svcOf).join(',') === 'prime', 'auto: Quartz focused again after Edge: Prime re-reads first', w.calls);
+    // Mixed: a watched service jumps the stale ones.
+    w.calls.length = 0;
+    g.say('quartz-watch:open {"url":"https://www.youtube.com/watch?v=q"}');
+    g.say('quartz-watch:visible {"visible":false}');
+    w.advance(11 * 60e3);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 4 && svcOf(w.calls[0]) === 'youtube', 'auto: the watched service reads first, then the stale rest', w.calls);
+    // A title that is not on a service marks nothing.
+    g.say('quartz-watch:open {"url":"https://www.themoviedb.org/movie/1"}');
+    check(Object.keys(w.wm.state().watched).length === 0, 'auto: a TMDB page marks no service', w.wm.state().watched);
+  } finally { w.cleanup(); }
+
+  // 3. The background refresh: no Watch page on screen.
+  w = fakeWorld({ background: true, cache: seededCache(61, { age: { youtube: 90, disney: 70, prime: 65, espn: 61 } }) });
+  w.saver = false;
+  try {
+    check(w.wm.describe().background.on === true, 'bg: on by default');
+    await runFor(w, 60e3);
+    check(w.calls.length === 0, 'bg: nothing in the first 2 min after start (boot delay)', w.calls);
+    await runFor(w, 70e3);
+    check(w.calls.map(svcOf).join(',') === 'youtube', 'bg: after the boot delay, ONE read, the oldest (no Watch page open at all)', w.calls);
+    await runFor(w, 60e3);
+    check(w.calls.length === 1, 'bg: the next one waits its 2-min gap', w.calls);
+    await runFor(w, 7 * 60e3);
+    check(w.calls.map(svcOf).join(',') === 'youtube,disney,prime,espn', 'bg: then the rest, one at a time, 2 min apart', w.calls);
+    check(w.maxConcurrent === 1, 'bg: never two readers at once', w.maxConcurrent);
+    const since = w.calls.length;
+    await runFor(w, 40 * 60e3);
+    check(w.calls.length === since, 'bg: nothing again inside 60 min', w.calls.slice(since));
+    await runFor(w, 25 * 60e3);
+    check(w.calls.length > since && w.calls.length <= since + 4, 'bg: 60 min later each service reads again, at most once', w.calls.slice(since));
+    check(w.wm.describe().background.reads >= 5 && w.wm.describe().background.waiting === '', 'bg: describe() counts the reads, waiting nothing', w.wm.describe().background);
+    const snap = w.wm.snapshot();
+    check(snap.services.every((s) => !s.paused), 'bg: background reads set no page pause', snap.services.map((s) => s.paused));
+  } finally { w.cleanup(); }
+
+  // 3b. Each gate, both ways: blocked -> no read and the reason; cleared -> it reads.
+  const gates = [
+    ['free RAM 2.0 GB', (x) => { x.free = 2.0; }, (x) => { x.free = 3.0; }, /GB of memory free/],
+    ['a game', (x) => { x.game = 'valorant'; }, (x) => { x.game = ''; }, /VALORANT/],
+    ['Quartz minimised', (x) => { x.showing = false; }, (x) => { x.showing = true; }, /minimised/],
+    ['battery saver', (x) => { x.saver = true; }, (x) => { x.saver = false; }, /battery saver/],
+  ];
+  for (const [name, block, clear, re] of gates) {
+    w = fakeWorld({ background: true, cache: seededCache(61), test: { saverOn: () => w.saver } });
+    w.saver = false;
+    try {
+      block(w);
+      await runFor(w, 3 * 60e3);
+      const bgd = w.wm.describe().background;
+      check(w.calls.length === 0 && re.test(bgd.waiting), 'bg gate ' + name + ': blocked, no read, reason shown', { calls: w.calls, waiting: bgd.waiting });
+      clear(w);
+      await runFor(w, 5 * 60e3);
+      check(w.calls.length === 0, 'bg gate ' + name + ': cleared, it waits out its 10-min pause (no tight loop)', w.calls);
+      await runFor(w, 6 * 60e3);
+      check(w.calls.length >= 1 && w.wm.describe().background.waiting === '', 'bg gate ' + name + ': cleared, it reads', { calls: w.calls, waiting: w.wm.describe().background.waiting });
+    } finally { w.cleanup(); }
+  }
+  // 1.5-2.5 GB blocks the background but not an on-screen read.
+  w = fakeWorld({ background: true, cache: seededCache(61), test: { saverOn: () => null } });
+  try {
+    w.free = 2.0;
+    await runFor(w, 3 * 60e3);
+    check(w.calls.length === 0, 'bg: 2.0 GB free blocks the background read', w.calls);
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 4, 'bg: ...but opening Watch at 2.0 GB still reads (the on-screen floor is 1.5 GB)', w.calls);
+  } finally { w.cleanup(); }
+  // A battery-saver answer of null (cannot tell) does not block.
+  w = fakeWorld({ background: true, cache: seededCache(61), test: { saverOn: () => null } });
+  try {
+    await runFor(w, 3 * 60e3);
+    check(w.calls.length === 1, 'bg: saver unknown (null) counts as off', w.calls);
+  } finally { w.cleanup(); }
+  // A throwing saver check does not break anything either.
+  w = fakeWorld({ background: true, cache: seededCache(61), test: { saverOn: () => { throw new Error('x'); } } });
+  try {
+    await runFor(w, 3 * 60e3);
+    check(w.calls.length === 1, 'bg: a saver check that throws counts as off', w.calls);
+  } finally { w.cleanup(); }
+
+  // 3c. Off in Settings: no timer, no reads; on again: it plans.
+  w = fakeWorld({ background: true, cache: seededCache(61), test: { saverOn: () => false } });
+  try {
+    const d0 = w.wm.setBackground(false);
+    check(d0.background.on === false && w.wm.state().bgTimerAt === 0, 'bg off: describe says off, no background timer', d0.background);
+    await runFor(w, 10 * 60e3);
+    check(w.calls.length === 0, 'bg off: nothing reads in the background', w.calls);
+    const saved = JSON.parse(fs.readFileSync(path.join(w.dir, WM.PREFS_FILE), 'utf8'));
+    check(saved.background === false, 'bg off: saved to watch.json', saved);
+    w.wm.setBackground(true);
+    check(w.wm.state().bgTimerAt > 0, 'bg on again: the timer is armed');
+    await runFor(w, 3 * 60e3);
+    check(w.calls.length >= 1, 'bg on again: it reads', w.calls);
+  } finally { w.cleanup(); }
+  check(WM.cleanPrefs({}).background === true && WM.cleanPrefs({ background: false }).background === false && WM.cleanPrefs({ background: 'no' }).background === true,
+    'bg: the pref defaults ON; only an explicit false turns it off');
+
+  // 3d. Only services that read fine before: never / signed-out are left alone.
+  w = fakeWorld({ background: true, cache: seededCache(61, { state: { youtube: 'signed-out', prime: 'never' } }), test: { saverOn: () => false } });
+  try {
+    await runFor(w, 12 * 60e3);
+    check(w.calls.map(svcOf).sort().join(',') === 'disney,espn', 'bg: a signed-out or never-read service is not read in the background', w.calls);
+  } finally { w.cleanup(); }
+
+  // 3e. A Watch page on screen uses the on-screen schedule, not the background one; hidden -> background.
+  w = fakeWorld({ background: true, cache: seededCache(1), test: { saverOn: () => false } });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    check(w.wm.state().bgTimerAt === 0 && w.wm.state().timerAt > 0, 'bg: a visible page: the on-screen timer, no background timer', w.wm.state());
+    await runFor(w, 15 * 60e3);
+    check(['youtube', 'disney', 'prime', 'espn'].every((id) => w.calls.some((c) => svcOf(c) === id)), 'on screen: every service at 15 min (Disney+ and Prime too)', w.calls);
+    g.say('quartz-watch:visible {"visible":false}');
+    await w.settle();
+    check(w.wm.state().timerAt === 0 && w.wm.state().bgTimerAt > 0, 'bg: hidden: the background timer takes over', w.wm.state());
+    w.calls.length = 0;
+    await runFor(w, 30 * 60e3);
+    check(w.calls.length === 0, 'bg: hidden 30 min after a read: no background read yet (60-min floor)', w.calls);
+    await runFor(w, 40 * 60e3);
+    check(w.calls.length >= 1 && w.calls.length <= 4, 'bg: hidden over 60 min: background reads resume', w.calls);
+  } finally { w.cleanup(); }
+
+  // 4. The read's time limit: past it the read is stopped, the service says why, a late answer is dropped.
+  w = fakeWorld({ cache: seededCache(1), test: { readLimitMs: 3000 } });
+  try {
+    w.behaviour.disney = () => ({ delayMs: 8000 });
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    g.say('quartz-watch:refresh {"service":"disney"}');
+    await w.settle();
+    const mid = w.svc(g.last('__applyWatch'), 'disney');
+    check(mid.reading === true && mid.readingSince > 0 && mid.readLimitMs === 3000, 'limit: while reading, the page gets readingSince and readLimitMs', mid);
+    await runFor(w, 4000);
+    const after = w.svc(g.last('__applyWatch'), 'disney');
+    check(after.reading === false && after.state === 'error' && /longer than 3 s/.test(after.reason), 'limit: past it, Disney+ says it took too long (error + reason, so Retry shows)', after);
+    check(after.lastOkAt > 0 && w.wm.snapshot().items.some((it) => it.service === 'disney'), 'limit: the last good rows stay');
+    await runFor(w, 6000);
+    const late = w.svc(w.wm.snapshot(), 'disney');
+    check(late.state === 'error', 'limit: the late answer is dropped, not written', late.state);
+    check(w.logs.some((l) => /stopped reading Disney\+ after its 3 s limit/.test(l)), 'limit: logged');
+    w.behaviour.disney = null;
+    w.advance(31e3);
+    g.say('quartz-watch:refresh {"service":"disney"}');
+    await w.settle();
+    check(w.svc(w.wm.snapshot(), 'disney').state === 'ok', 'limit: Retry reads again and recovers');
+  } finally { w.cleanup(); }
+  // The real limit: every step's budget + grace + 10 s.
+  w = fakeWorld({ cache: seededCache(1) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":true}');
+    await w.settle();
+    w.behaviour.youtube = () => ({ delayMs: 2000 });
+    g.say('quartz-watch:refresh {"service":"youtube"}');
+    await w.settle();
+    const yt = w.svc(g.last('__applyWatch'), 'youtube');
+    check(yt.readLimitMs === WM.STEP_BUDGET_MS + 5000 + 10000, 'limit: one 20-s step -> a 35-s limit', yt.readLimitMs);
+    await runFor(w, 3000);
+  } finally { w.cleanup(); }
+}
+
 (async () => {
   try {
     shapeTests();
     mergeTests();
     await mainTests();
     await reviewFixTests();
+    await autoTests();
     await moduleTests();
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));
