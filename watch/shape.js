@@ -365,6 +365,8 @@
     if (typeof v.simpleText === 'string') return v.simpleText;
     if (Array.isArray(v.runs)) return v.runs.map(function (r) { return (r && typeof r.text === 'string') ? r.text : ''; }).join('');
     if (typeof v.content === 'string') return v.content;
+    if (typeof v.string === 'string') return v.string;          // Prime: { attrs, string }
+    if (typeof v.message === 'string') return v.message;
     if (typeof v.text === 'string') return v.text;
     if (v.text && typeof v.text === 'object') return textOf(v.text);
     if (typeof v.default === 'object' && v.default) return textOf(v.default);
