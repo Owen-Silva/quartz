@@ -20,7 +20,7 @@
 'use strict';
 const { run, serve, html, KEYS, sleep } = require('./tests/e2e-kit');
 
-const CDP = 9435;
+const CDP = Number(process.env.QUARTZ_E2E_CDP) || 9435; // a lane's own port when it has to share the machine
 const TITLES = { start: 'Start Page', typed: 'Typed Page', local: 'Localhost Page', full: 'Full Url Page', alpha: 'Alpha Field Guide', beta: 'Beta Notebook', gamma: 'Gamma Workbench' };
 
 run('omnibox-e2e', async ({ check, launch }) => {
