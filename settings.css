@@ -1,9 +1,9 @@
 /* ============================================================
-   settings.css — the settings instrument, its popover and the toast.
+   settings.css — the settings instrument, its sheet and the toast.
 
    Loaded after chrome.css, and scoped entirely to #settings,
-   #settings-panel and #settings-toast: nothing here reaches
-   another element.
+   #settings-panel, #settings-scrim and #settings-toast: nothing
+   here reaches another element.
 
    LOOK. Helm's Settings: the pane is an opaque Helm panel, each
    section a Helm card, controls are Helm's buttons, inputs, switches,
@@ -13,19 +13,21 @@
    literal is the hue slider's rainbow, which is the value being
    chosen rather than a colour of the interface.
 
-   NO BLUR. The pane is tall and scrolls, and it floats over a
-   webview the host cannot sample, so it is opaque --surface-solid
-   with no backdrop-filter (this GPU drops raster tiles under one on
-   tall elements). Only the small toast keeps the overlay blur.
+   NO BLUR. The sheet is tall and scrolls, and it floats over a
+   webview the host cannot sample, so it is opaque with no
+   backdrop-filter (this GPU drops raster tiles under one on tall
+   elements); its scrim is a plain tint. Only the small toast keeps
+   the overlay blur.
 
-   MOTION. Colour changes over 120 ms; the toast fades in and out
-   over 150 ms and then holds still. Nothing animates continuously.
+   MOTION. Colour changes over 120 ms; the sheet and the toast use the
+   shared tokens (see "The sheet"). Nothing animates continuously.
    ============================================================ */
 
 /* There is no global reset in this app, and chrome.css gives every
    button `display: inline-flex`, which outranks the UA's [hidden]. */
 #settings[hidden],
 #settings-panel[hidden],
+#settings-scrim[hidden],
 #settings-toast[hidden],
 #settings-panel [hidden] { display: none; }
 
@@ -43,54 +45,260 @@
 }
 
 /* ============================================================
-   The popover
+   The sheet
+   A centred two-pane sheet over a soft scrim, laid out as Mantle's
+   Settings and Helm's are: the nav on the left (the title, Find a
+   setting, one row per section with its glyph), the section on show
+   on the right under its name, drawn as one quiet card of rows split
+   by hairlines. It starts under the nav row, so the tabs, the address
+   bar and the gear stay in reach and undimmed.
+
+   NO BLUR, on the sheet or the scrim. What sits under them is a
+   <webview>, which a backdrop-filter cannot sample; this GPU drops
+   raster tiles under a blur on tall boxes; and a full-window blur
+   re-renders on every frame a video plays underneath. The sheet is
+   opaque and the scrim a plain tint.
+
+   MOTION. The shared tokens (chrome.css "surfaces arrive and leave"):
+   in on --m-spring over --m-dur-m, scale .96 to 1 and a fade; out on
+   the accelerate at 45 %. The scrim only fades.
    ============================================================ */
 
 #settings-panel {
+  /* the sheet's own ground and layers (Mantle Settings: the window is one
+     ground, the cards are the only layer on it, drawn by a hairline) */
+  --set-ground: var(--surface-solid);
+  --set-card: rgba(255, 255, 255, 0.028);
+  --set-edge: var(--hairline);
+  --set-sep: rgba(255, 255, 255, 0.06);
+  --set-field: rgba(0, 0, 0, 0.22);
+  --set-hover: rgba(255, 255, 255, 0.045);
+  --set-press: rgba(255, 255, 255, 0.07);
+  --set-current: rgba(255, 255, 255, 0.07);
+  --set-top-at: var(--set-top, calc(var(--titlebar-h) + var(--nav-h)));
+  --set-gap: 24px;
+
   position: fixed;
-  top: calc(var(--titlebar-h) + var(--nav-h) + 8px);
-  right: 10px;
+  top: calc(var(--set-top-at) + var(--set-gap));
+  right: var(--set-gap);
+  bottom: var(--set-gap);
+  left: var(--set-gap);
   z-index: 20;
-  width: 440px;
-  max-width: calc(100vw - 20px);
-  max-height: calc(100vh - var(--titlebar-h) - var(--nav-h) - 28px);
-  display: flex;
-  flex-direction: column;
+  width: min(960px, calc(100vw - 2 * var(--set-gap)));
+  height: min(680px, calc(100vh - var(--set-top-at) - 2 * var(--set-gap)));
+  margin: auto;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
-  /* Helm's panel edge: one strong 1px hairline, the large radius. */
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-l);
   color: var(--text-2);
   font-family: var(--font);
   font-size: var(--fs-s);
-  /* Opaque: it floats over guest pages, which would read through a tint,
-     and a webview gives a blur nothing to sample. No backdrop-filter:
-     the pane is tall and scrolls. */
-  background: var(--surface-solid);
+  background: var(--set-ground);
   box-shadow:
     inset 0 1px 0 var(--panel-edge),
     var(--shadow-3);
+  transform-origin: 50% 50%;
 }
 
-/* Title row and filter, stacked: the head is a column now, closed by one
-   plain 1px hairline. */
-#settings-panel .set-head {
-  flex: 0 0 auto;
+html[data-theme="light"] #settings-panel {
+  --set-ground: #f4f6fa;                     /* Mantle --lg-ground */
+  --set-card: rgba(255, 255, 255, 0.82);
+  --set-edge: rgba(11, 14, 26, 0.09);
+  --set-sep: rgba(11, 14, 26, 0.065);
+  --set-field: rgba(255, 255, 255, 0.9);
+  --set-hover: rgba(11, 14, 26, 0.05);       /* Mantle --lg-sunk */
+  --set-press: rgba(11, 14, 26, 0.08);
+  --set-current: rgba(11, 14, 26, 0.06);     /* Mantle --lg-hover */
+}
+
+/* the scrim: a plain tint over the page, behind the sheet */
+#settings-scrim {
+  position: fixed;
+  top: var(--set-top, calc(var(--titlebar-h) + var(--nav-h)));
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 19;
+  background: var(--scrim);
+  transition: opacity var(--m-dur-m-out) var(--m-fade-out), display var(--m-dur-m-out) allow-discrete;
+}
+#settings-scrim[hidden] { opacity: 0; pointer-events: none; }
+#settings-scrim:not([hidden]) {
+  opacity: 1;
+  transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in);
+}
+@starting-style {
+  #settings-scrim:not([hidden]) { opacity: 0; }
+}
+
+/* --- the left pane: title, Find a setting, the nav ----------- */
+#settings-panel .set-side {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 0 14px 10px;
-  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px 12px;
 }
 
-#settings-panel .set-head-top {
+#settings-panel .set-side-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 38px;
-  /* the close button keeps the 8px gutter it had before the head stacked */
-  margin-right: -6px;
+  height: 60px;
+  padding: 0 10px;
 }
+
+#settings-panel .set-title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-l);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+#settings-panel .set-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 10px -6px 0;
+  padding: 0 6px;
+}
+
+/* a short sheet scrolls the nav: a thin thumb that shows only while the
+   pointer is over it (Mantle's .nav), never an arrowed grey gutter */
+#settings-panel .set-nav::-webkit-scrollbar,
+#settings-panel .set-body::-webkit-scrollbar { width: 10px; }
+#settings-panel .set-nav::-webkit-scrollbar-button,
+#settings-panel .set-body::-webkit-scrollbar-button { display: none; height: 0; }
+#settings-panel .set-nav::-webkit-scrollbar-thumb,
+#settings-panel .set-body::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  background-clip: padding-box;
+}
+#settings-panel .set-nav:hover::-webkit-scrollbar-thumb,
+#settings-panel .set-body:hover::-webkit-scrollbar-thumb { background-color: var(--hairline-strong); }
+
+#settings-panel .set-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: 34px;
+  margin: 0 0 2px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-s);
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+#settings-panel .set-nav-item:hover { background: var(--set-hover); color: var(--text); }
+#settings-panel .set-nav-item:active { background: var(--set-press); }
+
+/* the section on show: Windows 11's shape, a quiet wash and the accent
+   tick, never a coloured block (Mantle's .nav-i[aria-current]) */
+#settings-panel .set-nav-item[aria-current="page"] {
+  background: var(--set-current);
+  color: var(--text);
+}
+#settings-panel .set-nav-item[aria-current="page"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#settings-panel .set-nav-glyph {
+  flex: 0 0 16px;
+  width: 16px;
+  color: var(--text-2);
+  font-family: var(--icon-font);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+#settings-panel .set-nav-item[aria-current="page"] .set-nav-glyph { color: var(--accent); }
+
+#settings-panel .set-nav-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* while searching, a section with nothing that matches steps back */
+#settings-panel .set-nav-item.is-miss,
+#settings-panel .set-nav-item.is-miss .set-nav-glyph { color: var(--text-3); }
+
+/* --- the right pane: the section's name, then its rows -------- */
+#settings-panel .set-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+#settings-panel .set-main-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 60px;
+  padding: 6px 64px 0 32px;
+}
+
+#settings-panel .set-page-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* the back arrow belongs to the single-pane layout only */
+#settings-panel .set-back { display: none; }
+
+/* close: the sheet's top-right corner, over either layout */
+#settings-panel .set-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 30px;
+  height: 30px;
+}
+
+#settings-panel .set-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 32px 32px;
+}
+#settings-panel .set-body:focus { outline: none; }
 
 /* ============================================================
    Find a setting
@@ -98,13 +306,14 @@
 
 #settings-panel .set-filter-row {
   position: relative;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
 }
 
 #settings-panel .set-filter-glyph {
   position: absolute;
-  left: 9px;
+  left: 11px;
   color: var(--text-3);
   font-family: var(--icon-font);
   font-size: var(--fs-xs);
@@ -114,15 +323,14 @@
 
 #settings-panel .set-filter {
   width: 100%;
-  padding: 6px 9px 6px 28px;
+  height: 32px;
+  padding: 0 10px 0 32px;
   border: 1px solid var(--hairline);
-  /* Helm's input: the --code-bg well and a 1px hairline */
   border-radius: var(--radius-s);
-  background: var(--code-bg);
+  background: var(--set-field);
   color: var(--text);
   font-family: var(--font);
   font-size: var(--fs-s);
-  line-height: 1.4;
   transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
@@ -132,7 +340,7 @@
 #settings-panel .set-filter:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
 }
 
 #settings-panel .set-filter::selection { background: var(--ion-select); color: var(--text); }
@@ -146,116 +354,82 @@
 }
 
 #settings-panel .set-none {
-  margin: 16px 2px 6px;
+  margin: 8px 2px;
   color: var(--text-3);
-  font-size: var(--fs-xs);
-}
-
-#settings-panel .set-title {
-  flex: 1 1 auto;
-  color: var(--text);
   font-size: var(--fs-s);
-  font-weight: 500;
-}
-
-#settings-panel .set-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 4px 14px 14px;
 }
 
 /* ============================================================
    Sections
    ============================================================ */
 
-/* A section is a Helm card on the panel's ground: --surface-2, a 1px
-   hairline, the medium radius, the inner top edge and the level-1
-   shadow. The negative inline margin cancels the card's own gutter, so
-   every heading and control stays on exactly the column it was on
-   before. The 1px border sits where the transparent one did, so no box
-   moved. */
+/* One section on show; while searching, every section that holds a hit,
+   each under its heading. */
 #settings-panel .set-section {
   position: relative;
-  margin: 0 -12px 10px;
-  padding: 12px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-m);
-  background: var(--surface-2);
-  box-shadow: inset 0 1px 0 var(--hairline-inner), var(--shadow-1);
+  max-width: 720px;
 }
+#settings-panel:not(.is-filtering) .set-section:not(.is-current) { display: none; }
+#settings-panel:not(.is-filtering) .set-section > .set-h { display: none; }
+#settings-panel .set-section:not([hidden]) ~ .set-section:not([hidden]) { margin-top: 26px; }
 
-/* last-of-type, not last-child: the "No settings match" line is the body's
-   last child now, and About closes the stack. The border stays (now the
-   card's bottom edge) and only the margin under it goes. */
-#settings-panel .set-section:last-of-type { margin-bottom: 0; }
-
-/* A section heading, closed by a plain 1px hairline (Helm's card-head
-   rule). The padding it needs for that line comes back out of the
-   margin, so nothing below moves. */
+/* The heading shows over search results only, where it names the section
+   a hit is in and opens it (the nav's row, said again where you look). */
 #settings-panel .set-h {
-  /* Section names read as headings, not labels: full text colour, a step
-     larger and bold, so the eye finds each section at a glance (The user:
-     "make the settings section names bold or something so it's more
-     obvious where each section is"). The hairline underneath stays. */
-  margin: 0 0 8px;
-  padding-bottom: 6px;
-  color: var(--text);
-  font-size: var(--fs-s);
-  font-weight: 700;
-  background: linear-gradient(var(--hairline), var(--hairline))
-              left bottom / 100% 1px no-repeat;
-}
-
-/* --- a folded section ----------------------------------------- */
-/* Every section but About folds now, and ships folded (The user: "make it so that
-   all the different sections in settings are auto collapsed"); the pane opens
-   as a list of headings and you unfold the one you came for. About keeps the
-   plain <h2> and no fold at all, so none of this reaches it. Everywhere else
-   the heading IS the toggle, and the <button> reads exactly like the <h2> it
-   replaced:
-   the .set-h rule above still paints it — its colour, weight and fading
-   hairline — and everything here only undoes what a button adds of its own
-   (chrome background, border, padding, centred text, its own font family).
-   Nothing below is new decoration: the chevron and the fold are the same two
-   marks Shortcuts already carried, now on all fourteen. */
-#settings-panel .set-h-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0 2px;
+  color: var(--text-2);
+  font-size: var(--fs-s);
+  font-weight: 600;
+}
+
+#settings-panel .set-h-toggle {
+  justify-content: flex-start;
+  width: auto;
   height: auto;
-  padding: 0 0 6px;          /* the h2's padding, exactly */
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
+  background: none;
   appearance: none;
   -webkit-appearance: none;
   font-family: inherit;
   line-height: inherit;
   text-align: left;
   cursor: pointer;
+  transition: color var(--dur) var(--ease);
 }
-
-/* Folded, the card is the heading alone: the gap the h2 keeps for the body
-   under it would otherwise read as an empty card. */
-#settings-panel .set-foldable:not(.is-open) .set-h { margin-bottom: 0; }
+#settings-panel .set-h-toggle:hover { color: var(--text); }
 
 #settings-panel .set-h-chev {
-  margin-left: auto;         /* out at the right edge */
   color: var(--text-3);
   font-size: 15px;
   line-height: 1;
-  transform: rotate(0deg);   /* '›' points along the fold while closed */
-  transition: transform 140ms ease, color 140ms ease;
 }
-
-#settings-panel .set-foldable.is-open .set-h-chev { transform: rotate(90deg); }
-#settings-panel .set-h-toggle:hover .set-h-chev { color: var(--text-2); }
 
 /* The body is out of the tree while folded (the attribute is what settings.js
    sets); this only makes sure no later display rule outvotes it. */
 #settings-panel .set-collapse[hidden] { display: none; }
+
+/* --- the card of rows ---------------------------------------- */
+#settings-panel .set-rows {
+  border: 1px solid var(--set-edge);
+  border-radius: var(--radius-m);
+  background: var(--set-card);
+}
+
+#settings-panel .set-rows > * { padding-inline: 18px; }
+#settings-panel .set-rows > .set-field { padding-block: 15px; }
+#settings-panel .set-rows > .set-field:empty { display: none; }
+/* a hairline over every row but the first */
+#settings-panel .set-rows > :not([hidden]) ~ .set-field:not([hidden]) { border-top: 1px solid var(--set-sep); }
+/* a line of the section's own, under the row it speaks for */
+#settings-panel .set-rows > .set-field:has(+ .set-hint) { padding-bottom: 6px; }
+#settings-panel .set-rows > .set-hint { margin: 0; padding-bottom: 15px; }
+#settings-panel .set-rows > p:first-child { margin: 0; padding-top: 15px; }
+#settings-panel .set-rows > p:first-child:last-child { padding-bottom: 15px; }
 
 #settings-panel .set-hint {
   margin: 7px 0 0;
@@ -264,10 +438,10 @@
   line-height: 1.45;
 }
 
-#settings-panel .set-field + .set-field { margin-top: 10px; }
 /* A field that follows a hint line rather than another field (the Brave
    key under the engine list's hint) gets the same air above it. */
 #settings-panel .set-hint + .set-field-gap { margin-top: 14px; }
+#settings-panel .set-rows > .set-hint + .set-field-gap { margin-top: 0; }
 
 /* ============================================================
    Controls
@@ -531,11 +705,13 @@
    The folder field, and the switch row that carries --continue.
    ============================================================ */
 
+/* In the sheet a label is the row's title: full text colour at the body
+   size, so the eye reads title, control, then the muted hint under it. */
 #settings-panel .set-label {
   display: block;
-  margin: 0 0 6px;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: var(--fs-s);
   line-height: 1.35;
 }
 
@@ -589,7 +765,7 @@
 #settings-panel .set-ctl-label {
   flex: 1 1 150px;
   min-width: 0;
-  color: var(--text-2);
+  color: var(--text);
   font-size: var(--fs-s);
   line-height: 1.35;
 }
@@ -697,7 +873,7 @@
 #settings-panel .set-row-label {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--text-2);
+  color: var(--text);
   line-height: 1.35;
 }
 
@@ -1724,10 +1900,17 @@
    chrome.css already rings every button; these repeat it so the
    panel keeps its keyboard outline even if that rule moves.
    ============================================================ */
-#settings:focus-visible,
-#settings-panel button:focus-visible {
+#settings:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+/* Inside the sheet every ring is drawn inside its own control, as in
+   Mantle and Helm: a ring outside the box would paint over a packed
+   neighbour, or be clipped by the pane's scroll edge. */
+#settings-panel button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
 }
 
 /* Packed controls: option pills 1 px apart, rows stacked edge to edge, the
@@ -1774,8 +1957,41 @@
   #settings-panel .set-row,
   #settings-panel .set-switch,
   #settings-panel .set-switch-knob,
-  #settings-panel .set-h-chev { transition: none; }
+  #settings-panel .set-h-chev,
+  #settings-panel .set-h-toggle,
+  #settings-panel .set-nav-item { transition: none; }
+
+  /* the scrim keeps its fade (120 ms), like the sheet over it */
+  #settings-scrim, #settings-scrim:not([hidden]) { transition: opacity var(--m-dur-rm) var(--m-fade-in), display var(--m-dur-rm) allow-discrete; }
 
   /* reduced motion: it still fades (120 ms), it does not travel */
   #settings-toast, #settings-toast.is-up { transform: translate(-50%, 0); transition: opacity var(--m-dur-rm) var(--m-fade-in); }
+}
+
+/* ============================================================
+   Narrow windows: one pane
+   Under about 760 px the nav and the section take turns: the nav first,
+   a picked section with a back arrow over it (settings.js setPane). A
+   search shows its results under the box, the nav folded away.
+   ============================================================ */
+@media (max-width: 760px) {
+  #settings-panel {
+    --set-gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #settings-panel[data-pane="nav"]:not(.is-filtering) .set-main,
+  #settings-panel[data-pane="main"]:not(.is-filtering) .set-side { display: none; }
+  #settings-panel.is-filtering { grid-template-rows: auto minmax(0, 1fr); }
+  #settings-panel.is-filtering .set-side { padding-bottom: 0; }
+  #settings-panel.is-filtering .set-nav { display: none; }
+  #settings-panel[data-pane="main"]:not(.is-filtering) .set-back {
+    display: inline-flex;
+    width: 32px;
+    height: 32px;
+    margin-left: -8px;
+  }
+  #settings-panel[data-pane="main"]:not(.is-filtering) .set-back .glyph { font-size: var(--fs-m); }
+  #settings-panel .set-main-head { padding: 6px 60px 0 20px; }
+  #settings-panel .set-body { padding: 6px 20px 24px; }
+  #settings-panel .set-x { top: 15px; right: 14px; }
 }

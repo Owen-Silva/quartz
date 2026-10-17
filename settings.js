@@ -97,6 +97,32 @@
   var GLYPH_CLOSE = '\uE711';
   var GLYPH_CHECK = '\uE73E';
   var GLYPH_SEARCH = '\uE721';
+  var GLYPH_BACK = '\uE72B';
+
+  /* The sheet's nav: one Segoe Fluent glyph per section, keyed by the
+     heading it names (the heading stays the one source of the name). A
+     section with no entry here still gets a row, with the gear. */
+  var NAV_GLYPHS = {
+    'Look': '\uE790',                     // Color: the palette
+    'Claude': '\uE756',                   // CommandPrompt, as on a Claude tab
+    'Tabs': '\uE7C4',                     // TaskView: stacked windows
+    'Downloads': '\uE896',
+    'Search': '\uE721',
+    'Typing': '\uE8D2',                   // Font
+    'Websites': '\uE774',                 // Globe
+    'Protected video': '\uE714',          // Video
+    'Site styles and scripts': '\uE943',  // Code
+    'Browser style': '\uE771',            // Personalize: the brush
+    'New tab': '\uECA5',                  // Tiles
+    'Home': '\uE80F',
+    'Idle music': '\uE8D6',               // Audio
+    'Privacy': '\uE72E',                  // Lock
+    'Spotify': '\uE7F6',                  // Headphone
+    'Stocks': '\uEAFC',                   // Market
+    'Phone': '\uE8EA',                    // CellPhone
+    'Shortcuts': '\uE765',                // KeyboardClassic
+    'About': '\uE946'                     // Info
+  };
 
   var STORAGE_KEY = 'settings';
   /* theme-boot.js reads this one, before anything else runs. */
@@ -399,6 +425,12 @@
   var buttonEl = null;
   var bodyEl = null;
   var open_ = false;
+  /* The sheet: a nav of sections on the left, one section on the right. */
+  var scrimEl = null;          // the soft scrim over the page while open
+  var navEl = null;            // the list of sections
+  var titleEl = null;          // the right pane's heading
+  var currentEl = null;        // the section on show
+  var lastSection = '';        // reopened where it was left, this run only
   var toastEl = null;
   var toastTimer = 0;
   var toastHideTimer = 0;
@@ -411,12 +443,11 @@
   var recNote = '';
   var recUnbound = null;
 
-  /* Every section ships folded, so the pane opens as a list of headings and
-     the reader picks what to look at (The user: "make it so that all the
-     different sections in settings are auto collapsed"). About is the one
-     exception and does not fold at all — plain heading, always open. A fold
-     is a view state and a short-lived one: nothing is stored and nothing
-     subscribes to it, so every open starts folded again. */
+  /* Sections are still built as folds (About is a plain heading), but the
+     sheet holds every fold open: its nav picks the one section on show, which
+     is what the folds were for in the old single-column popover (The user: "make
+     it so that all the different sections in settings are auto collapsed").
+     The filter still forces folds by its hits and hands them back after. */
   var foldSeq = 0;                 // ids that pair a header with its body
   var foldsForced = false;         // held open by a filter, not by the reader
   var shortcutsSectionEl = null;   // the one fold with a side effect
@@ -2019,7 +2050,8 @@
    */
   function section(title) {
     var s = el('section', 'set-section set-foldable');
-    var body = el('div', 'set-collapse');
+    /* set-rows: in the sheet the body is the section's one quiet card of rows. */
+    var body = el('div', 'set-collapse set-rows');
     body.id = 'set-fold-' + (++foldSeq);
     s.appendChild(foldHead(title, body.id, s));
     s.appendChild(body);
@@ -2034,12 +2066,17 @@
    * A section with no fold at all: a plain <h2> and the content under it,
    * always there. About is the only one (The user) — it is three lines and a
    * button, so a fold would hide less than the control costs. Nothing here
-   * carries .set-foldable, so collapseAllFolds() and the filter's
+   * carries .set-foldable, so unfoldAll() and the filter's
    * unfold-the-hits pass both walk straight past it.
    */
   function plainSection(title) {
     var s = el('section', 'set-section');
     s.appendChild(el('h2', 'set-h', title));
+    /* The sheet draws a section's rows on one card, so About gets a body
+       too; appendChild lands in it, as a fold's does. No fold, no toggle. */
+    var body = el('div', 'set-rows');
+    s.appendChild(body);
+    s.appendChild = function (node) { return body.appendChild(node); };
     return s;
   }
 
@@ -2060,7 +2097,9 @@
     var chev = el('span', 'set-h-chev', '›');
     chev.setAttribute('aria-hidden', 'true');
     head.appendChild(chev);
-    head.addEventListener('click', function () { toggleFold(s); });
+    /* In the sheet a heading shows only over search results, where it is
+       the way into its section: the nav's row, said where the hit is. */
+    head.addEventListener('click', function () { showSection(s, true); });
     /* A <button> already turns Enter and Space into a click; taking the key
        ourselves keeps the panel's other key handling out of it, and the
        preventDefault is what stops the second, native toggle. */
@@ -2068,7 +2107,7 @@
       var key = ev && ev.key;
       if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
       if (typeof ev.preventDefault === 'function') ev.preventDefault();
-      toggleFold(s);
+      showSection(s, true);
     });
     return head;
   }
@@ -2099,29 +2138,6 @@
     if (!open && s === shortcutsSectionEl && recId !== null) stopRecording();
   }
 
-  /** The reader's own toggle. data-fold-was is what a filter hands back. */
-  function toggleFold(s) {
-    if (!s) return;
-    var open = !isFoldOpen(s);
-    if (s.setAttribute) s.setAttribute('data-fold-was', open ? '1' : '0');
-    applyFold(s, open);
-  }
-
-  /**
-   * Every open starts folded. Nothing is stored, so there is nothing to read
-   * back: whatever was left open last time is gone. About has no fold, so it
-   * is not in this list at all.
-   */
-  function collapseAllFolds() {
-    if (!bodyEl) return;
-    foldsForced = false;
-    var sections = bodyEl.querySelectorAll('.set-foldable');
-    for (var i = 0; i < sections.length; i++) {
-      sections[i].setAttribute('data-fold-was', '0');
-      applyFold(sections[i], false);
-    }
-  }
-
   /**
    * A search must not hide its own hits: while the filter has words every
    * section still showing is held open, and clearing the box puts the
@@ -2149,38 +2165,158 @@
     }
   }
 
+  /* ============================================================
+     The sheet: one section at a time
+
+     The nav on the left names every section; the right pane shows the
+     one picked. Every fold is held open while the sheet is (the nav is
+     what picks now), so a section on show is always whole, and the
+     filter's own pass still hides and lights exactly what it did.
+     ============================================================ */
+
+  /** The heading text: .set-h-text in a fold's button, the <h2> otherwise. */
+  function sectionName(s) {
+    if (!s || !s.querySelector) return '';
+    var head = s.querySelector('.set-h-text') || s.querySelector('.set-h');
+    return head ? String(head.textContent || '').trim() : '';
+  }
+
+  function allSections() {
+    return bodyEl ? bodyEl.querySelectorAll('.set-section') : [];
+  }
+
+  /** By heading, any case; null for a name no section carries. */
+  function findSection(title) {
+    var want = String(title == null ? '' : title).trim().toLowerCase();
+    if (!want) return null;
+    var sections = allSections();
+    for (var i = 0; i < sections.length; i++) {
+      if (sectionName(sections[i]).toLowerCase() === want) return sections[i];
+    }
+    return null;
+  }
+
+  /** Every fold open, and remembered open, so a cleared filter puts them back open. */
+  function unfoldAll() {
+    if (!bodyEl) return;
+    foldsForced = false;
+    var sections = bodyEl.querySelectorAll('.set-foldable');
+    for (var i = 0; i < sections.length; i++) {
+      sections[i].setAttribute('data-fold-was', '1');
+      applyFold(sections[i], true);
+    }
+  }
+
+  /** Below about 760 px the sheet is one pane: the nav, or a section with a back arrow. */
+  function setPane(pane) {
+    if (panelEl) panelEl.setAttribute('data-pane', pane === 'nav' ? 'nav' : 'main');
+  }
+
+  function isFiltering() {
+    return !!(panelEl && panelEl.classList.contains('is-filtering'));
+  }
+
+  /** The right pane's heading: the section's name, or what the search is for. */
+  function renderTitle() {
+    if (!titleEl) return;
+    var q = filterEl ? String(filterEl.value || '').trim() : '';
+    titleEl.textContent = isFiltering() && q
+      ? 'Results for \u201C' + q + '\u201D'
+      : sectionName(currentEl);
+  }
+
+  /** The nav follows: the current row, and (while searching) which rows hold a hit. */
+  function syncNav() {
+    if (!navEl) return;
+    var filtering = isFiltering();
+    var items = navEl.querySelectorAll('.set-nav-item');
+    for (var i = 0; i < items.length; i++) {
+      var s = items[i]._section;
+      if (!filtering && s === currentEl) items[i].setAttribute('aria-current', 'page');
+      else items[i].removeAttribute('aria-current');
+      items[i].classList.toggle('is-miss', filtering && !!s && !!s.hidden);
+    }
+  }
+
+  /** Put one section on show. Nothing else about it changes. */
+  function setCurrent(s) {
+    if (!s) return;
+    if (currentEl && currentEl !== s && currentEl === shortcutsSectionEl && recId !== null) {
+      stopRecording();     // leaving the row that records cancels it, as folding it away did
+    }
+    var sections = allSections();
+    for (var i = 0; i < sections.length; i++) {
+      sections[i].classList.toggle('is-current', sections[i] === s);
+    }
+    currentEl = s;
+    lastSection = sectionName(s);
+    syncNav();
+    renderTitle();
+  }
+
+  /**
+   * The nav's row (or a result's heading) was picked: a search in the box
+   * gives way to the section, which opens at its top. `focusIn` hands the
+   * keyboard to the pane, so the next Tab is the section's first control.
+   */
+  function showSection(s, focusIn) {
+    if (!s || !bodyEl) return;
+    if (filterEl && filterEl.value) clearFilter();
+    setCurrent(s);
+    setPane('main');
+    bodyEl.scrollTop = 0;
+    if (focusIn) {
+      try { bodyEl.focus({ preventScroll: true }); } catch (err) { /* not focusable yet */ }
+    }
+  }
+
+  /** The nav: one row per section, in the order the sections are built. */
+  function buildNav() {
+    if (!navEl) return;
+    navEl.textContent = '';
+    var sections = allSections();
+    for (var i = 0; i < sections.length; i++) {
+      (function (s) {
+        var name = sectionName(s);
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'set-nav-item';
+        var g = el('span', 'set-nav-glyph glyph', NAV_GLYPHS[name] || GLYPH_GEAR);
+        g.setAttribute('aria-hidden', 'true');
+        b.appendChild(g);
+        b.appendChild(el('span', 'set-nav-text', name));
+        b._section = s;
+        b.addEventListener('click', function () { showSection(s, false); });
+        navEl.appendChild(b);
+      })(sections[i]);
+    }
+  }
+
+  /** Up and Down walk the nav; Home and End jump to its ends. */
+  function navKeys(event) {
+    var k = event.key;
+    if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Home' && k !== 'End') return;
+    var items = Array.prototype.slice.call(navEl.querySelectorAll('.set-nav-item'));
+    var at = items.indexOf(document.activeElement);
+    if (at < 0 || !items.length) return;
+    event.preventDefault();
+    var next = k === 'Home' ? 0 : k === 'End' ? items.length - 1
+      : (at + (k === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next].focus();
+  }
+
   /**
    * Open the panel at one section — what a deep link from elsewhere in the
-   * browser needs. Matches on the heading text, unfolds that section (About
-   * has no fold to undo) and brings it into view; an unknown name leaves the
-   * panel exactly as it is.
+   * browser needs. Matches on the heading text and puts that section on
+   * show, at its top, in the single-pane layout too; an unknown name leaves
+   * the panel exactly as it is.
    */
   function revealSection(title) {
     if (!bodyEl) return false;
-    var want = String(title == null ? '' : title).trim().toLowerCase();
-    if (!want) return false;
-    var sections = bodyEl.querySelectorAll('.set-section');
-    for (var i = 0; i < sections.length; i++) {
-      /* .set-h-text inside a fold's button, the <h2> itself when there is no
-         fold — either way, the heading is the name. */
-      var head = sections[i].querySelector('.set-h-text') || sections[i].querySelector('.set-h');
-      var name = head ? String(head.textContent || '').trim().toLowerCase() : '';
-      if (name !== want) continue;
-      if (sections[i].classList && sections[i].classList.contains('set-foldable')) {
-        sections[i].setAttribute('data-fold-was', '1');
-        applyFold(sections[i], true);
-      }
-      /* Instant, not smooth: a smooth scroll asked for in the same task that
-         un-hides the popover never runs here (measured — the body stays at
-         scrollTop 0), and the pane has no motion of its own to match. */
-      try {
-        sections[i].scrollIntoView({ block: 'start' });
-      } catch (err) {
-        sections[i].scrollIntoView(true);   // older signature, same landing
-      }
-      return true;
-    }
-    return false;
+    var s = findSection(title);
+    if (!s) return false;
+    showSection(s, false);
+    return true;
   }
 
   /** A row of mutually exclusive options, drawn as one segmented instrument. */
@@ -4990,6 +5126,9 @@
       if (rows.length) target = rows[Math.min(at.index, rows.length - 1)];
     }
     if (!target) target = sec.querySelector('.set-h-toggle');
+    /* The sheet shows the heading only over search results; otherwise the
+       pane itself holds the keyboard, which keeps Escape closing it. */
+    if (target && (!target.getClientRects || !target.getClientRects().length)) target = bodyEl;
     if (!target || target.disabled) return;
     try { target.focus({ preventScroll: true }); } catch (err) { /* re-rendered away */ }
     if (target.tagName === 'INPUT' && at.start >= 0 && at.key === target.getAttribute('data-spell-key')) {
@@ -7193,7 +7332,9 @@
          one field's text out of its neighbours' index. */
       var head = s.querySelector('.set-h');
       if (head) chrome += ' ' + deepText(head) + ' ';
-      var host = s.querySelector('.set-collapse') || s;
+      /* .set-rows: a fold's body, or About's (it has no fold, but the sheet
+         gives it a body of its own) -- its fields still index apart. */
+      var host = s.querySelector('.set-rows') || s;
       var kids = host.children;
       for (var k = 0; k < kids.length; k++) {
         var kid = kids[k];
@@ -7337,6 +7478,8 @@
     if (noneEl) noneEl.hidden = !words.length || anyShown;
     if (panelEl) panelEl.classList.toggle('is-filtering', words.length > 0);
     syncFolds(words.length > 0);
+    syncNav();
+    renderTitle();
   }
 
   /** Index and filter in one breath — what a re-render owes the filter. */
@@ -7365,6 +7508,8 @@
     for (var i = 0; i < kids.length; i++) {
       var n = kids[i];
       if (n.hidden) continue;
+      /* not on show: a section the sheet is not showing, a pane folded away */
+      if (n.getClientRects && !n.getClientRects().length) continue;
       var tag = String(n.tagName || '').toLowerCase();
       if (FOCUSABLE.indexOf(tag) >= 0 && !n.disabled) return n;
       var deeper = firstControl(n);
@@ -7415,9 +7560,14 @@
   }
 
   /**
-   * The popover lives on <body>, not inside .chrome-layer: the chrome layer
+   * The sheet lives on <body>, not inside .chrome-layer: the chrome layer
    * carries a blur filter before boot, and a fixed element there would be
    * clipped to it rather than floating over the tab well.
+   *
+   * Two panes, as Mantle's Settings and Helm's are laid out: on the left the
+   * title, Find a setting and a nav with one row per section; on the right
+   * the section on show, its name over it and the close button beside it.
+   * A soft scrim sits over the page behind the sheet (a click on it closes).
    */
   function buildPanel() {
     if (document.getElementById('settings-panel')) {
@@ -7425,23 +7575,53 @@
       bodyEl = panelEl.querySelector('.set-body');
       return;
     }
+    scrimEl = el('div', 'set-scrim');
+    scrimEl.id = 'settings-scrim';
+    scrimEl.setAttribute('aria-hidden', 'true');
+    scrimEl.hidden = true;
+    /* The document's mousedown already closes the sheet; this keeps the
+       click from moving focus off the gear it hands the keyboard back to. */
+    scrimEl.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+
     panelEl = document.createElement('div');
     panelEl.id = 'settings-panel';
-    panelEl.className = 'glass';
+    panelEl.className = 'set-sheet';
     panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-modal', 'true');
     panelEl.setAttribute('aria-label', 'Settings');
+    panelEl.setAttribute('data-pane', 'nav');
     panelEl.tabIndex = -1;
     panelEl.hidden = true;
+    panelEl.addEventListener('keydown', trapTab);
 
-    var head = el('div', 'set-head');
-    var headTop = el('div', 'set-head-top');
-    headTop.appendChild(el('span', 'set-title', 'Settings'));
-    headTop.appendChild(iconButton(GLYPH_CLOSE, 'Close', 'set-act set-x', function () { closePanel(); }));
-    head.appendChild(headTop);
-    head.appendChild(buildFilter());
-    panelEl.appendChild(head);
+    var side = el('div', 'set-side');
+    var sideHead = el('div', 'set-side-head');
+    sideHead.appendChild(el('span', 'set-title', 'Settings'));
+    side.appendChild(sideHead);
+    side.appendChild(buildFilter());
+    navEl = el('nav', 'set-nav');
+    navEl.setAttribute('aria-label', 'Settings sections');
+    navEl.addEventListener('keydown', navKeys);
+    side.appendChild(navEl);
+    panelEl.appendChild(side);
+
+    var main = el('div', 'set-main');
+    var mainHead = el('div', 'set-main-head');
+    mainHead.appendChild(iconButton(GLYPH_BACK, 'All settings', 'set-act set-back', function () {
+      setPane('nav');
+      var cur = navEl && navEl.querySelector('.set-nav-item[aria-current="page"]');
+      if (cur) cur.focus();
+    }));
+    titleEl = el('h2', 'set-page-title');
+    titleEl.id = 'set-page-title';
+    mainHead.appendChild(titleEl);
+    main.appendChild(mainHead);
 
     bodyEl = el('div', 'set-body');
+    /* Focusable, not tabbable: a picked section hands the keyboard here. */
+    bodyEl.tabIndex = -1;
+    bodyEl.setAttribute('role', 'region');
+    bodyEl.setAttribute('aria-labelledby', 'set-page-title');
     bodyEl.appendChild(buildLook());
     bodyEl.appendChild(buildClaude());
     bodyEl.appendChild(buildTabs());
@@ -7466,9 +7646,15 @@
     noneEl.hidden = true;
     bodyEl.appendChild(noneEl);
 
-    panelEl.appendChild(bodyEl);
+    main.appendChild(bodyEl);
+    panelEl.appendChild(main);
+    /* Last in the sheet, over both panes: the top-right corner in either layout. */
+    panelEl.appendChild(iconButton(GLYPH_CLOSE, 'Close', 'set-act set-x', function () { closePanel(); }));
 
+    document.body.appendChild(scrimEl);
     document.body.appendChild(panelEl);
+    buildNav();
+    setCurrent(allSections()[0] || null);
     renderAll();
   }
 
@@ -7497,28 +7683,68 @@
     refreshFilter();          // the text just changed under the index
   }
 
-  /** Anchor under the gear, like the downloads popover does. */
+  /**
+   * The scrim and the sheet start under the nav row, so the tabs, the address
+   * bar and the gear that toggles the sheet stay in reach and undimmed. CSS
+   * has the same default (titlebar + nav row) for a row it cannot measure.
+   */
   function position() {
-    if (!panelEl || !buttonEl) return;
-    var r = buttonEl.getBoundingClientRect();
-    if (!r || !r.width) return;
-    var right = Math.max(8, Math.round(window.innerWidth - r.right));
-    panelEl.style.top = Math.round(r.bottom + 8) + 'px';
-    panelEl.style.right = right + 'px';
+    if (!panelEl) return;
+    var row = (buttonEl && buttonEl.closest && buttonEl.closest('.navrow')) || document.querySelector('.navrow');
+    var r = row ? row.getBoundingClientRect() : null;
+    var top = r && r.height ? Math.round(r.bottom) + 'px' : '';
+    panelEl.style.setProperty('--set-top', top);
+    if (scrimEl) scrimEl.style.setProperty('--set-top', top);
+  }
+
+  /** What Tab can reach in the sheet right now, in order. */
+  function tabbables() {
+    if (!panelEl) return [];
+    var all = panelEl.querySelectorAll('button, input, select, textarea, a[href], summary, [tabindex]');
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var n = all[i];
+      if (n.disabled || n.tabIndex < 0) continue;
+      if (!n.getClientRects || !n.getClientRects().length) continue;   // display:none, or folded away
+      out.push(n);
+    }
+    return out;
+  }
+
+  /** Focus stays in the sheet while it is open: Tab off either end wraps round. */
+  function trapTab(event) {
+    if (!open_ || event.key !== 'Tab' || event.defaultPrevented) return;
+    var list = tabbables();
+    if (!list.length) return;
+    var first = list[0];
+    var last = list[list.length - 1];
+    var a = document.activeElement;
+    var outside = !a || a === panelEl || !panelEl.contains(a);
+    if (event.shiftKey ? (a === first || outside) : (a === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
   }
 
   /**
    * `at` is a section heading — Settings.open('Spotify') is a deep link from
-   * anywhere else in the browser, and it is the one thing that arrives with a
-   * section already unfolded and scrolled to. Called with nothing, the panel
-   * opens the way it always does: every section folded.
+   * anywhere else in the browser, and it opens the sheet on that section.
+   * Called with nothing, the sheet opens on the section it was left on (Look
+   * the first time), with the nav first in the narrow single-pane layout.
    */
   function openPanel(at) {
     if (!panelEl) return;
-    /* Folded first, rendered second: renderAll() ends in the filter, so a
-       query still sitting in the box re-opens its own hits on the way in. */
-    collapseAllFolds();
+    var target = at ? findSection(at) : null;
+    /* A deep link lands on the section whole, so a query left in the box
+       gives way to it. A plain open keeps the query: renderAll() ends in the
+       filter, which re-shows its own hits on the way in. */
+    if (target && filterEl && filterEl.value) filterEl.value = '';
+    unfoldAll();
     renderAll();
+    setCurrent(target || findSection(lastSection) || allSections()[0] || null);
+    setPane(target ? 'main' : 'nav');
+    position();
+    if (scrimEl) scrimEl.hidden = false;
     panelEl.hidden = false;
     open_ = true;
     /* The Spotify readout is live only while the pane is: one subscription
@@ -7539,7 +7765,6 @@
     /* And the Typing section: main owns it and a page's right-click menu
        changes it, so it is live while the pane is, like Phone. */
     spellWatch();
-    position();
     if (buttonEl) {
       buttonEl.classList.add('is-open');
       buttonEl.setAttribute('aria-expanded', 'true');
@@ -7561,14 +7786,23 @@
        old offset when it is shown again, and opening the folded list already
        scrolled to wherever the last visit ended reads as a bug. */
     if (bodyEl) bodyEl.scrollTop = 0;
-    /* Last, with the panel on screen: scrollIntoView has nothing to measure
-       against while the popover is still hidden. */
-    if (at) revealSection(at);
   }
 
+  /**
+   * Escape, the close button, the scrim, the gear and Settings.close() all end
+   * here. When the keyboard was in the sheet it goes back to the gear, so the
+   * next Tab starts where the sheet was opened from; a click that took focus
+   * somewhere else (a tab, the address bar) keeps it there.
+   */
   function closePanel() {
+    var a = document.activeElement;
+    var hadFocus = !!(open_ && panelEl && a && (a === panelEl || panelEl.contains(a)));
     if (panelEl) panelEl.hidden = true;
+    if (scrimEl) scrimEl.hidden = true;
     open_ = false;
+    if (hadFocus && buttonEl && typeof buttonEl.focus === 'function') {
+      try { buttonEl.focus({ preventScroll: true }); } catch (err) { /* the row is gone */ }
+    }
     autopauseRelease();
     phoneRelease();
     spellRelease();

@@ -1434,7 +1434,7 @@ body,
    Each surface sets how far it travels and for how long:
      popovers (site info, shield, downloads, workspaces)  s, drop 8 px
      the palette (centred)                                 s, scale .96
-     Settings (a tall panel)                               m, drop 12 px
+     Settings (a centred sheet)                            m, scale .96
      menus (the tab menu, the bookmarks overflow)         xs, scale .96 from the corner
      the find bar                                         xs, drop 6 px */
 #siteinfo-panel, #shield-panel, #downloads-panel, #workspaces-panel,
@@ -1450,7 +1450,7 @@ body,
     display var(--m-out) allow-discrete;
 }
 #tabsearch { --m-from-y: 0px; --m-from-s: .96; transform-origin: 0 0; }  /* x 0 = its visual centre (translateX(-50%)) */
-#settings-panel { --m-in: var(--m-dur-m); --m-out: var(--m-dur-m-out); --m-from-y: -12px; }
+#settings-panel { --m-in: var(--m-dur-m); --m-out: var(--m-dur-m-out); --m-from-y: 0px; --m-from-s: .96; }  /* origin: its centre (settings.css) */
 #tabmenu, #bm-overflow { --m-in: var(--m-dur-xs); --m-out: var(--m-dur-xs-out); --m-from-y: 0px; --m-from-s: .96; }
 #tabmenu { transform-origin: top left; }      /* it opens at the pointer */
 #bm-overflow { transform-origin: top right; } /* it hangs under the chevron at the bar's end */
@@ -1483,7 +1483,7 @@ body,
 /* Site info holds nine native <select>s, and Chromium lays a MOVING select out again on every
    frame (10-16 probe: 15 layouts per open with the 8 px drop, 2 with the fade alone, 2 with no
    motion at all; hiding the selects alone also gave 2). So it keeps the shared timing and fades
-   without travel. Settings keeps its drop: its selects sit in folds that start closed. */
+   without travel. Settings scales rather than drops (see the frame trace in its lane notes). */
 #siteinfo-panel {
   --m-from-y: 0px;
   transition: opacity var(--m-out) var(--m-fade-out), display var(--m-out) allow-discrete;

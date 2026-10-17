@@ -262,7 +262,10 @@ run('overlap-audit', async (k) => {
     { name: 'settings', roots: ['#settings-panel'], setup: async () => ev('(Settings.open(), 1)') },
     {
       name: 'settings-open', roots: ['#settings-panel'], pages: true, wideOnly: true,
-      setup: async () => { await ev('(Settings.open(), 1)'); await ev(`(() => { for (const h of document.querySelectorAll('#settings-panel [aria-expanded="false"]')) h.click(); return 1; })()`); await sleep(400); },
+      // The sheet shows one section at a time; its results layout (every section under its heading,
+      // what a search shows) puts all of them on the pages this scene walks.
+      setup: async () => { await ev('(Settings.open(), 1)'); await ev("(document.getElementById('settings-panel').classList.add('is-filtering'), 1)"); await sleep(400); },
+      teardown: async () => ev("(document.getElementById('settings-panel').classList.remove('is-filtering'), Settings.close(), 1)"),
     },
     { name: 'siteinfo', roots: ['#siteinfo-panel'], setup: async () => { await activate(pageTab); await ev('(SiteInfo.open(), 1)'); await sleep(300); } },
     { name: 'shield', roots: ['#shield-panel'], setup: async () => { await activate(pageTab); await ev('(Shield.open(), 1)'); await sleep(300); } },
