@@ -489,6 +489,7 @@ function create(deps) {
     const bodyJobs = [];
     let captureBytes = 0;
     let crashed = '';
+    let captureBroken = '';      // why this view could not watch the page's own requests, or ''
     let loadErr = null;
     let loaded = false;
     let w = null;
@@ -535,11 +536,17 @@ function create(deps) {
             }, () => { /* evicted or gone */ }));
           }
         });
-        // Sent, NOT awaited: on a page that has never navigated, Electron 44 does not answer
-        // Network.enable until the first load starts (watch-e2e found the read hanging here
-        // forever). The command is queued ahead of the load, so capture still sees every response.
-        const enabled = dbg.sendCommand('Network.enable', { maxTotalBufferSize: 40 * 1024 * 1024, maxResourceBufferSize: 12 * 1024 * 1024 });
-        if (enabled && typeof enabled.catch === 'function') enabled.catch(() => { /* reported by the capture count */ });
+        // Electron 44 does not answer Network.enable on a window that has never navigated
+        // (watch-e2e: the read hung forever), and sending it un-awaited raced the page's own
+        // first fetches (watch-e2e: the FIRST Disney+ read captured 0 of 7 responses). So:
+        // navigate to about:blank first, then enable and WAIT for the answer (bounded), and
+        // only then load the service. Every response the page makes is seen.
+        try { await within(wc.loadURL('about:blank'), Math.min(3000, Math.max(0, deadline - now())), null); } catch { /* the enable below says */ }
+        const ENABLE_TIMEOUT = {};
+        const enabled = await within(
+          dbg.sendCommand('Network.enable', { maxTotalBufferSize: 40 * 1024 * 1024, maxResourceBufferSize: 12 * 1024 * 1024 }).then(() => true, () => false),
+          Math.min(3000, Math.max(0, deadline - now())), ENABLE_TIMEOUT);
+        if (enabled !== true) captureBroken = enabled === ENABLE_TIMEOUT ? 'DevTools did not answer' : 'DevTools refused';
       }
       const loadP = wc.loadURL(url).then(() => { loaded = true; }, (err) => {
         if (err && (err.errno === -3 || /ERR_ABORTED/.test(String(err.code || err.message)))) { loaded = true; return; }
@@ -578,7 +585,10 @@ function create(deps) {
         }
         if (bodyJobs.length) await Promise.race([Promise.all(bodyJobs), sleep(1500)]);
         if (crashed) out.error = { code: 'crashed', detail: 'the reader page crashed (' + crashed + ')' };
-        else if (!(isReady && (enough || out.captures.length))) {
+        else if (captureBroken && !out.captures.length) {
+          // Not a layout change and not the service's fault: say what actually broke.
+          out.error = { code: 'load-failed', detail: "the reader could not watch the page's data (" + captureBroken + ')' };
+        } else if (!(isReady && (enough || out.captures.length))) {
           out.error = { code: 'timeout', detail: 'timed out after ' + Math.round(budget / 1000) + ' s' };
         }
         out.ok = !out.error;
