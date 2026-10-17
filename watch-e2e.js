@@ -383,6 +383,298 @@ async function shotInner(g, file, name, w, h, caption, say) {
   return ok;
 }
 
+/* ---- modes: --boot2 N, --motion N [--trace file] [--theme dark|light] -------------------------- */
+// Normal runs are unchanged. --boot2 N: seed a cache with one short boot, then N second boots that
+// open Watch AND a control bundled page (Files) at the same early moment, alternating which goes
+// first, and say which pages logged Electron's sandbox-bundle error. --motion N: only the lens
+// stepping frame measurement, N fresh launches; --trace records run 1 and summarises it.
+const BOOT2_N = Math.max(0, Math.floor(Number(opt('boot2', '0')) || 0));
+const MOTION_N = Math.max(0, Math.floor(Number(opt('motion', '0')) || 0));
+const TRACE = opt('trace', '');
+const THEME = opt('theme', 'dark');
+const BOOT1_GRACE_MS = 8000;   // the normal run's boot 1 only: long enough to put Watch in the background first
+const SANDBOX = /sandboxed_renderer\.bundle\.js|binding\.startupData/;
+const STEP_KEYS = ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft'];
+const TRACE_CATS = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame',
+  'blink', 'cc', 'gpu', 'viz', 'disabled-by-default-devtools.timeline.invalidationTracking'];
+const loadNote = () => (fs.existsSync(path.join(os.tmpdir(), 'claude-heavytest.mutex2')) ? 'UNDER LOAD (mutex2 held)' : 'clean (mutex2 absent)');
+
+function mockEnv(mock, graceMs) {
+  return {
+    // main.js (--test-profile only): the first reader waits this long after app start (a real
+    // Quartz waits 10 s; reads before then sit queued). 0 keeps the e2e's timings.
+    QUARTZ_WATCH_BOOT_GRACE_MS: String(graceMs === undefined ? 0 : graceMs),
+    QUARTZ_WATCH_REBASE: JSON.stringify(mock.rebase),
+    QUARTZ_WATCH_OPEN_STUB: OPEN_STUB,
+    QUARTZ_EDGE_STUB: EDGE_STUB,
+    QUARTZ_WATCH_MIN_FREE_GB: '0',
+    QUARTZ_WATCH_GAME_FILE: GAME_FILE,
+    QUARTZ_TEST_MIN_FREE_GB: '0',
+  };
+}
+/** The first title the YouTube search fixture yields (what an answered search draws). */
+function ytSearchTitle() {
+  try { const l = Shape.cleanItems(ADAPTERS.youtube.parseSearch(readText(path.join(FIX, 'youtube-search.html'))), 20); return (l[0] && l[0].title) || ''; } catch (e) { return ''; }
+}
+const isMockUrl = (mock, u) => IDS.some((id) => String(u).indexOf(mock.origin(id) + '/') === 0 || String(u) === mock.origin(id));
+
+/**
+ * The lens-stepping frame measurement (the normal run's and --motion's): a rAF recorder, the ten
+ * steps 750 ms apart, each marked with console.timeStamp('e2e-step-<i>') for a trace. Returns the
+ * frames and the classification: a long frame within 300 ms of the FIRST wash cross-fade is the
+ * one-time first paint (watch-lead's bar); any other over 20 ms is steady stepping.
+ */
+async function measureMotion(g, o) {
+  o = o || {};
+  await g.send('Performance.enable');
+  const layouts = async () => { const m = await g.send('Performance.getMetrics'); const x = ((m.result && m.result.metrics) || []).find((v) => v.name === 'LayoutCount'); return x ? x.value : NaN; };
+  let tracing = false;
+  if (o.trace) {
+    try { await g.send('Tracing.start', { transferMode: 'ReturnAsStream', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATS } }); tracing = true; await sleep(300); } catch (e) { if (o.say) o.say('trace: could not start: ' + e.message.slice(0, 120)); }
+  }
+  await g.ev(`(() => { window.__e2eFr = { d: [], ts: [], on: true, wash: 0, washT: [], long: [], stepT: [], step: -1, stepAt: 0, t0: performance.now() }; let last = performance.now();
+    const f = (t) => { const x = window.__e2eFr; if (!x.on) return; const dt = t - last; x.d.push(dt); x.ts.push(t); last = t;
+      if (dt > 20 && x.d.length > 3) x.long.push({ at: Math.round(t - x.t0), dt: Math.round(dt * 10) / 10, step: x.step, sinceStep: Math.round(t - x.stepAt), washesBefore: x.wash });
+      requestAnimationFrame(f); }; requestAnimationFrame(f);
+    const mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.tagName === 'CANVAS' && m.target.classList.contains('on')) { const x = window.__e2eFr; x.wash++; x.washT.push(Math.round(performance.now() - x.t0)); } });
+    document.querySelectorAll('#wash canvas').forEach((c) => mo.observe(c, { attributes: true, attributeFilter: ['class'] })); window.__e2eFr.mo = mo; return 1; })()`);
+  await g.ev("(() => { const c = document.querySelector('#stack .lrow[data-d=\"0\"] .rt [tabindex=\"0\"]'); if (c) c.focus({ preventScroll: true }); return !!c; })()");
+  const l0 = await layouts();
+  for (let i = 0; i < STEP_KEYS.length; i++) {
+    await g.ev('(() => { const x = window.__e2eFr; x.step = ' + i + '; x.stepAt = performance.now(); x.stepT.push(x.stepAt); console.timeStamp("e2e-step-' + i + '"); return 1; })()');
+    await press(g, STEP_KEYS[i]);
+    await sleep(750);
+  }
+  await sleep(600);
+  const fr = await g.ev("(() => { const x = window.__e2eFr; x.on = false; x.mo.disconnect(); const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).length, max: Math.max.apply(null, d), wash: x.wash, washT: x.washT, long: x.long, ts: x.ts, stepT: x.stepT, t0: x.t0 }; })()");
+  const l1 = await layouts();
+  let summary = null;
+  if (tracing) {
+    try { await traceToFile(g, o.trace); summary = summarizeTrace(o.trace, fr); fs.writeFileSync(o.trace + '.summary.json', JSON.stringify(summary, null, 1)); if (o.say) o.say('trace: ' + o.trace + ' (' + Math.round(fs.statSync(o.trace).size / 1048576) + ' MB), summary ' + o.trace + '.summary.json'); } catch (e) { if (o.say) o.say('trace: failed: ' + e.message.slice(0, 160)); }
+  }
+  delete fr.ts; delete fr.stepT; delete fr.t0;   // only the trace summary needs them; the log does not
+  const firstWash = (fr.washT || [])[0];
+  const atFirstWash = (l) => firstWash !== undefined && Math.abs(l.at - firstWash) <= 300;
+  const steadyLong = (fr.long || []).filter((l) => !atFirstWash(l));
+  const firstLong = (fr.long || []).filter(atFirstWash);
+  return { fr, layouts: l1 - l0, steadyLong, firstLong, summary };
+}
+
+/** Tracing.end, then the stream (IO.read) into `file`, chunk by chunk. */
+async function traceToFile(g, file) {
+  let resolve; const done = new Promise((r) => { resolve = r; });
+  const h = (m) => { if (m.method === 'Tracing.tracingComplete') resolve(m.params || {}); };
+  g.handlers.push(h);
+  await g.send('Tracing.end');
+  const p = await Promise.race([done, sleep(60000).then(() => null)]);
+  g.handlers.splice(g.handlers.indexOf(h), 1);
+  if (!p || !p.stream) throw new Error('no trace stream (tracingComplete ' + (p ? 'without a stream' : 'never came') + ')');
+  const fd = fs.openSync(file, 'w');
+  try {
+    for (;;) {
+      const r = (await g.send('IO.read', { handle: p.stream, size: 4 << 20 })).result || {};
+      if (r.data) fs.writeSync(fd, r.base64Encoded ? Buffer.from(r.data, 'base64') : Buffer.from(r.data, 'utf8'));
+      if (r.eof || !r.data) break;
+    }
+  } finally { fs.closeSync(fd); await g.send('IO.close', { handle: p.stream }).catch(() => 0); }
+}
+
+/**
+ * For each rAF interval over 18 ms (a 60 Hz frame is 16.7 ms; rAF jitter keeps most within about
+ * 16.2-17.2), the top events by self time on every thread of the Watch guest's renderer (the
+ * process that logged the e2e-step marks) and the GPU process, its Paint events (layer, node, rect)
+ * and invalidation records; and per step, paint count and area.
+ */
+function summarizeTrace(file, fr) {
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const ev = Array.isArray(raw) ? raw : (raw.traceEvents || []);
+  const marks = ev.filter((e) => e.name === 'TimeStamp' && e.args && e.args.data && /^e2e-step-\d+$/.test(String(e.args.data.message || '')));
+  const m0 = marks.find((e) => e.args.data.message === 'e2e-step-0');
+  if (!m0 || !fr.stepT || !fr.stepT.length) return { error: 'no e2e-step-0 mark in the trace (' + ev.length + ' events)' };
+  const pid = m0.pid;
+  const thread = {}, proc = {};
+  for (const e of ev) if (e.ph === 'M' && e.args) { if (e.name === 'thread_name') thread[e.pid + ':' + e.tid] = e.args.name; else if (e.name === 'process_name') proc[e.pid] = e.args.name; }
+  const offsetUs = m0.ts - fr.stepT[0] * 1000;   // trace µs = perf ms * 1000 + offset
+  const us = (ms) => ms * 1000 + offsetUs;
+  const lists = new Map(), open = new Map();
+  for (const e of ev) {
+    const gpu = /gpu/i.test(proc[e.pid] || '');
+    if (e.pid !== pid && !gpu) continue;
+    const tk = e.pid + ':' + e.tid;
+    let x = null;
+    if (e.ph === 'X') x = { name: e.name, ts: e.ts, dur: e.dur || 0, args: e.args };
+    else if (e.ph === 'B') { if (!open.has(tk)) open.set(tk, []); open.get(tk).push(e); continue; }
+    else if (e.ph === 'E') { const b = (open.get(tk) || []).pop(); if (!b) continue; x = { name: b.name, ts: b.ts, dur: e.ts - b.ts, args: Object.assign({}, b.args, e.args) }; }
+    else continue;
+    x.thread = (gpu ? 'gpu:' : '') + (thread[tk] || 'tid ' + e.tid);
+    if (!lists.has(tk)) lists.set(tk, []);
+    lists.get(tk).push(x);
+  }
+  const all = [];
+  for (const list of lists.values()) {
+    list.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+    const st = [];
+    for (const x of list) {
+      x.self = x.dur;
+      while (st.length && st[st.length - 1].ts + st[st.length - 1].dur <= x.ts) st.pop();
+      if (st.length) st[st.length - 1].self -= x.dur;
+      st.push(x); all.push(x);
+    }
+  }
+  all.sort((a, b) => a.ts - b.ts);
+  const inv = ev.filter((e) => e.pid === pid && /InvalidationTracking/.test(e.name)).sort((a, b) => a.ts - b.ts);
+  const KEY = /^(Paint|PaintImage|RasterTask|Decode Image|ImageDecodeTask|Decode LazyPixelRef|UpdateLayerTree|Layout|Layerize|PrePaint|UpdateLayer|Commit|ScheduleStyleRecalculation|UpdateLayoutTree|RecalculateStyles)$/;
+  const rect = (a) => { const c = a && a.data && a.data.clip; if (!Array.isArray(c) || c.length < 8) return null; const xs = [c[0], c[2], c[4], c[6]], ys = [c[1], c[3], c[5], c[7]]; return { w: Math.round(Math.max(...xs) - Math.min(...xs)), h: Math.round(Math.max(...ys) - Math.min(...ys)) }; };
+  const win = (a, b) => {
+    const xs = all.filter((x) => x.ts >= a && x.ts < b);
+    const per = {};
+    for (const x of xs) { const t = per[x.thread] || (per[x.thread] = {}); const r = t[x.name] || (t[x.name] = { name: x.name, selfMs: 0, n: 0 }); r.selfMs += Math.max(0, x.self) / 1000; r.n++; }
+    const top = {};
+    for (const th of Object.keys(per)) {
+      const rows = Object.values(per[th]).sort((p, q) => q.selfMs - p.selfMs).filter((r, i) => i < 8 || KEY.test(r.name)).map((r) => ({ name: r.name, selfMs: +r.selfMs.toFixed(2), n: r.n }));
+      if (rows.some((r) => r.selfMs >= 0.05)) top[th] = rows;
+    }
+    const paints = xs.filter((x) => x.name === 'Paint').map((x) => { const r = rect(x.args); const d = (x.args && x.args.data) || {}; return { layerId: d.layerId, nodeId: d.nodeId, w: r ? r.w : null, h: r ? r.h : null, ms: +(x.dur / 1000).toFixed(2) }; });
+    const invs = inv.filter((e) => e.ts >= a && e.ts < b).slice(0, 12).map((e) => { const d = (e.args && e.args.data) || {}; return { what: e.name, nodeId: d.nodeId, node: d.nodeName, reason: d.reason, layerId: d.layerId }; });
+    return { top, paints: paints.length, paintArea: paints.reduce((s, p) => s + (p.w || 0) * (p.h || 0), 0), paintList: paints.slice(0, 12), invalidations: invs };
+  };
+  const stepOf = (t) => { let s = -1; for (let i = 0; i < fr.stepT.length; i++) if (fr.stepT[i] <= t) s = i; return s; };
+  const frames = [];
+  for (let i = 4; i < fr.ts.length; i++) {
+    const dt = fr.ts[i] - fr.ts[i - 1];
+    if (dt <= 18) continue;
+    const s = stepOf(fr.ts[i - 1]);
+    frames.push(Object.assign({ atMs: Math.round(fr.ts[i] - fr.t0), dt: +dt.toFixed(1), over20: dt > 20, step: s, key: STEP_KEYS[s] || null, sinceStepMs: s >= 0 ? Math.round(fr.ts[i - 1] - fr.stepT[s]) : null }, win(us(fr.ts[i - 1]), us(fr.ts[i]))));
+  }
+  frames.sort((p, q) => q.dt - p.dt);
+  const end = fr.ts[fr.ts.length - 1];
+  const steps = fr.stepT.map((t, i) => { const w = win(us(t), us(i + 1 < fr.stepT.length ? fr.stepT[i + 1] : end)); return { step: i, key: STEP_KEYS[i], paints: w.paints, paintArea: w.paintArea, paintList: w.paintList.slice(0, 6), main: (w.top.CrRendererMain || []).slice(0, 6) }; });
+  return { file, events: ev.length, rendererPid: pid, threads: [...new Set(all.map((x) => x.thread))], offsetUs: Math.round(offsetUs),
+    washT: fr.washT, longFrames: fr.long, threshold: 'rAF intervals over 18 ms (16.7 ms is one 60 Hz frame); over20 marks the ones the e2e counts', frames: frames.slice(0, 40), steps };
+}
+
+/** --motion N: the stepping measurement alone, N fresh launches; --trace records run 1. */
+async function runMotion(ctx, N) {
+  const { launch, say, check, setLive } = ctx;
+  const mock = await Mock.start({ log: () => {} });
+  const env = mockEnv(mock);
+  const per = [];
+  try {
+    for (let run = 1; run <= N; run++) {
+      const q = await launch({ cdp: CDP_PORT, env });
+      setLive(q);
+      try {
+        await q.chrome.ev('setTheme(' + JSON.stringify(THEME) + '), 1').catch(() => 0);
+        await ctrlAltW(q.chrome);
+        const g = await openGuest(q, [], 15000);
+        await g.ev(WRAP).catch(() => 0); await g.ev(HELLO).catch(() => 0);
+        let rows = 0;
+        try { rows = await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length || null', 120000); } catch (e) { rows = 0; }
+        await waitReads(g, [], 0, 90000).catch(() => 0);     // nothing reading or queued while it steps
+        await sleep(1500);
+        const mm = await measureMotion(g, { trace: run === 1 ? TRACE : '', say });
+        const fr = mm.fr;
+        per.push({ run, steady: mm.steadyLong.length, max: fr.max, n: fr.n });
+        say('motion run ' + run + ' [' + loadNote() + ', ' + THEME + ', ' + rows + ' cards]: ' + fr.n + ' frames, ' + fr.over + ' over 20 ms (max ' + fr.max.toFixed(1) + ' ms); steady stepping over 20 ms: '
+          + mm.steadyLong.length + (mm.steadyLong.length ? ' (' + mm.steadyLong.map((l) => l.dt + ' ms at step ' + l.step + ' ' + STEP_KEYS[l.step] + ' +' + l.sinceStep + ' ms').join(', ') + ')' : '')
+          + '; first wash paint: ' + mm.firstLong.map((l) => l.dt + ' ms').join(', ') + '; wash cross-fades ' + fr.wash + ' at ' + JSON.stringify(fr.washT) + '; layouts ' + mm.layouts);
+        check(fr.n > 200 && rows > 0, 'motion run ' + run + ': the page rendered through the steps (' + fr.n + ' frames, ' + rows + ' cards)');
+        g.close();
+      } finally { await q.quit(); }
+    }
+  } finally { await mock.close(); }
+  const maxAll = per.length ? Math.max(...per.map((p) => p.max)) : NaN;
+  console.log('motion: ' + per.length + ' runs, steady over 20 ms: ' + per.map((p) => p.steady).join(',') + '; max ' + (Number.isFinite(maxAll) ? maxAll.toFixed(1) : '?') + ' ms');
+  check(per.length === N, 'motion: all ' + N + ' runs measured', per.length);
+}
+
+/** --boot2 N: is the sandbox-bundle error on an early webview at boot 2 Watch's, or any bundled page's? */
+async function runBoot2(ctx, N) {
+  const { launch, say, check, profileDir, setLive } = ctx;
+  const mock = await Mock.start({ log: () => {} });
+  const env = mockEnv(mock);
+  const CACHE = path.join(profileDir, 'watch-cache.json');
+  const rows = [];
+  try {
+    // The seed: one boot reads every service from the mock, writes the cache, quits.
+    let q = await launch({ cdp: CDP_PORT, env });
+    setLive(q);
+    try {
+      await ctrlAltW(q.chrome);
+      const g0 = await openGuest(q, [], 15000);
+      await g0.ev(WRAP).catch(() => 0); await g0.ev(HELLO).catch(() => 0);
+      await waitReads(g0, IDS, 0, 120000).catch((e) => say('boot2 seed: reads did not settle: ' + e.message.slice(0, 120)));
+      let cached = false;
+      for (let i = 0; i < 40 && !cached; i++) { await sleep(250); cached = fs.existsSync(CACHE); }
+      check(cached, 'boot2 seed: boot 1 wrote <profile>/watch-cache.json', CACHE);
+      g0.close();
+    } finally { await q.quit(); }
+    for (const id of IDS) await mock.setMode(id, 'slow');   // as in the normal run's boot 2: no read can finish
+
+    for (let run = 1; run <= N; run++) {
+      const watchFirst = run % 2 === 1;
+      const grace = run <= Math.ceil(N / 2) ? 0 : 10000;   // first half: no boot grace; second half: the real 10 s
+      const t0 = Date.now();
+      q = await launch({ cdp: CDP_PORT, env: mockEnv(mock, grace) });
+      setLive(q);
+      const r = { run, grace, first: watchFirst ? 'watch' : 'control', up: Date.now() - t0, watchMs: null, controlMs: null, control: '', pages: {}, errAt: null, mockBefore: null, readersBefore: null };
+      const samples = [];
+      let polling = true;
+      const poller = (async () => { while (polling) { try { const l = await q.targets(); samples.push({ t: Date.now(), n: l.filter((t) => t.type === 'page' && isMockUrl(mock, t.url)).length }); } catch (e) { /* between targets */ } await sleep(100); } })();
+      try {
+        const openWatch = async () => { await ctrlAltW(q.chrome); r.watchMs = Date.now() - t0; };
+        const openControl = async () => { r.control = await q.chrome.ev('typeof openFilesTab === "function" ? (openFilesTab(), "files.html") : (createTab(), "newtab.html")').catch(() => '?'); r.controlMs = Date.now() - t0; };
+        if (watchFirst) { await openWatch(); await openControl(); } else { await openControl(); await openWatch(); }
+        await sleep(3000);
+        // Every file:// page: Runtime.enable replays what it logged before this attached.
+        for (const t of await q.targets().catch(() => [])) {
+          if (t.type !== 'page' || !/^file:/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
+          const page = String(t.url).split('/').pop().split(/[?#]/)[0];
+          const hits = [];
+          try {
+            const c = await new Cdp(t.webSocketDebuggerUrl).open();
+            c.ws.on('message', (raw) => {
+              let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
+              let text = '', ts = 0;
+              if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { text = (m.params.args || []).map((a) => a.value !== undefined ? String(a.value) : (a.description || '')).join(' '); ts = m.params.timestamp; }
+              else if (m.method === 'Runtime.exceptionThrown') { const d = m.params.exceptionDetails || {}; text = (d.exception && d.exception.description) || d.text || ''; ts = m.params.timestamp; }
+              if (text && SANDBOX.test(text)) hits.push(ts);
+            });
+            await c.send('Runtime.enable');
+            await sleep(400);
+            c.close();
+          } catch (e) { hits.push(NaN); say('boot2 run ' + run + ': could not attach to ' + page + ': ' + e.message.slice(0, 80)); }
+          const p = r.pages[page] || (r.pages[page] = { n: 0, err: 0 });
+          p.n++;
+          if (hits.length) { p.err++; const t1 = hits.filter(Number.isFinite).sort((a, b) => a - b)[0]; if (t1 && (!r.errAt || t1 < r.errAt)) r.errAt = t1; }
+        }
+      } finally { polling = false; await poller; await q.quit(); }
+      if (r.errAt) {
+        r.mockBefore = mock.log.filter((l) => l.t >= t0 && l.t <= r.errAt).length;
+        r.readersBefore = samples.filter((s) => s.t <= r.errAt).reduce((mx, s) => Math.max(mx, s.n), 0);
+      }
+      rows.push(r);
+      const ctlPage = r.control || '?';
+      say('boot2 run ' + run + ' [' + loadNote() + ', boot grace ' + grace + ' ms]: first ' + r.first + '; up ' + r.up + ' ms, watch opened +' + r.watchMs + ' ms, control (' + ctlPage + ') +' + r.controlMs + ' ms; pages '
+        + Object.keys(r.pages).map((k) => k + (r.pages[k].err ? ' ERROR' : ' ok')).join(', ') + (r.errAt ? '; first error +' + (r.errAt - t0) + ' ms after launch, mock requests before it ' + r.mockBefore + ', hidden reader pages before it ' + r.readersBefore : '; no sandbox-bundle error'));
+    }
+  } finally {
+    for (const id of IDS) await mock.setMode(id, 'ok').catch(() => 0);
+    await mock.close();
+  }
+  console.log('boot2 table: run | grace ms | first   | watch +ms | control +ms | watch.html | control | mock req before err | reader pages before err');
+  for (const r of rows) {
+    const w = r.pages['watch.html'], c = r.pages[r.control];
+    console.log('boot2 table: ' + String(r.run).padEnd(3) + ' | ' + String(r.grace).padStart(8) + ' | ' + r.first.padEnd(7) + ' | ' + String(r.watchMs).padStart(9) + ' | ' + String(r.controlMs).padStart(11) + ' | '
+      + (w ? (w.err ? 'ERROR' : 'ok') : 'absent').padEnd(10) + ' | ' + (c ? (c.err ? 'ERROR' : 'ok') : 'absent').padEnd(7) + ' | ' + String(r.mockBefore === null ? '-' : r.mockBefore).padStart(19) + ' | ' + (r.readersBefore === null ? '-' : r.readersBefore));
+  }
+  const X = rows.filter((r) => r.pages['watch.html'] && r.pages['watch.html'].err).length;
+  const Y = rows.filter((r) => r.pages[r.control] && r.pages[r.control].err).length;
+  const Z = rows.filter((r) => r.errAt && (r.mockBefore > 0 || r.readersBefore > 0)).length;
+  console.log('boot2: watch ' + X + '/' + N + ', control ' + Y + '/' + N + ', reads-before-error ' + Z);
+  check(rows.length === N && rows.every((r) => r.pages['watch.html'] && r.pages[r.control]), 'boot2: all ' + N + ' runs opened Watch and the control page and attached to both', rows.map((r) => Object.keys(r.pages).join('+')));
+}
+
 /* ---- the run --------------------------------------------------------------------------------- */
 if (require.main === module) {
   run('watch-e2e', async (k) => {
@@ -395,7 +687,7 @@ if (require.main === module) {
       console.log("FAIL HARNESS TIMEOUT: watch-e2e did not finish in 13 min");
       try { if (liveQ) require("child_process").execFileSync("taskkill", ["/PID", String(liveQ.child.pid), "/T", "/F"], { stdio: "ignore" }); } catch (e) { /* gone */ }
       setTimeout(() => { try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (e) { /* busy */ } console.log("watch-e2e: " + P + " passed, " + (F + 1) + " failed"); process.exit(1); }, 1500);
-    }, 13 * 60 * 1000);
+    }, (13 + 2 * BOOT2_N + 3 * MOTION_N) * 60 * 1000);
     dog.unref();
     fs.mkdirSync(SHOTS, { recursive: true });
     fs.writeFileSync(CAPTIONS, '');
@@ -403,17 +695,16 @@ if (require.main === module) {
     const cleanup = () => { for (const f of [OPEN_STUB, EDGE_STUB, GAME_FILE]) { try { fs.rmSync(f, { force: true }); } catch (e) { /* none */ } } for (const n of ['visible', 'cpu']) { try { fs.rmSync(path.join(os.tmpdir(), TAG + '-' + n + '.ps1'), { force: true }); } catch (e) { /* none */ } } };
     process.on('exit', cleanup);
 
+    if (BOOT2_N || MOTION_N) {
+      const ctx = { launch, say, check, profileDir, setLive: (x) => { liveQ = x; } };
+      if (BOOT2_N) await runBoot2(ctx, BOOT2_N); else await runMotion(ctx, MOTION_N);
+      return;
+    }
+
     await liveEspn(check, say);
 
     const mock = await Mock.start({ log: say });
-    const env = {
-      QUARTZ_WATCH_REBASE: JSON.stringify(mock.rebase),
-      QUARTZ_WATCH_OPEN_STUB: OPEN_STUB,
-      QUARTZ_EDGE_STUB: EDGE_STUB,
-      QUARTZ_WATCH_MIN_FREE_GB: '0',
-      QUARTZ_WATCH_GAME_FILE: GAME_FILE,
-      QUARTZ_TEST_MIN_FREE_GB: '0',
-    };
+    const env = mockEnv(mock);
     const mockHost = (u) => IDS.some((id) => String(u).indexOf(mock.origin(id) + '/') === 0 || String(u) === mock.origin(id));
     const expect = expectedItems();
     const CACHE = path.join(profileDir, 'watch-cache.json');
@@ -423,7 +714,8 @@ if (require.main === module) {
 
     /* ================================ boot 1 ================================ */
     const boot1 = Date.now();
-    let q = await launch({ cdp: CDP_PORT, env });
+    const appStart = boot1;
+    let q = await launch({ cdp: CDP_PORT, env: Object.assign({}, env, { QUARTZ_WATCH_BOOT_GRACE_MS: String(BOOT1_GRACE_MS) }) });
     liveQ = q;
     const chrome = q.chrome;
     const pid = q.child.pid;
@@ -454,10 +746,31 @@ if (require.main === module) {
     check(!!tabInfo && tabInfo.omni === '', 'the omnibox is blank on the Watch tab', tabInfo && JSON.stringify(tabInfo.omni));
     await chrome.ev('createTab(), 1');
     await chrome.waitFor('!' + ACTIVE_IS_WATCH, 5000).catch(() => 0);
+
+    // Visibility gating. A fresh profile, so every service is due; this boot has an 8 s boot grace.
+    // With Watch in a BACKGROUND tab, past the grace, nothing is read for 5 s; brought to the front,
+    // the reads start. If Quartz keeps a background webview 'visible', that is a finding, not a FAIL.
+    let bgVis = null;
+    const gb = await guestTarget(q, 5000).catch(() => null);
+    if (gb) { try { const c = await new Cdp(gb.webSocketDebuggerUrl).open(); const r = await c.send('Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }); bgVis = r && r.result && r.result.result ? r.result.result.value : null; c.close(); } catch (e) { bgVis = 'unknown (' + e.message.slice(0, 60) + ')'; } }
+    say('visibility: the Watch guest in a background tab says document.visibilityState = ' + JSON.stringify(bgVis));
+    if (Date.now() < appStart + BOOT1_GRACE_MS) await sleep(appStart + BOOT1_GRACE_MS - Date.now());
+    const tBg = Date.now();
+    await sleep(5000);
+    const bgHits = IDS.reduce((n, id) => n + mock.hits(id, appStart), 0);
+    const bgWhat = IDS.map((id) => id + ':' + mock.hits(id, appStart)).join(' ');
+    if (bgVis !== 'hidden') say('FINDING: a background Watch webview reports visibilityState ' + JSON.stringify(bgVis) + ', not "hidden", so the page cannot tell main it is out of sight; mock requests since launch: ' + bgWhat);
+    else check(bgHits === 0, 'visibility: Watch in a background tab (another tab active, every service due, ' + Math.round((tBg - appStart) / 1000) + ' s after launch, past the ' + BOOT1_GRACE_MS / 1000 + ' s boot grace) reads nothing for 5 s', bgWhat);
+
     await ctrlAltW(chrome);
     let reused = false;
     try { reused = await chrome.waitFor(WATCH_TABS + '.length === 1 && ' + ACTIVE_IS_WATCH, 5000); } catch (e) { reused = false; }
     check(reused, 'a second Ctrl+Alt+W (from another tab) goes back to the same Watch tab, no second one', await chrome.ev(WATCH_TABS + '.length'));
+    const tFront = Date.now();
+    let started = false;
+    for (let i = 0; i < 50 && !started; i++) { await sleep(200); started = IDS.some((id) => mock.hits(id, tFront) > 0); }
+    if (bgHits > 0) say('visibility: the reads had already started in the background (' + bgWhat + '), so "front starts the reads" is not checked');
+    else check(started, 'visibility: brought to the front, Watch starts reading (' + IDS.map((id) => id + ':' + mock.hits(id, tFront)).join(' ') + ' within ' + ((Date.now() - tFront) / 1000).toFixed(1) + ' s)');
 
     // The palette's Watch row.
     await chrome.ev('createTab(), 1');
@@ -552,6 +865,16 @@ if (require.main === module) {
     }
     check((await chrome.ev('tabs.length')) === tabsBefore, 'the Edge opens added no Quartz tab', await chrome.ev('tabs.length'));
 
+    // Search: a 1-character query is never sent (2 is the floor).
+    const SET_Q = (v) => g.ev('(() => { const q = document.getElementById("q"); q.focus(); q.value = ' + JSON.stringify(v) + '; q.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()');
+    const tq1 = Date.now();
+    await click(g, '#q');
+    await g.send('Input.insertText', { text: 'b' });
+    await sleep(1000);
+    check(mock.hits('youtube', tq1, /^\/results$/) === 0, 'search: a 1-character query is not sent (' + mock.hits('youtube', tq1, /^\/results$/) + ' search requests in 1 s)');
+    await SET_Q('');
+    await sleep(400);
+
     // Search: local matches + YouTube from the mock + a link per service + the TMDB slot.
     const ytSearch = Shape.cleanItems(ADAPTERS.youtube.parseSearch(readText(path.join(FIX, 'youtube-search.html'))), 20);
     const localWant = Merge.searchLocal ? Merge.searchLocal(items, 'bluey') : [];
@@ -569,6 +892,30 @@ if (require.main === module) {
     check(!!sres && sres.text.indexOf('Add a free TMDB key in Settings to search every service') !== -1, 'search: the TMDB slot says "Add a free TMDB key in Settings to search every service"');
     check(mock.hits('youtube', boot1, /^\/results$/) >= 1, 'search: YouTube was asked on the mock', mock.hits('youtube', boot1, /^\/results$/) + ' requests');
     if (sres) await shot(g, 'search-1280', 1280, 800, 'search "bluey" (dark): local Disney+ match, YouTube results from the mock, per-service links, TMDB slot', say);
+    await g.ev("(() => { const q = document.getElementById('q'); q.focus(); return 1; })()");
+    await press(g, 'Escape');
+    await g.waitFor("!document.getElementById('q').value", 3000).catch(() => 0);
+
+    // Search carries none of his cookies: the mock set one on the reader's YouTube pages.
+    const sreqs = mock.log.filter((l) => l.svc === 'youtube' && l.path === '/results' && l.t >= boot1);
+    const readerSent = mock.log.some((l) => l.svc === 'youtube' && l.path !== '/results' && l.t >= boot1 && /e2e_his_session/.test(l.cookie || ''));
+    check(sreqs.length > 0 && sreqs.every((l) => !/e2e_his_session/.test(l.cookie || '')), 'search: the YouTube search request carries none of his cookies (the reader '
+      + (readerSent ? 'did send the mock\'s cookie back, so there was one to leak)' : 'never sent the mock\'s cookie back; the leak check is weaker)'), sreqs.map((l) => l.cookie || '(no Cookie header)').slice(0, 3));
+
+    // A query still in flight when the next is typed: only the second's answer is drawn.
+    mock.setSearch({ tag: true, delay: { bandit: 3000 } });
+    const tq2 = Date.now();
+    await SET_Q('bandit');
+    await sleep(800);                       // past the 300 ms debounce: 'bandit' is asked and held 3 s
+    await SET_Q('bingo');
+    let race = null;
+    try { race = await g.waitFor('(() => { const r = document.getElementById("results"); const t = (r && !r.hidden && r.textContent) || ""; return t.indexOf("[bingo]") !== -1 ? 1 : null; })()', 6000); } catch (e) { race = null; }
+    await sleep(3200);                      // 'bandit' answers now, late
+    const raceText = await g.ev('(() => { const r = document.getElementById("results"); return (r && r.textContent) || ""; })()').catch(() => '');
+    const asked = mock.log.filter((l) => l.svc === 'youtube' && l.path === '/results' && l.t >= tq2).map((l) => decodeURIComponent((l.url.split('search_query=')[1] || '').split('&')[0]));
+    check(!!race && raceText.indexOf('[bingo]') !== -1 && raceText.indexOf('[bandit]') === -1 && asked.indexOf('bandit') !== -1 && asked.indexOf('bingo') !== -1,
+      'search: with "bandit" still in flight, "bingo" is drawn and the late "bandit" answer is not', { asked, bingo: raceText.indexOf('[bingo]') !== -1, bandit: raceText.indexOf('[bandit]') !== -1 });
+    mock.setSearch({ tag: false, delay: {} });
     await g.ev("(() => { const q = document.getElementById('q'); q.focus(); return 1; })()");
     await press(g, 'Escape');
     await g.waitFor("!document.getElementById('q').value", 3000).catch(() => 0);
@@ -636,21 +983,9 @@ if (require.main === module) {
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
 
     // Motion: frames over 20 ms while the lens steps rows (the focus band) and the wash cross-fades.
-    await g.send('Performance.enable');
-    const layouts = async () => { const m = await g.send('Performance.getMetrics'); const x = ((m.result && m.result.metrics) || []).find((v) => v.name === 'LayoutCount'); return x ? x.value : NaN; };
-    await g.ev(`(() => { window.__e2eFr = { d: [], on: true, wash: 0, washT: [], long: [], step: -1, stepAt: 0, t0: performance.now() }; let last = performance.now();
-      const f = (t) => { const x = window.__e2eFr; if (!x.on) return; const dt = t - last; x.d.push(dt); last = t;
-        if (dt > 20 && x.d.length > 3) x.long.push({ at: Math.round(t - x.t0), dt: Math.round(dt * 10) / 10, step: x.step, sinceStep: Math.round(t - x.stepAt), washesBefore: x.wash });
-        requestAnimationFrame(f); }; requestAnimationFrame(f);
-      const mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.tagName === 'CANVAS' && m.target.classList.contains('on')) { const x = window.__e2eFr; x.wash++; x.washT.push(Math.round(performance.now() - x.t0)); } });
-      document.querySelectorAll('#wash canvas').forEach((c) => mo.observe(c, { attributes: true, attributeFilter: ['class'] })); window.__e2eFr.mo = mo; return 1; })()`);
-    await g.ev("(() => { const c = document.querySelector('#stack .lrow[data-d=\"0\"] .rt [tabindex=\"0\"]'); if (c) c.focus({ preventScroll: true }); return !!c; })()");
-    const l0 = await layouts();
-    const STEPS = ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft'];
-    for (let i = 0; i < STEPS.length; i++) { await g.ev('(window.__e2eFr.step = ' + i + ', window.__e2eFr.stepAt = performance.now(), 1)'); await press(g, STEPS[i]); await sleep(750); }
-    await sleep(600);
-    const fr = await g.ev("(() => { const x = window.__e2eFr; x.on = false; x.mo.disconnect(); const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).length, max: Math.max.apply(null, d), wash: x.wash, washT: x.washT, long: x.long }; })()");
-    const l1 = await layouts();
+    const mm = await measureMotion(g, { say });
+    const fr = mm.fr;
+    const l0 = 0, l1 = mm.layouts;
     say('motion [' + (fs.existsSync(path.join(os.tmpdir(), 'claude-heavytest.mutex2')) ? 'UNDER LOAD (mutex2 held)' : 'clean (mutex2 absent)') + ']: ' + fr.n + ' frames, ' + fr.over + ' over 20 ms (max ' + fr.max.toFixed(1) + ' ms), ' + fr.wash + ' wash cross-fades, ' + (l1 - l0) + ' layouts over 10 steps');
     check(fr.n > 200, 'motion: the page rendered through the steps (' + fr.n + ' frames in ~8 s)', fr);
     // WHEN each long frame fell: its step, ms after that key, and how far from the FIRST wash
@@ -846,6 +1181,21 @@ if (require.main === module) {
     check(!!firstRows && drawMs < 4000, 'second boot: the rows draw from the cache at once (' + firstRows + ' cards, ' + drawMs + ' ms after the tab was shown' + (had ? ', restored tab' : ', Ctrl+Alt+W') + ')');
     check(!!sn2 && sn2.services.every((s) => !(s.readAt >= boot2)), 'second boot: no read had finished (every service is held by the mock; ' + answered + ' requests waiting)', sn2 && sn2.services.map((s) => s.id + ':' + s.readAt));
 
+    // The search cache, before Forget: YouTube answers "bluey" (its mock back to ok for this),
+    // and a repeat of it within the same boot is answered from memory.
+    const ytFirst = ytSearchTitle();
+    await mock.setMode('youtube', 'ok');
+    const ts1 = Date.now();
+    await SET_Q('bluey');
+    await g.waitFor('(() => { const r = document.getElementById("results"); return r && !r.hidden && (r.textContent || "").indexOf(' + JSON.stringify(ytFirst) + ') !== -1 ? 1 : null; })()', 8000).catch(() => 0);
+    const sHits1 = mock.hits('youtube', ts1, /^\/results$/);
+    await SET_Q(''); await sleep(400);
+    const ts2 = Date.now();
+    await SET_Q('bluey'); await sleep(1500);
+    const sHits2 = mock.hits('youtube', ts2, /^\/results$/);
+    await SET_Q(''); await sleep(400);
+    say('search cache before Forget: "bluey" asked YouTube ' + sHits1 + ' time(s); the repeat asked ' + sHits2 + ' (0 = from memory)');
+
     // Forget (Settings > Watch): the page empties and the cache file goes.
     const fState = () => chrome2.ev("(() => { const b = document.querySelector('.set-watch-forget'); return { open: !!(window.Settings && Settings.isOpen()), btn: b ? b.textContent.trim().slice(0, 60) : null, watchTabs: " + WATCH_TABS + ".length }; })()").catch((e) => 'ev failed: ' + e.message.slice(0, 80));
     const wTargets = (await q.targets().catch(() => [])).filter((x) => /\/watch\.html(\?|#|$)/.test(String(x.url))).length;
@@ -874,6 +1224,20 @@ if (require.main === module) {
     // After Forget nothing reads until its floor (or a Retry): the page must not say it is reading.
     const claim = await g.ev('(() => { const s = window.__e2eSnap || {}; const busy = (s.services || []).some((x) => x.enabled !== false && (x.reading || x.queued)); const heads = [...document.querySelectorAll("#stack .lrow h2, h1")].map((h) => h.textContent.trim()).join(" | ").slice(0, 160); return { busy, heads, says: /Reading/.test(heads) }; })()').catch(() => null);
     check(!!claim && !(claim.says && !claim.busy), 'Forget: the page does not say "Reading" while nothing reads', claim);
+    // Its own state: #stage says so, says when it reads again, offers Read now (not pressed: the mock is slow).
+    const stage = await g.ev('(() => { const s = document.getElementById("stage"); if (!s) return null; const h = s.querySelector("h1");'
+      + ' const b = [...s.querySelectorAll(".btn.primary")].find((x) => /Read now/.test(x.textContent || ""));'
+      + ' const t = (s.textContent || "").replace(/\\s+/g, " ").trim();'
+      + ' return { h1: h ? h.textContent.trim() : "", readNow: !!b, choose: /Choose services/.test(t), again: /reads your services again at/.test(t), empty: document.body.classList.contains("is-empty"), rows: document.querySelectorAll("#stack .lrow").length, text: t.slice(0, 200) }; })()').catch(() => null);
+    check(!!stage && /Watch data forgotten/.test(stage.h1) && stage.readNow, 'Forget: the stage says "Watch data forgotten" and offers "Read now"', stage);
+    // Forget takes the search cache too: the same query asks YouTube again.
+    await chrome2.ev('Settings.close(), 1').catch(() => 0);
+    await sleep(300);
+    const ts3 = Date.now();
+    await SET_Q('bluey'); await sleep(1500);
+    const sHits3 = mock.hits('youtube', ts3, /^\/results$/);
+    await SET_Q(''); await sleep(300);
+    check(sHits1 >= 1 && sHits3 >= 1, 'Forget: the search cache goes too ("bluey" asks YouTube again: ' + sHits3 + '; before Forget, first ask ' + sHits1 + ', repeat ' + sHits2 + (sHits2 === 0 ? ' (from memory)' : ' (no memory cache seen)') + ')');
     check(!fs.existsSync(CACHE), 'Forget: <profile>/watch-cache.json is deleted');
     // Electron's own sandbox bundle can fail on a second boot ("preloadScripts of
     // binding.startupData is null"). It counts against Watch only if NO other bundled page of the

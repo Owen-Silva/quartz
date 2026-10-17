@@ -435,7 +435,8 @@ const drm = drmModule.create({
  * (QUARTZ_WATCH_REBASE, JSON [[from, to], ...]), record opens to a file
  * (QUARTZ_WATCH_OPEN_STUB), lower the free-memory floor
  * (QUARTZ_WATCH_MIN_FREE_GB) and fake a running game (QUARTZ_WATCH_GAME_FILE:
- * present = a game is running). A live Quartz ignores all four.
+ * present = a game is running) and change the first read's boot grace
+ * (QUARTZ_WATCH_BOOT_GRACE_MS). A live Quartz ignores all five.
  */
 const watch = (() => {
   const t = process.argv.includes('--test-profile');
@@ -450,19 +451,39 @@ const watch = (() => {
       test.gameRunning = () => (fs.existsSync(flag) ? 'valorant' : '');
     }
   }
-  return require('./watch-main').create({
-    app,
-    ipcMain,
-    session,
-    BrowserWindow,
-    isChromeSender: (event) => isChromeSender(event),
-    isBundledPage: (url) => isBundledPageUrl(url),
-    send: (channel, payload) => send(channel, payload),
-    openInEdge: (url) => drm.openInEdge(url),
-    getWindow: () => win,
-    log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
-    test,
-  });
+  // The first reader waits this long after start, so a restored Watch tab never adds a hidden
+  // page load to Quartz's own boot. A TEST profile may change it (QUARTZ_WATCH_BOOT_GRACE_MS).
+  let bootGraceMs = 10000;
+  if (t && env.QUARTZ_WATCH_BOOT_GRACE_MS !== undefined && Number.isFinite(Number(env.QUARTZ_WATCH_BOOT_GRACE_MS))) {
+    bootGraceMs = Math.max(0, Number(env.QUARTZ_WATCH_BOOT_GRACE_MS));
+  }
+  // Watch must never stop Quartz from starting: if its code fails to load (watch-main.js,
+  // watch/shape.js, watch/merge.js ...) Quartz runs without it. The Watch page then says
+  // Quartz did not answer (its boot timeout), and Settings > Watch shows this reason.
+  try {
+    return require('./watch-main').create({
+      app,
+      ipcMain,
+      session,
+      BrowserWindow,
+      isChromeSender: (event) => isChromeSender(event),
+      isBundledPage: (url) => isBundledPageUrl(url),
+      send: (channel, payload) => send(channel, payload),
+      openInEdge: (url) => drm.openInEdge(url),
+      getWindow: () => win,
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
+      bootGraceMs,
+      test,
+    });
+  } catch (err) {
+    const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);
+    console.error('[watch] Watch could not start: ' + why);
+    setImmediate(() => { try { if (qlog) qlog.log.line('Watch could not start: ' + why); } catch { /* log not ready */ } });
+    for (const ch of ['watch:describe', 'watch:set-enabled', 'watch:set-leagues', 'watch:set-tmdb-key', 'watch:forget', 'watch:test-tmdb', 'watch:refresh']) {
+      try { ipcMain.handle(ch, () => { throw new Error('Watch could not start: ' + why); }); } catch { /* already registered */ }
+    }
+    return { failed: why, stop() {}, windowShown() {}, isReaderContents() { return false; } };
+  }
 })();
 
 const budget = budgetModule.create({ app });
@@ -2357,6 +2378,11 @@ function installClientHintFix(sess) {
  * session.defaultSession -- the same session downloads and permissions hang
  * off here.
  */
+/** A hidden Watch reader (watch-main.js); never throws, and false for anything else. */
+function isWatchReader(contents) {
+  try { return !!(contents && typeof watch.isReaderContents === 'function' && watch.isReaderContents(contents)); } catch { return false; }
+}
+
 function attachSessionHandlers() {
   const sess = session.defaultSession;
   if (!sess) return;
@@ -2366,6 +2392,9 @@ function attachSessionHandlers() {
   sess.on('will-download', handleWillDownload);
 
   sess.setPermissionRequestHandler((contents, permission, callback, details) => {
+    // Watch's hidden readers never prompt and never get anything: a dialog for a page the user
+    // cannot see would make his answer stick for his real tabs of that site.
+    if (isWatchReader(contents)) return callback(false);
     if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return callback(true);
     const prompts = permission === 'media' || permission in PERMISSION_PHRASES;
     if (!prompts) return callback(false);
@@ -2380,6 +2409,7 @@ function attachSessionHandlers() {
   // A check must give the same answer a request would, or a site sees itself
   // as granted and then silently fails.
   sess.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
+    if (isWatchReader(contents)) return false;
     if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return true;
     const origin = originOf(
       requestingOrigin || (details && details.requestingUrl) || safeUrl(contents)

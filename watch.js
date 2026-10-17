@@ -41,6 +41,8 @@
 
   var LINE = 'quartz-watch:';
   var SEARCH_DEBOUNCE_MS = 300;
+  var SEARCH_MIN_CHARS = 2;     // a shorter query searches his own rows only, never YouTube
+  var BOOT_TIMEOUT_MS = 5000;   // no first answer from Quartz by then: say so, with a Retry
   var HOVER_MS = 140;
   var WHEEL_GAP_MS = 380;
   var STAGE_SWAP_MS = 150;
@@ -81,6 +83,11 @@
     popFor: '',
     popFrom: null,
     tickTimer: 0,
+    bootTimer: 0,
+    failure: null,          // { title, why } on screen now
+    failEl: null,
+    answered: false,        // any answer from Quartz since the page loaded
+    pendingFail: '',        // a failure that arrived before the DOM
     resizeQueued: false
   };
   var $ = {};
@@ -94,19 +101,88 @@
   }
 
   window.__applyWatch = function (raw) {
+    S.answered = true;
+    clearTimeout(S.bootTimer);
+    S.bootTimer = 0;
+    // Quartz's side could not build an update: say why, never keep a silent skeleton.
+    if (raw && typeof raw === 'object' && typeof raw.fatal === 'string' && raw.fatal) {
+      var why = cleanText(raw.fatal, 300);
+      if (!S.ready) { S.pendingFail = why; return; }
+      showFailure('Watch couldn’t load its saved rows', why);
+      return;
+    }
     var snap;
-    try { snap = normalize(raw); } catch (err) { return; }
+    try { snap = normalize(raw); } catch (err) {
+      if (S.ready) showFailure('Watch couldn’t read an update from Quartz', (err && err.message) || String(err));
+      else S.pendingFail = (err && err.message) || String(err);
+      return;
+    }
     if (!S.ready) { S.pending = snap; return; }
-    try { applySnapshot(snap); } catch (err) {
-      try { console.error('Watch could not draw this update: ' + ((err && err.message) || err)); } catch (e) { /* ignore */ }
+    try { applySnapshot(snap); clearFailure(); } catch (err) {
+      var msg = (err && err.message) || String(err);
+      try { console.error('Watch could not draw this update: ' + msg); } catch (e) { /* ignore */ }
+      showFailure('Watch couldn’t draw the latest update', msg);
     }
   };
 
   window.__applyWatchSearch = function (raw) {
     if (!raw || typeof raw !== 'object' || !S.ready) return;
     if (raw.seq !== S.sentSeq || !S.q) return;     // an answer to a question no longer asked
-    try { S.answer = normalizeAnswer(raw); renderResults(); } catch (err) { /* keep what is on screen */ }
+    try { S.answer = normalizeAnswer(raw); renderResults(); } catch (err) {
+      toast('Couldn’t show these search results: ' + cleanText((err && err.message) || String(err), 160), { err: true });
+    }
   };
+
+  /* No silent failures: when Quartz does not answer, or an update cannot be read or drawn, the
+     page says so with the reason and a Retry (which asks Quartz for everything again). Before
+     the first update it replaces the boot skeleton; after it, a banner sits over what was drawn. */
+  function sayHello() {
+    clearTimeout(S.bootTimer);
+    S.bootTimer = setTimeout(function () {
+      S.bootTimer = 0;
+      if (S.answered) return;
+      showFailure('Quartz didn’t answer', 'Watch asked Quartz for your rows ' + Math.round(BOOT_TIMEOUT_MS / 1000) +
+        ' seconds ago and heard nothing back. Watch may have failed to start; Quartz’s log says why.');
+    }, BOOT_TIMEOUT_MS);
+    send('hello', { visible: !document.hidden });
+  }
+  function retryHello() {
+    clearFailure();
+    S.answered = false;
+    if (!S.snap) renderBoot();
+    sayHello();
+  }
+  function showFailure(title, why) {
+    S.failure = { title: title, why: cleanText(why, 300) };
+    if (!S.ready) return;
+    if (!S.snap) {
+      $.stack.replaceChildren();
+      S.rowEls = [];
+      S.model = [];
+      document.body.classList.add('is-empty');
+      renderStrip();
+      showStageSpecial('failed');
+      return;
+    }
+    var b = S.failEl;
+    if (!b) {
+      b = S.failEl = el('div', 'failbar');
+      b.setAttribute('role', 'alert');
+    }
+    b.replaceChildren();
+    b.appendChild(el('span', 'dot err'));
+    var g = el('span', 'grow');
+    g.appendChild(el('b', '', S.failure.title));
+    if (S.failure.why) { g.appendChild(document.createTextNode(' ')); g.appendChild(el('span', 'why', S.failure.why)); }
+    b.appendChild(g);
+    b.appendChild(button('btn sm', 'Retry', retryHello));
+    if (!b.parentNode) document.body.appendChild(b);
+  }
+  function clearFailure() {
+    if (!S.failure) return;
+    S.failure = null;
+    if (S.failEl && S.failEl.parentNode) S.failEl.parentNode.removeChild(S.failEl);
+  }
 
   window.__applyWatchResult = function (raw) {
     if (!raw || typeof raw !== 'object' || !S.ready) return;
@@ -267,7 +343,8 @@
       },
       items: arr(o.items).map(normItem).filter(Boolean),
       tmdb: { hasKey: !!(o.tmdb && o.tmdb.hasKey) },
-      reading: typeof o.reading === 'string' ? o.reading : ''
+      reading: typeof o.reading === 'string' ? o.reading : '',
+      forgottenAt: num(o.forgottenAt)
     };
   }
 
@@ -440,7 +517,7 @@
   /* ------------------------------------------------------------ the strip */
 
   function pillLook(s, boot, shared) {
-    if (boot) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
+    if (boot) return S.failure ? { cls: 'st-error', dot: 'err', small: 'No answer' } : { cls: 'st-busy', dot: 'busy', small: 'Starting\u2026' };
     if (s.state === 'off') return { cls: 'st-off', dot: 'off', small: 'Off' };
     if (s.reading) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
     if (s.state === 'error') return { cls: 'st-error', dot: 'err', small: "Couldn't read", act: 'Retry' };
@@ -706,7 +783,15 @@
     if (!en.length) return 'all-off';
     var busy = en.some(function (s) { return s.reading || s.queued; });
     var never = en.every(function (s) { return s.state === 'never' && !s.lastOkAt; });
-    if (never) return busy ? 'welcome' : (sharedPause() || en.some(function (s) { return s.paused; }) ? 'waiting' : 'welcome');
+    if (never) {
+      // The skeleton (and its "Reading" label) shows only while a read runs or is queued, or is
+      // due this moment (the boot hello, a beat before main queues it). Forget, or reads that
+      // are simply not due yet, say when the next read is instead.
+      if (busy) return 'welcome';
+      if (sharedPause() || en.some(function (s) { return s.paused; })) return 'waiting';
+      if (snap.forgottenAt && en.every(function (s) { return s.readAt < snap.forgottenAt; })) return 'forgotten';
+      return en.some(function (s) { return s.next && s.next <= snap.now + 1000; }) ? 'welcome' : 'later';
+    }
     if (busy) return 'reading';
     if (en.some(function (s) { return s.state === 'ok'; })) return 'empty';
     return 'failing';
@@ -729,7 +814,7 @@
   function renderBoot() {
     renderStrip();
     S.model = [];
-    var sk = skeletonRow('Reading your services\u2026');
+    var sk = skeletonRow('Loading Watch\u2026');
     $.stack.replaceChildren(sk);
     S.rowEls = [sk];
     document.body.classList.remove('is-empty');
@@ -1396,6 +1481,24 @@
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
+      } else if (mode === 'failed') {
+        var f = S.failure || { title: 'Watch couldn’t start', why: '' };
+        eb.appendChild(el('span', 'rn', 'Watch'));
+        h1Text = f.title;
+        lede = f.why || 'Quartz did not send Watch anything to show.';
+        acts.appendChild(button('btn primary', 'Retry', retryHello));
+        acts.appendChild(button('btn', 'Open Settings', function () { send('settings', {}); }));
+      } else if (mode === 'forgotten' || mode === 'later') {
+        // Nothing is reading: say so, say when the next read is, and offer it now.
+        var nexts = en.map(function (s) { return s.next; }).filter(function (n) { return n > 0; });
+        var at = nexts.length ? dayClock(Math.min.apply(null, nexts)) : '';
+        eb.appendChild(el('span', 'rn', 'Watch'));
+        h1Text = mode === 'forgotten' ? 'Watch data forgotten' : 'Nothing read yet';
+        lede = (mode === 'forgotten' ? 'Everything Watch had saved on this PC is gone. ' : '') +
+          (at ? 'Watch reads your services again at ' + at + '.' : 'Watch reads your services again while this page is open.') +
+          ' Read now to fill this page sooner.';
+        acts.appendChild(button('btn primary', 'Read now', function () { send('refresh', { service: null }); }));
+        acts.appendChild(button('btn', 'Choose services', function () { send('settings', {}); }));
       } else {
         eb.appendChild(el('span', 'rn', 'Watch'));
         h1Text = 'Every service is off';
@@ -1429,7 +1532,12 @@
       var im = new Image();
       im.decoding = 'async';
       im.referrerPolicy = 'no-referrer';
-      im.onload = function () { resolve(im); };
+      // Decoded off the main thread BEFORE the canvas draws it, so the wash's drawImage never
+      // decodes inside a frame of the cross-fade.
+      im.onload = function () {
+        if (typeof im.decode === 'function') im.decode().then(function () { resolve(im); }, function () { resolve(im); });
+        else resolve(im);
+      };
       im.onerror = function () { reject(new Error('image')); };
       im.src = src;
     });
@@ -1517,6 +1625,8 @@
     S.sentSeq = -1;
     enterSearch();
     renderResults();
+    // One letter matches his own rows here, but never goes out as a YouTube search.
+    if (q.length < SEARCH_MIN_CHARS) return;
     S.searchTimer = setTimeout(function () {
       S.seq += 1;
       S.sentSeq = S.seq;
@@ -1769,7 +1879,8 @@
     if (!s.enabled) n = el('small', '', 'Off');
     else if (s.id === 'youtube' && S.q) {
       var yt = a && a.youtube;
-      if (!a) n = el('small', '', 'Searching\u2026');
+      if (S.q.length < SEARCH_MIN_CHARS) n = el('small', '', 'Type ' + SEARCH_MIN_CHARS + '+ letters');
+      else if (!a) n = el('small', '', 'Searching\u2026');
       else if (yt && !yt.ok) n = el('small', yt.state === 'off' ? '' : 'err', yt.state === 'off' ? 'Off' : "Search didn't work");
       else if (yt) n = el('small', '', yt.items.length + (yt.items.length === 1 ? ' video' : ' videos'));
     }
@@ -2054,6 +2165,8 @@
       closePop(false);
     });
     document.addEventListener('visibilitychange', function () {
+      // Quartz reads only while a Watch page is on screen (and pauses timed re-reads while not).
+      send('visible', { visible: !document.hidden });
       if (document.hidden) { clearTimeout(S.tickTimer); S.tickTimer = 0; }
       else { refreshAgo(); scheduleTick(); }
     });
@@ -2063,9 +2176,12 @@
     if (S.pending) {
       var p = S.pending;
       S.pending = null;
-      try { applySnapshot(p); } catch (err) { /* the skeleton stays */ }
+      try { applySnapshot(p); } catch (err) { showFailure('Watch couldn’t draw your rows', (err && err.message) || String(err)); }
+    } else if (S.pendingFail) {
+      showFailure('Watch couldn’t load its saved rows', S.pendingFail);
     }
-    send('hello', {});
+    S.pendingFail = '';
+    sayHello();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

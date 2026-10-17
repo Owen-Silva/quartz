@@ -70,6 +70,8 @@ const json = (res, body) => send(res, 200, 'application/json; charset=utf-8', ty
 const redirect = (res, to) => send(res, 302, 'text/plain', 'moved', { Location: to });
 const page = (title, head, body) => '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>' + esc(title) + '</title>' + (head || '') + '</head><body>' + (body || '') + '</body></html>';
 
+const SEARCH = { tag: false, delay: {} };
+
 /* ---- YouTube ---------------------------------------------------------------------------------- */
 const YT_STEP = { '/': 'youtube-home', '/feed/history': 'youtube-history', '/playlist': 'youtube-watchlater' };
 function youtube(mode, req, res, p, q) {
@@ -78,9 +80,19 @@ function youtube(mode, req, res, p, q) {
     const f = fx(name);
     const script = '<script>var ytcfg={data_:{LOGGED_IN:' + (f.loggedIn === true) + '},get:function(k){return this.data_[k];}};'
       + 'window.ytInitialData=' + inScript(f.ytInitialData) + ';</script>';
-    return html(res, page('YouTube', script, '<div id="content">mock YouTube (' + esc(name) + ')</div>'));
+    // A cookie for the reader's session, so a search that leaked his cookies would show it (e2e checks).
+    return send(res, 200, 'text/html; charset=utf-8', page('YouTube', script, '<div id="content">mock YouTube (' + esc(name) + ')</div>'), { 'Set-Cookie': 'e2e_his_session=1; Path=/; SameSite=Lax' });
   }
-  if (p === '/results') return html(res, fixture('youtube-search.html'));
+  if (p === '/results') {
+    // SEARCH.tag puts [query] in front of every title, so two answers can be told apart; SEARCH.delay
+    // holds the answer to one query for that many ms (a query still in flight when the next is typed).
+    const qv = String(q.get('search_query') || '');
+    let body = fixture('youtube-search.html');
+    if (SEARCH.tag) body = body.split('"title":{"runs":[{"text":"').join('"title":{"runs":[{"text":"[' + qv.replace(/[^A-Za-z0-9 ]/g, '') + '] ');
+    const ms = Number(SEARCH.delay[qv]) || 0;
+    if (ms > 0) { const tm = setTimeout(() => { try { html(res, body); } catch (e) { /* gone */ } }, ms); res.on('close', () => clearTimeout(tm)); return true; }
+    return html(res, body);
+  }
   if (p === '/watch') return html(res, page('Mock video ' + esc(q.get('v') || ''), '', '<h1>mock YouTube watch page</h1>'));
   return false;
 }
@@ -181,7 +193,7 @@ async function start(opts) {
     held[svc] = new Set();
     servers[svc] = http.createServer((req, res) => {
       const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
-      log.push({ svc, path: u.pathname, url: u.pathname + u.search, t: Date.now() });
+      log.push({ svc, path: u.pathname, url: u.pathname + u.search, t: Date.now(), cookie: String(req.headers.cookie || '') });
       const mode = modes[svc];
       if (mode === 'slow') {
         held[svc].add(res);
@@ -242,6 +254,8 @@ async function start(opts) {
     rebase,
     modes: () => Object.assign({}, modes),
     setMode,
+    /** YouTube /results: { tag: true } prefixes titles with [query]; { delay: { q: ms } } holds one query's answer. */
+    setSearch: (o) => { SEARCH.tag = !!(o && o.tag); SEARCH.delay = Object.assign({}, (o && o.delay) || {}); },
     log,
     /** Requests to `svc` since `t` (ms), optionally only paths matching `re`. */
     hits: (svc, t, re) => log.filter((l) => l.svc === svc && l.t >= (t || 0) && (!re || re.test(l.path))).length,

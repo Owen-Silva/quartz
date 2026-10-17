@@ -191,9 +191,10 @@ function fakeWorld(opts) {
     prime: adapter('prime', 'view'),
     espn: adapter('espn', 'fetch'),
   };
-  world.wm = WM.create({
+  const deps = {
     dir,
     adapters,
+    bootGraceMs: o.bootGraceMs === undefined ? 0 : o.bootGraceMs,
     now: () => t,
     setTimeout: (fn, ms) => { const h = { fn, at: t + ms, ms, unref() {} }; timers.push(h); return h; },
     clearTimeout: (h) => { const i = timers.indexOf(h); if (i !== -1) timers.splice(i, 1); },
@@ -207,6 +208,7 @@ function fakeWorld(opts) {
       concurrent++; maxConcurrent = Math.max(maxConcurrent, concurrent);
       const svc = step.name === 'search' ? 'search' : (Shape.SERVICE_IDS.find((id) => (step.url || '').indexOf(new URL(Shape.serviceById(id).home).hostname) !== -1) || '?');
       calls.push(svc + ':' + step.name + ':' + rebase(step.url));
+      world.steps.push(step);
       await new Promise((r) => setImmediate(r));
       concurrent--;
       const b = world.behaviour[svc];
@@ -214,7 +216,15 @@ function fakeWorld(opts) {
       if (extra === 'HANG') return new Promise(() => { /* a reader that never answers */ });
       return Object.assign(okStep(step), extra);
     },
-  });
+  };
+  world.steps = [];
+  world.fetchImpl = o.fetch || null;
+  // realSteps: no fake runStep -- watch-main's own runFetchStep / runViewStep run, against
+  // o.fetch / o.BrowserWindow + o.session (fakes below), so their options can be checked.
+  if (o.realSteps) delete deps.runStep;
+  for (const k of ['fetch', 'BrowserWindow', 'session']) if (o[k]) deps[k] = o[k];
+  if (o.adapters) deps.adapters = Object.assign({}, adapters, o.adapters);
+  world.wm = WM.create(deps);
   world.guest = (url) => {
     const pushed = [];
     const handlers = {};
@@ -247,6 +257,441 @@ function fakeWorld(opts) {
   world.svc = (snap, id) => snap.services.find((s) => s.id === id);
   world.cleanup = () => { try { world.wm.stop(); } catch (e) { /* fine */ } try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* fine */ } };
   return world;
+}
+
+/**
+ * A fake BrowserWindow for watch-main's own runViewStep (realSteps worlds). `ctl.extract(code, win)`
+ * answers executeJavaScript (default { ok: true }). Every window made is in `made`, every script
+ * it ran in win.webContents.js as [code, userGesture].
+ */
+function fakeBrowser(ctl) {
+  const c = ctl || {};
+  const made = [];
+  class FakeBW {
+    constructor(opts) {
+      const win = this;
+      this.opts = opts;
+      this.destroyed = false;
+      this.handlers = {};
+      const wcH = {};
+      this.webContents = {
+        js: [], destroyed: false, url: '',
+        on(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+        once(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+        emit(ev, ...a) { for (const fn of (wcH[ev] || [])) fn(...a); },
+        setAudioMuted() {}, setFrameRate() {}, setWindowOpenHandler() {},
+        isDestroyed() { return this.destroyed; },
+        loadURL(url) { this.url = url; return Promise.resolve(); },
+        executeJavaScript(code, gesture) {
+          this.js.push([code, gesture]);
+          if (this.destroyed) return Promise.reject(new Error('Object has been destroyed'));
+          return Promise.resolve(c.extract ? c.extract(code, win) : { ok: true });
+        },
+        getURL() { return this.url; },
+        getTitle() { return ''; },
+        debugger: { attach() {}, on() {}, sendCommand() { return Promise.resolve({}); }, isAttached() { return false; }, detach() {} },
+      };
+      made.push(this);
+    }
+    once(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); }
+    isDestroyed() { return this.destroyed; }
+    destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      this.webContents.destroyed = true;
+      this.webContents.emit('destroyed');
+      for (const fn of (this.handlers.closed || [])) fn();
+    }
+  }
+  return { FakeBW, made, session: { defaultSession: {} } };
+}
+
+/** A fake fetch: records (url, opts); YouTube results / TMDB / ESPN answer; `hang(url)` never answers. */
+function fakeFetch(hang) {
+  const calls = [];
+  const f = (url, opts) => {
+    calls.push({ url, opts: opts || {} });
+    if (hang && hang(url)) return new Promise(() => { /* never answers, ignores abort */ });
+    let body = '{}';
+    if (/youtube\.com\/results/.test(url)) body = '<html>RESULTS</html>';
+    if (/themoviedb\.org/.test(url)) body = '{"results":[]}';
+    return Promise.resolve({ ok: true, status: 200, url, text: () => Promise.resolve(body) });
+  };
+  f.calls = calls;
+  return f;
+}
+
+/** A Disney+ adapter whose one view step extracts and scrolls (to see both scripts' userGesture). */
+function scrollingDisney(readyAfter) {
+  return {
+    disney: {
+      id: 'disney',
+      steps: () => [{ name: 'home', type: 'view', url: Shape.serviceById('disney').home, extract: 'window.__state', scroll: 2, ready: (v) => !!v && v.n >= readyAfter }],
+      parse: (read) => {
+        const s = read.steps.home;
+        if (s.error) return { state: 'error', reason: s.error.detail };
+        return { state: 'ok', items: mk('disney', 'resume', 2), profile: 'the user' };
+      },
+    },
+  };
+}
+
+/** The review fixes (REVIEW.md findings 1-9), one block each. */
+async function reviewFixTests() {
+  const P = WM.parseGuestLine;
+  const count = (g, fn) => g.pushed.filter((p) => p.fn === fn).length;
+
+  // --- 5. the visibility protocol: hello carries it, `visible` updates it
+  check(P('quartz-watch:hello {"visible":false}').visible === false && P('quartz-watch:hello {"visible":true}').visible === true,
+    'fix5: hello carries the page\'s visibility');
+  check(P('quartz-watch:hello {}').visible === true && P('quartz-watch:hello').visible === true, 'fix5: hello without the flag (an old page) counts as visible');
+  const pv = P('quartz-watch:visible {"visible":false}');
+  check(pv && pv.verb === 'visible' && pv.visible === false && P('quartz-watch:visible {"visible":true}').visible === true, 'fix5: the visible verb parses');
+  check(P('quartz-watch:visible {}') === null && P('quartz-watch:visible {"visible":"yes"}') === null && P('quartz-watch:visible') === null, 'fix5: visible without a boolean is refused');
+
+  // --- 1. no cookie goes with search, ESPN or TMDB: credentials 'omit' on every fetch
+  let w = fakeWorld({ realSteps: true, fetch: fakeFetch(), BrowserWindow: fakeBrowser().FakeBW, session: { defaultSession: {} } });
+  try {
+    const g = w.guest();
+    w.wm.setTmdbKey('abcdefghijklmnop0123');
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    g.say('quartz-watch:search {"q":"bluey","seq":1}');
+    await w.settle();
+    w.advance(2000);
+    await w.fire();
+    const calls = w.fetchImpl.calls;
+    const yt = calls.filter((c) => /youtube\.com\/results/.test(c.url));
+    const espn = calls.filter((c) => /espn/.test(c.url));
+    const tmdb = calls.filter((c) => /themoviedb\.org/.test(c.url));
+    check(yt.length === 1 && espn.length >= 1 && tmdb.length >= 1, 'fix1: search, ESPN and TMDB all went through fetch', calls.map((c) => c.url));
+    check(calls.length > 0 && calls.every((c) => c.opts.credentials === 'omit'), 'fix1: every fetch is credentials:omit (no cookie of the user\'s, nothing in his YouTube history)', calls.map((c) => c.opts.credentials));
+    const a = g.last('__applyWatchSearch');
+    check(a && a.seq === 1 && a.youtube.ok, 'fix1: the cookie-less search still answers', a && a.youtube);
+  } finally { w.cleanup(); }
+
+  // --- 1. a newer search cancels the one in flight: aborted, never answered, never cached
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    let firstHangs = true;
+    w.behaviour.search = () => { if (firstHangs) { firstHangs = false; return 'HANG'; } return { text: '<html>RESULTS</html>' }; };
+    g.say('quartz-watch:search {"q":"the","seq":1}');
+    await w.settle();
+    const s1 = w.steps.find((s) => s.name === 'search');
+    check(s1 && s1.signal && s1.signal.aborted === false, 'fix1: a search step carries an abort signal');
+    g.say('quartz-watch:search {"q":"the man","seq":2}');
+    await w.settle();
+    check(s1 && s1.signal.aborted === true, 'fix1: the next search aborts the one in flight');
+    w.advance(2000);
+    await w.fire();
+    let answers = g.pushed.filter((p) => p.fn === '__applyWatchSearch').map((p) => p.payload.seq);
+    check(answers.join() === '2' && g.last('__applyWatchSearch').youtube.ok, 'fix1: only the newest search answers the page', answers);
+    check(!w.logs.some((l) => /search on YouTube failed/.test(l)), 'fix1: a cancelled search is not logged as a failure', w.logs);
+    check(w.wm.state().searchesLive === 0, 'fix1: no search left in flight');
+    // one replaced while it waits for the gap never fetches at all
+    w.advance(2000);
+    w.calls.length = 0;
+    g.say('quartz-watch:search {"q":"alpha","seq":3}');
+    await w.settle();
+    g.say('quartz-watch:search {"q":"alph","seq":4}');
+    await w.settle();
+    g.say('quartz-watch:search {"q":"alpha beta","seq":5}');
+    await w.settle();
+    w.advance(2000);
+    await w.fire();
+    const urls = w.calls.filter((c) => c.indexOf('search:') === 0);
+    check(urls.length === 2 && /search_query=alpha$/.test(urls[0]) && /search_query=alpha%20beta$/.test(urls[1]), 'fix1: a search replaced while waiting never fetches (alpha, alpha beta; not alph)', urls);
+    answers = g.pushed.filter((p) => p.fn === '__applyWatchSearch').map((p) => p.payload.seq);
+    check(answers.join() === '2,3,5', 'fix1: seq 4 never answers; 3 and 5 do', answers);
+    // a closed page's search is cancelled too
+    w.behaviour.search = () => 'HANG';
+    w.advance(2000);
+    g.say('quartz-watch:search {"q":"gone","seq":6}');
+    await w.settle();
+    const s6 = w.steps[w.steps.length - 1];
+    g.destroyed = true;
+    g.emit('destroyed');
+    check(s6.signal.aborted === true && w.wm.state().searchesLive === 0, 'fix1: a page that closes cancels its search');
+  } finally { w.cleanup(); }
+
+  // --- 2. a snapshot that throws reaches the page as { v, now, fatal }; pushAll never dies quietly
+  w = fakeWorld();
+  const origRows = Merge.buildRows;
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    Merge.buildRows = () => { throw new Error('row bug'); };
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    const f = g.pushed[0] && g.pushed[0].payload;
+    check(f && f.v === 1 && typeof f.now === 'number' && typeof f.fatal === 'string' && /row bug/.test(f.fatal) && Object.keys(f).sort().join() === 'fatal,now,v',
+      'fix2: hello with a broken snapshot sends { v: 1, now, fatal }', f);
+    await w.settle();
+    const snaps = g.pushed.filter((p) => p.fn === '__applyWatch');
+    check(snaps.length > 1 && snaps.every((p) => typeof p.payload.fatal === 'string'), 'fix2: pushAll sends the fatal too (it does not die in its .then)', snaps.length);
+    check(w.logs.filter((l) => /row bug/.test(l)).length === 1, 'fix2: the failure is logged once, not once per push', w.logs.filter((l) => /row bug/.test(l)));
+    await new Promise((r) => setImmediate(r));
+    check(unhandled === 0, 'fix2: no unhandled rejection', unhandled);
+    Merge.buildRows = origRows;
+    g.say('quartz-watch:hello {}');   // the page's Retry
+    const back = g.last('__applyWatch');
+    check(back && !back.fatal && Array.isArray(back.rows) && back.rows.length > 0, 'fix2: Retry (hello again) draws normally once the fault is gone');
+  } finally { Merge.buildRows = origRows; process.removeListener('unhandledRejection', onUnhandled); w.cleanup(); }
+
+  // --- 3 + 4. the real runViewStep: userGesture false, reader webContents tracked live
+  let br = fakeBrowser({ extract: (code, win) => { win.n = (win.n || 0) + 1; return { n: win.n }; } });
+  w = fakeWorld({ realSteps: true, fetch: fakeFetch(), BrowserWindow: br.FakeBW, session: br.session, adapters: scrollingDisney(3) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    const ytWin = br.made[0];
+    const dWin = br.made[1];
+    check(ytWin && ytWin.destroyed && dWin && !dWin.destroyed, 'fix4: (setup) YouTube\'s reader done, Disney+\'s alive mid-read', br.made.map((x) => x.destroyed));
+    check(w.wm.isReaderContents(dWin.webContents) === true, 'fix4: isReaderContents is true for a live reader');
+    check(w.wm.isReaderContents(ytWin.webContents) === false, 'fix4: ...false once that reader is destroyed');
+    check(w.wm.isReaderContents(g) === false && w.wm.isReaderContents(null) === false && w.wm.isReaderContents({}) === false, 'fix4: ...false for a Watch page, null, anything else');
+    for (let i = 0; i < 6 && !dWin.destroyed; i++) { w.advance(600); await w.fire(); }
+    const js = dWin.webContents.js;
+    check(js.some(([c]) => /scrollBy/.test(c)) && js.some(([c]) => /__state/.test(c)), 'fix3: (setup) the reader both extracted and scrolled', js.map(([c]) => c.slice(0, 30)));
+    check(js.length >= 3 && js.every(([, gesture]) => gesture === false), 'fix3: every reader script runs with userGesture false', js.map(([, gst]) => gst));
+    await w.settle();
+    check(br.made.every((x) => x.destroyed) && w.wm.state().readers === 0, 'fix4: every reader destroyed and forgotten after the reads', br.made.map((x) => x.destroyed));
+    check(br.made.every((x) => !w.wm.isReaderContents(x.webContents)), 'fix4: no dead reader still counts as one');
+    check(w.svc(g.last('__applyWatch'), 'disney').state === 'ok', 'fix3: the Disney+ read still succeeds');
+  } finally { w.cleanup(); }
+
+  // --- 8. a hung search's watchdog never kills the Disney+ reader beside it
+  br = fakeBrowser({ extract: () => null });     // Disney+ never ready: it polls to its own 20 s deadline
+  const ff = fakeFetch((url) => /youtube\.com\/results/.test(url));   // the search fetch never answers, ignores abort
+  w = fakeWorld({ realSteps: true, fetch: ff, BrowserWindow: br.FakeBW, session: br.session, adapters: scrollingDisney(1) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    const dWin = br.made[1];
+    g.say('quartz-watch:search {"q":"bluey","seq":1}');
+    await w.settle();
+    for (let i = 0; i < 16; i++) { w.advance(1000); await w.fire(); }
+    check(w.logs.some((l) => /step search hit the watchdog/.test(l)), 'fix8: (setup) the hung search hit its watchdog at 15 s', w.logs);
+    check(dWin && dWin.destroyed === false && w.svc(g.last('__applyWatch'), 'disney').reading === true, 'fix8: the Disney+ reader beside it is untouched', dWin && dWin.destroyed);
+    const a = g.last('__applyWatchSearch');
+    check(a && a.youtube.ok === false && /stopped answering/.test(a.youtube.reason), 'fix8: the search says it timed out', a && a.youtube);
+    for (let i = 0; i < 6; i++) { w.advance(1000); await w.fire(); }
+    const d = w.svc(g.last('__applyWatch'), 'disney');
+    check(dWin.destroyed && d.state === 'error' && d.reason === 'timed out after 20 s', 'fix8: Disney+ ends on its own deadline, not as a crash or a kill', d.reason);
+  } finally { w.cleanup(); }
+
+  // --- 8. a view step's watchdog destroys that step's own window
+  br = fakeBrowser({ extract: () => null });
+  w = fakeWorld({ realSteps: true, fetch: fakeFetch(), BrowserWindow: br.FakeBW, session: br.session, adapters: scrollingDisney(1) });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    const dWin = br.made[1];
+    w.advance(26e3);
+    await w.fire();
+    await w.settle();
+    check(w.logs.some((l) => /step home hit the watchdog/.test(l)) && dWin.destroyed, 'fix8: the watchdog destroys its own step\'s window', w.logs);
+    check(br.made.slice(2).every((x) => x.destroyed) && w.svc(g.last('__applyWatch'), 'prime').state === 'ok', 'fix8: the next service still reads after it');
+    check(/stopped answering/.test(w.svc(g.last('__applyWatch'), 'disney').reason), 'fix8: Disney+ says the reader stopped answering', w.svc(g.last('__applyWatch'), 'disney').reason);
+  } finally { w.cleanup(); }
+
+  // --- 5. reads start only once a Watch page is visible; a hidden page gets no timed reads
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {"visible":false}');
+    check(g.pushed[0] && g.pushed[0].fn === '__applyWatch' && g.pushed[0].payload.services.length === 4, 'fix5: a hidden page still gets the cache snapshot at once');
+    await w.settle();
+    check(w.calls.length === 0 && w.wm.state().timerAt === 0, 'fix5: a hidden page starts no read and arms no timer', { calls: w.calls, timerAt: w.wm.state().timerAt });
+    w.wm.windowShown();
+    await w.settle();
+    check(w.calls.length === 0, 'fix5: the window coming back reads nothing for a hidden page');
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 4 && w.wm.state().timerAt > 0, 'fix5: turning visible reads what is due and arms the timer', w.calls);
+    g.say('quartz-watch:visible {"visible":false}');
+    await w.settle();
+    check(w.wm.state().timerAt === 0, 'fix5: turning hidden stops the timer');
+    w.calls.length = 0;
+    w.advance(16 * 60e3);
+    await w.fire();
+    check(w.calls.length === 0, 'fix5: no YouTube 15-min re-read while hidden', w.calls);
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.some((c) => c.indexOf('youtube') === 0) && w.calls.some((c) => c.indexOf('espn') === 0) && !w.calls.some((c) => c.indexOf('disney') === 0),
+      'fix5: back on screen, what fell due reads (YouTube, ESPN), the rest waits', w.calls);
+    // two pages: the visible one keeps the timer; when it closes, the hidden one gets none
+    const g2 = w.guest();
+    g2.say('quartz-watch:hello {"visible":true}');
+    g.say('quartz-watch:visible {"visible":false}');
+    await w.settle();
+    check(w.wm.state().visible === 1 && w.wm.state().timerAt > 0, 'fix5: one visible page of two keeps the timer');
+    g2.destroyed = true;
+    g2.emit('destroyed');
+    await w.settle();
+    check(w.wm.state().guests === 1 && w.wm.state().visible === 0 && w.wm.state().timerAt === 0, 'fix5: the visible page closing leaves the set; the hidden one gets no timer', w.wm.state());
+    // a Retry click still reads on a page that says it is hidden (the click is the user's)
+    w.calls.length = 0;
+    w.advance(31e3);
+    g.say('quartz-watch:refresh {"service":"prime"}');
+    await w.settle();
+    check(w.calls.some((c) => c.indexOf('prime') === 0), 'fix5: a Retry is never held back by visibility', w.calls);
+  } finally { w.cleanup(); }
+
+  // --- 5. a hidden page's hello reads nothing even while another Watch page is on screen
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    w.advance(16 * 60e3);          // YouTube and ESPN fall due; the timer has not fired yet
+    w.calls.length = 0;
+    const g2 = w.guest();
+    g2.say('quartz-watch:hello {"visible":false}');
+    await w.settle();
+    check(w.calls.length === 0 && g2.pushed.length >= 1, 'fix5: a hidden hello gets the snapshot but starts no read, even beside a visible page', w.calls);
+    g2.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.some((c) => c.indexOf('youtube') === 0), 'fix5: ...and reads once it turns visible', w.calls);
+  } finally { w.cleanup(); }
+
+  // --- 6. boot grace: reads wait QUEUED until create() + bootGraceMs, then one at a time
+  w = fakeWorld({ bootGraceMs: 10000 });
+  try {
+    const t0 = w.now();
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    let s = g.last('__applyWatch');
+    check(w.calls.length === 0 && s.services.every((x) => x.queued === true && x.reading === false), 'fix6: in the boot grace every due read is queued, none reading', s.services.map((x) => x.id + ':' + x.queued + '/' + x.reading));
+    check(w.wm.state().bootTimer && w.timers.some((h) => h.at === t0 + 10000), 'fix6: one timer, at create() + bootGraceMs');
+    w.advance(9000);
+    await w.fire();
+    check(w.calls.length === 0, 'fix6: nothing reads before the grace ends', w.calls);
+    w.advance(1000);
+    await w.fire();
+    s = g.last('__applyWatch');
+    check(w.calls.length === 4 && w.maxConcurrent === 1 && s.services.every((x) => x.state === 'ok' && !x.queued), 'fix6: the first reader starts at the end of the grace, then the rest, one at a time', w.calls);
+  } finally { w.cleanup(); }
+
+  // --- 7. Forget clears memory too: search answers, the search gap, pauses, Retry stamps
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    w.behaviour.search = () => ({ text: '<html>RESULTS</html>' });
+    g.say('quartz-watch:search {"q":"bluey","seq":1}');
+    await w.settle();
+    w.advance(31e3);
+    g.say('quartz-watch:refresh {"service":"disney"}');
+    await w.settle();
+    w.game = 'valorant';
+    w.advance(31e3);
+    g.say('quartz-watch:refresh {"service":null}');
+    await w.settle();
+    let st = w.wm.state();
+    check(st.searchCache === 1 && Object.keys(st.paused).length === 4 && st.lastForced >= 1, '(setup) a cached search, pauses and Retry stamps exist', st);
+    w.game = '';
+    g.say('quartz-watch:search {"q":"zeta","seq":2}');   // in flight across the Forget
+    g.say('quartz-watch:forget {}');
+    await w.settle();
+    st = w.wm.state();
+    check(st.searchCache === 0 && Object.keys(st.paused).length === 0 && Object.keys(st.pausedUntil).length === 0 && st.lastForced === 0,
+      'fix7: forget clears the search answers, pauses and Retry stamps', st);
+    check(g.last('__applyWatchSearch').seq === 2, 'fix7: a search in flight across Forget still answers the page (it is not cached)');
+    check(g.last('__applyWatch').forgottenAt > 0, 'fix7: forgottenAt is in the snapshot');
+    const n = w.calls.length;
+    g.say('quartz-watch:search {"q":"bluey","seq":3}');
+    await w.settle();
+    check(w.calls.length === n + 1 && g.last('__applyWatchSearch').seq === 3, 'fix7: after Forget the same search fetches again, at once (gap reset)', w.calls.slice(n));
+  } finally { w.cleanup(); }
+
+  // --- 7. turning a service off removes its rows from memory AND watch-cache.json
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    w.wm.flush();
+    const file = path.join(w.dir, 'watch-cache.json');
+    let disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    check(disk.services.disney.items.length === 3 && disk.services.disney.profile === 'the user', '(setup) Disney+ rows and profile on disk');
+    w.wm.setEnabled('disney', false);
+    disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    check(disk.services.disney.items.length === 0 && disk.services.disney.profile === '' && disk.services.disney.state === 'never', 'fix7: off -> its rows and profile leave watch-cache.json at once', disk.services.disney);
+    check(disk.services.youtube.items.length === 3 && disk.services.prime.items.length === 3, 'fix7: the other services keep theirs');
+    w.behaviour.espn = () => ({ extracted: { events: [{ id: '9', league: 'nhl', state: 'pre', startsAt: w.now() + 3600e3, home: { name: 'A' }, away: { name: 'B' } }] } });
+    w.wm.refresh('espn');
+    await w.settle();
+    w.wm.flush();
+    check(JSON.parse(fs.readFileSync(file, 'utf8')).services.espn.events.length === 1, '(setup) an ESPN game on disk');
+    w.wm.setEnabled('espn', false);
+    disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    check(!(disk.services.espn.events && disk.services.espn.events.length) && disk.services.espn.items.length === 0, 'fix7: ESPN off -> its games leave the file too', disk.services.espn);
+    w.behaviour.search = () => ({ text: '<html>RESULTS</html>' });
+    g.say('quartz-watch:search {"q":"bluey","seq":1}');
+    await w.settle();
+    check(w.wm.state().searchCache === 1, '(setup) a cached YouTube search');
+    w.wm.setEnabled('youtube', false);
+    check(w.wm.state().searchCache === 0, 'fix7: YouTube off drops its cached searches');
+    w.calls.length = 0;
+    w.wm.setEnabled('disney', true);
+    await w.settle();
+    check(w.calls.some((c) => c.indexOf('disney') === 0) && w.svc(g.last('__applyWatch'), 'disney').counts.resume === 3, 'fix7: turned back on, it reads at once');
+  } finally { w.cleanup(); }
+
+  // --- 9. a service waiting on checkGame() cannot be queued a second time
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await Promise.resolve();   // hello's checkGame().then has run; pump is now awaiting its own checkGame()
+    const st = w.wm.state();
+    check(st.starting === 'youtube' && st.reading === null && st.queue.indexOf('youtube') === -1, '(setup) YouTube is between the queue and reading', st);
+    check(w.wm.enqueue('youtube', true) === false, 'fix9: enqueue refuses a service that is starting');
+    check(w.wm.snapshot().services.find((x) => x.id === 'youtube').queued === true, 'fix9: the page sees it as queued meanwhile');
+    await w.settle();
+    check(w.calls.filter((c) => c.indexOf('youtube') === 0).length === 1, 'fix9: YouTube read once', w.calls);
+  } finally { w.cleanup(); }
+
+  // --- 6 (finding 6). a game pause backs off 5 min: no tasklist / push every 30 s
+  let looks = 0;
+  let game = 'valorant';
+  w = fakeWorld({ test: { gameRunning: () => { looks++; return game; } } });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    check(w.svc(g.last('__applyWatch'), 'youtube').paused === 'paused while VALORANT is running', '(setup) paused for the game');
+    check(w.wm.state().timerAt - w.now() >= 5 * 60e3 - 1, 'fix6b: the timer looks again in 5 min, not 30 s', w.wm.state().timerAt - w.now());
+    const looks0 = looks;
+    const pushes0 = count(g, '__applyWatch');
+    for (let i = 0; i < 9; i++) { w.advance(30e3); await w.fire(); }
+    check(looks === looks0 && count(g, '__applyWatch') === pushes0, 'fix6b: 4.5 min of a game: no game check, no push', { looks: looks - looks0, pushes: count(g, '__applyWatch') - pushes0 });
+    w.advance(31e3);
+    await w.fire();
+    check(looks > looks0 && w.calls.length === 0, 'fix6b: at 5 min it looks once more (still paused)', looks - looks0);
+    game = '';
+    w.advance(5 * 60e3 + 1000);
+    await w.fire();
+    check(w.calls.length === 4, 'fix6b: the game over, the next look reads everything', w.calls);
+    // a page coming back on screen does not wait out the backoff (that look is the user's)
+    game = 'valorant';
+    w.advance(61 * 60e3);
+    await w.fire();
+    game = '';
+    w.calls.length = 0;
+    g.say('quartz-watch:visible {"visible":false}');
+    g.say('quartz-watch:visible {"visible":true}');
+    await w.settle();
+    check(w.calls.length === 4, 'fix6b: a page turning visible looks at once, backoff or not', w.calls);
+  } finally { w.cleanup(); }
 }
 
 async function mainTests() {
@@ -569,6 +1014,7 @@ async function moduleTests() {
     shapeTests();
     mergeTests();
     await mainTests();
+    await reviewFixTests();
     await moduleTests();
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));

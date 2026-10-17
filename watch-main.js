@@ -24,21 +24,30 @@
  * WHEN. Cache first: the page draws the cache the moment it says hello, then the services
  * that are due are read one by one and the page is patched after each. Due = older than
  * the service's floor (YouTube 15 min, Disney+/Prime 60, ESPN 15 or 2 while a game is
- * live). Reads happen ONLY while a Watch page is open, and never while the Quartz window
- * is hidden or minimised (unless the cache is very stale), while a game is running, or
- * with under 1.5 GB of memory free -- and each of those pauses is SHOWN on the page, with
- * its reason, never silent. One timer, armed only while a Watch page exists.
+ * live). Reads start ONLY while a Watch page is open AND visible (the page reports its
+ * visibilityState: a tab restored in the background reads nothing until it is looked at),
+ * never in the first 10 s after create() (the boot grace: they wait, shown as queued), and
+ * never while the Quartz window is hidden or minimised (unless the cache is very stale),
+ * while a game is running, or with under 1.5 GB of memory free (those two re-checked every
+ * 5 min, not every 30 s) -- and each of those pauses is SHOWN on the page, with its reason,
+ * never silent. One timer, armed only while a Watch page is visible. A Retry always reads.
+ *
+ * SEARCH is a cookie-less fetch (credentials 'omit') of YouTube's public results page, so
+ * it never lands in the user's YouTube history; a newer search from the same page aborts the
+ * one in flight. Only the home/feed VIEW reads use his signed-in session.
  *
  * THE PAGE (watch.html) asks over console lines, like search.html; only a guest whose URL
  * is OUR watch.html is heard, and every line is validated here:
- *   in    quartz-watch:hello    {}
+ *   in    quartz-watch:hello    {"visible":true|false}         (no flag = visible; reads start only for a visible page)
+ *         quartz-watch:visible  {"visible":true|false}         (on every visibilitychange)
  *         quartz-watch:refresh  {"service":"youtube"|null}     (null = every service)
  *         quartz-watch:open     {"url":"https://..."}           (a title: Quartz tab, or Edge for DRM)
  *         quartz-watch:signin   {"service":"disney"}            (the sign-in page, in a Quartz tab)
  *         quartz-watch:search   {"q":"bluey","seq":3}           (YouTube results + TMDB slot)
  *         quartz-watch:forget   {}                              (delete the cache)
  *         quartz-watch:settings {}                              (handled by app.js: Settings > Watch)
- *   out   window.__applyWatch(snapshot)       after hello, and after every change
+ *   out   window.__applyWatch(snapshot)       after hello, and after every change; when the
+ *                                             snapshot itself fails: { v: 1, now, fatal: reason }
  *         window.__applyWatchSearch(answer)
  *         window.__applyWatchResult({ action, ok, reason, how })
  *
@@ -86,6 +95,8 @@ const TIMER_MIN_MS = 30 * 1000;
 const TIMER_MAX_MS = 60 * 60 * 1000;
 const SAVE_DEBOUNCE_MS = 1500;
 const GAME_CHECK_TTL_MS = 60 * 1000;
+const PAUSE_BACKOFF_MS = 5 * 60 * 1000;  // a game / low-memory pause: the timer looks again in 5 min, not every 30 s
+const BOOT_GRACE_MS = 10 * 1000;         // no reader starts in the first 10 s after create() (reads wait, queued)
 const SEARCH_GAP_MS = 1200;
 const SEARCH_TTL_MS = 10 * 60 * 1000;
 const SEARCH_CACHE_MAX = 20;
@@ -142,7 +153,12 @@ function parseGuestLine(text) {
   }
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return null;
   switch (verb) {
-    case 'hello': case 'forget': case 'settings':
+    case 'hello':
+      // An old page sends no flag: it counts as visible.
+      return { verb, visible: msg.visible !== false };
+    case 'visible':
+      return typeof msg.visible === 'boolean' ? { verb, visible: msg.visible } : null;
+    case 'forget': case 'settings':
       return { verb };
     case 'refresh':
       if (msg.service === null || msg.service === undefined) return { verb, service: null };
@@ -264,16 +280,28 @@ function create(deps) {
   let timerAt = 0;
   let stopped = false;
   const guests = new Set();
+  const guestVisible = new Map(); // guest webContents -> its page's last visibilityState === 'visible'
   const queue = [];
   let reading = null;            // service id being read now
+  let starting = null;           // service id taken off the queue, waiting on checkGame() before it reads
   let pumping = false;
-  let currentView = null;        // the one reader window alive, if any
+  const liveReaders = new Map(); // every hidden reader window alive now -> its step handle { win, killed }
+  const readerContents = new Set(); // ...and their webContents (isReaderContents)
   let epoch = 0;                 // bumped by forget(): a read from before it is dropped
+  let forgottenAt = 0;           // when Forget last emptied the cache (memory only; the page says so until a read lands)
   const paused = {};             // id -> reason the last due read did not start
+  const pausedUntil = {};        // id -> a game / memory pause: timed reads do not look again before this
   const lastForced = {};
   let gameCache = { at: 0, name: '' };
   let searchNext = 0;
   const searchCache = new Map();
+  const searchLive = new Map();  // guest -> its one search in flight { seq, ctrl, stale }
+  // Boot grace: reads enqueued in the first bootGraceMs stay queued (the page says "Waiting to
+  // read X") and the first reader starts at create() + bootGraceMs. The harness passes 0.
+  const bootGraceMs = Number.isFinite(d.bootGraceMs) && d.bootGraceMs >= 0 ? d.bootGraceMs : BOOT_GRACE_MS;
+  const bootUntil = now() + bootGraceMs;
+  let bootTimer = null;
+  let lastFatal = '';
 
   /* --- files --------------------------------------------------------------------- */
 
@@ -423,14 +451,16 @@ function create(deps) {
    * For watch/tmdb.js: one JSON GET -> { status, json, error }. Never rejects. The
    * key travels only in the URL or header TMDB asks for, and is never logged.
    */
-  async function fetchJson(url, headers) {
+  async function fetchJson(url, headers, cancel) {
     const f = getFetch();
     const target = rebase(String(url || ''));
     if (!f) return { status: 0, json: null, error: { code: 'load-failed', detail: 'this build cannot fetch' } };
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const t = setTimer(() => { try { if (ctrl) ctrl.abort(); } catch { /* gone */ } }, 10000);
+    const unlink = linkAbort(cancel, ctrl);
     try {
-      const res = await f(target, { signal: ctrl ? ctrl.signal : undefined, headers: Object.assign({ accept: 'application/json' }, headers || {}) });
+      // credentials 'omit': TMDB needs no cookie, and none of the user's goes with it.
+      const res = await f(target, { signal: ctrl ? ctrl.signal : undefined, credentials: 'omit', headers: Object.assign({ accept: 'application/json' }, headers || {}) });
       let json = null;
       try { json = JSON.parse(await res.text()); } catch { json = null; }
       return { status: res.status || 0, json, error: null };
@@ -439,7 +469,17 @@ function create(deps) {
       return { status: 0, json: null, error: aborted ? { code: 'timeout', detail: 'TMDB did not answer within 10 s' } : classifyNetError(err, 'TMDB') };
     } finally {
       clearTimer(t);
+      unlink();
     }
+  }
+
+  /** When `outer` (an AbortSignal, or nothing) aborts, so does `ctrl`. -> the unhook. */
+  function linkAbort(outer, ctrl) {
+    if (!outer || !ctrl || typeof outer.addEventListener !== 'function') return () => {};
+    const onAbort = () => { try { ctrl.abort(); } catch { /* gone */ } };
+    if (outer.aborted) { onAbort(); return () => {}; }
+    outer.addEventListener('abort', onAbort, { once: true });
+    return () => { try { outer.removeEventListener('abort', onAbort); } catch { /* gone */ } };
   }
 
   async function runFetchStep(step) {
@@ -450,8 +490,12 @@ function create(deps) {
     const budget = Number.isFinite(step.budgetMs) ? step.budgetMs : STEP_BUDGET_MS;
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const t = setTimer(() => { try { if (ctrl) ctrl.abort(); } catch { /* gone */ } }, budget);
+    const unlink = linkAbort(step.signal, ctrl);
     try {
-      const res = await fetchImpl(url, { signal: ctrl ? ctrl.signal : undefined, headers: { accept: step.as === 'text' ? 'text/html,*/*' : 'application/json' } });
+      // Every fetch step is public (ESPN's JSON, YouTube's results page for search):
+      // credentials 'omit', so no cookie of the user's is sent and a search never lands in his
+      // YouTube history. The home/feed reads are VIEW steps and keep his cookies.
+      const res = await fetchImpl(url, { signal: ctrl ? ctrl.signal : undefined, credentials: 'omit', headers: { accept: step.as === 'text' ? 'text/html,*/*' : 'application/json' } });
       out.status = res.status || 0;
       out.finalUrl = res.url || url;
       if (!res.ok) {
@@ -467,16 +511,24 @@ function create(deps) {
       return out;
     } catch (err) {
       const aborted = (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || ''))));
-      out.error = aborted ? { code: 'timeout', detail: 'timed out after ' + Math.round(budget / 1000) + ' s' } : classifyNetError(err, hostOf(url));
+      if (aborted && step.signal && step.signal.aborted) out.error = { code: 'cancelled', detail: 'cancelled' };
+      else out.error = aborted ? { code: 'timeout', detail: 'timed out after ' + Math.round(budget / 1000) + ' s' } : classifyNetError(err, hostOf(url));
       return out;
     } finally {
       clearTimer(t);
+      unlink();
     }
   }
 
   function sleep(ms) { return new Promise((r) => { const h = setTimer(r, ms); if (h && h.unref) h.unref(); }); }
 
-  async function runViewStep(step) {
+  /**
+   * `handle` is this step's own record: runViewStep puts its window on it, and the watchdog
+   * (or a cancel) destroys THAT window only -- never another step's reader -- and sets
+   * handle.killed so every loop below ends at once.
+   */
+  async function runViewStep(step, handle) {
+    const h0 = handle || { win: null, killed: '' };
     const url = rebase(String(step.url || ''));
     const out = blankStep(step, url);
     const BW = d.BrowserWindow;
@@ -503,8 +555,16 @@ function create(deps) {
           nodeIntegration: false, images: false, spellcheck: false, autoplayPolicy: 'user-gesture-required',
         },
       });
-      currentView = w;
+      h0.win = w;
+      liveReaders.set(w, h0);
       const wc = w.webContents;
+      // Every reader's webContents is known (isReaderContents) from birth to death, so main.js
+      // can deny its permission requests without a dialog the user never asked for.
+      if (wc) {
+        readerContents.add(wc);
+        try { wc.once('destroyed', () => readerContents.delete(wc)); } catch { /* fine */ }
+      }
+      try { w.once('closed', () => { liveReaders.delete(w); readerContents.delete(wc); }); } catch { /* fine */ }
       try { wc.setAudioMuted(true); } catch { /* fine */ }
       try { wc.setFrameRate(1); } catch { /* not offscreen */ }
       wc.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -553,10 +613,12 @@ function create(deps) {
         loadErr = err;
       });
       // The load itself, inside the budget.
-      while (!loaded && !loadErr && !crashed && now() < deadline) {
+      while (!loaded && !loadErr && !crashed && !h0.killed && now() < deadline) {
         await Promise.race([loadP, sleep(POLL_MS)]);
       }
-      if (loadErr && !loaded) {
+      if (h0.killed) {
+        out.error = { code: h0.killed === 'cancelled' ? 'cancelled' : 'timeout', detail: h0.killed === 'cancelled' ? 'cancelled' : 'the reader stopped answering' };
+      } else if (loadErr && !loaded) {
         out.error = classifyNetError(loadErr, hostOf(url));
       } else if (crashed) {
         out.error = { code: 'crashed', detail: 'the reader page crashed (' + crashed + ')' };
@@ -566,7 +628,7 @@ function create(deps) {
         let scrolled = 0;
         let isReady = !step.extract;
         let enough = !patterns.length;
-        while (now() < deadline && !crashed) {
+        while (now() < deadline && !crashed && !h0.killed) {
           if (step.extract) {
             out.extracted = await extractFrom(wc, step.extract, Math.min(5000, Math.max(0, deadline - now())));
             try { isReady = !!ready(out.extracted); } catch { isReady = false; }
@@ -579,12 +641,15 @@ function create(deps) {
           if (isReady && enough) break;
           if (step.scroll && scrolled < step.scroll) {
             scrolled++;
-            try { await within(wc.executeJavaScript('window.scrollBy(0, Math.round(window.innerHeight * 0.9)), 1', true), Math.min(2000, Math.max(0, deadline - now()))); } catch { /* gone */ }
+            // userGesture false: a gesture would give the hidden page sticky activation
+            // (autoplaying trailers, fullscreen/clipboard, beforeunload prompts).
+            try { await within(wc.executeJavaScript('window.scrollBy(0, Math.round(window.innerHeight * 0.9)), 1', false), Math.min(2000, Math.max(0, deadline - now()))); } catch { /* gone */ }
           }
           await sleep(POLL_MS);
         }
-        if (bodyJobs.length) await Promise.race([Promise.all(bodyJobs), sleep(1500)]);
-        if (crashed) out.error = { code: 'crashed', detail: 'the reader page crashed (' + crashed + ')' };
+        if (bodyJobs.length && !h0.killed) await Promise.race([Promise.all(bodyJobs), sleep(1500)]);
+        if (h0.killed) out.error = { code: h0.killed === 'cancelled' ? 'cancelled' : 'timeout', detail: h0.killed === 'cancelled' ? 'cancelled' : 'the reader stopped answering' };
+        else if (crashed) out.error = { code: 'crashed', detail: 'the reader page crashed (' + crashed + ')' };
         else if (captureBroken && !out.captures.length) {
           // Not a layout change and not the service's fault: say what actually broke.
           out.error = { code: 'load-failed', detail: "the reader could not watch the page's data (" + captureBroken + ')' };
@@ -598,10 +663,31 @@ function create(deps) {
       out.error = out.error || { code: 'load-failed', detail: 'the reader could not start (' + String((err && err.message) || err).slice(0, 100) + ')' };
     } finally {
       try { if (dbg && dbg.isAttached()) dbg.detach(); } catch { /* gone */ }
-      try { if (w && !w.isDestroyed()) w.destroy(); } catch { /* gone */ }
-      if (currentView === w) currentView = null;
+      destroyReader(w);
     }
     return out;
+  }
+
+  /**
+   * Destroy one reader window (and forget it and its webContents). Never throws. `why`
+   * ('watchdog' | 'cancelled') ends the step that owns it at once; none = its own step ending.
+   */
+  function destroyReader(w, why) {
+    if (!w) return;
+    const h = liveReaders.get(w);
+    if (why && h && !h.killed) h.killed = why;
+    let wc = null;
+    try { wc = w.webContents; } catch { wc = null; }
+    try { if (!w.isDestroyed()) w.destroy(); } catch { /* gone */ }
+    liveReaders.delete(w);
+    if (wc) readerContents.delete(wc);
+  }
+
+  /** True only for the webContents of a hidden reader that is alive now (main.js: deny its permissions). */
+  function isReaderContents(wc) {
+    if (!wc || !readerContents.has(wc)) return false;
+    try { if (typeof wc.isDestroyed === 'function' && wc.isDestroyed()) { readerContents.delete(wc); return false; } } catch { return false; }
+    return true;
   }
 
   /** p, or `fallback` once ms have passed: no await in a read may outlive its budget. */
@@ -613,7 +699,8 @@ function create(deps) {
 
   async function extractFrom(wc, expr, ms) {
     try {
-      const v = await within(wc.executeJavaScript('(function(){try{return (' + expr + ');}catch(e){return null;}})()', true), ms || 5000);
+      // userGesture false, as for the scroll: reading globals needs no activation.
+      const v = await within(wc.executeJavaScript('(function(){try{return (' + expr + ');}catch(e){return null;}})()', false), ms || 5000);
       if (v === undefined) return null;
       // A page cannot hand back something absurd: past the cap it is dropped, not truncated.
       try { if (JSON.stringify(v).length > MAX_EXTRACT_CHARS) return null; } catch { return null; }
@@ -621,20 +708,35 @@ function create(deps) {
     } catch { return null; }
   }
 
+  /**
+   * One step, under its watchdog. `step.signal` (an AbortSignal, optional) cancels it: the
+   * fetch is aborted / this step's own window destroyed, and the answer is { code:'cancelled' }.
+   */
   async function runStep(step) {
     const budget = Number.isFinite(step.budgetMs) ? step.budgetMs : STEP_BUDGET_MS;
+    const handle = { win: null, killed: '' };
+    const blank = () => blankStep(step, rebase(String(step.url || '')));
+    const cancelled = Object.assign(blank(), { error: { code: 'cancelled', detail: 'cancelled' } });
+    if (step.signal && step.signal.aborted) return cancelled;
     const run = typeof d.runStep === 'function' ? d.runStep(step, rebase)
-      : (step.type === 'fetch' ? runFetchStep(step) : runViewStep(step));
+      : (step.type === 'fetch' ? runFetchStep(step) : runViewStep(step, handle));
     // The watchdog: a step gets its budget plus WATCHDOG_GRACE_MS, then it is over, whatever
-    // inside it is still waiting. Its window is destroyed so nothing leaks, and the queue moves.
-    const late = Object.assign(blankStep(step, rebase(String(step.url || ''))), {
+    // inside it is still waiting. ITS OWN window is destroyed so nothing leaks -- never another
+    // step's (a hung search must not kill the Disney+ read beside it) -- and the queue moves.
+    const late = Object.assign(blank(), {
       error: { code: 'timeout', detail: 'timed out after ' + Math.round(budget / 1000) + ' s (the reader stopped answering)' },
     });
-    const r = await within(run, budget + WATCHDOG_GRACE_MS, late);
-    if (r === late) {
-      log('Watch reader step ' + step.name + ' hit the watchdog after ' + Math.round((budget + WATCHDOG_GRACE_MS) / 1000) + ' s');
-      try { if (currentView && !currentView.isDestroyed()) currentView.destroy(); } catch { /* gone */ }
-      currentView = null;
+    let onAbort = null;
+    const abortP = step.signal && typeof step.signal.addEventListener === 'function'
+      ? new Promise((r) => { onAbort = () => r(cancelled); step.signal.addEventListener('abort', onAbort, { once: true }); })
+      : null;
+    const r = await within(abortP ? Promise.race([run, abortP]) : run, budget + WATCHDOG_GRACE_MS, late);
+    if (onAbort) { try { step.signal.removeEventListener('abort', onAbort); } catch { /* gone */ } }
+    if (r === late || r === cancelled) {
+      if (r === late) log('Watch reader step ' + step.name + ' hit the watchdog after ' + Math.round((budget + WATCHDOG_GRACE_MS) / 1000) + ' s');
+      handle.killed = r === late ? 'watchdog' : 'cancelled';
+      destroyReader(handle.win);
+      if (run && typeof run.catch === 'function') run.catch(() => { /* ended from outside */ });
     }
     return r;
   }
@@ -655,8 +757,9 @@ function create(deps) {
     try { steps = (a.steps(c) || []).filter((x) => x && typeof x.name === 'string'); } catch (err) { steps = []; }
     const read = { now: c.now, steps: {} };
     let captured = 0;
+    const gen = epoch;
     for (const step of steps) {
-      if (stopped) return;
+      if (stopped || gen !== epoch) return;   // stopped, or forgotten mid-read: no further page loads
       // A required step that failed makes the rest pointless only when the service is gone
       // entirely (offline): the adapter still gets what was read, to say so in its words.
       let r;
@@ -696,58 +799,95 @@ function create(deps) {
 
   /* --- the queue -------------------------------------------------------------------- */
 
+  /** A due read that may not start: say why, and for a game / low memory back the timer off. */
+  function setPaused(id, why) {
+    paused[id] = why;
+    if (why.indexOf('paused') === 0) pausedUntil[id] = now() + PAUSE_BACKOFF_MS;
+    else delete pausedUntil[id];
+  }
+
   function enqueue(id, forced) {
     if (stopped || !loadPrefs().enabled[id]) return false;
-    if (reading === id || queue.indexOf(id) !== -1) return false;
+    // `starting`: taken off the queue and waiting on checkGame() -- in neither the queue nor
+    // `reading`, but already on its way. Without this the same service could read twice.
+    if (reading === id || starting === id || queue.indexOf(id) !== -1) return false;
     const why = blocker(id, forced);
-    if (why) { paused[id] = why; pushAll(); return false; }
+    if (why) { setPaused(id, why); pushAll(); return false; }
     delete paused[id];
+    delete pausedUntil[id];
     queue.push(id);
+    pushAll();    // the page shows it queued at once (it may wait out the boot grace)
     pump();
     return true;
   }
 
+  /** In the boot grace: arm the one timer that starts the first reader at its end. -> waiting? */
+  function bootWait() {
+    const left = bootUntil - now();
+    if (left <= 0) return false;
+    if (!bootTimer) {
+      bootTimer = setTimer(() => { bootTimer = null; pump(); }, left);
+      if (bootTimer && typeof bootTimer.unref === 'function') bootTimer.unref();
+    }
+    return true;
+  }
+
   async function pump() {
-    if (pumping) return;
+    if (pumping || stopped) return;
+    if (bootWait()) return;      // reads stay queued until create() + bootGraceMs
     pumping = true;
     try {
       while (queue.length && !stopped) {
         const id = queue.shift();
         const gen = epoch;
+        starting = id;
         // Conditions can change while earlier services read (a game starts): look again.
-        await checkGame();
+        try { await checkGame(); } finally { starting = null; }
         if (gen !== epoch) continue;   // forgotten while it waited
+        if (!loadPrefs().enabled[id]) continue;   // turned off while it waited
         const why = blocker(id, true);
-        if (why && why.indexOf('waiting') !== 0) { paused[id] = why; pushAll(); continue; }
+        if (why && why.indexOf('waiting') !== 0) { setPaused(id, why); pushAll(); continue; }
         reading = id;
         pushAll();
         try { await readService(id); } catch (err) { log('Watch reader error: ' + ((err && err.message) || err)); }
         reading = null;
         pushAll();
       }
+    } catch (err) {
+      failLoud('run its reads', err);
     } finally {
       pumping = false;
       reading = null;
-      schedule();
+      starting = null;
+      try { schedule(); } catch (err) { failLoud('plan its next read', err); }
     }
   }
 
-  function dueIds() {
+  /** Enabled services past their floor. `timed` (the timer): a game / memory pause waits its backoff. */
+  function dueIds(timed) {
     const p = loadPrefs();
     const c = loadCache();
     const t = now();
-    return Shape.SERVICE_IDS.filter((id) => p.enabled[id] && t - (c.services[id].attemptAt || 0) >= everyMs(id));
+    return Shape.SERVICE_IDS.filter((id) => p.enabled[id] && t - (c.services[id].attemptAt || 0) >= everyMs(id)
+      && !(timed && pausedUntil[id] > t));
   }
 
+  /** Is any Watch page on screen (its document visible)? Reads start only then. */
+  function anyVisible() {
+    for (const [g, v] of guestVisible) if (v && guests.has(g)) return true;
+    return false;
+  }
+
+  /** The one timer: armed only while a Watch page is VISIBLE; a hidden one gets no timed reads. */
   function schedule() {
     if (timer) { clearTimer(timer); timer = null; timerAt = 0; }
-    if (stopped || !guests.size) return;
+    if (stopped || !guests.size || !anyVisible()) return;
     const p = loadPrefs();
     const c = loadCache();
     let soonest = Infinity;
     for (const id of Shape.SERVICE_IDS) {
       if (!p.enabled[id]) continue;
-      soonest = Math.min(soonest, (c.services[id].attemptAt || 0) + everyMs(id));
+      soonest = Math.min(soonest, Math.max((c.services[id].attemptAt || 0) + everyMs(id), pausedUntil[id] || 0));
     }
     if (soonest === Infinity) return;
     let delay = Math.max(TIMER_MIN_MS, Math.min(TIMER_MAX_MS, soonest - now()));
@@ -760,13 +900,26 @@ function create(deps) {
   function tick() {
     timer = null;
     timerAt = 0;
-    if (stopped || !guests.size) return;
-    const due = dueIds();
+    if (stopped || !guests.size || !anyVisible()) return;
+    try {
+      const due = dueIds(true);
+      if (!due.length) { schedule(); return; }
+      checkGame().then(() => {
+        if (anyVisible()) for (const id of due) enqueue(id, false);
+        if (!pumping) schedule();
+      }).catch((err) => failLoud('start its next read', err));
+    } catch (err) { failLoud('start its next read', err); }
+  }
+
+  /** A Watch page is on screen (hello, its tab brought forward, the window back): what is due reads. */
+  function readDue() {
+    if (stopped || !anyVisible()) { schedule(); return; }
+    const due = dueIds(false);
     if (!due.length) { schedule(); return; }
     checkGame().then(() => {
-      for (const id of due) enqueue(id, false);
-      if (!pumping) schedule();
-    });
+      if (anyVisible()) for (const id of due) enqueue(id, false);
+      schedule();
+    }).catch((err) => failLoud('start its reads', err));
   }
 
   /* --- the page ---------------------------------------------------------------------- */
@@ -784,7 +937,7 @@ function create(deps) {
       reason: s.reason,
       warnings: s.warnings || [],
       readAt: s.readAt, lastOkAt: s.lastOkAt, profile: s.profile,
-      reading: reading === id, queued: queue.indexOf(id) !== -1,
+      reading: reading === id, queued: queue.indexOf(id) !== -1 || starting === id,
       paused: p.enabled[id] ? (paused[id] || '') : '',
       next: p.enabled[id] ? (s.attemptAt || 0) + everyMs(id) : 0,
       counts,
@@ -811,6 +964,7 @@ function create(deps) {
       items,
       tmdb: { hasKey: !!p.tmdbKey },
       reading,
+      forgottenAt,
     };
   }
 
@@ -819,11 +973,48 @@ function create(deps) {
     try { return path.basename(new URL(url).pathname).toLowerCase() === PAGE_FILE; } catch { return false; }
   }
 
+  /**
+   * The snapshot, or -- when building it throws -- { v: 1, now, fatal: reason }: the page shows
+   * the reason with a Retry (which says hello again). Never a page left on "Reading…".
+   */
+  function safeSnapshot() {
+    try {
+      const snap = snapshot();
+      lastFatal = '';
+      return snap;
+    } catch (err) {
+      return fatalSnapshot('build its page', err);
+    }
+  }
+
+  function fatalSnapshot(what, err) {
+    const msg = String((err && err.message) || err || 'unknown error').replace(/\s+/g, ' ').slice(0, 160);
+    const reason = 'Watch could not ' + what + ' (' + msg + ')';
+    if (reason !== lastFatal) { lastFatal = reason; log(reason); }   // once per distinct failure, not every push
+    return { v: 1, now: now(), fatal: reason };
+  }
+
+  /** Something that should never fail did: log it and put the reason on every Watch page. */
+  function failLoud(what, err) {
+    let snap;
+    try { snap = fatalSnapshot(what, err); } catch { snap = { v: 1, now: Date.now(), fatal: 'Watch could not ' + what }; }
+    for (const g of Array.from(guests)) pushTo(g, '__applyWatch', snap);
+  }
+
+  /** A guest leaves (closed, navigated away): out of the set, its visibility and its search too. */
+  function dropGuest(contents) {
+    const had = guests.delete(contents);
+    guestVisible.delete(contents);
+    const job = searchLive.get(contents);
+    if (job) { cancelSearch(job); searchLive.delete(contents); }
+    return had;
+  }
+
   function pushTo(contents, fn, payload) {
-    if (!contents || (typeof contents.isDestroyed === 'function' && contents.isDestroyed())) { guests.delete(contents); return; }
+    if (!contents || (typeof contents.isDestroyed === 'function' && contents.isDestroyed())) { dropGuest(contents); return; }
     let url = '';
-    try { url = contents.getURL(); } catch { guests.delete(contents); return; }
-    if (!isWatchPage(url)) { guests.delete(contents); return; }
+    try { url = contents.getURL(); } catch { dropGuest(contents); return; }
+    if (!isWatchPage(url)) { dropGuest(contents); return; }
     let json;
     try { json = JSON.stringify(payload); } catch { return; }
     try {
@@ -840,22 +1031,39 @@ function create(deps) {
     Promise.resolve().then(() => {
       pushQueued = false;
       if (!guests.size) { schedule(); return; }
-      const snap = snapshot();
+      const snap = safeSnapshot();
       for (const g of Array.from(guests)) pushTo(g, '__applyWatch', snap);
       if (!guests.size) schedule();
+    }).catch((err) => {
+      pushQueued = false;
+      failLoud('update its page', err);
     });
   }
 
-  function hello(contents) {
+  /**
+   * hello: the cache snapshot always goes back at once; reads that are due start only when
+   * this page is visible (a tab restored in the background reads nothing until it is looked at).
+   */
+  function hello(contents, visible) {
     guests.add(contents);
+    guestVisible.set(contents, visible !== false);
     // Cache first: the page draws what it had before anything is read.
-    pushTo(contents, '__applyWatch', snapshot());
-    const due = dueIds();
-    if (!due.length) { schedule(); return; }
-    checkGame().then(() => {
-      for (const id of due) enqueue(id, false);
-      schedule();
-    });
+    pushTo(contents, '__applyWatch', safeSnapshot());
+    try {
+      if (visible !== false) readDue();
+      else schedule();   // a hidden page: the snapshot only (and no timer, unless another page is on screen)
+    } catch (err) { failLoud('start its reads', err); }
+  }
+
+  /** The page's visibilitychange. Turning visible reads what is due; hidden stops the timer if no page is left on screen. */
+  function setVisible(contents, visible) {
+    if (!guests.has(contents)) { hello(contents, visible); return; }
+    const was = guestVisible.get(contents) === true;
+    guestVisible.set(contents, !!visible);
+    try {
+      if (visible && !was) readDue();
+      else if (!visible) schedule();
+    } catch (err) { failLoud('start its reads', err); }
   }
 
   function refresh(service) {
@@ -895,12 +1103,22 @@ function create(deps) {
 
   function forget() {
     epoch++;
+    forgottenAt = now();
     cache = cleanCache(null);
     // A read in flight writes into the old cache object, so its rows are dropped; a queued
     // one is cancelled; and nothing reads again until its normal floor (or a Retry), so
     // "Forget" leaves the page empty instead of refilling it a second later.
     queue.length = 0;
     for (const id of Shape.SERVICE_IDS) cache.services[id].attemptAt = now();
+    // Nothing of his stays in memory either: the search answers (keyed by what he typed; a
+    // search in flight still answers the page but is not cached), the pause reasons and Retry
+    // stamps, and the reader page open now (the read it belonged to stops at once).
+    searchCache.clear();
+    searchNext = 0;
+    for (const k of Object.keys(paused)) delete paused[k];
+    for (const k of Object.keys(pausedUntil)) delete pausedUntil[k];
+    for (const k of Object.keys(lastForced)) delete lastForced[k];
+    for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     const file = fileIn(CACHE_FILE);
     let ok = true;
     let freed = 0;
@@ -913,38 +1131,65 @@ function create(deps) {
 
   /* --- search ------------------------------------------------------------------------- */
 
-  async function search(q, seq) {
-    const p = loadPrefs();
-    const links = Merge.searchLinks(q);
-    // TMDB runs beside YouTube, not after it: two independent answers, one push.
-    const tmdbP = searchTmdb(q, p.tmdbKey);
-    const base = { seq, q, links, tmdb: null };
-    const yt = await searchYouTube(q, p);
-    base.tmdb = await tmdbP;
-    return Object.assign(base, { youtube: yt });
+  function cancelSearch(job) {
+    if (!job || job.stale) return;
+    job.stale = true;
+    try { if (job.ctrl) job.ctrl.abort(); } catch { /* gone */ }
   }
 
-  async function searchTmdb(q, key) {
+  /**
+   * One search -> the answer for the page, or null when a newer search from the same page
+   * replaced it while it ran (its fetches are aborted; nothing is cached; the page ignores a
+   * stale seq anyway). `contents` is the asking guest; without one (tests) nothing is replaced.
+   */
+  async function search(q, seq, contents) {
+    const job = { seq, stale: false, gen: epoch, ctrl: typeof AbortController === 'function' ? new AbortController() : null };
+    const owner = contents || null;
+    if (owner) { cancelSearch(searchLive.get(owner)); searchLive.set(owner, job); }
+    try {
+      const p = loadPrefs();
+      const links = Merge.searchLinks(q);
+      // TMDB runs beside YouTube, not after it: two independent answers, one push.
+      const tmdbP = searchTmdb(q, p.tmdbKey, job);
+      const base = { seq, q, links, tmdb: null };
+      const yt = await searchYouTube(q, p, job);
+      base.tmdb = await tmdbP;
+      if (job.stale) return null;
+      return Object.assign(base, { youtube: yt });
+    } finally {
+      if (owner && searchLive.get(owner) === job) searchLive.delete(owner);
+    }
+  }
+
+  /** Cache a search answer -- unless Forget ran since the search began. */
+  function rememberSearch(key, job, answer) {
+    if (job && job.gen !== epoch) return;
+    searchCache.set(key, { at: now(), answer });
+    while (searchCache.size > SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value);
+  }
+
+  async function searchTmdb(q, key, job) {
     if (!key) return { state: 'no-key', reason: 'Add a free TMDB key in Settings to search every service', results: [] };
     if (!Tmdb || typeof Tmdb.search !== 'function') return { state: 'error', reason: 'this build has no TMDB search', results: [] };
     const ck = 'tmdb|' + q.toLowerCase();
     const hit = searchCache.get(ck);
     if (hit && now() - hit.at < SEARCH_TTL_MS) return hit.answer;
+    const signal = job && job.ctrl ? job.ctrl.signal : null;
     let answer;
-    try { answer = await Tmdb.search(q, key, fetchJson, { region: 'US' }); } catch (err) {
+    try { answer = await Tmdb.search(q, key, (u, h) => fetchJson(u, h, signal), { region: 'US' }); } catch (err) {
       answer = { state: 'error', reason: 'TMDB search failed (' + String((err && err.message) || err).slice(0, 100) + ')', results: [] };
     }
+    if (job && job.stale) return { state: 'error', reason: 'cancelled', results: [] };   // never shown: the whole answer is dropped
     if (!answer || typeof answer !== 'object') answer = { state: 'error', reason: 'TMDB search returned nothing', results: [] };
     if (answer.state === 'ok') {
-      searchCache.set(ck, { at: now(), answer });
-      while (searchCache.size > SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value);
+      rememberSearch(ck, job, answer);
     } else if (answer.state !== 'empty') {
       log('Watch search on TMDB failed: ' + (answer.state || 'error'));   // the state only: never the key, never the query
     }
     return answer;
   }
 
-  async function searchYouTube(q, p) {
+  async function searchYouTube(q, p, job) {
     if (!p.enabled.youtube) return { ok: false, state: 'off', reason: 'YouTube is turned off in Settings > Watch', items: [] };
     const yt = adapters.youtube;
     if (!yt || typeof yt.searchUrl !== 'function' || typeof yt.parseSearch !== 'function') {
@@ -953,10 +1198,18 @@ function create(deps) {
     const key = 'yt|' + q.toLowerCase();
     const hit = searchCache.get(key);
     if (hit && now() - hit.at < SEARCH_TTL_MS) return hit.answer;
-    const wait = searchNext - now();
-    searchNext = Math.max(now(), searchNext) + SEARCH_GAP_MS;
-    if (wait > 0) await sleep(wait);
-    const r = await runStep({ name: 'search', type: 'fetch', as: 'text', url: yt.searchUrl(q), budgetMs: 10000 });
+    const cancelled = { ok: false, state: 'cancelled', reason: 'cancelled', items: [] };   // never shown
+    // Searches go out SEARCH_GAP_MS apart. One replaced while it waits never fetches at all,
+    // and does not hold a slot: the newest search goes as soon as the gap allows.
+    for (;;) {
+      if (job && job.stale) return cancelled;
+      const wait = searchNext - now();
+      if (wait <= 0) break;
+      await sleep(wait);
+    }
+    searchNext = now() + SEARCH_GAP_MS;
+    const r = await runStep({ name: 'search', type: 'fetch', as: 'text', url: yt.searchUrl(q), budgetMs: 10000, signal: job && job.ctrl ? job.ctrl.signal : undefined });
+    if ((job && job.stale) || (r.error && r.error.code === 'cancelled')) return cancelled;
     let answer;
     if (r.error) answer = { ok: false, state: 'error', reason: r.error.detail, items: [] };
     else {
@@ -966,8 +1219,7 @@ function create(deps) {
         : { ok: false, state: 'error', reason: "YouTube's results page had nothing Watch could read (YouTube changed its layout?)", items: [] };
     }
     if (answer.ok) {
-      searchCache.set(key, { at: now(), answer });
-      while (searchCache.size > SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value);
+      rememberSearch(key, job, answer);
     } else {
       log('Watch search on YouTube failed: ' + answer.reason);
     }
@@ -991,14 +1243,19 @@ function create(deps) {
     const req = parseGuestLine(line);
     if (!req) return false;
     switch (req.verb) {
-      case 'hello': hello(contents); break;
-      case 'refresh': guests.add(contents); refresh(req.service); break;
+      case 'hello': hello(contents, req.visible); break;
+      case 'visible': setVisible(contents, req.visible); break;
+      case 'refresh':
+        guests.add(contents);
+        if (!guestVisible.has(contents)) guestVisible.set(contents, true);   // a click: it is on screen
+        refresh(req.service);
+        break;
       case 'open':
         openTitle(req.url).then((r) => pushTo(contents, '__applyWatchResult', Object.assign({ action: 'open', url: req.url }, r)));
         break;
       case 'signin': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'signin', service: req.service }, signIn(req.service))); break;
       case 'search':
-        search(req.q, req.seq).then((a) => pushTo(contents, '__applyWatchSearch', a),
+        search(req.q, req.seq, contents).then((a) => { if (a) pushTo(contents, '__applyWatchSearch', a); },
           (err) => pushTo(contents, '__applyWatchSearch', { seq: req.seq, q: req.q, links: Merge.searchLinks(req.q), youtube: { ok: false, state: 'error', reason: String((err && err.message) || err), items: [] }, tmdb: null }));
         break;
       case 'forget': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'forget' }, forget())); break;
@@ -1015,9 +1272,10 @@ function create(deps) {
         log('Watch guest line failed: ' + ((err && err.message) || 'error'));
       }
     });
-    contents.on('destroyed', () => { if (guests.delete(contents)) schedule(); });
+    const left = () => { try { schedule(); } catch (err) { log('Watch could not re-plan its reads: ' + ((err && err.message) || 'error')); } };
+    contents.on('destroyed', () => { if (dropGuest(contents)) left(); });
     contents.on('did-start-navigation', (_e, to, inPage, isMain) => {
-      if (isMain && !inPage && !isWatchPage(String(to)) && guests.delete(contents)) schedule();
+      if (isMain && !inPage && !isWatchPage(String(to)) && dropGuest(contents)) left();
     });
   }
 
@@ -1041,7 +1299,20 @@ function create(deps) {
   function setEnabled(id, on) {
     if (Shape.SERVICE_IDS.indexOf(id) === -1) return Object.assign(describe(), { error: 'unknown service' });
     loadPrefs().enabled[id] = !!on;
-    if (!on) { const i = queue.indexOf(id); if (i !== -1) queue.splice(i, 1); delete paused[id]; }
+    if (!on) {
+      const i = queue.indexOf(id);
+      if (i !== -1) queue.splice(i, 1);
+      delete paused[id];
+      delete pausedUntil[id];
+      delete lastForced[id];
+      // Off means gone, not hidden: its rows, profile name and games leave the cache AND
+      // watch-cache.json now (a read in flight writes into the dropped record). Turned back
+      // on, it is "never read" and reads at once.
+      const c = loadCache();
+      c.services[id] = emptyServiceState();
+      saveCacheNow();
+      if (id === 'youtube') for (const k of Array.from(searchCache.keys())) if (k.indexOf('yt|') === 0) searchCache.delete(k);
+    }
     savePrefs();
     if (on && guests.size) enqueue(id, true);
     pushAll();
@@ -1096,19 +1367,21 @@ function create(deps) {
 
   /** The Quartz window came back on screen: whatever fell due while it was away reads now. */
   function windowShown() {
-    if (stopped || !guests.size) return;
-    for (const id of dueIds()) enqueue(id, false);
-    schedule();
+    if (stopped || !guests.size || !anyVisible()) return;
+    try { readDue(); } catch (err) { failLoud('start its reads', err); }
   }
 
   function stop() {
     stopped = true;
     if (timer) { clearTimer(timer); timer = null; }
+    if (bootTimer) { clearTimer(bootTimer); bootTimer = null; }
     queue.length = 0;
-    try { if (currentView && !currentView.isDestroyed()) currentView.destroy(); } catch { /* gone */ }
-    currentView = null;
+    for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
+    for (const job of searchLive.values()) cancelSearch(job);
+    searchLive.clear();
     if (saveTimer) saveCacheNow();
     guests.clear();
+    guestVisible.clear();
   }
 
   if (electronApp && typeof electronApp.on === 'function') {
@@ -1121,8 +1394,14 @@ function create(deps) {
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
     openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, windowShown, stop, schedule,
+    isReaderContents,
     flush: saveCacheNow,
-    state: () => ({ guests: guests.size, queue: queue.slice(), reading, timerAt, paused: Object.assign({}, paused), viewAlive: !!currentView }),
+    state: () => ({
+      guests: guests.size, visible: Array.from(guestVisible.entries()).filter(([g, v]) => v && guests.has(g)).length,
+      queue: queue.slice(), reading, starting, timerAt, bootTimer: !!bootTimer, paused: Object.assign({}, paused),
+      pausedUntil: Object.assign({}, pausedUntil), viewAlive: liveReaders.size > 0, readers: liveReaders.size,
+      searchCache: searchCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
+    }),
   };
 }
 

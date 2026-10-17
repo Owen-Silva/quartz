@@ -42,12 +42,20 @@
   --card-fill: color-mix(in srgb, var(--surface-solid) 90%, transparent);
   --noart-a: #2c2d30;
   --noart-b: #1a1b1d;
+  /* a row head's sub-line ink: >= 4.5:1 on the page AND on the lens over bright artwork, in both themes
+     (dark --text-3 alone is 3.6-4.0:1 there; light --danger 4.4:1 and --warn 3.8:1 on --bg) */
+  --row-sub: color-mix(in srgb, var(--text-3) 50%, var(--text-2));
+  --row-err: var(--danger);
+  --row-warn: var(--warn);
 }
 html[data-theme="light"] {
   --wash-a: .3;
   --card-fill: color-mix(in srgb, var(--surface-solid) 94%, transparent);
   --noart-a: #dedfe3;
   --noart-b: #c9cbd0;
+  --row-sub: color-mix(in srgb, var(--text-3) 85%, var(--text-2));
+  --row-err: color-mix(in srgb, var(--danger) 85%, var(--text));
+  --row-warn: color-mix(in srgb, var(--warn) 80%, var(--text));
 }
 
 /* ===== page ===== */
@@ -257,30 +265,48 @@ html[data-theme="light"] .wash::after {
 .lens-ctl .lpos { margin-right: 6px; }
 .stack { position: fixed; z-index: 5; left: 0; right: 0; top: var(--lens-top); will-change: transform;
   transition: transform var(--m-dur-m) var(--m-spring); }
-.stack.instant, .stack.instant .lrow { transition: none; }
-.lrow { height: var(--row-h); margin-bottom: var(--row-gap); transform-origin: 50% 0;
+.stack.instant, .stack.instant .lrow, .stack.instant .lrow > .row { transition: none; }
+/* A row's scale and its whole-row fade (leaving above, gone far below) run on .lrow; an unfocused row's
+   dimming runs on its imagery (.row) only, so its head keeps full ink (>= 4.5:1). Both move on every step,
+   so both are permanent layers: promoted per animation, each would repaint its cards (and their shadows)
+   on the step's first frame. Never on the cards themselves (there are ~50). */
+.lrow { height: var(--row-h); margin-bottom: var(--row-gap); transform-origin: 50% 0; will-change: transform, opacity;
   transition: opacity var(--m-dur-m) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring); }
-.lrow[data-d="1"] { opacity: .5; transform: scale(.965); }
-.lrow[data-d="2"] { opacity: .22; transform: scale(.93); }
+.lrow[data-d="1"] { transform: scale(.965); }
+.lrow[data-d="2"] { transform: scale(.93); }
 .lrow[data-d="far"] { opacity: 0; transform: scale(.9); pointer-events: none; }
 .lrow[data-d="-1"], .lrow[data-d="-far"] { opacity: 0; transform: translateY(-24px) scale(.97); pointer-events: none;
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring); }
+.lrow > .row { will-change: opacity; transition: opacity var(--m-dur-m) var(--m-fade-in); }
+.lrow[data-d="1"] > .row { opacity: .5; }
+/* "far" keeps d=2's dim, so far <-> 2 is only the whole-row fade (no brightening on the way out) */
+.lrow[data-d="2"] > .row, .lrow[data-d="far"] > .row { opacity: .22; }
 .lrow:not([data-d="0"]) { cursor: pointer; }
 .lrow:not([data-d="0"]) .card, .lrow:not([data-d="0"]) .gc, .lrow:not([data-d="0"]) .lr-h button { pointer-events: none; }
 .lr-h { display: flex; align-items: center; gap: 10px; height: var(--row-head); padding: 0 var(--gutter); margin-right: 96px; }
 .lr-h h2 { margin: 0; font: 600 var(--fs-l)/1.2 var(--font-display); white-space: nowrap; }
-.lr-h .sub { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.lr-h .sub.err { color: var(--danger); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
-.lr-h .sub.warn { color: var(--warn); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
+.lr-h .sub { color: var(--row-sub); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lr-h .sub.err { color: var(--row-err); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
+.lr-h .sub.warn { color: var(--row-warn); font-weight: 600; display: inline-flex; gap: 6px; align-items: center; }
 .lr-h .chip { height: 18px; }
 
-/* a row: a clipped viewport whose track moves on the shared spring */
+/* a row: a clipped viewport whose track moves on the shared spring.
+   The viewport is clipped to the lens panel's rounded rect, 1px inside its rim (so the rim stays drawn
+   over a card that crosses it): the focused row matches the panel exactly, and the rows below, scaled
+   from 50% 0, stay inside the same column, so no card reaches the window's edges. The insets are from
+   .rv's own box: the panel's top is the 30px head + 14px above it, and its bottom 8px below the row (the
+   height pins .rv's bottom to the row's; the cards end ~3px above it, so nothing moves). Above and below,
+   a card's 5px lift and its shade have the panel's whole margin. Only the paint is clipped: .rv keeps the
+   full width watch.js pages by (rv.clientWidth, the track's gutter padding, offsetLeft), and .rv is not a
+   layer, so this is a clip drawn inside the row's layer, nothing for the compositor to mask per frame. */
 .row { position: relative; }
-.rv { position: relative; overflow-x: clip; overflow-y: visible; padding: 10px 0 0; }
+.rv { position: relative; height: calc(var(--row-h) - var(--row-head)); overflow-x: clip; overflow-y: visible; padding: 10px 0 0;
+  clip-path: inset(calc(-1 * (var(--row-head) + 13px)) calc(var(--gutter) - 29px) -7px round 21px); }
 .rt { display: flex; gap: 16px; width: max-content; padding: 0 var(--gutter);
   transition: transform var(--m-dur-m) var(--m-spring); }
-.row-nav { position: absolute; top: 10px; height: var(--art-h); z-index: 6; display: grid; place-items: center; width: max(var(--gutter), 48px); pointer-events: none; }
-.row-nav.prev { left: 0; } .row-nav.next { right: 0; }
+/* prev/next sit inside the panel, each centred on the cards' outer edge (the gutter line), 12px in from the rim */
+.row-nav { position: absolute; top: 10px; height: var(--art-h); z-index: 6; display: grid; place-items: center; width: 60px; pointer-events: none; }
+.row-nav.prev { left: calc(var(--gutter) - 30px); } .row-nav.next { right: calc(var(--gutter) - 30px); }
 .row-nav button { pointer-events: auto; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; padding: 0;
   border: 1px solid var(--hairline); background: var(--overlay); color: var(--text); box-shadow: var(--shadow-2); cursor: pointer; outline: none;
   opacity: 0; transform: translateY(4px);
@@ -389,7 +415,8 @@ body.searching .stage, body.searching .lens, body.searching .lens-ctl, body.sear
 .wtw { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; font-size: var(--fs-s); }
 .wtw th, .wtw td { padding: 10px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--hairline); }
 .wtw tr:last-child > * { border-bottom: 0; }
-.wtw thead th { padding-top: 12px; padding-bottom: 10px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; vertical-align: bottom; }
+/* top-aligned: every name sits on one line, and a column's note (YouTube's "12 videos") hangs below its name */
+.wtw thead th { padding-top: 12px; padding-bottom: 10px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; vertical-align: top; }
 .wtw thead th small { display: flex; gap: 5px; align-items: center; margin-top: 3px; color: var(--text-3); font-weight: 500; font-size: var(--fs-2xs); }
 .wtw thead th small.err { color: var(--danger); font-weight: 600; }
 .wtw thead th small.warn { color: var(--warn); font-weight: 600; }
@@ -471,6 +498,23 @@ body.searching .stage, body.searching .lens, body.searching .lens-ctl, body.sear
 .toast .t-txt { flex: 1; min-width: 0; overflow-wrap: anywhere; padding-right: 4px; }
 .toast:not(:has(button)) { padding-right: 14px; }
 
+/* ===== the failure bar (watch.js showFailure, once rows are up): an update from Quartz couldn't be read
+   or drawn. A float centred under the top bar, over the stage and the lens; one line, the title whole,
+   the reason cut with an ellipsis. Opaque fill, so its ink holds on any artwork behind it. ===== */
+.failbar { position: fixed; z-index: 25; top: calc(var(--head-h) + 8px); left: 0; right: 0; margin: 0 auto;
+  width: max-content; max-width: min(720px, calc(100vw - 2 * var(--gutter)));
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 7px 7px 7px 14px; border-radius: var(--radius-l);
+  background: var(--surface-solid); color: var(--text); font-size: var(--fs-s); white-space: nowrap;
+  box-shadow: var(--elev-float), inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  animation: wf-in-move var(--m-dur-s) var(--m-spring) both,
+             wf-in-fade calc(var(--m-dur-s) * var(--m-fade-k)) var(--m-fade-in) both; }
+.failbar .grow { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.failbar .grow b { flex: none; font-weight: 600; }
+.failbar .why { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.failbar .btn { flex: none; }
+@keyframes wf-in-move { from { translate: 0 -6px; } }
+@keyframes wf-in-fade { from { opacity: 0; } }
+
 /* ===== states of the whole page ===== */
 body.is-empty .lens, body.is-empty .lens-ctl { display: none; }
 body.one-row .lens-ctl .icon-btn { visibility: hidden; }
@@ -495,8 +539,9 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; }
   .stack, .rt { transition: none !important; }
-  .lrow, .lrow[data-d], .stage .txt, .stage .pic, .card, .gc, .hint, .gc .ft, .row-nav button, .results, .pop, .toast, .wash canvas, .wash canvas.on {
+  .lrow, .lrow[data-d], .lrow > .row, .stage .txt, .stage .pic, .card, .gc, .hint, .gc .ft, .row-nav button, .results, .pop, .toast, .wash canvas, .wash canvas.on {
     transition: opacity var(--m-dur-rm) linear !important; }
+  .failbar { animation: wf-in-fade var(--m-dur-rm) linear both !important; }
   .lrow[data-d], .stage.pre .txt, .stage.pre .pic, .stage.out .txt, .stage.out .pic, .card:hover, .card:focus-visible, .lrow[data-d="0"] .card.cur,
   .gc:hover, .gc:focus-visible, .lrow[data-d="0"] .gc.cur, .results.pre, .pop.pre, .toast.pre, .toast.out, .gc .ft, .row-nav button { transform: none !important; }
   .hint, .card:hover .hint, .card:focus-visible .hint { transform: translate(-50%, -50%) !important; }
