@@ -823,7 +823,30 @@ if (require.main === module) {
     await sleep(500);
     check(emptied, 'Forget: the Watch page empties', await g.ev('document.querySelectorAll("#stack .lrow .rt > .card").length'));
     check(!fs.existsSync(CACHE), 'Forget: <profile>/watch-cache.json is deleted');
-    check(errors2.length === 0, 'no console errors from watch.html on the second boot', errors2.slice(0, 4).join(' || '));
+    // Electron's own sandbox bundle can fail on a second boot ("preloadScripts of
+    // binding.startupData is null"). It counts against Watch only if NO other bundled page of the
+    // same boot shows it: each other file:// page is asked for its console (Runtime.enable replays
+    // what was logged before it attached).
+    const SANDBOX_RE = /sandboxed_renderer\.bundle\.js script failed to run|binding\.startupData/;
+    const others = [];
+    for (const t of (await q.targets().catch(() => []))) {
+      if (t.type !== 'page' || !/^file:/.test(String(t.url)) || /\/watch\.html(\?|#|$)/.test(String(t.url)) || !t.webSocketDebuggerUrl) continue;
+      const seen = [];
+      try {
+        const c = await new Cdp(t.webSocketDebuggerUrl).open();
+        c.ws.on('message', (raw) => { let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
+          if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') seen.push((m.params.args || []).map((a) => a.value !== undefined ? String(a.value) : (a.description || a.type)).join(' ').slice(0, 160)); });
+        await c.send('Runtime.enable');
+        await sleep(400);
+        c.close();
+      } catch (e) { seen.push('(could not attach: ' + e.message.slice(0, 60) + ')'); }
+      others.push({ page: String(t.url).split('/').pop().split('?')[0], sandbox: seen.some((s) => SANDBOX_RE.test(s)), errors: seen.length });
+    }
+    const elsewhere = others.filter((o) => o.sandbox).map((o) => o.page);
+    say('boot 2, other bundled pages: ' + JSON.stringify(others));
+    const own2 = errors2.filter((e) => !(SANDBOX_RE.test(e) && elsewhere.length));
+    if (own2.length !== errors2.length) say('boot 2: Electron\'s sandbox-bundle error also shows on ' + elsewhere.join(', ') + ', so it is Electron on a restored session, not Watch: ' + (errors2.length - own2.length) + ' line(s) set aside');
+    check(own2.length === 0, 'no console errors from watch.html on the second boot' + (own2.length !== errors2.length ? ' (Electron\'s sandbox-bundle error, seen on other pages too, set aside)' : ''), own2.slice(0, 4).join(' || '));
     await chrome2.ev('Settings.close(), 1').catch(() => 0);
     for (const id of IDS) await mock.setMode(id, 'ok');
     g.close();
