@@ -5774,7 +5774,8 @@
     s.appendChild(el('p', 'set-hint',
       'Watch (Ctrl+Alt+W, or “Watch” in the command palette) shows Continue watching, ' +
       'picks and live sports from the services you are signed in to in Quartz. Reading happens ' +
-      'in a hidden page, at most every 15–60 min while Watch is open; nothing leaves this PC.'));
+      'in a hidden page: when it comes on screen (anything over 10 min old), every 15 min while it ' +
+      'stays there, and hourly in the background if the switch below is on; nothing leaves this PC.'));
     var svc = el('div', 'set-field');
     svc.setAttribute('data-field', 'watchservices');
     s.appendChild(svc);
@@ -5784,6 +5785,9 @@
     var key = el('div', 'set-field set-field-gap');
     key.setAttribute('data-field', 'watchtmdb');
     s.appendChild(key);
+    var bg = el('div', 'set-field set-field-gap');
+    bg.setAttribute('data-field', 'watchbg');
+    s.appendChild(bg);
     var fg = el('div', 'set-field set-field-gap');
     fg.setAttribute('data-field', 'watchforget');
     s.appendChild(fg);
@@ -5794,6 +5798,7 @@
     renderWatchServices();
     renderWatchLeagues();
     renderWatchKey();
+    renderWatchBackground();
     renderWatchForget();
   }
 
@@ -6137,6 +6142,33 @@
     field.appendChild(hint);
     field.appendChild(el('p', 'set-hint', 'This product uses the TMDB API but is not endorsed or certified by TMDB.'));
     field.appendChild(el('p', 'set-hint', 'Where-to-watch data is provided by JustWatch.'));
+  }
+
+  /* Keep Watch up to date in the background (watch-main.js: the background refresh). */
+  function renderWatchBackground() {
+    var field = watchField('watchbg');
+    if (!field) return;
+    if (!watchApi() || !wtState) return;
+    var b = wtState.background || { on: true, waiting: '', lastAt: 0 };
+    var row = switchRow('Keep Watch up to date in the background', !!b.on, function (on) {
+      if (wtBusy) return;
+      wtFocus = '.set-watch-bg';
+      watchCall('setBackground', [on], 'background', 'The background setting could not be saved');
+    });
+    row.classList.add('set-watch-bg');
+    if (wtBusy === 'background') row.disabled = true;
+    field.appendChild(row);
+    field.appendChild(el('p', 'set-hint',
+      'Costs one hidden page per service at most once an hour, one at a time (about 0.3 GB and a few seconds of CPU each, then closed); ' +
+      'skipped while a game runs, Quartz is minimised, battery saver is on or under 2.5 GB of memory is free.'));
+    var st = '';
+    if (b.on && b.waiting) st = 'Background updates are ' + b.waiting + '.';
+    else if (b.on && b.lastAt) st = 'Last background update ' + watchAgo(b.lastAt) + '.';
+    else if (b.on) st = 'No background update yet this session.';
+    else st = 'Off: it updates only while it is on screen.';
+    field.appendChild(el('p', 'set-hint set-watch-bg-state', st));
+    var res = watchResultRow('background');
+    if (res) field.appendChild(res);
   }
 
   function renderWatchForget() {

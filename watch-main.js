@@ -22,15 +22,29 @@
  * service pages make anyway.
  *
  * WHEN. Cache first: the page draws the cache the moment it says hello, then the services
- * that are due are read one by one and the page is patched after each. Due = older than
- * the service's floor (YouTube 15 min, Disney+/Prime 60, ESPN 15 or 2 while a game is
- * live). Reads start ONLY while a Watch page is open AND visible (the page reports its
- * visibilityState: a tab restored in the background reads nothing until it is looked at),
- * never in the first 10 s after create() (the boot grace: they wait, shown as queued), and
- * never while the Quartz window is hidden or minimised (unless the cache is very stale),
- * while a game is running, or with under 1.5 GB of memory free (those two re-checked every
- * 5 min, not every 30 s) -- and each of those pauses is SHOWN on the page, with its reason,
- * never silent. One timer, armed only while a Watch page is visible. A Retry always reads.
+ * that are due are read one by one and the page is patched after each.
+ *   ON SCREEN (a Watch page open AND visible -- the page reports its visibilityState plus
+ *   the chrome's "this tab is in front"):
+ *     - the moment it comes on screen (hello, its tab brought forward, the window shown or
+ *       focused again), every service last read over FRESH_ON_OPEN_MS (10 min) ago reads,
+ *       one at a time, oldest first -- and a service whose title the user opened from Watch reads
+ *       FIRST when he comes back (its Continue watching moved), whatever its age;
+ *     - then the one timer keeps each service to its floor: every 15 min (ESPN every 2 while
+ *       one of his games is live).
+ *   OFF SCREEN (no Watch page visible, or none open): the light background refresh, when
+ *   Settings > Watch "Keep Watch up to date in the background" is on (the default): at most
+ *   one read per BG_EVERY_MS (60 min) per service, one at a time and BG_GAP_MS apart, only for
+ *   a service that has read fine before (a signed-out one would only say so again), never in
+ *   the first BG_BOOT_DELAY_MS after create(), and only while Quartz is on screen (not
+ *   minimised), no game runs, BG_MIN_FREE_GB (2.5 GB) of memory is free and Windows' battery
+ *   saver is off. A blocked background read waits BG_PAUSE_MS and looks again; its reason
+ *   is in Settings > Watch, never silent.
+ * Every read: never in the first 10 s after create() (the boot grace: they wait, shown as
+ * queued), never while a game is running or with under 1.5 GB of memory free (on screen,
+ * those pauses are SHOWN on the page with their reason), never while the Quartz window is
+ * hidden or minimised unless the cache is very stale, and never longer than its time limit
+ * (readLimitMs: every step's budget + watchdog grace, plus 10 s) -- past it the read is
+ * stopped and the service says so, with Retry. A Retry or Read now always reads.
  *
  * SEARCH is a cookie-less fetch (credentials 'omit') of YouTube's public results page, so
  * it never lands in the user's YouTube history; a newer search from the same page aborts the
@@ -97,6 +111,18 @@ const SAVE_DEBOUNCE_MS = 1500;
 const GAME_CHECK_TTL_MS = 60 * 1000;
 const PAUSE_BACKOFF_MS = 5 * 60 * 1000;  // a game / low-memory pause: the timer looks again in 5 min, not every 30 s
 const BOOT_GRACE_MS = 10 * 1000;         // no reader starts in the first 10 s after create() (reads wait, queued)
+// Fresh on open: a page coming on screen re-reads what is older than this. 10 min, not the
+// 15-min floor: rows are never more than ~10 min old when he looks, while flipping between
+// tabs (every flip is a "came on screen") does not launch a hidden page each time.
+const FRESH_ON_OPEN_MS = 10 * 60 * 1000;
+const WATCHED_AWAY_MS = 20 * 1000;       // a title opened from Watch: its service re-reads on return if he was away this long
+const READ_LIMIT_SLACK_MS = 10 * 1000;   // a read's time limit: its steps' budgets + watchdog grace, plus this
+// The background refresh (no Watch page on screen): see WHEN above.
+const BG_EVERY_MS = 60 * 60 * 1000;
+const BG_GAP_MS = 2 * 60 * 1000;         // two background reads never closer than this (no burst)
+const BG_BOOT_DELAY_MS = 2 * 60 * 1000;  // nothing in the background while Quartz itself is starting
+const BG_MIN_FREE_GB = 2.5;
+const BG_PAUSE_MS = 10 * 60 * 1000;      // a blocked background read looks again in 10 min
 const SEARCH_GAP_MS = 1200;
 const SEARCH_TTL_MS = 10 * 60 * 1000;
 const SEARCH_CACHE_MAX = 20;
@@ -119,7 +145,9 @@ function cleanPrefs(raw) {
   if (!leagues) leagues = Shape.DEFAULT_LEAGUES.slice();
   leagues = leagues.filter((l, i) => leagues.indexOf(l) === i);
   const tmdbKey = cleanKey(r.tmdbKey);
-  return { enabled, leagues, tmdbKey };
+  // Keep Watch up to date in the background: on unless turned off.
+  const background = r.background !== false;
+  return { enabled, leagues, tmdbKey, background };
 }
 
 /** A TMDB key as pasted (a v3 key or a v4 read token), or ''. */
@@ -263,6 +291,16 @@ function create(deps) {
   const clearTimer = typeof d.clearTimeout === 'function' ? d.clearTimeout : clearTimeout;
   const freeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
   const minFreeGb = Number.isFinite(test.minFreeGb) ? test.minFreeGb : MIN_FREE_GB;
+  const bgMinFreeGb = Number.isFinite(test.bgMinFreeGb) ? test.bgMinFreeGb : BG_MIN_FREE_GB;
+  const bgEveryMs = Number.isFinite(test.bgEveryMs) && test.bgEveryMs > 0 ? test.bgEveryMs : BG_EVERY_MS;
+  const bgGapMs = Number.isFinite(test.bgGapMs) && test.bgGapMs >= 0 ? test.bgGapMs : BG_GAP_MS;
+  const bgBootDelayMs = Number.isFinite(test.bgBootDelayMs) && test.bgBootDelayMs >= 0 ? test.bgBootDelayMs : BG_BOOT_DELAY_MS;
+  const bgTimerMinMs = Number.isFinite(test.bgTimerMinMs) && test.bgTimerMinMs > 0 ? test.bgTimerMinMs : TIMER_MIN_MS;
+  const bgPauseMs = Number.isFinite(test.bgPauseMs) && test.bgPauseMs > 0 ? test.bgPauseMs : BG_PAUSE_MS;
+  const watchedAwayMs = Number.isFinite(test.watchedAwayMs) && test.watchedAwayMs >= 0 ? test.watchedAwayMs : WATCHED_AWAY_MS;
+  // Battery saver on? true / false / null (cannot say: counts as off). powersaver.js is one kernel32 call.
+  const saverOn = typeof test.saverOn === 'function' ? test.saverOn
+    : (typeof d.saverOn === 'function' ? d.saverOn : (() => { try { return require('./powersaver').on(); } catch { return null; } }));
   const rebaseMap = Array.isArray(test.rebase) ? test.rebase : [];
   const rebase = (url) => rebaseUrl(url, rebaseMap);
   const adapters = d.adapters || ADAPTERS;
@@ -305,6 +343,20 @@ function create(deps) {
   const bootUntil = now() + bootGraceMs;
   let bootTimer = null;
   let lastFatal = '';
+  // Fresh after watching: service id -> when the user opened one of its titles from Watch.
+  const watched = {};
+  // The read in flight: when it started and its time limit (the page shows both).
+  let readStartedAt = 0;
+  let readLimit = 0;
+  // The background refresh (no Watch page on screen).
+  const createdAt = now();
+  let bgTimer = null;
+  let bgTimerAt = 0;
+  const bgQueued = new Set();     // ids in the queue by the background refresh
+  let bgLastAt = 0;               // the last background read's start
+  let bgWaiting = '';             // why the last due background read did not start ('' = it did)
+  let bgPausedUntil = 0;
+  let bgReads = 0;
 
   /* --- files --------------------------------------------------------------------- */
 
@@ -430,6 +482,35 @@ function create(deps) {
       if (!stale) return 'waiting until Quartz is back on screen';
     }
     return '';
+  }
+
+  /**
+   * Why a BACKGROUND read must not start now ('' = it may). Cheapest first; the game answer is
+   * the last checkGame() (the caller refreshes it). Stricter than blocker(): 2.5 GB, the
+   * window on screen whatever the cache's age, and battery saver.
+   */
+  function bgBlocker() {
+    if (!loadPrefs().background) return 'turned off';
+    if (!windowShowing()) return 'waiting while Quartz is minimised';
+    let saver = null;
+    try { saver = saverOn(); } catch { saver = null; }
+    if (saver === true) return 'waiting while battery saver is on';
+    const free = freeGb();
+    if (free < bgMinFreeGb) return 'waiting: only ' + free.toFixed(1) + ' GB of memory free (it needs ' + bgMinFreeGb + ' GB)';
+    const game = gameRunning();
+    if (game) return 'waiting while ' + (game === 'valorant' ? 'VALORANT' : game) + ' is running';
+    return '';
+  }
+
+  /** One read's time limit: every step's budget plus its watchdog grace, plus READ_LIMIT_SLACK_MS. */
+  function readLimitMs(id) {
+    if (Number.isFinite(test.readLimitMs) && test.readLimitMs > 0) return test.readLimitMs;
+    const a = adapters[id];
+    let steps = [];
+    try { steps = a && typeof a.steps === 'function' ? (a.steps(ctx()) || []) : []; } catch { steps = []; }
+    let ms = READ_LIMIT_SLACK_MS;
+    for (const s of steps) ms += (s && Number.isFinite(s.budgetMs) ? s.budgetMs : STEP_BUDGET_MS) + WATCHDOG_GRACE_MS;
+    return ms;
   }
 
   function ctx() {
@@ -744,7 +825,8 @@ function create(deps) {
     return r;
   }
 
-  async function readService(id) {
+  async function readService(id, token) {
+    const dead = () => !!(token && token.dead);   // stopped by its time limit: it writes nothing more
     const a = adapters[id];
     const svc = Shape.serviceById(id);
     const s = loadCache().services[id];
@@ -762,7 +844,7 @@ function create(deps) {
     let captured = 0;
     const gen = epoch;
     for (const step of steps) {
-      if (stopped || gen !== epoch) return;   // stopped, or forgotten mid-read: no further page loads
+      if (stopped || gen !== epoch || dead()) return;   // stopped, forgotten or out of time mid-read: no further page loads
       // A required step that failed makes the rest pointless only when the service is gone
       // entirely (offline): the adapter still gets what was read, to say so in its words.
       let r;
@@ -775,6 +857,7 @@ function create(deps) {
     try { result = Shape.cleanResult(a.parse(read, c)); } catch (err) {
       result = Shape.cleanResult({ state: 'error', reason: 'its reader failed (' + String((err && err.message) || err).slice(0, 100) + ')' });
     }
+    if (dead()) return;
     s.readAt = now();
     s.captured = captured;
     s.state = result.state;
@@ -847,7 +930,10 @@ function create(deps) {
         // A due read that was queued while a page was in sight waits for one to be in sight again
         // (the page went behind another tab, or the boot grace outlasted its front time); a Retry
         // or Read now (forced) reads regardless.
-        if (!forcedQueued.delete(id) && !anyVisible()) { pushAll(); continue; }
+        // A background read (bg) runs out of sight, under its own stricter gates.
+        const forced = forcedQueued.delete(id);
+        const bg = bgQueued.delete(id);
+        if (!forced && !bg && !anyVisible()) { pushAll(); continue; }
         starting = id;
         // Conditions can change while earlier services read (a game starts): look again.
         try { await checkGame(); } finally { starting = null; }
@@ -855,10 +941,43 @@ function create(deps) {
         if (!loadPrefs().enabled[id]) continue;   // turned off while it waited
         const why = blocker(id, true);
         if (why && why.indexOf('waiting') !== 0) { setPaused(id, why); pushAll(); continue; }
+        if (bg && !forced && !anyVisible()) {
+          const bgWhy = bgBlocker();
+          if (bgWhy) { bgPause(bgWhy); pushAll(); continue; }
+          bgLastAt = now();
+          bgWaiting = '';
+          bgReads++;
+        }
         reading = id;
+        delete watched[id];      // this read picks up whatever he watched
+        readStartedAt = now();
+        readLimit = readLimitMs(id);
         pushAll();
-        try { await readService(id); } catch (err) { log('Watch reader error: ' + ((err && err.message) || err)); }
+        // The time limit: past it the read is stopped (its reader destroyed, its late answer
+        // dropped) and the service says so -- the page never sits on "Updating…" forever.
+        const token = { dead: false };
+        const LATE = {};
+        let r = null;
+        try {
+          r = await within(readService(id, token).then(() => null, (err) => { log('Watch reader error: ' + ((err && err.message) || err)); return null; }), readLimit, LATE);
+        } catch (err) { log('Watch reader error: ' + ((err && err.message) || err)); }
+        if (r === LATE) {
+          token.dead = true;
+          for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'watchdog');
+          const s = loadCache().services[id];
+          s.state = 'error';
+          s.reason = 'it took longer than ' + Math.round(readLimit / 1000) + ' s, so the read was stopped';
+          s.readAt = now();
+          s.warnings = [];
+          log('Watch stopped reading ' + Shape.serviceById(id).name + ' after its ' + Math.round(readLimit / 1000) + ' s limit');
+          saveCacheSoon();
+        }
         reading = null;
+        readStartedAt = 0;
+        readLimit = 0;
+        // A read that failed (or ran out of time) can be retried at once: the 30-s gap only
+        // folds a double click on a read still on its way.
+        if (loadCache().services[id].state === 'error') delete lastForced[id];
         pushAll();
       }
     } catch (err) {
@@ -867,6 +986,8 @@ function create(deps) {
       pumping = false;
       reading = null;
       starting = null;
+      readStartedAt = 0;
+      readLimit = 0;
       try { schedule(); } catch (err) { failLoud('plan its next read', err); }
     }
   }
@@ -886,10 +1007,15 @@ function create(deps) {
     return false;
   }
 
-  /** The one timer: armed only while a Watch page is VISIBLE; a hidden one gets no timed reads. */
+  /**
+   * The timers: the visible one while a Watch page is on screen, else the background one (off
+   * screen, or no Watch page open at all). Never both.
+   */
   function schedule() {
     if (timer) { clearTimer(timer); timer = null; timerAt = 0; }
-    if (stopped || !guests.size || !anyVisible()) return;
+    if (bgTimer) { clearTimer(bgTimer); bgTimer = null; bgTimerAt = 0; }
+    if (stopped) return;
+    if (!guests.size || !anyVisible()) { scheduleBg(); return; }
     const p = loadPrefs();
     const c = loadCache();
     let soonest = Infinity;
@@ -919,15 +1045,129 @@ function create(deps) {
     } catch (err) { failLoud('start its next read', err); }
   }
 
-  /** A Watch page is on screen (hello, its tab brought forward, the window back): what is due reads. */
+  /**
+   * Fresh on open: what a page coming on screen reads, in order. A service whose title he
+   * opened from Watch (and was away from for WATCHED_AWAY_MS) first, whatever its age; then
+   * every service last tried over FRESH_ON_OPEN_MS ago (or past its own floor, if that is
+   * shorter: ESPN with a game live), oldest first.
+   */
+  function openDueIds() {
+    const p = loadPrefs();
+    const c = loadCache();
+    const t = now();
+    const ids = Shape.SERVICE_IDS.filter((id) => p.enabled[id]);
+    const back = ids.filter((id) => watched[id] && t - watched[id] >= watchedAwayMs);
+    const stale = ids.filter((id) => back.indexOf(id) === -1 && t - (c.services[id].attemptAt || 0) >= Math.min(FRESH_ON_OPEN_MS, everyMs(id)))
+      .sort((a, b) => (c.services[a].attemptAt || 0) - (c.services[b].attemptAt || 0));
+    return back.concat(stale);
+  }
+
+  /** A Watch page is on screen (hello, its tab brought forward, the window back or focused): fresh on open. */
   function readDue() {
     if (stopped || !anyVisible()) { schedule(); return; }
-    const due = dueIds(false);
+    const due = openDueIds();
     if (!due.length) { schedule(); return; }
     checkGame().then(() => {
       if (anyVisible()) for (const id of due) enqueue(id, false);
       schedule();
     }).catch((err) => failLoud('start its reads', err));
+  }
+
+  /** Fresh after watching: a title opened from Watch marks its service to re-read when he comes back. */
+  function noteOpened(url) {
+    try {
+      const clean = Shape.cleanHttps(url);
+      const svc = clean ? Shape.serviceForUrl(clean) : null;
+      const id = svc && typeof svc === 'object' ? svc.id : svc;
+      if (id && Shape.SERVICE_IDS.indexOf(id) !== -1 && loadPrefs().enabled[id]) watched[id] = now();
+    } catch { /* not a service page: nothing to re-read */ }
+  }
+
+  /* --- the background refresh (no Watch page on screen) ------------------------------ */
+
+  /** Services the background refresh keeps up: enabled, read fine before, past BG_EVERY_MS. Oldest first. */
+  function bgDueIds() {
+    const p = loadPrefs();
+    const c = loadCache();
+    const t = now();
+    return Shape.SERVICE_IDS.filter((id) => {
+      const s = c.services[id];
+      return p.enabled[id] && s.lastOkAt > 0 && s.state !== 'signed-out' && t - (s.attemptAt || 0) >= bgEveryMs;
+    }).sort((a, b) => (c.services[a].attemptAt || 0) - (c.services[b].attemptAt || 0));
+  }
+
+  /** The earliest a background read may start (boot delay, the gap since the last, a pause). */
+  function bgEarliest() {
+    return Math.max(createdAt + bgBootDelayMs, bgLastAt ? bgLastAt + bgGapMs : 0, bgPausedUntil);
+  }
+
+  function bgPause(why) {
+    if (why !== bgWaiting) log('Watch background refresh ' + why);
+    bgWaiting = why;
+    bgPausedUntil = now() + bgPauseMs;
+  }
+
+  function scheduleBg() {
+    if (stopped || !loadPrefs().background) return;
+    const p = loadPrefs();
+    const c = loadCache();
+    let soonest = Infinity;
+    for (const id of Shape.SERVICE_IDS) {
+      const s = c.services[id];
+      if (!p.enabled[id] || !(s.lastOkAt > 0) || s.state === 'signed-out') continue;
+      soonest = Math.min(soonest, (s.attemptAt || 0) + bgEveryMs);
+    }
+    if (soonest === Infinity) return;
+    soonest = Math.max(soonest, bgEarliest());
+    const delay = Math.max(bgTimerMinMs, Math.min(TIMER_MAX_MS, soonest - now()));
+    bgTimerAt = now() + delay;
+    bgTimer = setTimer(bgTick, delay);
+    if (bgTimer && typeof bgTimer.unref === 'function') bgTimer.unref();
+  }
+
+  /** One background read at most per tick; the next one is BG_GAP_MS later at the earliest. */
+  function bgTick() {
+    bgTimer = null;
+    bgTimerAt = 0;
+    try {
+      if (stopped || anyVisible() || !loadPrefs().background) { schedule(); return; }
+      if (pumping || queue.length || now() < bgEarliest()) { if (!pumping) schedule(); return; }
+      const id = bgDueIds()[0];
+      if (!id) { schedule(); return; }
+      // The free gates first; the game check (one async tasklist) only if they pass.
+      const pre = bgBlocker();
+      if (pre) { bgPause(pre); schedule(); return; }
+      checkGame().then(() => {
+        if (stopped || anyVisible()) { schedule(); return; }
+        const why = bgBlocker();
+        if (why) { bgPause(why); schedule(); return; }
+        if (reading === id || starting === id || queue.indexOf(id) !== -1 || !loadPrefs().enabled[id]) { if (!pumping) schedule(); return; }
+        bgQueued.add(id);
+        queue.push(id);
+        pump();
+      }).catch((err) => failLoud('start its background read', err));
+    } catch (err) { failLoud('start its background read', err); }
+  }
+
+  function setBackground(on) {
+    const p = loadPrefs();
+    p.background = !!on;
+    savePrefs();
+    if (!p.background) {
+      // Off: a background read not yet started leaves the queue.
+      for (const id of Array.from(bgQueued)) { const i = queue.indexOf(id); if (i !== -1 && !forcedQueued.has(id)) queue.splice(i, 1); }
+      bgQueued.clear();
+      bgWaiting = '';
+      bgPausedUntil = 0;
+    }
+    schedule();
+    return describe();
+  }
+
+  /** The Quartz window got focus back (from Edge, say): a Watch page on screen reads what is stale. */
+  function windowFocused() {
+    if (stopped || !guests.size || !anyVisible()) return;
+    try { readDue(); } catch (err) { failLoud('start its reads', err); }
   }
 
   /* --- the page ---------------------------------------------------------------------- */
@@ -946,6 +1186,8 @@ function create(deps) {
       warnings: s.warnings || [],
       readAt: s.readAt, lastOkAt: s.lastOkAt, profile: s.profile,
       reading: reading === id, queued: queue.indexOf(id) !== -1 || starting === id,
+      // The read in flight: since when, and its time limit (the page's header counts against it).
+      readingSince: reading === id ? readStartedAt : 0, readLimitMs: reading === id ? readLimit : 0,
       paused: p.enabled[id] ? (paused[id] || '') : '',
       next: p.enabled[id] ? (s.attemptAt || 0) + everyMs(id) : 0,
       counts,
@@ -1074,7 +1316,7 @@ function create(deps) {
       else if (!visible) {
         // Out of sight: due reads not yet started leave the queue (they stay due for next time).
         if (!anyVisible()) {
-          const keep = queue.filter((id) => forcedQueued.has(id));
+          const keep = queue.filter((id) => forcedQueued.has(id) || bgQueued.has(id));
           if (keep.length !== queue.length) { queue.length = 0; queue.push(...keep); pushAll(); }
         }
         schedule();
@@ -1287,6 +1529,7 @@ function create(deps) {
     if (!isWatchPage(url)) return false;
     const req = parseGuestLine(line);
     if (!req) return false;
+    if (req.verb === 'open') noteOpened(req.url);   // fresh after watching: re-read it when he comes back
     switch (req.verb) {
       case 'hello': hello(contents, req.visible); break;
       case 'visible': setVisible(contents, req.visible); break;
@@ -1338,6 +1581,7 @@ function create(deps) {
       tmdb: { hasKey: !!p.tmdbKey, keyMask: maskKey(p.tmdbKey), signupUrl: 'https://www.themoviedb.org/settings/api' },
       cacheBytes,
       reading,
+      background: { on: !!p.background, waiting: p.background ? bgWaiting : '', lastAt: bgLastAt, nextAt: bgTimerAt, reads: bgReads },
     };
   }
 
@@ -1408,6 +1652,7 @@ function create(deps) {
     ipc.handle('watch:set-tmdb-key', (e, k) => (gate(e) ? setTmdbKey(k) : null));
     ipc.handle('watch:forget', (e) => (gate(e) ? Object.assign(describe(), { forgot: forget() }) : null));
     ipc.handle('watch:test-tmdb', (e) => (gate(e) ? testTmdb() : null));
+    ipc.handle('watch:set-background', (e, on) => (gate(e) ? setBackground(!!on) : null));
     ipc.handle('watch:refresh', (e, id) => (gate(e) ? Object.assign(describe(), { started: refresh(Shape.SERVICE_IDS.indexOf(id) !== -1 ? id : null) }) : null));
   }
 
@@ -1421,8 +1666,10 @@ function create(deps) {
     stopped = true;
     if (timer) { clearTimer(timer); timer = null; }
     if (bootTimer) { clearTimer(bootTimer); bootTimer = null; }
+    if (bgTimer) { clearTimer(bgTimer); bgTimer = null; }
     queue.length = 0;
     forcedQueued.clear();
+    bgQueued.clear();
     for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     for (const job of searchLive.values()) cancelSearch(job);
     searchLive.clear();
@@ -1437,10 +1684,15 @@ function create(deps) {
     });
   }
   if (d.ipcMain) registerIpc(d.ipcMain, d.isChromeSender);
+  // The background refresh's first look, at the end of its boot delay (no Watch page needs to
+  // be open). Nothing is loaded now: bgTick reads the prefs and the cache when it fires.
+  bgTimerAt = now() + Math.max(bgTimerMinMs, bgBootDelayMs);
+  bgTimer = setTimer(bgTick, Math.max(bgTimerMinMs, bgBootDelayMs));
+  if (bgTimer && typeof bgTimer.unref === 'function') bgTimer.unref();
 
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
-    openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, windowShown, stop, schedule,
+    openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, setBackground, windowShown, windowFocused, stop, schedule,
     isReaderContents, routeFor, drmView,
     // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
     drmChanged: () => pushAll(),
@@ -1450,6 +1702,8 @@ function create(deps) {
       queue: queue.slice(), reading, starting, timerAt, bootTimer: !!bootTimer, paused: Object.assign({}, paused),
       pausedUntil: Object.assign({}, pausedUntil), viewAlive: liveReaders.size > 0, readers: liveReaders.size,
       searchCache: searchCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
+      bgTimerAt, bgQueued: Array.from(bgQueued), bgLastAt, bgWaiting, bgPausedUntil, bgReads, watched: Object.assign({}, watched),
+      readStartedAt, readLimit,
     }),
   };
 }
@@ -1469,4 +1723,11 @@ module.exports = {
   STEP_BUDGET_MS,
   MIN_FREE_GB,
   GAME_PROCESSES,
+  FRESH_ON_OPEN_MS,
+  WATCHED_AWAY_MS,
+  BG_EVERY_MS,
+  BG_GAP_MS,
+  BG_BOOT_DELAY_MS,
+  BG_MIN_FREE_GB,
+  BG_PAUSE_MS,
 };
