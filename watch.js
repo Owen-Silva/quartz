@@ -1312,9 +1312,10 @@
     i = clamp(i, 0, rows.length - 1);
     S.cur = i;
     S.curKey = rows[i].dataset.key || '';
+    var maxD = deepestRow(rows);
     rows.forEach(function (r, j) {
       var d = j - i;
-      r.dataset.d = d >= 0 && d <= 4 ? String(d) : d > 4 ? 'far' : d === -1 ? '-1' : '-far';
+      r.dataset.d = d >= 0 && d <= maxD ? String(d) : d > maxD ? 'far' : d === -1 ? '-1' : '-far';
     });
     if (opts.instant) $.stack.classList.add('instant');
     setCompact(i > 0, opts.instant);
@@ -1346,6 +1347,24 @@
     if (instant) b.classList.add('top-instant');
     b.classList.toggle('is-compact', on);
     if (instant) { void b.offsetWidth; b.classList.remove('top-instant'); }
+  }
+
+  /*
+   * How deep below the lens a row can still be on screen (2 to 4, watch.css .lrow[data-d]): from the
+   * lens's highest line (--lens-c, under the slim bar) and the row pitch. Rows past it are "far" and
+   * stay still: a row that cannot be seen gets no scale and fade on every step (each one is three
+   * animations, and they were most of a step's work on a 1000 px window, where depths 3 and 4 are
+   * below the bottom edge). Cached per window height and pitch; the reads are already-clean layout.
+   */
+  function deepestRow(rows) {
+    if (rows.length < 2) return 4;
+    var pitch = rows[1].offsetTop - rows[0].offsetTop;
+    var key = window.innerHeight + 'x' + pitch;
+    if (S.deepKey === key) return S.deep;
+    var lensC = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lens-c')) || 78;
+    S.deepKey = key;
+    S.deep = pitch > 0 ? clamp(Math.floor((window.innerHeight - lensC - 1) / pitch), 2, 4) : 4;
+    return S.deep;
   }
 
   function rowIndexOf(rowEl) { return S.rowEls.indexOf(rowEl); }

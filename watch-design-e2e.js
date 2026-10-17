@@ -5,7 +5,7 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 // counts) in place of what main pushes. Never a real account, cookie or profile. The services'
 // stills are answered here (Fetch) as plain title cards; real YouTube thumbnails and ESPN logos pass.
 //
-//   node watch-design-e2e.js [--cdp 9466] [--shots <dir>] [--prefix watch-design-after] [--shots-only]
+//   node watch-design-e2e.js [--cdp 9466] [--shots <dir>] [--prefix watch-design-after] [--shots-only] [--baseline <before-frames.json>]
 //
 // Shots: 1920x1000, 1280x800, 900x800, each at the top and two rows down (dark), plus 1280 light.
 // Checks (not with --shots-only, which is for the BEFORE shots on the old code):
@@ -93,6 +93,31 @@ const STATE = `(() => {
     rows, seenRows: seen.length, rowPx: Math.round(px), cur: rows.findIndex((x) => x.d === '0') };
 })()`;
 
+/* Clipped text keeps its descenders: for every element in view with its own text inside a box that
+   clips vertically (overflow hidden/clip/auto, a line clamp), the last VISIBLE line's text box
+   (Range.getClientRects: the font's ascent to descent) ends inside the clip's padding box. A line whose
+   middle is below the clip is a clamped-away line, not a cut one. */
+const DESCENDERS = `(() => {
+  const clipOf = (e) => { for (let a = e, k = 0; a && a !== document.body && k < 8; a = a.parentElement, k++) { if (/hidden|clip|auto|scroll/.test(getComputedStyle(a).overflowY)) return a; } return null; };
+  const bad = []; let n = 0;
+  for (const e of document.querySelectorAll('body *')) {
+    const own = [...e.childNodes].filter((x) => x.nodeType === 3 && x.textContent.trim());
+    if (!own.length) continue;
+    const s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.fontSize) < 1) continue;
+    const b = e.getBoundingClientRect(); if (!b.width || !b.height || b.bottom <= 0 || b.top >= innerHeight || b.right <= 0 || b.left >= innerWidth) continue;
+    const c = clipOf(e); if (!c) continue;
+    const cb = c.getBoundingClientRect(); const bottom = cb.bottom - parseFloat(getComputedStyle(c).borderBottomWidth);
+    n++;
+    for (const t of own) {
+      const r = document.createRange(); r.selectNodeContents(t);
+      const rects = [...r.getClientRects()].filter((x) => x.width > 0 && (x.top + x.bottom) / 2 < bottom);
+      if (!rects.length) continue;
+      const last = Math.max(...rects.map((x) => x.bottom));
+      if (last > bottom + 0.5) bad.push({ el: e.tagName.toLowerCase() + '.' + String(e.className).split(' ').join('.'), text: t.textContent.trim().slice(0, 32), cutPx: Math.round((last - bottom) * 10) / 10, lh: s.lineHeight, fs: s.fontSize });
+    }
+  }
+  return { n, bad: bad.slice(0, 10), count: bad.length }; })()`;
+
 if (require.main === module) {
   run('watch-design-e2e', async (k) => {
     const { launch, say, check } = k;
@@ -115,7 +140,13 @@ if (require.main === module) {
       // the mock's reads first (so nothing main pushes later replaces the dense page), then dense, frozen
       await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length > 3 || null', 120000).catch(() => 0);
       await g.waitFor('(() => { const p = document.querySelectorAll("#pills .sp.st-busy"); return p.length === 0 || null; })()', 90000).catch(() => 0);
-      const snap = F.dense(Date.now());
+      // Titles with descenders (g, y, p, j) where text is clamped: the hero (The user's live "Judgment Day"
+      // had its g and y cut) and a title-card tile, so the shots and the descender check see them.
+      const snap = JSON.parse(JSON.stringify(F.dense(Date.now())).split('"Tears of Steel - Blender VFX Open Movie"').join('"Terminator 2: Judgment Day"')
+        .split('"title":"Rust"').join('"title":"Gypsy Jump: a pygmy\'s journey"'));
+      // ... and no picture for that tile, so its title is the clamped title-card text (.noart b)
+      const noPic = (o) => { if (Array.isArray(o)) o.forEach(noPic); else if (o && typeof o === 'object') { if (o.title === 'Gypsy Jump: a pygmy\'s journey') o.image = ''; Object.values(o).forEach(noPic); } };
+      noPic(snap);
       for (const it of snap.items) if (it.image) titles.set(it.image, it.title);
       await g.ev('(() => { window.__designApply = window.__applyWatch; window.__applyWatch = function () { window.__designHeld = (window.__designHeld || 0) + 1; }; window.__designApply(' + JSON.stringify(snap) + '); return 1; })()');
       await sleep(1500);
@@ -130,11 +161,31 @@ if (require.main === module) {
       };
       const ungrow = () => chrome.ev('(() => { const v = findWatchTab().viewEl; v.setAttribute("style", v.dataset.e2eStyle || ""); delete v.dataset.e2eStyle; return 1; })()').catch(() => 0);
       const size = async (w, h) => { await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await sleep(700); };
-      const settle = async () => { await g.ev("new Promise((r) => { const imgs = [...document.images].filter((i) => !i.complete); if (!imgs.length) return r(1); let n = imgs.length; const done = () => { if (--n <= 0) r(1); }; imgs.forEach((i) => { i.addEventListener('load', done, { once: true }); i.addEventListener('error', done, { once: true }); }); setTimeout(() => r(0), 3000); })").catch(() => 0); await sleep(900); };
+      // Every picture IN VIEW loaded and decoded before a shot (the stills come through Fetch, one CDP
+      // round trip each, so the first shot after the dense page can beat them; a 3 s cap on
+      // document.images missed lazy and async-decoded art and left those tiles dark in the shot).
+      const SETTLE = `new Promise((done) => {
+        const inView = () => [...document.querySelectorAll('.art > img, .stage .pic img')].filter((i) => { const b = i.getBoundingClientRect();
+          return b.width > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth && getComputedStyle(i).visibility !== 'hidden'; });
+        const t0 = performance.now();
+        const tick = () => {
+          const imgs = inView(); const waiting = imgs.filter((i) => !i.complete || !i.naturalWidth);
+          if (waiting.length && performance.now() - t0 < 12000) { setTimeout(tick, 100); return; }
+          Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => 0) : 0))).then(() => requestAnimationFrame(() => requestAnimationFrame(() =>
+            done({ inView: imgs.length, notReady: waiting.length, ms: Math.round(performance.now() - t0) }))));
+        };
+        tick(); })`;
+      const settled = {};
+      const settle = async () => { settled.last = await g.ev(SETTLE).catch((e) => ({ error: e.message })); await sleep(600); return settled.last; };
       const go = async (i) => { await g.ev('(() => { const r = document.querySelectorAll("#stack .lrow")[' + i + ']; const c = r && (r.querySelector(".rt [tabindex=\\"0\\"]") || r.querySelector(".card, .gc")); if (c) c.focus({ preventScroll: true }); return !!c; })()'); await sleep(900); };
       const wheel = async (dy, x, y) => { await g.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: x || 400, y: y || 500, deltaX: 0, deltaY: dy }); await sleep(450); };
       const save = async (name) => {
         const file = path.join(SHOTS, PREFIX + '-' + name + '.png');
+        say('shot ' + name + ': pictures in view ' + JSON.stringify(settled.last || {}));
+        const cut = await g.ev(DESCENDERS).catch((e) => ({ error: e.message }));
+        if (SHOTS_ONLY) say('shot ' + name + ': clipped text ' + JSON.stringify(cut));
+        else check(cut && cut.count === 0 && cut.n > 20, 'shot ' + name + ': no clipped text cuts its descenders (' + (cut && cut.n) + ' clipped texts in view)', cut);
+        if (!SHOTS_ONLY && /-(top|scrolled)$/.test(name)) check(settled.last && settled.last.notReady === 0, 'shot ' + name + ': every picture in view drew before the shot', settled.last);
         try { await g.shot(file); if (ALSO) fs.copyFileSync(file, path.join(SHOTS, ALSO + '-' + name + '.png')); return true; } catch (e) { say('shot ' + name + ' failed: ' + e.message); return false; }
       };
       const st = () => g.ev(STATE);
@@ -146,7 +197,7 @@ if (require.main === module) {
         await size(w, h);
         await go(0); await blurAll(); await settle();
         const top = await st();
-        if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")][0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
+        if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")[0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
         await save(w + 'x' + h + '-top');
         await go(2); await blurAll(); await settle();
         const down = await st();
@@ -203,7 +254,14 @@ if (require.main === module) {
       const fr = await g.ev('(() => { const x = window.__fr; x.on = false; const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).map((v) => Math.round(v * 10) / 10), max: Math.round(Math.max.apply(null, d) * 10) / 10 }; })()');
       say('frames: ' + fr.n + ', over 20 ms: ' + fr.over.length + ' ' + JSON.stringify(fr.over) + ', max ' + fr.max + ' ms');
       if (!SHOTS_ONLY) check(fr.n > 150, 'frames: the page rendered while stepping and hovering (' + fr.n + ')');
-      if (!SHOTS_ONLY) check(fr.over.length === 0, 'frames over 20 ms while stepping through the top change and hovering tiles: ' + fr.over.length + ' (max ' + fr.max + ' ms)', fr.over);
+      fs.writeFileSync(path.join(SHOTS, PREFIX + '-frames.json'), JSON.stringify({ n: fr.n, over: fr.over.length, max: fr.max, list: fr.over, at: new Date().toISOString() }));
+      // --baseline <the old code's -frames.json, measured just before in the same window>: no worse than
+      // it (this machine is shared and loaded, so the bar is the old code's own numbers right then);
+      // without one, none over 20 ms.
+      const BASELINE = opt('baseline', '');
+      let base = null; try { base = BASELINE ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')) : null; } catch (e) { say('baseline unreadable: ' + e.message); }
+      if (!SHOTS_ONLY && base) check(fr.over.length <= base.over && fr.max <= Math.max(20, base.max), 'frames over 20 ms while stepping through the top change and hovering tiles: ' + fr.over.length + ' (max ' + fr.max + ' ms), the old code back to back ' + base.over + ' (max ' + base.max + ' ms)', fr.over);
+      else if (!SHOTS_ONLY) check(fr.over.length === 0, 'frames over 20 ms while stepping through the top change and hovering tiles: ' + fr.over.length + ' (max ' + fr.max + ' ms)', fr.over);
 
       if (SHOTS_ONLY) return;
 

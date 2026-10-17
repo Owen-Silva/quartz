@@ -252,7 +252,10 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .stage .pic .w.stale > img { opacity: .8; }
 .eyebrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
 .eyebrow .rn { text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
-.stage h1 { margin: 10px 0 8px; font: 650 clamp(32px, 2.6vw, 50px)/1.05 var(--font-display); letter-spacing: -.026em;
+/* clamped titles keep their descenders: line-height >= 1.12 and .12em of padding inside the clip (the
+   font's descent reaches below a tighter line box, and overflow:hidden cut the g and y of "Judgment Day");
+   the margin gives the padding back, so nothing around it moves */
+.stage h1 { margin: 10px 0 calc(8px - .12em); padding-bottom: .12em; font: 650 clamp(32px, 2.6vw, 50px)/1.15 var(--font-display); letter-spacing: -.026em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .stage h1.mid { font-size: clamp(28px, 2.2vw, 42px); }
 .stage h1.long { font-size: clamp(24px, 1.9vw, 34px); }
@@ -367,23 +370,27 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 .art::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / .18); opacity: 0; pointer-events: none; z-index: 4; }
 .card:active .art::after { opacity: 1; }
-.frame > .ring { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 5; opacity: 0;
+/* hidden by visibility, not opacity 0: no effect node per tile for the layerizer to walk on every step */
+.frame > .ring { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 5; visibility: hidden;
   box-shadow: inset 0 0 0 2px var(--ion), inset 0 0 0 4px rgb(10 11 12 / .45); }
 html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion), inset 0 0 0 4px rgb(255 255 255 / .6); }
-.card:focus-visible .ring { opacity: 1; }
+.card:focus-visible .ring { visibility: visible; }
 .art .grad { position: absolute; inset: 0; z-index: 1; background: linear-gradient(180deg, transparent 52%, rgb(0 0 0 / .55)); }
 .art .chips { position: absolute; left: 8px; top: 8px; z-index: 2; display: flex; gap: 4px; max-width: calc(100% - 48px); }
 /* the service mark: small, the same on every tile and in the hero */
 .chip.mk, .chip.bd { height: 18px; padding: 0 6px; border-radius: 5px; font: 700 10px/1 var(--font); letter-spacing: .04em; }
 .chip.oa.mk, .chip.oa.bd { background: var(--art-chip); color: var(--on-art); box-shadow: none; }
 .chip.oa.bd { color: var(--on-art-2); font-weight: 600; }
-/* the play disc: fades in on hover and focus, centred on the picture */
-.frame::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; z-index: 6;
+/* the play disc: fades in on hover and focus, centred on the picture. It EXISTS only while shown: a
+   hidden disc on every tile (opacity 0, scale .9) was a paint chunk with its own transform and effect
+   node per tile, and re-layerizing ~270 of them on every animation start and end made each row step
+   cost 100-300 ms of PaintArtifactCompositor::Update (watch-compact2 trace, base 6a56c40: ~15 ms).
+   So it is drawn on hover/focus and enters with a keyframe fade; it leaves at once. */
+.card:hover .frame::after, .card:focus-visible .frame::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; z-index: 6;
   border-radius: 50%; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16);
   background: rgb(12 13 14 / .6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5.5 3.6v8.8l7-4.4z' fill='%23f4f3ef'/%3E%3C/svg%3E") 55% 50% / 18px no-repeat;
-  opacity: 0; transform: scale(.9); transition: opacity var(--m-dur-xs-out) var(--m-fade-out), transform var(--m-dur-xs-out) var(--m-accel); }
-.card:hover .frame::after, .card:focus-visible .frame::after { opacity: 1; transform: none;
-  transition: opacity calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-xs) var(--m-spring); }
+  animation: wd-disc-in var(--m-dur-xs) var(--m-spring) both; }
+@keyframes wd-disc-in { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
 .card.sk-card .frame::after { display: none; }
 .art .chip.stale .dot { width: 6px; height: 6px; background: var(--warn); }
 .art .prog { position: absolute; left: 10px; right: 10px; bottom: 9px; height: 3px; border-radius: 2px; z-index: 2; overflow: hidden;
@@ -408,7 +415,7 @@ html[data-theme="light"] .frame > .ring { box-shadow: inset 0 0 0 2px var(--ion)
 .noart { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 9% 9% 11%;
   background: radial-gradient(120% 100% at 0% 0%, var(--noart-a), var(--noart-b)); color: var(--text); }
 .noart small { position: absolute; left: 9%; top: 11%; color: var(--text-3); font: 600 10px/1 var(--font); letter-spacing: .12em; text-transform: uppercase; }
-.noart b { font: 650 var(--ka-fs, 20px)/1.06 var(--font-display); letter-spacing: -.02em; text-wrap: balance;
+.noart b { padding-bottom: .12em; margin-bottom: -.12em; font: 650 var(--ka-fs, 20px)/1.12 var(--font-display); letter-spacing: -.02em; text-wrap: balance;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .m { display: block; padding: 9px 2px 0; }
 .m b { display: block; font-size: var(--fs-m); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -460,9 +467,15 @@ body.searching .stage, body.searching .lens, body.searching .lens-ctl, body.sear
    the bar on the shared spring. Opacity and transform only: nothing changes size or position in
    layout, so nothing reflows and nothing jumps. top-instant: the same, with no motion (a resize,
    a first draw). */
-body { --lift: 0px; }
-body.is-compact { --lift: calc(var(--lens-c) - var(--lens-top)); }
-.stage { transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring), visibility 0s; }
+/* --lift is registered NOT inherited and set only on the two things that rise: on body (inherited) the
+   toggle restyled all ~1,500-4,000 elements of the page on the first step down and the last step up. */
+@property --lift { syntax: '<length>'; inherits: false; initial-value: 0px; }
+/* registered so watch.js can read it in px (the deepest row the lens can show, activate()) */
+@property --lens-c { syntax: '<length>'; inherits: true; initial-value: 78px; }
+body.is-compact .stack, body.is-compact .lens-ctl { --lift: calc(var(--lens-c) - var(--lens-top)); }
+/* the hero is a layer for life: promoted only for its fade, it re-layerized the page at both ends of it */
+.stage { will-change: opacity, transform;
+  transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring), visibility 0s; }
 body.is-compact:not(.searching) .stage { opacity: 0; visibility: hidden; transform: translateY(-28px); pointer-events: none;
   transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring), visibility 0s linear var(--m-dur-s-out); }
 .lens-ctl { transform: translateY(var(--lift)); transition: opacity var(--m-dur-s-out) var(--m-fade-out), transform var(--m-dur-m) var(--m-spring); }
@@ -600,7 +613,7 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
 /* short windows: a one-line title, the lens a little higher */
 @media (max-height: 720px) {
   :root { --lens-top: max(320px, 46vh); }
-  .stage h1, .stage h1.mid, .stage h1.long { -webkit-line-clamp: 1; font-size: 34px; margin: 6px 0 4px; }
+  .stage h1, .stage h1.mid, .stage h1.long { -webkit-line-clamp: 1; font-size: 34px; margin: 6px 0 calc(4px - .12em); }
   .stage .lede { display: none; }
   .stage .acts { margin-top: 10px; }
   .stage .pbar { margin-top: 8px; }
@@ -615,8 +628,9 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
   .failbar { animation: wf-in-fade var(--m-dur-rm) linear both !important; }
   .lrow[data-d], .stage.pre .txt, .stage.pre .pic, .stage.out .txt, .stage.out .pic, .card:hover, .card:focus-visible, .lrow[data-d="0"] .card.cur,
   .gc:hover, .gc:focus-visible, .lrow[data-d="0"] .gc.cur, .results.pre, .pop.pre, .toast.pre, .toast.out, .gc .ft, .row-nav button { transform: none !important; }
-  .hint, .card:hover .hint, .card:focus-visible .hint, .frame::after, .card:hover .frame::after, .card:focus-visible .frame::after { transform: none !important; }
-  .frame::after, .top::before { transition: opacity var(--m-dur-rm) linear !important; }
+  .hint, .card:hover .hint, .card:focus-visible .hint { transform: none !important; }
+  .card:hover .frame::after, .card:focus-visible .frame::after { animation: none !important; }
+  .top::before { transition: opacity var(--m-dur-rm) linear !important; }
   .stage, body.is-compact:not(.searching) .stage { transform: none !important;
     transition: opacity var(--m-dur-rm) linear, visibility 0s linear var(--m-dur-rm) !important; }
   .lens-ctl { transition: none !important; }
