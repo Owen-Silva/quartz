@@ -301,10 +301,13 @@ html[data-theme="light"] .wash::after {
    height pins .rv's bottom to the row's; the cards end ~3px above it, so nothing moves). Above and below,
    a card's 5px lift and its shade have the panel's whole margin. Only the paint is clipped: .rv keeps the
    full width watch.js pages by (rv.clientWidth, the track's gutter padding, offsetLeft), and .rv is not a
-   layer, so this is a clip drawn inside the row's layer, nothing for the compositor to mask per frame. */
+   layer, so this is a clip drawn inside the row's layer. The clip is a plain rect (no "round"): a card that
+   lifts or slides is its own layer for that moment, and under a rounded clip the compositor needs a
+   render surface for it (the suspect for 67-117 ms frames late in ArrowRight steps); the panel's 22px corners sit
+   in its 14px/8px margins, so a card reaches a curve by at most ~2px at the very bottom corners. */
 .row { position: relative; }
 .rv { position: relative; height: calc(var(--row-h) - var(--row-head)); overflow-x: clip; overflow-y: visible; padding: 10px 0 0;
-  clip-path: inset(calc(-1 * (var(--row-head) + 13px)) calc(var(--gutter) - 29px) -7px round 21px); }
+  clip-path: inset(calc(-1 * (var(--row-head) + 13px)) calc(var(--gutter) - 29px) -7px); }
 .rt { display: flex; gap: 16px; width: max-content; padding: 0 var(--gutter);
   transition: transform var(--m-dur-m) var(--m-spring); }
 /* prev/next sit inside the panel, each centred on the cards' outer edge (the gutter line), 12px in from the rim */
