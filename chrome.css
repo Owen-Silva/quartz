@@ -1480,6 +1480,16 @@ body,
   }
 }
 
+/* Site info holds nine native <select>s, and Chromium lays a MOVING select out again on every
+   frame (10-16 probe: 15 layouts per open with the 8 px drop, 2 with the fade alone, 2 with no
+   motion at all; hiding the selects alone also gave 2). So it keeps the shared timing and fades
+   without travel. Settings keeps its drop: its selects sit in folds that start closed. */
+#siteinfo-panel {
+  --m-from-y: 0px;
+  transition: opacity var(--m-out) var(--m-fade-out), display var(--m-out) allow-discrete;
+}
+#siteinfo-panel:not([hidden]) { transition: opacity calc(var(--m-in) * var(--m-fade-k)) var(--m-fade-in); }
+
 /* A tab opened after boot arrives: a 6 px rise and a fade, xs (app.js buildChip adds .is-born
    and takes it off at the end). Closing is instant for the chip itself (leaving is not an
    event); the chips that close the gap glide there (app.js stripGlide, translate only). */
