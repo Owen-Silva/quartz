@@ -1,0 +1,78 @@
+{
+ "id": "401909088",
+ "date": "2026-10-20T19:00Z",
+ "name": "Boston Celtics at New York Knicks",
+ "shortName": "BOS @ DET",
+ "status": {
+  "clock": 0,
+  "displayClock": "0.0",
+  "period": 0,
+  "type": {
+   "id": "1",
+   "name": "STATUS_SCHEDULED",
+   "state": "pre",
+   "completed": false,
+   "description": "Scheduled",
+   "detail": "Tue, October 20th at 3:00 PM EDT",
+   "shortDetail": "10/20 - 3:00 PM EDT"
+  }
+ },
+ "competitions": [
+  {
+   "id": "401909088",
+   "date": "2026-10-20T19:00Z",
+   "competitors": [
+    {
+     "id": "8",
+     "homeAway": "home",
+     "score": "0",
+     "team": {
+      "id": "8",
+      "abbreviation": "DET",
+      "displayName": "New York Knicks",
+      "shortDisplayName": "Knicks",
+      "name": "Knicks",
+      "logo": "https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/ny.png"
+     }
+    },
+    {
+     "id": "2",
+     "homeAway": "away",
+     "score": "0",
+     "team": {
+      "id": "2",
+      "abbreviation": "BOS",
+      "displayName": "Boston Celtics",
+      "shortDisplayName": "Celtics",
+      "name": "Celtics",
+      "logo": "https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/bos.png"
+     }
+    }
+   ],
+   "status": {
+    "clock": 0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Tue, October 20th at 3:00 PM EDT",
+     "shortDetail": "10/20 - 3:00 PM EDT"
+    }
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": [
+    "summary",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/nba/game/_/gameId/401909088/celtics-knicks"
+  }
+ ]
+}

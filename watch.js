@@ -1283,6 +1283,8 @@
     m.appendChild(el('b', '', gameTitle(ev)));
     m.appendChild(el('span', '', ev.state === 'in' ? joinDot(['Live now'].concat(ev.broadcasts.slice(0, 1))) : ev.state === 'post' ? 'Final' : joinDot(['Starts ' + (dayClock(ev.startsAt) || ev.detail)])));
     wrap.appendChild(m);
+    // Pin this game's score to the desktop (watch/pinbutton.js, score-pins-main.js).
+    if (window.ScorePinButton) wrap.appendChild(window.ScorePinButton.make(ev));
     return wrap;
   }
 

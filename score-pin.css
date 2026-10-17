@@ -1,0 +1,84 @@
+@import url("tokens.css");
+
+/* ============================================================
+   score-pin.css -- one pinned score card (score-pin.html).
+
+   The look is Quartz's chrome: neutral surfaces, one accent, the
+   theme's own tokens (tokens.css, switched by data-theme on <html>).
+   On Windows 11 the WINDOW wears Electron's 'acrylic' material, so the
+   card paints only a light tint over it (no CSS blur anywhere); older
+   Windows and test runs get the solid fallback (?material=solid).
+
+   Motion: transform and opacity only, run by score-pin.js through the
+   Web Animations API, so nothing animates (and nothing runs) between
+   events. prefers-reduced-motion drops every movement: the numbers
+   and the strip simply change.
+   ============================================================ */
+
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body { font: 500 var(--fs-xs, 12px)/1.25 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
+
+:root { --pin-tint: rgba(26, 27, 29, 0.58); --pin-solid: #202123; --pin-edge: rgba(255, 255, 255, 0.07); }
+html[data-theme="light"] { --pin-tint: rgba(250, 250, 251, 0.62); --pin-solid: #f4f4f5; --pin-edge: rgba(0, 0, 0, 0.08); }
+
+.card {
+  position: relative; box-sizing: border-box; width: 100%;
+  padding: 9px 12px 10px; background: var(--pin-tint);
+  box-shadow: inset 0 0 0 1px var(--pin-edge);
+  overflow: hidden;
+}
+html[data-material="solid"] .card { background: var(--pin-solid); }
+
+/* --- the top line: league, period/clock, power play; the strip slides over it --- */
+.top { position: relative; height: 18px; margin-bottom: 5px; }
+.topline, .strip { position: absolute; inset: 0 52px 0 0; display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+.lg { color: var(--text-3); font-size: var(--fs-2xs, 11px); font-weight: 650; letter-spacing: .02em; flex: none; }
+.line { color: var(--text-2); font-size: var(--fs-2xs, 11px); font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card[data-phase="live"] .line { color: var(--text); }
+.pp {
+  margin-left: auto; flex: none; padding: 1px 7px; border-radius: 999px;
+  font-size: var(--fs-2xs, 11px); font-weight: 650; font-variant-numeric: tabular-nums;
+  color: var(--accent-text, var(--accent)); background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line, transparent);
+}
+.pp.even { color: var(--text-2); background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); }
+.strip { inset: 0 52px 0 0; font-size: var(--fs-2xs, 11px); font-weight: 650; }
+.strip .tag { flex: none; width: 3px; height: 13px; border-radius: 2px; background: var(--accent); }
+.strip .txt { overflow: hidden; text-overflow: ellipsis; min-width: 0; letter-spacing: .01em; }
+.strip.penalty .tag { background: var(--text-3); }
+.strip.card-red .tag { background: #d6453d; }
+.strip.card-yellow .tag { background: #d9a400; }
+.strip.final .tag, .strip.overturned .tag { background: var(--text-3); }
+
+/* the two controls: there at rest only faintly, clear on hover */
+.tools { position: absolute; right: -4px; top: -3px; display: flex; gap: 2px; opacity: 0; transition: opacity 140ms ease; }
+.card:hover .tools, .tools.on { opacity: 1; }
+.tool {
+  width: 24px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent;
+  color: var(--text-2); font: 12px/1 var(--icon-font, "Segoe Fluent Icons"); cursor: default;
+}
+.tool:hover { background: var(--surface-3, rgba(127, 127, 127, .18)); color: var(--text); }
+.tool.x:hover { background: #c42b1c; color: #fff; }
+.mute.off .ico { color: var(--text-3); }
+
+/* --- a team row --- */
+.team { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; height: 28px; }
+.team + .team { margin-top: 2px; }
+.wash { position: absolute; inset: -1px -12px; background: var(--accent-soft); opacity: 0; pointer-events: none; }
+.logo { width: 22px; height: 22px; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: var(--text-3); }
+.logo img { width: 22px; height: 22px; object-fit: contain; }
+.ab { font-size: 14px; font-weight: 650; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark { font-size: var(--fs-2xs, 11px); font-weight: 650; color: var(--accent-text, var(--accent)); }
+.sc { position: relative; height: 26px; min-width: 30px; overflow: hidden; text-align: right; }
+.sc .n { position: absolute; right: 0; top: 0; font: 650 22px/26px var(--font-display); font-variant-numeric: tabular-nums; }
+.team.lo .ab, .team.lo .sc .n { color: var(--text-2); font-weight: 550; }
+.card[data-phase="pre"] .sc { visibility: hidden; }
+
+/* --- paused / partial: the reason and the last update, in words --- */
+.note { display: flex; gap: 7px; align-items: flex-start; margin-top: 7px; color: var(--text-2); font-size: var(--fs-2xs, 11px); line-height: 1.35; }
+.note .dot { flex: none; width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--danger, #d6453d); }
+.note.partial .dot { background: #d9a400; }
+.card.paused .team { opacity: .55; }
+
+/* re-pinning an already pinned game: a brief ring says "it's this one" */
+.card::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 2px var(--accent); opacity: 0; pointer-events: none; }

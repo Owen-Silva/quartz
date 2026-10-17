@@ -778,6 +778,19 @@ contextBridge.exposeInMainWorld('api', {
     forget: () => ipcRenderer.invoke('watch:forget'),
     refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
   },
+  // Lumen's pinned scores (score-pins-main.js), for the palette rows and the cards' look
+  // (scorepins-chrome.js). games() answers from Lumen's cached ESPN rows, never a fetch:
+  // { games: [{ key, id, league, leagueName, state, startsAt, detail, away, home }], pinned: [key], sound }.
+  scores: {
+    games: () => ipcRenderer.invoke('scores:games'),
+    pin: (game) => ipcRenderer.invoke('scores:pin', game && typeof game === 'object' ? game : null),
+    unpin: (key) => ipcRenderer.invoke('scores:unpin', String(key == null ? '' : key)),
+    setSound: (on) => ipcRenderer.invoke('scores:set-sound', !!on),
+    look: (look) => ipcRenderer.send('scores:look', look && typeof look === 'object' ? look : {}),
+    onChanged: (fn) => { ipcRenderer.on('scores:changed', (_e, m) => { try { fn(m); } catch (err) { /* the palette refreshes next time */ } }); },
+    // TEST PROFILES ONLY (main registers it for --test-profile runs): the cards' state for the e2e.
+    test: (op) => ipcRenderer.invoke('scores:test', op && typeof op === 'object' ? op : {})
+  },
   // The Files tab. files.html is a guest with no preload, so app.js reaches
   // these on its behalf once it has decided the console line it parsed was a
   // real request; main answers nothing but values, never a throw.
