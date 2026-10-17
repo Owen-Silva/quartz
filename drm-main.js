@@ -142,10 +142,13 @@ function create(o) {
         const c = all[id] || {};
         if (/widevine/i.test(String(c.title || id))) {
           const st = String(c.status || '');
-          const ok = /^(updated|up-to-date|installed|ready|new)$/i.test(st) || /installed|updated/i.test(st);
+          // 'not-installed' contains "installed": anything saying not/error/fail is NOT ready.
+          const bad = /not|error|fail|downloading|checking|updating/i.test(st);
+          const ok = !bad && (/^(updated|up-to-date|installed|ready|new)$/i.test(st) || /installed|updated/i.test(st));
+          const waiting = /not|downloading|checking|updating/i.test(st) && !/error|fail/i.test(st);
           return ok
             ? { available: true, reason: 'Widevine ' + (c.version || '') + ' is installed (' + st + ').', short: '' }
-            : { available: false, reason: 'The Widevine module is ' + (st || 'not ready') + '.', short: 'Widevine is ' + (st || 'not ready') };
+            : { available: false, reason: 'The Widevine module is ' + (st || 'not ready') + '.', short: waiting ? 'Widevine hasn’t finished downloading yet' : 'Widevine is ' + (st || 'not ready') };
         }
       }
       return { available: false, reason: 'This build can load Widevine, but it has not been downloaded.', short: 'Widevine hasn’t downloaded yet' };

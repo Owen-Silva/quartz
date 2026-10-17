@@ -209,6 +209,8 @@ function make(extraOpts) {
   t = make({ electron: { components: { status: () => ({}) } } });
   eq('castlabs, not downloaded', t.m.widevine().available, false);
   eq('castlabs, not downloaded: says why', t.m.widevine().short, 'Widevine hasn\u2019t downloaded yet');
+  t = make({ electron: { components: { status: () => ({ wv: { title: 'Widevine Content Decryption Module', status: 'not-installed', version: '' } }) } } });
+  eq('castlabs, status not-installed: NOT available (it contains "installed")', [t.m.widevine().available, t.m.widevine().short], [false, 'Widevine hasn\u2019t finished downloading yet']);
 
   // ---- 10-17: the streaming signature (VMP), the route Watch takes, licence refusals ----
   const STOCK_WHY = 'this build of Quartz has no Widevine';

@@ -23,7 +23,8 @@ const WS = require(path.join(__dirname, 'node_modules', 'ws'));
 const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
-const CDP_PORT = Number(opt('cdp', '9431'));
+let CDP_PORT = Number(opt('cdp', '9431'));
+const PORT0 = CDP_PORT;
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -102,12 +103,15 @@ async function run(mode, port, watcher) {
   if (mode === 'ready') env.QUARTZ_TEST_VMP = 'signed';
   if (mode === 'missing') env.QUARTZ_TEST_CDM = 'missing';
   let child = null, chrome = null, g = null;
+  CDP_PORT = PORT0 + ['ready', 'missing', 'real'].indexOf(mode); // a port of its own per launch
   try {
     child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + tag, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
     watcher.watch(child.pid);
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 40000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
     await chrome.waitFor('!!(window.Drm && typeof openWatchTab === "function" && window.Drm.state())', 20000);
+    // A fresh profile downloads the CDM on first run, possibly after main's 4 s cap.
+    if (mode !== 'missing') await chrome.waitFor('window.api.drm.state().then((s) => !!(s && s.widevine && s.widevine.available))', 90000).catch(() => null);
     const st = await chrome.ev('window.api.drm.state()');
     const wv = st && st.widevine;
     if (mode === 'ready') check(wv && wv.available === true && wv.services === true, mode + ': Widevine really loaded, services on (signature taken as signed)', wv);
@@ -115,11 +119,14 @@ async function run(mode, port, watcher) {
     if (mode === 'real') check(wv && wv.available === true && wv.services === false && wv.vmp === 'development', mode + ': Widevine loaded, development signature only', wv);
 
     await chrome.ev('(openWatchTab(), 1)');
-    const wt = await waitTarget((x) => /\/watch\.html(\?|#|$)/.test(String(x.url)) && x.webSocketDebuggerUrl, 20000);
+    const wt = await waitTarget((x) => /\/watch\.html(\?|#|$)/.test(String(x.url)) && x.webSocketDebuggerUrl, 30000).catch(() => { throw new Error('the Watch page never appeared as a CDP target'); });
     g = await new Cdp(wt.webSocketDebuggerUrl).open();
     await g.waitFor('!!document.body && !document.body.classList.contains("is-boot")', 20000);
-    // Every toast the page shows, kept as it appears (they fade on their own).
-    await g.ev('(() => { window.__toasts = []; new MutationObserver(() => { document.querySelectorAll(".toast .t-txt").forEach((n) => { if (window.__toasts.indexOf(n.textContent) === -1) window.__toasts.push(n.textContent); }); }).observe(document.body, { childList: true, subtree: true }); return 1; })()');
+    const toasts = [];
+    const grabToasts = async () => {
+      const now = await g.ev('Array.from(document.querySelectorAll(".toast .t-txt")).map((n) => n.textContent)').catch(() => []);
+      for (const t of now || []) if (toasts.indexOf(t) === -1) toasts.push(t);
+    };
 
     for (const [id, url] of TITLES) {
       const before = await chrome.ev('tabs.length');
@@ -135,8 +142,8 @@ async function run(mode, port, watcher) {
         const tabsNow = await chrome.ev('tabs.length');
         check(recorded && recorded.edge === true && sent && tabsNow === before, mode + ': ' + id + ' goes to Edge (stub), no Quartz tab', { recorded, sent, tabs: [before, tabsNow] });
       }
+      for (let i = 0; i < 10; i++) { await grabToasts(); await sleep(100); }
     }
-    const toasts = await g.ev('window.__toasts.slice()');
     if (mode === 'missing') check(toasts.some((t) => t === 'Opened in Microsoft Edge: Widevine is switched off for this test run'), mode + ': the toast says why it went to Edge', toasts);
     if (mode === 'real') check(toasts.some((t) => t === 'Opened in Microsoft Edge: this copy of Quartz isn\u2019t signed for streaming services yet'), mode + ': the toast says why it went to Edge', toasts);
     if (mode === 'ready') check(!toasts.some((t) => /Edge/.test(t)), mode + ': no Edge toast', toasts);

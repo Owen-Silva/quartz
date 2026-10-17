@@ -118,6 +118,10 @@ async function guest(urlRe) {
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 40000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
     await chrome.waitFor('!!(window.Drm && typeof createTab === "function" && window.Drm.state())', 20000);
+    // A fresh profile downloads the CDM on first run; past main's 4 s cap it lands later (drm:changed).
+    const t0 = Date.now();
+    await chrome.waitFor('(() => { const s = window.Drm.state(); return !!(s && s.widevine && s.widevine.available); })()', 90000).catch(() => null);
+    console.log('[e2e] Widevine available ' + (Date.now() - t0) + ' ms after the chrome was ready');
     const st = await chrome.ev('window.Drm.state()');
     check(st.widevine && st.widevine.available === true, 'castlabs build: Widevine reported available', st.widevine);
     check(st.widevine && st.widevine.services === false && st.widevine.vmp === 'development', 'test copy: development signature only, so services are reported unable to play', st.widevine && { services: st.widevine.services, vmp: st.widevine.vmp });
