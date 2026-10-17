@@ -224,6 +224,7 @@ function fakeWorld(opts) {
   if (o.realSteps) delete deps.runStep;
   for (const k of ['fetch', 'BrowserWindow', 'session']) if (o[k]) deps[k] = o[k];
   if (o.adapters) deps.adapters = Object.assign({}, adapters, o.adapters);
+  if (o.drmRoute) deps.drmRoute = o.drmRoute;
   world.wm = WM.create(deps);
   world.guest = (url) => {
     const pushed = [];
@@ -919,6 +920,56 @@ async function mainTests() {
     check(!fs.existsSync(path.join(w.dir, 'watch-cache.json')) && s.items.length === 0 && s.services.filter((x) => x.enabled).every((x) => x.state === 'never'), 'main: forget deletes the cache and the page empties', { file: fs.existsSync(path.join(w.dir, 'watch-cache.json')), items: s.items.length, states: s.services.map((x) => x.state) });
     check(g.last('__applyWatchResult').action === 'forget' && g.last('__applyWatchResult').ok === true, 'main: forget answers the page');
   } finally { w.cleanup(); }
+
+  // --- 10-17: protected titles follow drm-main's real answer (CDM + signature + the person's rules)
+  {
+    const route = { mode: 'none' };
+    const drmRoute = (url) => {
+      if (route.mode === 'ready') return /disneyplus/.test(url) && route.rule ? { edge: true, rule: 'disney', reason: 'you chose to always watch Disney+ in Edge' } : { edge: false, rule: '', reason: '' };
+      if (route.mode === 'throw') throw new Error('boom');
+      return { edge: true, rule: '', reason: 'this build of Quartz has no Widevine' };
+    };
+    w = fakeWorld({ drmRoute });
+    try {
+      const g = w.guest();
+      g.say('quartz-watch:hello {}');
+      await w.settle();
+      g.say('quartz-watch:open {"url":"https://www.disneyplus.com/browse/entity-1"}');
+      await w.settle();
+      let r = g.last('__applyWatchResult');
+      check(w.edge.length === 1 && r.how === 'edge' && r.why === 'this build of Quartz has no Widevine', 'route: CDM missing -> Disney+ opens in Edge, with the reason', r);
+      let s = g.last('__applyWatch');
+      check(s.drm && s.drm.playable === false && s.drm.reason === 'this build of Quartz has no Widevine' && s.drm.edgeHosts.indexOf('disneyplus.com') !== -1, 'route: the snapshot says Quartz cannot play here, and why', s.drm);
+      route.mode = 'ready';
+      w.wm.drmChanged();
+      await w.settle();
+      s = g.last('__applyWatch');
+      check(s.drm && s.drm.playable === true && s.drm.edgeHosts.length === 0, 'route: CDM ready -> the page hears it at once (drmChanged), nothing labelled Edge', s.drm);
+      for (const u of ['https://www.disneyplus.com/browse/entity-1', 'https://www.primevideo.com/detail/X/', 'https://www.hulu.com/watch/1', 'https://www.espn.com/watch/player/_/id/1']) {
+        const before = w.sent.filter((x) => x[0] === 'open-url').length;
+        g.say('quartz-watch:open ' + JSON.stringify({ url: u }));
+        await w.settle();
+        r = g.last('__applyWatchResult');
+        const tabs = w.sent.filter((x) => x[0] === 'open-url');
+        check(r.how === 'tab' && tabs.length === before + 1 && tabs[tabs.length - 1][1].url === u && w.edge.length === 1, 'route: CDM ready -> ' + new URL(u).hostname + ' opens in a Quartz tab', r);
+      }
+      route.rule = true;
+      g.say('quartz-watch:open {"url":"https://www.disneyplus.com/browse/entity-1"}');
+      await w.settle();
+      r = g.last('__applyWatchResult');
+      check(r.how === 'edge' && w.edge.length === 2 && /you chose/.test(r.why), 'route: "Always use Edge for Disney+" still wins on a build that can play', r);
+      s = (w.wm.drmView());
+      check(s.playable === true && s.edgeHosts.join() === 'disneyplus.com', 'route: a rule labels only that service Edge, and Quartz still counts as able to play', s);
+      route.mode = 'throw';
+      g.say('quartz-watch:open {"url":"https://www.primevideo.com/detail/X/"}');
+      await w.settle();
+      r = g.last('__applyWatchResult');
+      check(r.how === 'edge' && /could not check its Widevine \(boom\)/.test(r.why), 'route: a failing check goes to Edge and says so, never silently', r);
+      g.say('quartz-watch:open {"url":"https://www.youtube.com/watch?v=abc"}');
+      await w.settle();
+      check(g.last('__applyWatchResult').how === 'tab', 'route: YouTube never asks drm-main, always a Quartz tab');
+    } finally { w.cleanup(); }
+  }
 
   // --- opening titles, sign-in, the guest gate
   w = fakeWorld({ test: { rebase: [['https://www.youtube.com', 'http://127.0.0.1:9/yt']] } });

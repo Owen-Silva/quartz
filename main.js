@@ -424,6 +424,13 @@ const drm = drmModule.create({
   extraSites: DRM_TEST && process.env.QUARTZ_DRM_TEST_SITE
     ? [{ id: 'test', name: 'Test Stream', exact: [String(process.env.QUARTZ_DRM_TEST_SITE).toLowerCase()] }]
     : [],
+  // TEST ONLY: report the CDM missing (QUARTZ_TEST_CDM=missing) or the streaming
+  // signature in a given state (QUARTZ_TEST_VMP=signed|development|unsigned|stale),
+  // so the routing e2e can take both roads on one build. A live Quartz ignores both.
+  cdmOverride: DRM_TEST && process.env.QUARTZ_TEST_CDM === 'missing' ? 'missing' : '',
+  vmpOverride: DRM_TEST && /^(signed|development|unsigned|stale)$/.test(process.env.QUARTZ_TEST_VMP || '') ? process.env.QUARTZ_TEST_VMP : '',
+  // Watch labels "Opens in Edge" by this state: re-label when it changes.
+  onChange: () => { try { if (watch && typeof watch.drmChanged === 'function') watch.drmChanged(); } catch { /* Watch not built yet */ } },
 });
 
 /**
@@ -470,6 +477,9 @@ const watch = (() => {
       isBundledPage: (url) => isBundledPageUrl(url),
       send: (channel, payload) => send(channel, payload),
       openInEdge: (url) => drm.openInEdge(url),
+      // A protected title opens HERE when Widevine is in and Quartz is signed for
+      // streaming, and in Edge (with the reason) when not, or when the person chose Edge.
+      drmRoute: (url) => drm.route(url),
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,

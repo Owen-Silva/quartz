@@ -256,6 +256,8 @@ function create(deps) {
   const send = typeof d.send === 'function' ? d.send : () => {};
   const isBundledPage = typeof d.isBundledPage === 'function' ? d.isBundledPage : () => false;
   const openInEdge = typeof d.openInEdge === 'function' ? d.openInEdge : () => Promise.resolve({ ok: false, how: '', reason: 'Edge is not wired in this build' });
+  // drm-main's route(url): { edge, rule, reason }. Without it, every protected title goes to Edge.
+  const drmRoute = typeof d.drmRoute === 'function' ? d.drmRoute : () => ({ edge: true, rule: '', reason: 'Quartz can’t play protected video here' });
   const getWindow = typeof d.getWindow === 'function' ? d.getWindow : () => null;
   const setTimer = typeof d.setTimeout === 'function' ? d.setTimeout : setTimeout;
   const clearTimer = typeof d.clearTimeout === 'function' ? d.clearTimeout : clearTimeout;
@@ -986,6 +988,7 @@ function create(deps) {
   function safeSnapshot() {
     try {
       const snap = snapshot();
+      try { snap.drm = drmView(); } catch { /* the page then labels by address, as before */ }
       lastFatal = '';
       return snap;
     } catch (err) {
@@ -1092,16 +1095,44 @@ function create(deps) {
     return started;
   }
 
+  /*
+   * Where a protected title goes. Shape.opensInEdge says the page NEEDS Widevine;
+   * drm-main says whether this Quartz can play it (CDM in, signed for streaming)
+   * or the person chose Edge for that service. { edge, why }: why is said to the
+   * person whenever the title goes to Edge.
+   */
+  function routeFor(clean) {
+    if (!Shape.opensInEdge(clean)) return { edge: false, why: '' };
+    let r;
+    try { r = drmRoute(clean) || {}; } catch (err) { r = { edge: true, reason: 'Quartz could not check its Widevine (' + String((err && err.message) || err).slice(0, 80) + ')' }; }
+    return r.edge === false ? { edge: false, why: '' } : { edge: true, why: String(r.reason || '').slice(0, 200) };
+  }
+
+  /** What the page needs to label tiles "Opens in Edge": the same answer openTitle gets. */
+  function drmView() {
+    const hosts = Shape.EDGE_HOSTS.concat(['tv.apple.com', 'tv.youtube.com', 'espn.com']);
+    const edgeHosts = [];
+    let playable = true;
+    let reason = '';
+    for (const h of hosts) {
+      const probe = h === 'espn.com' ? 'https://www.espn.com/watch/player' : 'https://www.' + h + '/';
+      const r = routeFor(probe);
+      if (r.edge) { edgeHosts.push(h); if (!/^you chose/.test(r.why)) { playable = false; if (!reason) reason = r.why; } }
+    }
+    return { playable, reason, edgeHosts };
+  }
+
   async function openTitle(url) {
     const clean = Shape.cleanHttps(url);
     if (!clean || (!Shape.serviceForUrl(clean) && !isTmdbPage(clean))) return { ok: false, how: '', reason: 'Watch only opens pages on the services it reads' };
+    const route = routeFor(clean);
     if (test.openStub) {
-      try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: Shape.opensInEdge(clean) }) + '\n'); } catch { /* the e2e will see it missing */ }
+      try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
     }
-    if (Shape.opensInEdge(clean)) {
+    if (route.edge) {
       let r;
       try { r = await openInEdge(clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
-      return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '' };
+      return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
     }
     send('open-url', { url: rebase(clean), background: false });
     return { ok: true, how: 'tab', reason: '' };
@@ -1410,7 +1441,9 @@ function create(deps) {
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
     openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, windowShown, stop, schedule,
-    isReaderContents,
+    isReaderContents, routeFor, drmView,
+    // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
+    drmChanged: () => pushAll(),
     flush: saveCacheNow,
     state: () => ({
       guests: guests.size, visible: Array.from(guestVisible.entries()).filter(([g, v]) => v && guests.has(g)).length,

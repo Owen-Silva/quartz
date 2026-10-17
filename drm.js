@@ -16,7 +16,13 @@
  *   - the page asked for a protected key system, was refused, AND its video
  *     got encrypted media (drm-preload.js reports both). A refusal alone is a
  *     probe that YouTube, Twitch and many scripts make; it never shows a bar.
- *   - never when this build HAS Widevine (drm-main.js asks the castlabs API).
+ *   - never when this build can play real services: Widevine installed AND
+ *     Quartz.exe signed for streaming (drm-main.js widevine().services). The
+ *     bar says WHY it cannot ("this build of Quartz has no Widevine", "this
+ *     copy of Quartz isn't signed for streaming services yet", ...).
+ *   - on a build WITH Widevine, when the service still refused: its licence was
+ *     rejected, a key came back unusable, or no licence came (drm-preload.js
+ *     'licence'). Then the bar says that, with the same Edge buttons.
  *
  * WHAT the buttons do:
  *   Open in Edge          the same URL in Microsoft Edge (main launches
@@ -44,7 +50,9 @@
   var st = null; // the last DrmState from main (see preload.js), or null before the first
 
   function extra() { return st && Array.isArray(st.extraSites) ? st.extraSites : []; }
-  function widevineHere() { return !!(st && st.widevine && st.widevine.available); }
+  function wv() { return (st && st.widevine) || {}; }
+  // Real services play here: the CDM is in AND Quartz.exe is signed for streaming.
+  function servicesHere() { var w = wv(); return w.services === true; }
   function alwaysOn(key) {
     if (!st || !Array.isArray(st.alwaysEdge) || !key) return false;
     for (var i = 0; i < st.alwaysEdge.length; i++) if (st.alwaysEdge[i].key === key) return true;
@@ -58,7 +66,7 @@
     try { if (tab.viewEl && typeof tab.viewEl.getURL === 'function') u = tab.viewEl.getURL(); } catch (err) { u = ''; }
     return u || tab.url || '';
   }
-  function freshSeen() { return { denied: [], granted: [], encrypted: false }; }
+  function freshSeen() { return { denied: [], granted: [], encrypted: false, licence: null }; }
 
   /* ---- the bar ------------------------------------------------------ */
 
@@ -94,7 +102,7 @@
     var views = null;
     try { views = viewsEl; } catch (err) { views = null; }
     if (!tab || !views || tab.kind !== 'page') return;
-    var sig = [m.mode, m.key, m.name, m.url, m.reason || ''].join('|');
+    var sig = [m.mode, m.key, m.name, m.url, m.reason || '', m.outcome || ''].join('|');
     var existing = ourBar(tab);
     if (existing && tab.drmBar && tab.drmBar.sig === sig) return; // already says exactly this
 
@@ -122,13 +130,14 @@
     var icon = document.createElement('span');
     icon.className = 'drm-bar-icon glyph';
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = m.mode === 'failed' ? '' : (m.mode === 'opened' || m.mode === 'sent' ? '' : '');
+    icon.textContent = (m.mode === 'failed' || m.mode === 'refused') ? '' : (m.mode === 'opened' || m.mode === 'sent' ? '' : '');
     bar.appendChild(icon);
 
     var text = document.createElement('span');
     text.className = 'drm-bar-text';
     var line = '';
-    if (m.mode === 'need') line = Sites.barText(m.name, '');
+    if (m.mode === 'need') line = Sites.barText(m.name, m.reason || '');
+    else if (m.mode === 'refused') line = Sites.refusedText(m.name, m.outcome, m.reason || '');
     else if (m.mode === 'opening') line = 'Opening in Microsoft Edge…';
     else if (m.mode === 'opened') line = 'Opened in Microsoft Edge.';
     else if (m.mode === 'sent') line = Sites.sentText(m.name);
@@ -140,16 +149,17 @@
 
     var acts = document.createElement('span');
     acts.className = 'drm-bar-acts';
-    if (m.mode === 'need' || m.mode === 'failed') {
+    var offer = m.mode === 'need' || m.mode === 'refused';
+    if (offer || m.mode === 'failed') {
       acts.appendChild(button(m.mode === 'failed' ? 'Try again' : 'Open in Edge', 'drm-bar-primary', function (b) {
         openInEdge(tab, m, false, b);
       }, 'Open this page in Microsoft Edge'));
-      if (m.mode === 'need' && m.key && !alwaysOn(m.key)) {
+      if (offer && m.key && !alwaysOn(m.key)) {
         var label = m.name ? 'Always use Edge for ' + m.name : 'Always use Edge for this site';
         acts.appendChild(button(label, 'drm-bar-quiet', function (b) { openInEdge(tab, m, true, b); },
           'Open ' + (m.name || 'this site') + ' in Microsoft Edge every time. You can undo this in Settings.'));
       }
-      if (m.mode === 'need' && tab.drmDesktopId) {
+      if (offer && tab.drmDesktopId) {
         acts.appendChild(button('Open the desktop app', 'drm-bar-quiet', function () {
           try { launchDesktopApp(tab.drmDesktopId); } catch (err) { /* no apps bridge */ }
         }));
@@ -223,11 +233,14 @@
     if (!tab || tab.kind !== 'page' || !Sites) return;
     var url = currentUrl(tab);
     var bar = tab.drmBar;
-    if (widevineHere()) { clearBar(tab); return; }
+    var w = wv();
+    var seen = tab.drmSeen || freshSeen();
     var site = Sites.siteForUrl(url, extra());
-    var verdict = Sites.emeVerdict(tab.drmSeen || freshSeen());
     var key = Sites.ruleKeyFor(url, extra());
-    if (!site && !verdict.need) {
+    // Widevine is here and the service still refused: say so, whatever the address.
+    var refused = !!(w.available && seen.licence && seen.licence.outcome);
+    var need = !refused && !servicesHere() && (!!site || Sites.emeVerdict(seen).need);
+    if (!refused && !need) {
       // "Sent to Edge" / "Edge didn't open" belong to the attempt, not the
       // page, and stay until the tab goes somewhere new (did-navigate).
       if (bar && tab.drmKeepSent) return;
@@ -237,9 +250,12 @@
     }
     if (tab.drmDismissedKey && tab.drmDismissedKey === key) return;
     // A bar that already reports an Edge attempt for this site stays as it is.
-    if (bar && bar.key === key && bar.mode !== 'need') return;
+    if (bar && bar.key === key && bar.mode !== 'need' && bar.mode !== 'refused') return;
     var name = site ? site.name : '';
-    render(tab, { mode: 'need', key: key, name: name, url: url, reason: '' });
+    render(tab, {
+      mode: refused ? 'refused' : 'need', key: key, name: name, url: url,
+      reason: w.short || '', outcome: refused ? seen.licence.outcome : ''
+    });
   }
 
   function onSignal(sig) {
@@ -253,6 +269,9 @@
       if (list.indexOf(sig.keySystem) === -1 && list.length < 8) list.push(sig.keySystem);
     } else if (sig.kind === 'encrypted') {
       seen.encrypted = true;
+    } else if (sig.kind === 'licence' && Sites.isLicenceOutcome(sig.outcome)) {
+      // The first refusal says the most; a later one never replaces it.
+      if (!seen.licence) seen.licence = { outcome: sig.outcome, detail: String(sig.detail || '').slice(0, 80) };
     } else {
       return;
     }
@@ -276,7 +295,8 @@
       if (gone() || !event || !event.isMainFrame || event.isInPlace) return;
       var url = String(event.url || '');
       var key = Sites.ruleKeyFor(url, extra());
-      if (!key || !alwaysOn(key) || widevineHere()) return;
+      // The person's own rule wins even on a build that can play: they chose Edge.
+      if (!key || !alwaysOn(key)) return;
       if (tab.drmRestoredLoad) return; // the bar will offer Edge instead
       if (tab.drmAllowOnce && tab.drmAllowOnce === url) { tab.drmAllowOnce = ''; return; }
       try { viewEl.stop(); } catch (err) { /* already stopped */ }

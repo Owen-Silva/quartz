@@ -336,7 +336,7 @@ contextBridge.exposeInMainWorld('api', {
     event: (kind, details) => ipcRenderer.send('log:event', Object.assign({}, details || {}, { kind: String(kind || '') })),
   },
   // Protected video (drm-main.js). DrmState:
-  //   { widevine: { available, reason }, edge: { found, how, path },
+  //   { widevine: { available, services, reason, short, vmp }, edge: { found, how, path },
   //     alwaysEdge: [{ key, name }], detection, extraSites, lastLaunch }
   drm: {
     state: () => ipcRenderer.invoke('drm:state'),

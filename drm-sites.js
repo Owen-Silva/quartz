@@ -183,8 +183,27 @@
    * sentence about what is wrong, the fix is the button. "DRM" is named
    * once and nothing else technical is.
    */
-  function barText(name) {
-    return (name || 'This page') + ' uses DRM-protected video, which Quartz can’t play yet.';
+  function barText(name, why) {
+    var base = (name || 'This page') + ' uses DRM-protected video, which Quartz can’t play yet';
+    var w = typeof why === 'string' ? why.replace(/[.\s]+$/, '') : '';
+    return w ? base + ': ' + w + '.' : base + '.';
+  }
+
+  /*
+   * A build WITH Widevine, and the service still would not play: the key system
+   * was granted, but no working licence came. outcome is one of LICENCE_OUTCOMES.
+   */
+  var LICENCE_OUTCOMES = ['refused', 'no-licence', 'key-error'];
+  function isLicenceOutcome(o) { return typeof o === 'string' && LICENCE_OUTCOMES.indexOf(o) !== -1; }
+  function refusedText(name, outcome, why) {
+    var who = name || 'This site';
+    var what = outcome === 'key-error'
+      ? who + ' sent a licence this copy of Quartz can’t use'
+      : outcome === 'no-licence'
+        ? who + ' didn’t send a licence for this video'
+        : who + ' refused to license this video to Quartz';
+    var w = typeof why === 'string' ? why.replace(/[.\s]+$/, '') : '';
+    return what + (w ? ': ' + w : '') + '.';
   }
 
   function sentText(name) {
@@ -206,6 +225,9 @@
     isRuleKey: isRuleKey,
     emeVerdict: emeVerdict,
     barText: barText,
+    refusedText: refusedText,
+    isLicenceOutcome: isLicenceOutcome,
+    LICENCE_OUTCOMES: LICENCE_OUTCOMES,
     sentText: sentText,
     edgeUrlOk: edgeUrlOk,
     _bareHost: bareHost

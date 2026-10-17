@@ -257,8 +257,11 @@
     var ok = raw.ok === true;
     switch (raw.action) {
       case 'open':
-        if (ok) { if (raw.how === 'edge') toast('Opened in Microsoft Edge'); }
-        else toast((raw.how === 'edge' ? "Couldn't open Microsoft Edge" : "Couldn't open that title") + (reason ? ': ' + reason : ''), { err: true });
+        // why: the reason it went to Edge at all (no Widevine, not signed, or the person's rule).
+        var why = cleanText(raw.why, 200);
+        if (ok) { if (raw.how === 'edge') toast('Opened in Microsoft Edge' + (why ? ': ' + why : '')); }
+        else toast((raw.how === 'edge' ? "Couldn't open Microsoft Edge" : "Couldn't open that title") + (reason ? ': ' + reason : '') +
+          (raw.how === 'edge' && why ? '. Quartz itself can’t play it: ' + why : ''), { err: true });
         break;
       case 'signin':
         if (!ok) toast("Couldn't open the sign-in page" + (reason ? ': ' + reason : ''), { err: true });
@@ -393,8 +396,38 @@
 
   /* ------------------------------------------------------------ normalize */
 
+  /*
+   * Protected video: main says whether this Quartz can play it (Widevine in,
+   * signed for streaming) and which services the person sends to Edge anyway.
+   * Without that word (an older main) a protected title is labelled Edge, as before.
+   */
+  var DRM = { known: false, playable: false, reason: '', edgeHosts: [] };
+  function normDrm(d) {
+    if (!d || typeof d !== 'object' || typeof d.playable !== 'boolean') return { known: false, playable: false, reason: '', edgeHosts: [] };
+    return {
+      known: true,
+      playable: d.playable,
+      reason: cleanText(d.reason, 200),
+      edgeHosts: arr(d.edgeHosts).filter(function (h) { return typeof h === 'string' && h.length < 80; }).slice(0, 40)
+    };
+  }
+  function hostOn(url, hosts) {
+    var h = '';
+    try { h = new URL(url).hostname.toLowerCase(); } catch (err) { return false; }
+    for (var i = 0; i < hosts.length; i++) if (h === hosts[i] || h.slice(-(hosts[i].length + 1)) === '.' + hosts[i]) return true;
+    return false;
+  }
+  /** Does a click on this URL go to Edge? `needs` = the page needs DRM (default: by address). */
+  function edgeFor(url, needs) {
+    var protectedPage = typeof needs === 'boolean' ? needs : !!(Shape && url && Shape.opensInEdge(url));
+    if (!protectedPage) return false;
+    if (!DRM.known || !DRM.playable) return true;
+    return hostOn(url, DRM.edgeHosts);
+  }
+
   function normalize(raw) {
     var o = (raw && typeof raw === 'object') ? raw : {};
+    DRM = normDrm(o.drm);
     var services = arr(o.services).map(normService).filter(Boolean);
     var seen = {};
     services = services.filter(function (s) { if (seen[s.id]) return false; seen[s.id] = true; return true; });
@@ -426,7 +459,7 @@
       name: cleanText(s.name, 40) || d.name || s.id,
       short: cleanText(s.short, 24) || d.short || cleanText(s.name, 24) || s.id,
       covers: cleanText(s.covers, 200) || d.covers || '',
-      edge: typeof s.edge === 'boolean' ? s.edge : !!d.edge,
+      edge: edgeFor(https(s.home) || https(d.home), typeof s.edge === 'boolean' ? s.edge : !!d.edge),
       needsSignIn: typeof s.needsSignIn === 'boolean' ? s.needsSignIn : d.needsSignIn !== false,
       enabled: enabled,
       state: enabled ? state : 'off',
@@ -465,7 +498,7 @@
       durationSec: num(it.durationSec),
       badge: cleanText(it.badge, 24),
       group: cleanText(it.group, 120),
-      edge: typeof it.edge === 'boolean' ? it.edge : !!(Shape && Shape.opensInEdge(url))
+      edge: edgeFor(url, typeof it.edge === 'boolean' ? it.edge : undefined)
     };
   }
 
@@ -504,7 +537,7 @@
       away: away,
       broadcasts: arr(ev.broadcasts).map(function (b) { return cleanText(b, 24); }).filter(Boolean).slice(0, 3),
       url: url,
-      edge: !!(Shape && Shape.opensInEdge(url))
+      edge: edgeFor(url)
     };
   }
 
@@ -808,7 +841,7 @@
     }
     if (s.home) {
       var open = button('btn sm ghost', 'Open ' + s.short, function () { openUrl(s.home); closePop(true); });
-      if (Shape && Shape.opensInEdge(s.home)) open.title = 'Opens in Microsoft Edge';
+      if (edgeFor(s.home)) open.title = 'Opens in Microsoft Edge' + (DRM.reason ? ': ' + DRM.reason : '');
       acts.appendChild(open);
     }
     acts.appendChild(button('btn sm ghost', 'Settings', function () { send('settings', {}); closePop(true); }));
@@ -1198,6 +1231,7 @@
     }
     if (it.edge) {
       var hint = el('span', 'hint', 'Opens in Edge');
+      if (DRM.reason) hint.title = 'Quartz can’t play it: ' + DRM.reason;
       hint.appendChild(icon('out', 's'));
       art.appendChild(hint);
     }
@@ -1389,6 +1423,7 @@
 
   function opensNote(url, edge) {
     var span = el('span', 'opens', edge ? 'Opens in Microsoft Edge' : 'Opens in a new tab');
+    if (edge && DRM.reason) span.title = 'Quartz can’t play it: ' + DRM.reason;
     span.appendChild(icon('out', 's'));
     return span;
   }
@@ -1901,7 +1936,7 @@
       if (l) {
         var b = button('cell look', 'Search ' + s.short, function () { openUrl(l.url); });
         b.appendChild(icon('out', 's'));
-        b.setAttribute('aria-label', 'Search ' + s.name + ' for ' + S.q + (Shape && Shape.opensInEdge(l.url) ? ', opens in Microsoft Edge' : ''));
+        b.setAttribute('aria-label', 'Search ' + s.name + ' for ' + S.q + (edgeFor(l.url) ? ', opens in Microsoft Edge' : ''));
         b.dataset.r = String(rows.length);
         b.dataset.c = String(c);
         b.tabIndex = -1;
