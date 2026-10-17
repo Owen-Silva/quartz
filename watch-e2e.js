@@ -293,9 +293,13 @@ const UI = {
     const m = p.querySelector('.sp-main'); const a = p.querySelector('.sp-act'); const sm = m && m.querySelector('small');
     return { cls: p.className, small: sm ? sm.textContent : '', title: m ? (m.title || '') : '', aria: m ? (m.getAttribute('aria-label') || '') : '', act: a ? a.textContent : '' }; })()`,
 };
-const centerOf = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect();
-  if (!b.width || !b.height) return null; const x = b.left + b.width / 2, y = b.top + b.height / 2;
-  const hit = document.elementFromPoint(x, y); return { x, y, hit: !!hit && (hit === e || e.contains(hit)) }; })()`;
+// An element whose middle is off screen or covered (e.g. Settings > Watch > Forget, below the fold of
+// the sheet) is scrolled into view first, as a user would; a click there would land on the scrim.
+const centerOf = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null;
+  const at = () => { const b = e.getBoundingClientRect(); if (!b.width || !b.height) return null; const x = b.left + b.width / 2, y = b.top + b.height / 2;
+    const hit = document.elementFromPoint(x, y); return { x, y, hit: !!hit && (hit === e || e.contains(hit)) }; };
+  let r = at(); if (r && !r.hit) { try { e.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (err) { /* gone */ } r = at(); }
+  return r; })()`;
 
 /** A real left click (mouse events through CDP) at the middle of `sel` in page `c`. */
 async function click(c, sel) {
