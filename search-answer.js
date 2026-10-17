@@ -51,6 +51,7 @@
   var view = 'idle';        // 'idle' | 'off' | 'pending' | 'streaming' | 'done' | 'fail' | 'stopped'
   var offReason = '';
   var model = '';
+  var modelLabel = '';        // main's own name for the model, when it sends one
   var watchdog = null;
   var ticker = null;
   var stopTimer = null;
@@ -118,6 +119,8 @@
     var bits = [];
     if (isFinite(i) && i > 0) bits.push(i.toLocaleString('en-US') + ' in');
     if (isFinite(o) && o > 0) bits.push(o.toLocaleString('en-US') + ' out');
+    var w = Number(u.searches);
+    if (isFinite(w) && w > 0) bits.push(w + (w === 1 ? ' web search' : ' web searches'));
     return bits.join(' · ');
   }
 
@@ -247,7 +250,7 @@
     var mark = el('span', 'qa-mark');
     mark.setAttribute('aria-hidden', 'true');
     head.appendChild(mark);
-    head.appendChild(el('span', 'qa-label', 'Claude'));
+    head.appendChild(el('span', 'qa-label', 'Answer by Claude'));
     els.model = el('span', 'qa-model', '');
     head.appendChild(els.model);
     els.status = el('span', 'qa-status', '');
@@ -378,8 +381,10 @@
     if (!turn.text && (turn.state === 'pending' || turn.state === 'streaming')) art.appendChild(skeleton());
     if (turn.state === 'streaming' && turn.text) body.appendChild(el('span', 'qa-caret'));
     if (turn.state === 'done') {
+      if (turn.truncated) art.appendChild(el('p', 'qa-quiet qa-truncated', 'Answer cut short: Claude reached its length limit before finishing. Deeper answer may go further.'));
       var src = sourcesBox(turn);
       if (src) art.appendChild(src);
+      if (turn.searchErrors && turn.searchErrors.length) art.appendChild(el('p', 'qa-quiet qa-search-errors', 'Web search had trouble during this answer: ' + turn.searchErrors.join(', ') + '.'));
     }
     if (turn.state === 'stopped') {
       var st = el('p', 'qa-stopped', turn.stopNote || 'Stopped.');
@@ -411,7 +416,7 @@
     root.setAttribute('data-state', view);
     root.hidden = view === 'idle';
     var t = latest();
-    els.model.textContent = model ? modelName(model) : '';
+    els.model.textContent = modelLabel || (model ? modelName(model) : '');
     els.model.title = model || '';
     var statusText = '';
     if (t && t.state === 'stopping') statusText = 'Stopping…';
@@ -436,7 +441,9 @@
     els.copy.hidden = busy || !hasText || view === 'off';
     els.deeper.hidden = view !== 'done' || !t || t.mode === 'deep';
     els.follow.hidden = !(view === 'done' || (view === 'stopped' && hasText));
-    var cost = t && t.state === 'done' ? [money(t.costUsd), tokens(t.usage)].filter(Boolean).join(' · ') : '';
+    var cost = '';
+    if (t && t.state === 'done') cost = t.cached ? 'From memory, nothing spent' : [money(t.costUsd), tokens(t.usage)].filter(Boolean).join(' · ');
+    else if (t && t.state === 'fail' && t.fail && t.fail.costUsd > 0) cost = money(t.fail.costUsd) + ' spent before it failed';
     els.cost.textContent = cost;
     els.foot.hidden = view === 'off' || view === 'idle';
     root.setAttribute('aria-busy', busy ? 'true' : 'false');
@@ -485,6 +492,10 @@
     seq += 1;
     turn.seq = seq;
     turn.state = 'pending';
+    turn.started = false;
+    turn.truncated = false;
+    turn.searchErrors = [];
+    turn.cached = false;
     turn.text = '';
     turn.citations = [];
     turn.fail = null;
@@ -647,7 +658,12 @@
     var phase = obj.phase;
     if (t.state === 'stopping' && !(phase === 'fail' || phase === 'done')) return false;
     if (phase === 'start') {
+      // A second start for the same seq is main's "clear and restart" (its fallback switched
+      // models mid-answer): back to the skeleton, same seq.
       if (typeof obj.model === 'string') model = obj.model.slice(0, 80);
+      modelLabel = typeof obj.modelLabel === 'string' ? obj.modelLabel.slice(0, 60) : '';
+      if (t.started) { t.text = ''; t.citations = []; t.restarted = true; }
+      t.started = true;
       t.state = 'streaming';
       view = 'streaming';
       arm(cfg.stallMs, noReply);
@@ -664,6 +680,11 @@
       t.citations = Array.isArray(obj.citations) ? obj.citations.slice(0, 40) : [];
       t.usage = obj.usage && typeof obj.usage === 'object' ? obj.usage : null;
       t.costUsd = typeof obj.costUsd === 'number' ? obj.costUsd : null;
+      t.cached = obj.cached === true;
+      t.truncated = obj.truncated === true;
+      t.searchErrors = Array.isArray(obj.searchErrors) ? obj.searchErrors.slice(0, 8).map(function (x) { return String(x && typeof x === 'object' ? (x.error_code || x.code || x.title || JSON.stringify(x)) : x).slice(0, 80); }) : [];
+      if (typeof obj.model === 'string' && obj.model) model = obj.model.slice(0, 80);
+      if (typeof obj.modelLabel === 'string' && obj.modelLabel) modelLabel = obj.modelLabel.slice(0, 60);
       if (!t.text) {
         t.state = 'fail';
         t.fail = { state: 'bad-answer', title: 'Claude sent an empty answer', detail: 'The answer finished with no text in it.', retry: true, settings: false };
@@ -681,6 +702,7 @@
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       t.state = 'fail';
       t.fail = {
+        costUsd: typeof obj.costUsd === 'number' ? obj.costUsd : null,
         state: String(obj.state || 'unknown').slice(0, 40),
         title: typeof obj.title === 'string' ? obj.title.slice(0, 200) : '',
         detail: typeof obj.detail === 'string' ? obj.detail.slice(0, 1200) : '',

@@ -458,6 +458,8 @@ a.qa-cite:hover { background: var(--accent-soft); color: var(--text); }
 .qa-sk { display: block; height: 12px; border-radius: var(--radius-xs); background: var(--surface-3); }
 
 .qa-stopped { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-s); }
+.qa-quiet { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+.qa-truncated::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--warn); }
 .qa-problem { margin-top: 4px; }
 .qa-turn .qa-body + .qa-problem { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .qa-problem-head { display: flex; align-items: center; gap: 9px; }

@@ -295,14 +295,44 @@ const FAILS = [
     await page.send('Emulation.clearDeviceMetricsOverride');
     // (The second done above was ignored: seq 1 was already done. The panel kept the long text.)
 
+    // ---- main's extras: a second start restarts, done carries cached / truncated / searchErrors --
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    let xs = (await A()).seq;
+    await apply({ seq: xs, phase: 'start', model: 'claude-sonnet-4-5', modelLabel: 'Sonnet 4.5', mode: 'auto' });
+    await apply({ seq: xs, phase: 'delta', text: 'From the first model, half way' });
+    await apply({ seq: xs, phase: 'start', model: 'claude-haiku-4-5', modelLabel: 'Haiku 4.5 (fallback)', mode: 'auto', fallback: true });
+    a = await A();
+    check(a.seq === xs && a.text === '' && a.skeleton === 1 && a.modelLabel === 'Haiku 4.5 (fallback)', 'a second start for the same seq clears and restarts (skeleton, new model label)', a.text + ' / ' + a.modelLabel);
+    await apply({ seq: xs, phase: 'delta', text: 'Deltas that the final text replaces' });
+    await apply({ seq: xs, phase: 'done', text: 'The final answer [1].', citations: CITES.slice(0, 1), usage: { input: 900, output: 40, searches: 2 }, costUsd: 0.004, truncated: true, searchErrors: ['max_uses_exceeded'] });
+    a = await A();
+    const extras = await page.ev("({ t: (document.querySelector('.qa-truncated') || {}).textContent || '', e: (document.querySelector('.qa-search-errors') || {}).textContent || '', c: document.querySelector('.qa-cost').textContent, label: document.querySelector('.qa-label').textContent })");
+    check(a.text === 'The final answer [1].' && /^The final answer/.test(a.bodyText) && !/Deltas/.test(a.bodyText), 'done.text replaces the deltas', a.bodyText);
+    check(/^Answer cut short/.test(extras.t) && /max_uses_exceeded/.test(extras.e) && /\$0\.004 · 900 in · 40 out · 2 web searches/.test(extras.c) && extras.label === 'Answer by Claude',
+      'truncated and searchErrors are shown quietly; usage with searches; "Answer by Claude" label', JSON.stringify(extras));
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    xs = (await A()).seq;
+    await apply({ seq: xs, phase: 'start', model: 'claude-sonnet-4-5', mode: 'auto' });
+    await apply({ seq: xs, phase: 'done', text: 'Remembered answer.', citations: [], cached: true, costUsd: 0 });
+    check(/From memory, nothing spent/.test(await page.ev("document.querySelector('.qa-cost').textContent")), 'a cached answer says it cost nothing');
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    xs = (await A()).seq;
+    await apply({ seq: xs, phase: 'fail', state: 'server', title: 'Anthropic had a problem', detail: '500 api_error', retry: true, settings: false, costUsd: 0.0021 });
+    check(/\$0\.002 spent before it failed/.test(await page.ev("document.querySelector('.qa-cost').textContent")), 'a fail that cost money says so');
+    // Back to a finished answer for the follow-up.
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    xs = (await A()).seq;
+    await apply({ seq: xs, phase: 'start', model: 'claude-sonnet-4-5-20250929', mode: 'auto' });
+    await apply({ seq: xs, phase: 'done', text: full, citations: CITES, usage: { input_tokens: 1840, output_tokens: 212 }, costUsd: 0.0087 });
+
     // ---- follow-up ---------------------------------------------------------------------------
     await page.ev(`(() => { const i = document.querySelector('.qa-input'); i.focus(); i.value = 'Is there a free plan?'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
     a = await A();
     const fu = JSON.parse(a.sent[a.sent.length - 1].replace('quartz-search:answer ', ''));
-    check(fu.mode === 'ask' && fu.q === 'Is there a free plan?' && fu.seq === 2 && fu.history.length === 2 && fu.history[0].role === 'user' && fu.history[0].text === Q && fu.history[1].role === 'assistant' && fu.history[1].text.startsWith('**Claude**'), 'follow-up: mode "ask" with the conversation as history', JSON.stringify(fu).slice(0, 200));
-    await apply({ seq: 2, phase: 'start', model: 'claude-sonnet-4-5', mode: 'ask' });
-    await apply({ seq: 2, phase: 'delta', text: 'Yes: the free plan has daily limits [1].' });
-    await apply({ seq: 2, phase: 'done', text: 'Yes: the free plan has daily limits [1].', citations: CITES.slice(0, 1) });
+    check(fu.mode === 'ask' && fu.q === 'Is there a free plan?' && fu.seq === xs + 1 && fu.history.length === 2 && fu.history[0].role === 'user' && fu.history[0].text === Q && fu.history[1].role === 'assistant' && fu.history[1].text.startsWith('**Claude**'), 'follow-up: mode "ask" with the conversation as history', JSON.stringify(fu).slice(0, 200));
+    await apply({ seq: xs + 1, phase: 'start', model: 'claude-sonnet-4-5', mode: 'ask' });
+    await apply({ seq: xs + 1, phase: 'delta', text: 'Yes: the free plan has daily limits [1].' });
+    await apply({ seq: xs + 1, phase: 'done', text: 'Yes: the free plan has daily limits [1].', citations: CITES.slice(0, 1) });
     a = await A();
     check(a.turns === 2 && a.view === 'done' && /You asked/.test(await page.ev("document.querySelector('.qa-turn:last-child .qa-asked').textContent")), 'follow-up answers in place, under "You asked"', a.turns + ' turns');
 
@@ -310,13 +340,13 @@ const FAILS = [
     await page.ev("document.querySelector('.qa-deeper').click(), 1");
     a = await A();
     const deep = JSON.parse(a.sent[a.sent.length - 1].replace('quartz-search:answer ', ''));
-    check(deep.mode === 'deep' && deep.seq === 3 && deep.q === 'Is there a free plan?' && a.view === 'pending', 'Deeper answer re-asks the latest question in mode "deep"', JSON.stringify(deep).slice(0, 160));
-    await apply({ seq: 3, phase: 'start', model: 'claude-opus-4-1', mode: 'deep' });
-    await apply({ seq: 3, phase: 'delta', text: 'Partly written' });
+    check(deep.mode === 'deep' && deep.seq === xs + 2 && deep.q === 'Is there a free plan?' && a.view === 'pending', 'Deeper answer re-asks the latest question in mode "deep"', JSON.stringify(deep).slice(0, 160));
+    await apply({ seq: xs + 2, phase: 'start', model: 'claude-opus-4-1', mode: 'deep' });
+    await apply({ seq: xs + 2, phase: 'delta', text: 'Partly written' });
     await page.ev("document.querySelector('.qa-stop').click(), 1");
     a = await A();
-    check(a.sent[a.sent.length - 1] === 'quartz-search:answer-stop {"seq":3}' && a.turnState === 'stopping', 'Stop sends answer-stop for the seq in flight', a.sent[a.sent.length - 1]);
-    await apply({ seq: 3, phase: 'fail', state: 'stopped', title: 'Stopped', detail: '', retry: true, settings: false });
+    check(a.sent[a.sent.length - 1] === 'quartz-search:answer-stop {"seq":' + (xs + 2) + '}' && a.turnState === 'stopping', 'Stop sends answer-stop for the seq in flight', a.sent[a.sent.length - 1]);
+    await apply({ seq: xs + 2, phase: 'fail', state: 'stopped', title: 'Stopped', detail: '', retry: true, settings: false });
     a = await A();
     check(a.view === 'stopped' && a.text === 'Partly written' && a.controls.retry && a.controls.follow, 'stopped: what arrived stays, with Retry', a.view + ' / ' + a.text);
     await page.ev('window.__answerConfig({ stopGraceMs: 300, noReplyMs: 700 }), 1');
