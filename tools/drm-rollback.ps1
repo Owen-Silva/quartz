@@ -67,6 +67,10 @@ if ($run.Count) { Stop-Back ('Quartz is running from this checkout (PID ' + (($r
 $statePath = Join-Path $StateDir 'swap-state.json'
 if (-not (Test-Path $statePath)) { Stop-Back ('no swap record at ' + $statePath + ' (was drm-swap.ps1 run on this checkout?)') }
 $state = Get-Content $statePath -Raw | ConvertFrom-Json
+# Only the swap this checkout is still on: its merged commit must be in HEAD's history.
+if ((Run 'git' @('merge-base', '--is-ancestor', [string]$state.head, 'HEAD')).code -ne 0) {
+  Stop-Back ('this checkout is not where the swap of ' + $state.at + ' left it (' + ([string]$state.head).Substring(0, 7) + ' is not in HEAD); nothing changed.')
+}
 $regBefore = Reg-Snapshot
 $ptyBefore = Pty-Hash
 
@@ -109,6 +113,8 @@ if ($q.code -ne 0) { Stop-Back ('npm run quartz-exe failed: ' + (Tail $q.text 3)
 $ver = ''
 try { $ver = [string](Get-Content (Join-Path $ElectronDir 'package.json') -Raw | ConvertFrom-Json).version } catch { $ver = '?' }
 
+# This swap record is spent: a second rollback must not replay it.
+Move-Item $statePath (Join-Path $StateDir ('swap-state.rolled-back-' + $stamp + '.json')) -Force
 $regAfter = Reg-Snapshot
 if ($regAfter -ne $regBefore) { Say 'WARNING: the default-browser registry changed during the run (this script never writes it).'; exit 2 }
 Say ('DONE: electron ' + $ver + ', registry unchanged. Start Quartz from the pin.')
