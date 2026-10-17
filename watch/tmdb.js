@@ -236,21 +236,21 @@ async function check(key, fetchJson) {
     const k = usableKey(key);
     if (!k) return { ok: false, title: 'Not a key', detail: key ? 'It has spaces or odd characters in it.' : 'Paste a key first.' };
     const res = await get(fetchJson, '/authentication', k);
-    const kind = keyMode(k) === 'v4' ? 'API Read Access Token' : 'API key';
+    const kind = keyMode(k) === 'v4' ? 'an API Read Access Token' : 'an API key';
     const bad = failure(res, k);
     if (bad) {
       const titles = { 'bad-key': 'TMDB rejected the key', 'rate-limited': 'TMDB is busy', offline: 'Could not reach TMDB', error: 'Check failed' };
       let detail = bad.reason;
       if (bad.state === 'bad-key') {
         const msg = res.json && typeof res.json.status_message === 'string' ? scrub(res.json.status_message, k, 160) : '';
-        detail = 'Saved as a ' + kind + '.' + (msg ? ' TMDB said: ' + msg : '');
+        detail = 'Saved as ' + kind + '.' + (msg ? ' TMDB said: ' + msg : '');
       }
       return { ok: false, title: titles[bad.state] || 'Check failed', detail: scrub(detail, k, 240) };
     }
     if (res.json.success === false) {
-      return { ok: false, title: 'TMDB rejected the key', detail: scrub(res.json.status_message || ('Saved as a ' + kind + '.'), k, 240) };
+      return { ok: false, title: 'TMDB rejected the key', detail: scrub(res.json.status_message || ('Saved as ' + kind + '.'), k, 240) };
     }
-    return { ok: true, title: 'TMDB accepted the key', detail: 'Saved as a ' + kind + '. Search in Watch now covers every service.' };
+    return { ok: true, title: 'TMDB accepted the key', detail: 'Saved as ' + kind + '. Search in Watch now covers every service.' };
   } catch (err) {
     return { ok: false, title: 'Check failed', detail: scrub(String((err && err.message) || err), typeof key === 'string' ? key.trim() : '', 120) };
   }
