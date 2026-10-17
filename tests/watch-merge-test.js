@@ -21,8 +21,19 @@ module.exports = async function (check) {
   // 1. the key: same folded title AND the same year, Disney+ and Prime only
   check(Merge.sameKey(item('prime', 'rec', 'The Martian', '2015 · PG-13')) === 'the martian|2015', 'sameKey: title and year');
   check(Merge.sameKey(item('prime', 'rec', 'Bluey', '3 seasons')) === '', 'sameKey: no year, no key (a match would be a guess)');
-  check(Merge.sameKey(item('youtube', 'rec', 'The Martian', '2015')) === '', 'sameKey: YouTube videos never merge');
+  check(Merge.sameKey(item('youtube', 'rec', 'The Martian', 'Trailers 2015')) === '', 'sameKey: a year inside a channel name is not a release year');
   check(Merge.sameKey(item('prime', 'rec', 'X', 'S20151 E2')) === '', 'sameKey: digits inside a word are not a year');
+  check(Merge.sameKey({ service: 'hulu', kind: 'rec', title: 'Shogun', subtitle: 'Drama', year: 2024, url: 'https://www.hulu.com/series/shogun' }) === 'shogun|2024', 'sameKey: any service, and the service\'s own year first');
+  check(Merge.sameKey(Object.assign(item('disney', 'rec', 'Up', '2009 · PG'), { year: '2010' })) === 'up|2010', 'sameKey: item.year wins over the subtitle');
+
+  // a film and a show of one name and year stay apart when both say what they are
+  const film = Object.assign(item('disney', 'rec', 'Fargo', '1996'), { type: 'movie' });
+  const show = Object.assign(item('prime', 'rec', 'Fargo', '1996'), { type: 'show' });
+  const kept = Merge.mergeSame([film, show]);
+  check(kept.length === 2 && !kept[0].also, 'mergeSame: a film and a show of the same name and year are two tiles', kept.map((x) => x.type));
+  const film2 = Object.assign(item('prime', 'rec', 'Fargo', '1996 · R'), { type: 'movie' });
+  const one = Merge.mergeSame([film, film2]);
+  check(one.length === 1 && one[0].also && one[0].also[0].service === 'prime', 'mergeSame: two services, same film (type and year agree): one tile', one);
 
   // 2. Continue watching: the one he is watching keeps the tile, the other service is a mark
   const watching = item('prime', 'resume', 'The Martian', '2015 · PG-13', { progress: 0.4 });

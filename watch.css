@@ -587,7 +587,7 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
 @media (max-width: 1599px) { :root { --per: 4; } }
 @media (max-width: 1099px) { :root { --per: 3; } }
 /* the cluster's names step aside before anything crowds: a dot per service (its name is its label) */
-@media (max-width: 1199px) {
+@media (max-width: 1279px) {
   .sp-name { display: none; }
   .sp > .sp-main { padding: 0 8px; }
 }
