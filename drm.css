@@ -35,7 +35,8 @@
   font-size: 15px;
   color: var(--accent);
 }
-.drm-bar[data-drm-mode="failed"] .drm-bar-icon { color: var(--warn); }
+.drm-bar[data-drm-mode="failed"] .drm-bar-icon,
+.drm-bar[data-drm-mode="refused"] .drm-bar-icon { color: var(--warn); }
 .drm-bar[data-drm-mode="opened"] .drm-bar-icon,
 .drm-bar[data-drm-mode="sent"] .drm-bar-icon { color: var(--ok); }
 

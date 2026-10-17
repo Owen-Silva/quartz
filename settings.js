@@ -3743,10 +3743,19 @@
       return;
     }
     var wv = st.widevine || {};
-    field.appendChild(el('p', 'set-hint', wv.available
+    // services: the CDM is in AND Quartz.exe is signed for streaming (drm-main.js widevine()).
+    var canServices = wv.services === true || (wv.services === undefined && wv.available);
+    var drmLine = canServices
       ? 'This build of Quartz can play DRM-protected video. ' + (wv.reason || '')
-      : 'Quartz can’t play DRM-protected video yet (Prime Video, Netflix, Disney+, Spotify and similar). ' +
-        'On those pages a bar offers to open the same page in Microsoft Edge.'));
+      : (wv.available
+        ? 'Widevine is installed, but streaming services will refuse to play here yet. ' + (wv.reason || '') +
+          ' Until then Watch opens Prime Video, Disney+ and the rest in Microsoft Edge, and their pages offer Edge.'
+        : 'Quartz can’t play DRM-protected video yet (Prime Video, Netflix, Disney+, Spotify and similar): ' +
+          String(wv.reason || 'no reason was given').replace(/[.\s]+$/, '') + '. ' +
+          'On those pages a bar offers to open the same page in Microsoft Edge.');
+    var drmHint = el('p', 'set-hint', drmLine);
+    drmHint.setAttribute('data-drm-widevine', canServices ? 'services' : (wv.available ? 'cdm-only' : 'none'));
+    field.appendChild(drmHint);
     var edge = st.edge || {};
     field.appendChild(el('p', 'set-hint', edge.found
       ? 'Microsoft Edge: found' + (edge.path ? ' (' + edge.path + ')' : '') + '.'

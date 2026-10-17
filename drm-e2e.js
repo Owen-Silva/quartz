@@ -173,7 +173,7 @@ async function guest(urlRe) {
     try { fs.unlinkSync(STUB); } catch (e) { /* none */ }
     watcher = startWatcher((l) => console.log('[e2e] ' + l));
     await watcher.ready;
-    const env = Object.assign({}, process.env, { QUARTZ_EDGE_STUB: STUB, QUARTZ_DRM_TEST_SITE: 'localhost' });
+    const env = Object.assign({}, process.env, { QUARTZ_EDGE_STUB: STUB, QUARTZ_DRM_TEST_SITE: 'localhost', QUARTZ_TEST_CDM: 'missing' });
     child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
     watcher.watch(child.pid);
     console.log('[e2e] quartz pid ' + child.pid + ', pages :' + port);
@@ -183,7 +183,7 @@ async function guest(urlRe) {
     await chrome.waitFor('!!(window.Drm && window.DrmSites && typeof createTab === "function" && window.Drm.state())', 20000);
     check(true, 'chrome up with Drm and its state');
     const st0 = await chrome.ev('window.Drm.state()');
-    check(st0.widevine && st0.widevine.available === false, 'stock Electron: Widevine reported missing', st0.widevine);
+    check(st0.widevine && st0.widevine.available === false, 'no Widevine (stock, or castlabs with QUARTZ_TEST_CDM=missing): reported missing', st0.widevine);
     check(st0.edge && st0.edge.how === 'stub', 'test profile: Edge launch is the stub', st0.edge);
     check(/by address and by what their video does/.test(st0.detection), 'detection: both ways on', st0.detection);
 
@@ -242,7 +242,7 @@ async function guest(urlRe) {
     let ni;
     try { ni = await waitInfo('needs', 'i && i.bar && i.bar.mode === "need"'); } catch (e) { ni = await info('needs'); }
     check(ni.bar && ni.bar.mode === 'need', 'needs: the bar is up', ni);
-    check(ni.bar && ni.bar.text === 'This page uses DRM-protected video, which Quartz can\u2019t play yet.', 'needs: the words', ni.bar && ni.bar.text);
+    check(ni.bar && /^This page uses DRM-protected video, which Quartz can\u2019t play yet: (?:this build of Quartz has no Widevine|Widevine is switched off for this test run)\.$/.test(ni.bar.text), 'needs: the words', ni.bar && ni.bar.text);
     check(ni.bar && JSON.stringify(ni.bar.buttons) === JSON.stringify(['Open in Edge', 'Always use Edge for this site']), 'needs: one primary action + the always option', ni.bar && ni.bar.buttons);
     check(ni.bar && ni.bar.display === 'flex', 'needs: shown on the tab in front');
     const geo = await chrome.ev(`(() => { const t = window.__t.needs; const r = t.noteEl.getBoundingClientRect(); const w = t.viewEl.getBoundingClientRect(); return { barTop: Math.round(r.top), barH: Math.round(r.height), viewTop: Math.round(w.top), pos: getComputedStyle(t.noteEl).position, primaryBg: getComputedStyle(t.noteEl.querySelector('.drm-bar-primary')).backgroundColor }; })()`);
@@ -263,7 +263,7 @@ async function guest(urlRe) {
     // ---- 5. a known streaming site, by address ------------------------------------------------------
     await open('known', K + '/watch.html');
     const ki = await waitInfo('known', 'i && i.bar && i.bar.mode === "need"');
-    check(ki.bar.text === 'Test Stream uses DRM-protected video, which Quartz can\u2019t play yet.', 'known site: the bar names the service', ki.bar.text);
+    check(/^Test Stream uses DRM-protected video, which Quartz can\u2019t play yet: (?:this build of Quartz has no Widevine|Widevine is switched off for this test run)\.$/.test(ki.bar.text), 'known site: the bar names the service', ki.bar.text);
     check(JSON.stringify(ki.bar.buttons) === JSON.stringify(['Open in Edge', 'Always use Edge for Test Stream']), 'known site: buttons', ki.bar.buttons);
     check(await click('known', 'Always use Edge for Test Stream') === 'ok', 'known site: Always clicked');
     const sent = await waitInfo('known', 'i && i.bar && i.bar.mode === "sent"');

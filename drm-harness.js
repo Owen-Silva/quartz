@@ -208,6 +208,74 @@ function make(extraOpts) {
   eq('castlabs widevine available', t.m.widevine().available, true);
   t = make({ electron: { components: { status: () => ({}) } } });
   eq('castlabs, not downloaded', t.m.widevine().available, false);
+  eq('castlabs, not downloaded: says why', t.m.widevine().short, 'Widevine hasn\u2019t downloaded yet');
+  t = make({ electron: { components: { status: () => ({ wv: { title: 'Widevine Content Decryption Module', status: 'not-installed', version: '' } }) } } });
+  eq('castlabs, status not-installed: NOT available (it contains "installed")', [t.m.widevine().available, t.m.widevine().short], [false, 'Widevine hasn\u2019t finished downloading yet']);
+
+  // ---- 10-17: the streaming signature (VMP), the route Watch takes, licence refusals ----
+  const STOCK_WHY = 'this build of Quartz has no Widevine';
+  t = make();
+  eq('stock: no services, says why', [t.m.widevine().services, t.m.widevine().short], [false, STOCK_WHY]);
+  eq('stock: Watch route goes to Edge with the reason', t.m.route('https://www.disneyplus.com/video/1'), { edge: true, rule: '', reason: STOCK_WHY });
+  const CL = { components: { status: () => ({ wv: { title: 'Widevine Content Decryption Module', status: 'updated', version: '4.10.3112.0' } }), whenReady: () => Promise.resolve() } };
+  const EXE = 'C:\\q\\node_modules\\electron\\dist\\Quartz.exe';
+  const MARKER = path.join('C:\\q\\node_modules\\electron\\dist', '..', 'quartz-vmp.json');
+  const files = (o) => ({
+    execPath: EXE,
+    statSync: (p) => { if (o[p]) return o[p]; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
+    readFile: (p) => { if (o['text:' + p] !== undefined) return o['text:' + p]; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
+  });
+  const exeSt = { size: 246392320, mtimeMs: 1760000000000 };
+  const sigSt = { size: 1467, mtimeMs: 1760000005000 };
+  const good = JSON.stringify({ exe: 'Quartz.exe', exeSize: exeSt.size, exeMtimeMs: exeSt.mtimeMs, sigSize: sigSt.size, sigMtimeMs: sigSt.mtimeMs, signedAt: '2026-10-18T10:00:00Z' });
+  t = make(Object.assign({ electron: CL }, files({ [EXE]: exeSt })));
+  eq('castlabs, no Quartz.exe.sig: unsigned, CDM still available', [t.m.widevine().available, t.m.widevine().services, t.m.vmp().state], [true, false, 'unsigned']);
+  eq('unsigned: short reason', t.m.widevine().short, 'this copy of Quartz isn\u2019t signed for streaming services yet');
+  eq('unsigned: Watch route = Edge', t.m.route('https://www.primevideo.com/detail/X').edge, true);
+  t = make(Object.assign({ electron: CL }, files({ [EXE]: exeSt, [EXE + '.sig']: sigSt })));
+  eq('castlabs dev signature only (no marker): development', [t.m.vmp().state, t.m.widevine().services], ['development', false]);
+  t = make(Object.assign({ electron: CL }, files({ [EXE]: exeSt, [EXE + '.sig']: sigSt, ['text:' + MARKER]: good })));
+  eq('EVS-signed and unchanged: signed, services on', [t.m.vmp().state, t.m.widevine().services, t.m.widevine().short], ['signed', true, '']);
+  eq('signed: Watch route = Quartz', t.m.route('https://www.disneyplus.com/video/1'), { edge: false, rule: '', reason: '' });
+  eq('signed: Settings reason names EVS and the date', /Signed for streaming services \(castlabs EVS, 2026-10-18\)/.test(t.m.widevine().reason), true);
+  t = make(Object.assign({ electron: CL }, files({ [EXE]: { size: exeSt.size, mtimeMs: exeSt.mtimeMs + 60000 }, [EXE + '.sig']: sigSt, ['text:' + MARKER]: good })));
+  eq('Quartz.exe rebuilt after signing: stale, services off', [t.m.vmp().state, t.m.widevine().services], ['stale', false]);
+  eq('stale: says to sign again', /changed after it was signed/.test(t.m.widevine().short) && /drm-swap\.ps1 -ResignOnly/.test(t.m.widevine().reason), true);
+  t = make(Object.assign({ electron: CL }, files({ [EXE]: exeSt, [EXE + '.sig']: sigSt, ['text:' + MARKER]: JSON.stringify({ exe: 'electron.exe' }) })));
+  eq('a marker for another exe: development', t.m.vmp().state, 'development');
+  t = make(Object.assign({ electron: CL, vmpOverride: 'signed' }));
+  eq('test override signed', t.m.widevine().services, true);
+  t = make(Object.assign({ electron: CL, cdmOverride: 'missing', vmpOverride: 'signed' }));
+  eq('test override: CDM missing wins over signed', [t.m.widevine().available, t.m.widevine().services, t.m.route('https://www.hulu.com/watch/1').edge], [false, false, true]);
+  // the person's rule wins on a build that can play
+  t = make(Object.assign({ electron: CL, vmpOverride: 'signed' }));
+  t.m.setAlways('disney', true);
+  eq('rule: Disney+ still goes to Edge on a signed build', t.m.route('https://www.disneyplus.com/video/1'), { edge: true, rule: 'disney', reason: 'you chose to always watch Disney+ in Edge' });
+  eq('rule: Prime still plays here', t.m.route('https://www.primevideo.com/detail/X').edge, false);
+  t.m.setAlways('disney', false);
+  // onChange fires on every state change (Watch re-labels)
+  let changed = 0;
+  t = make({ electron: CL, vmpOverride: 'signed', onChange: () => { changed++; } });
+  t.m.setAlways('prime', true); t.m.setAlways('prime', false);
+  eq('onChange on each rule change', changed, 2);
+  // a CDM that fails to load says so
+  t = make({ electron: { components: { status: () => ({}), whenReady: () => Promise.reject(new Error('component updater offline')) } } });
+  const after = await t.m.whenCdmReady(500);
+  eq('CDM failed: not available, reason carried', [after.available, after.short], [false, 'Widevine didn\u2019t load (component updater offline)']);
+  // licence outcomes from a page are checked, then forwarded
+  t = make({ electron: CL });
+  t.ipc._on['drm:eme']({ sender: GUEST }, { kind: 'licence', outcome: 'no-licence', detail: 'license-request' });
+  t.ipc._on['drm:eme']({ sender: GUEST }, { kind: 'licence', outcome: 'refused', detail: 'NotSupportedError\u0007' });
+  t.ipc._on['drm:eme']({ sender: GUEST }, { kind: 'licence', outcome: 'pwned', detail: 'x' });
+  t.ipc._on['drm:eme']({ sender: CHROME }, { kind: 'licence', outcome: 'refused', detail: 'x' });
+  eq('licence signals forwarded (known outcomes, guests only, detail cleaned)', t.sent.filter(([c]) => c === 'drm:signal').map(([, p]) => [p.outcome, p.detail, p.wcId]),
+    [['no-licence', 'license-request', 7], ['refused', 'NotSupportedError', 7]]);
+  eq('bar text with a reason', S.barText('Disney+', STOCK_WHY), 'Disney+ uses DRM-protected video, which Quartz can\u2019t play yet: this build of Quartz has no Widevine.');
+  eq('refused text, no licence', S.refusedText('Prime Video', 'no-licence', 'this copy of Quartz isn\u2019t signed for streaming services yet'),
+    'Prime Video didn\u2019t send a licence for this video: this copy of Quartz isn\u2019t signed for streaming services yet.');
+  eq('refused text, refused, signed build', S.refusedText('Netflix', 'refused', ''), 'Netflix refused to license this video to Quartz.');
+  eq('refused text, key error', S.refusedText('', 'key-error', ''), 'This site sent a licence this copy of Quartz can\u2019t use.');
+  eq('licence outcomes', ['refused', 'no-licence', 'key-error', 'x', 7].map(S.isLicenceOutcome), [true, true, true, false, false]);
 
   // preload registration: refused cleanly on a session without the API
   t = make({ session: { defaultSession: {} } });

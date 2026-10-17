@@ -41,6 +41,12 @@ const LAUNCH_TIMEOUT_MS = 5000;
  * @param {Function} [o.spawn]       child_process.spawn (tests pass their own)
  * @param {Function} [o.exists]      fs.existsSync (tests pass their own)
  * @param {Object} [o.electron]      the electron module, for the castlabs `components` API
+ * @param {Function} [o.onChange]    called whenever state() may have changed (Watch re-labels)
+ * @param {string} [o.cdmOverride]   TEST ONLY: 'missing' = report no Widevine
+ * @param {string} [o.vmpOverride]   TEST ONLY: 'signed' | 'development' | 'unsigned' | 'stale'
+ * @param {string} [o.execPath]      process.execPath (tests pass their own)
+ * @param {Function} [o.statSync]    fs.statSync (tests pass their own)
+ * @param {Function} [o.readFile]    (path) => text (tests pass their own)
  */
 function create(o) {
   const opts = o || {};
@@ -53,6 +59,7 @@ function create(o) {
   let preloadTrouble = '';   // why the preload could not be added, '' when it was
   let hookTrouble = '';      // a page said the EME hook could not be installed
   let lastLaunch = null;     // { ok, how, reason, at } for Settings
+  let cdmTrouble = '';       // components.whenReady() failed, and why
 
   // ---- the "always use Edge" rules ----------------------------------------
 
@@ -119,28 +126,139 @@ function create(o) {
    * reports its status. Anything we cannot read counts as "not available",
    * with the reason, so the bar still shows rather than promising playback.
    */
-  function widevine() {
+  function cdm() {
     const electron = opts.electron || null;
     const components = electron && electron.components;
-    if (!components || typeof components.status !== 'function') {
-      return { available: false, reason: 'This Electron build has no Widevine module (stock Electron never ships one).' };
+    if (opts.cdmOverride === 'missing') {
+      return { available: false, reason: 'Widevine is switched off for this test run.', short: 'Widevine is switched off for this test run' };
     }
+    if (!components || typeof components.status !== 'function') {
+      return { available: false, reason: 'This Electron build has no Widevine module (stock Electron never ships one).', short: 'this build of Quartz has no Widevine' };
+    }
+    if (cdmTrouble) return { available: false, reason: 'Widevine could not be installed: ' + cdmTrouble, short: 'Widevine didn’t load (' + cdmTrouble.slice(0, 80) + ')' };
     try {
       const all = components.status() || {};
       for (const id of Object.keys(all)) {
         const c = all[id] || {};
         if (/widevine/i.test(String(c.title || id))) {
           const st = String(c.status || '');
-          const ok = /^(updated|up-to-date|installed|ready|new)$/i.test(st) || /installed|updated/i.test(st);
+          // 'not-installed' contains "installed": anything saying not/error/fail is NOT ready.
+          const bad = /not|error|fail|downloading|checking|updating/i.test(st);
+          const ok = !bad && (/^(updated|up-to-date|installed|ready|new)$/i.test(st) || /installed|updated/i.test(st));
+          const waiting = /not|downloading|checking|updating/i.test(st) && !/error|fail/i.test(st);
           return ok
-            ? { available: true, reason: 'Widevine ' + (c.version || '') + ' is installed (' + st + ').' }
-            : { available: false, reason: 'The Widevine module is ' + (st || 'not ready') + '.' };
+            ? { available: true, reason: 'Widevine ' + (c.version || '') + ' is installed (' + st + ').', short: '' }
+            : { available: false, reason: 'The Widevine module is ' + (st || 'not ready') + '.', short: waiting ? 'Widevine hasn’t finished downloading yet' : 'Widevine is ' + (st || 'not ready') };
         }
       }
-      return { available: false, reason: 'This build can load Widevine, but it has not been downloaded.' };
+      return { available: false, reason: 'This build can load Widevine, but it has not been downloaded.', short: 'Widevine hasn’t downloaded yet' };
     } catch (err) {
-      return { available: false, reason: 'Widevine status could not be read: ' + err.message };
+      return { available: false, reason: 'Widevine status could not be read: ' + err.message, short: 'Widevine’s status couldn’t be read' };
     }
+  }
+
+  // ---- the streaming signature (VMP) ---------------------------------------
+
+  /*
+   * A castlabs build plays Widevine with castlabs' DEVELOPMENT signature, which
+   * test streams accept and real services (Disney+, Prime Video, Netflix) refuse.
+   * They need a production VMP signature from castlabs EVS, made for the exe that
+   * actually runs: Quartz.exe, after rcedit. tools/drm-swap.ps1 makes it and, once
+   * EVS verified it, writes node_modules/electron/quartz-vmp.json with the exe's and
+   * the .sig's size and time. An Electron reinstall deletes that folder, and a
+   * Quartz.exe rebuild changes the exe, so both show here as "sign it again".
+   * Read once per run: the swap never runs while Quartz does.
+   */
+  const VMP_MARKER = 'quartz-vmp.json';
+  let vmpCache = null;
+  function vmp() {
+    if (opts.vmpOverride) return vmpWords(opts.vmpOverride, 'Quartz.exe', '');
+    if (vmpCache) return vmpCache;
+    const execPath = opts.execPath || process.execPath;
+    const exe = path.basename(execPath);
+    const statOf = opts.statSync || ((p) => fs.statSync(p));
+    const readText = opts.readFile || ((p) => fs.readFileSync(p, 'utf8'));
+    const sigPath = execPath + '.sig';
+    let state = 'unsigned';
+    let when = '';
+    try {
+      const sig = statOf(sigPath);
+      const self = statOf(execPath);
+      let marker = null;
+      try { marker = JSON.parse(readText(path.join(path.dirname(execPath), '..', VMP_MARKER))); } catch (err) { marker = null; }
+      if (!marker || typeof marker !== 'object' || String(marker.exe || '').toLowerCase() !== exe.toLowerCase()) {
+        state = 'development';
+      } else {
+        const same = (a, b) => Math.abs(Number(a) - Number(b)) < 2000;
+        const fresh = Number(marker.exeSize) === self.size && same(marker.exeMtimeMs, self.mtimeMs) &&
+          Number(marker.sigSize) === sig.size && same(marker.sigMtimeMs, sig.mtimeMs);
+        state = fresh ? 'signed' : 'stale';
+        when = typeof marker.signedAt === 'string' ? marker.signedAt.slice(0, 10) : '';
+      }
+    } catch (err) {
+      state = 'unsigned';
+    }
+    vmpCache = vmpWords(state, exe, when);
+    return vmpCache;
+  }
+
+  function vmpWords(state, exe, when) {
+    if (state === 'signed') return { state, reason: 'Signed for streaming services (castlabs EVS' + (when ? ', ' + when : '') + ').', short: '' };
+    if (state === 'stale') return { state, reason: exe + ' changed after it was signed for streaming (an Electron update or a rebuild), so services will refuse to play. Sign it again: tools\\drm-swap.ps1 -ResignOnly.', short: exe + ' changed after it was signed for streaming' };
+    if (state === 'development') return { state, reason: 'Only castlabs’ development signature is here: test streams play, but Disney+, Prime Video and Netflix refuse it. tools\\drm-swap.ps1 signs Quartz with your castlabs EVS account.', short: 'this copy of Quartz isn’t signed for streaming services yet' };
+    return { state: 'unsigned', reason: exe + ' has no streaming signature (' + exe + '.sig is missing), so services will refuse to play. tools\\drm-swap.ps1 signs it with your castlabs EVS account.', short: 'this copy of Quartz isn’t signed for streaming services yet' };
+  }
+
+  /*
+   * What the bars, Watch and Settings go by:
+   *   available  the Widevine CDM is installed (a test stream can play)
+   *   services   AND the build is signed for real services (Disney+, Prime ...)
+   *   reason     the whole story, for Settings
+   *   short      why services cannot play, for a bar or a toast ('' when they can)
+   */
+  function widevine() {
+    const c = cdm();
+    if (!c.available) return { available: false, services: false, reason: c.reason, short: c.short, vmp: null };
+    const v = vmp();
+    const services = v.state === 'signed';
+    return { available: true, services, reason: c.reason + ' ' + v.reason, short: services ? '' : v.short, vmp: v.state };
+  }
+
+  /*
+   * Where a click on a protected-video page should go, for Watch:
+   * { edge, rule, reason }. Edge when the person chose "Always use Edge" for the
+   * site, or when services cannot play here (reason = why); Quartz otherwise.
+   */
+  function route(url) {
+    load();
+    const key = DrmSites.ruleKeyFor(url, extraSites);
+    if (key && prefs.alwaysEdge.indexOf(key) !== -1) {
+      return { edge: true, rule: key, reason: 'you chose to always watch ' + DrmSites.ruleKeyName(key, extraSites) + ' in Edge' };
+    }
+    const wv = widevine();
+    if (!wv.services) return { edge: true, rule: '', reason: wv.short || 'Quartz can’t play protected video here' };
+    return { edge: false, rule: '', reason: '' };
+  }
+
+  /*
+   * castlabs ECS only (stock Electron: returns at once). Waits for the
+   * Widevine CDM component before the first window, as castlabs requires, but
+   * never longer than `ms`: a first run offline must still open Quartz. If the
+   * CDM lands later, the chrome hears drm:changed and the bars go away.
+   */
+  async function whenCdmReady(ms) {
+    const electron = opts.electron || null;
+    const components = electron && electron.components;
+    if (!components || typeof components.whenReady !== 'function') return widevine();
+    let timer = null;
+    const ready = Promise.resolve()
+      .then(() => components.whenReady())
+      .then(() => { cdmTrouble = ''; return 'ready'; },
+        (err) => { cdmTrouble = String((err && err.message) || err || 'no reason given').slice(0, 300); return 'failed'; });
+    const outcome = await Promise.race([ready, new Promise((r) => { timer = setTimeout(() => r('timeout'), ms || 4000); })]);
+    clearTimeout(timer);
+    if (outcome === 'timeout') ready.then(() => push());
+    return widevine();
   }
 
   // ---- Microsoft Edge -----------------------------------------------------
@@ -232,6 +350,8 @@ function create(o) {
 
   function push() {
     try { opts.send('drm:changed', state()); } catch (err) { /* no window yet */ }
+    // Watch labels its tiles "Opens in Edge" by the same state.
+    if (typeof opts.onChange === 'function') { try { opts.onChange(); } catch (err) { /* listener gone */ } }
   }
 
   // ---- startup and IPC ----------------------------------------------------
@@ -262,6 +382,10 @@ function create(o) {
         msg = { kind: 'request', keySystem: p.keySystem, granted: p.granted === true };
       } else if (p.kind === 'encrypted') {
         msg = { kind: 'encrypted', initDataType: typeof p.initDataType === 'string' ? p.initDataType.slice(0, 20) : '' };
+      } else if (p.kind === 'licence' && DrmSites.isLicenceOutcome(p.outcome)) {
+        // A Widevine build: the key system was granted, but the service never
+        // gave this page a working licence (refused, or a key it cannot use).
+        msg = { kind: 'licence', outcome: p.outcome, detail: typeof p.detail === 'string' ? p.detail.replace(/[^\x20-\x7e]/g, '').slice(0, 80) : '' };
       }
       if (!msg) return;
       msg.wcId = event.sender.id;
@@ -287,7 +411,7 @@ function create(o) {
     });
   }
 
-  return { start, state, openInEdge, setAlways, edge, widevine, _preloadId: () => preloadId };
+  return { start, state, openInEdge, setAlways, edge, widevine, route, vmp, whenCdmReady, _preloadId: () => preloadId };
 }
 
 module.exports = { create, PRELOAD_FILE };

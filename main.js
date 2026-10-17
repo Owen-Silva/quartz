@@ -200,6 +200,10 @@ if (process.argv.includes('--test-profile')) {
   const named = process.argv.find((a) => a.startsWith('--profile-name='));
   const suffix = named ? '-' + named.slice('--profile-name='.length).replace(/[^a-z0-9-]/gi, '') : '';
   app.setPath('userData', path.join(app.getPath('temp'), 'browser-test-profile' + suffix));
+  // QUARTZ_TEST_CDM=missing: a castlabs test copy with NO Widevine for real. The CDM is a
+  // component downloaded into userData on first run; a fresh test profile with the
+  // component updater off never gets it, so pages are refused exactly as on stock.
+  if (process.env.QUARTZ_TEST_CDM === 'missing') app.commandLine.appendSwitch('disable-component-update');
 }
 
 /*
@@ -424,6 +428,13 @@ const drm = drmModule.create({
   extraSites: DRM_TEST && process.env.QUARTZ_DRM_TEST_SITE
     ? [{ id: 'test', name: 'Test Stream', exact: [String(process.env.QUARTZ_DRM_TEST_SITE).toLowerCase()] }]
     : [],
+  // TEST ONLY: report the CDM missing (QUARTZ_TEST_CDM=missing) or the streaming
+  // signature in a given state (QUARTZ_TEST_VMP=signed|development|unsigned|stale),
+  // so the routing e2e can take both roads on one build. A live Quartz ignores both.
+  cdmOverride: DRM_TEST && process.env.QUARTZ_TEST_CDM === 'missing' ? 'missing' : '',
+  vmpOverride: DRM_TEST && /^(signed|development|unsigned|stale)$/.test(process.env.QUARTZ_TEST_VMP || '') ? process.env.QUARTZ_TEST_VMP : '',
+  // Watch labels "Opens in Edge" by this state: re-label when it changes.
+  onChange: () => { try { if (watch && typeof watch.drmChanged === 'function') watch.drmChanged(); } catch { /* Watch not built yet */ } },
 });
 
 /**
@@ -470,6 +481,9 @@ const watch = (() => {
       isBundledPage: (url) => isBundledPageUrl(url),
       send: (channel, payload) => send(channel, payload),
       openInEdge: (url) => drm.openInEdge(url),
+      // A protected title opens HERE when Widevine is in and Quartz is signed for
+      // streaming, and in Edge (with the reason) when not, or when the person chose Edge.
+      drmRoute: (url) => drm.route(url),
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,
@@ -1097,7 +1111,7 @@ app.on('second-instance', (_event, argv) => {
   w.focus();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // First of all: the log's start line says how the LAST run ended, and every
   // later hook (the window, each guest, the adblock engine) writes through it.
   // A log that cannot start leaves qlog null; Quartz runs exactly as before.
@@ -1130,6 +1144,15 @@ app.whenReady().then(() => {
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
   });
   toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
+  // castlabs ECS: the Widevine CDM must be ready before the first window
+  // (components.whenReady). Capped at 4 s so a first run offline still opens;
+  // on stock Electron this returns at once.
+  const cdm = await drm.whenCdmReady(4000);
+  if (!cdm.available) {
+    console.log('[drm] ' + cdm.reason);
+    // quartz.log lines are sentences (log-e2e checks every one).
+    if (qlog) qlog.log.line('Protected video is not available at start: ' + cdm.reason);
+  }
   createWindow();
 
   // A link that STARTED the browser: its tab goes in on top of the session the

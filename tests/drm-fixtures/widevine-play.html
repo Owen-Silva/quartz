@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>proto play</title>
+<script src="https://cdn.jsdelivr.net/npm/shaka-player@4.12.6/dist/shaka-player.compiled.js"></script>
+<style>body{margin:0;background:#000}video{width:640px;height:360px}</style></head>
+<body><video id="v" autoplay></video>
+<script>
+// Reports to main as console lines: proto:{json}. The last one has done:true.
+const q = new URLSearchParams(location.search);
+const RUN_MS = Number(q.get('ms') || 45000);
+const CLEAR = q.get('clear') === '1';
+const out = { ok: false, clear: CLEAR };
+const say = (o) => console.log('proto:' + JSON.stringify(o));
+const fail = (why) => { out.ok = false; out.error = why; out.done = true; say(out); };
+
+async function probe() {
+  // Which robustness levels this CDM will grant: SW_SECURE_* = L3 (software), HW_SECURE_ALL = L1.
+  const levels = {};
+  for (const r of ['SW_SECURE_CRYPTO', 'SW_SECURE_DECODE', 'HW_SECURE_CRYPTO', 'HW_SECURE_DECODE', 'HW_SECURE_ALL']) {
+    try {
+      await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"', robustness: r }] }]);
+      levels[r] = 'granted';
+    } catch (e) { levels[r] = 'refused:' + e.name; }
+  }
+  out.robustness = levels;
+  try {
+    const a = await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }]);
+    out.keySystemAccess = 'granted:' + a.keySystem;
+  } catch (e) { out.keySystemAccess = 'refused:' + e.name + ': ' + e.message; }
+  say({ phase: 'probe', robustness: out.robustness, keySystemAccess: out.keySystemAccess });
+}
+
+(async () => {
+  await probe();
+  if (!window.shaka) return fail('Shaka Player did not load (network?)');
+  shaka.polyfill.installAll();
+  if (!shaka.Player.isBrowserSupported()) return fail('shaka says browser unsupported');
+  const video = document.getElementById('v');
+  const player = new shaka.Player();
+  await player.attach(video);
+  out.licence = [];
+  player.getNetworkingEngine().registerResponseFilter((type, resp) => {
+    if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) {
+      out.licence.push({ status: resp.status, bytes: resp.data ? resp.data.byteLength : 0, uri: String(resp.uri).slice(0, 80) });
+      say({ phase: 'licence', status: resp.status, bytes: resp.data ? resp.data.byteLength : 0 });
+    }
+  });
+  player.addEventListener('error', (ev) => { out.shakaError = { code: ev.detail.code, category: ev.detail.category, data: String(ev.detail.data && ev.detail.data[0] || '').slice(0, 200) }; say({ phase: 'shaka-error', err: out.shakaError }); });
+  player.configure({
+    drm: { servers: { 'com.widevine.alpha': 'https://cwip-shaka-proxy.appspot.com/no_auth' } },
+    abr: { enabled: false },
+    streaming: { bufferingGoal: 10 },
+  });
+  const manifest = CLEAR
+    ? 'https://storage.googleapis.com/shaka-demo-assets/angel-one/dash.mpd'
+    : 'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine/dash.mpd';
+  out.manifest = manifest;
+  try {
+    await player.load(manifest);
+  } catch (e) {
+    out.shakaError = out.shakaError || { code: e.code, category: e.category, data: String(e.data && e.data[0] || '').slice(0, 200) };
+    return fail('load failed: shaka ' + e.code);
+  }
+  // Lowest video track: cheapest decode, still proves decryption.
+  const tracks = player.getVariantTracks().sort((a, b) => (a.height || 0) - (b.height || 0) || a.bandwidth - b.bandwidth);
+  out.variants = tracks.map((t) => (t.height || 0) + 'p');
+  if (tracks[0]) player.selectVariantTrack(tracks[0], true);
+  try { await video.play(); } catch (e) { out.playError = e.name + ': ' + e.message; }
+  say({ phase: 'loaded', variants: out.variants, keySystem: player.keySystem && player.keySystem(), drmInfo: player.drmInfo() ? player.drmInfo().keySystem : null });
+  const t0 = performance.now();
+  const timer = setInterval(() => {
+    const q2 = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : {};
+    const now = { currentTime: +video.currentTime.toFixed(2), totalFrames: q2.totalVideoFrames, dropped: q2.droppedVideoFrames, h: video.videoHeight, paused: video.paused, readyState: video.readyState };
+    if (performance.now() - t0 > RUN_MS || (now.currentTime > 12 && now.totalFrames > 100)) {
+      clearInterval(timer);
+      Object.assign(out, now);
+      out.keySystem = player.keySystem ? player.keySystem() : '';
+      out.ok = now.currentTime > 5 && now.totalFrames > 30 && !out.shakaError;
+      out.done = true;
+      say(out);
+      player.destroy();
+    }
+  }, 1000);
+})().catch((e) => fail('threw ' + (e && e.stack || e)));
+</script></body></html>
