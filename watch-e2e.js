@@ -613,19 +613,31 @@ if (require.main === module) {
     // Motion: frames over 20 ms while the lens steps rows (the focus band) and the wash cross-fades.
     await g.send('Performance.enable');
     const layouts = async () => { const m = await g.send('Performance.getMetrics'); const x = ((m.result && m.result.metrics) || []).find((v) => v.name === 'LayoutCount'); return x ? x.value : NaN; };
-    await g.ev(`(() => { window.__e2eFr = { d: [], on: true, wash: 0 }; let last = performance.now();
-      const f = (t) => { const x = window.__e2eFr; if (!x.on) return; x.d.push(t - last); last = t; requestAnimationFrame(f); }; requestAnimationFrame(f);
-      const mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.tagName === 'CANVAS' && m.target.classList.contains('on')) window.__e2eFr.wash++; });
+    await g.ev(`(() => { window.__e2eFr = { d: [], on: true, wash: 0, washT: [], long: [], step: -1, stepAt: 0, t0: performance.now() }; let last = performance.now();
+      const f = (t) => { const x = window.__e2eFr; if (!x.on) return; const dt = t - last; x.d.push(dt); last = t;
+        if (dt > 20 && x.d.length > 3) x.long.push({ at: Math.round(t - x.t0), dt: Math.round(dt * 10) / 10, step: x.step, sinceStep: Math.round(t - x.stepAt), washesBefore: x.wash });
+        requestAnimationFrame(f); }; requestAnimationFrame(f);
+      const mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.tagName === 'CANVAS' && m.target.classList.contains('on')) { const x = window.__e2eFr; x.wash++; x.washT.push(Math.round(performance.now() - x.t0)); } });
       document.querySelectorAll('#wash canvas').forEach((c) => mo.observe(c, { attributes: true, attributeFilter: ['class'] })); window.__e2eFr.mo = mo; return 1; })()`);
     await g.ev("(() => { const c = document.querySelector('#stack .lrow[data-d=\"0\"] .rt [tabindex=\"0\"]'); if (c) c.focus({ preventScroll: true }); return !!c; })()");
     const l0 = await layouts();
-    for (const kname of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft']) { await press(g, kname); await sleep(750); }
+    const STEPS = ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowLeft'];
+    for (let i = 0; i < STEPS.length; i++) { await g.ev('(window.__e2eFr.step = ' + i + ', window.__e2eFr.stepAt = performance.now(), 1)'); await press(g, STEPS[i]); await sleep(750); }
     await sleep(600);
-    const fr = await g.ev("(() => { const x = window.__e2eFr; x.on = false; x.mo.disconnect(); const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).length, max: Math.max.apply(null, d), wash: x.wash }; })()");
+    const fr = await g.ev("(() => { const x = window.__e2eFr; x.on = false; x.mo.disconnect(); const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).length, max: Math.max.apply(null, d), wash: x.wash, washT: x.washT, long: x.long }; })()");
     const l1 = await layouts();
     say('motion [' + (fs.existsSync(path.join(os.tmpdir(), 'claude-heavytest.mutex2')) ? 'UNDER LOAD (mutex2 held)' : 'clean (mutex2 absent)') + ']: ' + fr.n + ' frames, ' + fr.over + ' over 20 ms (max ' + fr.max.toFixed(1) + ' ms), ' + fr.wash + ' wash cross-fades, ' + (l1 - l0) + ' layouts over 10 steps');
     check(fr.n > 200, 'motion: the page rendered through the steps (' + fr.n + ' frames in ~8 s)', fr);
-    check(fr.over === 0, 'motion: 0 frames over 20 ms during the focus-band steps and wash cross-fades (' + fr.over + ', max ' + fr.max.toFixed(1) + ' ms)', fr);
+    // WHEN each long frame fell: its step, ms after that key, and how far from the FIRST wash
+    // cross-fade (the one-time decode and pre-blur of the first image). The lead's bar (watch-lead,
+    // 10-17): a long frame at the first wash paint, once, is not a blocker; one during steady
+    // stepping is. "At the first wash paint" = within 300 ms of the first cross-fade.
+    const firstWash = (fr.washT || [])[0];
+    const atFirstWash = (l) => firstWash !== undefined && Math.abs(l.at - firstWash) <= 300;
+    const steadyLong = (fr.long || []).filter((l) => !atFirstWash(l));
+    const firstLong = (fr.long || []).filter(atFirstWash);
+    say('motion timeline: long frames ' + JSON.stringify(fr.long || []) + '; wash cross-fades at ms ' + JSON.stringify(fr.washT || []) + ' (step key every ~770 ms from 0)');
+    check(steadyLong.length === 0, 'motion: 0 frames over 20 ms during steady stepping (' + steadyLong.length + (steadyLong.length ? ': ' + steadyLong.map((l) => l.dt + ' ms at step ' + l.step + ' +' + l.sinceStep + ' ms').join(', ') : '') + '); at the first wash paint (one-time decode): ' + firstLong.length + (firstLong.length ? ' (' + firstLong.map((l) => l.dt + ' ms').join(', ') + ')' : '') + '; all: ' + fr.over + ' over, max ' + fr.max.toFixed(1) + ' ms', fr.long);
     check(fr.wash > 0, 'motion: the wash cross-faded during the run (' + fr.wash + ' times; it needs a thumbnail to load from a real CDN)', fr.wash);
     measured = { frames: fr, layouts: l1 - l0 };
 
@@ -824,6 +836,12 @@ if (require.main === module) {
     say('boot 2 after Forget twice: ' + JSON.stringify(await fState()));
     let emptied = false;
     try { emptied = await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length === 0', 8000); } catch (e) { emptied = false; }
+    // What the page was last told and what it still draws: tells "main never pushed" from "the page kept rows".
+    const afterForget = await g.ev(`(() => { const s = window.__e2eSnap || {}; const rows = Array.isArray(s.rows) ? s.rows : [];
+      return { snaps: window.__e2eSnaps || 0, snapAge: s.now ? Date.now() - s.now : null, snapRows: rows.length, snapItems: rows.reduce((n, r) => n + ((r && r.items) || []).length, 0),
+        heads: [...document.querySelectorAll('#stack .lrow h2')].map((h) => h.textContent.trim().slice(0, 30)).slice(0, 6),
+        cards: [...document.querySelectorAll('#stack .lrow .rt > .card')].slice(0, 8).map((c) => ((c._item || {}).service || '?') + ':' + ((c._item || {}).title || '').slice(0, 20)) }; })()`).catch((e) => 'ev failed: ' + e.message.slice(0, 80));
+    say('boot 2 after Forget, the page: ' + JSON.stringify(afterForget));
     await sleep(500);
     check(emptied, 'Forget: the Watch page empties', await g.ev('document.querySelectorAll("#stack .lrow .rt > .card").length'));
     check(!fs.existsSync(CACHE), 'Forget: <profile>/watch-cache.json is deleted');
