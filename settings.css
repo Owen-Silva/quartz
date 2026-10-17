@@ -262,7 +262,7 @@ html[data-theme="light"] #settings-panel {
   align-items: center;
   gap: 4px;
   height: 60px;
-  padding: 6px 64px 0 32px;
+  padding: 0 64px 0 32px;
 }
 
 #settings-panel .set-page-title {
@@ -371,7 +371,8 @@ html[data-theme="light"] #settings-panel {
 }
 #settings-panel:not(.is-filtering) .set-section:not(.is-current) { display: none; }
 #settings-panel:not(.is-filtering) .set-section > .set-h { display: none; }
-#settings-panel .set-section:not([hidden]) ~ .set-section:not([hidden]) { margin-top: 26px; }
+/* only while searching: otherwise the one section on show sits right under its name */
+#settings-panel.is-filtering .set-section:not([hidden]) ~ .set-section:not([hidden]) { margin-top: 26px; }
 
 /* The heading shows over search results only, where it names the section
    a hit is in and opens it (the nav's row, said again where you look). */
@@ -1991,7 +1992,15 @@ html[data-theme="light"] #settings-panel {
     margin-left: -8px;
   }
   #settings-panel[data-pane="main"]:not(.is-filtering) .set-back .glyph { font-size: var(--fs-m); }
-  #settings-panel .set-main-head { padding: 6px 60px 0 20px; }
+  #settings-panel .set-main-head { padding: 0 60px 0 20px; }
   #settings-panel .set-body { padding: 6px 20px 24px; }
   #settings-panel .set-x { top: 15px; right: 14px; }
+  /* a row here drills in to its section: say so at its end */
+  #settings-panel .set-nav-item::after {
+    content: "\E76C";
+    flex: 0 0 auto;
+    color: var(--text-3);
+    font-family: var(--icon-font);
+    font-size: var(--fs-2xs);
+  }
 }
