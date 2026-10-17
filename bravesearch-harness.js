@@ -59,6 +59,40 @@ eq('videos: count', vidShape.results.length, 5);
 eq('videos: fields', [vidShape.results[1].duration, vidShape.results[1].creator, vidShape.results[1].views], ['4:01', 'Watch Channel 1', 2469134]);
 eq('news: not Brave shape', B.shapeAnswer('news', { type: 'news' }), null);
 
+/* ---- the rich web answer (same single request: infobox, faq, discussions, videos, news) ---- */
+ok('plain web answer carries no rich block', !('rich' in webShape));
+const rich = B.shapeAnswer('web', F.richWeb('claude ai'));
+eq('rich: results', rich.results.length, 10);
+eq('rich: modules present', Object.keys(rich.rich).sort(), ['discussions', 'faq', 'infobox', 'layout', 'news', 'videos']);
+eq('rich: layout follows Brave\'s mixed.main', rich.rich.layout.main.map((x) => x.t === 'web' ? x.i : x.t),
+  [0, 1, 'news', 2, 3, 'faq', 4, 'videos', 5, 6, 'discussions', 7, 8, 9]);
+eq('rich: infobox in the side, as mixed.side says', rich.rich.layout.side, [{ t: 'infobox' }]);
+eq('rich: sitelinks, javascript: button dropped', rich.results[0].sitelinks.map((s) => s.title), ['Log in', 'Pricing', 'Download apps', 'Claude Code', 'Help center']);
+eq('rich: cluster, javascript: row dropped', rich.results[1].cluster.length, 2);
+eq('rich: result thumbnail (https)', rich.results[1].thumb, 'https://imgs.search.brave.com/thumb/anthropic.jpg');
+eq('rich: site name from profile', [rich.results[0].site, rich.results[2].site], ['Claude', 'Wikipedia']);
+eq('rich: infobox fields', [rich.rich.infobox.title, rich.rich.infobox.category, rich.rich.infobox.website, rich.rich.infobox.provider.name],
+  ['Claude', 'Large language model', 'https://claude.ai/', 'Wikipedia']);
+eq('rich: infobox attributes (null value dropped, markup kept as TEXT)', rich.rich.infobox.attributes.map((a) => a[0]), ['Developer', 'Initial release', 'Type', 'License', 'Markup']);
+eq('rich: infobox profiles, javascript: dropped', rich.rich.infobox.profiles.map((p) => p.host), ['x.com', 'youtube.com']);
+eq('rich: faq', [rich.rich.faq.length, rich.rich.faq[0].host], [4, 'zdnet.com']);
+eq('rich: discussions keep forum data', [rich.rich.discussions[0].forum, rich.rich.discussions[0].answers, rich.rich.discussions[0].score], ['r/ClaudeAI', 214, '1.2k']);
+eq('rich: videos + news', [rich.rich.videos.length, rich.rich.news.length, rich.rich.videos[0].duration], [5, 4, '3:00']);
+ok('rich: no javascript: url anywhere', !JSON.stringify(rich).includes('javascript:'));
+const insecure = F.richWeb('x');
+insecure.infobox.results[0].thumbnail = { src: 'http://insecure.example/i.png' };
+eq('rich: http infobox image dropped', B.shapeAnswer('web', insecure).rich.infobox.thumb, '');
+const noTitle = F.richWeb('x');
+noTitle.infobox.results[0].title = '';
+ok('rich: an infobox with no title is not drawn', !('infobox' in B.shapeAnswer('web', noTitle).rich));
+// Indices: Brave's index counts the raw list; a dropped row must not shift the others.
+const raw = new Map([[0, 0], [2, 1], [3, 2]]);   // raw row 1 was dropped
+eq('layout: raw -> shaped index, dropped row skipped', B.shapeLayout({ main: [{ type: 'web', index: 0 }, { type: 'web', index: 1 }, { type: 'videos', all: true }, { type: 'web', index: 3 }, { type: 'web', index: 2 }, { type: 'weather' }] }, raw, 3, { videos: true }).main,
+  [{ t: 'web', i: 0 }, { t: 'videos' }, { t: 'web', i: 2 }, { t: 'web', i: 1 }]);
+eq('layout: no mixed -> results in order, modules after the third, infobox to the side', B.shapeLayout(null, new Map([[0, 0], [1, 1], [2, 2], [3, 3]]), 4, { news: true, faq: true, infobox: true }),
+  { top: [], main: [{ t: 'web', i: 0 }, { t: 'web', i: 1 }, { t: 'web', i: 2 }, { t: 'faq' }, { t: 'news' }, { t: 'web', i: 3 }], side: [{ t: 'infobox' }] });
+eq('layout: a module is placed once', B.shapeLayout({ main: [{ type: 'news', all: true }, { type: 'news', index: 1 }] }, new Map(), 0, { news: true }).main, [{ t: 'news' }]);
+
 eq('usage from headers', B.monthUsage(F.rateHeaders(1987)), { limit: 2000, remaining: 1987, resetSec: 1419704 });
 eq('usage absent', B.monthUsage({}), null);
 

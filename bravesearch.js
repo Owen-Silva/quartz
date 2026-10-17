@@ -7,7 +7,10 @@
 //   in    quartz-search:query {"q":"lunar eclipse","kind":"web"|"news"|"videos","offset":0,"seq":1}
 //   out   window.__applySearch(answer)
 //
-//   answer, ok:   { seq, q, kind, offset, ok: true, results: [...], more, altered, cached, webUrl }
+//   answer, ok:   { seq, q, kind, offset, ok: true, results: [...], more, altered, cached, webUrl, rich? }
+//                 rich (web only, and only when Brave sent any): infobox, faq, discussions, videos,
+//                 news, locations, and layout { main, top, side } from Brave's `mixed` (shapeLayout).
+//                 All of it comes in the same single web request: no extra parameter, no extra spend.
 //   answer, fail: { seq, q, kind, offset, ok: false, state, title, detail, webUrl, retry, settings }
 //
 // `state` is one of: 'no-key' | 'bad-key' | 'rate-limited' | 'quota' | 'plan' | 'offline' |
@@ -167,6 +170,216 @@ function shapeResult(kind, r) {
   return out;
 }
 
+/* --- the rest of ONE web answer -------------------------------------------------------------
+   A web search already carries more than ten blue links: an infobox, FAQ, discussions, video and
+   news strips, places, and per-result sitelinks (deep_results.buttons) and clusters. Brave sends
+   them in the SAME response, with no extra parameter and no extra request (result_filter, when
+   absent, means "all result types where data is available and the plan has them"), so drawing
+   them spends nothing. `mixed` is Brave's own layout of the page (main / top / side, in order);
+   the page follows it, so Brave's order is kept for the modules too. Every string is Brave's,
+   trimmed only for length; every link is http(s) and every image https, as for the results. */
+
+const RICH_MAX = { videos: 8, news: 8, faq: 6, discussions: 6, locations: 6, sitelinks: 6, cluster: 4, attributes: 12, profiles: 8 };
+
+function arr(value, max) { return Array.isArray(value) ? value.slice(0, max) : []; }
+
+/** A Brave `profile` (a site or a social account) -> { name, url, host }, or null without a link. */
+function shapeProfile(p) {
+  if (!p || typeof p !== 'object') return null;
+  const url = webHref(p.url);
+  if (!url) return null;
+  return { name: str(p.long_name || p.name, 120) || hostOf(url), url, host: hostOf(url) };
+}
+
+/** deep_results.buttons -> sitelinks [{ title, url }]: Brave's own titles, http(s) links only. */
+function shapeSitelinks(r) {
+  const deep = r && r.deep_results && typeof r.deep_results === 'object' ? r.deep_results : {};
+  const out = [];
+  for (const b of arr(deep.buttons, RICH_MAX.sitelinks * 2)) {
+    const url = b && webHref(b.url);
+    const title = b && str(b.title, 120);
+    if (url && title) out.push({ title, url });
+    if (out.length >= RICH_MAX.sitelinks) break;
+  }
+  return out;
+}
+
+/** result.cluster -> more results from the same site [{ title, url, description }]. */
+function shapeCluster(r) {
+  const out = [];
+  for (const c of arr(r && r.cluster, RICH_MAX.cluster * 2)) {
+    const url = c && webHref(c.url);
+    if (!url) continue;
+    out.push({ title: str(c.title, 300) || hostOf(url), url, description: str(c.description, 400) });
+    if (out.length >= RICH_MAX.cluster) break;
+  }
+  return out;
+}
+
+/** A web result, plus what only web results have. Extra keys appear only when Brave sent them. */
+function shapeWebResult(r) {
+  const out = shapeResult('web', r);
+  if (!out) return null;
+  const site = str(r.profile && r.profile.name, 120);
+  if (site && site.toLowerCase() !== out.host.toLowerCase()) out.site = site;
+  const thumb = imageHref(r.thumbnail && r.thumbnail.src);
+  if (thumb) out.thumb = thumb;
+  const sitelinks = shapeSitelinks(r);
+  if (sitelinks.length) out.sitelinks = sitelinks;
+  const cluster = shapeCluster(r);
+  if (cluster.length) out.cluster = cluster;
+  return out;
+}
+
+/** infobox.results[0] -> the knowledge panel, or null. Brave's words; attributes as [label, value]. */
+function shapeInfobox(block) {
+  const list = block && Array.isArray(block.results) ? block.results : [];
+  const ib = list.find((x) => x && typeof x === 'object');
+  if (!ib) return null;
+  const url = webHref(ib.url);
+  const title = str(ib.title, 200);
+  if (!title) return null;
+  const attributes = [];
+  for (const a of arr(ib.attributes, RICH_MAX.attributes * 2)) {
+    if (!Array.isArray(a)) continue;
+    const k = str(a[0], 80), v = str(a[1] == null ? '' : String(a[1]), 300);
+    if (k && v) attributes.push([k, v]);
+    if (attributes.length >= RICH_MAX.attributes) break;
+  }
+  const profiles = [];
+  for (const p of arr(ib.profiles, RICH_MAX.profiles * 2)) {
+    const shaped = shapeProfile(p);
+    if (shaped) profiles.push(shaped);
+    if (profiles.length >= RICH_MAX.profiles) break;
+  }
+  const provider = shapeProfile(ib.profile) || (Array.isArray(ib.providers) ? shapeProfile(ib.providers.find(Boolean)) : null);
+  return {
+    title,
+    url,
+    host: url ? hostOf(url) : '',
+    label: str(ib.label, 120),
+    category: str(ib.category, 120),
+    description: str(ib.description, 600),
+    longDesc: str(ib.long_desc, 2400),
+    thumb: imageHref(ib.thumbnail && (ib.thumbnail.src || ib.thumbnail.original)),
+    website: webHref(ib.website_url),
+    attributes,
+    profiles,
+    provider,
+  };
+}
+
+function shapeFaq(block) {
+  const out = [];
+  for (const f of arr(block && block.results, RICH_MAX.faq * 2)) {
+    if (!f || typeof f !== 'object') continue;
+    const url = webHref(f.url);
+    const question = str(f.question, 300), answer = str(f.answer, 1200);
+    if (!url || !question || !answer) continue;
+    const meta = f.meta_url && typeof f.meta_url === 'object' ? f.meta_url : {};
+    out.push({ question, answer, title: str(f.title, 300), url, host: str(meta.hostname, 120).replace(/^www\./, '') || hostOf(url), favicon: imageHref(meta.favicon) });
+    if (out.length >= RICH_MAX.faq) break;
+  }
+  return out;
+}
+
+function shapeDiscussions(block) {
+  const out = [];
+  for (const d of arr(block && block.results, RICH_MAX.discussions * 2)) {
+    const base = shapeResult('web', d);
+    if (!base) continue;
+    const data = d.data && typeof d.data === 'object' ? d.data : {};
+    const answers = Number(data.num_answers);
+    base.forum = str(data.forum_name, 120);
+    base.answers = Number.isFinite(answers) && data.num_answers !== null && data.num_answers !== '' ? answers : null;
+    base.score = str(data.score == null ? '' : String(data.score), 40);
+    base.question = str(data.question, 600);
+    base.topComment = str(data.top_comment, 600);
+    out.push(base);
+    if (out.length >= RICH_MAX.discussions) break;
+  }
+  return out;
+}
+
+function shapeList(kind, block, max) {
+  const out = [];
+  for (const r of arr(block && block.results, max * 2)) {
+    const shaped = shapeResult(kind, r);
+    if (shaped) out.push(shaped);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function shapeLocations(block) {
+  const out = [];
+  for (const l of arr(block && block.results, RICH_MAX.locations * 2)) {
+    if (!l || typeof l !== 'object') continue;
+    const url = webHref(l.url) || webHref(l.provider_url);
+    const title = str(l.title, 200);
+    if (!url || !title) continue;
+    const addr = l.postal_address && typeof l.postal_address === 'object' ? l.postal_address : {};
+    const rating = l.rating && typeof l.rating === 'object' ? l.rating : {};
+    const value = Number(rating.ratingValue), best = Number(rating.bestRating), count = Number(rating.reviewCount);
+    out.push({
+      title, url, host: hostOf(url),
+      address: str(addr.displayAddress || [addr.streetAddress, addr.addressLocality, addr.addressRegion].filter(Boolean).join(', '), 240),
+      rating: Number.isFinite(value) && value > 0 ? value : null,
+      best: Number.isFinite(best) && best > 0 ? best : null,
+      reviews: Number.isFinite(count) && count > 0 ? count : null,
+      phone: str(l.contact && l.contact.telephone, 40),
+      price: str(l.price_range, 20),
+      thumb: imageHref(l.thumbnail && l.thumbnail.src),
+      description: str(l.description, 400),
+    });
+    if (out.length >= RICH_MAX.locations) break;
+  }
+  return out;
+}
+
+const MODULES = ['infobox', 'faq', 'discussions', 'videos', 'news', 'locations'];
+
+/**
+ * Brave's `mixed` -> { main, top, side }: lists of { t: 'web', i } (i = the index in OUR results,
+ * after unusable rows were dropped) and { t: <module> }. A module appears once, where Brave first
+ * put it. Web results Brave's layout does not mention are appended in Brave's order, and so are
+ * modules with data that the layout leaves out, so nothing Brave sent is lost.
+ */
+function shapeLayout(mixed, rawToShaped, shapedCount, present) {
+  const m = mixed && typeof mixed === 'object' ? mixed : {};
+  const seenWeb = new Set(), seenMod = new Set();
+  const lane = (refs) => {
+    const out = [];
+    for (const ref of arr(refs, 200)) {
+      if (!ref || typeof ref !== 'object') continue;
+      const t = ref.type === 'web' ? 'web' : (MODULES.indexOf(ref.type) >= 0 ? ref.type : null);
+      if (!t) continue;
+      if (t === 'web') {
+        const idx = Number(ref.index);
+        const targets = ref.all === true ? Array.from(rawToShaped.keys()) : (Number.isInteger(idx) ? [idx] : []);
+        for (const raw of targets) {
+          const i = rawToShaped.get(raw);
+          if (i == null || seenWeb.has(i)) continue;
+          seenWeb.add(i); out.push({ t: 'web', i });
+        }
+      } else if (present[t] && !seenMod.has(t)) {
+        seenMod.add(t); out.push({ t });
+      }
+    }
+    return out;
+  };
+  const top = lane(m.top), main = lane(m.main), side = lane(m.side);
+  for (let i = 0; i < shapedCount; i++) if (!seenWeb.has(i)) main.push({ t: 'web', i });
+  let at = Math.min(main.length, 3);
+  for (const t of MODULES) {
+    if (!present[t] || seenMod.has(t)) continue;
+    // Not placed by Brave: the panel goes to the side, a strip after the first results.
+    if (t === 'infobox') side.push({ t });
+    else { main.splice(at, 0, { t }); at++; }
+  }
+  return { top, main, side };
+}
+
 /** A whole 200 answer -> { results, more, altered } or null when it is not Brave's shape. */
 function shapeAnswer(kind, json) {
   if (!json || typeof json !== 'object') return null;
@@ -181,16 +394,39 @@ function shapeAnswer(kind, json) {
     list = json.results;
   }
   const results = [];
-  for (const r of list) {
-    const shaped = shapeResult(kind, r);
-    if (shaped) results.push(shaped);
+  const rawToShaped = new Map();
+  for (let i = 0; i < list.length; i++) {
+    const shaped = kind === 'web' ? shapeWebResult(list[i]) : shapeResult(kind, list[i]);
+    if (shaped) { rawToShaped.set(i, results.length); results.push(shaped); }
   }
   const query = json.query && typeof json.query === 'object' ? json.query : {};
-  return {
+  const out = {
     results,
     more: query.more_results_available === true,
     altered: str(query.altered, MAX_QUERY) || '',
   };
+  if (kind === 'web') {
+    const rich = {
+      infobox: shapeInfobox(json.infobox),
+      faq: shapeFaq(json.faq),
+      discussions: shapeDiscussions(json.discussions),
+      videos: shapeList('videos', json.videos, RICH_MAX.videos),
+      news: shapeList('news', json.news, RICH_MAX.news),
+      locations: shapeLocations(json.locations),
+    };
+    const present = {};
+    let any = false;
+    for (const t of MODULES) {
+      present[t] = Array.isArray(rich[t]) ? rich[t].length > 0 : !!rich[t];
+      if (present[t]) any = true; else delete rich[t];
+    }
+    // Only an answer with something beyond the list carries `rich`: a plain one is unchanged.
+    if (any) {
+      rich.layout = shapeLayout(json.mixed, rawToShaped, results.length, present);
+      out.rich = rich;
+    }
+  }
+  return out;
 }
 
 /** A header's value whatever the headers object is (fetch Headers, or a plain object in tests). */
@@ -614,6 +850,7 @@ module.exports = {
   parseGuestLine,
   shapeResult,
   shapeAnswer,
+  shapeLayout,
   monthUsage,
   classifyStatus,
   classifyNetworkError,
