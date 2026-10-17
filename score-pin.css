@@ -69,7 +69,7 @@ html[data-material="solid"] .card { background: var(--pin-solid); }
 .logo img { width: 22px; height: 22px; object-fit: contain; }
 .ab { font-size: 14px; font-weight: 650; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark { font-size: var(--fs-2xs, 11px); font-weight: 650; color: var(--accent-text, var(--accent)); }
-.sc { position: relative; height: 26px; min-width: 30px; overflow: hidden; text-align: right; }
+.sc { position: relative; height: 26px; min-width: 44px; overflow: hidden; text-align: right; }
 .sc .n { position: absolute; right: 0; top: 0; font: 650 22px/26px var(--font-display); font-variant-numeric: tabular-nums; }
 .team.lo .ab, .team.lo .sc .n { color: var(--text-2); font-weight: 550; }
 .card[data-phase="pre"] .sc { visibility: hidden; }

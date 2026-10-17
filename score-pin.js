@@ -205,21 +205,23 @@
     $('stripTxt').textContent = ev.strip;
     strip.title = ev.strip;
     strip.hidden = false;
+    // The end state goes in the style and the animation runs from the old one, so nothing is
+    // left filling forwards once it is done.
+    line.style.opacity = '0';
     if (!reduced()) {
       strip.animate([{ transform: 'translateY(70%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 300, easing: EASE });
-      line.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: 'forwards' });
-    } else line.style.opacity = '0';
+      line.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160 });
+    }
     S.stripTimer = setTimeout(function () {
       var done = function () {
         strip.hidden = true;
-        line.getAnimations().forEach(function (a) { a.cancel(); });
-        line.style.opacity = '';
         S.strips.shift();
-        if (S.strips.length) showStrip();
+        if (S.strips.length) { showStrip(); return; }
+        line.style.opacity = '';
+        if (!reduced()) line.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240 });
       };
       if (reduced()) { done(); return; }
-      strip.animate([{ opacity: 1 }, { transform: 'translateY(-60%)', opacity: 0 }], { duration: 260, easing: 'ease-in' }).onfinish = done;
-      line.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, delay: 120, fill: 'forwards' });
+      strip.animate([{ opacity: 1 }, { transform: 'translateY(-60%)', opacity: 0 }], { duration: 240, easing: 'ease-in' }).onfinish = done;
     }, 5500);
   }
 
