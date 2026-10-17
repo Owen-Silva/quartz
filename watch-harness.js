@@ -819,7 +819,7 @@ async function mainTests() {
     const y = w.svc(s, 'youtube');
     check(y.state === 'error' && /reader failed \(boom\)/.test(y.reason), 'main: an adapter that throws is an error, not a crash', y.reason);
     check(w.svc(s, 'espn').state === 'ok' && s.rows.length > 0, 'main: the others still draw');
-    check(w.logs.filter((l) => /Watch could not read/.test(l)).length === 3, 'main: one log line per failed service', w.logs);
+    check(w.logs.filter((l) => /Lumen could not read/.test(l)).length === 3, 'main: one log line per failed service', w.logs);
     check(w.logs.some((l) => /Disney\+: timed out after 20 s \(1 page, 0 responses captured\)/.test(l)), 'main: the log line says what was read', w.logs);
   } finally { w.cleanup(); }
 

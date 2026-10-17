@@ -780,7 +780,7 @@ if (require.main === module) {
     try { one = await chrome.waitFor(WATCH_TABS + '.length === 1 && ' + ACTIVE_IS_WATCH, 8000); } catch (e) { one = false; }
     check(one, 'Ctrl+Alt+W (real keys into the chrome) opens one Watch tab and shows it');
     const tabInfo = await chrome.ev("(() => { const w = findWatchTab(); return w ? { title: w.title, strip: w.titleEl ? w.titleEl.textContent : null, omni: document.getElementById('omnibox').value, n: tabs.length } : null; })()");
-    check(!!tabInfo && tabInfo.strip === 'Watch' && tabInfo.title === 'Watch', 'the tab is named "Watch"', tabInfo);
+    check(!!tabInfo && tabInfo.strip === 'Lumen' && tabInfo.title === 'Lumen', 'the tab is named "Lumen"', tabInfo);
     check(!!tabInfo && tabInfo.omni === '', 'the omnibox is blank on the Watch tab', tabInfo && JSON.stringify(tabInfo.omni));
     // One synchronous step in the chrome: what the Watch page had been told (app.js syncWatchFront:
     // undefined = its dom-ready had not come yet, so it never heard "front"), then the new tab.
@@ -844,7 +844,7 @@ if (require.main === module) {
     await sleep(400);
     const pal = await chrome.ev("(() => { const l = document.getElementById('ts-list'); if (!l) return null; return [...l.querySelectorAll('[id^=\"ts-row-\"]')].map((r) => r.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 6); })()");
     // A row's text starts with its icon glyph (a private-use code point, e.g. U+E714), then the name.
-    check(Array.isArray(pal) && pal.some((t) => /^Watch(?![a-z])/.test(String(t).replace(/^[-\s]+/, ''))), 'the palette (commands, "watch") has a "Watch" row', pal);
+    check(Array.isArray(pal) && pal.some((t) => /^Lumen(?![a-z])/.test(String(t).replace(/^[-\s]+/, ''))), 'the palette (commands, "watch") has a "Lumen" row (Watch is its alias)', pal);
     await press(chrome, 'Enter');
     let palOpen = false;
     try { palOpen = await chrome.waitFor('!TabSearch.isOpen() && ' + WATCH_TABS + '.length === 1 && ' + ACTIVE_IS_WATCH, 5000); } catch (e) { palOpen = false; }
@@ -987,7 +987,7 @@ if (require.main === module) {
     await click(g, '#settings');
     let atWatch = null;
     try { atWatch = await chrome.waitFor("(() => { if (!Settings.isOpen()) return null; const c = document.querySelector('[aria-current=\"page\"]'); return c ? c.textContent.trim() : null; })()", 6000); } catch (e) { atWatch = null; }
-    check(!!atWatch && /Watch/.test(atWatch), 'the page\'s Settings button (quartz-watch:settings) opens Settings at the Watch section', atWatch);
+    check(!!atWatch && /Lumen/.test(atWatch), 'the page\'s Settings button (quartz-watch:settings) opens Settings at the Lumen section', atWatch);
     await chrome.ev('Settings.close(), 1');
     await chrome.waitFor('!Settings.isOpen()', 4000).catch(() => 0);
 
@@ -1191,9 +1191,9 @@ if (require.main === module) {
       ['Prime Video', /robot check/i], ['Prime Video', /timed out/i], ['Prime Video', /layout/i],
       ['ESPN', /shape|changed/i], ['ESPN', /offline|didn.t answer/i],
     ];
-    const lines = log.split(/\r?\n/).filter((l) => /Watch could not read /.test(l));
+    const lines = log.split(/\r?\n/).filter((l) => /Lumen could not read /.test(l));
     for (const [name, re] of want) {
-      const hit = lines.find((l) => new RegExp('Watch could not read ' + name + ': ').test(l) && re.test(l));
+      const hit = lines.find((l) => new RegExp('Lumen could not read ' + name + ': ').test(l) && re.test(l));
       check(!!hit, 'quartz.log has the forced failure: ' + name.replace('\\', '') + ' ' + re, hit ? hit.slice(-160) : lines.slice(-3).join(' | ').slice(0, 300));
     }
 
@@ -1296,7 +1296,7 @@ if (require.main === module) {
       + ' const b = [...s.querySelectorAll(".btn.primary")].find((x) => /Read now/.test(x.textContent || ""));'
       + ' const t = (s.textContent || "").replace(/\\s+/g, " ").trim();'
       + ' return { h1: h ? h.textContent.trim() : "", readNow: !!b, choose: /Choose services/.test(t), again: /reads your services again at/.test(t), empty: document.body.classList.contains("is-empty"), rows: document.querySelectorAll("#stack .lrow").length, text: t.slice(0, 200) }; })()').catch(() => null);
-    check(!!stage && /Watch data forgotten/.test(stage.h1) && stage.readNow, 'Forget: the stage says "Watch data forgotten" and offers "Read now"', stage);
+    check(!!stage && /Lumen data forgotten/.test(stage.h1) && stage.readNow, 'Forget: the stage says "Lumen data forgotten" and offers "Read now"', stage);
     // Forget takes the search cache too: the same query asks YouTube again.
     await chrome2.ev('Settings.close(), 1').catch(() => 0);
     await sleep(300);

@@ -376,7 +376,7 @@ function create(deps) {
       fs.writeFileSync(file, JSON.stringify(prefs, null, 2), { encoding: 'utf8', mode: 0o600 });
       return true;
     } catch (err) {
-      log('Watch settings could not be saved: ' + ((err && err.code) || 'unknown'));
+      log('Lumen settings could not be saved: ' + ((err && err.code) || 'unknown'));
       return false;
     }
   }
@@ -387,7 +387,7 @@ function create(deps) {
     const file = fileIn(CACHE_FILE);
     if (file) {
       try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (err) {
-        if (err && err.code !== 'ENOENT') log('Watch cache was unreadable and starts empty: ' + ((err && err.code) || 'bad JSON'));
+        if (err && err.code !== 'ENOENT') log('Lumen cache was unreadable and starts empty: ' + ((err && err.code) || 'bad JSON'));
       }
     }
     cache = cleanCache(raw);
@@ -404,7 +404,7 @@ function create(deps) {
       fs.renameSync(tmp, file);
       return true;
     } catch (err) {
-      log('Watch cache could not be saved: ' + ((err && err.code) || 'unknown'));
+      log('Lumen cache could not be saved: ' + ((err && err.code) || 'unknown'));
       try { fs.rmSync(tmp, { force: true }); } catch { /* nothing to tidy */ }
       return false;
     }
@@ -475,7 +475,7 @@ function create(deps) {
     if (game) return 'paused while ' + (game === 'valorant' ? 'VALORANT' : game) + ' is running';
     if (usesView(id)) {
       const free = freeGb();
-      if (free < minFreeGb) return 'paused: only ' + free.toFixed(1) + ' GB of memory free (Watch reads with at least ' + minFreeGb + ' GB)';
+      if (free < minFreeGb) return 'paused: only ' + free.toFixed(1) + ' GB of memory free (Lumen reads with at least ' + minFreeGb + ' GB)';
     }
     if (!forced && !windowShowing()) {
       const stale = !s.lastOkAt || now() - s.lastOkAt > STALE_FACTOR * everyMs(id);
@@ -817,7 +817,7 @@ function create(deps) {
     const r = await within(abortP ? Promise.race([run, abortP]) : run, budget + WATCHDOG_GRACE_MS, late);
     if (onAbort) { try { step.signal.removeEventListener('abort', onAbort); } catch { /* gone */ } }
     if (r === late || r === cancelled) {
-      if (r === late) log('Watch reader step ' + step.name + ' hit the watchdog after ' + Math.round((budget + WATCHDOG_GRACE_MS) / 1000) + ' s');
+      if (r === late) log('Lumen reader step ' + step.name + ' hit the watchdog after ' + Math.round((budget + WATCHDOG_GRACE_MS) / 1000) + ' s');
       handle.killed = r === late ? 'watchdog' : 'cancelled';
       destroyReader(handle.win);
       if (run && typeof run.catch === 'function') run.catch(() => { /* ended from outside */ });
@@ -863,7 +863,7 @@ function create(deps) {
     s.state = result.state;
     s.reason = result.reason;
     s.warnings = result.state === 'ok' ? result.warnings : [];
-    if (s.warnings.length) log('Watch read ' + svc.name + ' with warnings: ' + s.warnings.join('; '));
+    if (s.warnings.length) log('Lumen read ' + svc.name + ' with warnings: ' + s.warnings.join('; '));
     if (result.state === 'ok') {
       s.items = result.items.filter((it) => it.service === id).slice(0, ITEMS_PER_SERVICE);
       s.profile = result.profile || '';
@@ -877,7 +877,7 @@ function create(deps) {
     // An error keeps the last good rows: the page greys them with "as of".
     if (result.state !== 'ok') {
       const steps2 = Object.keys(read.steps).length;
-      log('Watch could not read ' + svc.name + ': ' + (result.state === 'signed-out' ? 'signed out' : result.reason)
+      log('Lumen could not read ' + svc.name + ': ' + (result.state === 'signed-out' ? 'signed out' : result.reason)
         + ' (' + steps2 + ' page' + (steps2 === 1 ? '' : 's') + ', ' + captured + ' response' + (captured === 1 ? '' : 's') + ' captured)');
     }
     saveCacheSoon();
@@ -959,8 +959,8 @@ function create(deps) {
         const LATE = {};
         let r = null;
         try {
-          r = await within(readService(id, token).then(() => null, (err) => { log('Watch reader error: ' + ((err && err.message) || err)); return null; }), readLimit, LATE);
-        } catch (err) { log('Watch reader error: ' + ((err && err.message) || err)); }
+          r = await within(readService(id, token).then(() => null, (err) => { log('Lumen reader error: ' + ((err && err.message) || err)); return null; }), readLimit, LATE);
+        } catch (err) { log('Lumen reader error: ' + ((err && err.message) || err)); }
         if (r === LATE) {
           token.dead = true;
           for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'watchdog');
@@ -969,7 +969,7 @@ function create(deps) {
           s.reason = 'it took longer than ' + Math.round(readLimit / 1000) + ' s, so the read was stopped';
           s.readAt = now();
           s.warnings = [];
-          log('Watch stopped reading ' + Shape.serviceById(id).name + ' after its ' + Math.round(readLimit / 1000) + ' s limit');
+          log('Lumen stopped reading ' + Shape.serviceById(id).name + ' after its ' + Math.round(readLimit / 1000) + ' s limit');
           saveCacheSoon();
         }
         reading = null;
@@ -1102,7 +1102,7 @@ function create(deps) {
   }
 
   function bgPause(why) {
-    if (why !== bgWaiting) log('Watch background refresh ' + why);
+    if (why !== bgWaiting) log('Lumen background refresh ' + why);
     bgWaiting = why;
     bgPausedUntil = now() + bgPauseMs;
   }
@@ -1240,7 +1240,7 @@ function create(deps) {
 
   function fatalSnapshot(what, err) {
     const msg = String((err && err.message) || err || 'unknown error').replace(/\s+/g, ' ').slice(0, 160);
-    const reason = 'Watch could not ' + what + ' (' + msg + ')';
+    const reason = 'Lumen could not ' + what + ' (' + msg + ')';
     if (reason !== lastFatal) { lastFatal = reason; log(reason); }   // once per distinct failure, not every push
     return { v: 1, now: now(), fatal: reason };
   }
@@ -1248,7 +1248,7 @@ function create(deps) {
   /** Something that should never fail did: log it and put the reason on every Watch page. */
   function failLoud(what, err) {
     let snap;
-    try { snap = fatalSnapshot(what, err); } catch { snap = { v: 1, now: Date.now(), fatal: 'Watch could not ' + what }; }
+    try { snap = fatalSnapshot(what, err); } catch { snap = { v: 1, now: Date.now(), fatal: 'Lumen could not ' + what }; }
     for (const g of Array.from(guests)) pushTo(g, '__applyWatch', snap);
   }
 
@@ -1366,7 +1366,7 @@ function create(deps) {
 
   async function openTitle(url) {
     const clean = Shape.cleanHttps(url);
-    if (!clean || (!Shape.serviceForUrl(clean) && !isTmdbPage(clean))) return { ok: false, how: '', reason: 'Watch only opens pages on the services it reads' };
+    if (!clean || (!Shape.serviceForUrl(clean) && !isTmdbPage(clean))) return { ok: false, how: '', reason: 'Lumen only opens pages on the services it reads' };
     const route = routeFor(clean);
     if (test.openStub) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
@@ -1410,7 +1410,7 @@ function create(deps) {
     let ok = true;
     let freed = 0;
     if (file) { try { freed = fs.statSync(file).size; } catch { freed = 0; } }
-    if (file) { try { fs.rmSync(file, { force: true }); } catch (err) { ok = false; log('Watch cache could not be deleted: ' + ((err && err.code) || 'unknown')); } }
+    if (file) { try { fs.rmSync(file, { force: true }); } catch (err) { ok = false; log('Lumen cache could not be deleted: ' + ((err && err.code) || 'unknown')); } }
     if (saveTimer) { clearTimer(saveTimer); saveTimer = null; }
     pushAll();
     return { ok, freed: ok ? freed : 0, reason: ok ? '' : 'the cache file could not be deleted' };
@@ -1471,13 +1471,13 @@ function create(deps) {
     if (answer.state === 'ok') {
       rememberSearch(ck, job, answer);
     } else if (answer.state !== 'empty') {
-      log('Watch search on TMDB failed: ' + (answer.state || 'error'));   // the state only: never the key, never the query
+      log('Lumen search on TMDB failed: ' + (answer.state || 'error'));   // the state only: never the key, never the query
     }
     return answer;
   }
 
   async function searchYouTube(q, p, job) {
-    if (!p.enabled.youtube) return { ok: false, state: 'off', reason: 'YouTube is turned off in Settings > Watch', items: [] };
+    if (!p.enabled.youtube) return { ok: false, state: 'off', reason: 'YouTube is turned off in Settings > Lumen', items: [] };
     const yt = adapters.youtube;
     if (!yt || typeof yt.searchUrl !== 'function' || typeof yt.parseSearch !== 'function') {
       return { ok: false, state: 'error', reason: 'this build has no YouTube search', items: [] };
@@ -1503,12 +1503,12 @@ function create(deps) {
       let items = [];
       try { items = Shape.cleanItems(yt.parseSearch(r.text || ''), 20); } catch { items = []; }
       answer = items.length ? { ok: true, state: 'ok', reason: '', items }
-        : { ok: false, state: 'error', reason: "YouTube's results page had nothing Watch could read (YouTube changed its layout?)", items: [] };
+        : { ok: false, state: 'error', reason: "YouTube's results page had nothing Lumen could read (YouTube changed its layout?)", items: [] };
     }
     if (answer.ok) {
       rememberSearch(key, job, answer);
     } else {
-      log('Watch search on YouTube failed: ' + answer.reason);
+      log('Lumen search on YouTube failed: ' + answer.reason);
     }
     return answer;
   }
@@ -1557,10 +1557,10 @@ function create(deps) {
     if (!contents || (typeof contents.isDestroyed === 'function' && contents.isDestroyed())) return;
     contents.on('console-message', function (details) {
       try { handleGuestLine(contents, messageOf(details, arguments)); } catch (err) {
-        log('Watch guest line failed: ' + ((err && err.message) || 'error'));
+        log('Lumen guest line failed: ' + ((err && err.message) || 'error'));
       }
     });
-    const left = () => { try { schedule(); } catch (err) { log('Watch could not re-plan its reads: ' + ((err && err.message) || 'error')); } };
+    const left = () => { try { schedule(); } catch (err) { log('Lumen could not re-plan its reads: ' + ((err && err.message) || 'error')); } };
     contents.on('destroyed', () => { if (dropGuest(contents)) left(); });
     contents.on('did-start-navigation', (_e, to, inPage, isMain) => {
       if (isMain && !inPage && !isWatchPage(String(to)) && dropGuest(contents)) left();

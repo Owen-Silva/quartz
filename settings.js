@@ -119,7 +119,7 @@
     'Privacy': '\uE72E',                  // Lock
     'Spotify': '\uE7F6',                  // Headphone
     'Stocks': '\uEAFC',                   // Market
-    'Watch': '\uE7F4',                    // TVMonitor
+    'Lumen': '\uE7F4',                    // TVMonitor
     'Phone': '\uE8EA',                    // CellPhone
     'Shortcuts': '\uE765',                // KeyboardClassic
     'About': '\uE946'                     // Info
@@ -3749,7 +3749,7 @@
       ? 'This build of Quartz can play DRM-protected video. ' + (wv.reason || '')
       : (wv.available
         ? 'Widevine is installed, but streaming services will refuse to play here yet. ' + (wv.reason || '') +
-          ' Until then Watch opens Prime Video, Disney+ and the rest in Microsoft Edge, and their pages offer Edge.'
+          ' Until then Lumen opens Prime Video, Disney+ and the rest in Microsoft Edge, and their pages offer Edge.'
         : 'Quartz can’t play DRM-protected video yet (Prime Video, Netflix, Disney+, Spotify and similar): ' +
           String(wv.reason || 'no reason was given').replace(/[.\s]+$/, '') + '. ' +
           'On those pages a bar offers to open the same page in Microsoft Edge.');
@@ -5770,9 +5770,9 @@
   }
 
   function buildWatch() {
-    var s = section('Watch');
+    var s = section('Lumen');
     s.appendChild(el('p', 'set-hint',
-      'Watch (Ctrl+Alt+W, or “Watch” in the command palette) shows Continue watching, ' +
+      'Lumen (Ctrl+Alt+W, or “Lumen” or “Watch” in the command palette) shows Continue watching, ' +
       'picks and live sports from the services you are signed in to in Quartz. Reading happens ' +
       'in a hidden page: when it comes on screen (anything over 10 min old), every 15 min while it ' +
       'stays there, and hourly in the background if the switch below is on; nothing leaves this PC.'));
@@ -5886,7 +5886,7 @@
   function watchCall(method, args, slot, failed, after) {
     var api = watchApi();
     if (!api || typeof api[method] !== 'function') {
-      wtResult[slot] = { ok: false, text: failed + ': this build has no Watch support.' };
+      wtResult[slot] = { ok: false, text: failed + ': this build has no Lumen support.' };
       renderWatch();
       return;
     }
@@ -5962,12 +5962,12 @@
     if (!field) return;
     if (!watchApi()) {
       field.appendChild(el('p', 'set-typing-notice',
-        'This build has no Watch support. Restart Quartz to pick up the newer build.'));
+        'This build has no Lumen support. Restart Quartz to pick up the newer build.'));
       return;
     }
     if (!wtState || !Array.isArray(wtState.services)) {
       field.appendChild(el('p', wtAskFailed ? 'set-note' : 'set-hint',
-        wtAskFailed ? 'Watch settings could not be read: ' + wtAskFailed + '.' : 'Reading Watch settings…'));
+        wtAskFailed ? 'Lumen settings could not be read: ' + wtAskFailed + '.' : 'Reading Lumen settings…'));
       return;
     }
     wtState.services.forEach(function (v, i) {
@@ -5977,7 +5977,7 @@
         wtFocus = '[data-field="watchservices"] [data-watch-svc="' + v.id + '"]';
         watchCall('setEnabled', [v.id, next], 'svc:' + v.id, 'That switch could not be saved', function (ans) {
           wtResult['svc:' + v.id] = ans.error ? { ok: false, text: ans.error }
-            : { ok: true, text: v.name + ' is ' + (next ? 'on.' : 'off. Its rows leave Watch.') };
+            : { ok: true, text: v.name + ' is ' + (next ? 'on.' : 'off. Its rows leave Lumen.') };
         });
       }));
       var sw = box.lastChild;
@@ -6112,7 +6112,7 @@
         wtShowKey = false;
         wtFocus = '#set-watch-key';
         watchCall('setTmdbKey', [''], 'key', 'That key could not be removed', function (ans) {
-          wtResult.key = ans.error ? { ok: false, text: ans.error } : { ok: true, text: 'Key removed. Watch searches YouTube and the rows it has read.' };
+          wtResult.key = ans.error ? { ok: false, text: ans.error } : { ok: true, text: 'Key removed. Lumen searches YouTube and the rows it has read.' };
         });
       }));
     }
@@ -6130,8 +6130,8 @@
 
     var hint = el('p', 'set-hint');
     hint.appendChild(document.createTextNode(has
-      ? 'Watch’s search also finds where any film or show streams, across every service. '
-      : 'Without a key, Watch searches YouTube and the rows it has read. A free TMDB key adds searching every service: where any film or show streams, rents or is free. '));
+      ? 'Lumen’s search also finds where any film or show streams, across every service. '
+      : 'Without a key, Lumen searches YouTube and the rows it has read. A free TMDB key adds searching every service: where any film or show streams, rents or is free. '));
     var signup = (tm.signupUrl && /^https:\/\//.test(tm.signupUrl)) ? tm.signupUrl : 'https://www.themoviedb.org/settings/api';
     var a = el('a', 'set-gal-link', 'Get a free key');
     a.href = signup;
@@ -6150,7 +6150,7 @@
     if (!field) return;
     if (!watchApi() || !wtState) return;
     var b = wtState.background || { on: true, waiting: '', lastAt: 0 };
-    var row = switchRow('Keep Watch up to date in the background', !!b.on, function (on) {
+    var row = switchRow('Keep Lumen up to date in the background', !!b.on, function (on) {
       if (wtBusy) return;
       wtFocus = '.set-watch-bg';
       watchCall('setBackground', [on], 'background', 'The background setting could not be saved');
@@ -6177,7 +6177,7 @@
     if (!watchApi() || !wtState) return;
     var size = watchBytes(wtState.cacheBytes);
     var row = el('div', 'set-path-row');
-    var label = wtForgetArmed ? 'Press again to forget Watch data' : 'Forget Watch data (' + size + ')';
+    var label = wtForgetArmed ? 'Press again to forget Lumen data' : 'Forget Lumen data (' + size + ')';
     var b = textButton(wtBusy === 'forget' ? 'Forgetting…' : label, 'set-text set-watch-forget', function () {
       if (wtBusy) return;
       if (!wtForgetArmed) {
@@ -6198,16 +6198,16 @@
       window.clearTimeout(wtForgetTimer);
       var freed = size;
       wtFocus = '.set-watch-forget';
-      watchCall('forget', [], 'forget', 'Watch data could not be forgotten', function (ans) {
+      watchCall('forget', [], 'forget', 'Lumen data could not be forgotten', function (ans) {
         var f = ans.forgot || {};
         wtResult.forget = f.ok === false ? { ok: false, text: 'Could not forget: ' + (f.reason || 'no reason given') + '.' }
-          : { ok: true, text: 'Forgot ' + freed + ' of Watch data. Settings and the key stay.' };
+          : { ok: true, text: 'Forgot ' + freed + ' of Lumen data. Settings and the key stay.' };
       });
     });
     row.appendChild(b);
     field.appendChild(row);
     field.appendChild(el('p', 'set-hint',
-      'Deletes the rows Watch has read and cached on this PC. The services keep your history; the next read fills it again.'));
+      'Deletes the rows Lumen has read and cached on this PC. The services keep your history; the next read fills it again.'));
     var res = watchResultRow('forget');
     if (res) field.appendChild(res);
   }

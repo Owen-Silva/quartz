@@ -154,7 +154,7 @@ module.exports = async function (check) {
 
   /* --- states ---------------------------------------------------------------------------- */
   const r401 = await Tmdb.search('x', V3, fake({ search: () => ({ status: 401, json: { success: false, status_code: 7, status_message: 'Invalid API key: You must be granted a valid key.' }, error: null }) }));
-  check(r401.state === 'bad-key' && /TMDB rejected the key; check it in Settings > Watch/.test(r401.reason) && r401.results.length === 0, '401 -> bad-key', r401);
+  check(r401.state === 'bad-key' && /TMDB rejected the key; check it in Settings > Lumen/.test(r401.reason) && r401.results.length === 0, '401 -> bad-key', r401);
   const r429 = await Tmdb.search('x', V3, fake({ search: () => ({ status: 429, json: null, error: null }) }));
   check(r429.state === 'rate-limited' && r429.reason, '429 -> rate-limited', r429);
   const roff = await Tmdb.search('x', V3, fake({ search: () => ({ status: 0, json: null, error: { code: 'offline', detail: 'This PC is offline' } }) }));
@@ -213,7 +213,7 @@ module.exports = async function (check) {
   }
   check(threw === 0 && shaped === junk.length, 'junk: ' + junk.length + ' bad inputs, no throw, all shaped', { threw, shaped });
   check(junkOut[0].state === 'empty' && junkOut[2].state === 'empty', 'junk: no query -> empty');
-  check(junkOut[3].state === 'bad-key' && /Settings > Watch/.test(junkOut[3].reason), 'junk: no key -> bad-key, says where to add one');
+  check(junkOut[3].state === 'bad-key' && /Settings > Lumen/.test(junkOut[3].reason), 'junk: no key -> bad-key, says where to add one');
   check(junkOut[4].state === 'bad-key', 'junk: a key with spaces -> bad-key, never sent');
   check(junkOut[6].state === 'error' && junkOut[9].state === 'error' && junkOut[9].reason.indexOf(V3) === -1, 'junk: no / throwing fetchJson -> error, key not in reason', junkOut[9].reason);
   check(junkOut[8].results.length === 6, 'junk: bad region/max fall back to US / 6');

@@ -415,7 +415,7 @@ function firstRun(now) {
 function mixedFailures(now) {
   const t = typeof now === 'number' ? now : Date.now();
   const c = fullCache(t);
-  c.youtube.paused = 'paused: only 1.2 GB of memory free (Watch reads with at least 1.5 GB)';
+  c.youtube.paused = 'paused: only 1.2 GB of memory free (Lumen reads with at least 1.5 GB)';
   c.youtube.warnings = ['Continue watching: timed out after 20 s'];
   c.disney = Object.assign(c.disney, {
     state: 'error',
@@ -481,7 +481,7 @@ function searchAnswerFailed(q, seq) {
   const a = searchAnswer(q, seq);
   a.youtube = {
     ok: false, state: 'error',
-    reason: "YouTube's results page had nothing Watch could read (YouTube changed its layout?)",
+    reason: "YouTube's results page had nothing Lumen could read (YouTube changed its layout?)",
     items: []
   };
   return a;

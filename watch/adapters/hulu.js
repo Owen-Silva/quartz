@@ -54,9 +54,9 @@ var CAPTURE = [CONTENT_RE, PROFILE_RE];
 
 var UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
-var SIGNED_OUT_REASON = 'sign in to hulu.com in Quartz to see your Hulu rows (or, if you watch Hulu inside Disney+, turn Hulu off in Settings > Watch)';
+var SIGNED_OUT_REASON = 'sign in to hulu.com in Quartz to see your Hulu rows (or, if you watch Hulu inside Disney+, turn Hulu off in Settings > Lumen)';
 var PICKER_REASON = "Hulu is asking who's watching; open hulu.com in Quartz and pick a profile";
-var MOVED_REASON = 'hulu.com sent Quartz to Disney+: Hulu now plays inside Disney+ for this account, and Watch reads it there (turn Hulu off in Settings > Watch)';
+var MOVED_REASON = 'hulu.com sent Quartz to Disney+: Hulu now plays inside Disney+ for this account, and Lumen reads it there (turn Hulu off in Settings > Lumen)';
 
 var DECOY_RE = /hero|marquee|masthead|billboard|brand|promo|upsell|spotlight|network|channel|live[\s_-]*tv|ad[\s_-]*slot/i;
 var RESUME_RE = /keep[\s_-]*watching|continue[\s_-]*watching|\bresume\b|pick up where/i;

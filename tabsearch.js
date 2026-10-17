@@ -1337,7 +1337,7 @@
     });
     // Watch, the streaming hub. Same story as Files: app.js hardcodes the combo.
     list.push({
-      id: 'watch', glyph: GLYPH.video, label: 'Watch',
+      id: 'watch', glyph: GLYPH.video, label: 'Lumen', aliases: ['watch'],
       hint: 'Continue watching, picks and live sports from your services', keys: ['Ctrl', 'Alt', 'W'],
       run: function () { callGlobal(function () { return typeof openWatchTab === 'function' ? openWatchTab : null; }); }
     });
@@ -1440,11 +1440,17 @@
     if (!words || !words.length) return true;
     var label = String(cmd.label || '').toLowerCase();
     var hint = String(cmd.hint || '').toLowerCase();
+    var alias = commandAliases(cmd);
     for (var i = 0; i < words.length; i++) {
       var w = words[i];
-      if (label.indexOf(w) < 0 && hint.indexOf(w) < 0) return false;
+      if (label.indexOf(w) < 0 && hint.indexOf(w) < 0 && alias.indexOf(w) < 0) return false;
     }
     return true;
+  }
+
+  /** A command's old names (Lumen was "Watch"), lowercased and space-joined: they match like the label. */
+  function commandAliases(cmd) {
+    return Array.isArray(cmd.aliases) ? cmd.aliases.join(' ').toLowerCase() : '';
   }
 
   /** 0 label starts with the query, 1 label contains it, 2 the hint carried it. */
@@ -1453,6 +1459,8 @@
     if (!q) return 0;
     var label = String(cmd.label || '').toLowerCase();
     if (label.indexOf(q) === 0) return 0;
+    var aliases = Array.isArray(cmd.aliases) ? cmd.aliases : [];
+    for (var i = 0; i < aliases.length; i++) if (String(aliases[i]).toLowerCase().indexOf(q) === 0) return 0;
     if (label.indexOf(q) >= 0) return 1;
     return 2;
   }

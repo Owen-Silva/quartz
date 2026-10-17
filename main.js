@@ -496,10 +496,10 @@ const watch = (() => {
     });
   } catch (err) {
     const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);
-    console.error('[watch] Watch could not start: ' + why);
-    setImmediate(() => { try { if (qlog) qlog.log.line('Watch could not start: ' + why); } catch { /* log not ready */ } });
+    console.error('[watch] Lumen could not start: ' + why);
+    setImmediate(() => { try { if (qlog) qlog.log.line('Lumen could not start: ' + why); } catch { /* log not ready */ } });
     for (const ch of ['watch:describe', 'watch:set-enabled', 'watch:set-leagues', 'watch:set-tmdb-key', 'watch:forget', 'watch:test-tmdb', 'watch:refresh', 'watch:set-background']) {
-      try { ipcMain.handle(ch, () => { throw new Error('Watch could not start: ' + why); }); } catch { /* already registered */ }
+      try { ipcMain.handle(ch, () => { throw new Error('Lumen could not start: ' + why); }); } catch { /* already registered */ }
     }
     return { failed: why, stop() {}, windowShown() {}, windowFocused() {}, isReaderContents() { return false; } };
   }

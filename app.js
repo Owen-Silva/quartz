@@ -4609,7 +4609,7 @@ function handleWatchPageLine(tab, viewEl, text) {
   if (typeof text !== 'string' || text.trim() !== 'quartz-watch:settings {}') return false;
   const settings = window.Settings;
   if (!settings || typeof settings.open !== 'function') return false;
-  try { settings.open('Watch'); } catch (err) { return false; }
+  try { settings.open('Lumen'); } catch (err) { return false; }
   return true;
 }
 
@@ -5381,7 +5381,7 @@ function shortLabelFor(url) {
   // The folder browser is named, not hostnamed: the chip says Files from the
   // moment the tab is made, instead of flashing "New tab" until <title> lands.
   if (isFilesUrl(url)) return 'Files';
-  if (isWatchUrl(url)) return 'Watch';
+  if (isWatchUrl(url)) return 'Lumen';
   // The Phone page the same way: "Phone" from the first frame, not "New tab"
   // until phone.html's own <title> arrives.
   if (isPhoneUrl(url)) return 'Phone';

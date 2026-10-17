@@ -359,7 +359,7 @@ run('watch-auto-e2e', async (k) => {
   await click(g, '#settings');
   let sw = null;
   try { sw = await chrome2.waitFor("(() => { const b = document.querySelector('.set-watch-bg'); if (!Settings.isOpen() || !b) return null; return { label: b.textContent.trim(), on: b.getAttribute('aria-checked'), hint: (b.nextElementSibling || {}).textContent || '', state: (document.querySelector('.set-watch-bg-state') || {}).textContent || '' }; })()", 8000); } catch (e) { sw = null; }
-  check(!!sw && sw.label === 'Keep Watch up to date in the background' && sw.on === 'true', 'settings: "Keep Watch up to date in the background", on', sw);
+  check(!!sw && sw.label === 'Keep Lumen up to date in the background' && sw.on === 'true', 'settings: "Keep Lumen up to date in the background", on', sw);
   check(!!sw && /once an hour/.test(sw.hint) && /2\.5 GB/.test(sw.hint) && /battery saver/.test(sw.hint), 'settings: one line says what it costs and when it skips', sw && sw.hint);
   await click(chrome2, '.set-watch-bg');
   let offNow = null;

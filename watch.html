@@ -9,7 +9,7 @@
      createElement + textContent only (watch.js); links never navigate this
      page, a click asks main (watch-main.js) to open the title. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
-<title>Watch</title>
+<title>Lumen</title>
 <!-- Watch, Quartz's streaming hub. A bundled, preload-less file:// guest
      like search.html: the theme, palette and accent arrive in the URL (read
      by newtab-theme.js before first paint; the chrome re-sets data-theme on
@@ -31,14 +31,14 @@
 <div class="wash" id="wash" aria-hidden="true"><canvas width="96" height="54"></canvas><canvas width="96" height="54"></canvas></div>
 
 <header class="top">
-  <div class="brand"><span class="brand-name">Watch</span><span class="brand-sub">Quartz</span></div>
+  <div class="brand"><span class="brand-name">Lumen</span><span class="brand-sub">Quartz</span></div>
   <div class="find" role="search">
     <svg class="i find-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>
-    <input id="q" type="search" placeholder="Search your services and YouTube" aria-label="Search Watch" autocomplete="off" spellcheck="false" maxlength="200">
+    <input id="q" type="search" placeholder="Search your services and YouTube" aria-label="Search Lumen" autocomplete="off" spellcheck="false" maxlength="200">
     <kbd class="find-key" id="q-key" aria-hidden="true">/</kbd>
   </div>
   <div class="top-end">
-    <button class="icon-btn" id="settings" type="button" title="Watch settings" aria-label="Watch settings">
+    <button class="icon-btn" id="settings" type="button" title="Lumen settings" aria-label="Lumen settings">
       <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"/><circle cx="11" cy="4.5" r="1.6"/><circle cx="5" cy="11.5" r="1.6"/></svg>
     </button>
   </div>
@@ -70,7 +70,7 @@
     <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
   </button>
 </div>
-<main class="stack" id="stack" aria-label="Watch rows"></main>
+<main class="stack" id="stack" aria-label="Lumen rows"></main>
 
 <!-- Search: where to watch, across the services. -->
 <section class="results" id="results" aria-label="Search results" hidden></section>

@@ -121,20 +121,20 @@
     if (raw && typeof raw === 'object' && typeof raw.fatal === 'string' && raw.fatal) {
       var why = cleanText(raw.fatal, 300);
       if (!S.ready) { S.pendingFail = why; return; }
-      showFailure('Watch couldn’t load its saved rows', why);
+      showFailure('Lumen couldn’t load its saved rows', why);
       return;
     }
     var snap;
     try { snap = normalize(raw); } catch (err) {
-      if (S.ready) showFailure('Watch couldn’t read an update from Quartz', (err && err.message) || String(err));
+      if (S.ready) showFailure('Lumen couldn’t read an update from Quartz', (err && err.message) || String(err));
       else S.pendingFail = (err && err.message) || String(err);
       return;
     }
     if (!S.ready) { S.pending = snap; return; }
     try { applySnapshot(snap); clearFailure(); } catch (err) {
       var msg = (err && err.message) || String(err);
-      try { console.error('Watch could not draw this update: ' + msg); } catch (e) { /* ignore */ }
-      showFailure('Watch couldn’t draw the latest update', msg);
+      try { console.error('Lumen could not draw this update: ' + msg); } catch (e) { /* ignore */ }
+      showFailure('Lumen couldn’t draw the latest update', msg);
     }
   };
 
@@ -154,8 +154,8 @@
     S.bootTimer = setTimeout(function () {
       S.bootTimer = 0;
       if (S.answered) return;
-      showFailure('Quartz didn’t answer', 'Watch asked Quartz for your rows ' + Math.round(BOOT_TIMEOUT_MS / 1000) +
-        ' seconds ago and heard nothing back. Watch may have failed to start; Quartz’s log says why.');
+      showFailure('Quartz didn’t answer', 'Lumen asked Quartz for your rows ' + Math.round(BOOT_TIMEOUT_MS / 1000) +
+        ' seconds ago and heard nothing back. Lumen may have failed to start; Quartz’s log says why.');
     }, BOOT_TIMEOUT_MS);
     // An older Quartz never says front or back: after FRONT_WAIT_MS the tab counts as in front.
     if (S.front === null && !S.frontTimer) {
@@ -271,8 +271,8 @@
         if (!ok) toast("Couldn't open the sign-in page" + (reason ? ': ' + reason : ''), { err: true });
         break;
       case 'forget':
-        if (ok) toast('Cleared everything Watch had read');
-        else toast("Couldn't clear what Watch had read" + (reason ? ': ' + reason : ''), { err: true });
+        if (ok) toast('Cleared everything Lumen had read');
+        else toast("Couldn't clear what Lumen had read" + (reason ? ': ' + reason : ''), { err: true });
         break;
       default: break;
     }
@@ -639,7 +639,7 @@
 
   function pillTitle(s) {
     var lines = [s.name + (s.profile ? ' \u00b7 ' + s.profile : '')];
-    if (s.state === 'off') lines.push('Turned off in Settings > Watch');
+    if (s.state === 'off') lines.push('Turned off in Settings > Lumen');
     else if (s.reading) lines.push('Reading now');
     else if (s.state === 'error') lines.push("Couldn't read: " + (s.reason || 'no reason given'));
     else if (s.state === 'signed-out') lines.push('Signed out' + (s.reason ? ': ' + s.reason : ''));
@@ -667,7 +667,7 @@
       if (look.small) main.appendChild(el('small', look.warn ? 'warn-mark' : '', look.small));
       if (boot) {
         main.disabled = true;
-        main.setAttribute('aria-label', s.name + ': waiting for Watch to start');
+        main.setAttribute('aria-label', s.name + ': waiting for Lumen to start');
       } else {
         main.title = pillTitle(s);
         main.setAttribute('aria-label', main.title.replace(/\n/g, '. '));
@@ -695,7 +695,7 @@
     addBtn.dataset.k = 'manage';
     addBtn.appendChild(icon('plus', 's'));
     addBtn.appendChild(document.createTextNode('Manage'));
-    addBtn.title = 'Choose the services Watch reads (Settings > Watch)';
+    addBtn.title = 'Choose the services Lumen reads (Settings > Lumen)';
     addBtn.disabled = boot;
     add.appendChild(addBtn);
     frag.appendChild(add);
@@ -891,7 +891,7 @@
         p.appendChild(keepP);
       } else p.appendChild(el('p', 'small', 'Nothing from ' + s.name + ' is cached yet.'));
     } else if (s.state === 'signed-out') {
-      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + 'Sign in to ' + s.name + ' in a Quartz tab as usual; Watch reads it again after.'));
+      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.'));
     }
     if (s.paused) p.appendChild(el('p', '', capFirst(s.paused) + '.'));
     if (s.warnings.length) {
@@ -903,7 +903,7 @@
     if (s.covers) p.appendChild(el('p', 'small', s.covers + '.'));
     if (s.next && s.readAt && s.next > nowMs() && !s.reading && s.state !== 'error') {
       var nx = Math.max(1, Math.round((s.next - nowMs()) / 60000));
-      p.appendChild(el('p', 'small', 'Next read in about ' + nx + ' min, while Watch is open.'));
+      p.appendChild(el('p', 'small', 'Next read in about ' + nx + ' min, while Lumen is open.'));
     }
 
     var acts = el('div', 'acts');
@@ -988,7 +988,7 @@
   function renderBoot() {
     renderStrip();
     S.model = [];
-    var sk = skeletonRow('Loading Watch\u2026');
+    var sk = skeletonRow('Loading Lumen\u2026');
     $.stack.replaceChildren(sk);
     S.rowEls = [sk];
     document.body.classList.remove('is-empty');
@@ -1639,46 +1639,46 @@
       var signedOut = en.filter(function (s) { return s.state === 'signed-out'; })[0];
       var h1Text, lede;
       if (mode === 'welcome' || mode === 'reading' || mode === 'waiting') {
-        eb.appendChild(el('span', 'rn', mode === 'welcome' ? 'Welcome to Watch' : 'Watch'));
+        eb.appendChild(el('span', 'rn', mode === 'welcome' ? 'Welcome to Lumen' : 'Lumen'));
         h1Text = mode === 'reading' ? 'Reading your services' : 'Everything you\u2019re watching, in one place';
-        lede = 'Watch reads ' + (reads ? reads.charAt(0).toLowerCase() + reads.slice(1) : 'the services you turn on') +
-          '. You sign in to each service in a Quartz tab, as usual; Watch only reads what that sign-in already shows, and nothing leaves this PC.';
-        if (mode === 'waiting') lede = capFirst(sharedPause() || (en.filter(function (s) { return s.paused; })[0] || {}).paused || '') + '. Watch reads your services as soon as it can.';
+        lede = 'Lumen reads ' + (reads ? reads.charAt(0).toLowerCase() + reads.slice(1) : 'the services you turn on') +
+          '. You sign in to each service in a Quartz tab, as usual; Lumen only reads what that sign-in already shows, and nothing leaves this PC.';
+        if (mode === 'waiting') lede = capFirst(sharedPause() || (en.filter(function (s) { return s.paused; })[0] || {}).paused || '') + '. Lumen reads your services as soon as it can.';
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Choose services', function () { send('settings', {}); }));
       } else if (mode === 'empty') {
-        eb.appendChild(el('span', 'rn', 'Watch'));
+        eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Nothing to watch here yet';
         lede = 'Your services were read, but none had anything in Continue watching, a watchlist or recommendations. Start something on a service and it shows up here.';
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failing') {
-        eb.appendChild(el('span', 'rn', 'Watch'));
-        h1Text = 'Watch couldn\u2019t read your services';
+        eb.appendChild(el('span', 'rn', 'Lumen'));
+        h1Text = 'Lumen couldn\u2019t read your services';
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failed') {
-        var f = S.failure || { title: 'Watch couldn’t start', why: '' };
-        eb.appendChild(el('span', 'rn', 'Watch'));
+        var f = S.failure || { title: 'Lumen couldn’t start', why: '' };
+        eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = f.title;
-        lede = f.why || 'Quartz did not send Watch anything to show.';
+        lede = f.why || 'Quartz did not send Lumen anything to show.';
         acts.appendChild(button('btn primary', 'Retry', retryHello));
         acts.appendChild(button('btn', 'Open Settings', function () { send('settings', {}); }));
       } else if (mode === 'forgotten' || mode === 'later') {
         // Nothing is reading: say so, say when the next read is, and offer it now.
         var nexts = en.map(function (s) { return s.next; }).filter(function (n) { return n > 0; });
         var at = nexts.length ? dayClock(Math.min.apply(null, nexts)) : '';
-        eb.appendChild(el('span', 'rn', 'Watch'));
-        h1Text = mode === 'forgotten' ? 'Watch data forgotten' : 'Nothing read yet';
-        lede = (mode === 'forgotten' ? 'Everything Watch had saved on this PC is gone. ' : '') +
-          (at ? 'Watch reads your services again at ' + at + '.' : 'Watch reads your services again while this page is open.') +
+        eb.appendChild(el('span', 'rn', 'Lumen'));
+        h1Text = mode === 'forgotten' ? 'Lumen data forgotten' : 'Nothing read yet';
+        lede = (mode === 'forgotten' ? 'Everything Lumen had saved on this PC is gone. ' : '') +
+          (at ? 'Lumen reads your services again at ' + at + '.' : 'Lumen reads your services again while this page is open.') +
           ' Read now to fill this page sooner.';
         acts.appendChild(button('btn primary', 'Read now', function () { send('refresh', { service: null }); }));
         acts.appendChild(button('btn', 'Choose services', function () { send('settings', {}); }));
       } else {
-        eb.appendChild(el('span', 'rn', 'Watch'));
+        eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Every service is off';
-        lede = 'Turn on the services you use in Settings > Watch, and Watch reads them while this page is open.';
+        lede = 'Turn on the services you use in Settings > Lumen, and Lumen reads them while this page is open.';
         acts.appendChild(button('btn primary', 'Open Settings', function () { send('settings', {}); }));
       }
       txt.appendChild(eb);
@@ -1752,7 +1752,7 @@
   function openUrl(url) {
     var u = https(url);
     if (!u) return;
-    if (Shape && !Shape.serviceForUrl(u)) { toast('Watch only opens pages on the services it reads', { err: true }); return; }
+    if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
     send('open', { url: u });
   }
   function openCard(card) {
@@ -2351,9 +2351,9 @@
     if (S.pending) {
       var p = S.pending;
       S.pending = null;
-      try { applySnapshot(p); } catch (err) { showFailure('Watch couldn’t draw your rows', (err && err.message) || String(err)); }
+      try { applySnapshot(p); } catch (err) { showFailure('Lumen couldn’t draw your rows', (err && err.message) || String(err)); }
     } else if (S.pendingFail) {
-      showFailure('Watch couldn’t load its saved rows', S.pendingFail);
+      showFailure('Lumen couldn’t load its saved rows', S.pendingFail);
     }
     S.pendingFail = '';
     sayHello();

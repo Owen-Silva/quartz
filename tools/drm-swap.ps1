@@ -214,7 +214,7 @@ Say ('Quartz.exe made: ' + (Tail $q.text 1))
 
 # ---- 5-6. sign, verify, mark ---------------------------------------------------------------
 if ($SkipSign) {
-  Say 'SKIPPED signing (-SkipSign). Quartz shows "not signed for streaming services yet" and Watch sends Disney+, Prime and Hulu to Edge until tools\drm-swap.ps1 -ResignOnly runs with EVS signed in.'
+  Say 'SKIPPED signing (-SkipSign). Quartz shows "not signed for streaming services yet" and Lumen sends Disney+, Prime and Hulu to Edge until tools\drm-swap.ps1 -ResignOnly runs with EVS signed in.'
 } else { Sign-And-Mark }
 
 # ---- 7. registry -------------------------------------------------------------------------

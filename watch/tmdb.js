@@ -103,10 +103,10 @@ function failure(res, key) {
     if (code === 'offline' || code === 'timeout') return { state: 'offline', reason: detail || (code === 'timeout' ? 'TMDB did not answer in time' : 'This PC looks offline') };
     return { state: 'error', reason: 'Could not reach TMDB' + (detail ? ' (' + detail + ')' : '') };
   }
-  if (res.status === 401) return { state: 'bad-key', reason: 'TMDB rejected the key; check it in Settings > Watch' };
-  if (res.status === 429) return { state: 'rate-limited', reason: 'TMDB is asking Watch to slow down; try again in a few seconds' };
+  if (res.status === 401) return { state: 'bad-key', reason: 'TMDB rejected the key; check it in Settings > Lumen' };
+  if (res.status === 429) return { state: 'rate-limited', reason: 'TMDB is asking Lumen to slow down; try again in a few seconds' };
   if (res.status < 200 || res.status >= 300) return { state: 'error', reason: 'TMDB answered with an error (HTTP ' + (res.status || 'no status') + ')' };
-  if (!res.json) return { state: 'error', reason: 'TMDB sent something Watch could not read' };
+  if (!res.json) return { state: 'error', reason: 'TMDB sent something Lumen could not read' };
   return null;
 }
 
@@ -182,7 +182,7 @@ async function search(q, key, fetchJson, opts) {
     const query = Shape.cleanText(typeof q === 'string' ? q : '', 200);
     if (!query) return answer('empty', 'Type a title to search', [], '');
     const k = usableKey(key);
-    if (!k) return answer('bad-key', key ? 'That TMDB key has spaces or odd characters in it; check it in Settings > Watch' : 'Add a free TMDB key in Settings > Watch', [], '');
+    if (!k) return answer('bad-key', key ? 'That TMDB key has spaces or odd characters in it; check it in Settings > Lumen' : 'Add a free TMDB key in Settings > Lumen', [], '');
 
     const res = await get(fetchJson, '/search/multi?query=' + encodeURIComponent(query) + '&include_adult=false&language=en-US&page=1', k);
     const bad = failure(res, k);
@@ -250,7 +250,7 @@ async function check(key, fetchJson) {
     if (res.json.success === false) {
       return { ok: false, title: 'TMDB rejected the key', detail: scrub(res.json.status_message || ('Saved as ' + kind + '.'), k, 240) };
     }
-    return { ok: true, title: 'TMDB accepted the key', detail: 'Saved as ' + kind + '. Search in Watch now covers every service.' };
+    return { ok: true, title: 'TMDB accepted the key', detail: 'Saved as ' + kind + '. Search in Lumen now covers every service.' };
   } catch (err) {
     return { ok: false, title: 'Check failed', detail: scrub(String((err && err.message) || err), typeof key === 'string' ? key.trim() : '', 120) };
   }

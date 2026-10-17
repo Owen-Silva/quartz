@@ -130,7 +130,7 @@ module.exports = async function (check) {
   /* ---------- signed out, and every way a read can fail ---------- */
   var so = run(readFrom(signedOut));
   check(so.state === 'signed-out' && so.reason === hulu._internal.SIGNED_OUT_REASON && so.items.length === 0, 'signed out: /hub/home -> /welcome is signed-out with the reason', so.state + ' ' + so.reason);
-  check(/sign in to hulu\.com in Quartz/.test(so.reason) && /turn Hulu off in Settings > Watch/.test(so.reason), 'signed out: the reason says what to do either way', so.reason);
+  check(/sign in to hulu\.com in Quartz/.test(so.reason) && /turn Hulu off in Settings > Lumen/.test(so.reason), 'signed out: the reason says what to do either way', so.reason);
   check(run(readFrom(home, null, { finalUrl: 'https://auth.hulu.com/web/login?next=https%3A%2F%2Fwww.hulu.com%2Fhub%2Fhome' })).state === 'signed-out', 'signed out: landing on auth.hulu.com', '');
   check(run(readFrom(home, null, { finalUrl: SITE + '/', extracted: { url: SITE + '/' } })).state === 'signed-out', 'signed out: the bare landing page', '');
   var unauth = readFrom(home);
