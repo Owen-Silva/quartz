@@ -251,9 +251,9 @@ const FAILS = [
     const first = JSON.parse((a.sent[0] || '').replace('quartz-search:answer ', '') || '{}');
     check(first.q === Q && first.mode === 'auto' && first.seq === 1 && Array.isArray(first.history) && first.history.length === 0, 'a web search sends quartz-search:answer mode "auto"', a.sent[0]);
     check(a.view === 'pending' && a.skeleton === 1 && a.controls.stop && /Thinking/.test(a.status), 'pending: skeleton, Stop, "Thinking"', JSON.stringify(a).slice(0, 220));
-    check(await apply({ seq: 1, phase: 'start', model: 'claude-sonnet-4-5-20250929', mode: 'auto' }), 'start accepted');
+    check(await apply({ seq: 1, phase: 'start', model: 'claude-haiku-5-5', mode: 'auto' }), 'start accepted');
     a = await A();
-    check(a.modelLabel === 'Sonnet 4.5' && a.view === 'streaming' && a.skeleton === 1, 'start: the model label, still the skeleton until text', a.modelLabel + ' / ' + a.view);
+    check(a.modelLabel === 'Haiku 5.5' && a.view === 'streaming' && a.skeleton === 1, 'start: the model label, still the skeleton until text', a.modelLabel + ' / ' + a.view);
     await apply({ seq: 1, phase: 'delta', text: ANSWER[0] });
     await apply({ seq: 1, phase: 'delta', text: ANSWER[1] });
     await apply({ seq: 1, phase: 'delta', text: 'Hostile: <img src=x onerror="window.__pwned=3"><script>window.__pwned=4</script> **unclosed bold' });
@@ -322,7 +322,7 @@ const FAILS = [
     // Back to a finished answer for the follow-up.
     await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
     xs = (await A()).seq;
-    await apply({ seq: xs, phase: 'start', model: 'claude-sonnet-4-5-20250929', mode: 'auto' });
+    await apply({ seq: xs, phase: 'start', model: 'claude-haiku-5-5', mode: 'auto' });
     await apply({ seq: xs, phase: 'done', text: full, citations: CITES, usage: { input_tokens: 1840, output_tokens: 212 }, costUsd: 0.0087 });
 
     // ---- follow-up ---------------------------------------------------------------------------
