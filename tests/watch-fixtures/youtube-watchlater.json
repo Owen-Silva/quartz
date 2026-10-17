@@ -1,0 +1,133 @@
+{
+  "_fixture": "shape from YouTube.js src/parser/classes (PlaylistVideoList, PlaylistVideo, PlaylistSidebar, PageHeader, LockupView, ThumbnailOverlayResumePlayback) for browse VLWL, unverified against a live account",
+  "loggedIn": true,
+  "ytInitialData": {
+    "responseContext": { "serviceTrackingParams": [{ "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "1" }, { "key": "browse_id", "value": "VLWL" }] }] },
+    "contents": {
+      "twoColumnBrowseResultsRenderer": {
+        "tabs": [{
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  { "itemSectionRenderer": {
+                    "contents": [
+                      { "playlistVideoListRenderer": {
+                        "playlistId": "WL",
+                        "isEditable": true,
+                        "canReorder": true,
+                        "contents": [
+                          { "playlistVideoRenderer": {
+                            "videoId": "wlVideo0001",
+                            "index": { "simpleText": "1" },
+                            "thumbnail": { "thumbnails": [
+                              { "url": "https://i.ytimg.com/vi/wlVideo0001/hqdefault.jpg?sqp=w1a", "width": 168, "height": 94 },
+                              { "url": "https://i.ytimg.com/vi/wlVideo0001/hqdefault.jpg?sqp=w1b", "width": 336, "height": 188 }
+                            ] },
+                            "title": { "runs": [{ "text": "Top 10 Stars of the Season" }] },
+                            "shortBylineText": { "runs": [{ "text": "ESA" }] },
+                            "lengthText": { "simpleText": "10:00" },
+                            "lengthSeconds": "600",
+                            "isPlayable": true,
+                            "videoInfo": { "runs": [{ "text": "1.2M views" }, { "text": " • " }, { "text": "3 years ago" }] },
+                            "thumbnailOverlays": [
+                              { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 30 } },
+                              { "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "10:00" }, "style": "DEFAULT" } }
+                            ]
+                          } },
+                          { "playlistVideoRenderer": {
+                            "videoId": "wlVideo0002",
+                            "index": { "simpleText": "2" },
+                            "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/wlVideo0002/hqdefault.jpg", "width": 480, "height": 270 }] },
+                            "title": { "runs": [{ "text": "How to Tape a Leaky Faucet" }] },
+                            "shortBylineText": { "runs": [{ "text": "Home Repair" }] },
+                            "lengthText": { "simpleText": "3:45" },
+                            "isPlayable": true,
+                            "videoInfo": { "runs": [{ "text": "320K views" }, { "text": " • " }, { "text": "2 years ago" }] }
+                          } },
+                          { "playlistVideoRenderer": {
+                            "videoId": "wlDeleted03",
+                            "index": { "simpleText": "3" },
+                            "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/img/no_thumbnail.jpg", "width": 120, "height": 90 }] },
+                            "title": { "runs": [{ "text": "[Deleted video]" }] },
+                            "isPlayable": false
+                          } },
+                          { "playlistVideoRenderer": {
+                            "videoId": "wlVideo0004",
+                            "index": { "simpleText": "4" },
+                            "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/wlVideo0004/hqdefault.jpg", "width": 480, "height": 270 }] },
+                            "title": { "runs": [{ "text": "Inside the Test Kitchen: Day 7" }] },
+                            "shortBylineText": { "runs": [{ "text": "Baking Night" }] },
+                            "lengthText": { "simpleText": "42:17" },
+                            "lengthSeconds": "2537",
+                            "isPlayable": true,
+                            "videoInfo": { "runs": [{ "text": "75K views" }, { "text": " • " }, { "text": "8 months ago" }] }
+                          } },
+                          { "lockupViewModel": {
+                            "contentImage": { "thumbnailViewModel": {
+                              "image": { "sources": [{ "url": "https://i.ytimg.com/vi/wlLockup005/hqdefault.jpg?sqp=w5", "width": 480, "height": 270 }] },
+                              "overlays": [{ "thumbnailBottomOverlayViewModel": { "badges": [{ "thumbnailBadgeViewModel": { "text": "12:31" } }] } }]
+                            } },
+                            "metadata": { "lockupMetadataViewModel": {
+                              "title": { "content": "Nutrition for Office Workers" },
+                              "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                                { "metadataParts": [{ "text": { "content": "Athlete Fuel" } }] },
+                                { "metadataParts": [{ "text": { "content": "41K views" } }, { "text": { "content": "1 month ago" } }] }
+                              ] } }
+                            } },
+                            "contentId": "wlLockup005",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                          } },
+                          { "lockupViewModel": {
+                            "contentImage": { "thumbnailViewModel": {
+                              "image": { "sources": [{ "url": "https://i.ytimg.com/vi/wlLockup006/hqdefault.jpg?sqp=w6", "width": 480, "height": 270 }] },
+                              "overlays": [{ "thumbnailBottomOverlayViewModel": {
+                                "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 60 } },
+                                "badges": [{ "thumbnailBadgeViewModel": { "text": "5:00" } }]
+                              } }]
+                            } },
+                            "metadata": { "lockupMetadataViewModel": {
+                              "title": { "content": "At-Home Agility Ladder Workout" },
+                              "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                                { "metadataParts": [{ "text": { "content": "Train Like a Pro" } }] }
+                              ] } }
+                            } },
+                            "contentId": "wlLockup006",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                          } },
+                          { "playlistVideoRenderer": {
+                            "videoId": "wlVideo0007",
+                            "index": { "simpleText": "7" },
+                            "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/wlVideo0007/hqdefault.jpg", "width": 480, "height": 270 }] },
+                            "title": { "simpleText": "World Cycling Final Highlights" },
+                            "shortBylineText": { "runs": [{ "text": "IIHF" }] },
+                            "lengthText": { "simpleText": "18:02" },
+                            "isPlayable": true
+                          } },
+                          { "continuationItemRenderer": { "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN", "continuationEndpoint": { "continuationCommand": { "token": "4qmFsgJhEgRWTFdM", "request": "CONTINUATION_REQUEST_TYPE_BROWSE" } } } }
+                        ]
+                      } }
+                    ]
+                  } }
+                ]
+              }
+            }
+          }
+        }]
+      }
+    },
+    "header": { "pageHeaderRenderer": { "pageTitle": "Watch later", "content": { "pageHeaderViewModel": { "title": { "dynamicTextViewModel": { "text": { "content": "Watch later" } } } } } } },
+    "sidebar": { "playlistSidebarRenderer": { "items": [
+      { "playlistSidebarPrimaryInfoRenderer": {
+        "thumbnailRenderer": { "playlistVideoThumbnailRenderer": { "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/wlVideo0001/hqdefault.jpg", "width": 480, "height": 270 }] } } },
+        "title": { "runs": [{ "text": "Watch later" }] },
+        "stats": [{ "runs": [{ "text": "7" }, { "text": " videos" }] }],
+        "navigationEndpoint": { "watchEndpoint": { "videoId": "wlVideo0001", "playlistId": "WL" } }
+      } }
+    ] } },
+    "topbar": { "desktopTopbarRenderer": { "topbarButtons": [
+      { "topbarMenuButtonRenderer": { "avatar": { "thumbnails": [{ "url": "https://yt3.ggpht.com/meAvatar=s88-c-k", "width": 88, "height": 88 }] } } }
+    ] } }
+  }
+}

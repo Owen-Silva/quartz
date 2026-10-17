@@ -206,7 +206,7 @@ function hostOf(url) {
 }
 
 function emptyServiceState() {
-  return { state: 'never', reason: '', readAt: 0, attemptAt: 0, lastOkAt: 0, items: [], profile: '', events: null, captured: 0 };
+  return { state: 'never', reason: '', readAt: 0, attemptAt: 0, lastOkAt: 0, items: [], profile: '', events: null, captured: 0, warnings: [] };
 }
 
 /** The cache file's contents, checked. Anything broken becomes "never read". */
@@ -221,6 +221,7 @@ function cleanCache(raw) {
     for (const k of ['readAt', 'attemptAt', 'lastOkAt']) e[k] = Number.isFinite(s[k]) && s[k] > 0 ? s[k] : 0;
     e.items = Shape.cleanItems(s.items, ITEMS_PER_SERVICE).filter((it) => it.service === id);
     e.profile = Shape.cleanText(s.profile, 60);
+    e.warnings = Array.isArray(s.warnings) ? s.warnings.map((x) => Shape.cleanText(x, 160)).filter(Boolean).slice(0, 5) : [];
     e.events = id === 'espn' && Array.isArray(s.events) ? Shape.cleanEvents(s.events) : null;
     out.services[id] = e;
   }
@@ -638,6 +639,8 @@ function create(deps) {
     s.captured = captured;
     s.state = result.state;
     s.reason = result.reason;
+    s.warnings = result.state === 'ok' ? result.warnings : [];
+    if (s.warnings.length) log('Watch read ' + svc.name + ' with warnings: ' + s.warnings.join('; '));
     if (result.state === 'ok') {
       s.items = result.items.filter((it) => it.service === id).slice(0, ITEMS_PER_SERVICE);
       s.profile = result.profile || '';
@@ -745,6 +748,7 @@ function create(deps) {
       enabled: !!p.enabled[id],
       state: p.enabled[id] ? s.state : 'off',
       reason: s.reason,
+      warnings: s.warnings || [],
       readAt: s.readAt, lastOkAt: s.lastOkAt, profile: s.profile,
       reading: reading === id, queued: queue.indexOf(id) !== -1,
       paused: p.enabled[id] ? (paused[id] || '') : '',

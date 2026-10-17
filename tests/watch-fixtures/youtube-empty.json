@@ -1,0 +1,28 @@
+{
+  "_fixture": "shape from YouTube.js src/parser/classes with the renderers deliberately renamed to simulate a layout change (signed in, no video renderer anywhere), unverified against a live account",
+  "loggedIn": true,
+  "ytInitialData": {
+    "responseContext": { "serviceTrackingParams": [{ "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "1" }] }] },
+    "contents": {
+      "twoColumnBrowseResultsRenderer": {
+        "tabs": [{
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "gridFeedViewModel": {
+                "cells": [
+                  { "mediaTileViewModel": { "tileKey": "tile-1", "headline": { "content": "A tile the reader has never seen" }, "art": { "sources": [{ "url": "https://i.ytimg.com/vi/zzzzzzzzzzz/hqdefault.jpg", "width": 480 }] } } },
+                  { "mediaTileViewModel": { "tileKey": "tile-2", "headline": { "content": "Another unknown tile" } } },
+                  { "continuationItemRenderer": { "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN" } }
+                ]
+              }
+            }
+          }
+        }]
+      }
+    },
+    "topbar": { "desktopTopbarRenderer": { "topbarButtons": [
+      { "topbarMenuButtonRenderer": { "avatar": { "thumbnails": [{ "url": "https://yt3.ggpht.com/meAvatar=s88-c-k", "width": 88, "height": 88 }] } } }
+    ] } }
+  }
+}

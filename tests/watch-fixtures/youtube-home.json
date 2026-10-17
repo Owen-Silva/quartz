@@ -1,0 +1,257 @@
+{
+  "_fixture": "shape from YouTube.js src/parser/classes (RichGrid, RichItem, RichShelf, VideoRenderer as Video, GridVideo, CompactVideo, ReelItem, ShortsLockupView, LockupView, ThumbnailOverlayResumePlayback, ThumbnailOverlayProgressBarView, ThumbnailBadgeView, AdSlot), unverified against a live account",
+  "loggedIn": true,
+  "ytInitialData": {
+    "responseContext": {
+      "serviceTrackingParams": [{ "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "1" }, { "key": "e", "value": "23804281,51010235" }] }],
+      "webResponseContextExtensionData": { "hasDecorated": true }
+    },
+    "contents": {
+      "twoColumnBrowseResultsRenderer": {
+        "tabs": [{
+          "tabRenderer": {
+            "selected": true,
+            "tabIdentifier": "FEwhat_to_watch",
+            "content": {
+              "richGridRenderer": {
+                "header": { "feedFilterChipBarRenderer": { "contents": [
+                  { "chipCloudChipRenderer": { "text": { "runs": [{ "text": "All" }] }, "isSelected": true } },
+                  { "chipCloudChipRenderer": { "text": { "runs": [{ "text": "Baking" }] } } }
+                ] } },
+                "contents": [
+                  { "richItemRenderer": { "content": { "videoRenderer": {
+                    "videoId": "hmOldVid001",
+                    "thumbnail": { "thumbnails": [
+                      { "url": "https://i.ytimg.com/vi/hmOldVid001/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLA1", "width": 168, "height": 94 },
+                      { "url": "https://i.ytimg.com/vi/hmOldVid001/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLB2", "width": 336, "height": 188 },
+                      { "url": "https://i.ytimg.com/vi/hmOldVid001/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLC3", "width": 480, "height": 270 }
+                    ] },
+                    "title": { "runs": [{ "text": "How Pro Chefs Read a Recipe Card" }], "accessibility": { "accessibilityData": { "label": "How Pro Chefs Read a Recipe Card by Recipe Breakdown 10 minutes" } } },
+                    "longBylineText": { "runs": [{ "text": "Recipe Breakdown", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl", "canonicalBaseUrl": "/@recipebreakdown" } } }] },
+                    "ownerText": { "runs": [{ "text": "Recipe Breakdown", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl" } } }] },
+                    "publishedTimeText": { "simpleText": "2 weeks ago" },
+                    "lengthText": { "accessibility": { "accessibilityData": { "label": "10 minutes" } }, "simpleText": "10:00" },
+                    "viewCountText": { "simpleText": "412,331 views" },
+                    "shortViewCountText": { "accessibility": { "accessibilityData": { "label": "412K views" } }, "simpleText": "412K views" },
+                    "navigationEndpoint": { "commandMetadata": { "webCommandMetadata": { "url": "/watch?v=hmOldVid001", "webPageType": "WEB_PAGE_TYPE_WATCH" } }, "watchEndpoint": { "videoId": "hmOldVid001" } },
+                    "thumbnailOverlays": [
+                      { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 40 } },
+                      { "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "10:00" }, "style": "DEFAULT" } },
+                      { "thumbnailOverlayToggleButtonRenderer": { "isToggled": false, "untoggledIcon": { "iconType": "WATCH_LATER" } } },
+                      { "thumbnailOverlayNowPlayingRenderer": { "text": { "runs": [{ "text": "Now playing" }] } } }
+                    ],
+                    "menu": { "menuRenderer": { "items": [{ "menuServiceItemRenderer": { "text": { "runs": [{ "text": "Add to queue" }] } } }] } }
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "adSlotRenderer": {
+                    "adSlotMetadata": { "slotId": "0:1760000000:0:0", "slotType": "SLOT_TYPE_IN_FEED" },
+                    "fulfillmentContent": { "fulfilledLayout": { "inFeedAdLayoutRenderer": { "renderingContent": {
+                      "videoRenderer": {
+                        "videoId": "adVideo0001",
+                        "title": { "runs": [{ "text": "Sponsored: The Best Knives of 2026" }] },
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/adVideo0001/hqdefault.jpg", "width": 480, "height": 360 }] },
+                        "lengthText": { "simpleText": "0:30" }
+                      }
+                    } } } }
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "lockupViewModel": {
+                    "contentImage": { "thumbnailViewModel": {
+                      "image": { "sources": [
+                        { "url": "https://i.ytimg.com/vi/hmLockup002/hqdefault.jpg?sqp=a1", "width": 360, "height": 202 },
+                        { "url": "https://i.ytimg.com/vi/hmLockup002/hq720.jpg?sqp=a2", "width": 720, "height": 404 }
+                      ] },
+                      "overlays": [
+                        { "thumbnailBottomOverlayViewModel": {
+                          "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 25 } },
+                          "badges": [{ "thumbnailBadgeViewModel": { "text": "1:02:03", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT", "animationActivationTargetId": "hmLockup002" } }]
+                        } },
+                        { "thumbnailHoverOverlayToggleActionsViewModel": { "buttons": [] } }
+                      ]
+                    } },
+                    "metadata": { "lockupMetadataViewModel": {
+                      "title": { "content": "Total Eclipse Highlights: Iceland, Spain" },
+                      "image": { "decoratedAvatarViewModel": { "avatar": { "avatarViewModel": { "image": { "sources": [{ "url": "https://yt3.ggpht.com/abcESA=s68-c-k", "width": 68, "height": 68 }] } } } } },
+                      "metadata": { "contentMetadataViewModel": {
+                        "metadataRows": [
+                          { "metadataParts": [{ "text": { "content": "ESA" } }] },
+                          { "metadataParts": [{ "text": { "content": "1.2M views" } }, { "text": { "content": "3 days ago" } }] }
+                        ],
+                        "delimiter": " • "
+                      } },
+                      "menuButton": { "buttonViewModel": { "iconName": "MORE_VERT" } }
+                    } },
+                    "contentId": "hmLockup002",
+                    "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                    "rendererContext": { "commandContext": { "onTap": { "innertubeCommand": {
+                      "commandMetadata": { "webCommandMetadata": { "url": "/watch?v=hmLockup002", "webPageType": "WEB_PAGE_TYPE_WATCH" } },
+                      "watchEndpoint": { "videoId": "hmLockup002" }
+                    } } } }
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "lockupViewModel": {
+                    "contentImage": { "thumbnailViewModel": {
+                      "image": { "sources": [
+                        { "url": "https://i.ytimg.com/vi/hmLiveNow03/hqdefault_live.jpg?sqp=l1", "width": 480, "height": 270 }
+                      ] },
+                      "overlays": [
+                        { "thumbnailBottomOverlayViewModel": { "badges": [{ "thumbnailBadgeViewModel": { "text": "LIVE", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE", "icon": { "sources": [{ "clientResource": { "imageName": "LIVE" } }] } } }] } }
+                      ]
+                    } },
+                    "metadata": { "lockupMetadataViewModel": {
+                      "title": { "content": "LIVE: Junior Baking Showcase, Tent 2" },
+                      "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                        { "metadataParts": [{ "text": { "content": "Showcase Baking Network" } }] },
+                        { "metadataParts": [{ "text": { "content": "4.1K watching" } }] }
+                      ] } }
+                    } },
+                    "contentId": "hmLiveNow03",
+                    "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "lockupViewModel": {
+                    "contentImage": { "collectionThumbnailViewModel": { "primaryThumbnail": { "thumbnailViewModel": {
+                      "image": { "sources": [{ "url": "https://i.ytimg.com/vi/hmOldVid001/hqdefault.jpg", "width": 480, "height": 270 }] },
+                      "overlays": [{ "thumbnailOverlayBadgeViewModel": { "thumbnailBadges": [{ "thumbnailBadgeViewModel": { "text": "42 videos", "icon": { "sources": [{ "clientResource": { "imageName": "PLAYLISTS" } }] } } }] } }]
+                    } } } },
+                    "metadata": { "lockupMetadataViewModel": { "title": { "content": "Best Bakes 2026 (playlist)" } } },
+                    "contentId": "PLbakingMix0042abcdef",
+                    "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST"
+                  } } } },
+
+                  { "richSectionRenderer": { "content": { "richShelfRenderer": {
+                    "title": { "runs": [{ "text": "Shorts" }] },
+                    "isShorts": true,
+                    "contents": [
+                      { "richItemRenderer": { "content": { "shortsLockupViewModel": {
+                        "entityId": "shorts-shelf-item-hmShorts004",
+                        "accessibilityText": "Knife grip basics, 88 thousand views - play Short",
+                        "thumbnail": { "sources": [{ "url": "https://i.ytimg.com/vi/hmShorts004/oardefault.jpg?sqp=s4&rs=t4", "width": 405, "height": 720 }] },
+                        "onTap": { "innertubeCommand": {
+                          "commandMetadata": { "webCommandMetadata": { "url": "/shorts/hmShorts004", "webPageType": "WEB_PAGE_TYPE_SHORTS" } },
+                          "reelWatchEndpoint": { "videoId": "hmShorts004", "playerParams": "8AEB" }
+                        } },
+                        "overlayMetadata": { "primaryText": { "content": "Knife grip basics" }, "secondaryText": { "content": "88K views" } }
+                      } } } },
+                      { "richItemRenderer": { "content": { "reelItemRenderer": {
+                        "videoId": "hmShorts005",
+                        "headline": { "simpleText": "Herbs from the plot" },
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hmShorts005/frame0.jpg", "width": 1080, "height": 1920 }] },
+                        "viewCountText": { "simpleText": "2.3M views" },
+                        "navigationEndpoint": {
+                          "commandMetadata": { "webCommandMetadata": { "url": "/shorts/hmShorts005", "webPageType": "WEB_PAGE_TYPE_SHORTS" } },
+                          "reelWatchEndpoint": { "videoId": "hmShorts005" }
+                        }
+                      } } } }
+                    ]
+                  } } } },
+
+                  { "richSectionRenderer": { "content": { "richShelfRenderer": {
+                    "title": { "runs": [{ "text": "Trending in Baking" }] },
+                    "contents": [
+                      { "richItemRenderer": { "content": { "videoRenderer": {
+                        "videoId": "hmTrend0006",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hmTrend0006/hqdefault_live.jpg?sqp=t6", "width": 480, "height": 270 }] },
+                        "title": { "runs": [{ "text": "Pastry Contest " }, { "text": "LIVE" }] },
+                        "longBylineText": { "runs": [{ "text": "ESA" }] },
+                        "viewCountText": { "runs": [{ "text": "12,004" }, { "text": " watching" }] },
+                        "badges": [{ "metadataBadgeRenderer": { "style": "BADGE_STYLE_TYPE_LIVE_NOW", "label": "LIVE" } }],
+                        "thumbnailOverlays": [{ "thumbnailOverlayTimeStatusRenderer": { "text": { "runs": [{ "text": "LIVE" }] }, "style": "LIVE" } }]
+                      } } } },
+                      { "richItemRenderer": { "content": { "lockupViewModel": {
+                        "contentImage": { "thumbnailViewModel": {
+                          "image": { "sources": [{ "url": "https://i.ytimg.com/vi/hmTrend0007/hqdefault.jpg?sqp=t7", "width": 480, "height": 270 }] },
+                          "overlays": [{ "thumbnailBottomOverlayViewModel": {
+                            "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 100 } },
+                            "badges": [{ "thumbnailBadgeViewModel": { "text": "14:59", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT" } }]
+                          } }]
+                        } },
+                        "metadata": { "lockupMetadataViewModel": {
+                          "title": { "content": "Every Bake-Off Winner This Week" },
+                          "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                            { "metadataParts": [{ "text": { "content": "Sportsnet" } }] },
+                            { "metadataParts": [{ "text": { "content": "88K views" } }, { "text": { "content": "1 day ago" } }] }
+                          ] } }
+                        } },
+                        "contentId": "hmTrend0007",
+                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                      } } } }
+                    ]
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "videoRenderer": {
+                    "videoId": "hmPlain0008",
+                    "thumbnail": { "thumbnails": [
+                      { "url": "https://i.ytimg.com/vi/hmPlain0008/hqdefault.jpg?sqp=p8a", "width": 246, "height": 138 },
+                      { "url": "https://i.ytimg.com/vi/hmPlain0008/hq720.jpg?sqp=p8b", "width": 686, "height": 386 }
+                    ] },
+                    "title": { "runs": [{ "text": "Bowl Turning Tips for Beginners" }] },
+                    "ownerText": { "runs": [{ "text": "Lathe Lab" }] },
+                    "publishedTimeText": { "simpleText": "5 months ago" },
+                    "shortViewCountText": { "simpleText": "61K views" },
+                    "lengthText": { "simpleText": "3:33" },
+                    "thumbnailOverlays": [{ "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "3:33" }, "style": "DEFAULT" } }]
+                  } } } },
+
+                  { "richItemRenderer": { "content": { "radioRenderer": {
+                    "playlistId": "RDhmOldVid001",
+                    "title": { "simpleText": "Mix - Recipe Breakdown" },
+                    "videos": [{ "childVideoRenderer": { "videoId": "hmOldVid001", "title": { "simpleText": "How Pro Chefs Read a Recipe Card" } } }],
+                    "navigationEndpoint": { "watchEndpoint": { "videoId": "hmOldVid001", "playlistId": "RDhmOldVid001" } }
+                  } } } },
+
+                  { "richSectionRenderer": { "content": { "shelfRenderer": {
+                    "title": { "runs": [{ "text": "From your subscriptions" }] },
+                    "content": { "horizontalListRenderer": { "items": [
+                      { "gridVideoRenderer": {
+                        "videoId": "hmGrid00009",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hmGrid00009/hqdefault.jpg" }] },
+                        "title": { "simpleText": "Practice Vlog: Interval Ride Day" },
+                        "shortBylineText": { "runs": [{ "text": "Bike Rat Diaries" }] },
+                        "publishedTimeText": { "simpleText": "6 hours ago" },
+                        "viewCountText": { "simpleText": "1,203 views" },
+                        "thumbnailOverlays": [{ "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "7:45" }, "style": "DEFAULT" } }]
+                      } }
+                    ] } }
+                  } } } },
+
+                  { "richSectionRenderer": { "content": { "shelfRenderer": {
+                    "title": { "simpleText": "Recommended for you" },
+                    "content": { "verticalListRenderer": { "items": [
+                      { "compactVideoRenderer": {
+                        "videoId": "hmCompact10",
+                        "thumbnail": { "thumbnails": [
+                          { "url": "//i.ytimg.com/vi/hmCompact10/hqdefault.jpg", "width": 336, "height": 188 },
+                          { "url": "http://i.ytimg.com/vi/hmCompact10/insecure.jpg", "width": 480, "height": 270 }
+                        ] },
+                        "title": { "simpleText": "Photographing in Tight Spaces" },
+                        "longBylineText": { "runs": [{ "text": "Coach Jeremy" }] },
+                        "shortViewCountText": { "simpleText": "9.9K views" },
+                        "publishedTimeText": { "simpleText": "1 year ago" },
+                        "lengthText": { "simpleText": "1:02:03" }
+                      } }
+                    ] } }
+                  } } } },
+
+                  { "continuationItemRenderer": { "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN", "continuationEndpoint": { "continuationCommand": { "token": "4qmFsgKbARIPRkV3aGF0X3RvX3dhdGNo", "request": "CONTINUATION_REQUEST_TYPE_BROWSE" } } } }
+                ]
+              }
+            }
+          }
+        }]
+      }
+    },
+    "header": { "feedTabbedHeaderRenderer": { "title": { "runs": [{ "text": "Home" }] } } },
+    "topbar": { "desktopTopbarRenderer": {
+      "logo": { "topbarLogoRenderer": { "iconImage": { "iconType": "YOUTUBE_LOGO" } } },
+      "topbarButtons": [
+        { "topbarMenuButtonRenderer": { "icon": { "iconType": "VIDEO_CALL" } } },
+        { "topbarMenuButtonRenderer": {
+          "avatar": { "thumbnails": [{ "url": "https://yt3.ggpht.com/meAvatar=s88-c-k", "width": 88, "height": 88 }] },
+          "accessibility": { "accessibilityData": { "label": "Account menu" } }
+        } }
+      ]
+    } },
+    "frameworkUpdates": { "entityBatchUpdate": { "mutations": [], "timestamp": { "seconds": "1760650000" } } }
+  }
+}

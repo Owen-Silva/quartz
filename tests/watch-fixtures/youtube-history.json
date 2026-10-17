@@ -1,0 +1,176 @@
+{
+  "_fixture": "shape from YouTube.js src/parser/classes (SectionList, ItemSection, ItemSectionHeader, VideoRenderer as Video, LockupView, ReelShelf, ShortsLockupView, ThumbnailOverlayResumePlayback, ThumbnailOverlayProgressBarView) for browse FEhistory, unverified against a live account",
+  "loggedIn": true,
+  "ytInitialData": {
+    "responseContext": { "serviceTrackingParams": [{ "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "1" }, { "key": "browse_id", "value": "FEhistory" }] }] },
+    "contents": {
+      "twoColumnBrowseResultsRenderer": {
+        "tabs": [{
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  { "itemSectionRenderer": {
+                    "header": { "itemSectionHeaderRenderer": { "title": { "simpleText": "Today" } } },
+                    "contents": [
+                      { "videoRenderer": {
+                        "videoId": "hiNearDone1",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hiNearDone1/hqdefault.jpg?sqp=h1", "width": 480, "height": 270 }] },
+                        "title": { "runs": [{ "text": "Almost Finished: Sourdough Starter 101" }] },
+                        "ownerText": { "runs": [{ "text": "Baking Science" }] },
+                        "lengthText": { "simpleText": "15:00" },
+                        "thumbnailOverlays": [
+                          { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 98 } },
+                          { "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "15:00" }, "style": "DEFAULT" } }
+                        ]
+                      } },
+                      { "lockupViewModel": {
+                        "contentImage": { "thumbnailViewModel": {
+                          "image": { "sources": [{ "url": "https://i.ytimg.com/vi/hiLockupB02/hqdefault.jpg?sqp=h2", "width": 480, "height": 270 }] },
+                          "overlays": [{ "thumbnailBottomOverlayViewModel": {
+                            "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 37 } },
+                            "badges": [{ "thumbnailBadgeViewModel": { "text": "8:20", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT" } }]
+                          } }]
+                        } },
+                        "metadata": { "lockupMetadataViewModel": {
+                          "title": { "content": "Raised Bed Breakdown: Timber vs. Galvanized" },
+                          "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                            { "metadataParts": [{ "text": { "content": "The Garden Guy" } }] },
+                            { "metadataParts": [{ "text": { "content": "220K views" } }, { "text": { "content": "4 days ago" } }] }
+                          ] } }
+                        } },
+                        "contentId": "hiLockupB02",
+                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                      } },
+                      { "videoRenderer": {
+                        "videoId": "hiVideoC003",
+                        "thumbnail": { "thumbnails": [
+                          { "url": "https://i.ytimg.com/vi/hiVideoC003/hqdefault.jpg?sqp=h3a", "width": 246, "height": 138 },
+                          { "url": "https://i.ytimg.com/vi/hiVideoC003/hqdefault.jpg?sqp=h3b", "width": 470, "height": 264 }
+                        ] },
+                        "title": { "runs": [{ "text": "Guitar Warmup Routine (Full)" }] },
+                        "longBylineText": { "runs": [{ "text": "Guitar Coach Mike" }] },
+                        "viewCountText": { "simpleText": "1,044 views" },
+                        "publishedTimeText": { "simpleText": "Streamed 1 month ago" },
+                        "lengthText": { "simpleText": "20:00" },
+                        "thumbnailOverlays": [
+                          { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 62 } },
+                          { "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "20:00" }, "style": "DEFAULT" } }
+                        ]
+                      } },
+                      { "reelShelfRenderer": {
+                        "title": { "runs": [{ "text": "Shorts" }] },
+                        "items": [
+                          { "shortsLockupViewModel": {
+                            "entityId": "shorts-shelf-item-hiShortS004",
+                            "thumbnail": { "sources": [{ "url": "https://i.ytimg.com/vi/hiShortS004/oardefault.jpg", "width": 405, "height": 720 }] },
+                            "onTap": { "innertubeCommand": { "reelWatchEndpoint": { "videoId": "hiShortS004" } } },
+                            "overlayMetadata": { "primaryText": { "content": "Old maps compilation" }, "secondaryText": { "content": "5M views" } }
+                          } }
+                        ]
+                      } }
+                    ]
+                  } },
+
+                  { "itemSectionRenderer": {
+                    "header": { "itemSectionHeaderRenderer": { "title": { "simpleText": "Yesterday" } } },
+                    "contents": [
+                      { "videoRenderer": {
+                        "videoId": "hiVideoD005",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hiVideoD005/hqdefault.jpg?sqp=h5", "width": 480, "height": 270 }] },
+                        "title": { "runs": [{ "text": "1980 Miracle on Ice: Full Broadcast" }] },
+                        "ownerText": { "runs": [{ "text": "Classic Travel Archive" }] },
+                        "lengthText": { "simpleText": "1:00:00" },
+                        "thumbnailOverlays": [
+                          { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 5 } },
+                          { "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "1:00:00" }, "style": "DEFAULT" } }
+                        ]
+                      } },
+                      { "lockupViewModel": {
+                        "contentImage": { "thumbnailViewModel": {
+                          "image": { "sources": [{ "url": "https://i.ytimg.com/vi/hiLockE0006/hqdefault.jpg", "width": 480, "height": 270 }] },
+                          "overlays": [{ "thumbnailBottomOverlayViewModel": {
+                            "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 100 } },
+                            "badges": [{ "thumbnailBadgeViewModel": { "text": "2:10" } }]
+                          } }]
+                        } },
+                        "metadata": { "lockupMetadataViewModel": { "title": { "content": "Watched All The Way: Quick Fold Method" } } },
+                        "contentId": "hiLockE0006",
+                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                      } },
+                      { "lockupViewModel": {
+                        "contentImage": { "thumbnailViewModel": {
+                          "image": { "sources": [
+                            { "url": "https://i.ytimg.com/vi/hiLockF0007/mqdefault.jpg", "width": 320, "height": 180 },
+                            { "url": "https://i.ytimg.com/vi/hiLockF0007/sddefault.jpg", "width": 640, "height": 480 }
+                          ] },
+                          "overlays": [{ "thumbnailBottomOverlayViewModel": {
+                            "progressBar": { "thumbnailOverlayProgressBarViewModel": { "startPercent": 80 } },
+                            "badges": [{ "thumbnailBadgeViewModel": { "text": "4:13", "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT" } }]
+                          } }]
+                        } },
+                        "metadata": { "lockupMetadataViewModel": {
+                          "title": { "content": "Lens Iris Mechanics in Slow Motion" },
+                          "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                            { "metadataParts": [{ "text": { "content": "Darkroom Lab" } }] }
+                          ] } }
+                        } },
+                        "contentId": "hiLockF0007",
+                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO"
+                      } },
+                      { "videoRenderer": {
+                        "videoId": "hiPlainG008",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hiPlainG008/hqdefault.jpg", "width": 480, "height": 270 }] },
+                        "title": { "runs": [{ "text": "No Progress Bar On This One" }] },
+                        "ownerText": { "runs": [{ "text": "Mystery Channel" }] },
+                        "lengthText": { "simpleText": "6:06" }
+                      } }
+                    ]
+                  } },
+
+                  { "itemSectionRenderer": {
+                    "header": { "itemSectionHeaderRenderer": { "title": { "runs": [{ "text": "Earlier this week" }] } } },
+                    "contents": [
+                      { "lockupViewModel": {
+                        "contentImage": { "thumbnailViewModel": {
+                          "image": { "sources": [{ "url": "https://i.ytimg.com/vi/hiLockH0009/hqdefault.jpg", "width": 480, "height": 270 }] },
+                          "overlays": [
+                            { "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 50 } }
+                          ]
+                        } },
+                        "metadata": { "lockupMetadataViewModel": {
+                          "title": { "content": "Podcast: Life on the ISS" },
+                          "metadata": { "contentMetadataViewModel": { "metadataRows": [
+                            { "metadataParts": [{ "text": { "content": "Minor Planet Pod" } }] }
+                          ] } }
+                        } },
+                        "contentId": "hiLockH0009"
+                      } },
+                      { "videoRenderer": {
+                        "videoId": "hiVideoI010",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hiVideoI010/hqdefault.jpg", "width": 480, "height": 270 }] },
+                        "title": { "runs": [{ "text": "Proofing Time and Temps Explained" }] },
+                        "ownerText": { "runs": [{ "text": "Baking Science" }] },
+                        "lengthText": { "simpleText": "10:00" },
+                        "thumbnailOverlays": [{ "thumbnailOverlayResumePlaybackRenderer": { "percentDurationWatched": 94 } }]
+                      } },
+                      { "continuationItemRenderer": { "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN", "continuationEndpoint": { "continuationCommand": { "token": "4qmFsgIrEglGRWhpc3Rvcnk", "request": "CONTINUATION_REQUEST_TYPE_BROWSE" } } } }
+                    ]
+                  } }
+                ]
+              }
+            }
+          }
+        }],
+        "secondaryContents": { "browseFeedActionsRenderer": { "contents": [
+          { "buttonRenderer": { "text": { "runs": [{ "text": "Clear all watch history" }] } } },
+          { "buttonRenderer": { "text": { "runs": [{ "text": "Pause watch history" }] } } }
+        ] } }
+      }
+    },
+    "topbar": { "desktopTopbarRenderer": { "topbarButtons": [
+      { "topbarMenuButtonRenderer": { "avatar": { "thumbnails": [{ "url": "https://yt3.ggpht.com/meAvatar=s88-c-k", "width": 88, "height": 88 }] } } }
+    ] } }
+  }
+}

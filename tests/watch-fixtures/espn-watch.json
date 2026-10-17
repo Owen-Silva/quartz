@@ -1,0 +1,70 @@
+{
+  "_fixture": "public JSON, shape from watch.product.api.espn.com watchespn/web/home (fetched 2026-10-16 per FEASIBILITY.md: buckets, listing id = airing UUID, eventId = scoreboard gameId, status, isLocked, links.play), unverified against a live account (no account needed); listings invented",
+  "page": {
+    "id": "home",
+    "name": "ESPN Watch",
+    "buckets": [
+      {
+        "id": 1001, "name": "Featured", "type": "standard", "metadata": { "imageFormat": "16x9" },
+        "contents": [
+          {
+            "id": "7f3e2a10-5c1d-4b9e-9a61-0d2c3b4a5e01", "type": "listing", "status": "live",
+            "eventId": 401892517, "name": "Boston Bruins vs. Seattle Kraken",
+            "isLocked": true, "isPersonalized": false, "progress": 0,
+            "imageHref": "https://artwork.espncdn.com/events/401892517/16x9/1280x720_20261017010000.jpg",
+            "network": { "name": "ESPN+" },
+            "streams": [{ "id": "s-401892517", "source": "ESPN+", "authTypes": ["DIRECT"] }],
+            "links": { "play": "https://www.espn.com/watch/player/_/id/7f3e2a10-5c1d-4b9e-9a61-0d2c3b4a5e01" }
+          }
+        ]
+      },
+      {
+        "id": 1002, "name": "Upcoming", "type": "standard",
+        "contents": [
+          {
+            "id": "1b9c4d22-8e7f-4a10-b3c2-7d6e5f4a3b02", "type": "listing", "status": "upcoming",
+            "eventId": "401892518", "name": "Vancouver Canucks vs. Los Angeles Kings",
+            "isLocked": false, "startTime": "2026-10-17T02:30:00Z",
+            "imageHref": "https://artwork.espncdn.com/events/401892518/16x9/1280x720_20261017023000.jpg",
+            "network": "TNT"
+          },
+          {
+            "id": "c0ffee00-1111-4222-8333-444455556603", "type": "listing", "status": "upcoming",
+            "eventId": 401900000, "name": "Minnesota vs. Wisconsin (NCAA Hockey)",
+            "isLocked": true, "imageHref": "https://artwork.espncdn.com/events/401900000/16x9/1280x720.jpg"
+          }
+        ]
+      },
+      {
+        "id": 1003, "name": "Recently Added", "type": "standard",
+        "contents": [
+          {
+            "id": "9a8b7c6d-5e4f-4321-a0b1-c2d3e4f5a604", "type": "listing", "status": "replay",
+            "eventId": 401892519, "name": "Rangers vs. Maple Leafs (Replay)", "isLocked": true,
+            "imageHref": "https://artwork.espncdn.com/events/401892519/16x9/1280x720_replay.jpg",
+            "network": { "name": "ESPN+" }
+          },
+          {
+            "id": "0d1e2f3a-4b5c-4d6e-8f70-81920a1b2c05", "type": "listing", "status": "replay",
+            "eventId": "401772899", "name": "Steelers vs. Browns (Replay)", "isLocked": false,
+            "images": [{ "url": "https://artwork.espncdn.com/events/401772899/16x9/1280x720.jpg", "ratio": "16x9" }],
+            "network": { "name": "ESPN" }
+          },
+          {
+            "id": "5c4b3a29-1807-4f6e-9d5c-4b3a29180706", "type": "listing", "status": "replay",
+            "name": "SportsCenter", "subtitle": "Thursday night edition", "isLocked": false,
+            "imageHref": "https://artwork.espncdn.com/programs/sportscenter/16x9/1280x720.jpg",
+            "network": { "name": "ESPN" }
+          }
+        ]
+      },
+      {
+        "id": 1004, "name": "Leagues", "type": "league",
+        "contents": [
+          { "id": "nhl", "name": "NHL", "type": "league", "imageHref": "https://a.espncdn.com/i/teamlogos/leagues/500/nhl.png" },
+          { "id": "nfl", "name": "NFL", "type": "league", "imageHref": "https://a.espncdn.com/i/teamlogos/leagues/500/nfl.png" }
+        ]
+      }
+    ]
+  }
+}

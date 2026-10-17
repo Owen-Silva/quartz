@@ -319,6 +319,15 @@
       profile: cleanText(r.profile, 60)
     };
     if (Array.isArray(r.events)) out.events = cleanEvents(r.events);
+    // A part that failed while the rest read (history timed out, home worked) is a WARNING:
+    // kept and shown, never dropped (no silent failures).
+    out.warnings = [];
+    if (Array.isArray(r.warnings)) {
+      for (var w = 0; w < r.warnings.length && out.warnings.length < 5; w++) {
+        var t = cleanText(r.warnings[w], 160);
+        if (t && out.warnings.indexOf(t) === -1) out.warnings.push(t);
+      }
+    }
     return out;
   }
 

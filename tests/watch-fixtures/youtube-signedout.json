@@ -1,0 +1,38 @@
+{
+  "_fixture": "shape from YouTube.js src/parser/classes (RichGrid, FeedNudge, Button with signInEndpoint, DesktopTopbar) for a logged-out FEwhat_to_watch, unverified against a live account",
+  "loggedIn": false,
+  "ytInitialData": {
+    "responseContext": { "serviceTrackingParams": [{ "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "0" }] }] },
+    "contents": {
+      "twoColumnBrowseResultsRenderer": {
+        "tabs": [{
+          "tabRenderer": {
+            "selected": true,
+            "tabIdentifier": "FEwhat_to_watch",
+            "content": {
+              "richGridRenderer": {
+                "contents": [
+                  { "richSectionRenderer": { "content": { "feedNudgeRenderer": {
+                    "title": { "runs": [{ "text": "Try searching to get started" }] },
+                    "subtitle": { "runs": [{ "text": "Start watching videos to help us build a feed of videos you'll love." }] },
+                    "style": "FEED_NUDGE_STYLE_CHIPS"
+                  } } } }
+                ]
+              }
+            }
+          }
+        }]
+      }
+    },
+    "topbar": { "desktopTopbarRenderer": { "topbarButtons": [
+      { "buttonRenderer": {
+        "style": "STYLE_SUGGESTIVE",
+        "text": { "runs": [{ "text": "Sign in" }] },
+        "navigationEndpoint": {
+          "commandMetadata": { "webCommandMetadata": { "url": "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F", "webPageType": "WEB_PAGE_TYPE_UNKNOWN" } },
+          "signInEndpoint": { "idamTag": "65620" }
+        }
+      } }
+    ] } }
+  }
+}

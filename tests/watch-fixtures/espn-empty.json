@@ -1,0 +1,8 @@
+{
+  "_fixture": "public JSON, shape from site.api.espn.com public scoreboard (fetched 2026-10-16 per FEASIBILITY.md) and pseudo-r/Public-ESPN-API, unverified against a live account (no account needed): a league with no games today",
+  "leagues": [{ "id": "10", "uid": "s:1~l:10", "name": "Major League Baseball", "abbreviation": "MLB", "slug": "mlb",
+    "calendar": ["2026-10-17T07:00Z", "2026-10-18T07:00Z"] }],
+  "season": { "type": 3, "year": 2026 },
+  "day": { "date": "2026-10-16" },
+  "events": []
+}
