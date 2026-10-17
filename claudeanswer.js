@@ -112,7 +112,7 @@ const CAP_MAX = 10000;
  *  toward max_tokens, so the ceiling leaves it room while still keeping a runaway answer short. */
 const PLAN = {
   quick: { maxTokens: 4096, maxUses: 2, effort: 'high' }, // the user 10-17: Haiku at HIGH effort; 4096 leaves thinking room
-  deep: { maxTokens: 2048, maxUses: 4, effort: 'medium' },
+  deep: { maxTokens: 8192, maxUses: 4, effort: 'high' }, // the user 10-17: Sonnet at HIGH effort too; 8192 leaves thinking room
 };
 
 const MAX_QUERY = 1000;

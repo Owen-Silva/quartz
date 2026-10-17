@@ -184,7 +184,7 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     got = await ask(ca, { q: 'mock:nosearch capital of france', seq: 7, mode: 'deep' });
     const rd = reqs()[reqs().length - 1];
     eq('deep: text', last(got).text, 'Paris is the capital of France.');
-    ok('deep: Sonnet, 2048 tokens, 4 searches, medium effort', rd.body.model === 'claude-sonnet-5-5' && rd.body.max_tokens === 2048 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'medium', rd.body);
+    ok('deep: Sonnet, 8192 tokens, 4 searches, high effort (The user, 10-17)', rd.body.model === 'claude-sonnet-5-5' && rd.body.max_tokens === 8192 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'high', rd.body);
     ok('deep: server-side fallback "default" with its beta header', rd.body.fallbacks === 'default' && rd.beta === 'server-side-fallback-2026-07-01', rd.beta);
     ok('deep: context says deeper', /deeper answer/.test(rd.body.system[1].text));
     near('deep: priced at Sonnet', last(got).costUsd, (900 * 2 + 12 * 10) / 1e6);

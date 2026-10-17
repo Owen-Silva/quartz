@@ -817,7 +817,7 @@ those that read as questions, or only the ones you press "Ask Claude" on, per th
 setting) and any follow-up typed into the answer box go to Anthropic, so Claude can answer and run
 Anthropic's own web search for its sources; Brave still supplies the results list, and Brave's
 results are never sent to Claude (Brave's API terms grant no AI use of them). Quick answers use
-Claude Haiku 5.5 at high effort with at most 2 searches; "Deeper answer" uses Claude Sonnet 5.5 with
+Claude Haiku 5.5 at high effort with at most 2 searches; "Deeper answer" uses Claude Sonnet 5.5 at high effort with
 at most 4 (both changeable). Every answer's cost is estimated from the usage Anthropic returns at the
 published prices plus $0.01 a search, added to "This month: $X.XX estimated · N answers", and
 answers stop at the monthly cap (default $150). That is Quartz's own estimate; it cannot see the
