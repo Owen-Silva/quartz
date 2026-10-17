@@ -235,6 +235,8 @@ html[data-theme="light"] #settings-panel {
   text-align: center;
 }
 #settings-panel .set-nav-item[aria-current="page"] .set-nav-glyph { color: var(--accent); }
+#settings-panel .set-nav-mark { display: flex; align-items: center; justify-content: center; height: 16px; }
+#settings-panel .set-nav-mark img { display: block; width: 16px; height: 16px; }
 
 #settings-panel .set-nav-text {
   flex: 1 1 auto;
