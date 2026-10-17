@@ -184,12 +184,24 @@ function start(opts) {
         }
         break;
       case 'fallback':
+        // A fallback block Quartz never asked for: the client must refuse the rest.
         startMsg(900);
-        text(0, ['Partial text from the first model that is long enough to stream out before the fallback switches models mid-answer. ']);
+        text(0, ['Partial text from Haiku that is long enough to stream out before an unasked-for fallback switches models mid-answer. ']);
         ev('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'fallback', from: { model }, to: { model: 'claude-opus-4-8' } } });
         ev('content_block_stop', { type: 'content_block_stop', index: 1 });
         text(2, ['Answer from the fallback model.']);
         end('end_turn', { input_tokens: 900, output_tokens: 40 });
+        break;
+      case 'wrong-model':
+        // message_start reports a model other than the one asked for.
+        startMsg(900, 'claude-sonnet-5-5');
+        text(0, ['An answer written by some other model, long enough that it would be shown at once if it were not refused. ']);
+        end('end_turn', { input_tokens: 900, output_tokens: 30 });
+        break;
+      case 'no-model':
+        ev('message_start', { type: 'message_start', message: { id: 'msg_mock', type: 'message', role: 'assistant', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 1 } } });
+        text(0, ['An answer from a stream that never said which model wrote it.']);
+        end('end_turn', { input_tokens: 900, output_tokens: 20 });
         break;
       case 'big':
         startMsg(150000);

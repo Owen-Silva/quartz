@@ -816,9 +816,17 @@ without a key, nothing goes to Anthropic. With one, each web search on Quartz re
 those that read as questions, or only the ones you press "Ask Claude" on, per the AI answers
 setting) and any follow-up typed into the answer box go to Anthropic, so Claude can answer and run
 Anthropic's own web search for its sources; Brave still supplies the results list, and Brave's
-results are never sent to Claude (Brave's API terms grant no AI use of them). Quick answers use
-Claude Haiku 5.5 at high effort with at most 2 searches; "Deeper answer" uses Claude Sonnet 5.5 at high effort with
-at most 4 (both changeable). Every answer's cost is estimated from the usage Anthropic returns at the
+results are never sent to Claude (Brave's API terms grant no AI use of them). Every answer is
+written by Claude Haiku 5.5 (`claude-haiku-5-5`) at high effort, and no other model ever answers:
+quick answers allow 2 searches and 4,096 output tokens; "Deeper answer" is the same model with 4
+searches and 8,192 tokens (more searching, a longer answer). Settings shows this as one read-only
+line; there is no model picker, and a stored config from an older build that named Sonnet or Opus
+is read back as Haiku. No server-side fallback is ever requested (no `fallbacks` field, no
+`anthropic-beta` header), and a stream whose `message_start` names another model, or that carries
+a fallback block anyway, fails as "Not an answer from Claude Haiku 5.5" without showing that
+model's text. A typical answer costs about a tenth of a cent in tokens ($0.10 / $0.50 per million
+input / output tokens up to a 100,000-token prompt, $0.50 / $2.50 beyond) plus $0.01 a search.
+Every answer's cost is estimated from the usage Anthropic returns at those
 published prices plus $0.01 a search, added to "This month: $X.XX estimated · N answers", and
 answers stop at the monthly cap (default $150). That is Quartz's own estimate; it cannot see the
 real credit balance. Tests run only against a mock (`QUARTZ_CLAUDE_API`, honoured for

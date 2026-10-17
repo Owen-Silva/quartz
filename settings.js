@@ -3435,8 +3435,9 @@
      main (claudeanswer.js) keeps the key in <userData>/claude-answer.json,
      ENCRYPTED with safeStorage (DPAPI), and answers describe() with
      `hasKey` and a mask, never the key. "Check key" is GET /v1/models,
-     which costs nothing. Under it: when answers run (the mode), which
-     models write them, the monthly cap, and this month's spend as
+     which costs nothing. Under it: when answers run (the mode), a
+     read-only line naming the one model (Claude Haiku 5.5, high effort)
+     that writes every answer, the monthly cap, and this month's spend as
      Quartz estimates it. Every refusal from main comes back with
      `error` and is printed here, never swallowed.
      ============================================================ */
@@ -3604,7 +3605,7 @@
     field.appendChild(el('p', 'set-hint set-claude-privacy', claudeDisclosure(st) + ' ' +
       'Make a key at platform.claude.com/settings/keys. Quartz encrypts it with Windows (DPAPI) in this profile and never gives it to a page.'));
 
-    /* When answers run, and which model writes them. */
+    /* When answers run, and the model that writes them. */
     var modes = Array.isArray(st.modes) && st.modes.length ? st.modes
       : [{ id: 'every', name: 'Answer every search' }, { id: 'questions', name: 'Only questions' }, { id: 'manual', name: 'Only when I ask' }];
     field.appendChild(controlRow('AI answers', 'set-claude-mode', glassSelect('set-claude-mode',
@@ -3612,19 +3613,11 @@
         ckFocus = '#set-claude-mode';
         claudeCall('setConfig', { mode: v }, 'That could not be saved');
       })));
-    var models = (Array.isArray(st.models) ? st.models : []).map(function (m) {
-      return { value: m.id, name: m.label + (m.note ? ' (' + m.note + ')' : '') };
-    });
-    if (models.length) {
-      field.appendChild(controlRow('Quick answers', 'set-claude-auto', glassSelect('set-claude-auto', models, st.autoModel, function (v) {
-        ckFocus = '#set-claude-auto';
-        claudeCall('setConfig', { autoModel: v }, 'That could not be saved');
-      })));
-      field.appendChild(controlRow('“Deeper answer”', 'set-claude-deep', glassSelect('set-claude-deep', models, st.deepModel, function (v) {
-        ckFocus = '#set-claude-deep';
-        claudeCall('setConfig', { deepModel: v }, 'That could not be saved');
-      })));
-    }
+    /* One model only (The user, 10-17: "only haiku"): a quiet read-only line, no picker. */
+    var modelName = (st.answerModelLabel && String(st.answerModelLabel)) || 'Claude Haiku 5.5';
+    field.appendChild(el('p', 'set-hint set-claude-model',
+      'Answers by ' + modelName + ' (high effort), about a tenth of a cent an answer plus $0.01 a search. ' +
+      '“Deeper answer” searches more and writes more.'));
 
     /* The monthly cap: answers stop with "cap reached" once the estimate gets there. */
     var capRow = el('div', 'set-path-row');

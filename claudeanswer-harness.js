@@ -55,8 +55,12 @@ for (const [q, want] of [['youtube', false], ['gmail login', false], ['best pizz
 
 near('cost haiku', C.estimateCost('claude-haiku-5-5', { input: 50000, output: 1000000, searches: 0 }), 50000 * 0.10 / 1e6 + 0.50);
 near('cost haiku over 100k prompt', C.estimateCost('claude-haiku-5-5', { input: 150000, output: 1000 }), (150000 * 0.5 + 1000 * 2.5) / 1e6);
-near('cost sonnet + cache + searches', C.estimateCost('claude-sonnet-5-5', { input: 1000, cacheWrite: 1000, cacheRead: 1000, output: 1000, searches: 2 }), (1000 * 2 + 1000 * 2.5 + 1000 * 0.1 + 1000 * 10) / 1e6 + 0.02);
-near('cost opus', C.estimateCost('claude-opus-5-5', { input: 1e6, output: 1e6 }), 24);
+near('cost haiku + cache + searches', C.estimateCost('claude-haiku-5-5', { input: 1000, cacheWrite: 1000, cacheRead: 1000, output: 1000, searches: 2 }), (1000 * 0.10 + 1000 * 0.125 + 1000 * 0.01 + 1000 * 0.50) / 1e6 + 0.02);
+eq('only Haiku is offered', C.MODELS.map((m) => m.id), ['claude-haiku-5-5']);
+eq('only Haiku is priced (Sonnet/Opus rows are gone)', Object.keys(C.PRICES), ['claude-haiku-5-5']);
+eq('defaults: both answers on Haiku', [C.DEFAULTS.autoModel, C.DEFAULTS.deepModel], ['claude-haiku-5-5', 'claude-haiku-5-5']);
+eq('plan: quick is Haiku, 4096, 2 searches, high', C.PLAN.quick, { model: 'claude-haiku-5-5', maxTokens: 4096, maxUses: 2, effort: 'high' });
+eq('plan: deep is Haiku, 8192, 4 searches, high', C.PLAN.deep, { model: 'claude-haiku-5-5', maxTokens: 8192, maxUses: 4, effort: 'high' });
 near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1e6 }), 10);
 
 {
@@ -137,14 +141,18 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
 
     // ---- Check key: GET /v1/models, free ------------------------------------------------------
     let t = d(await ca.test());
-    ok('check key: works', t.check && t.check.ok && /Claude Haiku 5\.5 and Claude Sonnet 5\.5/.test(t.check.detail), t.check);
+    ok('check key: works, naming Haiku only', t.check && t.check.ok && /Claude Haiku 5\.5 is open/.test(t.check.detail) && !/Sonnet|Opus/.test(t.check.detail), t.check);
     const mreq = mock.requests[mock.requests.length - 1];
     ok('check key: GET /v1/models with the key header', mreq.method === 'GET' && mreq.path.indexOf('/v1/models') === 0 && mreq.key === KEY && mreq.version === '2023-06-01', mreq);
     const mock2 = await M.start({ models: ['claude-haiku-5-5'] });
     const ca2 = mk({ apiBase: mock2.base });
     t = d(await ca2.test());
-    ok('check key: a picked model missing is said', t.check && !t.check.ok && /Claude Sonnet 5\.5/.test(t.check.detail), t.check);
+    ok('check key: a list with only Haiku is enough', t.check && t.check.ok, t.check);
     await mock2.close();
+    const mock3 = await M.start({ models: ['claude-sonnet-5-5', 'claude-opus-5-5'] });
+    t = d(await mk({ apiBase: mock3.base }).test());
+    ok('check key: Haiku missing from the list is said', t.check && !t.check.ok && /no Claude Haiku 5\.5/.test(t.check.detail), t.check);
+    await mock3.close();
     const badKeyMod = mk({ storePath: () => path.join(tmp, 'bad.json') });
     badKeyMod.setKey('sk-ant-api03-wrongkey-0000');
     t = d(await badKeyMod.test());
@@ -170,7 +178,7 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     eq('request: high effort for the quick answer (The user, 10-17)', r1.body.output_config, { effort: 'high' });
     ok('request: cached system prompt first, date after the breakpoint', r1.body.system[0].text === C.SYSTEM_PROMPT && r1.body.system[0].cache_control.type === 'ephemeral' && !r1.body.system[1].cache_control && /^Today is /.test(r1.body.system[1].text), r1.body.system);
     eq('request: just the query', r1.body.messages, [{ role: 'user', content: 'what is quartz' }]);
-    ok('request: no fallbacks on Haiku, no beta header', !('fallbacks' in r1.body) && r1.beta === '' && r1.key === KEY && r1.version === '2023-06-01', r1);
+    ok('request: no fallbacks, no beta header', !('fallbacks' in r1.body) && r1.beta === '' && r1.key === KEY && r1.version === '2023-06-01', r1);
     ok('request: no Brave results in it', JSON.stringify(r1.body).indexOf('search.brave.com') < 0 && JSON.stringify(r1.body).toLowerCase().indexOf('brave') < 0);
     desc = d(ca.describe());
     ok('month: the answer counted', desc.month.answers === 1 && Math.abs(desc.month.spentUsd - done.costUsd) < 1e-6 && desc.month.label === 'October 2026', desc.month);
@@ -180,14 +188,16 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     got = await ask(ca, { q: 'what is quartz', seq: 6, mode: 'auto' });
     ok('cache: same answer, nothing sent, nothing spent', last(got).phase === 'done' && last(got).cached === true && last(got).costUsd === 0 && last(got).text === done.text && reqs().length === n0 && d(ca.describe()).month.answers === 1, last(got));
 
-    // ---- deep: the deep model, fallbacks on, bigger budget --------------------------------------
+    // ---- deep: still Haiku, more searching and a longer answer -----------------------------------
     got = await ask(ca, { q: 'mock:nosearch capital of france', seq: 7, mode: 'deep' });
     const rd = reqs()[reqs().length - 1];
     eq('deep: text', last(got).text, 'Paris is the capital of France.');
-    ok('deep: Sonnet, 8192 tokens, 4 searches, high effort (The user, 10-17)', rd.body.model === 'claude-sonnet-5-5' && rd.body.max_tokens === 8192 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'high', rd.body);
-    ok('deep: server-side fallback "default" with its beta header', rd.body.fallbacks === 'default' && rd.beta === 'server-side-fallback-2026-07-01', rd.beta);
+    ok('deep uses Haiku, 8192, 4 searches, high (The user, 10-17: "only haiku")', rd.body.model === 'claude-haiku-5-5' && rd.body.max_tokens === 8192 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'high', rd.body);
+    ok('deep: no fallbacks, no beta header', !('fallbacks' in rd.body) && rd.beta === '', rd.beta);
+    ok('deep: start and done both say Haiku', got[0].model === 'claude-haiku-5-5' && got[0].modelLabel === 'Claude Haiku 5.5' && last(got).model === 'claude-haiku-5-5' && last(got).modelLabel === 'Claude Haiku 5.5', [got[0], last(got).model]);
     ok('deep: context says deeper', /deeper answer/.test(rd.body.system[1].text));
-    near('deep: priced at Sonnet', last(got).costUsd, (900 * 2 + 12 * 10) / 1e6);
+    near('deep: priced at Haiku', last(got).costUsd, (900 * 0.10 + 12 * 0.50) / 1e6);
+    ok('deep: setConfig cannot pick another model', /only use Claude Haiku 5\.5/.test(d(ca.setConfig({ deepModel: 'claude-sonnet-5-5' })).error || '') && d(ca.describe()).deepModel === 'claude-haiku-5-5');
     eq('deep: short uncited answer still delivered by delta', deltas(got), 'Paris is the capital of France.');
 
     got = await ask(ca, { q: 'mock:long text', seq: 8, mode: 'ask' });
@@ -269,14 +279,39 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     near('pause_turn: both requests priced', last(got).costUsd, (4000 * 0.1 + 30 * 0.5) / 1e6 + 0.01 + (4100 * 0.1 + 20 * 0.5) / 1e6);
     ok('pause_turn: first request was the same body', p1 && p1.body.messages.length === 1);
 
-    // ---- server-side fallback ----------------------------------------------------------------------
+    // ---- only Haiku may answer -------------------------------------------------------------------
+    got = await ask(ca, { q: 'mock:wrong-model x', seq: ++seq, mode: 'ask' });
+    isFail('a stream reporting a non-Haiku model is refused', last(got), 'bad-answer');
+    ok('non-Haiku stream: says which model, plainly', /claude-sonnet-5-5, not Claude Haiku 5\.5/.test(last(got).detail), last(got).detail);
+    ok('non-Haiku stream: none of its text reached the page', deltas(got) === '' && got.filter((o) => o.phase === 'done').length === 0, deltas(got));
+    ok('non-Haiku stream: one start only', got.filter((o) => o.phase === 'start').length === 1);
+    got = await ask(ca, { q: 'mock:no-model x', seq: ++seq, mode: 'ask' });
+    isFail('a stream naming no model is refused', last(got), 'bad-answer');
+    ok('no-model stream: says so', /did not say which model/.test(last(got).detail), last(got).detail);
     got = await ask(ca, { q: 'mock:fallback x', seq: ++seq, mode: 'deep' });
-    const starts = got.filter((o) => o.phase === 'start');
-    ok('fallback: a second start resets the page, with the new model', starts.length === 2 && starts[1].model === 'claude-opus-4-8' && starts[1].fallback === true, starts);
-    ok('fallback: final text is the fallback answer only', last(got).text === 'Answer from the fallback model.' && last(got).model === 'claude-opus-4-8', last(got));
-    near('fallback: priced at the dearer model', last(got).costUsd, (900 * 5 + 40 * 25) / 1e6);
+    isFail('an unasked-for fallback block is refused', last(got), 'bad-answer');
+    ok('fallback block: names the switch plainly', /switched this answer from Claude Haiku 5\.5 to claude-opus-4-8/.test(last(got).detail), last(got).detail);
+    ok('fallback block: one start, no reset, no fallback text shown', got.filter((o) => o.phase === 'start').length === 1 && deltas(got).indexOf('Answer from the fallback model') < 0, got.filter((o) => o.phase === 'start'));
+    ok('fallback block: what streamed still costs something', last(got).costUsd > 0, last(got).costUsd);
     got = await ask(ca, { q: 'mock:big x', seq: ++seq, mode: 'ask' });
     near('Haiku over 100k prompt tokens: long-context price row', last(got).costUsd, (150000 * 0.5 + 1000 * 2.5) / 1e6);
+
+    // ---- a stored non-Haiku config is sanitised ---------------------------------------------------
+    {
+      const oldStore = path.join(tmp, 'old-sonnet.json');
+      const blob = JSON.parse(fs.readFileSync(store, 'utf8'));
+      blob.cfg = Object.assign({}, blob.cfg, { autoModel: 'claude-opus-5-5', deepModel: 'claude-sonnet-5-5' });
+      fs.writeFileSync(oldStore, JSON.stringify(blob));
+      const oldMod = mk({ storePath: () => oldStore });
+      const od = d(oldMod.describe());
+      ok('a stored non-Haiku config is sanitised', od.autoModel === 'claude-haiku-5-5' && od.deepModel === 'claude-haiku-5-5' && od.answerModel === 'claude-haiku-5-5', [od.autoModel, od.deepModel]);
+      const nOld = reqs().length;
+      got = await ask(oldMod, { q: 'mock:nosearch old profile deep', seq: ++seq, mode: 'deep' });
+      ok('old Sonnet profile: deep still goes to Haiku', reqs()[nOld] && reqs()[nOld].body.model === 'claude-haiku-5-5' && last(got).model === 'claude-haiku-5-5', reqs()[nOld] && reqs()[nOld].body.model);
+      d(oldMod.setConfig({ mode: 'every' }));
+      const saved = JSON.parse(fs.readFileSync(oldStore, 'utf8')).cfg;
+      ok('old Sonnet profile: the next save writes Haiku', saved.autoModel === 'claude-haiku-5-5' && saved.deepModel === 'claude-haiku-5-5', saved);
+    }
 
     // ---- stop, stale stop, supersede ------------------------------------------------------------------
     {
@@ -392,6 +427,14 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     ok('leak: logs carry no query text', logs.every((l) => l.indexOf('quartz') < 0 && l.indexOf('mock:') < 0), logs);
     ok('leak: not in the store file', fs.readFileSync(store, 'utf8').indexOf(KEY) < 0);
     ok('leak: every Anthropic request carried it only as x-api-key', mock.requests.filter((r) => r.key === KEY).length > 10 && mock.requests.every((r) => JSON.stringify(r.body || {}).indexOf('SECRET') < 0));
+
+    // ---- only Haiku, ever: across EVERY request this run made --------------------------------------------------
+    const msgReqs = reqs();
+    ok('no request ever carries fallbacks or the fallback beta header (' + mock.requests.length + ' requests)',
+      mock.requests.every((r) => r.beta === '' && !(r.body && 'fallbacks' in r.body)),
+      mock.requests.filter((r) => r.beta || (r.body && 'fallbacks' in r.body)).map((r) => [r.path, r.beta]));
+    ok('every Messages request asked for Haiku at high effort (' + msgReqs.length + ')', msgReqs.length > 20 && msgReqs.every((r) => r.body && r.body.model === 'claude-haiku-5-5' && r.body.output_config && r.body.output_config.effort === 'high'), msgReqs.map((r) => r.body && r.body.model).filter((m) => m !== 'claude-haiku-5-5'));
+    ok('every start and done the pages got said Haiku', pushed.filter((o) => o.phase === 'start' || o.phase === 'done').every((o) => o.model === 'claude-haiku-5-5' && o.modelLabel === 'Claude Haiku 5.5'), pushed.filter((o) => (o.phase === 'start' || o.phase === 'done') && o.model !== 'claude-haiku-5-5'));
 
     // ---- removing the key ----------------------------------------------------------------------------------------------
     desc = d(ca.setKey(''));

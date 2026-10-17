@@ -87,7 +87,7 @@ function findStore(dir) {
     // ---- the bridge and a fresh profile ---------------------------------------------------------
     check(await chrome.ev('!!(window.api.claudeAnswer && typeof window.api.claudeAnswer.setConfig === "function")'), 'preload bridge: window.api.claudeAnswer');
     let desc = await api('describe()');
-    check(desc && desc.hasKey === false && desc.mode === 'every' && desc.capUsd === 150 && desc.autoModel === 'claude-haiku-5-5' && desc.deepModel === 'claude-sonnet-5-5', 'fresh profile: no key, defaults', desc);
+    check(desc && desc.hasKey === false && desc.mode === 'every' && desc.capUsd === 150 && desc.autoModel === 'claude-haiku-5-5' && desc.deepModel === 'claude-haiku-5-5' && desc.answerModel === 'claude-haiku-5-5', 'fresh profile: no key, defaults (Haiku for both)', desc);
     check(desc.canEncrypt === true, 'safeStorage (DPAPI) is available in the test instance', desc.canEncrypt);
 
     // ---- Settings > Search: the field --------------------------------------------------------------
@@ -113,22 +113,22 @@ function findStore(dir) {
     // ---- Check key: GET /v1/models, free ---------------------------------------------------------------
     await chrome.ev("document.querySelector('.set-claude-check').click(), 1");
     const checked = await chrome.waitFor("(() => { const p = document.querySelector('.set-claude-status'); return p && /^Check/.test(p.textContent) ? p.textContent : null; })()", 8000);
-    check(/^Checked: The key works\. Anthropic accepted it, and Claude Haiku 5\.5 and Claude Sonnet 5\.5 are open to it\./.test(checked), 'Check key: works', checked);
+    check(/^Checked: The key works\. Anthropic accepted it, and Claude Haiku 5\.5 is open to it\./.test(checked), 'Check key: works (needs only Haiku)', checked);
     const mreq = mock.requests.filter((r) => r.path.indexOf('/v1/models') === 0);
     check(mreq.length === 1 && mreq[0].method === 'GET' && mreq[0].key === KEY, 'Check key: one GET /v1/models with the key as x-api-key', mreq.length);
 
-    // ---- mode, models, cap ---------------------------------------------------------------------------
+    // ---- mode, the one-model line, cap ---------------------------------------------------------------
     const pick = (sel, value) => chrome.ev(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change', { bubbles: true })); return 1; })()`);
     await pick('#set-claude-mode', 'questions');
     await chrome.waitFor("(() => { const p = document.querySelector('.set-claude-privacy'); return p && /that reads as a question/.test(p.textContent); })()", 6000);
     check((await api('describe()')).mode === 'questions', 'mode select: saved in main, disclosure follows it');
     await pick('#set-claude-mode', 'every');
-    await pick('#set-claude-deep', 'claude-opus-5-5');
-    await chrome.waitFor('true', 300);
     await sleep(300);
-    check((await api('describe()')).deepModel === 'claude-opus-5-5', 'deep model select: saved');
-    await pick('#set-claude-deep', 'claude-sonnet-5-5');
-    await sleep(300);
+    const modelLine = await chrome.ev("(document.querySelector('.set-claude-model') || {}).textContent || ''");
+    check(/^Answers by Claude Haiku 5\.5 \(high effort\)/.test(modelLine) && /Deeper answer” searches more and writes more/.test(modelLine), 'one quiet read-only model line', modelLine);
+    check(await chrome.ev("!document.querySelector('#set-claude-auto') && !document.querySelector('#set-claude-deep')"), 'no model selects any more');
+    const noPick = await api('setConfig({ deepModel: "claude-sonnet-5-5" })');
+    check(/only use Claude Haiku 5\.5/.test(noPick.error || '') && noPick.deepModel === 'claude-haiku-5-5', 'setConfig over IPC cannot pick another model', noPick.error);
     await chrome.ev("(() => { const i = document.querySelector('#set-claude-cap'); i.value = 'lots'; document.querySelector('.set-claude-capsave').click(); return 1; })()");
     const capErr = await chrome.waitFor("(() => { const p = document.querySelector('.set-claude-error'); return p ? p.textContent : null; })()", 6000);
     check(/^Not saved: the monthly cap must be a dollar amount/.test(capErr), 'cap: junk is refused out loud', capErr);
@@ -176,7 +176,8 @@ function findStore(dir) {
     await line({ q: 'mock:nosearch deeper', seq: 4, mode: 'deep' });
     const dd = await page.waitFor("(() => { const f = window.__ans.find((o) => o.phase === 'done' || o.phase === 'fail'); return f ? f : null; })()", 8000);
     const rdeep = mock.requests.filter((r) => r.path === '/v1/messages').pop();
-    check(dd.phase === 'done' && dd.model === 'claude-sonnet-5-5' && rdeep.body.fallbacks === 'default' && rdeep.beta === 'server-side-fallback-2026-07-01', 'page: "Deeper answer" goes to Sonnet with the fallback', dd.model);
+    check(dd.phase === 'done' && dd.model === 'claude-haiku-5-5' && rdeep.body.model === 'claude-haiku-5-5' && rdeep.body.max_tokens === 8192 && rdeep.body.tools[0].max_uses === 4 && rdeep.body.output_config.effort === 'high', 'page: "Deeper answer" is Haiku, 8192, 4 searches, high', dd.model);
+    check(mock.requests.every((r) => r.beta === '' && !(r.body && 'fallbacks' in r.body)), 'no request carried fallbacks or the fallback beta header', mock.requests.length);
 
     // ---- a web page printing the same line is ignored ---------------------------------------------------
     const nBefore = mock.requests.length;

@@ -19,15 +19,19 @@
 //         { seq, phase:'off', reason:'no-key'|'manual'|'not-question' }   nothing was spent
 //
 //   `mode`: "auto" is the page's own ask on load (honours the Settings mode), "ask" is the user
-//   clicking "Ask Claude", "deep" is "Deeper answer" (the deep model). Only ONE answer streams
+//   clicking "Ask Claude", "deep" is "Deeper answer" (more searches, a longer answer; the same
+//   model). Only ONE answer streams
 //   per page: a new seq aborts the old fetch and the old seq gets nothing more; a navigation or
 //   a closed tab aborts it too. `fail.state` is one of 'no-key' | 'bad-key' | 'rate-limited' |
 //   'overloaded' | 'no-credit' | 'cap-reached' | 'offline' | 'server' | 'bad-answer' |
 //   'stopped', each with a plain-English title and a detail that quotes what Anthropic (or the
 //   network) actually answered. Nothing here falls back on its own.
 //
-//   A second 'start' for the same seq happens only when Anthropic's server-side fallback switched
-//   models mid-answer (deep mode): the page should clear what it drew and start again.
+//   ONE MODEL (The user, 10-17: "only haiku"). Every answer, quick and deep, is Claude Haiku 5.5
+//   (ANSWER_MODEL) at high effort. No server-side fallback is ever requested, so there is exactly
+//   one 'start' per seq and its model is always Haiku. If a stream reports another model in
+//   message_start, or carries a fallback block anyway, the answer fails 'bad-answer' and none of
+//   that model's text is shown.
 //
 // Only a guest whose URL is OUR search.html is heard, checked per message as bravesearch.js does,
 // so no web page can spend the user's credit by printing the same line.
@@ -71,7 +75,13 @@ const KEYS_URL = 'https://platform.claude.com/settings/keys';
 const BILLING_URL = 'https://platform.claude.com/settings/billing';
 const CAPABILITIES_URL = 'https://platform.claude.com/settings/capabilities';
 const PRICES_CHECKED = '2026-10-17';
-const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+/** The ONLY model that ever answers (The user, 10-17: "only haiku"). Quick and "Deeper answer" both. */
+const ANSWER_MODEL = 'claude-haiku-5-5';
+const ANSWER_MODEL_LABEL = 'Claude Haiku 5.5';
+/** What message_start may report: the id itself, or a dated snapshot of it. Anything else is
+ *  another model and is refused. */
+const ANSWER_MODEL_RE = /^claude-haiku-5-5(-\d{8})?$/;
 
 /** USD per million tokens, from platform.claude.com/docs/en/about-claude/pricing (5-minute cache
  *  writes). `upTo` is the prompt-length ceiling for that row (Haiku 5.5 is priced by prompt length:
@@ -81,22 +91,16 @@ const PRICES = {
     { upTo: 100000, in: 0.10, out: 0.50, cacheWrite: 0.125, cacheRead: 0.01 },
     { upTo: Infinity, in: 0.50, out: 2.50, cacheWrite: 0.625, cacheRead: 0.05 },
   ],
-  'claude-sonnet-5-5': [{ upTo: Infinity, in: 2, out: 10, cacheWrite: 2.50, cacheRead: 0.10 }],
-  'claude-opus-5-5': [{ upTo: Infinity, in: 4, out: 20, cacheWrite: 5, cacheRead: 0.20 }],
-  // Possible server-side fallback targets (priced only; never picked in Settings).
-  'claude-opus-5': [{ upTo: Infinity, in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.50 }],
-  'claude-opus-4-8': [{ upTo: Infinity, in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.50 }],
 };
-/** A model the table does not know is priced as the dearest current one, so the estimate errs high. */
+/** A model the table does not know (only ever a refused, non-Haiku stream's partial cost) is priced
+ *  as the dearest current one, so the estimate errs high. */
 const PRICE_UNKNOWN = [{ upTo: Infinity, in: 10, out: 50, cacheWrite: 12.50, cacheRead: 1 }];
 const SEARCH_USD = 10 / 1000;
 
-/** The models Settings offers. `fallbacks`: send fallbacks:"default" (Anthropic's server-side
- *  refusal fallback; there is none for Haiku 5.5, so it is not sent there). */
+/** The one model, as Settings describes it. No server-side fallback exists for Haiku 5.5, and none
+ *  is ever requested. */
 const MODELS = [
-  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: 'fastest, about a tenth of a cent an answer', fallbacks: false },
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: 'sharper, a few cents an answer', fallbacks: true },
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: 'most capable, roughly twice Sonnet', fallbacks: true },
+  { id: ANSWER_MODEL, label: ANSWER_MODEL_LABEL, note: 'high effort; about a tenth of a cent an answer plus $0.01 a search' },
 ];
 const MODEL_IDS = MODELS.map((m) => m.id);
 const MODES = [
@@ -105,14 +109,16 @@ const MODES = [
   { id: 'manual', name: 'Only when I ask' },
 ];
 const MODE_IDS = MODES.map((m) => m.id);
-const DEFAULTS = { mode: 'every', capUsd: 150, autoModel: 'claude-haiku-5-5', deepModel: 'claude-sonnet-5-5' };
+const DEFAULTS = { mode: 'every', capUsd: 150, autoModel: ANSWER_MODEL, deepModel: ANSWER_MODEL };
 const CAP_MAX = 10000;
 
-/** What one request may spend. Thinking is adaptive (the default on these models) and counts
- *  toward max_tokens, so the ceiling leaves it room while still keeping a runaway answer short. */
+/** What one request may spend. Thinking is adaptive (the default on Haiku 5.5) and counts toward
+ *  max_tokens, so the ceiling leaves it room while still keeping a runaway answer short. Both are
+ *  Haiku at HIGH effort (The user, 10-17); "Deeper" means more searching and a longer answer, not
+ *  another model. */
 const PLAN = {
-  quick: { maxTokens: 4096, maxUses: 2, effort: 'high' }, // the user 10-17: Haiku at HIGH effort; 4096 leaves thinking room
-  deep: { maxTokens: 8192, maxUses: 4, effort: 'high' }, // the user 10-17: Sonnet at HIGH effort too; 8192 leaves thinking room
+  quick: { model: ANSWER_MODEL, maxTokens: 4096, maxUses: 2, effort: 'high' },
+  deep: { model: ANSWER_MODEL, maxTokens: 8192, maxUses: 4, effort: 'high' },
 };
 
 const MAX_QUERY = 1000;
@@ -429,7 +435,9 @@ function sseParser(onEvent) {
  * Reads one Messages stream into (a) the content blocks exactly as Anthropic sent them, for a
  * pause_turn continuation, and (b) the text the page is shown. Hooks:
  *   onText(piece)     text to append on the page
- *   onReset(model)    a server-side fallback switched model mid-answer: start the text again
+ * Only Haiku may answer: if message_start names another model, or a fallback block arrives (none is
+ * ever requested), `foreign` says so in plain words, nothing more is shown, and the caller stops
+ * reading and fails the answer 'bad-answer'.
  * Display rules: a short, uncited text block is HELD until we know what follows it; if a search
  * follows, it was a "Let me look that up" lead-in and is dropped. A cited block's [n] markers are
  * appended when the block ends. Citations number by first use of each URL.
@@ -437,7 +445,6 @@ function sseParser(onEvent) {
 function createAccumulator(hooks, shared) {
   const h = hooks || {};
   const onText = typeof h.onText === 'function' ? h.onText : () => {};
-  const onReset = typeof h.onReset === 'function' ? h.onReset : () => {};
   const st = shared || newDisplay();
   const blocks = [];
   let model = '';
@@ -447,12 +454,13 @@ function createAccumulator(hooks, shared) {
   let error = null;
   let sawStart = false;
   let sawStop = false;
-  let fallbackTo = '';
+  let foreign = '';     // why this stream is not Haiku's answer, or ''
   let bad = 0;
   let cur = null;       // the text block now streaming: { index, text, cited, held, ns }
   let pending = null;   // a held block that has ended: decided by whatever comes next
 
   function emit(t) {
+    if (foreign) return;
     let piece = String(t || '');
     if (!st.text) piece = piece.replace(/^\s+/, '');
     if (!piece) return;
@@ -494,11 +502,17 @@ function createAccumulator(hooks, shared) {
     const type = d.type || ev.event;
     if (type === 'ping') return;
     if (type === 'error') { error = d.error || { type: 'api_error', message: 'unknown stream error' }; return; }
+    if (foreign && type !== 'message_delta' && type !== 'message_stop') return;   // not Haiku: only usage is still read
     if (type === 'message_start') {
       sawStart = true;
       const m = d.message || {};
-      if (typeof m.model === 'string') model = m.model;
+      model = typeof m.model === 'string' ? m.model : '';
       usage = Object.assign({}, m.usage || {});
+      if (!ANSWER_MODEL_RE.test(model)) {
+        foreign = model
+          ? 'Anthropic answered with ' + str(model, 60) + ', not ' + ANSWER_MODEL_LABEL + '. Quartz only shows answers written by ' + ANSWER_MODEL_LABEL + ', so it stopped reading.'
+          : 'Anthropic\'s answer did not say which model wrote it. Quartz only shows answers written by ' + ANSWER_MODEL_LABEL + ', so it stopped reading.';
+      }
       return;
     }
     if (type === 'message_delta') {
@@ -509,6 +523,10 @@ function createAccumulator(hooks, shared) {
       }
       if (d.usage && typeof d.usage === 'object') {
         for (const k of Object.keys(d.usage)) if (d.usage[k] != null) usage[k] = d.usage[k];   // cumulative
+        const its = Array.isArray(d.usage.iterations) ? d.usage.iterations : [];
+        if (!foreign && its.some((x) => x && x.type === 'fallback_message')) {
+          foreign = 'Anthropic says another model took over part of this answer. Quartz only shows answers written by ' + ANSWER_MODEL_LABEL + ', so it stopped reading.';
+        }
       }
       return;
     }
@@ -518,11 +536,12 @@ function createAccumulator(hooks, shared) {
       blocks[d.index] = cb;
       if (cb.type === 'server_tool_use' || cb.type === 'tool_use') { decidePending(true); cb._json = ''; return; }
       if (cb.type === 'fallback') {
+        // Quartz never asks for a fallback. If one comes anyway, the rest is another model's text.
         decidePending(true);
-        fallbackTo = cb.to && typeof cb.to.model === 'string' ? cb.to.model : (fallbackTo || 'unknown');
-        st.text = ''; st.cites.clear(); st.list.length = 0; st.searchErrors.length = 0;
+        const to = cb.to && typeof cb.to.model === 'string' ? str(cb.to.model, 60) : 'another model';
+        foreign = 'Anthropic switched this answer from ' + ANSWER_MODEL_LABEL + ' to ' + to + ' partway through. Quartz only shows answers written by ' + ANSWER_MODEL_LABEL + ', so it stopped reading.';
+        if (to !== 'another model') model = to;
         cur = null;
-        onReset(fallbackTo);
         return;
       }
       if (cb.type === 'web_search_tool_result') {
@@ -591,6 +610,7 @@ function createAccumulator(hooks, shared) {
 
   /** The stream ended: anything still held is shown (nothing followed it). */
   function finish() {
+    if (foreign) { cur = null; pending = null; return; }
     if (cur) { release(cur); if (cur.ns.length) emit(markers(cur)); cur = null; }
     decidePending(false);
   }
@@ -599,7 +619,7 @@ function createAccumulator(hooks, shared) {
     feed, finish,
     result: () => ({
       blocks: blocks.filter(Boolean),
-      model, usage: usageOf(usage), rawUsage: usage, stopReason, stopDetails, error, sawStart, sawStop, fallbackTo, badEvents: bad,
+      model, usage: usageOf(usage), rawUsage: usage, stopReason, stopDetails, error, sawStart, sawStop, foreign, badEvents: bad,
     }),
   };
 }
@@ -694,8 +714,10 @@ function create(deps) {
     if (MODE_IDS.indexOf(c.mode) >= 0) out.mode = c.mode;
     const cap = Number(c.capUsd);
     if (Number.isFinite(cap) && cap > 0 && cap <= CAP_MAX) out.capUsd = Math.round(cap * 100) / 100;
-    if (MODEL_IDS.indexOf(c.autoModel) >= 0) out.autoModel = c.autoModel;
-    if (MODEL_IDS.indexOf(c.deepModel) >= 0) out.deepModel = c.deepModel;
+    // Only Haiku answers: a stored config naming any other model (an older build offered Sonnet and
+    // Opus) is read back as Haiku, and the next save writes Haiku.
+    out.autoModel = ANSWER_MODEL;
+    out.deepModel = ANSWER_MODEL;
     return out;
   }
 
@@ -713,6 +735,9 @@ function create(deps) {
       autoModel: cfg.autoModel,
       deepModel: cfg.deepModel,
       models: MODELS.map((m) => ({ id: m.id, label: m.label, note: m.note })),
+      answerModel: ANSWER_MODEL,
+      answerModelLabel: ANSWER_MODEL_LABEL,
+      effort: PLAN.quick.effort,
       month: {
         id: month.id, label: monthLabel(month.id),
         spentUsd: roundUsd(month.spentUsd), answers: month.answers,
@@ -764,22 +789,22 @@ function create(deps) {
       if (Number.isFinite(cap) && cap > 0 && cap <= CAP_MAX) want.capUsd = Math.round(cap * 100) / 100;
       else errors.push('the monthly cap must be a dollar amount above $0 and at most $' + CAP_MAX.toLocaleString('en-US'));
     }
-    if (p.autoModel !== undefined) { if (MODEL_IDS.indexOf(p.autoModel) >= 0) want.autoModel = p.autoModel; else errors.push('unknown model'); }
-    if (p.deepModel !== undefined) { if (MODEL_IDS.indexOf(p.deepModel) >= 0) want.deepModel = p.deepModel; else errors.push('unknown model'); }
+    for (const k of ['autoModel', 'deepModel']) {
+      if (p[k] !== undefined && MODEL_IDS.indexOf(p[k]) < 0) errors.push('answers only use ' + ANSWER_MODEL_LABEL);
+    }
     if (errors.length) return Object.assign(describe(), { error: 'Not saved: ' + errors.join('; ') + '.' });
     cfg = cleanCfg(want);
     if (!save()) return Object.assign(describe(), { error: 'The setting could not be written to the profile folder.' });
     return describe();
   }
 
-  function headers(extraBeta) {
-    const h = { 'x-api-key': key, 'anthropic-version': API_VERSION, 'content-type': 'application/json' };
-    if (extraBeta) h['anthropic-beta'] = extraBeta;
-    return h;
+  /** No anthropic-beta header is ever sent: in particular never the server-side fallback beta. */
+  function headers() {
+    return { 'x-api-key': key, 'anthropic-version': API_VERSION, 'content-type': 'application/json' };
   }
 
-  /** Settings' "Check key": GET /v1/models, which costs nothing. Also says whether the two
-   *  picked models are open to this key. */
+  /** Settings' "Check key": GET /v1/models, which costs nothing. Also says whether Claude Haiku 5.5,
+   *  the only model that answers, is open to this key. */
   async function test() {
     load();
     if (!key) return Object.assign(describe(), { check: { ok: false, state: 'no-key', title: 'No key saved', detail: 'Paste a key first.' } });
@@ -789,7 +814,7 @@ function create(deps) {
     const t = ctrl ? timers.setTimeout(() => ctrl.abort(), T.headers) : null;
     let check;
     try {
-      res = await fetchImpl(apiBase + '/v1/models?limit=100', { method: 'GET', headers: headers(''), signal: ctrl ? ctrl.signal : undefined });
+      res = await fetchImpl(apiBase + '/v1/models?limit=100', { method: 'GET', headers: headers(), signal: ctrl ? ctrl.signal : undefined });
       let json = null;
       try { json = JSON.parse(await res.text()); } catch { json = null; }
       if (res.status !== 200) {
@@ -800,11 +825,9 @@ function create(deps) {
         if (!ids) {
           check = { ok: false, state: 'bad-answer', title: 'Anthropic\'s answer could not be read', detail: 'Anthropic answered 200, but not with a model list Quartz understands.' };
         } else {
-          const want = [cfg.autoModel, cfg.deepModel].filter((v, i, a) => a.indexOf(v) === i);
-          const missing = want.filter((id) => ids.indexOf(id) < 0);
-          check = missing.length
-            ? { ok: false, state: 'server', title: 'The key works, but not for every picked model', detail: 'Anthropic accepted the key, but its model list has no ' + missing.map(modelLabel).join(' or ') + '. Pick another model below.' }
-            : { ok: true, state: 'ok', title: 'The key works', detail: 'Anthropic accepted it, and ' + want.map(modelLabel).join(' and ') + (want.length > 1 ? ' are' : ' is') + ' open to it. Checking costs nothing; it cannot show your credit balance.' };
+          check = ids.indexOf(ANSWER_MODEL) < 0
+            ? { ok: false, state: 'server', title: 'The key works, but not for ' + ANSWER_MODEL_LABEL, detail: 'Anthropic accepted the key, but its model list has no ' + ANSWER_MODEL_LABEL + ' (' + ANSWER_MODEL + '), the only model Quartz answers with. Check the key\'s workspace at platform.claude.com.' }
+            : { ok: true, state: 'ok', title: 'The key works', detail: 'Anthropic accepted it, and ' + ANSWER_MODEL_LABEL + ' is open to it. Checking costs nothing; it cannot show your credit balance.' };
         }
       }
     } catch (err) {
@@ -828,11 +851,11 @@ function create(deps) {
       : '');
   }
 
-  function requestBody(model, mode, messages) {
+  /** Never carries `fallbacks`, and never needs a beta header. */
+  function requestBody(mode, messages) {
     const plan = mode === 'deep' ? PLAN.deep : PLAN.quick;
-    const meta = MODELS.find((m) => m.id === model) || {};
-    const body = {
-      model,
+    return {
+      model: plan.model,
       max_tokens: plan.maxTokens,
       stream: true,
       system: [
@@ -843,8 +866,6 @@ function create(deps) {
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: plan.maxUses }],
       output_config: { effort: plan.effort },
     };
-    if (meta.fallbacks) body.fallbacks = 'default';
-    return { body, beta: meta.fallbacks ? FALLBACK_BETA : '' };
   }
 
   function cacheKey(model, mode, q, history) {
@@ -880,17 +901,14 @@ function create(deps) {
   }
 
   /** One streamed request. Resolves { acc, http: verdict|null, why }; never throws. */
-  async function streamOnce(job, model, body, beta, display, out) {
-    const acc = createAccumulator({
-      onText: (t) => out.delta(t),
-      onReset: (m) => { out.send({ phase: 'start', model: m, modelLabel: modelLabel(m), mode: job.mode, fallback: true }); },
-    }, display);
+  async function streamOnce(job, body, display, out) {
+    const acc = createAccumulator({ onText: (t) => out.delta(t) }, display);
     let res = null;
     for (let attempt = 0; ; attempt++) {
       job.stage = 'headers';
       armTimer(job, 'headers', T.headers);
       try {
-        res = await fetchImpl(apiBase + '/v1/messages', { method: 'POST', headers: headers(beta), body: JSON.stringify(body), signal: job.ctrl.signal });
+        res = await fetchImpl(apiBase + '/v1/messages', { method: 'POST', headers: headers(), body: JSON.stringify(body), signal: job.ctrl.signal });
         break;
       } catch (err) {
         if (attempt === 0 && !job.ctrl.signal.aborted && isDroppedConnection(err)) continue;
@@ -917,12 +935,13 @@ function create(deps) {
           armTimer(job, 'idle', T.idle);
           parser.push(typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true }));
           const r = acc.result();
-          if (r.error || r.sawStop) break;
+          if (r.error || r.sawStop || r.foreign) break;
         }
       } else {
         parser.push(await res.text());
       }
       parser.end();
+      if (acc.result().foreign) { try { job.ctrl.abort(); } catch { /* already */ } }   // stop another model's stream
     } catch (err) {
       parser.end();
       acc.finish();
@@ -943,7 +962,7 @@ function create(deps) {
     const u = Object.assign({}, r.usage);
     u.output = Math.max(u.output, Math.ceil(display.text.length / 4));
     u.searches = Math.max(u.searches, display.searchesSeen);
-    return estimateCost(r.fallbackTo || model, u);
+    return estimateCost(r.foreign ? (r.model || 'unknown') : model, u);
   }
 
   function addSpend(usd, counted) {
@@ -994,7 +1013,7 @@ function create(deps) {
       return;
     }
 
-    const model = req.mode === 'deep' ? cfg.deepModel : cfg.autoModel;
+    const model = ANSWER_MODEL;   // quick and deep alike (The user, 10-17: "only haiku")
     const answerMode = req.mode === 'deep' ? 'deep' : 'quick';
     prune();
     const ck = cacheKey(model, answerMode, req.q, req.history);
@@ -1016,15 +1035,14 @@ function create(deps) {
     const display = newDisplay();
     const usageSum = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0 };
     let costUsd = 0;
-    let finalModel = model;
     let verdict = null;
     let stopReason = null;
     let stopDetails = null;
     try {
       let convo = messages;
       for (let turn = 0; ; turn++) {
-        const { body, beta } = requestBody(model, req.mode, convo);
-        const r = await streamOnce(job, model, body, beta, display, out);
+        const body = requestBody(req.mode, convo);
+        const r = await streamOnce(job, body, display, out);
         const res = r.acc.result();
         if (job.why === 'superseded') {
           out.close();
@@ -1040,9 +1058,13 @@ function create(deps) {
           verdict = { state: 'bad-answer', title: 'Claude\'s answer could not be read', detail: 'Anthropic answered 200, but the stream had no message in it' + (res.badEvents ? ' (' + res.badEvents + ' unreadable events)' : '') + '.', retry: true, settings: false };
           break;
         }
-        if (res.fallbackTo) finalModel = res.fallbackTo;
-        const priced = res.fallbackTo ? (estimateCost(res.fallbackTo, res.usage) >= estimateCost(model, res.usage) ? res.fallbackTo : model) : model;
-        costUsd += estimateCost(priced, res.usage);
+        if (res.foreign) {
+          // Another model answered (or took over): refuse it, plainly. Its tokens still cost.
+          costUsd += partialCost(model, res, display);
+          verdict = { state: 'bad-answer', title: 'Not an answer from ' + ANSWER_MODEL_LABEL, detail: res.foreign + ' Try again.', retry: true, settings: false };
+          break;
+        }
+        costUsd += estimateCost(model, res.usage);
         for (const k of Object.keys(usageSum)) usageSum[k] += res.usage[k];
         stopReason = res.stopReason;
         stopDetails = res.stopDetails;
@@ -1101,8 +1123,8 @@ function create(deps) {
       citations: display.list.map((c) => Object.assign({}, c)),
       usage: { input: usageSum.input + usageSum.cacheRead + usageSum.cacheWrite, output: usageSum.output, searches: usageSum.searches, cacheRead: usageSum.cacheRead, cacheWrite: usageSum.cacheWrite },
       costUsd,
-      model: finalModel,
-      modelLabel: modelLabel(finalModel),
+      model,
+      modelLabel: modelLabel(model),
       mode: req.mode,
       cached: false,
       truncated: stopReason === 'max_tokens' || stopReason === 'pause_turn',
@@ -1243,6 +1265,8 @@ module.exports = {
   PRICES,
   PRICES_CHECKED,
   SEARCH_USD,
+  ANSWER_MODEL,
+  ANSWER_MODEL_LABEL,
   MODELS,
   MODES,
   DEFAULTS,
