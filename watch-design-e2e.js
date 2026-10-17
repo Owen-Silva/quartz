@@ -64,6 +64,8 @@ async function guest(q, errors) {
       const u = m.params.request.url;
       let host = ''; try { host = new URL(u).hostname; } catch (e) { host = ''; }
       const yt = /i\.ytimg\.com\/vi\/([^/]+)\//.exec(u);
+      g.fetched = g.fetched || { pass: 0, drawn: 0 };
+      if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.fetched.pass++; else g.fetched.drawn++;
       if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.send('Fetch.continueRequest', { requestId: m.params.requestId });
       else g.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/svg+xml' }], body: Buffer.from(still(u)).toString('base64') });
     }
@@ -144,6 +146,7 @@ if (require.main === module) {
         await size(w, h);
         await go(0); await blurAll(); await settle();
         const top = await st();
+        if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")][0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
         await save(w + 'x' + h + '-top');
         await go(2); await blurAll(); await settle();
         const down = await st();
@@ -188,6 +191,20 @@ if (require.main === module) {
       await chrome.ev('setTheme("dark"), 1').catch(() => 0);
       await sleep(600);
       fs.writeFileSync(path.join(SHOTS, PREFIX + '-measure.json'), JSON.stringify(measured, null, 1));
+      // frames: wheel down through the top's change and back, then hover across a row's tiles
+      await go(0); await blurAll(); await sleep(800);
+      await g.ev('(() => { window.__fr = { d: [], on: true }; let last = performance.now(); const f = (t) => { const x = window.__fr; if (!x.on) return; x.d.push(t - last); last = t; requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()');
+      await sleep(400);
+      for (let i = 0; i < 4; i++) await wheel(120);
+      for (let i = 0; i < 4; i++) await wheel(-120);
+      await wheel(120);
+      const cards = await g.ev('[...document.querySelectorAll("#stack .lrow[data-d=\\"0\\"] .rt > .card")].slice(0, 5).map((c) => { const b = c.getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 3)]; })');
+      for (let pass = 0; pass < 2; pass++) for (const [x, y] of cards) { for (let s = 0; s < 4; s++) { await g.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 30 + s * 20, y }); await sleep(60); } await sleep(200); }
+      const fr = await g.ev('(() => { const x = window.__fr; x.on = false; const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).map((v) => Math.round(v * 10) / 10), max: Math.round(Math.max.apply(null, d) * 10) / 10 }; })()');
+      say('frames: ' + fr.n + ', over 20 ms: ' + fr.over.length + ' ' + JSON.stringify(fr.over) + ', max ' + fr.max + ' ms');
+      if (!SHOTS_ONLY) check(fr.n > 150, 'frames: the page rendered while stepping and hovering (' + fr.n + ')');
+      if (!SHOTS_ONLY) check(fr.over.length === 0, 'frames over 20 ms while stepping through the top change and hovering tiles: ' + fr.over.length + ' (max ' + fr.max + ' ms)', fr.over);
+
       if (SHOTS_ONLY) return;
 
       /* ---- behaviour at the e2e's own window size ---- */
@@ -228,20 +245,6 @@ if (require.main === module) {
         check(ring.t >= ring.bar, where + ': the focused card (and its ring) is below the bar', ring);
       }
 
-      // frames: wheel down through the top's change and back, then hover across a row's tiles
-      await go(0); await blurAll(); await sleep(800);
-      await g.ev('(() => { window.__fr = { d: [], on: true }; let last = performance.now(); const f = (t) => { const x = window.__fr; if (!x.on) return; x.d.push(t - last); last = t; requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()');
-      await sleep(400);
-      for (let i = 0; i < 4; i++) await wheel(120);
-      for (let i = 0; i < 4; i++) await wheel(-120);
-      await wheel(120);
-      const cards = await g.ev('[...document.querySelectorAll("#stack .lrow[data-d=\\"0\\"] .rt > .card")].slice(0, 5).map((c) => { const b = c.getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 3)]; })');
-      for (let pass = 0; pass < 2; pass++) for (const [x, y] of cards) { for (let s = 0; s < 4; s++) { await g.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 30 + s * 20, y }); await sleep(60); } await sleep(200); }
-      const fr = await g.ev('(() => { const x = window.__fr; x.on = false; const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).map((v) => Math.round(v * 10) / 10), max: Math.round(Math.max.apply(null, d) * 10) / 10 }; })()');
-      say('frames: ' + fr.n + ', over 20 ms: ' + fr.over.length + ' ' + JSON.stringify(fr.over) + ', max ' + fr.max + ' ms');
-      check(fr.n > 150, 'frames: the page rendered while stepping and hovering (' + fr.n + ')');
-      check(fr.over.length === 0, 'frames over 20 ms while stepping through the top change and hovering tiles: ' + fr.over.length + ' (max ' + fr.max + ' ms)', fr.over);
-
       // reduced motion: the change is a short fade only
       await g.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
       await go(0); await sleep(300); await go(1); await sleep(400);
@@ -249,7 +252,11 @@ if (require.main === module) {
       check(rm.compact && !/transform/.test(rm.tp) && rm.tf === 'none', 'reduced motion: the hero only fades (' + rm.tp + ', ' + rm.tf + ')', rm);
       await g.send('Emulation.setEmulatedMedia', { features: [] });
 
-      check(!errors.length, 'no console errors or exceptions on the Watch page', errors.slice(0, 5));
+      // Electron's own sandbox-bundle error (an early webview at boot; watch-e2e sets it aside the same way) is not the page's
+      const electron = errors.filter((e) => /sandboxed_renderer\.bundle\.js|binding\.startupData|preloadScripts/.test(e));
+      if (electron.length) say('set aside: ' + electron.length + " Electron sandbox-bundle error line(s), not the page's");
+      const mine = errors.filter((e) => electron.indexOf(e) === -1);
+      check(!mine.length, 'no console errors or exceptions on the Watch page', mine.slice(0, 5));
       g.close();
     } finally {
       try { await mock.close(); } catch (e) { /* gone */ }
