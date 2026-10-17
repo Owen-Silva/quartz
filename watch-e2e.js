@@ -344,8 +344,33 @@ async function retry(g, id) {
   return ok ? click(g, '#pop [data-e2e-retry="1"]') : false;
 }
 
-async function shot(g, name, w, h, caption, say) {
+async function shot(g, name, w, h, caption, say, chrome) {
   const file = path.join(SHOTS, 'quartz-watch-' + name + '.png');
+  // A metrics override LARGER than the guest's real view tiles the page (the hidden test window
+  // is ~1624x933). So when the shot is bigger than the <webview>, the chrome grows that element to
+  // the shot's size for the shot (fixed, over everything), and puts its style back after.
+  let grown = false;
+  if (chrome) {
+    const r = await chrome.ev('(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return null; const b = v.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height) }; })()').catch(() => null);
+    if (r && (r.w < w || r.h < h)) {
+      grown = !!(await chrome.ev('(() => { const v = findWatchTab().viewEl; v.dataset.e2eStyle = v.getAttribute("style") || ""; const s = v.style;'
+        + ' s.setProperty("position", "fixed", "important"); s.setProperty("left", "0px", "important"); s.setProperty("top", "0px", "important");'
+        + ' s.setProperty("width", "' + w + 'px", "important"); s.setProperty("height", "' + h + 'px", "important"); s.setProperty("z-index", "2147483647", "important"); return 1; })()').catch(() => 0));
+      await sleep(600);
+      const now = await g.ev('[innerWidth, innerHeight]').catch(() => null);
+      say('shot ' + name + ': the webview was ' + r.w + 'x' + r.h + ', grown to ' + w + 'x' + h + ' for the shot; the page now sees ' + JSON.stringify(now));
+    }
+  }
+  try {
+    return await shotInner(g, file, name, w, h, caption, say);
+  } finally {
+    if (grown) {
+      await chrome.ev('(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return 0; v.setAttribute("style", v.dataset.e2eStyle || ""); delete v.dataset.e2eStyle; return 1; })()').catch(() => 0);
+      await sleep(400);
+    }
+  }
+}
+async function shotInner(g, file, name, w, h, caption, say) {
   await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
   // Let the lens re-measure, and give the thumbnails a moment (they come from the services' own CDNs).
   await sleep(700);
@@ -568,13 +593,13 @@ if (require.main === module) {
     await sleep(400);
     const dark = await colours();
     await shot(g, 'dark-1280', 1280, 800, 'Watch, dark, 1280x800, every service read from the mock fixtures', say);
-    await shot(g, 'dark-1920', 1920, 1080, 'Watch, dark, 1920x1080, every service read from the mock fixtures', say);
+    await shot(g, 'dark-1920', 1920, 1080, 'Watch, dark, 1920x1080, every service read from the mock fixtures', say, chrome);
     await chrome.ev("setTheme('light'), 1");
     await g.waitFor("document.documentElement.getAttribute('data-theme') === 'light'", 4000).catch(() => 0);
     await sleep(400);
     const light = await colours();
     await shot(g, 'light-1280', 1280, 800, 'Watch, light, 1280x800, every service read from the mock fixtures', say);
-    await shot(g, 'light-1920', 1920, 1080, 'Watch, light, 1920x1080, every service read from the mock fixtures', say);
+    await shot(g, 'light-1920', 1920, 1080, 'Watch, light, 1920x1080, every service read from the mock fixtures', say, chrome);
     check(dark.theme === 'dark' && light.theme === 'light' && dark.bg !== light.bg && dark.fg !== light.fg, 'light and dark: the page follows setTheme and its colours differ', { dark, light });
     const cd = contrast(dark.fg, dark.bg), cl = contrast(light.fg, light.bg);
     const hd = contrast(dark.head || dark.fg, dark.bg), hl = contrast(light.head || light.fg, light.bg);
