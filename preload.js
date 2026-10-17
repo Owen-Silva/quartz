@@ -762,6 +762,22 @@ contextBridge.exposeInMainWorld('api', {
     // Read-only; the live verification's window onto both.
     focusInfo: () => ipcRenderer.invoke('embed:focus-info')
   },
+  // Watch (watch-main.js), for Settings > Watch only: the page itself talks to
+  // main over console lines and never sees these. Every call answers the same
+  // describe() value -- { services: [{ id, name, enabled, state, reason,
+  // readAt, profile, paused, ... }], leagues, allLeagues, tmdb: { hasKey,
+  // keyMask, signupUrl }, cacheBytes, reading } -- and the TMDB key itself
+  // never comes back out (a mask only).
+  watch: {
+    describe: () => ipcRenderer.invoke('watch:describe'),
+    setEnabled: (id, on) => ipcRenderer.invoke('watch:set-enabled', String(id == null ? '' : id), !!on),
+    setLeagues: (list) => ipcRenderer.invoke('watch:set-leagues', Array.isArray(list) ? list.map(String) : []),
+    setTmdbKey: (key) => ipcRenderer.invoke('watch:set-tmdb-key', String(key == null ? '' : key)),
+    // One small TMDB request with the saved key: describe() + { check: { ok, title, detail } }.
+    testTmdb: () => ipcRenderer.invoke('watch:test-tmdb'),
+    forget: () => ipcRenderer.invoke('watch:forget'),
+    refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
+  },
   // The Files tab. files.html is a guest with no preload, so app.js reaches
   // these on its behalf once it has decided the console line it parsed was a
   // real request; main answers nothing but values, never a throw.

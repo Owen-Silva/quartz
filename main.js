@@ -426,6 +426,45 @@ const drm = drmModule.create({
     : [],
 });
 
+/**
+ * Watch, the streaming hub (watch-main.js + watch.html). It reads the user's own
+ * rows from the services he is signed in to here, in one hidden reader at a
+ * time on the default session, and opens a title on the service's own page:
+ * a Quartz tab, or Edge through drm.openInEdge for the services whose players
+ * need Widevine. A TEST profile may point every service at a local mock
+ * (QUARTZ_WATCH_REBASE, JSON [[from, to], ...]), record opens to a file
+ * (QUARTZ_WATCH_OPEN_STUB), lower the free-memory floor
+ * (QUARTZ_WATCH_MIN_FREE_GB) and fake a running game (QUARTZ_WATCH_GAME_FILE:
+ * present = a game is running). A live Quartz ignores all four.
+ */
+const watch = (() => {
+  const t = process.argv.includes('--test-profile');
+  const env = process.env;
+  const test = {};
+  if (t) {
+    try { if (env.QUARTZ_WATCH_REBASE) test.rebase = JSON.parse(env.QUARTZ_WATCH_REBASE); } catch { /* no rebase */ }
+    if (env.QUARTZ_WATCH_OPEN_STUB) test.openStub = env.QUARTZ_WATCH_OPEN_STUB;
+    if (env.QUARTZ_WATCH_MIN_FREE_GB !== undefined && Number.isFinite(Number(env.QUARTZ_WATCH_MIN_FREE_GB))) test.minFreeGb = Number(env.QUARTZ_WATCH_MIN_FREE_GB);
+    if (env.QUARTZ_WATCH_GAME_FILE) {
+      const flag = env.QUARTZ_WATCH_GAME_FILE;
+      test.gameRunning = () => (fs.existsSync(flag) ? 'valorant' : '');
+    }
+  }
+  return require('./watch-main').create({
+    app,
+    ipcMain,
+    session,
+    BrowserWindow,
+    isChromeSender: (event) => isChromeSender(event),
+    isBundledPage: (url) => isBundledPageUrl(url),
+    send: (channel, payload) => send(channel, payload),
+    openInEdge: (url) => drm.openInEdge(url),
+    getWindow: () => win,
+    log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
+    test,
+  });
+})();
+
 const budget = budgetModule.create({ app });
 // The first-run welcome's flag and its default-browser step (firstrun-main.js).
 // Created here, before any window: it reads what the profile held before this run.
@@ -972,7 +1011,13 @@ function createWindow() {
 
   win.on('closed', () => {
     win = null;
+    // A hidden Watch reader is a window too: it must not keep the app alive
+    // past its last real window (window-all-closed waits for every window).
+    try { watch.stop(); } catch { /* best effort */ }
   });
+  // Watch reads only while Quartz is on screen; whatever fell due while it was
+  // hidden or minimised reads when it comes back.
+  for (const ev of ['show', 'restore']) win.on(ev, () => { try { watch.windowShown(); } catch { /* best effort */ } });
 }
 
 // ---------------------------------------------------------------------------
@@ -3160,6 +3205,11 @@ function shortcutFor(input) {
   if (input.control && input.alt && !input.shift && /^[1-9]$/.test(key)) {
     return { action: 'select-workspace', index: Number(key) };
   }
+  // Ctrl+Alt+W opens Watch. app.js hardcodes it (shortcuts.js does not name
+  // it), so without this it would be lost whenever a page holds the keyboard.
+  if (input.control && input.alt && !input.shift && key.toLowerCase() === 'w') {
+    return { action: 'watch' };
+  }
   // Everything else is whatever the renderer has bound the combo to.
   const action = bindingFor(comboFromInput(input));
   return typeof action === 'string' && action ? { action } : null;
@@ -5271,6 +5321,8 @@ app.on('before-quit', (event) => {
   stocks.stop();
   // The search page's in-memory answers (Brave's terms: transient only).
   try { braveSearch.stop(); } catch { /* best effort */ }
+  // Watch: its timer, a hidden reader window mid-read, and the cache's last write.
+  try { watch.stop(); } catch { /* best effort */ }
   // The favicon cache: a logo learned a moment ago must be there next start.
   try { if (faviconStore) faviconStore.flushSync(); } catch { /* best effort */ }
   // The budget poller's timer and the school helper's child processes (a

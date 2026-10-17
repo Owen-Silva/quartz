@@ -59,6 +59,9 @@ const TESTS = [
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
+  // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
+  // pause shown), and every service adapter against its hand-written fixtures.
+  { name: 'watch', file: 'watch-harness.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.

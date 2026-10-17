@@ -4599,6 +4599,38 @@ function handleSearchPageLine(tab, viewEl, text) {
   return true;
 }
 
+/**
+ * `quartz-watch:settings {}` from the Watch page: open Settings at Watch (the
+ * services, the leagues, the TMDB key). Everything else the page says goes to
+ * main (watch-main.js), which hears the same lines and answers the page itself.
+ */
+function handleWatchPageLine(tab, viewEl, text) {
+  if (!tab || tab.viewEl !== viewEl || !isWatchUrl(tab.url)) return false;
+  if (typeof text !== 'string' || text.trim() !== 'quartz-watch:settings {}') return false;
+  const settings = window.Settings;
+  if (!settings || typeof settings.open !== 'function') return false;
+  try { settings.open('Watch'); } catch (err) { return false; }
+  return true;
+}
+
+/** The Watch tab already open, or null. Like Files, there is only ever one. */
+function findWatchTab() {
+  for (const tab of tabs) {
+    if (tab && tab.kind === 'page' && isWatchUrl(tab.url)) return tab;
+  }
+  return null;
+}
+
+/** Ctrl+Alt+W and the palette's "Watch" row: one Watch tab, reused when open. */
+function openWatchTab() {
+  const existing = findWatchTab();
+  if (existing) {
+    activateTab(existing.id);
+    return true;
+  }
+  return !!createTab(watchUrl());
+}
+
 /** The Files tab already open, or null. There is only ever one. */
 function findFilesTab() {
   for (const tab of tabs) {
@@ -5234,6 +5266,32 @@ function filesUrl(folder) {
   return FILES_URL + '?' + params.toString();
 }
 
+// watch.html is Watch, the streaming hub: a bundled, preload-less guest like
+// Files, wearing the look from its URL. Main (watch-main.js) answers it
+// directly over console lines; the chrome only opens it, names it, keeps its
+// theme in step and opens Settings > Watch when it asks.
+const WATCH_URL = new URL('watch.html', window.location.href).href;
+
+/** True for the bundled Watch page, query string and hash included. */
+function isWatchUrl(url) {
+  return typeof url === 'string' && url.indexOf(WATCH_URL) === 0;
+}
+
+/** The Watch page's address, with the look it should wear on its first frame. */
+function watchUrl() {
+  const params = new URLSearchParams();
+  params.set('theme', getTheme());
+  const settings = window.Settings;
+  if (settings && typeof settings.all === 'function') {
+    try {
+      const all = settings.all() || {};
+      if (typeof all.accentHue === 'number' && isFinite(all.accentHue)) params.set('hue', String(all.accentHue));
+      if (all.palette && all.palette !== 'aurora') params.set('palette', String(all.palette));
+    } catch (err) { /* the authored defaults are fine */ }
+  }
+  return WATCH_URL + '?' + params.toString();
+}
+
 // reader.html?src=<article url> is our own page wrapping someone else's article.
 // Everywhere a URL is shown or stored, the article's address is what matters.
 const READER_URL = new URL('reader.html', window.location.href).href;
@@ -5288,6 +5346,7 @@ function shortLabelFor(url) {
   // The folder browser is named, not hostnamed: the chip says Files from the
   // moment the tab is made, instead of flashing "New tab" until <title> lands.
   if (isFilesUrl(url)) return 'Files';
+  if (isWatchUrl(url)) return 'Watch';
   // The Phone page the same way: "Phone" from the first frame, not "New tab"
   // until phone.html's own <title> arrives.
   if (isPhoneUrl(url)) return 'Phone';
@@ -5329,7 +5388,7 @@ function pushThemeToTab(tab, theme) {
   // The history page too: its ?theme= is only the first-paint hint, so without
   // the push it kept the theme it was opened in (and a restored one, the theme
   // it was SAVED in) whatever the switch said afterwards.
-  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isSearchPageUrl(tab.url) || isHistoryTab(tab) || isWelcomeUrl(tab.url))) return;
+  if (!isViewUsable(tab) || !(isNewTabUrl(tab.url) || isFilesUrl(tab.url) || isWatchUrl(tab.url) || isSearchPageUrl(tab.url) || isHistoryTab(tab) || isWelcomeUrl(tab.url))) return;
   if (pushUnchanged(tab, 'theme', theme)) return; // already wearing it
   try {
     const pending = tab.viewEl.executeJavaScript(
@@ -5743,7 +5802,7 @@ function setOmniboxValue(url, force) {
   // The folder browser has a path bar of its own; its file:// href is noise,
   // and so is the Phone page's — neither is an address the user ever typed.
   const blank = !url || url === 'about:blank' || isNewTabUrl(url)
-    || isFilesUrl(url) || isPhoneUrl(url) || isWelcomeUrl(url) || ours;
+    || isFilesUrl(url) || isWatchUrl(url) || isPhoneUrl(url) || isWelcomeUrl(url) || ours;
   // A reader tab shows the article it is reading, not our wrapper page, and
   // our results page shows the search itself: Enter on it searches again.
   omniboxEl.value = blank ? '' : (searchPageQueryOf(url) || readerSourceOf(url) || url);
@@ -10913,6 +10972,11 @@ function wireViewEvents(tab) {
     handleSearchPageLine(tab, viewEl, event && event.message);
   });
 
+  // Watch asks the chrome for one thing only: "Open Settings > Watch".
+  viewEl.addEventListener('console-message', (event) => {
+    handleWatchPageLine(tab, viewEl, event && event.message);
+  });
+
   // The idle music tile's three controls, `newtab:music {json}`, answered on
   // window.__applyMusic.
   viewEl.addEventListener('console-message', (event) => {
@@ -12117,6 +12181,8 @@ const ACTIONS = {
   // id yet, so the binding below is hardcoded; the moment it does, every
   // chrome-side path — the resolver and main's replay — is already wired.
   'files': () => openFilesTab(),
+  // Watch, the streaming hub: one tab, reused (Ctrl+Alt+W, hardcoded below).
+  'watch': () => openWatchTab(),
   'settings': () => moduleShortcut('settings'),
   'bookmark': () => moduleShortcut('bookmark'),
   'bookmarks-bar': () => moduleShortcut('bookmarks-bar'),
@@ -12246,6 +12312,14 @@ function wireKeyboard() {
     if (event.ctrlKey && event.altKey && !event.shiftKey && key.toLowerCase() === 'e') {
       event.preventDefault();
       openFilesTab();
+      return;
+    }
+
+    // Ctrl+Alt+W opens Watch, the same way (Ctrl+W alone closes a tab; the Alt
+    // is what makes it Watch).
+    if (event.ctrlKey && event.altKey && !event.shiftKey && key.toLowerCase() === 'w') {
+      event.preventDefault();
+      openWatchTab();
       return;
     }
 

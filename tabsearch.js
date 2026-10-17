@@ -73,6 +73,7 @@
     moon:    '\uE708',
     color:   '\uE790',
     gear:    '\uE713',
+    video:   '\uE714',
     down:    '\uE896',
     info:    '\uE946',
     shield:  '\uE83D',
@@ -1333,6 +1334,12 @@
       id: 'files', glyph: GLYPH.folder, label: 'Files',
       hint: 'Browse your folders in a tab', keys: ['Ctrl', 'Alt', 'E'],
       run: function () { callGlobal(function () { return openFilesTab; }); }
+    });
+    // Watch, the streaming hub. Same story as Files: app.js hardcodes the combo.
+    list.push({
+      id: 'watch', glyph: GLYPH.video, label: 'Watch',
+      hint: 'Continue watching, picks and live sports from your services', keys: ['Ctrl', 'Alt', 'W'],
+      run: function () { callGlobal(function () { return typeof openWatchTab === 'function' ? openWatchTab : null; }); }
     });
     list.push({
       id: 'downloads-folder', glyph: GLYPH.folder, label: 'Open downloads folder',
