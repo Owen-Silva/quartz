@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Nothing on this page is fetched but its own files and the services'
+     https images (stills, thumbnails, team logos): no connect, no frames, no
+     forms posting out. Everything the services said is drawn with
+     createElement + textContent only (watch.js); links never navigate this
+     page, a click asks main (watch-main.js) to open the title. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
+<title>Watch</title>
+<!-- Watch, Quartz's streaming hub. A bundled, preload-less file:// guest
+     like search.html: the theme, palette and accent arrive in the URL (read
+     by newtab-theme.js before first paint; the chrome re-sets data-theme on
+     a flip), the shared contract loads next (window.WatchShape,
+     window.WatchMerge), then the page. watch.js defines __applyWatch,
+     __applyWatchSearch and __applyWatchResult before anything can call them
+     and says "quartz-watch:hello {}" once the document is ready. -->
+<script src="newtab-theme.js"></script>
+<script src="watch/shape.js"></script>
+<script src="watch/merge.js"></script>
+<script src="watch.js"></script>
+<link rel="stylesheet" href="watch.css">
+</head>
+<body class="is-boot">
+
+<!-- The far layer: the selected title's still, drawn ONCE into a tiny
+     pre-blurred canvas and scaled up; two of them cross-fade by opacity.
+     Nothing here re-blurs or moves. -->
+<div class="wash" id="wash" aria-hidden="true"><canvas width="96" height="54"></canvas><canvas width="96" height="54"></canvas></div>
+
+<header class="top">
+  <div class="brand"><span class="brand-name">Watch</span><span class="brand-sub">Quartz</span></div>
+  <div class="find" role="search">
+    <svg class="i find-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>
+    <input id="q" type="search" placeholder="Search your services and YouTube" aria-label="Search Watch" autocomplete="off" spellcheck="false" maxlength="200">
+    <kbd class="find-key" id="q-key" aria-hidden="true">/</kbd>
+  </div>
+  <div class="top-end">
+    <button class="icon-btn" id="settings" type="button" title="Watch settings" aria-label="Watch settings">
+      <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"/><circle cx="11" cy="4.5" r="1.6"/><circle cx="5" cy="11.5" r="1.6"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- The services, each with its state in words. -->
+<nav class="strip" id="strip" aria-label="Your services">
+  <span class="strip-l">Your services</span>
+  <div class="pills" id="pills"></div>
+  <div class="strip-end">
+    <span class="fresh" id="fresh"></span>
+    <button class="icon-btn sm" id="read-all" type="button" title="Read every service now" aria-label="Read every service now">
+      <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.75"/><path d="M13.4 2.6v3.1h-3.1"/></svg>
+    </button>
+  </div>
+</nav>
+
+<!-- What the lens is on. -->
+<section class="stage" id="stage" aria-live="polite"></section>
+
+<!-- The lens: a still band; the rows move through it. -->
+<div class="lens" id="lens" aria-hidden="true"></div>
+<div class="lens-ctl" id="lens-ctl">
+  <span class="lpos" id="lpos"></span>
+  <button class="icon-btn sm" id="lup" type="button" aria-label="Previous row" title="Previous row (Up)">
+    <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
+  </button>
+  <button class="icon-btn sm" id="ldn" type="button" aria-label="Next row" title="Next row (Down)">
+    <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+  </button>
+</div>
+<main class="stack" id="stack" aria-label="Watch rows"></main>
+
+<!-- Search: where to watch, across the services. -->
+<section class="results" id="results" aria-label="Search results" hidden></section>
+
+<div class="pop" id="pop" role="dialog" aria-modal="false" hidden></div>
+<div class="toasts" id="toasts"></div>
+</body>
+</html>
