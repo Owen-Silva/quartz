@@ -652,6 +652,7 @@
     if (boot) return S.failure ? { cls: 'st-error', dot: 'err', small: 'No answer' } : { cls: 'st-busy', dot: 'busy', small: 'Starting\u2026' };
     if (s.state === 'off') return { cls: 'st-off', dot: 'off', small: 'Off' };
     if (s.reading) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
+    if (s.picker) return { cls: 'st-error st-picker', dot: 'warn', small: 'Who’s watching?', act: 'Pick profile' };   // watch/profiles.js
     if (s.state === 'error') return { cls: 'st-error', dot: 'err', small: "Couldn't read", act: 'Retry' };
     if (s.state === 'signed-out') return { cls: 'st-signed-out', dot: 'out', small: 'Signed out', act: 'Sign in' };
     if (s.paused) return { cls: 'st-paused', dot: 'warn', small: shared ? 'Paused' : capFirst(s.paused.replace(/\s*\([^)]*\)\s*$/, '')) };
@@ -691,6 +692,7 @@
       main.appendChild(dot);
       main.appendChild(el('span', 'sp-name', s.name));
       if (look.small) main.appendChild(el('small', look.warn ? 'warn-mark' : '', look.small));
+      if (!boot && window.LumenProfiles) window.LumenProfiles.chip(main, s);
       if (boot) {
         main.disabled = true;
         main.setAttribute('aria-label', s.name + ': waiting for Lumen to start');
@@ -708,6 +710,7 @@
       if (!boot && look.act) {
         var act = button('sp-act', look.act, function () {
           if (look.act === 'Retry') send('refresh', { service: s.id });
+          else if (look.act === 'Pick profile') send('profile', { service: s.id });
           else send('signin', { service: s.id });
         });
         act.dataset.k = s.id + ':act';
@@ -808,6 +811,7 @@
       var why = failed[0].reason || 'no reason given';
       var full = failed.map(function (s) { return s.name + ': ' + (s.reason || 'no reason given'); }).join('\n');
       freshText(f, 'Couldn’t update ' + names + (failed.length === 1 ? ': ' + why : ''), full);
+      if (window.LumenProfiles) window.LumenProfiles.freshPick(f, failed, send);
       freshRetry(f, 'Retry ' + names, function () {
         failed.forEach(function (s) { send('refresh', { service: s.id }); });
       });
@@ -888,6 +892,7 @@
     var h = el('h3', '', s.name);
     h.id = 'pop-title';
     if (s.profile) h.appendChild(el('small', '', s.profile));
+    if (window.LumenProfiles) window.LumenProfiles.popHead(h, s);
     p.setAttribute('aria-labelledby', 'pop-title');
     p.appendChild(h);
 
@@ -908,7 +913,9 @@
     }
     p.appendChild(st);
 
-    if (s.state === 'error') {
+    if (s.state === 'error' && window.LumenProfiles && window.LumenProfiles.popWords(p, s)) {
+      /* who's watching: watch/profiles.js said it, and adds Pick profile below */
+    } else if (s.state === 'error') {
       p.appendChild(el('p', '', "Couldn't read " + s.name + ': ' + (s.reason || 'no reason was given') + '.'));
       if (s.lastOkAt) {
         var keepP = el('p', 'small');
@@ -933,7 +940,7 @@
     }
 
     var acts = el('div', 'acts');
-    var readBtn = button('btn sm' + (s.state === 'error' ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
+    var readBtn = button('btn sm' + (s.state === 'error' && !s.picker ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
     if (s.reading) readBtn.disabled = true;
     acts.appendChild(readBtn);
     if (s.needsSignIn && s.state !== 'ok') {
@@ -944,6 +951,7 @@
       if (edgeFor(s.home)) open.title = 'Opens in Microsoft Edge' + (DRM.reason ? ': ' + DRM.reason : '');
       acts.appendChild(open);
     }
+    if (window.LumenProfiles) window.LumenProfiles.popActs(acts, s, send, closePop, null);
     acts.appendChild(button('btn sm ghost', 'Settings', function () { send('settings', {}); closePop(true); }));
     p.appendChild(acts);
   }
@@ -1302,14 +1310,61 @@
    */
   var ART_MISS = new Set();
   function artMissKey(u) { return String(u).replace('/vi_webp/', '/vi/').replace(/\.webp$/, '.jpg'); }
-  function artSrcs(it) {
+  function artSrcs(it, needPx) {
     var list = arr(it.images).length > 1 && it.images[0] === it.image ? it.images
       : Shape && typeof Shape.ytThumbs === 'function' ? Shape.ytThumbs(it.image) : [it.image];
+    list = artOrder(list, needPx);
     var left = list.filter(function (u) { return u && !ART_MISS.has(artMissKey(u)); });
     return left.length ? left : list.slice(-1);
   }
+  /*
+   * Which of YouTube's stills to ask for first. The DECODE is what costs, not the bytes
+   * (watch-design-e2e --trace, 10-17, the user's 125%, on this laptop): a tile's 1280x720 maxres webp
+   * took 78 ms a decode on the raster workers, 137 ms at worst (Chromium decodes webp to RGB at full
+   * size, then scales it), an sd JPEG 2-6 ms (decoded straight to YUV); a row of webp tiles starved
+   * the frames (frames over 20 ms 13 -> 21, max 50 -> 150 ms). img.decode() of one 1280x720 picture,
+   * median of 12: webp 50 ms, JPEG 12 ms. So:
+   *   - JPEG before webp, always: the same picture for a quarter of the decode;
+   *   - a tile starts at sd when sd covers it in DEVICE pixels (sd's 16:9 picture is 640 wide: 4:3
+   *     with bars, which artCrop crops; the user's 125% tiles are 360-450 px, and watch.css keeps every
+   *     tile under ~370 CSS px, so that is every tile up to ~175% scaling), a wider one at maxres;
+   *     hq (480 wide) is never first;
+   *   - the hero (needPx Infinity) starts at maxres.
+   * Only YouTube's named stills move, and only among their own places: a Short's vertical still
+   * stays first, the page's own still stays last. The rest stay behind as fallbacks.
+   */
+  var YT_STILL = /\/vi(?:_webp)?\/[A-Za-z0-9_-]{11}\/(maxresdefault|sddefault|hqdefault)(?:_live)?\.(jpg|webp)(?:\?|$)/;
+  var SD_PICTURE_W = 640;
+  function artOrder(list, needPx) {
+    var slots = [];
+    var named = [];
+    list.forEach(function (u, k) {
+      var m = YT_STILL.exec(String(u));
+      if (m) { slots.push(k); named.push({ u: u, name: m[1], webp: m[2] === 'webp' ? 1 : 0, k: k }); }
+    });
+    if (named.length < 2) return list;
+    var pref = needPx > SD_PICTURE_W ? ['maxresdefault', 'sddefault', 'hqdefault'] : ['sddefault', 'maxresdefault', 'hqdefault'];
+    named.sort(function (a, b) { return pref.indexOf(a.name) - pref.indexOf(b.name) || a.webp - b.webp || a.k - b.k; });
+    var out = list.slice();
+    slots.forEach(function (k, i) { out[k] = named[i].u; });
+    return out;
+  }
+  /* The tiles' width in CSS px (watch.css --card-w), from a hidden probe a ResizeObserver reads after
+     layout, so choosing a still never forces one. Before the first reading: the widest a tile gets
+     (per >= 3 within a 1720 px column, watch.css) stands in, which errs sharp. */
+  var TILE = { css: 0, probe: null };
+  function tileNeedPx() {
+    if (!TILE.probe && document.body && typeof ResizeObserver === 'function') {
+      TILE.probe = el('div', 'tile-probe');
+      TILE.probe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(TILE.probe);
+      new ResizeObserver(function (en) { var w = en[0] && en[0].contentRect ? en[0].contentRect.width : 0; if (w > 0) TILE.css = w; }).observe(TILE.probe);
+    }
+    var css = TILE.css || Math.min(380, Math.max(240, (window.innerWidth || 1280) / 3));
+    return Math.ceil(css * (window.devicePixelRatio || 1));
+  }
   function artLoad(img, it, fail, hero) {
-    var srcs = artSrcs(it);
+    var srcs = artSrcs(it, hero ? Infinity : tileNeedPx());
     var i = 0;
     var step = function () {   // false when no candidate is left
       if (ART_MISS.size > 4000) ART_MISS.clear();
@@ -1360,7 +1415,7 @@
   }
 
   function cardSub(it, m) {
-    if (it.kind === 'resume') return joinDot([epText(it.subtitle), timeLeft(it)]);
+    if (it.kind === 'resume') return (window.LumenPlay && window.LumenPlay.resumeLabel(it)) || joinDot([epText(it.subtitle), timeLeft(it)]);
     if (it.kind === 'upcoming' && it.startsAt) return joinDot([it.subtitle, dayClock(it.startsAt)]);
     if (it.kind === 'live') return joinDot([it.subtitle, 'Live now']);
     if (it.subtitle) return it.kind === 'watchlist' || it.service === 'youtube' ? it.subtitle : epText(it.subtitle);
@@ -1692,7 +1747,7 @@
     }
     var acts = el('div', 'acts');
     var label = it.kind === 'resume' ? 'Resume' : it.kind === 'live' ? 'Watch live' : it.service === 'youtube' ? 'Play' : /^rent$/i.test(it.badge) ? 'Rent' : it.kind === 'upcoming' ? 'Open' : 'Watch';
-    var primary = button('btn primary', '', function () { openUrl(it.url, it.title); });
+    var primary = button('btn primary', '', function () { openUrl(it.url, it.title, false, it); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
@@ -1969,6 +2024,7 @@
         eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Lumen couldn\u2019t read your services';
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
+        if (window.LumenProfiles) window.LumenProfiles.emptyPick(acts, en, send);
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failed') {
@@ -2064,11 +2120,15 @@
   /* ---------------------------------------------------------------- opening */
 
   /** title: the player layer's bar; multi: "Add to multiview" (watch-player.js). */
-  function openUrl(url, title, multi) {
+  function openUrl(url, title, multi, it) {
     var u = https(url);
     if (!u) return;
     if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
     var msg = { url: u };
+    // A tile: straight to the service's player where that is proven (watch/playurl.js), the title page
+    // as its fallback; and what it is, for Up next.
+    if (it && it.url === u && https(it.playUrl)) { msg.url = https(it.playUrl); msg.fallback = u; }
+    if (it && it.url === u && it.id) msg.item = { id: it.id, title: it.title || '', subtitle: it.subtitle || '' };
     if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
     if (multi === true) msg.multi = true;
     send('open', msg);
@@ -2077,7 +2137,7 @@
     var LS = window.LumenSports;
     if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
     if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
-    if (card._item) openUrl(card._item.url, card._item.title, multi);
+    if (card._item) openUrl(card._item.url, card._item.title, multi, card._item);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
   function eventTitle(ev) {
@@ -2155,6 +2215,7 @@
   }
 
   function exitSearch() {
+    if (window.WatchFindPage) window.WatchFindPage.close();
     S.q = '';
     S.answer = null;
     S.sentSeq = -1;
@@ -2253,6 +2314,7 @@
 
   function renderResults() {
     if (!S.q) return;
+    if (window.WatchFindPage && window.WatchFindPage.owns(S.q)) { window.WatchFindPage.render(); return; }
     var keepPos = gridFocusPos();
     var a = S.answer;
     var cols = services();
@@ -2521,6 +2583,8 @@
       if (S.q) { e.preventDefault(); $.q.focus(); return; }
       return;
     }
+    // Enter: every service's own search (watch/find-page.js); recent searches; Down into its tiles.
+    if (t === $.q && !mod && window.WatchFindPage && window.WatchFindPage.key(e, S.q)) { if (e.key === 'Enter') clearTimeout(S.searchTimer); return; }
     if (t === $.q && S.q && (e.key === 'ArrowDown' || e.key === 'Enter') && !mod) {
       var stop = $.results.querySelector('.cell[tabindex="0"]') || $.results.querySelector('.cell');
       if (stop) { e.preventDefault(); stop.focus(); }
@@ -2685,6 +2749,14 @@
       sightChanged();
     });
 
+    if (window.WatchFindPage) {
+      window.WatchFindPage.attach({
+        send: send, openUrl: openUrl, toast: toast, artImage: artImage, results: $.results, input: $.q,
+        snap: function () { return S.snap; }, services: services, isCurrent: function (q) { return S.q === q; },
+        signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); },
+        clear: function () { clearSearch(true); }
+      });
+    }
     S.ready = true;
     renderBoot();
     if (S.pending) {

@@ -37,6 +37,7 @@
  * never a fixed collection id.
  */
 var shape = require('../shape');
+var play = require('../playurl');
 
 var ID = 'hulu';
 var SITE = 'https://www.hulu.com';
@@ -55,7 +56,7 @@ var CAPTURE = [CONTENT_RE, PROFILE_RE];
 var UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 var SIGNED_OUT_REASON = 'sign in to hulu.com in Quartz to see your Hulu rows (or, if you watch Hulu inside Disney+, turn Hulu off in Settings > Lumen)';
-var PICKER_REASON = "Hulu is asking who's watching; open hulu.com in Quartz and pick a profile";
+var PICKER_REASON = "Hulu is asking who's watching; pick a profile and Lumen reads it again";
 var MOVED_REASON = 'hulu.com sent Quartz to Disney+: Hulu now plays inside Disney+ for this account, and Lumen reads it there (turn Hulu off in Settings > Lumen)';
 
 var DECOY_RE = /hero|marquee|masthead|billboard|brand|promo|upsell|spotlight|network|channel|live[\s_-]*tv|ad[\s_-]*slot/i;
@@ -366,6 +367,8 @@ function parseItem(raw, row, cls) {
     image: pickImage(raw),
     progress: cls.kind === 'resume' ? progressOf(raw, meta, durationSec) : null,
     url: SITE + '/' + page.type + '/' + page.id,
+    // A Continue tile goes straight to Hulu's player (watch/playurl.js); url is the fallback.
+    playUrl: cls.kind === 'resume' ? play.huluWatchUrl(play.huluPlayId(raw) || (page.type === 'movie' ? page.id : '')) : '',
     startsAt: null,
     durationSec: durationSec !== null && durationSec > 0 ? Math.round(durationSec) : null,
     badge: '',
@@ -377,23 +380,28 @@ function parseItem(raw, row, cls) {
 
 /* ---------- profile ---------- */
 
-function profileOf(captures) {
+/* The active profile's name; with `avatar`, its picture's URL instead ('' when Hulu names none). */
+function profileOf(captures, avatar) {
   var name = '';
+  var found = null;
   (Array.isArray(captures) ? captures : []).forEach(function (c) {
     if (name || !obj(c) || !okStatus(c) || (c.url && !isProfile(c) && !isContent(c))) return;
     shape.walk(c.json, function (node, key) {
       if (name) return false;
       if ((key === 'current_profile' || key === 'currentProfile' || key === 'active_profile' || key === 'activeProfile') && obj(node) && str(node.name)) {
         name = node.name;
+        found = node;
         return false;
       }
       if (obj(node) && str(node.name) && (node.is_current === true || node.isCurrent === true || node.current === true || node.selected === true) &&
           isProfile(c)) {
         name = node.name;
+        found = node;
         return false;
       }
     });
   });
+  if (avatar) return play.avatarOf(ID, found);
   return shape.cleanText(name, 60);
 }
 
@@ -475,7 +483,7 @@ function parseRead(read) {
   var urls = [sv.finalUrl, str(sv.ex.url)].filter(Boolean);
   if (urls.some(movedToDisney)) return fail(MOVED_REASON, counts);
   if (urls.some(signedOutByUrl)) return { state: 'signed-out', reason: SIGNED_OUT_REASON, items: [], profile: '', counts: counts };
-  if (urls.some(profilePickerByUrl)) return fail(PICKER_REASON, counts);
+  if (urls.some(profilePickerByUrl)) { var pk = fail(PICKER_REASON, counts); pk.picker = true; return pk; }
 
   // 2. The reader itself failed (a timeout may still have captured rows; read them).
   var e = obj(step.error);
@@ -491,7 +499,8 @@ function parseRead(read) {
   var warnings = [];
   if (mine.warning && !hasWatchlist) warnings.push(mine.warning);
 
-  if (home.items.length) return { state: 'ok', reason: '', items: items, profile: profile, counts: counts, warnings: warnings };
+  var avatar = profileOf(sv.captures, true);
+  if (home.items.length) return { state: 'ok', reason: '', items: items, profile: profile, avatar: avatar, counts: counts, warnings: warnings };
 
   // 4. Signed out, told by the data rather than the URL.
   var unauthorized = sv.content.length > 0 && sv.content.every(function (c) { var s = num(c.status); return s === 401 || s === 403; });
@@ -583,4 +592,11 @@ module.exports = {
     signedOutByUrl: signedOutByUrl, profilePickerByUrl: profilePickerByUrl, movedToDisney: movedToDisney,
     SIGNED_OUT_REASON: SIGNED_OUT_REASON, MOVED_REASON: MOVED_REASON
   }
+};
+
+/* For watch/search/hulu.js (Lumen's one search box): the same tolerant item parser and page reads. */
+module.exports._search = {
+  EXTRACT: EXTRACT, parseItem: parseItem, locked: locked, errorReason: errorReason, stepView: stepView,
+  signedOutByUrl: signedOutByUrl, profilePickerByUrl: profilePickerByUrl, movedToDisney: movedToDisney, ready: ready,
+  SIGNED_OUT_REASON: SIGNED_OUT_REASON, PICKER_REASON: PICKER_REASON
 };

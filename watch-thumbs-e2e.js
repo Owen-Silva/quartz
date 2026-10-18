@@ -1,6 +1,6 @@
 try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
-// watch-thumbs-e2e.js -- YouTube art steps down from maxres to the sharpest still that exists, end to
-// end: a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js)
+// watch-thumbs-e2e.js -- YouTube art asks for the still its box needs and steps down to the sharpest
+// one that exists, end to end: a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js)
 // reading the local mock of every service, then drawing tests/watch-snapshot.js dense() in place of what
 // main pushes. Every picture request is answered from a LOCAL mock image server (127.0.0.1), never the
 // real CDN: per video, maxres (webp + jpg) answers 404 with YouTube's 120x90 grey body, or 200 with
@@ -8,16 +8,20 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 //
 //   node watch-thumbs-e2e.js [--cdp 9270] [--img-port 9271]
 //
-// Checks: each tile lands on the expected candidate (maxres / sd / hq) with that width; a 404'd maxres
-// jpg is never asked for after its webp missed; a repaint asks for no maxres again; the hero shows
-// maxres sharp, and an hq-only still softened (data-lowres + blur); no Cookie / Referer on the
-// requests; no console errors. One line: "watch-thumbs-e2e: N passed, M failed".
+// Checks, on a 2x screen (tiles wider than sd's 640 px picture, so they start at maxres JPEG): each tile
+// lands on the expected candidate (maxres / sd / hq) with that width; a missed maxres jpg's webp is never
+// asked for; a repaint asks for no maxres again; the hero shows maxres sharp, and an hq-only still
+// softened (data-lowres + blur); no Cookie / Referer on the requests; no console errors. (At 1x and
+// 1.25x tiles start at sd: watch-design-e2e --trace lists the art each tile drew.) One line: "watch-thumbs-e2e: N passed, M failed".
 'use strict';
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const path = require('path');
 const { run, Cdp, sleep } = require('./tests/e2e-kit');
+// i.ytimg.com never resolves in this instance: a still this file doesn't answer (one asked before
+// its CDP client attached) fails here instead of reaching YouTube's real CDN
+const NO_YT_NET = ['--host-resolver-rules=MAP *.ytimg.com ~NOTFOUND'];
 const Mock = require('./tests/watch-mock');
 const F = require('./tests/watch-snapshot');
 const Shape = require('./watch/shape');
@@ -44,9 +48,9 @@ function bmp(w, h, rgb, bars) {   // bars: black letterbox rows top and bottom (
 }
 const GREY = () => bmp(120, 90, [204, 204, 204]);   // what i.ytimg.com sends with a maxres 404
 
-/* Per video: A maxres 404 -> sd; B maxres 404 + sd 404 -> hq; C maxres webp 200 grey -> sd; D maxres. */
+/* Per video: A maxres 404 -> sd; B maxres 404 + sd 404 -> hq; C maxres 200 grey -> sd; D maxres. */
 const CASE = new Map();
-const WANT = { A: 'sddefault.jpg', B: 'hqdefault.jpg', C: 'sddefault.jpg', D: 'maxresdefault.webp' };
+const WANT = { A: 'sddefault.jpg', B: 'hqdefault.jpg', C: 'sddefault.jpg', D: 'maxresdefault.jpg' };
 const WANT_W = { A: 640, B: 480, C: 640, D: 1280 };
 function answer(file, c) {
   if (/^maxresdefault\.webp$/.test(file)) {
@@ -54,7 +58,7 @@ function answer(file, c) {
     if (c === 'C') return [200, GREY()];
     return [404, GREY()];
   }
-  if (/^maxresdefault\.jpg$/.test(file)) return c === 'D' ? [200, bmp(1280, 720, [40, 120, 200])] : [404, GREY()];
+  if (/^maxresdefault\.jpg$/.test(file)) return c === 'D' ? [200, bmp(1280, 720, [40, 120, 200])] : c === 'C' ? [200, GREY()] : [404, GREY()];
   if (/^sddefault\.jpg$/.test(file)) return c === 'B' ? [404, GREY()] : [200, bmp(640, 480, [60, 160, 90], 0.125)];
   if (/^hqdefault\.jpg$/.test(file)) return [200, bmp(480, 360, [180, 90, 60], 0.125)];
   return [404, GREY()];
@@ -121,7 +125,7 @@ if (require.main === module) {
       QUARTZ_WATCH_MIN_FREE_GB: '0', QUARTZ_WATCH_GAME_FILE: STUB('game.flag'), QUARTZ_TEST_MIN_FREE_GB: process.env.QUARTZ_TEST_MIN_FREE_GB || '1.5' };
     const errors = [];
     const log = [];
-    const q = await launch({ cdp: CDP_PORT, env });
+    const q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env });
     const chrome = q.chrome;
     try {
       await chrome.ev('(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); return 1; })()');
@@ -129,7 +133,8 @@ if (require.main === module) {
       await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, W));
       await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, W));
       const g = await guest(q, errors, log);
-      await g.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1000, deviceScaleFactor: 1, mobile: false });
+      // a 2x screen: a 1580 px window's tiles are 351 CSS px (4 a row), 702 device px: wider than sd, so they start at maxres
+      await g.send('Emulation.setDeviceMetricsOverride', { width: 1580, height: 800, deviceScaleFactor: 2, mobile: false });
       await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length > 3 || null', 120000).catch(() => 0);
       await g.waitFor('(() => { const p = document.querySelectorAll("#pills .sp.st-busy"); return p.length === 0 || null; })()', 90000).catch(() => 0);
 
@@ -145,6 +150,11 @@ if (require.main === module) {
         if (c === 'A' || c === 'C') { const l = Shape.ytThumbs(it.image, id); it.image = l[0]; it.images = l; }
       }
       say(ids.length + ' YouTube videos: ' + ['A', 'B', 'C', 'D'].map((c) => c + '=' + ids.filter((i) => CASE.get(i) === c).length).join(' '));
+      // the 2x screen again, right before the rows (the boot's own resizes can drop an early override)
+      await g.send('Emulation.setDeviceMetricsOverride', { width: 1580, height: 800, deviceScaleFactor: 2, mobile: false });
+      await sleep(700);
+      const scr = await g.ev('(() => ({ w: innerWidth, dpr: devicePixelRatio, tile: (document.querySelector(".tile-probe") || { getBoundingClientRect: () => ({ width: 0 }) }).getBoundingClientRect().width }))()');
+      say('screen: ' + JSON.stringify(scr));
       await g.ev('(() => { window.__thumbsApply = window.__applyWatch; window.__applyWatch = function () {}; window.__thumbsApply(' + JSON.stringify(snap) + '); return 1; })()');
 
       // let every tile in the first rows finish its chain
@@ -159,8 +169,8 @@ if (require.main === module) {
         check(mine.length > 0 && !bad.length, 'case ' + c + ': ' + mine.length + ' tile(s) land on ' + WANT[c] + ' (' + WANT_W[c] + ' wide)', bad.slice(0, 3));
       }
       const dTiles = done.filter((t) => CASE.get(t.id) === 'D' && t.cssW > 0);
-      const thin = dTiles.filter((t) => t.w < 1.25 * t.cssW);
-      check(dTiles.length > 0 && !thin.length, 'maxres tiles: the still is >= 1.25x the tile width (' + dTiles.map((t) => t.w + '/' + t.cssW).slice(0, 3).join(', ') + ')', thin.slice(0, 3));
+      const thin = dTiles.filter((t) => t.w < 2 * t.cssW);
+      check(dTiles.length > 0 && !thin.length, 'maxres tiles: the still covers the tile in device pixels (' + dTiles.map((t) => t.w + '/' + 2 * t.cssW).slice(0, 3).join(', ') + ')', thin.slice(0, 3));
       const boxed = done.filter((t) => /[ABC]/.test(CASE.get(t.id)));
       const barred = boxed.filter((t) => t.crop !== '16:9' || !/inset\(12\.5%/.test(t.ovb) || t.fit !== 'cover');
       check(boxed.length > 0 && !barred.length, 'sd/hq tiles: the 4:3 letterbox is cropped to the 16:9 picture (object-view-box ' + (boxed[0] && boxed[0].ovb) + ', cover)', barred.slice(0, 3));
@@ -170,8 +180,8 @@ if (require.main === module) {
 
       const yt = log.filter((r) => r.p !== '/other');
       const count = (re) => yt.filter((r) => re.test(r.p)).length;
-      const jpgMaxABC = yt.filter((r) => /maxresdefault\.jpg$/.test(r.p) && /[ABC]/.test(CASE.get(r.p.split('/')[2]) || ''));
-      check(jpgMaxABC.length === 0, 'after a webp maxres miss the jpg maxres is never asked for', jpgMaxABC.slice(0, 3).map((r) => r.p));
+      const webpMaxABC = yt.filter((r) => /maxresdefault\.webp$/.test(r.p) && /[ABC]/.test(CASE.get(r.p.split('/')[2]) || ''));
+      check(webpMaxABC.length === 0, 'after a maxres jpg miss its webp is never asked for (JPEG first: a tenth of the decode)', webpMaxABC.slice(0, 3).map((r) => r.p));
       const dupes = {}; for (const r of yt) dupes[r.p] = (dupes[r.p] || 0) + 1;
       const twice = Object.keys(dupes).filter((p) => dupes[p] > 1 && /maxres/.test(p));
       check(!twice.length, 'no maxres URL asked for twice', twice.slice(0, 3));
@@ -206,7 +216,7 @@ if (require.main === module) {
         return { timeout: 1, src: (document.querySelector('#stage .pic .w img') || {}).src || '' };
       })()`;
       const hd = await g.ev(HERO('D'));
-      check(hd && /maxresdefault\.webp$/.test(hd.src) && hd.w === 1280 && !hd.lowres && !hd.filter, 'hero: a maxres video shows the 1280 still, unsoftened', hd);
+      check(hd && /maxresdefault\.jpg$/.test(hd.src) && hd.w === 1280 && !hd.lowres && !hd.filter, 'hero: a maxres video shows the 1280 still (JPEG), unsoftened', hd);
       const hb = await g.ev(HERO('B'));
       check(hb && /hqdefault\.jpg$/.test(hb.src) && hb.w === 480 && hb.lowres === '1' && /blur\(/.test(hb.filter) && hb.crop === '16:9' && /inset/.test(hb.ovb), 'hero: an hq-only video is bar-cropped and softened (data-lowres, ' + (hb && hb.filter) + ') at ' + (hb && hb.boxW) + ' px wide', hb);
       const ha = await g.ev(HERO('A'));

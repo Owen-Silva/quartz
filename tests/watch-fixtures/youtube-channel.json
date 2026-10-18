@@ -1,0 +1,871 @@
+{
+ "_fixture": "shape from YouTube.js src/parser/classes (RichGrid, RichItem, RichSection, RichShelf, VideoRenderer as Video, LockupView, ShortsLockupView, DecoratedAvatarView, ContentMetadataView, PageHeaderView, C4TabbedHeader, ChannelMetadata, PlaylistVideoList, PlaylistVideo, GridPlaylist, CollectionThumbnailView, ThumbnailBadgeView, BackgroundPromo, AdSlot, ContinuationItem) for /@guitarcoachryan/videos (pageHeaderViewModel + channelMetadataRenderer, the Videos tab selected), unverified against a live account",
+ "loggedIn": true,
+ "ytInitialData": {
+  "responseContext": {
+   "serviceTrackingParams": [
+    {
+     "service": "GFEEDBACK",
+     "params": [
+      {
+       "key": "logged_in",
+       "value": "1"
+      },
+      {
+       "key": "browse_id",
+       "value": "UCguitarCoachRyanChan004"
+      }
+     ]
+    }
+   ]
+  },
+  "contents": {
+   "twoColumnBrowseResultsRenderer": {
+    "tabs": [
+     {
+      "tabRenderer": {
+       "title": "Home",
+       "selected": false,
+       "endpoint": {
+        "browseEndpoint": {
+         "browseId": "UCguitarCoachRyanChan004",
+         "params": "EgZ2aWRlb3PyBgQKAjoA",
+         "canonicalBaseUrl": "/@guitarcoachryan"
+        }
+       }
+      }
+     },
+     {
+      "tabRenderer": {
+       "title": "Videos",
+       "selected": true,
+       "endpoint": {
+        "browseEndpoint": {
+         "browseId": "UCguitarCoachRyanChan004",
+         "params": "EgZ2aWRlb3PyBgQKAjoA",
+         "canonicalBaseUrl": "/@guitarcoachryan"
+        }
+       },
+       "content": {
+        "richGridRenderer": {
+         "contents": [
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0004",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Barre Chord Change Drills for Youth Players"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Barre Chord Change Drills for Youth Players by Guitar Coach Ryan"
+                }
+               }
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0004",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0004"
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "11:47"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "9 hours ago"
+              },
+              "viewCountText": {
+               "simpleText": "6,031 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "6K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "11:47"
+                }
+               },
+               "simpleText": "11:47"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/chVideo0002/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/chVideo0002/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "12:20",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "chVideo0002"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "Tracking Tempo Through Changes"
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "15K views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "4 days ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "chVideo0002",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=chVideo0002",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "chVideo0002"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0009",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Fret Work: 5 Drills You Can Do Alone"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Fret Work: 5 Drills You Can Do Alone by Guitar Coach Ryan"
+                }
+               }
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0009",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0009"
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "9:58"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "1 week ago"
+              },
+              "viewCountText": {
+               "simpleText": "12,775 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "12K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "9:58"
+                }
+               },
+               "simpleText": "9:58"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "chVideo0004",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0004/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0004/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0004/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "My Pre-Show Routine (Every Step)"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "My Pre-Show Routine (Every Step) by Guitar Coach Ryan"
+                }
+               }
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=chVideo0004",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "chVideo0004"
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "15:31"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "3 weeks ago"
+              },
+              "viewCountText": {
+               "simpleText": "22,019 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "22K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "15:31"
+                }
+               },
+               "simpleText": "15:31"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/chVideo0005/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/chVideo0005/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "10:06",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "chVideo0005"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "Strum Hand Fundamentals"
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "40K views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "1 month ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "chVideo0005",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=chVideo0005",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "chVideo0005"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "chVideo0006",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0006/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0006/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/chVideo0006/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Picking Style: Hybrid vs. Economy"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Picking Style: Hybrid vs. Economy by Guitar Coach Ryan"
+                }
+               }
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=chVideo0006",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "chVideo0006"
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "19:12"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "2 months ago"
+              },
+              "viewCountText": {
+               "simpleText": "31,446 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "31K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "19:12"
+                }
+               },
+               "simpleText": "19:12"
+              }
+             }
+            }
+           }
+          },
+          {
+           "continuationItemRenderer": {
+            "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN",
+            "continuationEndpoint": {
+             "continuationCommand": {
+              "token": "CONT_TOKEN_x",
+              "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     {
+      "tabRenderer": {
+       "title": "Shorts",
+       "selected": false,
+       "endpoint": {
+        "browseEndpoint": {
+         "browseId": "UCguitarCoachRyanChan004",
+         "params": "EgZ2aWRlb3PyBgQKAjoA",
+         "canonicalBaseUrl": "/@guitarcoachryan"
+        }
+       }
+      }
+     },
+     {
+      "tabRenderer": {
+       "title": "Live",
+       "selected": false,
+       "endpoint": {
+        "browseEndpoint": {
+         "browseId": "UCguitarCoachRyanChan004",
+         "params": "EgZ2aWRlb3PyBgQKAjoA",
+         "canonicalBaseUrl": "/@guitarcoachryan"
+        }
+       }
+      }
+     },
+     {
+      "tabRenderer": {
+       "title": "Playlists",
+       "selected": false,
+       "endpoint": {
+        "browseEndpoint": {
+         "browseId": "UCguitarCoachRyanChan004",
+         "params": "EgZ2aWRlb3PyBgQKAjoA",
+         "canonicalBaseUrl": "/@guitarcoachryan"
+        }
+       }
+      }
+     },
+     {
+      "expandableTabRenderer": {
+       "title": "Search",
+       "selected": false
+      }
+     }
+    ]
+   }
+  },
+  "header": {
+   "pageHeaderRenderer": {
+    "pageTitle": "Guitar Coach Ryan",
+    "content": {
+     "pageHeaderViewModel": {
+      "title": {
+       "dynamicTextViewModel": {
+        "text": {
+         "content": "Guitar Coach Ryan"
+        }
+       }
+      },
+      "image": {
+       "decoratedAvatarViewModel": {
+        "avatar": {
+         "avatarViewModel": {
+          "image": {
+           "sources": [
+            {
+             "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s48-c-k-c0x00ffffff-no-rj",
+             "width": 48,
+             "height": 48
+            },
+            {
+             "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s88-c-k-c0x00ffffff-no-rj",
+             "width": 88,
+             "height": 88
+            },
+            {
+             "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s176-c-k-c0x00ffffff-no-rj",
+             "width": 176,
+             "height": 176
+            }
+           ]
+          },
+          "avatarImageSize": "AVATAR_SIZE_XXL"
+         }
+        }
+       }
+      },
+      "metadata": {
+       "contentMetadataViewModel": {
+        "metadataRows": [
+         {
+          "metadataParts": [
+           {
+            "text": {
+             "content": "@guitarcoachryan"
+            }
+           }
+          ]
+         },
+         {
+          "metadataParts": [
+           {
+            "text": {
+             "content": "84.2K subscribers"
+            }
+           },
+           {
+            "text": {
+             "content": "312 videos"
+            }
+           }
+          ]
+         }
+        ],
+        "delimiter": " • "
+       }
+      },
+      "banner": {
+       "imageBannerViewModel": {
+        "image": {
+         "sources": [
+          {
+           "url": "https://yt3.googleusercontent.com/gcrBanner=w1060-fcrop64=1,00005a57ffffa5a8-k-c0xffffffff-no-nd-rj",
+           "width": 1060,
+           "height": 175
+          }
+         ]
+        }
+       }
+      },
+      "actions": {
+       "flexibleActionsViewModel": {
+        "actionsRows": [
+         {
+          "actions": [
+           {
+            "buttonViewModel": {
+             "title": "Subscribed"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "metadata": {
+   "channelMetadataRenderer": {
+    "title": "Guitar Coach Ryan",
+    "description": "Guitar coaching for every level: drills, gear and song picks.",
+    "externalId": "UCguitarCoachRyanChan004",
+    "vanityChannelUrl": "http://www.youtube.com/@guitarcoachryan",
+    "channelUrl": "https://www.youtube.com/channel/UCguitarCoachRyanChan004",
+    "avatar": {
+     "thumbnails": [
+      {
+       "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s900-c-k-c0x00ffffff-no-rj",
+       "width": 900,
+       "height": 900
+      }
+     ]
+    }
+   }
+  },
+  "topbar": {
+   "desktopTopbarRenderer": {
+    "logo": {
+     "topbarLogoRenderer": {
+      "iconImage": {
+       "iconType": "YOUTUBE_LOGO"
+      }
+     }
+    },
+    "topbarButtons": [
+     {
+      "topbarMenuButtonRenderer": {
+       "avatar": {
+        "thumbnails": [
+         {
+          "url": "https://yt3.ggpht.com/ytc/meAvatar=s88",
+          "width": 88,
+          "height": 88
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

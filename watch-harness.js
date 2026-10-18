@@ -1149,7 +1149,7 @@ async function previewMainTests() {
 /* ------------------------------------------------------------------ 4. adapters + tmdb */
 async function moduleTests() {
   const dir = path.join(__dirname, 'tests');
-  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js' || f === 'watch-preview-test.js').sort();
+  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || /^watch-lumen-.*-test\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js' || f === 'watch-preview-test.js').sort();
   for (const id of Shape.SERVICE_IDS) {
     check(files.indexOf('watch-adapter-' + id + '.js') !== -1, 'adapters: ' + id + ' has fixture tests');
     let a = null;

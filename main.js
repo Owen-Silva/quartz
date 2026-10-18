@@ -640,6 +640,8 @@ const lumenSports = (() => {
 if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
   watchPlayer.setOnInside(() => { try { watch.drmChanged(); } catch { /* Watch gone */ } });
+  // Up next (watch-player-extras.js): what follows a title that ended, from Lumen's own rows.
+  if (typeof watchPlayer.setUpNext === 'function' && typeof watch.upNext === 'function') watchPlayer.setUpNext((o) => watch.upNext(o));
 }
 
 const budget = budgetModule.create({ app });
