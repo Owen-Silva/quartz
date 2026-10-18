@@ -85,6 +85,8 @@
     stageTimer: 0,
     stageIt: null,          // the item / ESPN event the stage shows (the hover preview reads it)
     stageEv: null,
+    pvOn: false,            // main said the hover preview may play (snapshot.preview.on)
+    pvMock: false,          // ... from the test mock's origin (a --test-profile instance only)
     hoverTimer: 0,
     wheelAt: 0,
     q: '',
@@ -127,6 +129,14 @@
       if (!S.ready) { S.pendingFail = why; return; }
       showFailure('Watch couldn’t load its saved rows', why);
       return;
+    }
+    // the hover preview's word from main (snapshot.preview): OFF until a snapshot says on, so a
+    // --test-profile instance (main says off, or mock) never loads a real embed; a snapshot without
+    // the field (a test's own fixture) keeps the last word
+    if (raw && typeof raw === 'object' && raw.preview && typeof raw.preview === 'object') {
+      S.pvOn = raw.preview.on === true;
+      S.pvMock = raw.preview.mock === true;
+      if (!S.pvOn) previewStop();
     }
     var snap;
     try { snap = normalize(raw); } catch (err) {
@@ -1643,7 +1653,7 @@
   var PV = window.WatchPreview || null;
   var PREVIEW_REVEAL_MS = 2500;
   var PREVIEW_LOAD_MS = 9000;
-  var P = { key: '', seq: 0, timer: 0, loadTimer: 0, revealTimer: 0, wrap: null, frame: null, note: null, playing: false, title: '' };
+  var P = { key: '', seq: 0, timer: 0, loadTimer: 0, revealTimer: 0, wrap: null, frame: null, origin: '', note: null, playing: false, title: '' };
 
   function stagePic() {
     var pic = $.stage ? $.stage.querySelector('.pic') : null;
@@ -1652,7 +1662,7 @@
 
   /** The pointer or focus came to rest on the stage (or its tile): start the clock. */
   function previewWant() {
-    if (!S.stageKey || S.stageKey.indexOf('special:') === 0) return;
+    if (!S.pvOn || !S.stageKey || S.stageKey.indexOf('special:') === 0) return;   // off (a test profile): no work at all
     if (P.key === S.stageKey && (P.timer || P.wrap || P.note)) return;
     previewStop();
     if (S.compact || S.q || document.hidden || S.front === false) return;
@@ -1663,7 +1673,7 @@
 
   function previewStart() {
     P.timer = 0;
-    if (P.key !== S.stageKey || S.compact || S.q || document.hidden || S.front === false) { previewStop(); return; }
+    if (!S.pvOn || P.key !== S.stageKey || S.compact || S.q || document.hidden || S.front === false) { previewStop(); return; }
     if (!PV) { previewNote('No preview: this build is missing watch/preview.js', 'err'); return; }
     if (reduced()) { previewNote('Previews don’t autoplay while Windows is set to reduce motion', ''); return; }
     var src = PV.sourceFor(S.stageIt, { event: !!S.stageEv, hasTmdbKey: !!(S.snap && S.snap.tmdb && S.snap.tmdb.hasKey) });
@@ -1687,7 +1697,8 @@
   function previewMount(videoId, start) {
     var pic = stagePic();
     var w = pic ? pic.querySelector('.w') : null;
-    var url = PV.embedUrl(videoId, start);
+    var origin = PV.embedOrigin(S.pvMock);
+    var url = PV.embedUrl(videoId, start, origin);
     if (!w || !url) { previewNote('No preview: ' + (url ? 'the artwork area is gone' : 'not a YouTube video id'), 'err'); return; }
     var wrap = el('div', 'pv');
     var f = document.createElement('iframe');
@@ -1700,7 +1711,7 @@
       if (P.frame !== f) return;
       clearTimeout(P.loadTimer);
       P.loadTimer = 0;
-      try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), PV.EMBED_ORIGIN); } catch (err) { /* the fallback reveal covers it */ }
+      try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), P.origin); } catch (err) { /* the fallback reveal covers it */ }
       clearTimeout(P.revealTimer);
       P.revealTimer = setTimeout(previewReveal, PREVIEW_REVEAL_MS);
     });
@@ -1712,6 +1723,7 @@
     w.appendChild(wrap);
     P.wrap = wrap;
     P.frame = f;
+    P.origin = origin;
     P.playing = false;
     previewNote('', '');
     f.src = url;
@@ -1727,7 +1739,7 @@
 
   /* The embedded player's own messages: playing -> fade in; an error -> the note, frame gone. */
   function onPreviewMessage(e) {
-    if (!PV || !P.frame || e.origin !== PV.EMBED_ORIGIN) return;
+    if (!PV || !P.frame || e.origin !== P.origin) return;
     var cw = null;
     try { cw = P.frame.contentWindow; } catch (err) { cw = null; }
     if (!cw || e.source !== cw) return;

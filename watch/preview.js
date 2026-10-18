@@ -24,6 +24,14 @@
  */
 (function () {
   var EMBED_ORIGIN = 'https://www.youtube-nocookie.com';
+  /*
+   * TESTS ONLY. A --test-profile Quartz never loads a real YouTube embed: main turns the preview
+   * off there, or (QUARTZ_WATCH_PREVIEW_MOCK=1, watch-preview-e2e.js) points the frame here. The
+   * .invalid TLD resolves on no network (RFC 2606), so only the e2e's own CDP interception can
+   * answer it: a missed interception is a load error, never a real video. A live Quartz never
+   * uses it (main says 'live'); watch.html's frame-src allows only this and EMBED_ORIGIN.
+   */
+  var MOCK_ORIGIN = 'https://quartz-preview.invalid';
   var PREVIEW_DELAY_MS = 600;
   /*
    * YouTube's embed refuses to play (error 153, "Video player configuration error") without a
@@ -80,12 +88,19 @@
     return { type: 'trailer', title: title.slice(0, 200), tv: tv };
   }
 
-  /** The muted, chrome-less embed for one video. '' when the id is not a YouTube id. */
-  function embedUrl(videoId, start) {
+  /** Where the page's frame loads from: MOCK_ORIGIN only when main said the test mock is on. */
+  function embedOrigin(mock) { return mock === true ? MOCK_ORIGIN : EMBED_ORIGIN; }
+
+  /**
+   * The muted, chrome-less embed for one video. '' when the id is not a YouTube id. origin:
+   * EMBED_ORIGIN (the default) or MOCK_ORIGIN; anything else is EMBED_ORIGIN.
+   */
+  function embedUrl(videoId, start, origin) {
     if (!YT_ID_RE.test(String(videoId || ''))) return '';
+    var o = origin === MOCK_ORIGIN ? MOCK_ORIGIN : EMBED_ORIGIN;
     var s = Number.isInteger(start) && start > 0 ? start : 0;
     // loop needs playlist=<same id>; enablejsapi lets the player tell the page "playing" / an error.
-    return EMBED_ORIGIN + '/embed/' + videoId + '?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&playsinline=1' +
+    return o + '/embed/' + videoId + '?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&playsinline=1' +
       '&rel=0&iv_load_policy=3&modestbranding=1&loop=1&playlist=' + videoId + '&enablejsapi=1' + (s ? '&start=' + s : '');
   }
 
@@ -148,6 +163,8 @@
 
   var API = {
     EMBED_ORIGIN: EMBED_ORIGIN,
+    MOCK_ORIGIN: MOCK_ORIGIN,
+    embedOrigin: embedOrigin,
     EMBED_REFERER: EMBED_REFERER,
     PREVIEW_DELAY_MS: PREVIEW_DELAY_MS,
     youtubeIdOf: youtubeIdOf,

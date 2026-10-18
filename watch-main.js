@@ -273,6 +273,11 @@ function create(deps) {
   const minFreeGb = Number.isFinite(test.minFreeGb) ? test.minFreeGb : MIN_FREE_GB;
   const rebaseMap = Array.isArray(test.rebase) ? test.rebase : [];
   const rebase = (url) => rebaseUrl(url, rebaseMap);
+  // The hover preview: 'live' in a live Quartz; main.js passes 'off' (or, with
+  // QUARTZ_WATCH_PREVIEW_MOCK=1, 'mock') ONLY to a --test-profile instance. Off: the page is told so
+  // and no trailer is ever looked up. Mock: the page's frame loads watch/preview.js MOCK_ORIGIN, and
+  // a trailer is looked up only when TMDB is rebased to a local mock (never the real TMDB).
+  const previewMode = test.preview === 'off' || test.preview === 'mock' ? test.preview : 'live';
   const adapters = d.adapters || ADAPTERS;
   const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; } catch { return 'America/New_York'; } })();
 
@@ -980,6 +985,8 @@ function create(deps) {
       leagues: p.leagues.slice(),
       items,
       tmdb: { hasKey: !!p.tmdbKey },
+      // the page never previews until a snapshot says on (a snapshot without this keeps its last word)
+      preview: { on: previewMode !== 'off', mock: previewMode === 'mock' },
       reading,
       forgottenAt,
     };
@@ -1261,6 +1268,10 @@ function create(deps) {
    * that there is none, are kept a day; failures are not kept, so the next hover tries again.
    */
   async function previewTrailer(title, tv) {
+    if (previewMode === 'off') return { state: 'off', reason: 'No preview: previews are off in a test profile', videoId: '' };
+    if (previewMode === 'mock' && (!Tmdb || rebase(String(Tmdb.API_BASE || '')) === String(Tmdb.API_BASE || ''))) {
+      return { state: 'off', reason: 'No preview: this test profile has no TMDB mock (QUARTZ_WATCH_REBASE), so no trailer is looked up', videoId: '' };
+    }
     const p = loadPrefs();
     if (!p.tmdbKey) return { state: 'no-key', reason: 'No trailer preview: trailers are looked up on TMDB. Add the free TMDB key in Settings > Watch', videoId: '' };
     if (!Tmdb || typeof Tmdb.trailer !== 'function') return { state: 'error', reason: 'No trailer preview: this build has no TMDB trailer lookup', videoId: '' };

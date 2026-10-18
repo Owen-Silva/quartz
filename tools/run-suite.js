@@ -99,6 +99,8 @@ const TESTS = [
   { name: 'watch-e2e', file: 'watch-e2e.js', e2e: true, timeout: 900 },
   // YouTube art steps down maxres -> sd -> hq against a local mock image server (tiles, hero, repaint).
   { name: 'watch-thumbs-e2e', file: 'watch-thumbs-e2e.js', e2e: true },
+  // The stage's hover preview against a mock player (quartz-preview.invalid via CDP Fetch) and a mock TMDB.
+  { name: 'watch-preview-e2e', file: 'watch-preview-e2e.js', e2e: true },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,

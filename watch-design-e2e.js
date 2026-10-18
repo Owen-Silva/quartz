@@ -64,7 +64,7 @@ async function guest(q, errors) {
     else if (m.method === 'Fetch.requestPaused') {
       const u = m.params.request.url;
       let host = ''; try { host = new URL(u).hostname; } catch (e) { host = ''; }
-      const yt = /i\.ytimg\.com\/vi\/([^/]+)\//.exec(u);
+      const yt = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(u);   // the sharp-art chain asks /vi_webp/ first
       g.fetched = g.fetched || { pass: 0, drawn: 0 };
       if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.fetched.pass++; else g.fetched.drawn++;
       if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.send('Fetch.continueRequest', { requestId: m.params.requestId });

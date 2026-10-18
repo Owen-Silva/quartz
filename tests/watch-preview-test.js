@@ -56,6 +56,12 @@ module.exports = async function (check) {
   check(/[?&]loop=1(&|$)/.test(u) && /[?&]playlist=dQw4w9WgXcQ(&|$)/.test(u) && /[?&]start=42(&|$)/.test(u), 'embedUrl: loops, and starts where asked', u);
   check(Pv.embedUrl('"><script>', 0) === '' && Pv.embedUrl('', 0) === '', 'embedUrl: not an id -> no URL');
   check(!/start=/.test(Pv.embedUrl('dQw4w9WgXcQ', 0)), 'embedUrl: start 0 is left out');
+  // the test mock's origin: a .invalid host (no network resolves it), and nothing else can be named
+  check(/^https:\/\/[a-z0-9-]+\.invalid$/.test(Pv.MOCK_ORIGIN), 'MOCK_ORIGIN: a .invalid host', Pv.MOCK_ORIGIN);
+  check(Pv.embedOrigin(true) === Pv.MOCK_ORIGIN && Pv.embedOrigin(false) === Pv.EMBED_ORIGIN && Pv.embedOrigin('yes') === Pv.EMBED_ORIGIN, 'embedOrigin: the mock only for a literal true');
+  check(Pv.embedUrl('dQw4w9WgXcQ', 0, Pv.MOCK_ORIGIN).indexOf(Pv.MOCK_ORIGIN + '/embed/dQw4w9WgXcQ?') === 0, 'embedUrl: the mock origin when asked');
+  check(Pv.embedUrl('dQw4w9WgXcQ', 0, 'https://evil.example').indexOf(Pv.EMBED_ORIGIN + '/embed/') === 0, 'embedUrl: any other origin falls back to the real embed host');
+  check(Pv.embedReferer({ resourceType: 'subFrame', url: Pv.MOCK_ORIGIN + '/embed/dQw4w9WgXcQ', requestHeaders: {}, webContents: { getURL: () => 'file:///C:/q/watch.html' } }) === '', 'embedReferer: never for the mock origin');
 
   // --- the player's messages
   check(Pv.readPlayerMessage('{"event":"onStateChange","info":1}').playing === true, 'readPlayerMessage: playing');

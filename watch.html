@@ -7,10 +7,12 @@
      https images (stills, thumbnails, team logos): no connect, no forms
      posting out, and one kind of frame only: YouTube's privacy-enhanced
      embed player for the hover preview (watch/preview.js), sandboxed and
-     muted, made only while a title is hovered. Everything the services said
+     muted, made only while a title is hovered (and quartz-preview.invalid, a
+     host no network resolves: the test mock's, used only when main says so
+     in a --test-profile instance). Everything the services said
      is drawn with createElement + textContent only (watch.js); links never
      navigate this page, a click asks main (watch-main.js) to open the title. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; frame-src https://www.youtube-nocookie.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; frame-src https://www.youtube-nocookie.com https://quartz-preview.invalid; base-uri 'none'; form-action 'none'">
 <title>Watch</title>
 <!-- Watch, Quartz's streaming hub. A bundled, preload-less file:// guest
      like search.html: the theme, palette and accent arrive in the URL (read
