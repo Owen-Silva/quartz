@@ -416,7 +416,7 @@
     root.setAttribute('data-state', view);
     root.hidden = view === 'idle';
     var t = latest();
-    els.model.textContent = modelLabel || (model ? modelName(model) : '');
+    els.model.textContent = (modelLabel || (model ? modelName(model) : '')).replace(/^Claude\s+/i, '');
     els.model.title = model || '';
     var statusText = '';
     if (t && t.state === 'stopping') statusText = 'Stopping…';
@@ -709,6 +709,8 @@
         retry: obj.retry === true,
         settings: obj.settings === true,
       };
+      // A refused stream (main's 'bad-answer') must leave nothing of itself on the page.
+      if (t.fail.state === 'bad-answer') { t.text = ''; t.citations = []; }
       view = 'fail';
     } else if (phase === 'off') {
       clearTimers();

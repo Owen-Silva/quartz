@@ -376,6 +376,14 @@ const FAILS = [
       }
     }
     await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    xs = (await A()).seq;
+    await apply({ seq: xs, phase: 'start', model: 'claude-haiku-5-5', modelLabel: 'Claude Haiku 5.5', mode: 'auto' });
+    await apply({ seq: xs, phase: 'delta', text: 'Text from a stream that is then refused' });
+    await apply({ seq: xs, phase: 'fail', state: 'bad-answer', title: 'The answer was refused', detail: 'Not a Haiku stream.', retry: true, settings: false });
+    a = await A();
+    check(a.view === 'fail' && a.text === '' && !/refused/.test(await page.ev("document.querySelector('#qa .qa-thread').textContent.replace('The answer was refused', '')")) && a.modelLabel === 'Haiku 5.5',
+      'bad-answer after text: the streamed text is replaced by the failure; chip reads "Haiku 5.5" beside "Answer by Claude"', a.text + ' / ' + a.modelLabel);
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
     await apply({ seq: (await A()).seq, phase: 'fail', state: 'stopped', title: 'Stopped', detail: '', retry: true, settings: false });
     check((await A()).view === 'stopped', 'fail stopped: shown as stopped, not as an error');
     await page.ev("document.querySelector('.qa-act-retry').click(), 1");
