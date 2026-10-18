@@ -4,11 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Nothing on this page is fetched but its own files and the services'
-     https images (stills, thumbnails, team logos): no connect, no frames, no
-     forms posting out. Everything the services said is drawn with
-     createElement + textContent only (watch.js); links never navigate this
-     page, a click asks main (watch-main.js) to open the title. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
+     https images (stills, thumbnails, team logos): no connect, no forms
+     posting out, and one kind of frame only: YouTube's privacy-enhanced
+     embed player for the hover preview (watch/preview.js), sandboxed and
+     muted, made only while a title is hovered. Everything the services said
+     is drawn with createElement + textContent only (watch.js); links never
+     navigate this page, a click asks main (watch-main.js) to open the title. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; frame-src https://www.youtube-nocookie.com; base-uri 'none'; form-action 'none'">
 <title>Watch</title>
 <!-- Watch, Quartz's streaming hub. A bundled, preload-less file:// guest
      like search.html: the theme, palette and accent arrive in the URL (read
@@ -20,6 +22,7 @@
 <script src="newtab-theme.js"></script>
 <script src="watch/shape.js"></script>
 <script src="watch/merge.js"></script>
+<script src="watch/preview.js"></script>
 <script src="watch.js"></script>
 <link rel="stylesheet" href="watch.css">
 </head>

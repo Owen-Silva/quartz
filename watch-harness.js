@@ -1001,10 +1001,52 @@ async function mainTests() {
   } finally { w.cleanup(); }
 }
 
+/* ------------------------------------------------------------------ 3b. the hover preview's trailers */
+async function previewMainTests() {
+  const P = WM.parseGuestLine;
+  const pl = P('quartz-watch:preview {"title":"Terminator 2","tv":false,"seq":4}');
+  check(pl && pl.verb === 'preview' && pl.title === 'Terminator 2' && pl.tv === false && pl.seq === 4, 'preview: the verb parses', pl);
+  check(P('quartz-watch:preview {"title":"","seq":1}') === null && P('quartz-watch:preview {"seq":1}') === null, 'preview: no title is refused');
+  const odd = P('quartz-watch:preview {"title":"a\\u0000b","tv":"yes","seq":-3}');
+  check(odd && odd.title === 'a b' && odd.tv === false && odd.seq === 0, 'preview: control characters, a non-boolean tv and a bad seq are cleaned', odd);
+
+  // A fake fetch that answers TMDB's /search/multi and /movie/280/videos, and counts.
+  const tm = (url, opts) => {
+    tm.calls.push({ url, opts: opts || {} });
+    let body = '{}';
+    if (/\/search\/multi/.test(url)) body = JSON.stringify({ results: [{ id: 280, media_type: 'movie', title: 'Terminator 2' }] });
+    if (/\/movie\/280\/videos/.test(url)) body = JSON.stringify({ results: [{ site: 'YouTube', key: 'CRRlbK5w8AE', type: 'Trailer', official: true }] });
+    return Promise.resolve({ ok: true, status: 200, url, text: () => Promise.resolve(body) });
+  };
+  tm.calls = [];
+  const w = fakeWorld({ realSteps: true, fetch: tm, BrowserWindow: fakeBrowser().FakeBW, session: { defaultSession: {} } });
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:preview {"title":"Terminator 2","tv":false,"seq":1}');
+    await w.settle();
+    let a = g.last('__applyWatchPreview');
+    check(a && a.seq === 1 && a.state === 'no-key' && /TMDB key in Settings > Watch/.test(a.reason) && tm.calls.length === 0, 'preview: no key -> says how, fetches nothing', a);
+    w.wm.setTmdbKey('abcdefghijklmnop0123');
+    g.say('quartz-watch:preview {"title":"Terminator 2","tv":false,"seq":2}');
+    await w.settle();
+    a = g.last('__applyWatchPreview');
+    check(a && a.seq === 2 && a.state === 'ok' && a.videoId === 'CRRlbK5w8AE', 'preview: the TMDB trailer comes back', a);
+    check(tm.calls.length === 2 && tm.calls.every((c) => c.opts.credentials === 'omit'), 'preview: two cookie-less reads', tm.calls.map((c) => c.url));
+    g.say('quartz-watch:preview {"title":"terminator 2","tv":false,"seq":3}');
+    await w.settle();
+    check(g.last('__applyWatchPreview').seq === 3 && g.last('__applyWatchPreview').videoId === 'CRRlbK5w8AE' && tm.calls.length === 2, 'preview: a second hover is answered from memory');
+    check(w.wm.state().trailerCache === 1, 'preview: one trailer remembered');
+    w.wm.forget();
+    check(w.wm.state().trailerCache === 0, 'preview: Forget clears the trailers too');
+    const intruder = w.guest('https://evil.example/watch.html');
+    check(intruder.say('quartz-watch:preview {"title":"x","seq":1}') === false, 'preview: a web page printing the line is ignored');
+  } finally { w.cleanup(); }
+}
+
 /* ------------------------------------------------------------------ 4. adapters + tmdb */
 async function moduleTests() {
   const dir = path.join(__dirname, 'tests');
-  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js').sort();
+  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js' || f === 'watch-preview-test.js').sort();
   for (const id of Shape.SERVICE_IDS) {
     check(files.indexOf('watch-adapter-' + id + '.js') !== -1, 'adapters: ' + id + ' has fixture tests');
     let a = null;
@@ -1040,6 +1082,7 @@ async function moduleTests() {
     mergeTests();
     await mainTests();
     await reviewFixTests();
+    await previewMainTests();
     await moduleTests();
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));

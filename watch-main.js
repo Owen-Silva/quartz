@@ -44,12 +44,14 @@
  *         quartz-watch:open     {"url":"https://..."}           (a title: Quartz tab, or Edge for DRM)
  *         quartz-watch:signin   {"service":"disney"}            (the sign-in page, in a Quartz tab)
  *         quartz-watch:search   {"q":"bluey","seq":3}           (YouTube results + TMDB slot)
+ *         quartz-watch:preview  {"title":"Terminator 2","tv":false,"seq":4}  (the hover preview's TMDB trailer)
  *         quartz-watch:forget   {}                              (delete the cache)
  *         quartz-watch:settings {}                              (handled by app.js: Settings > Watch)
  *   out   window.__applyWatch(snapshot)       after hello, and after every change; when the
  *                                             snapshot itself fails: { v: 1, now, fatal: reason }
  *         window.__applyWatchSearch(answer)
  *         window.__applyWatchResult({ action, ok, reason, how })
+ *         window.__applyWatchPreview({ seq, state, reason, videoId })
  *
  * TESTS: create({ test: { rebase, openStub, ... } }) -- main.js passes these ONLY to a
  * --test-profile instance (QUARTZ_WATCH_* env), so a live Quartz always reads the real
@@ -101,6 +103,8 @@ const SEARCH_GAP_MS = 1200;
 const SEARCH_TTL_MS = 10 * 60 * 1000;
 const SEARCH_CACHE_MAX = 20;
 const QUERY_MAX = 200;
+const TRAILER_TTL_MS = 24 * 60 * 60 * 1000;   // a title's trailer barely changes; a failure is not kept
+const TRAILER_CACHE_MAX = 200;
 
 /* Games whose process means "do not start a hidden page now" (The user plays VALORANT). */
 const GAME_PROCESSES = ['valorant-win64-shipping.exe', 'league of legends.exe', 'fortniteclient-win64-shipping.exe',
@@ -172,6 +176,12 @@ function parseGuestLine(text) {
       // pages, which front JustWatch's links), and nothing else.
       if (!Shape.serviceForUrl(url) && !isTmdbPage(url)) return null;
       return { verb, url };
+    }
+    case 'preview': {
+      const title = typeof msg.title === 'string' ? msg.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
+      const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
+      if (!title) return null;
+      return { verb, title, tv: msg.tv === true, seq };
     }
     case 'search': {
       const q = typeof msg.q === 'string' ? msg.q.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
@@ -296,6 +306,7 @@ function create(deps) {
   let gameCache = { at: 0, name: '' };
   let searchNext = 0;
   const searchCache = new Map();
+  const trailerCache = new Map();   // 'tv|title' -> { at, answer }; hover previews, never written to disk
   const searchLive = new Map();  // guest -> its one search in flight { seq, ctrl, stale }
   // Boot grace: reads enqueued in the first bootGraceMs stay queued (the page says "Waiting to
   // read X") and the first reader starts at create() + bootGraceMs. The harness passes 0.
@@ -1128,6 +1139,7 @@ function create(deps) {
     // search in flight still answers the page but is not cached), the pause reasons and Retry
     // stamps, and the reader page open now (the read it belonged to stops at once).
     searchCache.clear();
+    trailerCache.clear();
     searchNext = 0;
     for (const k of Object.keys(paused)) delete paused[k];
     for (const k of Object.keys(pausedUntil)) delete pausedUntil[k];
@@ -1240,6 +1252,38 @@ function create(deps) {
     return answer;
   }
 
+  /* --- hover-preview trailers (watch/preview.js, watch/tmdb.js trailer()) -------------------- */
+
+  /**
+   * The official YouTube trailer for a title, from TMDB -> { state, reason, videoId }. Only with
+   * the TMDB key the user saved for search; without one the page never asks (it says why itself),
+   * and a late ask is answered 'no-key' with the reason. Answers that found a trailer, or found
+   * that there is none, are kept a day; failures are not kept, so the next hover tries again.
+   */
+  async function previewTrailer(title, tv) {
+    const p = loadPrefs();
+    if (!p.tmdbKey) return { state: 'no-key', reason: 'No trailer preview: trailers are looked up on TMDB. Add the free TMDB key in Settings > Watch', videoId: '' };
+    if (!Tmdb || typeof Tmdb.trailer !== 'function') return { state: 'error', reason: 'No trailer preview: this build has no TMDB trailer lookup', videoId: '' };
+    const ck = (tv ? 'tv|' : 'mv|') + title.toLowerCase();
+    const hit = trailerCache.get(ck);
+    if (hit && now() - hit.at < TRAILER_TTL_MS) return hit.answer;
+    const gen = epoch;
+    let a;
+    try { a = await Tmdb.trailer(title, { tv }, p.tmdbKey, (u, h) => fetchJson(u, h)); } catch (err) {
+      a = { state: 'error', reason: 'TMDB trailer lookup failed (' + String((err && err.message) || err).slice(0, 100) + ')', videoId: '' };
+    }
+    if (!a || typeof a !== 'object') a = { state: 'error', reason: 'TMDB trailer lookup returned nothing', videoId: '' };
+    const answer = { state: String(a.state || 'error'), reason: String(a.reason || ''), videoId: /^[A-Za-z0-9_-]{11}$/.test(String(a.videoId || '')) ? String(a.videoId) : '' };
+    if (answer.state === 'ok' && !answer.videoId) { answer.state = 'none'; answer.reason = answer.reason || 'No trailer preview: TMDB sent no usable video'; }
+    if ((answer.state === 'ok' || answer.state === 'none') && gen === epoch) {
+      trailerCache.set(ck, { at: now(), answer });
+      while (trailerCache.size > TRAILER_CACHE_MAX) trailerCache.delete(trailerCache.keys().next().value);
+    } else if (answer.state !== 'ok' && answer.state !== 'none') {
+      log('Watch trailer lookup on TMDB failed: ' + answer.state);   // the state only: never the key, never the title
+    }
+    return answer;
+  }
+
   /* --- guests -------------------------------------------------------------------------- */
 
   function messageOf(first, args) {
@@ -1271,6 +1315,10 @@ function create(deps) {
       case 'search':
         search(req.q, req.seq, contents).then((a) => { if (a) pushTo(contents, '__applyWatchSearch', a); },
           (err) => pushTo(contents, '__applyWatchSearch', { seq: req.seq, q: req.q, links: Merge.searchLinks(req.q), youtube: { ok: false, state: 'error', reason: String((err && err.message) || err), items: [] }, tmdb: null }));
+        break;
+      case 'preview':
+        previewTrailer(req.title, req.tv).then((a) => pushTo(contents, '__applyWatchPreview', Object.assign({ seq: req.seq }, a)),
+          (err) => pushTo(contents, '__applyWatchPreview', { seq: req.seq, state: 'error', reason: 'No preview: ' + String((err && err.message) || err).slice(0, 120), videoId: '' }));
         break;
       case 'forget': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'forget' }, forget())); break;
       case 'settings': break;   // app.js opens Settings > Watch; nothing for main to do
@@ -1409,14 +1457,14 @@ function create(deps) {
 
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
-    openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, windowShown, stop, schedule,
+    openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, windowShown, stop, schedule, previewTrailer,
     isReaderContents,
     flush: saveCacheNow,
     state: () => ({
       guests: guests.size, visible: Array.from(guestVisible.entries()).filter(([g, v]) => v && guests.has(g)).length,
       queue: queue.slice(), reading, starting, timerAt, bootTimer: !!bootTimer, paused: Object.assign({}, paused),
       pausedUntil: Object.assign({}, pausedUntil), viewAlive: liveReaders.size > 0, readers: liveReaders.size,
-      searchCache: searchCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
+      searchCache: searchCache.size, trailerCache: trailerCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
     }),
   };
 }

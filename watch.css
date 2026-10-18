@@ -250,6 +250,24 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .stage .pic .w > .noart { opacity: .5; }
 .stage .pic .w > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
 .stage .pic .w.stale > img { opacity: .8; }
+/* the hover preview (watch.js "the hover preview"): .pvhit takes the pointer over the still so resting
+   on it can start one. It starts where the text column ends (the still runs under the text's right
+   side on narrower windows, and the text's buttons must keep their clicks); the .pic itself stays
+   pointer-events: none. The muted YouTube frame sits inside .w, under the same edge mask, and fades in
+   once it plays. It covers the still like the img does (cover by container units), never takes the
+   pointer, and exists only while hovered. No blur, no glow, no animation but the one fade. */
+.stage .pic .pvhit { position: absolute; top: 0; bottom: 0; right: 0; z-index: 3; pointer-events: auto;
+  left: max(0px, calc(var(--gutter) + min(560px, 42vw) - 100vw + min(64vw, 1240px))); }
+.stage .pic .w > .pv { position: absolute; inset: 0; z-index: 1; overflow: hidden; container-type: size; opacity: 0;
+  transition: opacity var(--m-dur-m) var(--m-fade-in); pointer-events: none; }
+.stage .pic .w > .pv.on { opacity: 1; }
+.stage .pic .w > .pv > iframe { position: absolute; left: 50%; top: 50%; width: max(100cqw, 177.78cqh); height: max(100cqh, 56.25cqw);
+  transform: translate(-50%, -50%); border: 0; display: block; pointer-events: none; background: transparent; }
+.pvnote { position: absolute; right: var(--gutter); bottom: 14px; z-index: 2; max-width: min(46ch, 80%); padding: 5px 10px;
+  border-radius: var(--radius-l); background: var(--overlay); color: var(--text-2); font-size: var(--fs-xs);
+  line-height: 1.35; box-shadow: inset 0 0 0 1px var(--hairline); pointer-events: none; }
+.pvnote.wait { color: var(--text-3); }
+.pvnote.err { color: var(--danger); }
 .eyebrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
 .eyebrow .rn { text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
 /* clamped titles keep their descenders: line-height >= 1.12 and .12em of padding inside the clip (the

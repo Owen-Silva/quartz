@@ -2303,6 +2303,11 @@ function safeUrl(contents) {
 /** Set once installClientHintFix() has taken the one onBeforeSendHeaders slot. */
 let clientHintsFixed = false;
 
+/* Watch's hover preview (watch/preview.js): the Referer YouTube's embed needs from a file://
+   page. Only the embed frame Watch's own page asks for gets one; see embedReferer(). */
+let WatchPreview = null;
+try { WatchPreview = require('./watch/preview'); } catch (err) { WatchPreview = null; }
+
 /*
  * The other half of the Chrome-only User-Agent (see chromeOnlyUserAgent()).
  *
@@ -2323,7 +2328,9 @@ let clientHintsFixed = false;
  * Every request in the browser goes through this callback, so it is written to
  * be incapable of stalling one: the whole body is inside a try/catch, the
  * catch passes the ORIGINAL headers straight through, and callback() is reached
- * on every path. Headers other than the three named here are untouched.
+ * on every path. Headers other than the three named here are untouched, except
+ * one: a Referer is ADDED to the YouTube embed frame Watch's own page asks for
+ * (its hover preview), which a file:// page cannot send (watch/preview.js).
  */
 function installClientHintFix(sess) {
   if (clientHintsFixed) return;
@@ -2359,6 +2366,8 @@ function installClientHintFix(sess) {
           if (lower === 'user-agent') requestHeaders[key] = app.userAgentFallback;
           else delete requestHeaders[key];
         }
+        const embedRef = WatchPreview ? WatchPreview.embedReferer(details) : '';
+        if (embedRef) requestHeaders.Referer = embedRef;
       } catch (err) {
         console.error('[ua] client-hint rewrite skipped for', (details && details.url) || '?', '-', (err && err.message) || err);
         return callback({ requestHeaders: (details && details.requestHeaders) || {} });
