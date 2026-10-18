@@ -141,6 +141,7 @@
       S.pvOn = raw.preview.on === true;
       S.pvMock = raw.preview.mock === true;
       if (!S.pvOn) previewStop();
+      if (window.WatchTilePreview) window.WatchTilePreview.setMode(raw.preview);   // the tile previews' word too
     }
     var snap;
     try { snap = normalize(raw); } catch (err) {
@@ -214,6 +215,7 @@
       minute timer only while the page is in sight. Before the first hello: hello carries it. */
   function sightChanged() {
     if (document.hidden || S.front === false) previewStop();   // nothing plays out of sight
+    if (window.WatchTilePreview) window.WatchTilePreview.check();
     if (S.told === null) return;
     var was = S.told;
     tellSight('visible');
@@ -1591,6 +1593,7 @@
     });
     if (opts.instant) $.stack.classList.add('instant');
     setCompact(i > 0, opts.instant);
+    if (window.WatchTilePreview) window.WatchTilePreview.check();   // a row step: the previewing tile left the lens
     // --lift (watch.css) is 0 at the top and moves the lens up under the slim bar once the hero is gone
     $.stack.style.transform = 'translateY(calc(' + (-rows[i].offsetTop) + 'px + var(--lift)))';
     if (opts.instant) { void $.stack.offsetWidth; $.stack.classList.remove('instant'); }
@@ -1900,6 +1903,7 @@
   }
 
   window.__applyWatchPreview = function (raw) {
+    if (window.WatchTilePreview && window.WatchTilePreview.onTrailer(raw)) return;   // a tile's trailer (watch-tilepreview.js)
     if (!raw || typeof raw !== 'object' || raw.seq !== P.seq || !P.key || P.key !== S.stageKey || P.wrap) return;
     if (raw.state === 'ok' && typeof raw.videoId === 'string' && raw.videoId) { previewMount(raw.videoId, 0); return; }
     previewNote(cleanText(raw.reason, 200) || 'No trailer preview for this title', raw.state === 'none' || raw.state === 'no-key' ? '' : 'err');
@@ -2156,6 +2160,8 @@
     if (it && it.url === u && it.id) msg.item = { id: it.id, title: it.title || '', subtitle: it.subtitle || '' };
     if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
     if (multi === true) msg.multi = true;
+    // a tile previewing this video: the player opens where the preview was (YouTube &t=)
+    else if (window.WatchTilePreview) msg.url = window.WatchTilePreview.handoff(msg.url);
     send('open', msg);
   }
   function openCard(card, multi) {
@@ -2237,6 +2243,7 @@
     closePop(false);
     document.body.classList.add('searching');
     previewStop();
+    if (window.WatchTilePreview) window.WatchTilePreview.stop('search');
     setWash(null);
     $.results.hidden = false;
     S.gridPos = null;
@@ -2770,6 +2777,12 @@
         artImage: artImage, icon: icon, focusLens: focusLens, previewStop: previewStop, snap: function () { return S.snap; } });
     }
     window.addEventListener('wheel', onWheel, { passive: false });
+    // hover previews inside the tiles (watch-tilepreview.js): past the first row, where the hero is gone
+    if (window.WatchTilePreview) {
+      window.WatchTilePreview.attach({ stack: $.stack, send: send, snap: function () { return S.snap; },
+        stageOwns: function () { return !S.compact && !!stagePic(); }, searching: function () { return !!S.q; },
+        front: function () { return S.front !== false; }, reduced: reduced });
+    }
     window.addEventListener('resize', onResize);
     document.addEventListener('pointerdown', function (e) {
       if ($.pop.hidden) return;

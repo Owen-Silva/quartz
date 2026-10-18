@@ -94,6 +94,9 @@ const TESTS = [
   // Lumen Alerts: the subscriptions diff and batch, the gaming/RAM gates, the toggles, favourite-team
   // start/final on ESPN-shaped fixtures, watch-alerts-main.js on fakes, and ytlib-main's two hooks.
   { name: 'watch-alerts', file: 'tests/watch-alerts-test.js' },
+  // Lumen's hover previews inside tiles (watch-tilepreview.js): the hover delay, a sweep starts nothing,
+  // one player at a time, the gates, trailer-or-nothing, the &t= hand-off, and watch-main's tilepv gate.
+  { name: 'watch-tilepreview', file: 'tests/watch-tilepreview-test.js' },
   // The go-live scripts count processes as arrays: @(Main-Procs) / @(Test-Procs) (a single Quartz
   // came back unrolled, its .Count empty, and the close step skipped closing it).
   { name: 'golive-procs', file: 'tests/golive-procs-test.js' },

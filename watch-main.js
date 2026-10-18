@@ -97,6 +97,8 @@ try { YtLib = require('./watch/ytlib'); YtLibMain = require('./watch/ytlib-main'
 /* TMDB "where to watch" (watch/tmdb.js): only with a key the user pastes in Settings > Watch. */
 let Tmdb = null;
 try { Tmdb = require('./watch/tmdb'); } catch (err) { Tmdb = null; }
+let TilePv = null;   // the hover previews inside tiles: the gate's words (watch-tilepreview.js)
+try { TilePv = require('./watch-tilepreview'); } catch (err) { TilePv = null; }
 
 /* Lumen's one search box, on Enter: every service's own search (watch-find-main.js). */
 let FindMain = null;
@@ -168,7 +170,9 @@ function cleanPrefs(raw) {
   const tmdbKey = cleanKey(r.tmdbKey);
   // Keep Watch up to date in the background: on unless turned off.
   const background = r.background !== false;
-  return { enabled, leagues, tmdbKey, background };
+  // Settings > Lumen "Preview videos when I hover": on unless turned off.
+  const tilePreview = r.tilePreview !== false;
+  return { enabled, leagues, tmdbKey, background, tilePreview };
 }
 
 /** A TMDB key as pasted (a v3 key or a v4 read token), or ''. */
@@ -247,6 +251,10 @@ function parseGuestLine(text) {
     }
     case 'profile':
       return Shape.SERVICE_IDS.indexOf(msg.service) !== -1 && Play.profilePage(msg.service) ? { verb, service: msg.service } : null;
+    case 'tilepv': {
+      const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
+      return { verb, seq };
+    }
     case 'preview': {
       const title = typeof msg.title === 'string' ? msg.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
       const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
@@ -1334,7 +1342,7 @@ function create(deps) {
       tmdb: { hasKey: !!p.tmdbKey },
       player: player ? { inside: !!player.inside() } : null,
       // the page never previews until a snapshot says on (a snapshot without this keeps its last word)
-      preview: { on: previewMode !== 'off', mock: previewMode === 'mock' },
+      preview: { on: previewMode !== 'off', mock: previewMode === 'mock', tiles: p.tilePreview !== false },
       reading,
       forgottenAt,
     };
@@ -1855,6 +1863,10 @@ function create(deps) {
         f.run(req.q, req.seq, contents, { only: req.only, force: req.force }).catch((err) => log('Lumen search failed: ' + ((err && err.message) || err)));
         break;
       }
+      case 'tilepv':
+        tilePreviewGate().then((a) => pushTo(contents, '__applyWatchTilePreview', Object.assign({ seq: req.seq }, a)),
+          (err) => pushTo(contents, '__applyWatchTilePreview', { seq: req.seq, ok: false, reason: 'No preview: ' + String((err && err.message) || err).slice(0, 120) }));
+        break;
       case 'preview':
         previewTrailer(req.title, req.tv).then((a) => pushTo(contents, '__applyWatchPreview', Object.assign({ seq: req.seq }, a)),
           (err) => pushTo(contents, '__applyWatchPreview', { seq: req.seq, state: 'error', reason: 'No preview: ' + String((err && err.message) || err).slice(0, 120), videoId: '' }));
@@ -1902,7 +1914,33 @@ function create(deps) {
       cacheBytes,
       reading,
       background: { on: !!p.background, waiting: p.background ? bgWaiting : '', lastAt: bgLastAt, nextAt: bgTimerAt, reads: bgReads },
+      tilePreview: { on: p.tilePreview !== false },
     };
+  }
+
+  /** Settings > Lumen "Preview videos when I hover": saved, and every Lumen page hears it. */
+  function setTilePreview(on) {
+    const p = loadPrefs();
+    p.tilePreview = !!on;
+    savePrefs();
+    pushAll();
+    return describe();
+  }
+
+  /*
+   * May a tile start a hover preview now? -> { ok, reason }. Asked once per hover that rested
+   * HOVER_DELAY_MS (never per frame): the setting, a running game (checkGame: one tasklist a minute
+   * at most), battery saver, and free memory (MIN_FREE_GB; a TEST profile may change it).
+   */
+  async function tilePreviewGate() {
+    if (!TilePv) return { ok: false, reason: 'No preview: this build is missing watch-tilepreview.js' };
+    let game = '';
+    try { game = await checkGame(); } catch { game = gameRunning(); }
+    let saver = null;
+    try { saver = saverOn(); } catch { saver = null; }
+    const why = TilePv.gateMain({ mode: previewMode, on: loadPrefs().tilePreview !== false, gaming: game, saver, freeGb: freeGb(),
+      minFreeGb: Number.isFinite(test.tpvMinFreeGb) ? test.tpvMinFreeGb : TilePv.MIN_FREE_GB });
+    return { ok: !why, reason: why };
   }
 
   function setEnabled(id, on) {
@@ -1973,6 +2011,7 @@ function create(deps) {
     ipc.handle('watch:forget', (e) => (gate(e) ? Object.assign(describe(), { forgot: forget() }) : null));
     ipc.handle('watch:test-tmdb', (e) => (gate(e) ? testTmdb() : null));
     ipc.handle('watch:set-background', (e, on) => (gate(e) ? setBackground(!!on) : null));
+    ipc.handle('watch:set-tile-preview', (e, on) => (gate(e) ? setTilePreview(!!on) : null));
     ipc.handle('watch:refresh', (e, id) => (gate(e) ? Object.assign(describe(), { started: refresh(Shape.SERVICE_IDS.indexOf(id) !== -1 ? id : null) }) : null));
   }
 
@@ -2015,7 +2054,7 @@ function create(deps) {
 
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
-    openTitle, signIn, pickProfile, upNext, forget, setEnabled, setLeagues, setTmdbKey, setBackground, windowShown, windowFocused, stop, schedule, previewTrailer,
+    openTitle, signIn, pickProfile, upNext, forget, setEnabled, setLeagues, setTmdbKey, setBackground, setTilePreview, tilePreviewGate, windowShown, windowFocused, stop, schedule, previewTrailer,
     isReaderContents, routeFor, drmView,
     // Lumen Alerts: the hooks (watch-alerts-main.js), the cached game answer, and what its Settings field needs.
     setAlerts: (a) => { alerts = a && typeof a === 'object' ? a : null; try { schedule(); } catch { /* next tick */ } },
