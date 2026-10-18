@@ -363,10 +363,13 @@
 
     buttonEl.addEventListener('click', function () { open(); });
 
+    // Left of the Lumen button when there is one, so Lumen stays directly left of the shield.
+    var lumen = document.getElementById('lumen');
     var shield = document.getElementById('shield');
     var downloads = document.getElementById('downloads');
     var theme = document.getElementById('theme');
-    if (shield && shield.parentNode === navrow) navrow.insertBefore(buttonEl, shield);
+    if (lumen && lumen.parentNode === navrow) navrow.insertBefore(buttonEl, lumen);
+    else if (shield && shield.parentNode === navrow) navrow.insertBefore(buttonEl, shield);
     else if (downloads && downloads.parentNode === navrow) navrow.insertBefore(buttonEl, downloads);
     else if (theme && theme.parentNode === navrow) navrow.insertBefore(buttonEl, theme);
     else navrow.appendChild(buttonEl);

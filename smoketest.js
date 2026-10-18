@@ -24,6 +24,7 @@ const REQUIRED_IDS = [
   'tabstrip', 'newtab', 'back', 'forward', 'reload', 'omnibox', 'views',
   'titlebar', 'win-min', 'win-max', 'win-close',
   'theme',     // light/dark toggle
+  'lumen',     // the Lumen button, left of the shield
 ];
 
 const log = [];
