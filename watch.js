@@ -1299,14 +1299,61 @@
    */
   var ART_MISS = new Set();
   function artMissKey(u) { return String(u).replace('/vi_webp/', '/vi/').replace(/\.webp$/, '.jpg'); }
-  function artSrcs(it) {
+  function artSrcs(it, needPx) {
     var list = arr(it.images).length > 1 && it.images[0] === it.image ? it.images
       : Shape && typeof Shape.ytThumbs === 'function' ? Shape.ytThumbs(it.image) : [it.image];
+    list = artOrder(list, needPx);
     var left = list.filter(function (u) { return u && !ART_MISS.has(artMissKey(u)); });
     return left.length ? left : list.slice(-1);
   }
+  /*
+   * Which of YouTube's stills to ask for first. The DECODE is what costs, not the bytes
+   * (watch-design-e2e --trace, 10-17, the user's 125%, on this laptop): a tile's 1280x720 maxres webp
+   * took 78 ms a decode on the raster workers, 137 ms at worst (Chromium decodes webp to RGB at full
+   * size, then scales it), an sd JPEG 2-6 ms (decoded straight to YUV); a row of webp tiles starved
+   * the frames (frames over 20 ms 13 -> 21, max 50 -> 150 ms). img.decode() of one 1280x720 picture,
+   * median of 12: webp 50 ms, JPEG 12 ms. So:
+   *   - JPEG before webp, always: the same picture for a quarter of the decode;
+   *   - a tile starts at sd when sd covers it in DEVICE pixels (sd's 16:9 picture is 640 wide: 4:3
+   *     with bars, which artCrop crops; the user's 125% tiles are 360-450 px, and watch.css keeps every
+   *     tile under ~370 CSS px, so that is every tile up to ~175% scaling), a wider one at maxres;
+   *     hq (480 wide) is never first;
+   *   - the hero (needPx Infinity) starts at maxres.
+   * Only YouTube's named stills move, and only among their own places: a Short's vertical still
+   * stays first, the page's own still stays last. The rest stay behind as fallbacks.
+   */
+  var YT_STILL = /\/vi(?:_webp)?\/[A-Za-z0-9_-]{11}\/(maxresdefault|sddefault|hqdefault)(?:_live)?\.(jpg|webp)(?:\?|$)/;
+  var SD_PICTURE_W = 640;
+  function artOrder(list, needPx) {
+    var slots = [];
+    var named = [];
+    list.forEach(function (u, k) {
+      var m = YT_STILL.exec(String(u));
+      if (m) { slots.push(k); named.push({ u: u, name: m[1], webp: m[2] === 'webp' ? 1 : 0, k: k }); }
+    });
+    if (named.length < 2) return list;
+    var pref = needPx > SD_PICTURE_W ? ['maxresdefault', 'sddefault', 'hqdefault'] : ['sddefault', 'maxresdefault', 'hqdefault'];
+    named.sort(function (a, b) { return pref.indexOf(a.name) - pref.indexOf(b.name) || a.webp - b.webp || a.k - b.k; });
+    var out = list.slice();
+    slots.forEach(function (k, i) { out[k] = named[i].u; });
+    return out;
+  }
+  /* The tiles' width in CSS px (watch.css --card-w), from a hidden probe a ResizeObserver reads after
+     layout, so choosing a still never forces one. Before the first reading: the widest a tile gets
+     (per >= 3 within a 1720 px column, watch.css) stands in, which errs sharp. */
+  var TILE = { css: 0, probe: null };
+  function tileNeedPx() {
+    if (!TILE.probe && document.body && typeof ResizeObserver === 'function') {
+      TILE.probe = el('div', 'tile-probe');
+      TILE.probe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(TILE.probe);
+      new ResizeObserver(function (en) { var w = en[0] && en[0].contentRect ? en[0].contentRect.width : 0; if (w > 0) TILE.css = w; }).observe(TILE.probe);
+    }
+    var css = TILE.css || Math.min(380, Math.max(240, (window.innerWidth || 1280) / 3));
+    return Math.ceil(css * (window.devicePixelRatio || 1));
+  }
   function artLoad(img, it, fail, hero) {
-    var srcs = artSrcs(it);
+    var srcs = artSrcs(it, hero ? Infinity : tileNeedPx());
     var i = 0;
     var step = function () {   // false when no candidate is left
       if (ART_MISS.size > 4000) ART_MISS.clear();
