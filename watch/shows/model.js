@@ -213,6 +213,9 @@
       s.seasons.forEach(function (x) { have[x.n] = x; });
       t.seasons.forEach(function (ts) {
         var mine = have[ts.n];
+        // TMDB's Specials (season 0) only when the service listed no seasons of its own: beside the
+        // service's own seasons it is an empty tab the service never offered
+        if (!mine && ts.n === 0 && s.seasons.length) return;
         if (!mine) { s.seasons.push(Object.assign({}, ts, { fromTmdb: true })); used = true; return; }
         if (!mine.episodes.length && ts.episodes.length) { mine.episodes = ts.episodes; mine.loaded = true; mine.fromTmdb = true; used = true; }
         else if (mine.episodes.length && ts.episodes.length) {

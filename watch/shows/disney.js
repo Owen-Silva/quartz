@@ -143,6 +143,8 @@ function parseShow(read, req) {
     var e = obj(step.error);
     if (e) return { state: 'error', reason: X.errorReason(e, step), show: null };
     if (ex.login === true) return { state: 'signed-out', reason: X.SIGNED_OUT_REASON, show: null };
+    var refused = (Array.isArray(step.captures) ? step.captures : []).filter(function (c) { return obj(c) && CAPTURE_RE.test(capUrl(c)) && !okStatus(c); })[0];
+    if (refused) return { state: 'error', reason: 'Disney+’s servers answered HTTP ' + num(refused.status) + ' for this title’s data', show: null };
     return { state: 'error', reason: 'the Disney+ title page loaded but sent nothing Lumen could read (Disney+ changed its layout?)', show: null };
   }
   var v = obj(page && page.visuals) || {};
