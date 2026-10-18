@@ -54,6 +54,7 @@ function create(deps) {
   const floorGb = Number.isFinite(test.floorGb) ? test.floorGb : FLOOR_GB;
   let afterWatching = typeof d.afterWatching === 'function' ? d.afterWatching : null;
   let onInside = typeof d.onInsideChanged === 'function' ? d.onInsideChanged : null;
+  let upNext = typeof d.upNext === 'function' ? d.upNext : null;   // watch-main's upNext: "Up next" when a title ends
 
   const players = new Map();   // wcId -> { wcId, contents, service, origins, fullscreen, sheets:Set }
   const sheets = new Map();    // sheet id -> { id, view, contents, opener, rect }
@@ -99,6 +100,10 @@ function create(deps) {
 
   /* --- one title into the layer ---------------------------------------------------- */
 
+  function cleanItem(it) {
+    if (!it || typeof it !== 'object' || !Hosts.SERVICES[it.service]) return null;
+    return { id: cleanTitle(it.id), service: it.service, title: cleanTitle(it.title), subtitle: cleanTitle(it.subtitle) };
+  }
   function cleanTitle(t) { return typeof t === 'string' ? t.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) : ''; }
 
   /**
@@ -118,6 +123,12 @@ function create(deps) {
       title: cleanTitle(x.title),
       multi: !!x.multi,
       blocked: typeof x.blocked === 'string' ? x.blocked.slice(0, 200) : '',
+      // watch-player-extras.js: the title page when url is the player itself; what was opened (Up next);
+      // 'profile' for the service's own picker, with where its menu is when it has no page of its own.
+      fallback: /^https?:///i.test(String(x.fallback || '')) ? String(x.fallback) : '',
+      item: cleanItem(x.item),
+      purpose: x.purpose === 'profile' ? 'profile' : '',
+      note: typeof x.note === 'string' ? cleanTitle(x.note) : '',
     });
     return true;
   }
@@ -370,6 +381,14 @@ function create(deps) {
       }
       return { asked };
     });
+    on('watch-player:up-next', async (p) => {
+      // A title ended in the layer: what follows it on the same service, from Lumen's rows (watch-main).
+      if (!upNext) return { ok: false, next: null, reason: 'Lumen isn’t running its reader' };
+      const item = cleanItem(p.item);
+      if (!item) return { ok: false, next: null, reason: 'Lumen doesn’t know what was playing' };
+      log(Hosts.HUB_NAME + ' player: ' + item.service + ' title ended; looking for what is next');
+      try { return await upNext({ item }); } catch (err) { return { ok: false, next: null, reason: String((err && err.message) || err).slice(0, 120) }; }
+    });
     on('watch-player:sheet-rect', (p) => ({ ok: placeSheet(Number(p.id), p.rect) }));
     on('watch-player:sheet-close', (p) => ({ ok: closeSheet(Number(p.id), String(p.why || 'Close').slice(0, 40)) }));
   }
@@ -380,6 +399,7 @@ function create(deps) {
     inside,
     setInside,
     setAfterWatching: (fn) => { afterWatching = typeof fn === 'function' ? fn : null; },
+    setUpNext: (fn) => { upNext = typeof fn === 'function' ? fn : null; },
     setOnInside: (fn) => { onInside = typeof fn === 'function' ? fn : null; },
     isPlayer: (wcId) => players.has(wcId),
     state: () => ({ players: players.size, sheets: sheets.size, mode, inside: inside() }),

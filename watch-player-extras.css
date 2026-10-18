@@ -1,0 +1,83 @@
+/* watch-player-extras.css -- the quality note, the More menu (Open in Edge, and why) and the
+   Up next card in the Lumen player layer (watch-player-extras.js). Neutral greys, Quartz's accent. */
+
+/* The quality note: a quiet label that opens the menu. */
+.wp-btn.wpx-q {
+  height: 24px;
+  padding: 0 9px;
+  border-color: rgba(255, 255, 255, 0.10);
+  background: transparent;
+  color: #b9bdc3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.wp-btn.wpx-q:hover { color: #e9eaec; }
+.wp-btn.wpx-more { width: 34px; padding: 0; font-size: 16px; line-height: 1; letter-spacing: 0.04em; }
+
+/* The menu, under More. */
+.wpx-menu {
+  position: absolute;
+  z-index: 6;
+  width: 340px;
+  max-width: calc(100% - 16px);
+  padding: 6px;
+  background: #17181b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: #e9eaec;
+  font-size: 13px;
+}
+.wpx-menu[hidden] { display: none; }
+.wpx-info {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px 9px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  line-height: 1.4;
+}
+.wpx-info b { font-weight: 600; font-size: 12px; color: #c9ccd1; }
+.wpx-info span { color: #a9adb3; font-size: 12px; }
+.wp-btn.wpx-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  padding: 8px 10px 9px;
+  text-align: left;
+  white-space: normal;
+  border-color: transparent;
+  background: transparent;
+  line-height: 1.35;
+}
+.wp-btn.wpx-item:hover, .wp-btn.wpx-item:focus-visible { background: rgba(255, 255, 255, 0.07); }
+.wpx-item-label { font-weight: 600; }
+.wpx-item-why { color: #a9adb3; font-size: 12px; }
+
+/* Up next: a card over the bottom right of the tile. */
+.wpx-up {
+  position: absolute;
+  z-index: 4;
+  right: 24px;
+  bottom: 80px;
+  width: 340px;
+  max-width: calc(100% - 48px);
+  padding: 14px 16px 14px;
+  background: rgba(23, 24, 27, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #e9eaec;
+  line-height: 1.4;
+}
+.wpx-up[hidden] { display: none; }
+.wpx-up-head { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #a9adb3; }
+.wpx-up-title { margin: 6px 0 0; font: 600 15px/1.3 var(--font-display, inherit); overflow-wrap: anywhere; }
+.wpx-up-sub { margin: 4px 0 0; font-size: 12.5px; color: #c9ccd1; overflow-wrap: anywhere; }
+.wpx-up-count { margin: 6px 0 0; font-size: 12px; color: #a9adb3; font-variant-numeric: tabular-nums; }
+.wpx-up-bar { height: 3px; margin-top: 10px; border-radius: 2px; background: rgba(255, 255, 255, 0.10); overflow: hidden; }
+.wpx-up-bar i { display: block; height: 100%; width: 100%; background: var(--accent, #72adca); transform-origin: left center; transition-property: transform; transition-timing-function: linear; }
+.wpx-up-bar i.go { transform: scaleX(0); }
+.wpx-up-acts { display: flex; gap: 8px; margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .wpx-up-bar i { transition: none; } }

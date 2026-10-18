@@ -652,6 +652,7 @@
     if (boot) return S.failure ? { cls: 'st-error', dot: 'err', small: 'No answer' } : { cls: 'st-busy', dot: 'busy', small: 'Starting\u2026' };
     if (s.state === 'off') return { cls: 'st-off', dot: 'off', small: 'Off' };
     if (s.reading) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
+    if (s.picker) return { cls: 'st-error st-picker', dot: 'warn', small: 'Who’s watching?', act: 'Pick profile' };   // watch/profiles.js
     if (s.state === 'error') return { cls: 'st-error', dot: 'err', small: "Couldn't read", act: 'Retry' };
     if (s.state === 'signed-out') return { cls: 'st-signed-out', dot: 'out', small: 'Signed out', act: 'Sign in' };
     if (s.paused) return { cls: 'st-paused', dot: 'warn', small: shared ? 'Paused' : capFirst(s.paused.replace(/\s*\([^)]*\)\s*$/, '')) };
@@ -691,6 +692,7 @@
       main.appendChild(dot);
       main.appendChild(el('span', 'sp-name', s.name));
       if (look.small) main.appendChild(el('small', look.warn ? 'warn-mark' : '', look.small));
+      if (!boot && window.LumenProfiles) window.LumenProfiles.chip(main, s);
       if (boot) {
         main.disabled = true;
         main.setAttribute('aria-label', s.name + ': waiting for Lumen to start');
@@ -708,6 +710,7 @@
       if (!boot && look.act) {
         var act = button('sp-act', look.act, function () {
           if (look.act === 'Retry') send('refresh', { service: s.id });
+          else if (look.act === 'Pick profile') send('profile', { service: s.id });
           else send('signin', { service: s.id });
         });
         act.dataset.k = s.id + ':act';
@@ -808,6 +811,7 @@
       var why = failed[0].reason || 'no reason given';
       var full = failed.map(function (s) { return s.name + ': ' + (s.reason || 'no reason given'); }).join('\n');
       freshText(f, 'Couldn’t update ' + names + (failed.length === 1 ? ': ' + why : ''), full);
+      if (window.LumenProfiles) window.LumenProfiles.freshPick(f, failed, send);
       freshRetry(f, 'Retry ' + names, function () {
         failed.forEach(function (s) { send('refresh', { service: s.id }); });
       });
@@ -888,6 +892,7 @@
     var h = el('h3', '', s.name);
     h.id = 'pop-title';
     if (s.profile) h.appendChild(el('small', '', s.profile));
+    if (window.LumenProfiles) window.LumenProfiles.popHead(h, s);
     p.setAttribute('aria-labelledby', 'pop-title');
     p.appendChild(h);
 
@@ -908,7 +913,9 @@
     }
     p.appendChild(st);
 
-    if (s.state === 'error') {
+    if (s.state === 'error' && window.LumenProfiles && window.LumenProfiles.popWords(p, s)) {
+      /* who's watching: watch/profiles.js said it, and adds Pick profile below */
+    } else if (s.state === 'error') {
       p.appendChild(el('p', '', "Couldn't read " + s.name + ': ' + (s.reason || 'no reason was given') + '.'));
       if (s.lastOkAt) {
         var keepP = el('p', 'small');
@@ -933,7 +940,7 @@
     }
 
     var acts = el('div', 'acts');
-    var readBtn = button('btn sm' + (s.state === 'error' ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
+    var readBtn = button('btn sm' + (s.state === 'error' && !s.picker ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
     if (s.reading) readBtn.disabled = true;
     acts.appendChild(readBtn);
     if (s.needsSignIn && s.state !== 'ok') {
@@ -944,6 +951,7 @@
       if (edgeFor(s.home)) open.title = 'Opens in Microsoft Edge' + (DRM.reason ? ': ' + DRM.reason : '');
       acts.appendChild(open);
     }
+    if (window.LumenProfiles) window.LumenProfiles.popActs(acts, s, send, closePop, null);
     acts.appendChild(button('btn sm ghost', 'Settings', function () { send('settings', {}); closePop(true); }));
     p.appendChild(acts);
   }
@@ -1349,7 +1357,7 @@
   }
 
   function cardSub(it, m) {
-    if (it.kind === 'resume') return joinDot([epText(it.subtitle), timeLeft(it)]);
+    if (it.kind === 'resume') return (window.LumenPlay && window.LumenPlay.resumeLabel(it)) || joinDot([epText(it.subtitle), timeLeft(it)]);
     if (it.kind === 'upcoming' && it.startsAt) return joinDot([it.subtitle, dayClock(it.startsAt)]);
     if (it.kind === 'live') return joinDot([it.subtitle, 'Live now']);
     if (it.subtitle) return it.kind === 'watchlist' || it.service === 'youtube' ? it.subtitle : epText(it.subtitle);
@@ -1680,7 +1688,7 @@
     }
     var acts = el('div', 'acts');
     var label = it.kind === 'resume' ? 'Resume' : it.kind === 'live' ? 'Watch live' : it.service === 'youtube' ? 'Play' : /^rent$/i.test(it.badge) ? 'Rent' : it.kind === 'upcoming' ? 'Open' : 'Watch';
-    var primary = button('btn primary', '', function () { openUrl(it.url, it.title); });
+    var primary = button('btn primary', '', function () { openUrl(it.url, it.title, false, it); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
@@ -1954,6 +1962,7 @@
         eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Lumen couldn\u2019t read your services';
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
+        if (window.LumenProfiles) window.LumenProfiles.emptyPick(acts, en, send);
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failed') {
@@ -2049,17 +2058,21 @@
   /* ---------------------------------------------------------------- opening */
 
   /** title: the player layer's bar; multi: "Add to multiview" (watch-player.js). */
-  function openUrl(url, title, multi) {
+  function openUrl(url, title, multi, it) {
     var u = https(url);
     if (!u) return;
     if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
     var msg = { url: u };
+    // A tile: straight to the service's player where that is proven (watch/playurl.js), the title page
+    // as its fallback; and what it is, for Up next.
+    if (it && it.url === u && https(it.playUrl)) { msg.url = https(it.playUrl); msg.fallback = u; }
+    if (it && it.url === u && it.id) msg.item = { id: it.id, title: it.title || '', subtitle: it.subtitle || '' };
     if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
     if (multi === true) msg.multi = true;
     send('open', msg);
   }
   function openCard(card, multi) {
-    if (card._item) openUrl(card._item.url, card._item.title, multi);
+    if (card._item) openUrl(card._item.url, card._item.title, multi, card._item);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
   function eventTitle(ev) {
