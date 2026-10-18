@@ -326,6 +326,9 @@
     var tabs = el('div', 'shw-tabs');
     tabs.setAttribute('role', 'tablist');
     var cur = sh.seasons.filter(function (x) { return x.n === v.season; })[0] || sh.seasons[0];
+    // a service's page with some seasons from TMDB marks those; a page that is all TMDB's (a title on none of
+    // his services, or a reader's fallback, whose banner says so) does not repeat it per season
+    var mixed = sh.source !== 'tmdb';
     v.season = cur.n;
     if (sh.seasons.length > 1) {
       sh.seasons.forEach(function (s) {
@@ -333,13 +336,13 @@
         t.setAttribute('role', 'tab');
         t.setAttribute('aria-selected', s.n === cur.n ? 'true' : 'false');
         t.dataset.n = String(s.n);
-        if (s.fromTmdb) { t.appendChild(el('span', 'shw-tab-src', 'TMDB')); t.title = s.label + ': episodes from TMDB, no progress'; }
+        if (s.fromTmdb && mixed) { t.appendChild(el('span', 'shw-tab-src', 'TMDB')); t.title = s.label + ': episodes from TMDB, no progress'; }
         tabs.appendChild(t);
       });
       head.appendChild(tabs);
     }
     w.appendChild(head);
-    if (cur.fromTmdb && cur.episodes.length) w.appendChild(el('p', 'shw-fine', 'This season’s episodes are from TMDB: ' + svcName(sh.service || v.req.service) + ' didn’t send them, so there’s no progress here.'));
+    if (mixed && cur.fromTmdb && cur.episodes.length) w.appendChild(el('p', 'shw-fine', 'This season’s episodes are from TMDB: ' + svcName(sh.service || v.req.service) + ' didn’t send them, so there’s no progress here.'));
     var list = el('div', 'shw-eps');
     list.setAttribute('role', 'tabpanel');
     if (!cur.episodes.length) {
@@ -351,7 +354,8 @@
       return w;
     }
     var plan = M.resumePlan(sh);
-    cur.episodes.forEach(function (ep) { list.appendChild(episodeRow(v, sh, ep, plan.ep && plan.ep.id === ep.id && plan.ep.e === ep.e && plan.ep.s === ep.s)); });
+    var playable = !(v.answer && v.answer.state === 'elsewhere');
+    cur.episodes.forEach(function (ep) { list.appendChild(episodeRow(v, sh, ep, playable && plan.ep && plan.ep.id === ep.id && plan.ep.e === ep.e && plan.ep.s === ep.s)); });
     w.appendChild(list);
     return w;
   }
@@ -395,7 +399,8 @@
     if (ep.synopsis) t.appendChild(el('span', 'shw-ep-s', ep.synopsis));
     r.appendChild(t);
     var p = M.playFor(sh, ep);
-    r.setAttribute('aria-label', dot([M.epLabel(ep), ep.title, mins(ep.runtimeSec), M.done(ep) ? 'watched' : ep.progress ? Math.round(ep.progress * 100) + ' percent watched' : '']) + '. ' + (p.proven ? 'Plays in Lumen.' : 'Opens the title page in Lumen.'));
+    if (!p.url) r.disabled = true;
+    r.setAttribute('aria-label', dot([M.epLabel(ep), ep.title, mins(ep.runtimeSec), M.done(ep) ? 'watched' : ep.progress ? Math.round(ep.progress * 100) + ' percent watched' : '']) + '. ' + (!p.url ? 'Not on your services.' : p.proven ? 'Plays in Lumen.' : 'Opens the title page in Lumen.'));
     return r;
   }
 

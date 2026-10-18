@@ -162,7 +162,7 @@ const PAGE_NOW = `(() => {
   const r = document.querySelector('.shw'); if (!r || r.hidden) return null;
   const tx = (sel) => { const n = r.querySelector(sel); return n ? n.textContent : ''; };
   const eps = [...r.querySelectorAll('.shw-eps .shw-ep')].map((b) => ({ t: (b.querySelector('.shw-ep-h b') || {}).textContent || '', m: (b.querySelector('.shw-ep-m') || {}).textContent || '',
-    done: b.classList.contains('done'), next: b.classList.contains('next'), check: !!b.querySelector('.shw-check'), prog: (() => { const i = b.querySelector('.shw-prog i'); return i ? Number(i.style.getPropertyValue('--p')) : null; })() }));
+    done: b.classList.contains('done'), next: b.classList.contains('next'), dis: b.disabled, check: !!b.querySelector('.shw-check'), prog: (() => { const i = b.querySelector('.shw-prog i'); return i ? Number(i.style.getPropertyValue('--p')) : null; })() }));
   return { s: ${LS}, h1: tx('.shw-h1'), meta: tx('.shw-meta'), play: tx('.shw-play'), left: tx('.shw-left'), why: tx('.shw-why'), chip: tx('.shw-svc-n'), wl: tx('.shw-wl'),
     note: tx('.shw-note .shw-note-t'), noteKind: (r.querySelector('.shw-note') || { className: '' }).className, noteBtns: [...r.querySelectorAll('.shw-note .btn')].map((b) => b.textContent),
     fine: [...r.querySelectorAll('.shw-fine')].map((n) => n.textContent), tabs: [...r.querySelectorAll('.shw-tab')].map((b) => b.firstChild.textContent + (b.querySelector('.shw-tab-src') ? '(TMDB)' : '') + (b.classList.contains('on') ? '*' : '')),
@@ -214,12 +214,19 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await g.send('Runtime.enable');
     await g.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0);
 
+    // A shot is the Lumen page in a w x h window: the tab's view grown to w x (h - Quartz's top bar) and the page
+    // emulated at that size (watch-preview-e2e's way), so it is the page itself, not a tiling of the smaller
+    // off-screen view. The file names say the window size.
+    const barH = Math.round(await chrome.ev('(() => { const w = findWatchTab(); const v = w && w.viewEl; return v ? v.getBoundingClientRect().top : 85; })()')) || 85;
     const shoot = async (name, sizes) => {
       for (const [w, h] of (sizes || [[1536, 800], [1920, 1000]])) {
-        await chrome.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
-        await sleep(1000);
-        try { await chrome.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
-        await chrome.send('Emulation.clearDeviceMetricsOverride');
+        const ph = h - barH;
+        await chrome.ev(`(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return 0; const s = v.style; s.setProperty('position', 'fixed', 'important'); s.setProperty('left', '0px', 'important'); s.setProperty('top', '0px', 'important'); s.setProperty('width', '${w}px', 'important'); s.setProperty('height', '${ph}px', 'important'); s.setProperty('z-index', '2147483647', 'important'); return 1; })()`).catch(() => 0);
+        await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: ph, deviceScaleFactor: 1, mobile: false });
+        await sleep(1100);
+        try { await g.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
+        await g.send('Emulation.clearDeviceMetricsOverride');
+        await chrome.ev(`(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return 0; for (const k of ['position', 'left', 'top', 'width', 'height', 'z-index']) v.style.removeProperty(k); return 1; })()`).catch(() => 0);
         await sleep(300);
       }
     };
@@ -244,13 +251,14 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     check(ld && ld.h1 === 'The Bear' && /^Reading Hulu/.test(ld.note) && /busy/.test(ld.noteKind), 'the page opens at once: the title, and "Reading Hulu…" while it reads', ld && { h1: ld.h1, note: ld.note });
     const part = await until(`v.s && v.s.partial && v.eps.length`, 15000);
     check(part && /TMDB until it answers/.test(part.note) && part.eps.length >= 3, 'TMDB lands first: its episodes are drawn while Hulu is still being read, and the page says so', part && { note: part.note, eps: part.eps.length });
-    if (part) await shoot('loading', [[1536, 800]]);
+    if (part) await shoot('loading');
     const fb = await until(`v.s && v.s.state === 'fallback'`, 45000);
     check(!!fb, 'Hulu’s hub answered 503: the page settles on its fallback (' + Math.round((Date.now() - t0) / 1000) + ' s)', fb && fb.s);
     check(fb && fb.note === 'Couldn’t read Hulu: Hulu’s servers answered HTTP 503 for this title’s data. Episodes are from TMDB; your progress isn’t shown.' && /warn/.test(fb.noteKind), 'the reason, in words: "Couldn’t read Hulu: Hulu’s servers answered HTTP 503…", and that the episodes are TMDB’s', fb && fb.note);
     check(fb && fb.noteBtns.indexOf('Retry') !== -1 && fb.noteBtns.indexOf('Open on Hulu') !== -1, 'the fallback offers Retry and Open on Hulu', fb && fb.noteBtns);
     check(fb && fb.eps.length === 3 && fb.eps[0].t === '1. System' && fb.eps.every((e) => !e.check && e.prog === null), 'TMDB’s season 1 (System, Hands, Brigade), with no progress drawn (none was read)', fb && fb.eps);
     check(fb && fb.tabs.length >= 3 && fb.more.indexOf('Severance') !== -1, 'TMDB’s seasons as tabs, and its More like this: Severance', fb && { tabs: fb.tabs, more: fb.more });
+    check(fb && fb.tabs.every((t) => t.indexOf('(TMDB)') === -1) && !fb.fine.some((t) => /This season’s episodes are from TMDB/.test(t)), 'the fallback is all TMDB’s and its banner says so: no per-season TMDB marks or notes repeating it', fb && { tabs: fb.tabs, fine: fb.fine });
     await shoot('fallback');
 
     /* ---- 3. More like this -> Severance: on none of his services ---- */
@@ -259,6 +267,7 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     check(sev && sev.s.depth === 1 && sev.chip === 'Not on your services' && !sev.play, 'Severance opens on top: "Not on your services", no play button', sev && { depth: sev.s.depth, chip: sev.chip, play: sev.play });
     check(sev && sev.prov.some((t) => /Apple TV Plus/.test(t) && /See where to watch/.test(t)) && sev.prov.some((t) => /Amazon Video/.test(t) && /Buy/.test(t) && /Watch on Prime Video/.test(t)), 'Where it streams: Apple TV Plus (See where to watch), Amazon Video to buy (Watch on Prime Video)', sev && sev.prov);
     check(sev && /JustWatch/.test(sev.attr) && sev.hasEps && sev.eps.length === 2, 'its TMDB episodes and the JustWatch attribution are shown', sev && { attr: sev.attr, eps: sev.eps.length });
+    check(sev && sev.eps.every((e) => e.dis && !e.next) && sev.tabs.every((t) => t.indexOf('(TMDB)') === -1), 'nothing plays from his services here: no episode is marked next, the rows are not buttons that do nothing, no TMDB marks', sev && { eps: sev.eps, tabs: sev.tabs });
     await shoot('elsewhere');
     await clickText('.shw-prov-r .btn', 'Watch on Prime Video');
     const pv = await layerAt(FP + '/search/');
@@ -277,17 +286,17 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     check(ok && ok.wl === 'In My Stuff' && /2022/.test(ok.meta) && /TV-MA/.test(ok.meta) && /3 seasons/.test(ok.meta) && !ok.note, 'the hero: In My Stuff (read-only), 2022 · TV-MA · 3 seasons, no warning', ok && { wl: ok.wl, meta: ok.meta, note: ok.note });
     const e3 = ok && ok.eps.find((e) => e.next);
     check(ok && ok.tabs.indexOf('Season 2*') !== -1 && e3 && /^3\. /.test(e3.t) && e3.prog > 0 && e3.prog < 1 && /% watched/.test(e3.m), 'season 2 is open on its own; S2 E3 is marked next, with a progress bar and "% watched"', ok && { tabs: ok.tabs, e3 });
-    await shoot('show');
+    await shoot('show', [[1280, 800], [1536, 800], [1920, 1000]]);
     await clickText('.shw-tab', 'Season 1');
     const s1 = await until(`v.tabs.indexOf('Season 1*') !== -1 && v.eps.length`, 5000);
     check(s1 && s1.eps.length === 3 && s1.eps.every((e) => e.done && e.check && /Watched/.test(e.m)), 'the Season 1 tab: every episode has its watched check', s1 && s1.eps);
-    await shoot('watched', [[1536, 800]]);
+    await shoot('watched');
     const tm0 = st.tmdb.length;
     await clickText('.shw-tab', 'Season 3');
     const s3 = await until(`v.tabs.indexOf('Season 3(TMDB)*') !== -1 && v.eps.length`, 15000);
     check(s3 && s3.eps.map((e) => e.t).join('|') === '1. Tomorrow|2. Next' && s3.fine.some((t) => /from TMDB: Hulu didn’t send them/.test(t)), 'the Season 3 tab (Hulu sent none): filled from TMDB, its tab marked TMDB, and it says so', s3 && { eps: s3.eps.map((e) => e.t), fine: s3.fine });
     check(st.tmdb.slice(tm0).indexOf('/tv/136315/season/3') !== -1, 'S3 came from TMDB’s /tv/136315/season/3 (the local mock)', st.tmdb.slice(tm0));
-    await shoot('s3-tmdb', [[1920, 1000]]);
+    await shoot('s3-tmdb');
 
     /* ---- 5. Resume and an episode play in the layer ---- */
     await g.ev(`document.querySelector('.shw-play').click(), 1`);
@@ -297,6 +306,7 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await clickText('.shw-tab', 'Season 1');
     await g.ev(`(() => { const b = document.querySelector('.shw-eps .shw-ep'); b.scrollIntoView({ block: 'nearest' }); b.click(); return 1; })()`);
     const e11 = await layerAt(FH + '/watch/' + EP(1, 1));
+    for (let i = 0; i < 50 && st.played.indexOf(EP(1, 1)) === -1; i++) await sleep(100);   // the layer's page request lands just after its slot is set
     check(!!e11 && st.played.indexOf(EP(1, 1)) !== -1, 'an episode row (S1 E1) plays its own /watch/ in the layer', e11);
     await closeLayer();
     check(await g.ev('LumenShows.isOpen()'), 'the show page is still there after the layer closes');
@@ -311,11 +321,11 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     check(await openItem({ service: 'disney', kind: 'rec', type: 'show', title: 'Andor', url: 'https://www.disneyplus.com/browse/entity-aB3dE5fG7hJ9' }), 'a Disney+ title opens its page');
     const an = await until(`v.s && v.s.state === 'ok' && v.play`, 40000);
     check(an && an.h1 === 'Andor' && an.play === 'Resume S2 E1' && /isn’t proven/.test(an.why) && an.chip === 'On Disney+', 'Disney+ (Andor): Resume S2 E1, and why it opens the title page', an && { h1: an.h1, play: an.play, why: an.why, chip: an.chip });
-    await shoot('disney', [[1536, 800]]);
+    await shoot('disney');
     check(await openItem({ service: 'prime', kind: 'rec', type: 'show', title: 'The Boys', url: 'https://www.primevideo.com/detail/B07FMHTRFA/' }), 'a Prime Video title opens its page');
     const by = await until(`v.s && v.s.state === 'ok' && v.play`, 40000);
     check(by && by.play === 'Resume S1 E2' && by.chip === 'On Prime Video' && by.eps.some((e) => e.done) && by.eps.some((e) => e.prog > 0), 'Prime Video (The Boys): Resume S1 E2, E1 watched, E2 part-way', by && { play: by.play, eps: by.eps });
-    await shoot('prime', [[1920, 1000]]);
+    await shoot('prime');
 
     /* ---- 8. film pages ---- */
     check(await openItem({ service: 'hulu', kind: 'rec', type: 'movie', title: 'Palm Springs', url: 'https://www.hulu.com/movie/palm-springs-' + PALM }), 'a Hulu film opens its page');
@@ -329,7 +339,7 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     check(await openItem({ service: 'prime', kind: 'rec', type: 'movie', title: 'Air', url: 'https://www.primevideo.com/detail/0AIRMOVIE0001/' }), 'a Prime Video film opens its page');
     const air = await until(`v.s && v.s.state === 'ok' && v.play`, 40000);
     check(air && air.play === 'Play' && /1 h 52 min/.test(air.meta) && air.wl === 'On your Watchlist', 'a Prime film (Air): Play, 1 h 52 min, On your Watchlist', air && { play: air.play, meta: air.meta, wl: air.wl });
-    await shoot('film-prime', [[1536, 800]]);
+    await shoot('film-prime');
     await g.ev('LumenShows.close(), 1');
 
     /* ---- 9. nothing left the machine ---- */
