@@ -100,9 +100,14 @@ try { fs.unlinkSync(freeFile); } catch (e) { /* none */ }
   check(!key('5') && !key('k') && !key('x', { control: true }) && !key('m', { shift: true }) && f.sent.length === 0, 'multiview: 5, K, Ctrl+X, Shift+M stay the page’s own');
   c.emit('focus');
   check(f.sent.length === 1 && f.sent[0][1].key === 'focus' && f.sent[0][1].wcId === 7, 'multiview: a click into a tile (its focus) is told to the chrome', f.sent);
+  f.sent.length = 0;
+  c.emit('input-event', {}, { type: 'mouseDown' });
+  c.emit('input-event', {}, { type: 'mouseMove' });
+  check(f.sent.length === 1 && f.sent[0][1].key === 'focus', 'multiview: a mouse-down in a tile is told once (a move is not)', f.sent);
   f.call('watch-player:mode', { mode: 'single' });
   f.sent.length = 0;
   c.emit('focus');
+  c.emit('input-event', {}, { type: 'mouseDown' });
   check(f.sent.length === 0, 'single player: focus is not told');
 
   const mem = f.call('watch-player:memory');

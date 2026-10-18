@@ -295,6 +295,8 @@ function create(deps) {
     });
     // A click into a tile's page (it takes focus) moves the sound there, in multiview only.
     contents.on('focus', () => { if (mode === 'grid') send('watch-player:key', { key: 'focus', wcId }); });
+    // ...and its mouse-down too: focus never arrives while the window itself is unfocused.
+    contents.on('input-event', (_e, input) => { if (mode === 'grid' && input && input.type === 'mouseDown') send('watch-player:key', { key: 'focus', wcId }); });
     contents.once('destroyed', () => {
       players.delete(wcId);
       for (const id of Array.from(p.sheets)) closeSheet(id, 'its player closed');
