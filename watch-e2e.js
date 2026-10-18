@@ -358,7 +358,14 @@ async function retry(g, id) {
   try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { return false; }
   const ok = await g.ev(`(() => { const b = [...document.querySelectorAll('#pop .acts button')].find((x) => /^(Retry|Read now)$/.test(x.textContent.trim()));
     if (!b) return false; b.setAttribute('data-e2e-retry', '1'); return true; })()`);
-  return ok ? click(g, '#pop [data-e2e-retry="1"]') : false;
+  if (!ok) return false;
+  // Say why, when the popover's button is not the thing on top where it is drawn (or is disabled).
+  const at = await g.ev(centerOf('#pop [data-e2e-retry="1"]')).catch(() => null);
+  const st = await g.ev(`(() => { const b = document.querySelector('#pop [data-e2e-retry="1"]'); const p = document.getElementById('pop');
+    const h = at => { const e = document.elementFromPoint(at.x, at.y); return e ? (e.tagName + '.' + String(e.className)).slice(0, 60) : null; };
+    return { popHidden: p.hidden, disabled: !!(b && b.disabled), text: b ? b.textContent : null, top: ${at ? 'h(' + JSON.stringify(at) + ')' : 'null'} }; })()`).catch(() => null);
+  if (!at || !at.hit || (st && (st.popHidden || st.disabled))) console.log('[e2e] retry diag ' + id + ': ' + JSON.stringify({ at, st }));
+  return click(g, '#pop [data-e2e-retry="1"]');
 }
 
 async function shot(g, name, w, h, caption, say, chrome) {

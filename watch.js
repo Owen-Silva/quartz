@@ -495,6 +495,7 @@
       id: cleanText(it.id, 300) || (service + ':' + url),
       service: service,
       kind: typeof it.kind === 'string' ? it.kind : 'rec',
+      also: normAlso(it.also, service),
       title: title,
       subtitle: cleanText(it.subtitle, 200),
       image: https(it.image),
@@ -927,14 +928,20 @@
   function lensModel(snap) {
     var out = [];
     if (!snap) return out;
-    var rest = [];
-    var cont = null;
-    snap.rows.forEach(function (r) { if (r.id === 'continue' && !cont) cont = r; else rest.push(r); });
-    if (cont) out.push(itemRow(cont));
+    // Rows by what he would want to watch, never by app: in progress, live, saved, picked for him,
+    // the games ahead and just finished; the services' own shelves come after, below the merged ones.
+    var by = {};
+    var shelves = [];
+    snap.rows.forEach(function (r) { if (/^(continue|foryou|watchlist)$/.test(r.id) && !by[r.id]) by[r.id] = r; else shelves.push(r); });
     var sp = snap.sports;
-    var events = sp.live.concat(sp.soon, sp.done);
-    if (events.length) out.push({ key: 'sports', kind: 'sports', id: 'sports', title: 'Live and upcoming', service: 'espn', events: events });
-    rest.forEach(function (r) { out.push(itemRow(r)); });
+    var games = function (key, title, events) { if (events.length) out.push({ key: key, kind: 'sports', id: key, title: title, service: 'espn', events: events }); };
+    if (by.continue) out.push(itemRow(by.continue));
+    games('sports', 'Live now', sp.live);
+    if (by.watchlist) out.push(itemRow(by.watchlist));
+    if (by.foryou) out.push(itemRow(by.foryou));
+    games('sports-soon', 'Upcoming games', sp.soon);
+    games('sports-done', 'Recent games', sp.done);
+    shelves.forEach(function (r) { out.push(itemRow(r)); });
     out.forEach(function (m) { m.sig = rowSig(m); });
     return out;
   }
@@ -942,10 +949,15 @@
     return { key: 'r:' + r.id, kind: 'items', id: r.id, title: r.title, service: r.service || '', items: r.items };
   }
   function itemKey(it) { return it.id || it.url; }
+  /** The other services that carry the same title (watch/merge.js mergeSame): [{ service, url }], at most 3. */
+  function normAlso(list, own) {
+    return arr(list).filter(function (a) { return a && typeof a.service === 'string' && a.service && a.service !== own && https(a.url); })
+      .slice(0, 3).map(function (a) { return { service: a.service, url: https(a.url) }; });
+  }
   function rowSig(m) {
     var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : ''];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
-    else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : ''); });
+    else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
     return parts.join('\u0001');
   }
 
@@ -1283,14 +1295,18 @@
     artImage(art, it, true);
     var hasProg = it.kind === 'resume' && typeof it.progress === 'number';
     if (hasProg) art.appendChild(el('span', 'grad'));
+    // One small mark per service that carries it, always in the same corner; a badge (Hulu, Rent) after.
     var chips = el('span', 'chips');
-    if (it.badge && fold(it.badge) !== fold(svcShort(it.service))) chips.appendChild(el('span', 'chip oa', it.badge));
-    if (!m.service || stale) {
-      var sc = el('span', 'chip oa' + (stale ? ' stale' : ''));
-      if (stale) sc.appendChild(el('span', 'dot'));
-      sc.appendChild(document.createTextNode(svcShort(it.service)));
-      chips.appendChild(sc);
+    if (!m.service || stale || it.also.length) {
+      [it.service].concat(it.also.map(function (a) { return a.service; })).forEach(function (id, n) {
+        var mk = el('span', 'chip oa mk' + (stale && !n ? ' stale' : ''));
+        mk.dataset.svc = id;
+        if (stale && !n) mk.appendChild(el('span', 'dot'));
+        mk.appendChild(document.createTextNode(svcShort(id)));
+        chips.appendChild(mk);
+      });
     }
+    if (it.badge && fold(it.badge) !== fold(svcShort(it.service))) chips.appendChild(el('span', 'chip oa bd', it.badge));
     if (chips.childNodes.length) art.appendChild(chips);
     if (hasProg) {
       var prog = el('span', 'prog');
@@ -1324,6 +1340,7 @@
 
     c.setAttribute('aria-label', joinDot([it.title, svcName(it.service), sub, stale ? 'from an earlier read' : '']) + '. ' +
       (it.edge ? 'Opens in Microsoft Edge.' : 'Opens in a new tab.'));
+    if (it.also.length) c.setAttribute('aria-label', c.getAttribute('aria-label') + ' Also on ' + listWords(it.also.map(function (a) { return svcName(a.service); })) + '.');
     return c;
   }
 
@@ -1389,7 +1406,7 @@
     wrap.appendChild(g);
     var m = el('span', 'm');
     m.appendChild(el('b', '', gameTitle(ev)));
-    m.appendChild(el('span', '', ev.state === 'in' ? joinDot(['Live now'].concat(ev.broadcasts.slice(0, 1))) : ev.state === 'post' ? 'Final' : joinDot(['Starts ' + (dayClock(ev.startsAt) || ev.detail)])));
+    m.appendChild(el('span', '', joinDot([ev.state === 'in' ? clockText(ev) : ev.state === 'post' ? 'Final' : (dayClock(ev.startsAt) || ev.detail), ev.leagueName, ev.state === 'post' ? '' : ev.broadcasts[0]])));
     wrap.appendChild(m);
     return wrap;
   }
@@ -1403,12 +1420,15 @@
     i = clamp(i, 0, rows.length - 1);
     S.cur = i;
     S.curKey = rows[i].dataset.key || '';
+    var maxD = deepestRow(rows);
     rows.forEach(function (r, j) {
       var d = j - i;
-      r.dataset.d = d === 0 ? '0' : d === 1 ? '1' : d === 2 ? '2' : d > 2 ? 'far' : d === -1 ? '-1' : '-far';
+      r.dataset.d = d >= 0 && d <= maxD ? String(d) : d > maxD ? 'far' : d === -1 ? '-1' : '-far';
     });
     if (opts.instant) $.stack.classList.add('instant');
-    $.stack.style.transform = 'translateY(' + (-rows[i].offsetTop) + 'px)';
+    setCompact(i > 0, opts.instant);
+    // --lift (watch.css) is 0 at the top and moves the lens up under the slim bar once the hero is gone
+    $.stack.style.transform = 'translateY(calc(' + (-rows[i].offsetTop) + 'px + var(--lift)))';
     if (opts.instant) { void $.stack.offsetWidth; $.stack.classList.remove('instant'); }
     $.lpos.textContent = rows.length > 1 ? (i + 1) + ' / ' + rows.length : '';
     $.lup.disabled = i === 0;
@@ -1419,6 +1439,40 @@
       mark(c);
       if (opts.focus) c.focus({ preventScroll: true });
     }
+  }
+
+  /*
+   * The top, two states. At the first row: the hero (the stage) and the full bar, as Watch opens.
+   * Past it: the hero fades up and away, the bar turns opaque, and the lens rises under it, so most
+   * of the window is rows. Watch has no document scroll (the rows step through the lens), so the
+   * lens position IS the trigger: no scroll handler, no layout read; one class, and transform and
+   * opacity transitions on the shared spring (watch.css body.is-compact).
+   */
+  function setCompact(on, instant) {
+    if (S.compact === on) return;
+    S.compact = on;
+    var b = document.body;
+    if (instant) b.classList.add('top-instant');
+    b.classList.toggle('is-compact', on);
+    if (instant) { void b.offsetWidth; b.classList.remove('top-instant'); }
+  }
+
+  /*
+   * How deep below the lens a row can still be on screen (2 to 4, watch.css .lrow[data-d]): from the
+   * lens's highest line (--lens-c, under the slim bar) and the row pitch. Rows past it are "far" and
+   * stay still: a row that cannot be seen gets no scale and fade on every step (each one is three
+   * animations, and they were most of a step's work on a 1000 px window, where depths 3 and 4 are
+   * below the bottom edge). Cached per window height and pitch; the reads are already-clean layout.
+   */
+  function deepestRow(rows) {
+    if (rows.length < 2) return 4;
+    var pitch = rows[1].offsetTop - rows[0].offsetTop;
+    var key = window.innerHeight + 'x' + pitch;
+    if (S.deepKey === key) return S.deep;
+    var lensC = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lens-c')) || 78;
+    S.deepKey = key;
+    S.deep = pitch > 0 ? clamp(Math.floor((window.innerHeight - lensC - 1) / pitch), 2, 4) : 4;
+    return S.deep;
   }
 
   function rowIndexOf(rowEl) { return S.rowEls.indexOf(rowEl); }
@@ -1506,7 +1560,11 @@
     var txt = el('div', 'txt');
     var eb = el('div', 'eyebrow');
     eb.appendChild(el('span', 'rn', m.title));
-    eb.appendChild(el('span', 'chip', svcShort(it.service)));
+    [it.service].concat(it.also.map(function (a) { return a.service; })).forEach(function (id) {
+      var mk = el('span', 'chip mk', svcShort(id));
+      mk.dataset.svc = id;
+      eb.appendChild(mk);
+    });
     if (it.badge && fold(it.badge) !== fold(svcShort(it.service))) eb.appendChild(el('span', 'chip', it.badge));
     if (it.kind === 'resume' && it.subtitle) eb.appendChild(el('span', '', epText(it.subtitle)));
     txt.appendChild(eb);
