@@ -119,7 +119,8 @@
     { id: 'mlb', name: 'MLB', path: 'baseball/mlb' },
     { id: 'cfb', name: 'College football', path: 'football/college-football' },
     { id: 'mls', name: 'MLS', path: 'soccer/usa.1' },
-    { id: 'wnba', name: 'WNBA', path: 'basketball/wnba' }
+    { id: 'wnba', name: 'WNBA', path: 'basketball/wnba' },
+    { id: 'chky', name: 'College hockey', path: 'hockey/mens-college-hockey' }
   ];
   var DEFAULT_LEAGUES = ['nhl', 'nfl', 'nba', 'mlb'];
 

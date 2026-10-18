@@ -960,8 +960,15 @@
     snap.rows.forEach(function (r) { if (/^(continue|foryou|watchlist)$/.test(r.id) && !by[r.id]) by[r.id] = r; else shelves.push(r); });
     var sp = snap.sports;
     var games = function (key, title, events) { if (events.length) out.push({ key: key, kind: 'sports', id: key, title: title, service: 'espn', events: events }); };
+    // Lumen sports (watch/sportspage.js): Live now leads while a favourite's or a big game is live
+    // (favourites first), and the favourites get a My teams row.
+    var LS = window.LumenSports || null;
+    var liveTop = !!(LS && LS.liveOnTop(sp.live));
+    if (liveTop) games('sports', 'Live now', LS.sortLive(sp.live));
     if (by.continue) out.push(itemRow(by.continue));
-    games('sports', 'Live now', sp.live);
+    var mine = LS ? LS.myTeamsRow() : null;
+    if (mine) out.push(mine);
+    if (!liveTop) games('sports', 'Live now', sp.live);
     if (by.watchlist) out.push(itemRow(by.watchlist));
     if (by.foryou) out.push(itemRow(by.foryou));
     games('sports-soon', 'Upcoming games', sp.soon);
@@ -982,6 +989,7 @@
   function rowSig(m) {
     var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : ''];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
+    else if (m.kind === 'teams') parts.push(window.LumenSports.rowSig(m));
     else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
     return parts.join('\u0001');
   }
@@ -1149,8 +1157,10 @@
       var sp = S.snap.sports;
       var t = sp.live.length ? sp.live.length + ' live now' : sp.soon.length ? 'next ' + dayClock(sp.soon[0].startsAt) : 'finals';
       head.appendChild(el('span', 'sub', 'ESPN \u00b7 ' + t));
+      if (window.LumenSports) window.LumenSports.headChips(m, head);
       return;
     }
+    if (m.kind === 'teams') { window.LumenSports.rowSub(m, head); return; }
     if (m.service) {
       var s = svcOf(m.service);
       head.appendChild(el('span', 'chip', svcShort(m.service)));
@@ -1204,6 +1214,7 @@
     var rv = el('div', 'rv');
     var rt = el('div', 'rt');
     if (m.kind === 'sports') m.events.forEach(function (ev) { rt.appendChild(gameEl(ev)); });
+    else if (m.kind === 'teams') m.teams.forEach(function (t) { rt.appendChild(window.LumenSports.teamCardEl(t)); });
     else m.items.forEach(function (it) { rt.appendChild(cardEl(it, m)); });
     rv.appendChild(rt);
     row.appendChild(rv);
@@ -1472,12 +1483,12 @@
       tm.appendChild(el('span', 's', ev.state === 'pre' ? '' : t.score));
       g.appendChild(tm);
     });
-    var ft = el('span', 'ft', ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
+    var ft = el('span', 'ft', window.LumenSports ? window.LumenSports.cardFoot(ev) : ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
     ft.appendChild(icon('out', 's'));
     g.appendChild(ft);
     var label = gameTitle(ev) + '. ' + joinDot([ev.leagueName, ev.state === 'in' ? 'live, ' + clockText(ev) : clockText(ev)]);
     if (ev.state !== 'pre' && ev.away.score !== '' && ev.home.score !== '') label += '. ' + ev.away.abbr + ' ' + ev.away.score + ', ' + ev.home.abbr + ' ' + ev.home.score;
-    g.setAttribute('aria-label', label + '. ' + (ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
+    g.setAttribute('aria-label', label + '. ' + (window.LumenSports ? 'Opens the game page.' : ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     wrap.appendChild(g);
     var m = el('span', 'm');
     m.appendChild(el('b', '', gameTitle(ev)));
@@ -1600,7 +1611,8 @@
     S.stageSig = sig;
     S.stageIt = it;
     S.stageEv = ev;
-    var build = function () { return ev ? stageEvent(ev, m) : stageItem(it, m); };
+    var tm = !it && !ev && card._team && window.LumenSports ? card._team : null;   // a My teams card with no game to show
+    var build = function () { return tm ? window.LumenSports.stageTeam(tm) : ev ? stageEvent(ev, m) : stageItem(it, m); };
     swapStage(build, first);
     if (ev) setWash({ key: 'ev:' + ev.id, logos: [ev.away.logo, ev.home.logo] });
     else setWash(it && it.image ? { key: 'it:' + it.image, image: washSrc(it) } : null);
@@ -1721,12 +1733,15 @@
       txt.appendChild(w);
     }
     var acts = el('div', 'acts');
-    var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
-    var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
-    primary.appendChild(icon('play'));
-    primary.appendChild(document.createTextNode(label));
-    acts.appendChild(primary);
-    acts.appendChild(opensNote(ev.url, ev.edge));
+    if (window.LumenSports) acts.appendChild(window.LumenSports.stageActs(ev));   // Game page, Watch this game
+    else {
+      var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
+      var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
+      primary.appendChild(icon('play'));
+      primary.appendChild(document.createTextNode(label));
+      acts.appendChild(primary);
+      acts.appendChild(opensNote(ev.url, ev.edge));
+    }
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -2059,6 +2074,9 @@
     send('open', msg);
   }
   function openCard(card, multi) {
+    var LS = window.LumenSports;
+    if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
+    if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
     if (card._item) openUrl(card._item.url, card._item.title, multi);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
@@ -2068,6 +2086,8 @@
   }
   // "Add to multiview" from a tile's hover action or right-click (watch-tiles.js): the same open, marked.
   window.__watchOpenCard = function (card, multi) { if (card && (card._item || card._event)) openCard(card, multi === true); };
+  // Lumen sports: favourites or My teams changed, so the rows rebuild from the snapshot already here.
+  window.__lumenRerender = function () { if (S.ready && S.snap) renderLens(); };
 
   /* ----------------------------------------------------------------- toasts */
 

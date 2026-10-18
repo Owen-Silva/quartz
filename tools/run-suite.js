@@ -71,6 +71,8 @@ const TESTS = [
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.
   { name: 'watch', file: 'watch-harness.js' },
+  // Lumen sports (watch/sports.js, sports-main.js): ESPN-shaped fixtures, a fake fetch, no network.
+  { name: 'sports', file: 'tests/sports-test.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
