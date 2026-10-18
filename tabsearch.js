@@ -1341,6 +1341,10 @@
       hint: 'Continue watching, picks and live sports from your services', keys: ['Ctrl', 'Alt', 'W'],
       run: function () { callGlobal(function () { return typeof openWatchTab === 'function' ? openWatchTab : null; }); }
     });
+    // Lumen's pinned scores: a row per live or upcoming game, and the sound switch (scorepins-chrome.js).
+    if (window.ScorePins && typeof window.ScorePins.commands === 'function') {
+      try { list = list.concat(window.ScorePins.commands(GLYPH)); } catch (err) { /* no score rows this time */ }
+    }
     list.push({
       id: 'downloads-folder', glyph: GLYPH.folder, label: 'Open downloads folder',
       hint: 'The folder itself, in Explorer',

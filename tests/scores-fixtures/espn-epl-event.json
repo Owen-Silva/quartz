@@ -1,0 +1,357 @@
+{
+ "id": "401878771",
+ "date": "2026-10-17T11:30Z",
+ "name": "Chelsea at Everton",
+ "shortName": "CHE @ EVE",
+ "status": {
+  "clock": 5400,
+  "displayClock": "90'+14'",
+  "period": 2,
+  "type": {
+   "id": "28",
+   "name": "STATUS_FULL_TIME",
+   "state": "post",
+   "completed": true,
+   "description": "Full Time",
+   "detail": "FT",
+   "shortDetail": "FT"
+  }
+ },
+ "competitions": [
+  {
+   "id": "401878771",
+   "date": "2026-10-17T11:30Z",
+   "competitors": [
+    {
+     "id": "368",
+     "homeAway": "home",
+     "score": "0",
+     "team": {
+      "id": "368",
+      "abbreviation": "EVE",
+      "displayName": "Everton",
+      "shortDisplayName": "Everton",
+      "name": "Everton",
+      "logo": "https://a.espncdn.com/i/teamlogos/soccer/500/368.png"
+     }
+    },
+    {
+     "id": "363",
+     "homeAway": "away",
+     "score": "2",
+     "team": {
+      "id": "363",
+      "abbreviation": "CHE",
+      "displayName": "Chelsea",
+      "shortDisplayName": "Chelsea",
+      "name": "Chelsea",
+      "logo": "https://a.espncdn.com/i/teamlogos/soccer/500/363.png"
+     }
+    }
+   ],
+   "status": {
+    "clock": 5400,
+    "displayClock": "90'+14'",
+    "period": 2,
+    "type": {
+     "id": "28",
+     "name": "STATUS_FULL_TIME",
+     "state": "post",
+     "completed": true,
+     "description": "Full Time",
+     "detail": "FT",
+     "shortDetail": "FT"
+    }
+   },
+   "details": [
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 1338,
+      "displayValue": "23'"
+     },
+     "team": {
+      "id": "368"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "378458",
+       "displayName": "Harrison Armstrong",
+       "shortName": "H. Armstrong",
+       "team": {
+        "id": "368"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 1563,
+      "displayValue": "27'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "256115",
+       "displayName": "Pedro Neto",
+       "shortName": "P. Neto",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 1903,
+      "displayValue": "32'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "368317",
+       "displayName": "Josh Acheampong",
+       "shortName": "J. Acheampong",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 1991,
+      "displayValue": "34'"
+     },
+     "team": {
+      "id": "368"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "155226",
+       "displayName": "James Tarkowski",
+       "shortName": "J. Tarkowski",
+       "team": {
+        "id": "368"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 1998,
+      "displayValue": "34'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "265653",
+       "displayName": "Morgan Rogers",
+       "shortName": "M. Rogers",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "70",
+      "text": "Goal"
+     },
+     "clock": {
+      "value": 2743,
+      "displayValue": "46'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 1,
+     "scoringPlay": true,
+     "redCard": false,
+     "yellowCard": false,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "256115",
+       "displayName": "Pedro Neto",
+       "shortName": "P. Neto",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 3866,
+      "displayValue": "65'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "296395",
+       "displayName": "Cole Palmer",
+       "shortName": "C. Palmer",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "94",
+      "text": "Yellow Card"
+     },
+     "clock": {
+      "value": 5293,
+      "displayValue": "89'"
+     },
+     "team": {
+      "id": "368"
+     },
+     "scoreValue": 0,
+     "scoringPlay": false,
+     "redCard": false,
+     "yellowCard": true,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "178077",
+       "displayName": "Christian Nørgaard",
+       "shortName": "C. Nørgaard",
+       "team": {
+        "id": "368"
+       }
+      }
+     ]
+    },
+    {
+     "type": {
+      "id": "70",
+      "text": "Goal"
+     },
+     "clock": {
+      "value": 5396,
+      "displayValue": "90'"
+     },
+     "team": {
+      "id": "363"
+     },
+     "scoreValue": 1,
+     "scoringPlay": true,
+     "redCard": false,
+     "yellowCard": false,
+     "penaltyKick": false,
+     "ownGoal": false,
+     "shootout": false,
+     "athletesInvolved": [
+      {
+       "id": "256115",
+       "displayName": "Pedro Neto",
+       "shortName": "P. Neto",
+       "team": {
+        "id": "363"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "links": [
+  {
+   "rel": [
+    "summary",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/soccer/match/_/gameId/401878771/chelsea-everton"
+  },
+  {
+   "rel": [
+    "highlights",
+    "desktop"
+   ],
+   "href": "https://www.espn.com/soccer/video/_/gameId/401878771"
+  }
+ ]
+}

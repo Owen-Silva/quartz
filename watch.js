@@ -1408,6 +1408,8 @@
     m.appendChild(el('b', '', gameTitle(ev)));
     m.appendChild(el('span', '', joinDot([ev.state === 'in' ? clockText(ev) : ev.state === 'post' ? 'Final' : (dayClock(ev.startsAt) || ev.detail), ev.leagueName, ev.state === 'post' ? '' : ev.broadcasts[0]])));
     wrap.appendChild(m);
+    // Pin this game's score to the desktop (watch/pinbutton.js, score-pins-main.js).
+    if (window.ScorePinButton) wrap.appendChild(window.ScorePinButton.make(ev));
     return wrap;
   }
 

@@ -1,0 +1,86 @@
+{
+ "id": "401908027",
+ "date": "2026-10-18T00:00Z",
+ "name": "Tampa Bay Rays at Cleveland Guardians",
+ "shortName": "TB @ CLE",
+ "status": {
+  "clock": 0,
+  "displayClock": "0:00",
+  "period": 1,
+  "type": {
+   "id": "1",
+   "name": "STATUS_SCHEDULED",
+   "state": "pre",
+   "completed": false,
+   "description": "Scheduled",
+   "detail": "Scheduled",
+   "shortDetail": "10/17 - 8:00 PM EDT"
+  }
+ },
+ "competitions": [
+  {
+   "id": "401908027",
+   "date": "2026-10-18T00:00Z",
+   "competitors": [
+    {
+     "id": "5",
+     "homeAway": "home",
+     "score": "0",
+     "team": {
+      "id": "5",
+      "abbreviation": "CLE",
+      "displayName": "Cleveland Guardians",
+      "shortDisplayName": "Guardians",
+      "name": "Guardians",
+      "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/cle.png"
+     }
+    },
+    {
+     "id": "30",
+     "homeAway": "away",
+     "score": "0",
+     "team": {
+      "id": "30",
+      "abbreviation": "TB",
+      "displayName": "Tampa Bay Rays",
+      "shortDisplayName": "Rays",
+      "name": "Rays",
+      "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tb.png"
+     }
+    }
+   ],
+   "status": {
+    "clock": 0,
+    "displayClock": "0:00",
+    "period": 1,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Scheduled",
+     "shortDetail": "10/17 - 8:00 PM EDT"
+    }
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": [
+    "summary",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/mlb/game/_/gameId/401908027/rays-guardians"
+  },
+  {
+   "rel": [
+    "preview",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/mlb/preview/_/gameId/401908027"
+  }
+ ]
+}

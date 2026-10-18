@@ -1,0 +1,120 @@
+{
+ "id": "401856719",
+ "date": "2026-10-17T19:30Z",
+ "name": "Auburn Tigers at Georgia Bulldogs",
+ "shortName": "AUB @ UGA",
+ "status": {
+  "clock": 72,
+  "displayClock": "1:12",
+  "period": 4,
+  "type": {
+   "id": "2",
+   "name": "STATUS_IN_PROGRESS",
+   "state": "in",
+   "completed": false,
+   "description": "In Progress",
+   "detail": "1:12 - 4th Quarter",
+   "shortDetail": "1:12 - 4th"
+  }
+ },
+ "competitions": [
+  {
+   "id": "401856719",
+   "date": "2026-10-17T19:30Z",
+   "competitors": [
+    {
+     "id": "61",
+     "homeAway": "home",
+     "score": "24",
+     "team": {
+      "id": "61",
+      "abbreviation": "UGA",
+      "displayName": "Georgia Bulldogs",
+      "shortDisplayName": "Georgia",
+      "name": "Bulldogs",
+      "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/61.png"
+     }
+    },
+    {
+     "id": "2",
+     "homeAway": "away",
+     "score": "24",
+     "team": {
+      "id": "2",
+      "abbreviation": "AUB",
+      "displayName": "Auburn Tigers",
+      "shortDisplayName": "Auburn",
+      "name": "Tigers",
+      "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/2.png"
+     }
+    }
+   ],
+   "status": {
+    "clock": 72,
+    "displayClock": "1:12",
+    "period": 4,
+    "type": {
+     "id": "2",
+     "name": "STATUS_IN_PROGRESS",
+     "state": "in",
+     "completed": false,
+     "description": "In Progress",
+     "detail": "1:12 - 4th Quarter",
+     "shortDetail": "1:12 - 4th"
+    }
+   },
+   "situation": {
+    "lastPlay": {
+     "id": "401856719774",
+     "type": {
+      "id": "21",
+      "text": "Timeout",
+      "abbreviation": "TO"
+     },
+     "text": "Timeout Georgia, clock 01:18",
+     "scoreValue": 0,
+     "team": {
+      "id": "2"
+     },
+     "statYardage": 0,
+     "start": {
+      "yardLine": 72,
+      "team": {
+       "id": "61"
+      }
+     },
+     "end": {
+      "yardLine": 72,
+      "team": {
+       "id": "2"
+      }
+     }
+    },
+    "down": 0,
+    "yardLine": 72,
+    "distance": 11,
+    "isRedZone": false,
+    "homeTimeouts": 0,
+    "awayTimeouts": 1
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": [
+    "live",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/college-football/game?gameId=401856719"
+  },
+  {
+   "rel": [
+    "boxscore",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/college-football/boxscore/_/gameId/401856719"
+  }
+ ]
+}

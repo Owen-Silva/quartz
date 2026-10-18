@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  score-pin.html -- one pinned score card (Lumen). A frameless, never-focused, always-on-top
+  window that score-pins-main.js opens per pinned game; score-pin.js draws it and
+  score-pin-preload.js is its only bridge. Bundled, file://, no remote script, no frames.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data:; base-uri 'none'; form-action 'none'">
+<title>Score</title>
+<script src="newtab-theme.js"></script>
+<link rel="stylesheet" href="score-pin.css">
+</head>
+<body>
+<main id="card" class="card" data-phase="pre" aria-live="polite">
+  <div class="top">
+    <div class="topline">
+      <span class="lg" id="lg"></span>
+      <span class="line" id="line">Loading score&hellip;</span>
+      <span class="pp" id="pp" hidden></span>
+    </div>
+    <div class="strip" id="strip" role="status" hidden><span class="tag" id="stripTag"></span><span class="txt" id="stripTxt"></span></div>
+    <span class="tools">
+      <button class="tool mute" id="mute" type="button" aria-label="Mute this card" title="Mute this card"><span class="ico" aria-hidden="true">&#xE767;</span></button>
+      <button class="tool x" id="close" type="button" aria-label="Close this card" title="Close this card"><span class="ico" aria-hidden="true">&#xE8BB;</span></button>
+    </span>
+  </div>
+  <div class="team away" id="away"><span class="wash"></span><span class="logo"></span><span class="ab"></span><span class="mark"></span><span class="sc"><span class="n"></span></span></div>
+  <div class="team home" id="home"><span class="wash"></span><span class="logo"></span><span class="ab"></span><span class="mark"></span><span class="sc"><span class="n"></span></span></div>
+  <div class="note" id="note" hidden><span class="dot"></span><span class="txt" id="noteTxt"></span></div>
+</main>
+<script src="score-pin.js"></script>
+</body>
+</html>

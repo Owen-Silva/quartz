@@ -527,6 +527,44 @@ const watch = (() => {
   }
 })();
 
+/*
+ * Lumen's pinned scores (score-pins-main.js): small always-on-top cards on the desktop, one
+ * per pinned game, fed by public score JSON (ESPN; the NHL's own feed for hockey). Nothing
+ * runs with nothing pinned. A TEST profile's cards are always off-screen and silent, and it
+ * may point the feeds at a local mock (QUARTZ_SCORES_REBASE, JSON [[from, to], ...]), record
+ * card opens to a file (QUARTZ_SCORES_OPEN_STUB) and scale the poll cadence
+ * (QUARTZ_SCORES_POLL_SCALE). A live Quartz ignores all three.
+ */
+const scorePins = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) {
+    const env = process.env;
+    test.offscreen = true;
+    test.silent = true;
+    try { if (env.QUARTZ_SCORES_REBASE) test.rebase = JSON.parse(env.QUARTZ_SCORES_REBASE); } catch { /* no rebase */ }
+    if (env.QUARTZ_SCORES_OPEN_STUB) test.openStub = env.QUARTZ_SCORES_OPEN_STUB;
+    if (Number(env.QUARTZ_SCORES_POLL_SCALE) > 0) test.pollScale = Number(env.QUARTZ_SCORES_POLL_SCALE);
+  }
+  // Like Watch, it must never stop Quartz from starting.
+  try {
+    const electron = require('electron');
+    return require('./score-pins-main').create({
+      app, ipcMain, BrowserWindow, test,
+      screen: { getPrimaryDisplay: () => electron.screen.getPrimaryDisplay(), getAllDisplays: () => electron.screen.getAllDisplays() },
+      powerMonitor: { on: (e, fn) => electron.powerMonitor.on(e, fn), removeListener: (e, fn) => electron.powerMonitor.removeListener(e, fn) },
+      isChromeSender: (event) => isChromeSender(event),
+      send: (channel, payload) => send(channel, payload),
+      getWindow: () => win,
+      // The palette's rows: Lumen's cached ESPN games (no fetch).
+      getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[scores] ' + line); },
+    });
+  } catch (err) {
+    console.error('[scores] Score pins could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+
 const budget = budgetModule.create({ app });
 // The first-run welcome's flag and its default-browser step (firstrun-main.js).
 // Created here, before any window: it reads what the profile held before this run.
