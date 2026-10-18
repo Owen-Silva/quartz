@@ -190,6 +190,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     const cleared = await g.ev('document.getElementById("q").value === "" && document.getElementById("results").hidden && !' + FS + '.open');
     check(cleared, 'Esc clears the search');
     const before = hits.length;
+    await g.ev('document.activeElement && document.activeElement.blur(), 1');
     await key(g, ...SLASH);
     await g.send('Input.insertText', { text: 'the bear' });
     await key(g, ...ENTER);
