@@ -331,7 +331,7 @@
       try { var pr = one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
     } else {
       clearSlots();
-      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '' });
+      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', note: o.note || '' });
       L.slots.push(s);
       L.focus = 0;
       L.grid.appendChild(s.tile);
