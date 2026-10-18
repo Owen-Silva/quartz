@@ -824,6 +824,10 @@ contextBridge.exposeInMainWorld('api', {
     setView: (view) => ipcRenderer.invoke('watch-playview:set-view', { view: String(view || '') }),
     testWin: () => ipcRenderer.invoke('watch-playview:test-win')
   },
+  // Lumen's Shorts view (watch-shorts.js -> watch-shorts-main.js): one quartz.log line.
+  lumenShorts: {
+    log: (line) => ipcRenderer.invoke('watch-shorts:log', { line: String(line || '').slice(0, 200) })
+  },
   watch: {
     describe: () => ipcRenderer.invoke('watch:describe'),
     setEnabled: (id, on) => ipcRenderer.invoke('watch:set-enabled', String(id == null ? '' : id), !!on),

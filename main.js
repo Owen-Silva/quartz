@@ -521,6 +521,21 @@ const watchPlayview = (() => {
   }
 })();
 void watchPlayview;
+// Lumen's Shorts view (watch-shorts-main.js + watch-shorts.js): its quartz.log lines.
+const watchShorts = (() => {
+  try {
+    const m = require('./watch-shorts-main').create({
+      ipcMain, isChromeSender: (event) => isChromeSender(event),
+      log: (line) => { if (qlog) qlog.log.line('[lumen shorts] ' + line); else console.log('[lumen shorts] ' + line); },
+    });
+    m.registerIpc();
+    return m;
+  } catch (err) {
+    console.error('[lumen shorts] could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+void watchShorts;
 
 /**
  * Watch, the streaming hub (watch-main.js + watch.html). It reads the user's own

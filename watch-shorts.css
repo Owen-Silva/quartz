@@ -1,0 +1,120 @@
+/* ============================================================
+   watch-shorts.css -- Lumen's Shorts view (watch-shorts.js).
+
+   The one player on a YouTube Shorts page: YouTube's vertical player
+   (the webview, 9:16, as tall as the layer allows) centred, Lumen's
+   Previous / Next beside it, and Lumen's info BESIDE it on a wide
+   layer or BELOW it on a narrow one (watch-shorts.js box() places
+   them in px; this file only draws them). The info's parts reuse
+   watch-playview.css's pv-* look. Neutral greys; the accent only on
+   focus. No backdrop-filter, no glow.
+   ============================================================ */
+.wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.sh {
+  overflow: hidden;
+  background: #0b0c0d;
+}
+.wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.sh > .wp-view {
+  position: absolute;
+  inset: auto !important;
+  left: var(--sh-x, 0px) !important;
+  top: var(--sh-y, 16px) !important;
+  width: var(--sh-w, 405px) !important;
+  height: var(--sh-h, 720px) !important;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+}
+/* Outside the view (a grid, the corner, fullscreen, the whole page when no player was found): nothing of Lumen's. */
+.wp-tile:not(.sh) > .sh-cover,
+.wp-tile:not(.sh) > .sh-nav,
+.wp-tile:not(.sh) > .sh-info,
+.wp-layer.mv-mini .sh-cover, .wp-layer.mv-mini .sh-nav, .wp-layer.mv-mini .sh-info,
+.wp-layer.wp-fs .sh-cover, .wp-layer.wp-fs .sh-nav, .wp-layer.wp-fs .sh-info { display: none !important; }
+
+/* Loading: Lumen's box over the page until only the player shows. */
+.sh-cover {
+  position: absolute;
+  z-index: 2;
+  border-radius: 14px;
+  background: #111214;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 18px;
+  color: #a9adb3;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.sh-cover[hidden] { display: none; }
+.sh-cover.is-empty .pv-cover-bar { display: none; }
+.sh-cover.is-empty .sh-cover-txt { color: var(--warn, #d6b46a); }
+
+/* Previous / Next: YouTube's own navigation, pressed by Lumen's buttons. */
+.sh-nav {
+  position: absolute;
+  z-index: 3;
+  width: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+.sh-nav[hidden] { display: none; }
+.sh-navbtn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  justify-content: center;
+}
+.sh-navbtn .pv-ico, .sh-navbtn .pv-ico svg { width: 22px; height: 22px; }
+.sh-navbtn .pv-ico svg { stroke-width: 2; }
+
+/* The info: beside (a column the player's height) or below (a short block under it). */
+.sh-info {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+  color: #e9eaec;
+  font: 13px/1.4 var(--font);
+}
+.sh-info[hidden] { display: none; }
+.wp-tile[data-sh="beside"] .sh-info { justify-content: flex-end; padding-bottom: 6px; }
+.wp-tile[data-sh="below"] .sh-info { gap: 10px; }
+.sh-head { display: flex; align-items: center; gap: 8px; }
+.sh-kicker {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8d9197;
+  padding-bottom: 1px;
+}
+.sh-info .sh-title {
+  margin: 0;
+  font: 650 clamp(17px, 1.25vw, 21px)/1.32 var(--font-display);
+  color: #f1f2f3;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-bottom: 0.12em;
+  overflow-wrap: anywhere;
+}
+.wp-tile[data-sh="below"] .sh-title { -webkit-line-clamp: 2; }
+.sh-chan { flex-wrap: wrap; row-gap: 10px; }
+.sh-info .pv-chan-name { max-width: 220px; }
+.sh-acts { flex-wrap: wrap; row-gap: 8px; }
+.sh-info .pv-confirm, .sh-info .pv-savelist { margin: 0; }
+.sh-info .pv-savelist { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+.sh-info .pv-why { margin: 0; }
+.sh-hint { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: #75767a; padding-bottom: 1px; }
+.wp-tile[data-sh="below"] .sh-hint, .wp-tile[data-sh="below"] .sh-head { display: none; }
+@media (prefers-reduced-motion: reduce) { .sh-cover .pv-cover-bar::after { animation: none; } }

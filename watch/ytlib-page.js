@@ -188,10 +188,13 @@
       sub.textContent = 'YouTube';
       headEl.appendChild(sub);
     }
-    if (a.state === 'signed-out') return;
     var acts = el('span', 'yt-hacts');
-    acts.appendChild(btn('btn sm ghost', 'See all', function () { open({ kind: 'subs' }); }, 'See all subscriptions'));
-    acts.appendChild(btn('btn sm ghost', 'Library', function () { open({ kind: 'library' }); }, 'Your YouTube library: Watch later, Liked videos, playlists'));
+    if (a.state !== 'signed-out') {
+      acts.appendChild(btn('btn sm ghost', 'See all', function () { open({ kind: 'subs' }); }, 'See all subscriptions'));
+      acts.appendChild(btn('btn sm ghost', 'Library', function () { open({ kind: 'library' }); }, 'Your YouTube library: Watch later, Liked videos, playlists'));
+    }
+    // Shorts play signed out too.
+    acts.appendChild(shortsBtn('Shorts', ORIGIN + '/shorts', 'YouTube Shorts', 'Watch YouTube Shorts in Lumen'));   // Lumen's Shorts view (watch-shorts.js)
     headEl.appendChild(acts);
   }
 
@@ -406,6 +409,12 @@
     Y.head.appendChild(acts);
     return acts;
   }
+  /** Shorts play in Lumen's own Shorts view (watch-shorts.js, in the player layer): never a tab, no "out" mark. */
+  function shortsBtn(label, url, ttl, aria) {
+    var b = btn('btn sm ghost yt-shorts-btn', label, function () { H.openUrl(url, ttl); }, aria);
+    b.dataset.shorts = url;
+    return b;
+  }
   function hostedBtn(label, url, ttl) {
     var b = btn('btn sm ghost', label, function () { H.openUrl(url, ttl); });
     if (H && H.icon) b.appendChild(H.icon('out', 's'));
@@ -559,8 +568,8 @@
     if (rest.length) Y.body.appendChild(section(fresh.length ? 'Earlier' : 'Latest', '', grid(rest)));
     if (a.shortsHidden) {
       var sn = el('div', 'res-note calm yt-shorts');
-      sn.appendChild(el('span', 'grow', plural(a.shortsHidden, 'Short') + ' from your subscriptions aren’t in this list (they’re vertical; they play best on YouTube’s Shorts page).'));
-      sn.appendChild(hostedBtn('Open Shorts', ORIGIN + '/feed/subscriptions/shorts', 'Subscriptions: Shorts'));
+      sn.appendChild(el('span', 'grow', plural(a.shortsHidden, 'Short') + ' from your subscriptions aren’t in this list (they’re vertical, so they play in Lumen’s Shorts view).'));
+      sn.appendChild(shortsBtn('Open Shorts', ORIGIN + '/feed/subscriptions/shorts', 'Subscriptions: Shorts', 'Watch the Shorts from your subscriptions in Lumen'));
       Y.body.appendChild(sn);
     }
   }
@@ -574,7 +583,7 @@
     Y.head.appendChild(t);
     var acts = title(name, bits.join(' \u00b7 ') || 'YouTube channel');
     acts.appendChild(refreshBtn(v, a));
-    acts.appendChild(hostedBtn('Shorts', ORIGIN + v.path + '/shorts', name + ': Shorts'));
+    acts.appendChild(shortsBtn('Shorts', ORIGIN + v.path + '/shorts', name + ': Shorts', 'Watch ' + name + '’s Shorts in Lumen'));
     acts.appendChild(hostedBtn('Open on YouTube', ORIGIN + v.path, name));
     noteFor(v, a, 'this channel');
     if (stateBody(v, a, { what: 'this channel', loading: 'Reading ' + name + '\u2026', signedOut: 'YouTube asked the reader to sign in.',

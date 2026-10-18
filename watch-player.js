@@ -56,7 +56,8 @@
   function X(ev) {
     var args = [CTX].concat([].slice.call(arguments, 1));
     var out;
-    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview].forEach(function (x) {
+    // watch-shorts.js (Lumen's Shorts view) hooks in last, the same way.
+    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview, window.LumenShorts].forEach(function (x) {
       if (!x || typeof x[ev] !== 'function') return;
       try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
         try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
