@@ -354,7 +354,7 @@ const FAILS = [
     a = await A();
     await apply({ seq: a.seq, phase: 'start', model: 'claude-opus-4-1', mode: 'deep' });
     await page.ev("document.querySelector('.qa-stop').click(), 1");
-    await sleep(450);
+    await page.waitFor("window.__answerState().view === 'stopped'", 4000).catch(() => 0);
     a = await A();
     check(a.view === 'stopped', 'Stop with no reply from main: the page stops on its own', a.view);
 
@@ -387,7 +387,7 @@ const FAILS = [
     await apply({ seq: (await A()).seq, phase: 'fail', state: 'stopped', title: 'Stopped', detail: '', retry: true, settings: false });
     check((await A()).view === 'stopped', 'fail stopped: shown as stopped, not as an error');
     await page.ev("document.querySelector('.qa-act-retry').click(), 1");
-    await sleep(800);
+    await page.waitFor("window.__answerState().view === 'fail'", 5000).catch(() => 0);
     a = await A();
     check(a.view === 'fail' && a.fail.state === 'no-reply' && /did not answer/.test(a.fail.title) && a.controls.retry, 'no reply from main: says so, with Retry (never a blank panel)', JSON.stringify(a.fail));
 
