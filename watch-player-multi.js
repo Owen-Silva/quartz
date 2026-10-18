@@ -41,7 +41,6 @@
   var MAX = 4;
   var HEAD_H = 30;                 // a tile's header (multiview) and the mini-player's
   var MINI_W = 400, MINI_W_GRID = 500, MINI_GAP = 16;
-  var EMBED_REFERER = 'https://github.com/Owen-Silva/quartz';   // the identity watch/preview.js sends with YouTube's embed
   var LIMIT_TAG = '__lumen:limit ';
   var LIMIT_WATCH_MS = 120000;     // how long after a page loads its text is watched for a stream-limit message
   var EMBED_CHECKS = [2500, 7000];
@@ -97,23 +96,22 @@
   }
   function clearTimers(s) { for (var i = 0; i < s._mv.timers.length; i++) clearTimeout(s._mv.timers[i]); s._mv.timers = []; }
 
-  /** A YouTube video address -> its embed (same origin, so a test's local front serves it too), or ''. */
-  function embedFor(url) {
-    var x;
-    try { x = new URL(url); } catch (e) { return ''; }
-    var id = '';
-    var short = /(^|\.)youtu\.be$/i.test(x.hostname);
-    if (short) id = x.pathname.slice(1).split('/')[0];
-    else if (x.pathname === '/watch') id = x.searchParams.get('v') || '';
-    else { var m = /^\/(?:live|embed)\/([^/?#]+)/.exec(x.pathname); if (m) id = m[1]; }
-    if (!/^[A-Za-z0-9_-]{6,20}$/.test(id)) return '';
-    var start = H && H.seconds ? H.seconds(x.searchParams.get('t') || x.searchParams.get('start') || '') : 0;
-    var origin = short || /^(m|music)\.youtube\.com$/i.test(x.hostname) ? 'https://www.youtube.com' : x.origin;
-    return origin + '/embed/' + id + '?autoplay=1&playsinline=1&rel=0' + (start > 0 ? '&start=' + start : '');
+  /* YouTube addresses are watch-player-yt.js's alone (videoOf, embedUrl, pageUrl, REFERER): a tile's
+     slot is made with multi:true, so the layer's slotUrl hook there turns a watch page into the embed
+     and its referrer hook sends the Referer the embed needs. This file only reads what the slot is. */
+  function YT() { return window.WatchPlayerYT || null; }
+  /** The YouTube video a slot shows ({ id, start, origin, embed }), or null. */
+  function videoOfSlot(s) {
+    var Y = YT();
+    return Y && s && s.service === 'youtube' ? Y.videoOf(s.url, 'youtube') : null;
   }
-  function withStart(embed, sec) {
-    var u = embed.replace(/&start=\d+/, '');
-    return sec > 0 ? u + '&start=' + Math.floor(sec) : u;
+  /** A YouTube video address -> its embed (at `sec` when given), or '' (no video, or no yt.js). */
+  function embedFor(url, sec) {
+    var Y = YT();
+    var v = Y ? Y.videoOf(url, 'youtube') : null;
+    if (!v) return '';
+    if (sec !== undefined) v.start = Math.max(0, Math.floor(Number(sec) || 0));
+    return Y.embedUrl(v);
   }
 
   /* --------------------------------------------------------------- page scripts */
@@ -195,7 +193,12 @@
   function onSlot(ctx, s, o) {
     CTX = ctx;
     var x = o || {};
-    s._mv = { embed: x.embed || '', watchUrl: x.watchUrl || '', limit: '', muted: false, q: '', pageTitle: '', timers: [], limitIn: false, converted: !!x.embed, check: '' };
+    // makeSlot ran watch-player-yt.js's slotUrl already: a tile's YouTube video is its embed by now.
+    var v = videoOfSlot(s);
+    var embed = v && v.embed ? s.url : '';
+    var watchUrl = embed ? (x.watchUrl || YT().pageUrl(v)) : '';
+    // converted: nothing left for toEmbed() to do (an embed already, or a tile from the start).
+    s._mv = { embed: embed, watchUrl: watchUrl, limit: '', muted: false, q: '', pageTitle: '', timers: [], limitIn: false, converted: !!embed || !!s.multi, check: '' };
     var head = el('div', 'mv-head');
     var num = el('span', 'mv-num', '');
     var mark = el('span', 'wp-mark mv-mark');
@@ -224,10 +227,6 @@
     s.tile.appendChild(target);
     s._mv.els = { head: head, num: num, mark: mark, name: name, limit: limit, sound: sound, target: target };
     paintHead(s);
-  }
-
-  function onView(ctx, s, v) {
-    if (s._mv && s._mv.embed) v.setAttribute('httpreferrer', EMBED_REFERER);
   }
 
   function onAttach(ctx, s, v) {
@@ -334,17 +333,20 @@
   /** The single player's YouTube watch page, once it is a tile, becomes the embed where it was. */
   function toEmbed(s) {
     s._mv.converted = true;
-    if (s.service !== 'youtube' || !s.view || s.blocked) return;
-    var e = embedFor(s.url);
-    if (!e) return;
+    s.multi = true;   // a tile now: watch-player-yt.js keeps it the embed on a reuse too
+    var vid = videoOfSlot(s);
+    if (!vid || vid.embed || !s.view || s.blocked) return;
     var v = s.view;
     js(v, TIME_JS).then(function (sec) {
       if (s.view !== v || !isMulti()) return;
-      var to = withStart(e, Number(sec) || 0);
+      var to = embedFor(s.url, sec);
+      if (!to) return;
       s._mv.watchUrl = s.url;
       s._mv.embed = to;
       s.url = to;
-      try { var p = v.loadURL(to, { httpReferrer: EMBED_REFERER }); if (p && p.catch) p.catch(function () { /* a redirect or a stop */ }); } catch (err) { /* gone */ }
+      var ref = YT().REFERER;
+      try { v.setAttribute('httpreferrer', ref); } catch (err) { /* the load carries it */ }
+      try { var p = v.loadURL(to, { httpReferrer: ref }); if (p && p.catch) p.catch(function () { /* a redirect or a stop */ }); } catch (err) { /* gone */ }
     });
   }
 
@@ -571,9 +573,8 @@
 
   function addTile(url, service, title, o) {
     var l = L();
-    var to = url, embed = '', watchUrl = '';
-    if (service === 'youtube' && !o.blocked) { embed = embedFor(url); if (embed) { watchUrl = url; to = embed; } }
-    var s = CTX.makeSlot(to, { service: service, title: title, blocked: o.blocked || '', multi: true, embed: embed, watchUrl: watchUrl });
+    // multi:true -- watch-player-yt.js's slotUrl makes a YouTube video its embed; url stays the watch page.
+    var s = CTX.makeSlot(url, { service: service, title: title, blocked: o.blocked || '', multi: true, watchUrl: url });
     l.slots.push(s);
     l.grid.appendChild(s.tile);
     if (M.mini) exitMini(true);
@@ -792,9 +793,9 @@
   }
 
   window.WatchPlayerMulti = {
-    build: onBuild, bar: onBar, slot: onSlot, view: onView, attach: onAttach, destroy: onDestroy,
+    build: onBuild, bar: onBar, slot: onSlot, attach: onAttach, destroy: onDestroy,
     open: onOpen, layout: onLayout, place: onPlace, shortcut: onShortcut, key: onKey, back: onBack, close: onClose, state: state,
-    // for watch-player-multi-unit.js
-    _embedFor: embedFor, _withStart: withStart
+    // for tests/watch-multi-test.js
+    _embedFor: embedFor
   };
 })();

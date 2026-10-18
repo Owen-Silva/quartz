@@ -69,6 +69,16 @@ const EMBED_EXTRA = '<div id="movie_player"></div><script>window.__q = ""; docum
 const REFUSE_EXTRA = '<div class="ytp-error" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000"><div>Video unavailable</div><div>Playback on other websites has been disabled by the video owner.</div></div>';
 const LIMIT_EXTRA = '<script>setTimeout(function () { var d = document.createElement("div"); d.id = "lim"; d.textContent = ' + JSON.stringify(LIMIT_TEXT) + '; document.body.appendChild(d); document.getElementById("v").pause(); }, 1200);</script>';
 const PLAYER_PATH = /^\/(?:watch$|watch\/player|video\/|play\/|detail\/|movies\/|series\/|__p\/)/;
+// YouTube Subscriptions (watch/ytlib.js reads /feed/subscriptions in a hidden view): the ytlib e2e's own
+// fixture, so the rows show the Subscriptions row as the user does, not "couldn't read" (the mock has none).
+const SUBS_FIX = path.join(__dirname, 'tests', 'watch-fixtures', 'youtube-subs.json');
+function subsPage() {
+  let f = null;
+  try { f = JSON.parse(fs.readFileSync(SUBS_FIX, 'utf8')); } catch (e) { f = null; }
+  const data = f && f.ytInitialData ? 'window.ytInitialData=' + JSON.stringify(f.ytInitialData).split('<').join('\\u003c') + ';' : '';
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>YouTube</title><script>var ytcfg={data_:{LOGGED_IN:true},get:function(k){return this.data_[k];}};' +
+    data + '</script></head><body><div id="content">front YouTube (subscriptions)</div></body></html>';
+}
 
 async function startServers(mock) {
   const fronts = {};
@@ -80,6 +90,7 @@ async function startServers(mock) {
       if (/^\/embed\/refuse/.test(p)) return sendHtml(res, page('Refused embed', REFUSE_EXTRA));
       if (p.indexOf('/embed/') === 0) return sendHtml(res, page(svc + ' embed ' + p.slice(7), EMBED_EXTRA));
       if (p === '/__p/limit') return sendHtml(res, page(svc + ' limit', LIMIT_EXTRA));
+      if (svc === 'youtube' && p === '/feed/subscriptions') return sendHtml(res, subsPage());
       if (PLAYER_PATH.test(p)) return sendHtml(res, page(svc + ' ' + p, p === '/watch' ? EMBED_EXTRA : ''));
       const up = http.request({ host: '127.0.0.1', port: mock.ports[svc], path: req.url, method: req.method, headers: Object.assign({}, req.headers, { host: '127.0.0.1:' + mock.ports[svc] }) }, (r) => {
         res.writeHead(r.statusCode || 502, r.headers);
@@ -125,7 +136,7 @@ const ST = 'WatchPlayer._state()';
 const MS = '(WatchPlayer._state().multi || {})';
 const DIG = { 1: 49, 2: 50, 3: 51, 4: 52 };
 
-run('watch-multiview-e2e', async ({ check, launch, say }) => {
+run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
   fs.mkdirSync(SHOTS, { recursive: true });
   try { fs.unlinkSync(FREE_FILE); } catch (e) { /* none */ }
   check(fs.existsSync(CLIP), 'the local fixture clip exists', CLIP);
@@ -143,7 +154,9 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
   };
   const results = { size: SIZE, perTiles: [] };
   try {
-    const q = await launch({ cdp: CDP_PORT, env });
+    // --menu-dump: a right-click that reaches main (no tile under it) dumps Quartz's native menu instead
+    // of popping it. Menu.popup() opens at the REAL cursor, on the visible desktop, whatever the window.
+    const q = await launch({ cdp: CDP_PORT, env, args: ['--menu-dump'] });
     const chrome = q.chrome;
     await chrome.ev('window.__fsCalls = 0; window.toggleFullscreen = function () { window.__fsCalls++; }; 1');
     check(await chrome.ev('!!window.WatchPlayerMulti && typeof window.openInLumen === "function"'), 'watch-player-multi.js is loaded in the chrome');
@@ -167,23 +180,45 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     const order = () => chrome.ev('WatchPlayer._state().slots.map((s) => s.wcId)');
 
     /* ===== 1. the tile menu; Add to multiview with nothing playing ===== */
-    let cards = await g.ev(`${ytCards}.length`);
-    const sel = cards >= 1 ? ytCards : anyYt;
-    const pt = await g.ev(`(() => { const c = ${sel}[0]; c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 3]; })()`);
-    await mouse(g, 'mouseMoved', pt[0], pt[1]);
-    await mouse(g, 'mousePressed', pt[0], pt[1], 'right', 1);
-    await mouse(g, 'mouseReleased', pt[0], pt[1], 'right', 1);
-    let menu = await g.waitFor('(() => { const s = window.LumenTileMenu && LumenTileMenu._state(); return s && s.open ? s : null; })()', 4000).catch(() => null);
-    if (!menu) { // the focused row had no card under the pointer: the same menu, opened on the card itself
-      await g.ev(`(() => { const c = ${anyYt}[0]; const r = c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 20 })); return 1; })()`);
-      menu = await g.waitFor('(() => { const s = LumenTileMenu._state(); return s.open ? s : null; })()', 3000).catch(() => null);
+    // The rows settle first: YouTube Subscriptions (watch/ytlib-page.js) answers on its own and re-renders
+    // them, and a right-click aimed before that lands on whatever moved under the pointer.
+    await g.waitFor('(() => { if (!window.WatchYt) return true; const s = WatchYt._state().subs; return !!s && s.state !== "loading" && !s.refreshing; })()', 20000).catch(() => 0);
+    await sleep(600);
+    // A YouTube tile wholly in view, and a point on it that hit-tests to that tile (the focused row first).
+    const aim = (list) => g.ev(`(async () => {
+      const owner = (n) => { for (; n && n !== document.body; n = n.parentNode) if (n._item || n._event) return n; return null; };
+      for (const c of (${list}).slice(0, 16)) {
+        c.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await new Promise((r) => setTimeout(r, 350));
+        const r = c.getBoundingClientRect();
+        if (r.width < 40 || r.height < 30 || r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) continue;
+        for (const [fx, fy] of [[0.5, 0.33], [0.5, 0.5], [0.25, 0.25]]) {
+          const x = r.left + r.width * fx, y = r.top + r.height * fy;
+          if (owner(document.elementFromPoint(x, y)) === c) return { key: c.dataset.key || '', x, y };
+        }
+      }
+      return null;
+    })()`).catch(() => null);
+    const pt = (await aim(ytCards)) || (await aim(anyYt));
+    check(!!pt, 'a YouTube tile is in view, under the pointer', pt);
+    let menu = null;
+    if (pt) {
+      await mouse(g, 'mouseMoved', pt.x, pt.y);
+      await mouse(g, 'mousePressed', pt.x, pt.y, 'right', 1);
+      await mouse(g, 'mouseReleased', pt.x, pt.y, 'right', 1);
+      menu = await g.waitFor('(() => { const s = window.LumenTileMenu && LumenTileMenu._state(); return s && s.open ? s : null; })()', 4000).catch(() => null);
     }
-    check(!!menu && JSON.stringify(menu.items) === '["Play","Add to multiview"]', 'a right-click on a playable tile opens its menu: Play, Add to multiview', menu);
+    check(!!menu && !!pt && JSON.stringify(menu.items) === '["Play","Add to multiview"]' && menu.last.key === pt.key, 'a right-click on a playable tile opens its menu: Play, Add to multiview', menu);
+    // ...and never Quartz's own page menu: with --menu-dump main writes it to the profile instead of showing it.
+    const dumped = (() => { try { return JSON.parse(fs.readFileSync(path.join(profileDir, 'menu-dump.json'), 'utf8')); } catch (e) { return null; } })();
+    check(!dumped, 'the right-click stayed Lumen’s: Quartz’s page menu never came up', dumped);
     const firstTitle = await g.ev(`(${anyYt}).find((c) => c.dataset.key === ${JSON.stringify(menu && menu.last && menu.last.key)})?._item.title || ''`).catch(() => '');
     const ap = await g.ev('(() => { const b = document.querySelectorAll(".tm-item")[1]; if (!b) return null; const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()');
     if (ap) { await mouse(g, 'mouseMoved', ap[0], ap[1]); await mouse(g, 'mousePressed', ap[0], ap[1]); await mouse(g, 'mouseReleased', ap[0], ap[1]); }
     let m1 = await chrome.waitFor(`(() => { const m = ${MS}; return m.n === 1 && m.mini && m.tiles[0].wcId !== null ? m : null; })()`, 15000).catch(() => null);
     check(!!m1 && m1.pick === true, 'Add to multiview with nothing playing: it plays in a corner, waiting for the next pick', m1 && { n: m1.n, mini: m1.mini, pick: m1.pick });
+    if (!m1) say('why no tile: ' + JSON.stringify({ menuAt: ap, player: await chrome.ev(`(() => { const s = WatchPlayer._state(); return { open: s.open, mode: s.mode, note: s.note, title: s.title, slots: (s.slots || []).map((x) => ({ url: String(x.url).slice(0, 90), wcId: x.wcId, svc: x.service })), multi: s.multi }; })()`).catch((e) => 'ev failed: ' + e.message), tabs: await chrome.ev('typeof tabs !== "undefined" ? tabs.map((t) => String(t.url).slice(0, 80)) : null').catch(() => null) }).slice(0, 1500));
     check(!(await g.ev('LumenTileMenu._state().open')), 'the menu closed after the click');
     const vr = await viewRect();
     let box = m1 && m1.box;
@@ -194,7 +229,7 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     check((await chrome.ev('WatchPlayer.handleShortcut("escape")')) === false && (await chrome.ev(`${MS}.mini`)), 'Esc with the mini-player up is not the player’s (it stays playing)');
 
     // Drag it to the top-left corner (a real mouse drag in the chrome).
-    const cen = (b) => [b[0] + b[2] / 2, b[1] + 15];
+    const cen = (b) => { if (!b) throw new Error('the mini-player never came up, so it cannot be dragged (see the FAILs above)'); return [b[0] + b[2] / 2, b[1] + 15]; };
     await drag(chrome, cen(box), [vr[0] + 120, vr[1] + 90]);
     await sleep(400);
     let m = await mstate();
@@ -209,8 +244,21 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     check(m.corner === 'bl', 'dragged to the bottom left: that corner', m.corner);
 
     /* ===== 2. the pick: tile 2 ===== */
-    const secondTitle = await g.ev(`(() => { const all = ${anyYt}; const c = all.find((x) => x._item.title !== ${JSON.stringify(firstTitle)}) || all[1]; c.click(); return c._item.title; })()`);
+    // A click on a card in a row that is not the focused one only focuses that row (watch.js onStackClick),
+    // so a card of the focused row is picked, else its row is focused first and the card clicked again.
+    const secondTitle = await g.ev(`(async () => {
+      const ft = ${JSON.stringify(firstTitle)};
+      const inFocus = (x) => !!x.closest('.lrow') && x.closest('.lrow').dataset.d === '0';
+      const all = ${anyYt};
+      const c = all.find((x) => x._item.title !== ft && inFocus(x)) || all.find((x) => x._item.title !== ft) || all[1];
+      const key = c.dataset.key;
+      if (!inFocus(c)) { c.click(); await new Promise((r) => setTimeout(r, 900)); }
+      const again = (${anyYt}).find((x) => x.dataset.key === key && inFocus(x)) || c;
+      again.click();
+      return again._item.title;
+    })()`);
     let s2 = await waitN(2);
+    if (!s2) say('why no tile 2: ' + JSON.stringify({ picked: secondTitle, note: (await chrome.ev(ST)).note, multi: await mstate() }).slice(0, 900));
     check(!!s2 && !s2.mini && s2.layout === '2', 'a title picked from the rows joins as tile 2: two side by side, full size', s2 && { n: s2.n, mini: s2.mini, layout: s2.layout });
     check(!!s2 && s2.tiles[1].embed && s2.tiles[1].url.indexOf(FY + '/embed/') === 0, 'the new YouTube tile plays the embed', s2 && s2.tiles[1].url);
     await chrome.waitFor(`${MS}.tiles[0].url.indexOf('/embed/') > 0`, 10000).catch(() => 0);
