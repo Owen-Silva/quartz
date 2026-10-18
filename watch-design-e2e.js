@@ -3,7 +3,8 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 // a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js)
 // reading the local mock of every service, then drawing tests/watch-snapshot.js dense() (The user's real
 // counts) in place of what main pushes. Never a real account, cookie or profile. The services'
-// stills are answered here (Fetch) as plain title cards; real YouTube thumbnails and ESPN logos pass.
+// stills are answered here (Fetch) as plain title cards; YouTube's at YouTube's own sizes and formats
+// (tests/watch-yt-stills.js) and ESPN's logos as drawn badges: nothing is asked of a real CDN.
 //
 //   node watch-design-e2e.js [--cdp 9466] [--shots <dir>] [--prefix watch-design-after] [--shots-only] [--baseline <before-frames.json>]
 //
@@ -20,8 +21,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { run, Cdp, sleep } = require('./tests/e2e-kit');
+// i.ytimg.com never resolves in this instance: a still this file doesn't answer (one asked before
+// its CDP client attached) fails here instead of reaching YouTube's real CDN
+const NO_YT_NET = ['--host-resolver-rules=MAP *.ytimg.com ~NOTFOUND'];
 const Mock = require('./tests/watch-mock');
 const F = require('./tests/watch-snapshot');
+const Stills = require('./tests/watch-yt-stills');
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -33,21 +38,27 @@ const ALSO = opt('also-prefix', '');   // a second name for the same files (watc
 const TAG = 'quartz-watch-design-' + process.pid;
 const STUB = (n) => path.join(os.tmpdir(), TAG + '-' + n);
 const SIZES = [[1920, 1000], [1536, 800], [1280, 800], [900, 800]];
-const KNOWN_YT = new Set(['R6MlUcmOul8', 'PVGeM40dABA', 'mN0zPOpADL4', 'aqz-KE-bpKQ', 'h6fcK_fRYaI', 'wbSwFU6tY1c', 'WhWc3b3KhnY', 'UXqq0ZvbOnk', 'eRsGyueVLvQ', 'SkVqJ1SGeL0', 'TLkA0RELQ1g', 'UF8uR6Z6KLc']);
+const TRACE = opt('trace', '');      // a Chromium trace of the frames pass, to this file (the long frames marked)
 
 /* ---- a title card for a fixture still (as tools/watch-preview.js draws them) ---- */
 const titles = new Map();
 function hue(s) { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 360; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function ytTitle(url) { const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(url); return titles.get(url) || (v && titles.get('yt:' + v[1])) || 'Untitled'; }
 function still(url) {
-  const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(url);
-  const t = titles.get(url) || (v && titles.get('yt:' + v[1])) || 'Untitled';
+  const t = ytTitle(url);
   const h1 = hue(t), h2 = (h1 + 40) % 360, size = t.length > 24 ? 64 : 92;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">' +
     '<defs><radialGradient id="a" cx="22%" cy="18%" r="90%"><stop offset="0" stop-color="hsl(' + h1 + ',38%,46%)"/><stop offset="1" stop-color="hsl(' + h2 + ',30%,12%)"/></radialGradient>' +
     '<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset=".45" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient></defs>' +
     '<rect width="1280" height="720" fill="url(#a)"/><circle cx="1010" cy="250" r="260" fill="hsl(' + h2 + ',40%,60%)" opacity=".18"/><rect width="1280" height="720" fill="url(#b)"/>' +
     '<text x="80" y="620" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-weight="700" font-size="' + size + '" fill="#f4f3ef" letter-spacing="-2">' + esc(t) + '</text></svg>';
+}
+/* an ESPN team logo (a.espncdn.com/.../<abbr>.png): a badge with the team's letters */
+function logo(url) {
+  const a = (/\/([a-z0-9]{2,4})\.png/i.exec(url) || [0, 'tm'])[1].toUpperCase();
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><circle cx="250" cy="250" r="230" fill="hsl(' + hue(a) + ',45%,42%)"/>' +
+    '<text x="250" y="300" text-anchor="middle" font-family="Segoe UI, sans-serif" font-weight="800" font-size="150" fill="#fff">' + esc(a) + '</text></svg>';
 }
 
 async function guest(q, errors) {
@@ -62,14 +73,17 @@ async function guest(q, errors) {
     let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
     if (m.method === 'Runtime.exceptionThrown') errors.push('exception: ' + String((m.params.exceptionDetails.exception || {}).description || m.params.exceptionDetails.text).slice(0, 300));
     else if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push('console.error: ' + (m.params.args || []).map((a) => a.value !== undefined ? String(a.value) : (a.description || '')).join(' ').slice(0, 300));
+    else if (m.method === 'Tracing.dataCollected') { if (g.trace) for (const e of m.params.value) g.trace.push(e); }
+    else if (m.method === 'Tracing.tracingComplete') { if (g.traceDone) g.traceDone(); }
     else if (m.method === 'Fetch.requestPaused') {
-      const u = m.params.request.url;
+      const u = m.params.request.url, rid = m.params.requestId;
       let host = ''; try { host = new URL(u).hostname; } catch (e) { host = ''; }
-      const yt = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(u);   // the sharp-art chain asks /vi_webp/ first
-      g.fetched = g.fetched || { pass: 0, drawn: 0 };
-      if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.fetched.pass++; else g.fetched.drawn++;
-      if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.send('Fetch.continueRequest', { requestId: m.params.requestId });
-      else g.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/svg+xml' }], body: Buffer.from(still(u)).toString('base64') });
+      g.fetched = g.fetched || { drawn: 0, yt: 0, logos: 0 };
+      const fulfill = (mime, body) => g.send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: mime }], body: Buffer.from(body).toString('base64') });
+      // YouTube's stills: drawn here at YouTube's own sizes and formats (the sharp-art chain asks /vi_webp/ first)
+      if (Stills.parse(u)) { g.fetched.yt++; Stills.answer(g, u, ytTitle(u)).then((r) => fulfill(r.mime, r.body), (e) => { console.log('[e2e] still ' + u + ': ' + e.message); g.send('Fetch.failRequest', { requestId: rid, errorReason: 'Failed' }); }); }
+      else if (host === 'a.espncdn.com') { g.fetched.logos++; fulfill('image/svg+xml', logo(u)); }
+      else { g.fetched.drawn++; fulfill('image/svg+xml', still(u)); }
     }
   });
   await g.send('Runtime.enable');
@@ -131,7 +145,7 @@ if (require.main === module) {
     const env = { QUARTZ_WATCH_BOOT_GRACE_MS: '0', QUARTZ_WATCH_REBASE: JSON.stringify(mock.rebase), QUARTZ_WATCH_OPEN_STUB: STUB('open.txt'), QUARTZ_EDGE_STUB: STUB('edge.txt'),
       QUARTZ_WATCH_MIN_FREE_GB: '0', QUARTZ_WATCH_GAME_FILE: STUB('game.flag'), QUARTZ_TEST_MIN_FREE_GB: process.env.QUARTZ_TEST_MIN_FREE_GB || '1.5' };
     const errors = [];
-    const q = await launch({ cdp: CDP_PORT, env });
+    const q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env });
     const chrome = q.chrome;
     try {
       await chrome.ev('setTheme("dark"), 1').catch(() => 0);
@@ -157,6 +171,9 @@ if (require.main === module) {
         if (k === 'image' && typeof v === 'string' && /^https:\/\//.test(v) && !/i\.ytimg\.com|espncdn\.com/.test(v)) o[k] = v + (v.indexOf('?') >= 0 ? '&' : '?') + BUST; else bust(v); } };
       bust(snap);
       for (const it of snap.items) if (it.image) { titles.set(it.image, it.title); const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(it.image); if (v) titles.set('yt:' + v[1], it.title); }   // the sharp-art chain asks other URLs of the same video
+      // YouTube's stills for these videos, every size the page may ask, drawn now (once per machine: kept on disk)
+      { const t0 = Date.now(); const yt = snap.items.map((it) => Stills.parse(it.image)).filter(Boolean).map((p) => ({ id: p.id, title: titles.get('yt:' + p.id) }));
+        await Stills.prepare(g, yt); say('youtube stills: ' + yt.length + ' videos ready in ' + (Date.now() - t0) + ' ms (' + Stills.DIR + ')'); }
       await g.ev('(() => { window.__designApply = window.__applyWatch; window.__applyWatch = function () { window.__designHeld = (window.__designHeld || 0) + 1; }; window.__designApply(' + JSON.stringify(snap) + '); return 1; })()');
       await sleep(1500);
       await chrome.ev('(() => { const w = findWatchTab(); if (w && w.viewEl) w.viewEl.focus(); return 1; })()').catch(() => 0);
@@ -209,7 +226,7 @@ if (require.main === module) {
         await go(0); await blurAll(); await settle();
         const top = await st();
         if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")[0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
-        if (w === 1920 && !SHOTS_ONLY) check(!!g.fetched && g.fetched.drawn > 3, 'the services\' stills in the shots are the test\'s own title cards (' + ((g.fetched && g.fetched.drawn) || 0) + ' drawn; none from a real CDN or a cache)', g.fetched);
+        if (w === 1920 && !SHOTS_ONLY) check(!!g.fetched && g.fetched.drawn > 3 && g.fetched.yt > 3, 'the services\' stills in the shots are the test\'s own (' + ((g.fetched && g.fetched.drawn) || 0) + ' title cards, ' + ((g.fetched && g.fetched.yt) || 0) + ' YouTube stills; none from a real CDN or a cache)', g.fetched);
         await save(w + 'x' + h + '-top');
         await go(2); await blurAll(); await settle();
         const down = await st();
@@ -295,7 +312,13 @@ if (require.main === module) {
       fs.writeFileSync(path.join(SHOTS, PREFIX + '-measure.json'), JSON.stringify(measured, null, 1));
       // frames: wheel down through the top's change and back, then hover across a row's tiles
       await go(0); await blurAll(); await sleep(800);
-      await g.ev('(() => { window.__fr = { d: [], on: true }; let last = performance.now(); const f = (t) => { const x = window.__fr; if (!x.on) return; x.d.push(t - last); last = t; requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()');
+      if (TRACE) {   // --trace: the whole pass in a Chromium trace, each long frame marked (console.timeStamp "lf <ms>")
+        g.trace = [];
+        const tr = await g.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'blink.user_timing', 'toplevel', 'cc', 'gpu', 'blink', 'loading', 'v8.execute'] } });
+        if (tr.error) say('trace: Tracing.start failed ' + JSON.stringify(tr.error));
+        await sleep(300);
+      }
+      await g.ev('(() => { window.__fr = { d: [], on: true }; let last = performance.now(); const f = (t) => { const x = window.__fr; if (!x.on) return; x.d.push(t - last);' + (TRACE ? ' if (t - last > 20) console.timeStamp("lf " + Math.round(t - last));' : '') + ' last = t; requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()');
       await sleep(400);
       for (let i = 0; i < 4; i++) await wheel(120);
       for (let i = 0; i < 4; i++) await wheel(-120);
@@ -304,6 +327,15 @@ if (require.main === module) {
       for (let pass = 0; pass < 2; pass++) for (const [x, y] of cards) { for (let s = 0; s < 4; s++) { await g.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 30 + s * 20, y }); await sleep(60); } await sleep(200); }
       const fr = await g.ev('(() => { const x = window.__fr; x.on = false; const d = x.d.slice(3); return { n: d.length, over: d.filter((v) => v > 20).map((v) => Math.round(v * 10) / 10), max: Math.round(Math.max.apply(null, d) * 10) / 10 }; })()');
       say('frames: ' + fr.n + ', over 20 ms: ' + fr.over.length + ' ' + JSON.stringify(fr.over) + ', max ' + fr.max + ' ms');
+      if (TRACE && g.trace) {
+        const art = await g.ev('[...document.querySelectorAll(".art > img, .stage .pic img")].map((i) => { const b = i.getBoundingClientRect(); return [i.closest(".stage") ? "hero" : "tile", (() => { const s = String(i.currentSrc || i.src); return /ytimg/.test(s) ? "yt:" + s.split("?")[0].split("/").pop() : /^data:/.test(s) ? "data" : "other"; })(), i.naturalWidth + "x" + i.naturalHeight, Math.round(b.width * devicePixelRatio) + "x" + Math.round(b.height * devicePixelRatio)]; })').catch((e) => e.message);
+        const done = new Promise((r) => { g.traceDone = r; });
+        await g.send('Tracing.end');
+        await Promise.race([done, sleep(60000)]);
+        fs.writeFileSync(TRACE, JSON.stringify({ traceEvents: g.trace, meta: { frames: fr, art, dpr: await g.ev('devicePixelRatio').catch(() => 0), size: await g.ev('[innerWidth, innerHeight]').catch(() => 0) } }));
+        say('trace: ' + g.trace.length + ' events -> ' + TRACE);
+        g.trace = null;
+      }
       if (!SHOTS_ONLY) check(fr.n > 150, 'frames: the page rendered while stepping and hovering (' + fr.n + ')');
       fs.writeFileSync(path.join(SHOTS, PREFIX + '-frames.json'), JSON.stringify({ n: fr.n, over: fr.over.length, max: fr.max, list: fr.over, at: new Date().toISOString() }));
       // --baseline <the old code's -frames.json, measured just before in the same window>: no worse than
