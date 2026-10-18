@@ -60,7 +60,7 @@ function sendClip(req, res) {
 }
 // A playing HTML5 video (with its sound, when autoplay allows it), and a stamp that changes on every load.
 const VIDEO = '<video id="v" src="/__media/clip.mp4" autoplay loop playsinline style="display:block;width:100%;height:100%;object-fit:contain;background:#000"></video>' +
-  '<script>window.__born = Date.now() + Math.random(); var v = document.getElementById("v"); v.play().catch(function () { v.muted = true; v.play().catch(function () {}); });</script>';
+  '<script>window.__born = Date.now() + Math.random(); window.addEventListener("keydown", function (e) { window.__lastKey = e.key; }, true); var v = document.getElementById("v"); v.play().catch(function () { v.muted = true; v.play().catch(function () {}); });</script>';
 function page(title, extra) {
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title><style>html,body{margin:0;height:100%;background:#000;color:#ddd;font:15px/1.4 "Segoe UI",sans-serif;overflow:hidden}' +
     '#lim{position:absolute;left:0;right:0;top:40%;padding:24px;text-align:center;background:rgba(10,10,12,.92)}</style></head><body>' + VIDEO + (extra || '') + '</body></html>';
@@ -108,8 +108,8 @@ async function targetWhere(q, pred, ms) {
 }
 async function cdpTo(t) { const c = await new Cdp(t.webSocketDebuggerUrl).open(); await c.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0); return c; }
 async function keyIn(c, key, code, vk) {
-  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0, text: key.length === 1 ? key : undefined };
-  await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, base));
+  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0 };
+  await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, base));
   await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
 }
 async function mouse(c, type, x, y, button, count) {
@@ -162,7 +162,8 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     const mstate = () => chrome.ev(MS);
     const waitN = (n, ms) => chrome.waitFor(`(() => { const m = ${MS}; return m.n === ${n} && m.tiles.every((t) => t.wcId !== null) ? m : null; })()`, ms || 15000).catch(() => null);
     const add = (url, service, title) => chrome.ev(`openInLumen(${JSON.stringify(url)}, { service: ${JSON.stringify(service)}, title: ${JSON.stringify(title)}, multi: true }), 1`);
-    const muted = () => chrome.ev('[...document.querySelectorAll(".wp-layer webview")].map((v) => { try { return v.isAudioMuted(); } catch (e) { return null; } })');
+    const muted = async () => { await sleep(400); return chrome.ev('[...document.querySelectorAll(".wp-layer webview")].map((v) => { try { return v.isAudioMuted(); } catch (e) { return null; } })'); };
+    const why = async () => { const m = await mstate(); return { focus: (await chrome.ev(ST)).focus, meant: m.tiles.map((t) => t.muted), audio: m.tiles.map((t) => t.audio), actual: await muted(), note: (await chrome.ev(ST)).note }; };
     const order = () => chrome.ev('WatchPlayer._state().slots.map((s) => s.wcId)');
 
     /* ===== 1. the tile menu; Add to multiview with nothing playing ===== */
@@ -251,7 +252,7 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     const p3 = t3T && await cdpTo(t3T);
     if (p3) await keyIn(p3, '3', 'Digit3', DIG[3]);
     sa = await chrome.waitFor(`${MS}.tiles[2].audio ? ${MS} : null`, 3000).catch(() => null);
-    check(!!sa && JSON.stringify(await muted()) === '[true,true,false,true]', '3 (pressed inside a tile’s page): main hands it over, the sound moves to tile 3', await muted());
+    check(!!sa && JSON.stringify(await muted()) === '[true,true,false,true]', '3 (pressed inside a tile’s page): main hands it over, the sound moves to tile 3', await why());
     check(!!p3 && (await p3.ev('window.__lastKey || ""')) !== '3', 'and the page never saw that 3');
     await chrome.ev('document.querySelector(\'.wp-layer .wp-tile[data-pos="0"] .mv-head\').click(), 1');
     sa = await chrome.waitFor(`${MS}.tiles[0].audio ? ${MS} : null`, 3000).catch(() => null);
@@ -261,7 +262,7 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     await mouse(chrome, 'mousePressed', r3c[0], r3c[1]);
     await mouse(chrome, 'mouseReleased', r3c[0], r3c[1]);
     sa = await chrome.waitFor(`${MS}.tiles[2].audio ? ${MS} : null`, 3000).catch(() => null);
-    check(!!sa, 'a click into tile 3’s page moves the sound there', sa ? '' : await mstate().then((x) => x.tiles.map((t) => t.audio)));
+    check(!!sa && JSON.stringify(await muted()) === '[true,true,false,true]', 'a click into tile 3’s page moves the sound there', await why());
     await chrome.ev('document.querySelector(".wp-layer .mv-sound").focus(), 1');
     await chrome.key('m', { code: 'KeyM', vk: 77 });
     sa = await chrome.waitFor(`${MS}.muteAll ? ${MS} : null`, 3000).catch(() => null);
@@ -269,10 +270,9 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     await chrome.ev('document.querySelector(".wp-layer .mv-sound").focus(), 1');
     await chrome.key('m', { code: 'KeyM', vk: 77 });
     await sleep(300);
-    check(JSON.stringify(await muted()) === '[true,true,false,true]', 'M again: the sound is back on its tile', await muted());
+    check(JSON.stringify(await muted()) === '[true,true,false,true]', 'M again: the sound is back on its tile', await why());
     const audible = await chrome.ev('[...document.querySelectorAll(".wp-layer webview")].map((v) => { try { return v.isCurrentlyAudible(); } catch (e) { return null; } })');
-    say('audible right now (informative; the fixture plays with sound when autoplay allows it): ' + JSON.stringify(audible));
-    check(audible.filter(Boolean).length <= 1, 'never more than one tile is audible', audible);
+    say('audible right now (informative only: Chromium reports a muted tab as audible too): ' + JSON.stringify(audible));
 
     // The quality hint: a YouTube tile without the sound was asked for 360p by its own player API.
     const ytT = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/embed/') === 0, 5000);

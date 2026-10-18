@@ -73,7 +73,7 @@
 .mv-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d6d8db; }
 .mv-limit { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3c78f; }
 .mv-limit:empty { display: none; }
-.wp-tile.mv-limited .mv-name { flex-shrink: 3; }
+.wp-tile.mv-limited .mv-name { flex-shrink: 3; min-width: min(7em, 30%); }
 
 /* the buttons in a header: quiet until hovered */
 .mv-ib, .mv-sound {
@@ -167,3 +167,6 @@
 @media (prefers-reduced-motion: reduce) {
   .wp-layer.mv-mini.mv-snap { transition: none; }
 }
+
+/* a mini-player drag: a clear shield over the whole window, so the Lumen tab's own page never takes the moves */
+.mv-drag-shield { position: fixed; inset: 0; z-index: 2147483646; cursor: grabbing; background: transparent; }

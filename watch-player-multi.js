@@ -650,48 +650,63 @@
     return true;
   }
 
+  /*
+   * Dragging the mini-player. Once the pointer leaves the box it is over the Lumen tab's own
+   * <webview>, a separate page that would take the moves (the chrome's pointer capture does not
+   * reach across it), so a drag lays a clear full-window shield in the chrome until the button
+   * comes up. The shield goes on pointerup, pointercancel, blur, or a lost button.
+   */
   function wireDrag(node) {
     node.addEventListener('pointerdown', function (e) {
-      if (!M.mini || e.button !== 0) return;
+      if (!M.mini || e.button !== 0 || M.drag) return;
       if (e.target && e.target.closest && e.target.closest('button')) return;
       var l = L();
       var b = l.el.getBoundingClientRect();
       var views = document.getElementById('views');
       var hr = views ? views.getBoundingClientRect() : { left: 0, top: 0 };
-      M.drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: b.left - hr.left, oy: b.top - hr.top, x: b.left - hr.left, y: b.top - hr.top, moved: false, node: node };
-      try { node.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ }
+      var shield = el('div', 'mv-drag-shield');
+      document.body.appendChild(shield);
+      var d = M.drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: b.left - hr.left, oy: b.top - hr.top, x: b.left - hr.left, y: b.top - hr.top, moved: false, node: node, shield: shield };
+      var move = function (ev) {
+        if (M.drag !== d || ev.pointerId !== d.id) return;
+        if (!(ev.buttons & 1)) { finish(ev, true); return; }   // the button came up somewhere we never heard
+        var dx = ev.clientX - d.sx, dy = ev.clientY - d.sy;
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) < 5) return;
+        if (!d.moved) { d.moved = true; L().el.classList.add('mv-dragging'); }
+        d.x = d.ox + dx;
+        d.y = d.oy + dy;
+        CTX.place();
+      };
+      var up = function (ev) { if (M.drag === d && ev.pointerId === d.id) finish(ev, ev.type === 'pointercancel'); };
+      var blur = function () { if (M.drag === d) finish(null, true); };
+      var finish = function (ev, cancelled) {
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', up, true);
+        window.removeEventListener('pointercancel', up, true);
+        window.removeEventListener('blur', blur);
+        if (shield.parentNode) shield.parentNode.removeChild(shield);
+        M.drag = null;
+        var ll = L();
+        if (!ll || !ll.el) return;
+        ll.el.classList.remove('mv-dragging');
+        if (cancelled && !d.moved) { CTX.place(); return; }
+        if (!d.moved) { if (node === M.els.hit) exitMini(); return; }
+        // The nearest corner, by where the box's middle was let go.
+        var a = M.box && M.box.area;
+        var w = M.box ? M.box.width : 0, h = M.box ? M.box.height : 0;
+        var cx = d.x + w / 2, cy = d.y + h / 2;
+        var midX = a ? (a.minL + a.maxL + w) / 2 : 0, midY = a ? (a.minT + a.maxT + h) / 2 : 0;
+        M.corner = (cy < midY ? 't' : 'b') + (cx < midX ? 'l' : 'r');
+        ll.el.classList.add('mv-snap');
+        CTX.place();
+        setTimeout(function () { if (L() && L().el) L().el.classList.remove('mv-snap'); }, 260);
+      };
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+      window.addEventListener('pointercancel', up, true);
+      window.addEventListener('blur', blur);
       e.preventDefault();
     });
-    node.addEventListener('pointermove', function (e) {
-      var d = M.drag;
-      if (!d || d.id !== e.pointerId) return;
-      var dx = e.clientX - d.sx, dy = e.clientY - d.sy;
-      if (!d.moved && Math.abs(dx) + Math.abs(dy) < 5) return;
-      if (!d.moved) { d.moved = true; L().el.classList.add('mv-dragging'); }
-      d.x = d.ox + dx;
-      d.y = d.oy + dy;
-      CTX.place();
-    });
-    var end = function (e) {
-      var d = M.drag;
-      if (!d || d.id !== e.pointerId) return;
-      try { node.releasePointerCapture(e.pointerId); } catch (err) { /* released */ }
-      M.drag = null;
-      var l = L();
-      l.el.classList.remove('mv-dragging');
-      if (e.type === 'pointercancel') { CTX.place(); return; }
-      if (!d.moved) { if (node === M.els.hit) exitMini(); return; }
-      // The nearest corner, by where the box's middle was let go.
-      var a = M.box && M.box.area;
-      var cx = d.x + (M.box ? M.box.width : 0) / 2, cy = d.y + (M.box ? M.box.height : 0) / 2;
-      var midX = a ? (a.minL + a.maxL + M.box.width) / 2 : 0, midY = a ? (a.minT + a.maxT + M.box.height) / 2 : 0;
-      M.corner = (cy < midY ? 't' : 'b') + (cx < midX ? 'l' : 'r');
-      l.el.classList.add('mv-snap');
-      CTX.place();
-      setTimeout(function () { if (L() && L().el) L().el.classList.remove('mv-snap'); }, 260);
-    };
-    node.addEventListener('pointerup', end);
-    node.addEventListener('pointercancel', end);
   }
 
   /* --------------------------------------------------------------- keys */
