@@ -23,6 +23,8 @@
  *     title:     plain text, <= 200 chars                       (required)
  *     subtitle:  plain text, <= 200 chars ('S2 E4', channel, network)
  *     image:     https URL of a 16:9 still/thumbnail, or ''
+ *     images:    optional, only when there is more than one: art candidates sharpest first,
+ *                images[0] === image (YouTube: ytThumbs()); the page steps down on a miss
  *     progress:  0..1 watched, or null (resume rows; null = unknown)
  *     url:       https URL on the service's own site            (required)
  *     startsAt:  epoch ms for live/upcoming, or null
@@ -230,13 +232,22 @@
     var year = finiteOrNull(raw.year);
     if (year !== null && (year !== Math.round(year) || year < 1880 || year > 2100)) year = null;
     var type = raw.type === 'movie' || raw.type === 'show' ? raw.type : '';
-    return {
+    var image = cleanHttps(raw.image);
+    var images = [];
+    if (image && Array.isArray(raw.images)) {
+      for (var i = 0; i < raw.images.length && images.length < 6; i++) {
+        var im = cleanHttps(raw.images[i]);
+        if (im && images.indexOf(im) === -1) images.push(im);
+      }
+      if (images[0] !== image) images = [];
+    }
+    var out = {
       id: id,
       service: service,
       kind: kind,
       title: title,
       subtitle: cleanText(raw.subtitle, TITLE_MAX),
-      image: cleanHttps(raw.image),
+      image: image,
       progress: progress,
       url: url,
       startsAt: startsAt !== null && startsAt > 0 ? Math.round(startsAt) : null,
@@ -247,6 +258,8 @@
       year: year,
       type: type
     };
+    if (images.length > 1) out.images = images;
+    return out;
   }
 
   /** A list of items, cleaned, de-duplicated by id (first wins), capped. */
@@ -418,6 +431,41 @@
     return days === 1 ? 'yesterday' : days + ' days ago';
   }
 
+  /*
+   * YouTube thumbnail candidates, sharpest first. YouTube's pages hand out ~320-480 px stills
+   * (hqdefault/mqdefault, often with ?sqp=&rs= sizing), which look blocky as full-bleed art. For a
+   * video id the CDN also serves maxresdefault (1280x720; webp and jpg) and sddefault (640x480), but
+   * maxres is missing for some videos (404 with a 120x90 grey body), so the page steps down the list.
+   * Live streams use the *_live names (the plain ones are a stale pre-stream still). The original URL
+   * is always last. A non-ytimg URL, or one without a video id, comes back alone. Never more than 6.
+   * Shorts (short === true) keep the original FIRST: it is YouTube's vertical still, which a 16:9 tile
+   * crops cleanly, where the 16:9 / 4:3 stills of a vertical video carry black side bars.
+   */
+  var YT_ID = /^[A-Za-z0-9_-]{11}$/;
+  function ytThumbs(url, id, short) {
+    var orig = cleanHttps(url);
+    var host = '';
+    var path = '';
+    try { var u = new URL(orig); host = u.hostname; path = u.pathname; } catch (err) { host = ''; }
+    var isYt = /^i\d?\.ytimg\.com$/.test(host);
+    var m = isYt ? /^\/(?:vi|vi_webp)\/([A-Za-z0-9_-]{11})\/([A-Za-z0-9_]+)\.(?:jpg|webp)$/.exec(path) : null;
+    var vid = m ? m[1] : (isYt || !orig) && typeof id === 'string' && YT_ID.test(id) ? id : '';
+    if (!vid) return orig ? [orig] : [];
+    var live = m ? /_live$/.test(m[2]) : false;
+    var sfx = live ? '_live' : '';
+    var base = 'https://i.ytimg.com/vi/' + vid + '/';
+    var out = [
+      'https://i.ytimg.com/vi_webp/' + vid + '/maxresdefault' + sfx + '.webp',
+      base + 'maxresdefault' + sfx + '.jpg',
+      base + 'sddefault' + sfx + '.jpg',
+      base + 'hqdefault' + sfx + '.jpg'
+    ];
+    if (orig && out.indexOf(orig) === -1) {
+      if (short === true) out.unshift(orig); else out.push(orig);
+    }
+    return out.slice(0, 6);
+  }
+
   var API = {
     SERVICES: SERVICES,
     SERVICE_IDS: SERVICE_IDS,
@@ -440,7 +488,8 @@
     walk: walk,
     textOf: textOf,
     clockToSec: clockToSec,
-    agoText: agoText
+    agoText: agoText,
+    ytThumbs: ytThumbs
   };
 
   if (typeof module === 'object' && module && module.exports) module.exports = API;

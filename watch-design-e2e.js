@@ -7,7 +7,8 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 //
 //   node watch-design-e2e.js [--cdp 9466] [--shots <dir>] [--prefix watch-design-after] [--shots-only] [--baseline <before-frames.json>]
 //
-// Shots: 1920x1000, 1280x800, 900x800, each at the top and two rows down (dark), plus 1280 light.
+// Shots: 1920x1000, 1536x800, 1280x800, 900x800, each at the top and two rows down (dark), plus 1280 light,
+// and 1280 at the top on a white hero (dark) and a black one (light): the bar's words on its scrim.
 // Checks (not with --shots-only, which is for the BEFORE shots on the old code):
 //   the top: the hero shown, the same after a trip down and back; past the first row the hero is
 //   gone and the bar is 48-56 px and opaque; the rows in view (px) top vs scrolled; nothing overlaps
@@ -31,7 +32,7 @@ const SHOTS_ONLY = argv.includes('--shots-only');
 const ALSO = opt('also-prefix', '');   // a second name for the same files (watch-compact-*)
 const TAG = 'quartz-watch-design-' + process.pid;
 const STUB = (n) => path.join(os.tmpdir(), TAG + '-' + n);
-const SIZES = [[1920, 1000], [1280, 800], [900, 800]];
+const SIZES = [[1920, 1000], [1536, 800], [1280, 800], [900, 800]];
 const KNOWN_YT = new Set(['R6MlUcmOul8', 'PVGeM40dABA', 'mN0zPOpADL4', 'aqz-KE-bpKQ', 'h6fcK_fRYaI', 'wbSwFU6tY1c', 'WhWc3b3KhnY', 'UXqq0ZvbOnk', 'eRsGyueVLvQ', 'SkVqJ1SGeL0', 'TLkA0RELQ1g', 'UF8uR6Z6KLc']);
 
 /* ---- a title card for a fixture still (as tools/watch-preview.js draws them) ---- */
@@ -39,7 +40,8 @@ const titles = new Map();
 function hue(s) { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 360; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function still(url) {
-  const t = titles.get(url) || 'Untitled';
+  const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(url);
+  const t = titles.get(url) || (v && titles.get('yt:' + v[1])) || 'Untitled';
   const h1 = hue(t), h2 = (h1 + 40) % 360, size = t.length > 24 ? 64 : 92;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">' +
     '<defs><radialGradient id="a" cx="22%" cy="18%" r="90%"><stop offset="0" stop-color="hsl(' + h1 + ',38%,46%)"/><stop offset="1" stop-color="hsl(' + h2 + ',30%,12%)"/></radialGradient>' +
@@ -63,7 +65,7 @@ async function guest(q, errors) {
     else if (m.method === 'Fetch.requestPaused') {
       const u = m.params.request.url;
       let host = ''; try { host = new URL(u).hostname; } catch (e) { host = ''; }
-      const yt = /i\.ytimg\.com\/vi\/([^/]+)\//.exec(u);
+      const yt = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(u);   // the sharp-art chain asks /vi_webp/ first
       g.fetched = g.fetched || { pass: 0, drawn: 0 };
       if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.fetched.pass++; else g.fetched.drawn++;
       if (host === 'a.espncdn.com' || (yt && KNOWN_YT.has(yt[1]))) g.send('Fetch.continueRequest', { requestId: m.params.requestId });
@@ -71,7 +73,8 @@ async function guest(q, errors) {
     }
   });
   await g.send('Runtime.enable');
-  await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] });
+  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] });
+  if (fe && fe.error) console.log('[e2e] Fetch.enable failed: ' + JSON.stringify(fe.error));
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
@@ -147,7 +150,13 @@ if (require.main === module) {
       // ... and no picture for that tile, so its title is the clamped title-card text (.noart b)
       const noPic = (o) => { if (Array.isArray(o)) o.forEach(noPic); else if (o && typeof o === 'object') { if (o.title === 'Gypsy Jump: a pygmy\'s journey') o.image = ''; Object.values(o).forEach(noPic); } };
       noPic(snap);
-      for (const it of snap.items) if (it.image) titles.set(it.image, it.title);
+      // every service still at a URL only this run asks for, so none can come from a cache (the profile's
+      // last rows, or the page's memory cache, both hold the real CDN's answer: Disney+ fixtures draw black)
+      const BUST = 'wde=' + process.pid;
+      const bust = (o) => { if (Array.isArray(o)) o.forEach(bust); else if (o && typeof o === 'object') for (const k of Object.keys(o)) { const v = o[k];
+        if (k === 'image' && typeof v === 'string' && /^https:\/\//.test(v) && !/i\.ytimg\.com|espncdn\.com/.test(v)) o[k] = v + (v.indexOf('?') >= 0 ? '&' : '?') + BUST; else bust(v); } };
+      bust(snap);
+      for (const it of snap.items) if (it.image) { titles.set(it.image, it.title); const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(it.image); if (v) titles.set('yt:' + v[1], it.title); }   // the sharp-art chain asks other URLs of the same video
       await g.ev('(() => { window.__designApply = window.__applyWatch; window.__applyWatch = function () { window.__designHeld = (window.__designHeld || 0) + 1; }; window.__designApply(' + JSON.stringify(snap) + '); return 1; })()');
       await sleep(1500);
       await chrome.ev('(() => { const w = findWatchTab(); if (w && w.viewEl) w.viewEl.focus(); return 1; })()').catch(() => 0);
@@ -174,6 +183,8 @@ if (require.main === module) {
           Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => 0) : 0))).then(() => requestAnimationFrame(() => requestAnimationFrame(() =>
             done({ inView: imgs.length, notReady: waiting.length, ms: Math.round(performance.now() - t0) }))));
         };
+        // never hang the run: a page that draws no frame (or a decode that never ends) answers after 20 s, marked
+        setTimeout(() => done({ inView: inView().length, notReady: inView().filter((i) => !i.complete || !i.naturalWidth).length, ms: Math.round(performance.now() - t0), stuck: true }), 20000);
         tick(); })`;
       const settled = {};
       const settle = async () => { settled.last = await g.ev(SETTLE).catch((e) => ({ error: e.message })); await sleep(600); return settled.last; };
@@ -198,6 +209,7 @@ if (require.main === module) {
         await go(0); await blurAll(); await settle();
         const top = await st();
         if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")[0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
+        if (w === 1920 && !SHOTS_ONLY) check(!!g.fetched && g.fetched.drawn > 3, 'the services\' stills in the shots are the test\'s own title cards (' + ((g.fetched && g.fetched.drawn) || 0) + ' drawn; none from a real CDN or a cache)', g.fetched);
         await save(w + 'x' + h + '-top');
         await go(2); await blurAll(); await settle();
         const down = await st();
@@ -239,6 +251,45 @@ if (require.main === module) {
       await sleep(900);
       { const grown = await grow(1280, 800); await size(1280, 800); await go(0); await blurAll(); await settle(); await save('1280x800-light-top'); await go(2); await blurAll(); await settle(); await save('1280x800-light-scrolled');
         await g.send('Emulation.clearDeviceMetricsOverride'); if (grown) await ungrow(); }
+      // the bar's words on its scrim (watch.css .top::after), at the top over the worst art: the hero's
+      // still swapped for a white one (dark theme) and a black one (light). Measured on the shot's own
+      // pixels: each service name and the read status against the backdrop in its padding, on its lines.
+      const ART = {
+        white: '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="#fff"/><circle cx="930" cy="260" r="190" fill="#fff6d8"/></svg>',
+        black: '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="#000"/><circle cx="930" cy="260" r="190" fill="#14110a"/></svg>',
+      };
+      const BAR_TEXT = `(() => { const out = []; const box = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
+        for (const b of document.querySelectorAll('#pills .sp > .sp-main')) { const n = b.querySelector('.sp-name'); if (!n || !n.textContent.trim() || !n.getClientRects().length) continue;
+          out.push({ what: n.textContent.trim(), pad: box(b), text: box(n), color: getComputedStyle(n).color }); }
+        const f = document.querySelector('.strip-end .fresh'), e = document.querySelector('.strip-end');
+        if (f && e && f.getClientRects().length) out.push({ what: f.textContent.trim().slice(0, 30), pad: box(e), text: box(f), color: getComputedStyle(f).color });
+        return out; })()`;
+      const barContrast = async () => {
+        const items = await g.ev(BAR_TEXT);
+        const png = await g.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
+        if (!png.result || !png.result.data) return { error: 'no screenshot' };
+        return g.ev('(async () => { const items = ' + JSON.stringify(items) + '; const im = new Image(); im.src = "data:image/png;base64,' + png.result.data + '"; await im.decode();' +
+          ' const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext("2d"); x.drawImage(im, 0, 0); const k = im.naturalWidth / innerWidth;' +
+          ' const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; const L = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);' +
+          ' return items.map((it) => { const m = /rgba?\\(([\\d.]+),\\s*([\\d.]+),\\s*([\\d.]+)/.exec(it.color); const lt = m ? L(+m[1], +m[2], +m[3]) : 0;' +
+          '   const x0 = Math.round((it.pad.l + 2) * k), x1 = Math.round((it.pad.l + 6) * k), y0 = Math.round(it.text.t * k), y1 = Math.round(it.text.b * k);' +
+          '   const d = x.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data; let worst = 99;' +
+          '   for (let i = 0; i < d.length; i += 4) { const lb = L(d[i], d[i + 1], d[i + 2]); const cr = (Math.max(lt, lb) + 0.05) / (Math.min(lt, lb) + 0.05); if (cr < worst) worst = cr; }' +
+          '   return { what: it.what, contrast: Math.round(worst * 100) / 100 }; }); })()');
+      };
+      for (const [theme, art, name] of [['dark', 'white', '1280x800-white-art-top'], ['light', 'black', '1280x800-light-black-art-top']]) {
+        await chrome.ev('setTheme("' + theme + '"), 1').catch(() => 0);
+        await sleep(700);
+        const grown = await grow(1280, 800); await size(1280, 800); await go(0); await blurAll(); await settle();
+        const old = await g.ev('(async () => { const i = document.querySelector(".stage .pic .w > img"); if (!i) return null; const was = i.getAttribute("src"); i.src = "data:image/svg+xml," + encodeURIComponent(' + JSON.stringify(ART[art]) + '); await i.decode().catch(() => 0); return was; })()');
+        await sleep(500);
+        const cr = old ? await barContrast().catch((e) => ({ error: e.message })) : { error: 'no hero picture' };
+        say(name + ': the bar\'s words on ' + art + ' art ' + JSON.stringify(cr));
+        await save(name);
+        if (!SHOTS_ONLY) check(Array.isArray(cr) && cr.length >= 3 && cr.every((x) => x.contrast >= 4.5), name + ': on ' + art + ' hero art every service name and the read status keep 4.5:1 (the bar\'s scrim)', cr);
+        if (old) await g.ev('(() => { const i = document.querySelector(".stage .pic .w > img"); if (i) i.src = ' + JSON.stringify(old) + '; return 1; })()');
+        await g.send('Emulation.clearDeviceMetricsOverride'); if (grown) await ungrow();
+      }
       await chrome.ev('setTheme("dark"), 1').catch(() => 0);
       await sleep(600);
       fs.writeFileSync(path.join(SHOTS, PREFIX + '-measure.json'), JSON.stringify(measured, null, 1));

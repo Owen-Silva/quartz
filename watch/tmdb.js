@@ -256,13 +256,82 @@ async function check(key, fetchJson) {
   }
 }
 
+/* ---------------------------------------------------------------------- trailers */
+/*
+ * trailer(title, opts, key, fetchJson) -> { state, reason, videoId, name }
+ *   state 'ok'      videoId is the official YouTube trailer's id (the hover preview, watch/preview.js)
+ *         'none'    TMDB has the title but no YouTube trailer, or no title matched; reason says which
+ *         'bad-key' | 'rate-limited' | 'offline' | 'error'   with the reason, as search() words them
+ * opts.tv: the title looks like a series (an "S2 E4" subtitle). Two reads: /search/multi, then
+ * /{movie|tv}/{id}/videos. Never throws; the key never appears in what it returns.
+ */
+const VIDEO_TYPE_RANK = { trailer: 0, teaser: 1, clip: 2, featurette: 3 };
+
+function foldTitle(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '');
+}
+
+/** The /search/multi hit a Watch title means: an exact title match (series first when tv), else the first movie/tv hit. */
+function matchHit(hits, title, tv) {
+  const mapped = (Array.isArray(hits) ? hits : []).map(mapHit).filter(Boolean);
+  if (!mapped.length) return null;
+  const want = foldTitle(title);
+  const exact = mapped.filter((h) => foldTitle(h.title) === want);
+  const pool = exact.length ? exact : mapped;
+  const typed = pool.filter((h) => h.mediaType === (tv ? 'tv' : 'movie'));
+  return (typed.length && exact.length ? typed[0] : pool[0]) || null;
+}
+
+/** The best YouTube video in a /videos answer -> { key, name } or null. Official trailers first. */
+function pickTrailer(results) {
+  const list = (Array.isArray(results) ? results : []).filter((v) => v && typeof v === 'object' &&
+    String(v.site || '').toLowerCase() === 'youtube' && /^[A-Za-z0-9_-]{11}$/.test(String(v.key || '')));
+  if (!list.length) return null;
+  const rank = (v) => {
+    const t = VIDEO_TYPE_RANK[String(v.type || '').toLowerCase()];
+    return (t === undefined ? 4 : t) * 4 + (v.official === false ? 2 : 0) + (v.iso_639_1 && v.iso_639_1 !== 'en' ? 1 : 0);
+  };
+  const best = list.map((v, i) => ({ v, i, r: rank(v) })).sort((a, b) => a.r - b.r || a.i - b.i)[0].v;
+  return { key: String(best.key), name: Shape.cleanText(best.name || '', 120) };
+}
+
+function trailerAnswer(state, reason, key, videoId, name) {
+  return { state, reason: scrub(reason || '', key), videoId: videoId || '', name: name || '' };
+}
+
+async function trailer(title, opts, key, fetchJson) {
+  try {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const query = Shape.cleanText(typeof title === 'string' ? title : '', 200);
+    if (!query) return trailerAnswer('none', 'No title to look a trailer up by', '');
+    const k = usableKey(key);
+    if (!k) return trailerAnswer('bad-key', key ? 'That TMDB key has spaces or odd characters in it; check it in Settings > Watch' : 'Add the free TMDB key in Settings > Watch for trailer previews', '');
+    const res = await get(fetchJson, '/search/multi?query=' + encodeURIComponent(query) + '&include_adult=false&language=en-US&page=1', k);
+    const bad = failure(res, k);
+    if (bad) return trailerAnswer(bad.state, bad.reason, k);
+    const hit = matchHit(res.json.results, query, !!o.tv);
+    if (!hit) return trailerAnswer('none', 'No trailer preview: TMDB has nothing called “' + query + '”', k);
+    const vr = await get(fetchJson, '/' + hit.mediaType + '/' + hit.tmdbId + '/videos?language=en-US', k);
+    const vbad = failure(vr, k);
+    if (vbad) return trailerAnswer(vbad.state, vbad.reason, k);
+    const pick = pickTrailer(vr.json.results);
+    if (!pick) return trailerAnswer('none', 'No trailer preview: TMDB lists no YouTube trailer for “' + hit.title + '”', k);
+    return trailerAnswer('ok', '', k, pick.key, pick.name);
+  } catch (err) {
+    return trailerAnswer('error', 'TMDB trailer lookup failed (' + String((err && err.message) || err).slice(0, 100) + ')', typeof key === 'string' ? key.trim() : '');
+  }
+}
+
 module.exports = {
   API_BASE,
   ATTRIBUTION,
   search,
   check,
+  trailer,
   keyMode,
   // exposed for tests
   serviceForProvider,
   mapProviders,
+  matchHit,
+  pickTrailer,
 };
