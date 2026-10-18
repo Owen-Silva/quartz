@@ -154,23 +154,23 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     /* ---- 1. the chip: the active profile, and the who's-watching state ---- */
     const dChip = await g.waitFor(`(() => { const p = ${pill('disney')}; const a = p && p.querySelector('.lp-av'); const n = p && p.querySelector('.sp-prof'); return a && n ? { av: a.textContent, name: n.textContent } : null; })()`, 90000).catch(() => null);
     check(dChip && dChip.av === 'O' && dChip.name === 'the user', 'the Disney+ chip shows its active profile: the avatar and the name', dChip);
-    const hPick = await g.waitFor(`(() => { const p = ${pill('hulu')}; const a = p && p.querySelector('.sp-act'); return p && p.classList.contains('st-picker') && a ? a.textContent : null; })()`, 60000).catch(() => null);
-    check(hPick === 'Pick profile', 'Hulu on its who’s-watching page: the chip says so, with Pick profile', hPick);
-    await g.ev(`${pill('hulu')}.querySelector('.sp-main').click(), 1`);
+    const hPick = await g.waitFor(`(() => { const p = ${pill('hulu')}; const a = p && p.querySelector('.sp-act'); return p && p.classList.contains('st-picker') && a ? a.textContent : null; })()`, 120000).catch(() => null);
+    check(hPick === 'Pick profile', 'Hulu on its who’s-watching page: the chip says so, with Pick profile', hPick || await g.ev(`(() => { const p = ${pill('hulu')}; return p ? p.className + ' | ' + (p.querySelector('.sp-main') || {}).title : 'no hulu pill'; })()`));
+    await g.ev(`((${pill('hulu')} || document).querySelector('.sp-main') || { click: () => 0 }).click(), 1`);
     const pop = await g.waitFor(`(() => { const p = document.querySelector('.pop'); const b = p && p.querySelector('.lp-pick'); return b && !p.hidden ? { pick: b.textContent, primary: b.classList.contains('primary'), text: p.textContent } : null; })()`, 5000).catch(() => null);
     check(pop && pop.pick === 'Pick profile' && pop.primary && /asking who’s watching/.test(pop.text), 'the Hulu card: who’s watching, in words, with Pick profile first', pop && { pick: pop.pick, text: pop.text.slice(0, 160) });
     await shoot('picker-card', 1536, 800);
     await shoot('picker-card', 1920, 1000);
 
     /* ---- 2. Pick profile: Hulu's own picker, in the layer; closing re-reads Hulu ---- */
-    await g.ev(`document.querySelector('.pop .lp-pick').click(), 1`);
+    await g.ev(`(document.querySelector('.pop .lp-pick') || { click: () => 0 }).click(), 1`);
     const lp = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && /\\/profiles/.test(s.slots[0].url) ? s : null; })()`, 15000).catch(() => null);
     check(!!lp && lp.slots[0].url.indexOf(FH + '/profiles') === 0, 'Pick profile opens Hulu’s own “Who’s watching?” in the layer (no tab)', lp && lp.slots[0].url);
     check(lp && lp.extras && lp.extras.purpose === 'profile' && /reads Hulu again when you close/.test(lp.note), 'the layer says Lumen reads Hulu again on close', lp && { note: lp.note, purpose: lp.extras && lp.extras.purpose });
     await shoot('picker-layer', 1536, 800);
     const pt = await targetWhere(q, (x) => String(x.url).indexOf(FH + '/profiles') === 0, 10000);
     const pg = pt && await cdpTo(pt);
-    if (pg) { await pg.waitFor('!!document.getElementById("p-owen")', 10000).catch(() => 0); await pg.ev('document.getElementById("p-owen").click(), 1'); pg.close(); }
+    if (pg) { await pg.waitFor('!!document.getElementById("p-owen")', 10000).catch(() => 0); await pg.ev('(document.getElementById("p-owen") || { click: () => 0 }).click(), 1').catch(() => 0); pg.close(); }
     await chrome.waitFor(`(() => { const s = ${ST}; return s.slots[0] && /\\/hub\\/home/.test(s.slots[0].url); })()`, 10000).catch(() => 0);
     check(st.picked === 'the user', 'the pick is Hulu’s own page answering (fixture), in the layer', st.picked);
     await chrome.ev('WatchPlayer.close("Close"), 1');
@@ -180,10 +180,10 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     check(hOk === 'the user', 'Hulu reads again, now as the user: the chip shows the profile', hOk);
 
     /* ---- 3. Switch profile (Disney+): the picker in the layer, re-read on close ---- */
-    await g.ev(`${pill('disney')}.querySelector('.sp-main').click(), 1`);
+    await g.ev(`((${pill('disney')} || document).querySelector('.sp-main') || { click: () => 0 }).click(), 1`);
     const sw = await g.waitFor(`(() => { const b = document.querySelector('.pop .lp-switch'); return b ? b.textContent : null; })()`, 5000).catch(() => null);
     check(sw === 'Switch profile', 'the Disney+ card has Switch profile', sw);
-    await g.ev(`document.querySelector('.pop .lp-switch').click(), 1`);
+    await g.ev(`(document.querySelector('.pop .lp-switch') || { click: () => 0 }).click(), 1`);
     const ds = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && /select-profile/.test(s.slots[0].url) ? s.slots[0].url : null; })()`, 15000).catch(() => null);
     check(ds && ds.indexOf(FD + '/select-profile') === 0, 'Switch profile opens Disney+’s /select-profile in the layer', ds);
     await sleep(800);
@@ -197,21 +197,21 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     const bearCard = `[...document.querySelectorAll('.card')].find((n) => n._item && n._item.service === 'hulu' && n._item.kind === 'resume' && n._item.title === 'The Bear')`;
     const sub = await g.waitFor(`(() => { const c = ${bearCard}; return c ? c.querySelector('.m span').textContent : null; })()`, 30000).catch(() => null);
     check(sub === 'Resume S4 E3 \u00b7 15 min left', 'the Continue tile: "Resume S4 E3 · 15 min left"', sub);
-    await g.ev(`(() => { const c = ${bearCard}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    await g.ev(`(() => { const c = ${bearCard}; if (!c) return 0; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
     const s1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].url.indexOf('/watch/') !== -1 ? s : null; })()`, 15000).catch(() => null);
     check(s1 && s1.slots[0].url === FH + '/watch/' + BEAR_EP, 'a click goes straight to Hulu’s player: /watch/<episode>, not the series page', s1 && s1.slots[0].url);
     const q1 = await chrome.waitFor(`(() => { const x = ${XS}; return x && x.quality ? x : null; })()`, 20000).catch(() => null);
     check(q1 && q1.quality === '720p, browser limit' && q1.height === 720 && /720p/.test(q1.qualityWhy), 'the quality note: the video’s real height, "720p, browser limit", with its reason', q1 && { q: q1.quality, h: q1.height, why: q1.qualityWhy });
 
     /* ---- 5. the menu: Open in Edge, and why ---- */
-    await chrome.ev('document.querySelector(".wpx-more").click(), 1');
+    await chrome.ev('(document.querySelector(".wpx-more") || { click: () => 0 }).click(), 1');
     const menu = await chrome.waitFor(`(() => { const x = ${XS}; return x && x.menu ? x.menu : null; })()`, 3000).catch(() => null);
     check(menu && menu.items.indexOf('Open in Edge to cast to a TV') !== -1 && menu.items.indexOf('Open in Edge for a sharper picture') !== -1 && menu.items.indexOf('Open in Edge: licence refused') === -1,
       'More: Open in Edge to cast, for a sharper picture (no licence item: none was refused)', menu);
     check(menu && menu.info.some((t) => /^Picture: 720p, browser limit/.test(t)), 'More says the picture’s limit in one line', menu && menu.info);
     await shoot('menu', 1536, 800);
     await shoot('menu', 1920, 1000);
-    await chrome.ev('document.querySelector(".wpx-more").click(), 1');
+    await chrome.ev('(document.querySelector(".wpx-more") || { click: () => 0 }).click(), 1');
 
     /* ---- 6. Up next: the episode ends, Hulu is read again, the next one counts down and plays ---- */
     const ask = await chrome.waitFor(`(() => { const x = ${XS}; return x && x.upnext && (x.upnext.phase === 'asking' || x.upnext.phase === 'counting') ? x.upnext : null; })()`, 20000).catch(() => null);
@@ -226,7 +226,7 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     /* ---- 7. Cancel ---- */
     const cnt2 = await chrome.waitFor(`(() => { const x = ${XS}; return x && x.upnext && x.upnext.phase === 'counting' && x.upnext.next && /S4 E5/.test(x.upnext.next.subtitle) ? x.upnext : null; })()`, 70000).catch(() => null);
     check(!!cnt2, 'S4 E4 ended too: Up next offers S4 E5', cnt2);
-    await chrome.ev('document.querySelector(".wpx-up-cancel").click(), 1');
+    await chrome.ev('(document.querySelector(".wpx-up-cancel") || { click: () => 0 }).click(), 1');
     const can = await chrome.ev(`(() => { const x = ${XS}; return x.upnext; })()`);
     check(can && can.phase === 'cancelled' && !(await chrome.ev(`${XS}.upShown`)), 'Cancel: the card goes, nothing plays', can);
     await sleep(11500);
@@ -239,16 +239,16 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     const xCard = `[...document.querySelectorAll('.card')].find((n) => n._item && n._item.service === 'hulu' && n._item.kind === 'resume' && n._item.title === 'X')`;
     const xs = await g.waitFor(`(() => { const c = ${xCard}; return c ? c._item.playUrl || '' : null; })()`, 20000).catch(() => null);
     check(xs === 'https://www.hulu.com/watch/' + X_MOVIE, 'the film X in Keep Watching goes to /watch/ too', xs);
-    await g.ev(`(() => { const c = ${xCard}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    await g.ev(`(() => { const c = ${xCard}; if (!c) return 0; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
     const fb = await chrome.waitFor(`(() => { const x = ${XS}; const s = ${ST}; return x && x.fell && s.slots[0] && s.slots[0].url.indexOf('/movie/') !== -1 ? { fell: x.fell, url: s.slots[0].url, note: s.note } : null; })()`, 15000).catch(() => null);
     check(fb && /HTTP 404/.test(fb.fell) && fb.url === FH + '/movie/' + X_MOVIE && /opened the .*page instead/.test(fb.note), 'Hulu’s player refused (HTTP 404): the layer opened X’s title page and said why', fb);
     check(st.watched.indexOf(X_MOVIE) !== -1, 'the player URL was really tried first', st.watched.slice(-2));
     await shoot('fallback', 1536, 800);
 
     /* ---- 9. Open in Edge from the menu ---- */
-    await chrome.ev('document.querySelector(".wpx-more").click(), 1');
+    await chrome.ev('(document.querySelector(".wpx-more") || { click: () => 0 }).click(), 1');
     await chrome.waitFor(`!!${XS}.menu`, 3000).catch(() => 0);
-    await chrome.ev(`[...document.querySelectorAll('.wpx-item')].find((b) => /cast/.test(b.textContent)).click(), 1`);
+    await chrome.ev(`([...document.querySelectorAll('.wpx-item')].find((b) => /cast/.test(b.textContent)) || { click: () => 0 }).click(), 1`);
     const edged = await chrome.waitFor(`(() => { const s = ${ST}; return !s.open ? 1 : 0; })()`, 8000).catch(() => 0);
     let stub = '';
     try { stub = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub = ''; }

@@ -496,6 +496,10 @@
       readAt: num(s.readAt),
       lastOkAt: num(s.lastOkAt),
       profile: cleanText(s.profile, 60),
+      // Profiles in Lumen (watch/profiles.js): the picture, the who's-watching state, the service's own picker.
+      avatar: https(s.avatar),
+      picker: s.picker === true && enabled && state === 'error',
+      profilePage: s.profilePage && https(s.profilePage.url) ? { url: https(s.profilePage.url), label: cleanText(s.profilePage.label, 40), where: cleanText(s.profilePage.where, 160) } : null,
       reading: s.reading === true,
       queued: s.queued === true,
       readingSince: s.reading === true ? num(s.readingSince) : 0,
