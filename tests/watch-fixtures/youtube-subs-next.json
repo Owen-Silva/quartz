@@ -1,0 +1,2254 @@
+{
+ "_fixture": "shape from YouTube.js src/parser/classes (RichGrid, RichItem, RichSection, RichShelf, VideoRenderer as Video, LockupView, ShortsLockupView, DecoratedAvatarView, ContentMetadataView, PageHeaderView, C4TabbedHeader, ChannelMetadata, PlaylistVideoList, PlaylistVideo, GridPlaylist, CollectionThumbnailView, ThumbnailBadgeView, BackgroundPromo, AdSlot, ContinuationItem) for /feed/subscriptions, a later read with two new uploads on top, unverified against a live account",
+ "loggedIn": true,
+ "ytInitialData": {
+  "responseContext": {
+   "serviceTrackingParams": [
+    {
+     "service": "GFEEDBACK",
+     "params": [
+      {
+       "key": "logged_in",
+       "value": "1"
+      },
+      {
+       "key": "browse_id",
+       "value": "FEsubscriptions"
+      }
+     ]
+    }
+   ]
+  },
+  "contents": {
+   "twoColumnBrowseResultsRenderer": {
+    "tabs": [
+     {
+      "tabRenderer": {
+       "selected": true,
+       "tabIdentifier": "FEsubscriptions",
+       "content": {
+        "richGridRenderer": {
+         "header": {
+          "feedFilterChipBarRenderer": {
+           "contents": [
+            {
+             "chipCloudChipRenderer": {
+              "text": {
+               "runs": [
+                {
+                 "text": "All"
+                }
+               ]
+              },
+              "isSelected": true
+             }
+            }
+           ]
+          }
+         },
+         "contents": [
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/sbNewVid011/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/sbNewVid011/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "13:01",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "sbNewVid011"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "Reading the Weather: Cloud, Wind, Rain"
+                },
+                "image": {
+                 "decoratedAvatarViewModel": {
+                  "avatar": {
+                   "avatarViewModel": {
+                    "image": {
+                     "sources": [
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s48-c-k-c0x00ffffff-no-rj",
+                       "width": 48,
+                       "height": 48
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s88-c-k-c0x00ffffff-no-rj",
+                       "width": 88,
+                       "height": 88
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s176-c-k-c0x00ffffff-no-rj",
+                       "width": 176,
+                       "height": 176
+                      }
+                     ]
+                    },
+                    "avatarImageSize": "AVATAR_SIZE_M"
+                   }
+                  },
+                  "a11yLabel": "Go to channel Guitar Coach Ryan",
+                  "rendererContext": {
+                   "commandContext": {
+                    "onTap": {
+                     "innertubeCommand": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@guitarcoachryan",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCguitarCoachRyanChan004",
+                       "canonicalBaseUrl": "/@guitarcoachryan"
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "Guitar Coach Ryan",
+                       "commandRuns": [
+                        {
+                         "startIndex": 0,
+                         "length": 17,
+                         "onTap": {
+                          "innertubeCommand": {
+                           "browseEndpoint": {
+                            "browseId": "UCguitarCoachRyanChan004",
+                            "canonicalBaseUrl": "/@guitarcoachryan"
+                           }
+                          }
+                         }
+                        }
+                       ]
+                      }
+                     }
+                    ]
+                   },
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "1,022 views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "12 minutes ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "sbNewVid011",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=sbNewVid011",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "sbNewVid011"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbNewVid012",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbNewVid012/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbNewVid012/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbNewVid012/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Why the Cast-Iron Skillet Is Back"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Why the Cast-Iron Skillet Is Back by Recipe Breakdown"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbNewVid012",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbNewVid012"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                  "canonicalBaseUrl": "/@recipebreakdown"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "17:44"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "40 minutes ago"
+              },
+              "viewCountText": {
+               "simpleText": "4,410 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "4K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "17:44"
+                }
+               },
+               "simpleText": "17:44"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0002",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0002/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0002/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0002/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Knife Skills Demo, Frame by Frame"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Knife Skills Demo, Frame by Frame by Recipe Breakdown"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0002",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0002"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                  "canonicalBaseUrl": "/@recipebreakdown"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "14:32"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "2 hours ago"
+              },
+              "viewCountText": {
+               "simpleText": "18,204 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "18K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "14:32"
+                }
+               },
+               "simpleText": "14:32"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0003/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0003/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "18:05",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "sbVideo0003"
+                     }
+                    }
+                   ],
+                   "progressBar": {
+                    "thumbnailOverlayProgressBarViewModel": {
+                     "startPercent": 30
+                    }
+                   }
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "I Rebuilt My Planes From Scratch"
+                },
+                "image": {
+                 "decoratedAvatarViewModel": {
+                  "avatar": {
+                   "avatarViewModel": {
+                    "image": {
+                     "sources": [
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s48-c-k-c0x00ffffff-no-rj",
+                       "width": 48,
+                       "height": 48
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s88-c-k-c0x00ffffff-no-rj",
+                       "width": 88,
+                       "height": 88
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s176-c-k-c0x00ffffff-no-rj",
+                       "width": 176,
+                       "height": 176
+                      }
+                     ]
+                    },
+                    "avatarImageSize": "AVATAR_SIZE_M"
+                   }
+                  },
+                  "a11yLabel": "Go to channel Pro Shop Joinery",
+                  "rendererContext": {
+                   "commandContext": {
+                    "onTap": {
+                     "innertubeCommand": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@proshopjoinery",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCproShopJoineryChan0002",
+                       "canonicalBaseUrl": "/@proshopjoinery"
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "Pro Shop Joinery",
+                       "commandRuns": [
+                        {
+                         "startIndex": 0,
+                         "length": 16,
+                         "onTap": {
+                          "innertubeCommand": {
+                           "browseEndpoint": {
+                            "browseId": "UCproShopJoineryChan0002",
+                            "canonicalBaseUrl": "/@proshopjoinery"
+                           }
+                          }
+                         }
+                        }
+                       ]
+                      }
+                     }
+                    ]
+                   },
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "41K views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "5 hours ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "sbVideo0003",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=sbVideo0003",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "sbVideo0003"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0004",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0004/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Barre Chord Change Drills for Youth Players"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Barre Chord Change Drills for Youth Players by Guitar Coach Ryan"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0004",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0004"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCguitarCoachRyanChan004",
+                  "canonicalBaseUrl": "/@guitarcoachryan"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayResumePlaybackRenderer": {
+                 "percentDurationWatched": 60
+                }
+               },
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "11:47"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "9 hours ago"
+              },
+              "viewCountText": {
+               "simpleText": "6,031 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "6K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "11:47"
+                }
+               },
+               "simpleText": "11:47"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richSectionRenderer": {
+            "content": {
+             "richShelfRenderer": {
+              "title": {
+               "runs": [
+                {
+                 "text": "Shorts"
+                }
+               ]
+              },
+              "isShorts": true,
+              "icon": {
+               "iconType": "YOUTUBE_SHORTS_BRAND_24"
+              },
+              "contents": [
+               {
+                "richItemRenderer": {
+                 "content": {
+                  "shortsLockupViewModel": {
+                   "entityId": "shorts-shelf-item-sbShort0001",
+                   "accessibilityText": "Comet of the night, 2.1M views - play Short",
+                   "thumbnail": {
+                    "sources": [
+                     {
+                      "url": "https://i.ytimg.com/vi/sbShort0001/frame0.jpg",
+                      "width": 1080,
+                      "height": 1920
+                     }
+                    ]
+                   },
+                   "onTap": {
+                    "innertubeCommand": {
+                     "commandMetadata": {
+                      "webCommandMetadata": {
+                       "url": "/shorts/sbShort0001",
+                       "webPageType": "WEB_PAGE_TYPE_SHORTS"
+                      }
+                     },
+                     "reelWatchEndpoint": {
+                      "videoId": "sbShort0001"
+                     }
+                    }
+                   },
+                   "overlayMetadata": {
+                    "primaryText": {
+                     "content": "Comet of the night"
+                    },
+                    "secondaryText": {
+                     "content": "2.1M views"
+                    }
+                   }
+                  }
+                 }
+                }
+               },
+               {
+                "richItemRenderer": {
+                 "content": {
+                  "shortsLockupViewModel": {
+                   "entityId": "shorts-shelf-item-sbShort0002",
+                   "accessibilityText": "Hiking POV: ridge walk, 640K views - play Short",
+                   "thumbnail": {
+                    "sources": [
+                     {
+                      "url": "https://i.ytimg.com/vi/sbShort0002/frame0.jpg",
+                      "width": 1080,
+                      "height": 1920
+                     }
+                    ]
+                   },
+                   "onTap": {
+                    "innertubeCommand": {
+                     "commandMetadata": {
+                      "webCommandMetadata": {
+                       "url": "/shorts/sbShort0002",
+                       "webPageType": "WEB_PAGE_TYPE_SHORTS"
+                      }
+                     },
+                     "reelWatchEndpoint": {
+                      "videoId": "sbShort0002"
+                     }
+                    }
+                   },
+                   "overlayMetadata": {
+                    "primaryText": {
+                     "content": "Hiking POV: ridge walk"
+                    },
+                    "secondaryText": {
+                     "content": "640K views"
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              ]
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0005/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0005/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "21:09",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "sbVideo0005"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "The Cheapest Gaming Laptop That’s Actually Good"
+                },
+                "image": {
+                 "decoratedAvatarViewModel": {
+                  "avatar": {
+                   "avatarViewModel": {
+                    "image": {
+                     "sources": [
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/clAvatar05=s48-c-k-c0x00ffffff-no-rj",
+                       "width": 48,
+                       "height": 48
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/clAvatar05=s88-c-k-c0x00ffffff-no-rj",
+                       "width": 88,
+                       "height": 88
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/clAvatar05=s176-c-k-c0x00ffffff-no-rj",
+                       "width": 176,
+                       "height": 176
+                      }
+                     ]
+                    },
+                    "avatarImageSize": "AVATAR_SIZE_M"
+                   }
+                  },
+                  "a11yLabel": "Go to channel Circuit Lab",
+                  "rendererContext": {
+                   "commandContext": {
+                    "onTap": {
+                     "innertubeCommand": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@circuitlab",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCcircuitLabChannel00003",
+                       "canonicalBaseUrl": "/@circuitlab"
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "Circuit Lab",
+                       "commandRuns": [
+                        {
+                         "startIndex": 0,
+                         "length": 11,
+                         "onTap": {
+                          "innertubeCommand": {
+                           "browseEndpoint": {
+                            "browseId": "UCcircuitLabChannel00003",
+                            "canonicalBaseUrl": "/@circuitlab"
+                           }
+                          }
+                         }
+                        }
+                       ]
+                      }
+                     }
+                    ]
+                   },
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "702K views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "1 day ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "sbVideo0005",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=sbVideo0005",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "sbVideo0005"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "adSlotRenderer": {
+              "adSlotMetadata": {
+               "slotId": "0:1",
+               "slotType": "SLOT_TYPE_IN_FEED"
+              },
+              "fulfillmentContent": {
+               "fulfilledLayout": {
+                "inFeedAdLayoutRenderer": {
+                 "renderingContent": {
+                  "videoRenderer": {
+                   "videoId": "adVideo0001",
+                   "title": {
+                    "runs": [
+                     {
+                      "text": "An ad"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0006",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0006/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0006/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0006/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Ep. 112: Mission Budget Winners and Losers"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Ep. 112: Mission Budget Winners and Losers by Stargaze Pod"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Stargaze Pod",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@stargazepod",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCstargazePodcastChan005",
+                   "canonicalBaseUrl": "/@stargazepod"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Stargaze Pod",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@stargazepod",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCstargazePodcastChan005",
+                   "canonicalBaseUrl": "/@stargazepod"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Stargaze Pod",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@stargazepod",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCstargazePodcastChan005",
+                   "canonicalBaseUrl": "/@stargazepod"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0006",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0006"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/opAvatar06=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/opAvatar06=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/opAvatar06=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCstargazePodcastChan005",
+                  "canonicalBaseUrl": "/@stargazepod"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "1:12:40"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "2 days ago"
+              },
+              "viewCountText": {
+               "simpleText": "9,880 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "9K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "1:12:40"
+                }
+               },
+               "simpleText": "1:12:40"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0007/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0007/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "8:15",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "sbVideo0007"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "Top 10 Stars of the Week"
+                },
+                "image": {
+                 "decoratedAvatarViewModel": {
+                  "avatar": {
+                   "avatarViewModel": {
+                    "image": {
+                     "sources": [
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/esaAvatar01=s48-c-k-c0x00ffffff-no-rj",
+                       "width": 48,
+                       "height": 48
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/esaAvatar01=s88-c-k-c0x00ffffff-no-rj",
+                       "width": 88,
+                       "height": 88
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/esaAvatar01=s176-c-k-c0x00ffffff-no-rj",
+                       "width": 176,
+                       "height": 176
+                      }
+                     ]
+                    },
+                    "avatarImageSize": "AVATAR_SIZE_M"
+                   }
+                  },
+                  "a11yLabel": "Go to channel ESA",
+                  "rendererContext": {
+                   "commandContext": {
+                    "onTap": {
+                     "innertubeCommand": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@ESA",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCesaOfficialChannel0001",
+                       "canonicalBaseUrl": "/@ESA"
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "ESA",
+                       "commandRuns": [
+                        {
+                         "startIndex": 0,
+                         "length": 3,
+                         "onTap": {
+                          "innertubeCommand": {
+                           "browseEndpoint": {
+                            "browseId": "UCesaOfficialChannel0001",
+                            "canonicalBaseUrl": "/@ESA"
+                           }
+                          }
+                         }
+                        }
+                       ]
+                      }
+                     }
+                    ]
+                   },
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "1.1M views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "3 days ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "sbVideo0007",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=sbVideo0007",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "sbVideo0007"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbPremier08",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbPremier08/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbPremier08/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbPremier08/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Premiere: Our Winter Menu, Previewed"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Premiere: Our Winter Menu, Previewed by Recipe Breakdown"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Recipe Breakdown",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@recipebreakdown",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                   "canonicalBaseUrl": "/@recipebreakdown"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbPremier08",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbPremier08"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/hbAvatar02=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                  "canonicalBaseUrl": "/@recipebreakdown"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "runs": [
+                   {
+                    "text": "UPCOMING"
+                   }
+                  ]
+                 },
+                 "style": "UPCOMING"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "upcomingEventData": {
+               "startTime": "1792627200",
+               "isReminderSet": false,
+               "upcomingEventText": {
+                "runs": [
+                 {
+                  "text": "Premieres "
+                 },
+                 {
+                  "text": "10/20/26, 7:00 PM"
+                 }
+                ]
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "videoRenderer": {
+              "videoId": "sbVideo0009",
+              "thumbnail": {
+               "thumbnails": [
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                 "width": 168,
+                 "height": 94
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                 "width": 336,
+                 "height": 188
+                },
+                {
+                 "url": "https://i.ytimg.com/vi/sbVideo0009/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                 "width": 480,
+                 "height": 270
+                }
+               ]
+              },
+              "title": {
+               "runs": [
+                {
+                 "text": "Fret Work: 5 Drills You Can Do Alone"
+                }
+               ],
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "Fret Work: 5 Drills You Can Do Alone by Guitar Coach Ryan"
+                }
+               }
+              },
+              "longBylineText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "ownerText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "shortBylineText": {
+               "runs": [
+                {
+                 "text": "Guitar Coach Ryan",
+                 "navigationEndpoint": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/@guitarcoachryan",
+                    "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                   }
+                  },
+                  "browseEndpoint": {
+                   "browseId": "UCguitarCoachRyanChan004",
+                   "canonicalBaseUrl": "/@guitarcoachryan"
+                  }
+                 }
+                }
+               ]
+              },
+              "navigationEndpoint": {
+               "commandMetadata": {
+                "webCommandMetadata": {
+                 "url": "/watch?v=sbVideo0009",
+                 "webPageType": "WEB_PAGE_TYPE_WATCH"
+                }
+               },
+               "watchEndpoint": {
+                "videoId": "sbVideo0009"
+               }
+              },
+              "channelThumbnailSupportedRenderers": {
+               "channelThumbnailWithLinkRenderer": {
+                "thumbnail": {
+                 "thumbnails": [
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s48-c-k-c0x00ffffff-no-rj",
+                   "width": 48,
+                   "height": 48
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s88-c-k-c0x00ffffff-no-rj",
+                   "width": 88,
+                   "height": 88
+                  },
+                  {
+                   "url": "https://yt3.ggpht.com/ytc/gcrAvatar04=s176-c-k-c0x00ffffff-no-rj",
+                   "width": 176,
+                   "height": 176
+                  }
+                 ]
+                },
+                "navigationEndpoint": {
+                 "browseEndpoint": {
+                  "browseId": "UCguitarCoachRyanChan004",
+                  "canonicalBaseUrl": "/@guitarcoachryan"
+                 }
+                },
+                "accessibility": {
+                 "accessibilityData": {
+                  "label": "Go to channel"
+                 }
+                }
+               }
+              },
+              "thumbnailOverlays": [
+               {
+                "thumbnailOverlayTimeStatusRenderer": {
+                 "text": {
+                  "simpleText": "9:58"
+                 },
+                 "style": "DEFAULT"
+                }
+               },
+               {
+                "thumbnailOverlayToggleButtonRenderer": {
+                 "isToggled": false,
+                 "untoggledIcon": {
+                  "iconType": "WATCH_LATER"
+                 }
+                }
+               }
+              ],
+              "menu": {
+               "menuRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Save to Watch later"
+                     }
+                    ]
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "publishedTimeText": {
+               "simpleText": "1 week ago"
+              },
+              "viewCountText": {
+               "simpleText": "12,775 views"
+              },
+              "shortViewCountText": {
+               "simpleText": "12K views"
+              },
+              "lengthText": {
+               "accessibility": {
+                "accessibilityData": {
+                 "label": "9:58"
+                }
+               },
+               "simpleText": "9:58"
+              }
+             }
+            }
+           }
+          },
+          {
+           "richItemRenderer": {
+            "content": {
+             "lockupViewModel": {
+              "contentImage": {
+               "thumbnailViewModel": {
+                "image": {
+                 "sources": [
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0010/hqdefault.jpg?sqp=lk1",
+                   "width": 360,
+                   "height": 202
+                  },
+                  {
+                   "url": "https://i.ytimg.com/vi/sbVideo0010/hq720.jpg?sqp=lk2",
+                   "width": 720,
+                   "height": 404
+                  }
+                 ]
+                },
+                "overlays": [
+                 {
+                  "thumbnailBottomOverlayViewModel": {
+                   "badges": [
+                    {
+                     "thumbnailBadgeViewModel": {
+                      "text": "16:22",
+                      "badgeStyle": "THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT",
+                      "animationActivationTargetId": "sbVideo0010"
+                     }
+                    }
+                   ]
+                  }
+                 },
+                 {
+                  "thumbnailHoverOverlayToggleActionsViewModel": {
+                   "buttons": []
+                  }
+                 }
+                ]
+               }
+              },
+              "metadata": {
+               "lockupMetadataViewModel": {
+                "title": {
+                 "content": "Building a Backyard Shed, Part 2 (the Joists Go Up)"
+                },
+                "image": {
+                 "decoratedAvatarViewModel": {
+                  "avatar": {
+                   "avatarViewModel": {
+                    "image": {
+                     "sources": [
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s48-c-k-c0x00ffffff-no-rj",
+                       "width": 48,
+                       "height": 48
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s88-c-k-c0x00ffffff-no-rj",
+                       "width": 88,
+                       "height": 88
+                      },
+                      {
+                       "url": "https://yt3.ggpht.com/ytc/pshAvatar03=s176-c-k-c0x00ffffff-no-rj",
+                       "width": 176,
+                       "height": 176
+                      }
+                     ]
+                    },
+                    "avatarImageSize": "AVATAR_SIZE_M"
+                   }
+                  },
+                  "a11yLabel": "Go to channel Pro Shop Joinery",
+                  "rendererContext": {
+                   "commandContext": {
+                    "onTap": {
+                     "innertubeCommand": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@proshopjoinery",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCproShopJoineryChan0002",
+                       "canonicalBaseUrl": "/@proshopjoinery"
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                },
+                "metadata": {
+                 "contentMetadataViewModel": {
+                  "metadataRows": [
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "Pro Shop Joinery",
+                       "commandRuns": [
+                        {
+                         "startIndex": 0,
+                         "length": 16,
+                         "onTap": {
+                          "innertubeCommand": {
+                           "browseEndpoint": {
+                            "browseId": "UCproShopJoineryChan0002",
+                            "canonicalBaseUrl": "/@proshopjoinery"
+                           }
+                          }
+                         }
+                        }
+                       ]
+                      }
+                     }
+                    ]
+                   },
+                   {
+                    "metadataParts": [
+                     {
+                      "text": {
+                       "content": "88K views"
+                      }
+                     },
+                     {
+                      "text": {
+                       "content": "2 weeks ago"
+                      }
+                     }
+                    ]
+                   }
+                  ],
+                  "delimiter": " • "
+                 }
+                },
+                "menuButton": {
+                 "buttonViewModel": {
+                  "iconName": "MORE_VERT"
+                 }
+                }
+               }
+              },
+              "contentId": "sbVideo0010",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "rendererContext": {
+               "commandContext": {
+                "onTap": {
+                 "innertubeCommand": {
+                  "commandMetadata": {
+                   "webCommandMetadata": {
+                    "url": "/watch?v=sbVideo0010",
+                    "webPageType": "WEB_PAGE_TYPE_WATCH"
+                   }
+                  },
+                  "watchEndpoint": {
+                   "videoId": "sbVideo0010"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          },
+          {
+           "continuationItemRenderer": {
+            "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN",
+            "continuationEndpoint": {
+             "continuationCommand": {
+              "token": "CONT_TOKEN_x",
+              "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+             }
+            }
+           }
+          }
+         ],
+         "targetId": "browse-feedFEsubscriptions"
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  "header": {
+   "feedTabbedHeaderRenderer": {
+    "title": {
+     "runs": [
+      {
+       "text": "Latest"
+      }
+     ]
+    }
+   }
+  },
+  "topbar": {
+   "desktopTopbarRenderer": {
+    "logo": {
+     "topbarLogoRenderer": {
+      "iconImage": {
+       "iconType": "YOUTUBE_LOGO"
+      }
+     }
+    },
+    "topbarButtons": [
+     {
+      "topbarMenuButtonRenderer": {
+       "avatar": {
+        "thumbnails": [
+         {
+          "url": "https://yt3.ggpht.com/ytc/meAvatar=s88",
+          "width": 88,
+          "height": 88
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}
