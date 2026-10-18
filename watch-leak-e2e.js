@@ -279,9 +279,20 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
     await sleep(500);
 
     /* ---- 3. YouTube: the embed for a tile, "Full page", the fallback ---- */
+    // Section 2 leaves YouTube's page playing, and a multiview open with a player up ADDS a tile
+    // (watch-player-multi.js): close it first, so this tile is the layer's one slot.
+    await chrome.ev('WatchPlayer.close("e2e"), 1');
+    await chrome.waitFor(`!${ST}.open`, 8000).catch(() => 0);
+    check(!(await chrome.ev(`${ST}.open`)), 'section 3 starts with the layer closed');
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=' + VID + '&t=30')}, { service: 'youtube', title: 'A tile', multi: true }), 1`);
     sl = await layerAt(FY + '/embed/' + VID);
     check(!!sl && /[?&]start=30(&|$)/.test(sl.url), 'a multiview tile plays the embed, at the same time', sl && sl.url);
+    // With nothing else playing, that tile waits in the corner for the next pick (the mini-player).
+    // Its restore button brings it back full size, where the "Full page" button is checked.
+    const MS = '(WatchPlayer._state().multi || {})';
+    await chrome.ev('(() => { const b = document.querySelector(".mv-mini-restore"); if (b) b.click(); return 1; })()');
+    const full = await chrome.waitFor(`(() => { const m = ${MS}; const s = ${ST}; return s.open && s.n === 1 && !m.mini && !m.pick ? { n: s.n } : null; })()`, 5000).catch(() => null);
+    check(!!full, 'the corner player restores to the full layer, still one tile', { multi: await chrome.ev(MS), n: await chrome.ev(`${ST}.n`) });
     await chrome.waitFor('WatchPlayerYT._state().fullShown', 5000).catch(() => 0);
     check(await chrome.ev('WatchPlayerYT._state().fullShown'), 'the embed has a "Full page" button');
     await sleep(600);
