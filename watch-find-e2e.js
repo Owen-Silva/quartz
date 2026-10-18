@@ -154,6 +154,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     check(searchHits('disney') + searchHits('hulu') + searchHits('prime') === 0, 'typing alone reads no service (only Enter does)', hits.map((h) => h.svc + h.path));
     await key(g, ...ENTER);
     const done1 = await g.waitFor(FS + '.done && ' + FS, 30000).catch(() => null);
+    await g.waitFor('!document.querySelector("#results .fd-spin")', 5000).catch(() => 0);   // the last answer drawn (one frame later)
     check(!!done1 && done1.services.join() === 'disney:ok,hulu:ok,prime:ok' && done1.youtube === 'ok', 'Enter: Disney+, Hulu, Prime Video and YouTube all answered', done1);
     const order = hits.filter((h) => h.path === '/search' || /^\/search\//.test(h.path)).map((h) => h.svc);
     check(order.join() === 'disney,hulu,prime', "one read of each service's own search page, one at a time, in order", order);
@@ -227,6 +228,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     await g.send('Input.insertText', { text: 'cocaine bear' });
     await key(g, ...ENTER);
     const done3 = await g.waitFor(FS + '.done && ' + FS, 30000).catch(() => null);
+    await g.waitFor('!document.querySelector("#results .fd-spin")', 5000).catch(() => 0);   // the last answer drawn (one frame later)
     check(!!done3 && done3.services.join() === 'disney:ok,hulu:signed-out,prime:error' && done3.youtube === 'ok', 'cocaine bear: Disney+ ok, Hulu signed out, Prime Video failed, YouTube ok', done3);
     const fv = await g.ev(`(() => { const r = document.getElementById('results'); const sec = (k) => r.querySelector('[data-sec="' + k + '"]'); return { sign: (sec('hulu').querySelector('.fd-sign') || {}).textContent || '', err: (sec('prime').querySelector('.fd-note') || {}).textContent || '', retry: !!sec('prime').querySelector('.fd-note .btn'), disney: sec('disney').querySelectorAll('.fd-tile').length, yt: sec('youtube').querySelectorAll('.fd-tile').length }; })()`);
     check(fv.sign === 'Sign in to search Hulu', 'signed out: "Sign in to search Hulu"', fv.sign);
