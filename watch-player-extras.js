@@ -173,7 +173,7 @@
     s.tile.classList.remove('has-state');
     try { var pr = s.view.loadURL(to); if (pr && pr.catch) pr.catch(function () { /* did-fail-load says the rest */ }); } catch (e) { s.view.setAttribute('src', to); }
     CTX.note(why + ', so Lumen opened the ' + (s.item && s.item.title ? s.item.title + ' ' : '') + 'page instead');
-    try { if (CTX.api) CTX.api.escape('fell back to the title page: ' + why, x.playUrl); } catch (e) { /* the log line is a nicety */ }
+    try { console.warn('[lumen] ' + why + '; fell back to the title page'); } catch (e) { /* no console */ }
   }
 
   /* --------------------------------------------------------------- the page's media events */

@@ -121,5 +121,12 @@
     acts.insertBefore(btn('btn primary lp-pick', 'Pick a ' + s.name + ' profile', function () { pick(s, send); }), acts.firstChild);
   }
 
-  window.LumenProfiles = { chip: chip, popHead: popHead, popActs: popActs, popWords: popWords, freshPick: freshPick, emptyPick: emptyPick, avatar: avatar };
+  // watch.js calls these mid-render: one that throws must never take the strip or the card down with it.
+  function guard(fn, name) {
+    return function () {
+      try { return fn.apply(null, arguments); } catch (e) { try { console.warn('[lumen profiles] ' + name + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ } return false; }
+    };
+  }
+  window.LumenProfiles = { chip: guard(chip, 'chip'), popHead: guard(popHead, 'popHead'), popActs: guard(popActs, 'popActs'), popWords: guard(popWords, 'popWords'),
+    freshPick: guard(freshPick, 'freshPick'), emptyPick: guard(emptyPick, 'emptyPick'), avatar: avatar };
 })();
