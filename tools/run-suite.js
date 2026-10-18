@@ -82,6 +82,8 @@ const TESTS = [
   { name: 'watch-leaks', file: 'watch-leaks-harness.js' },
   // Lumen sports (watch/sports.js, sports-main.js): ESPN-shaped fixtures, a fake fetch, no network.
   { name: 'sports', file: 'tests/sports-test.js' },
+  // Lumen multiview (watch-player-multi.js, watch-player-main.js): the tile embed, the simulated RAM, the keys.
+  { name: 'watch-multi', file: 'tests/watch-multi-test.js' },
   // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
   // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
   { name: 'watch-shows', file: 'tests/watch-shows-test.js' },
