@@ -112,7 +112,7 @@ run('lumen-btn-e2e', async ({ check, launch, say }) => {
     check(s1.frontIsLumen && s1.tabCount === n0 + 1 && s1.lumenTabs.length === 1, 'a click opens Lumen in a new tab, in front (' + n0 + ' -> ' + s1.tabCount + ' tabs)', s1);
     await sleep(150);
     const s1b = await st();
-    check(s1b.active && s1b.current === 'page', 'lit while Lumen is the tab in front (.is-active, aria-current="page")', s1b);
+    check(s1b.active && s1b.current === 'true', 'lit while Lumen is the tab in front (.is-active, aria-current="true")', s1b);
     const lumenId = s1.lumenTabs[0];
 
     /* ---- off Lumen, the light goes out ---- */

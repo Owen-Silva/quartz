@@ -4667,7 +4667,7 @@ function openWatchTab() {
 }
 
 /**
- * The toolbar's Lumen button: lit (the accent, aria-current) while the tab in
+ * The toolbar's Lumen button: lit (the accent, aria-current="true") while the tab in
  * front IS Lumen. Repainted on every tabchange and on the front tab's own
  * navigations, like the save star. Cheap: one class and one attribute.
  */
@@ -4677,7 +4677,7 @@ function updateLumenBtn() {
   const on = !!(tab && tab.kind === 'page' && isWatchUrl(tab.url));
   if (lumenBtnEl.classList.contains('is-active') === on) return;
   lumenBtnEl.classList.toggle('is-active', on);
-  if (on) lumenBtnEl.setAttribute('aria-current', 'page');
+  if (on) lumenBtnEl.setAttribute('aria-current', 'true');  // 'true', not 'page': Settings' nav owns the page item
   else lumenBtnEl.removeAttribute('aria-current');
 }
 
