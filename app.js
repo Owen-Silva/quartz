@@ -12168,7 +12168,8 @@ function moduleShortcut(action) {
   const modules = [
     window.FindBar, window.Downloads, window.History,
     window.Settings, window.Shield, window.Reader, window.TabSearch, window.SiteInfo,
-    window.Capture, window.Bookmarks, window.Pip, window.Workspaces, window.UserStyle
+    window.Capture, window.Bookmarks, window.Pip, window.Workspaces, window.UserStyle,
+    window.WatchPlayer
   ];
   for (const mod of modules) {
     if (!mod || typeof mod.handleShortcut !== 'function') continue;
@@ -12276,6 +12277,9 @@ const ACTIONS = {
  */
 function runShortcut(id, payload) {
   const key = typeof id === 'string' ? id : '';
+  // The Watch player layer, while it is on screen, owns Back (watch-player.js); Esc reaches it
+  // through moduleShortcut, after every panel that sits above it.
+  if (key === 'back' && window.WatchPlayer && window.WatchPlayer.handleShortcut('back')) return true;
   const run = key ? ACTIONS[key] : null;
   if (!run) return false;
   run(payload || {});

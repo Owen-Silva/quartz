@@ -1,0 +1,154 @@
+/* ============================================================
+   watch-player.css -- the Watch player layer (watch-player.js).
+
+   Full-bleed and dark in both themes (a player, not a panel): a slim
+   bar on top, the service's page under it. No backdrop-filter
+   anywhere on the layer (a tall blurred element drops raster tiles
+   on this GPU). It opens and closes on the shared spring
+   (tokens.css --m-spring / --m-accel / --m-dur-*); reduced motion
+   is a short fade.
+   ============================================================ */
+.wp-layer {
+  position: absolute;
+  z-index: 6;                       /* over the Watch <webview> in #views, under the chrome's menus */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #0b0c0d;
+  color: #e9eaec;
+  font: 13px/1.3 var(--font);
+  opacity: 0;
+  transform: translateY(14px) scale(0.985);
+  transform-origin: 50% 40%;
+  transition: opacity var(--m-dur-m-out) var(--m-fade-out), transform var(--m-dur-m-out) var(--m-accel);
+}
+.wp-layer[hidden] { display: none !important; }
+.wp-layer.wp-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in), transform var(--m-dur-m) var(--m-spring);
+}
+.wp-layer.wp-out { opacity: 0; transform: translateY(10px) scale(0.99); pointer-events: none; }
+
+/* The video's own fullscreen: the layer fills the window (the chrome hides) with no bar. */
+.wp-layer.wp-fs { position: fixed; inset: 0; z-index: 2147483000; transform: none; transition: none; }
+.wp-layer.wp-fs .wp-bar { display: none; }
+.wp-layer.wp-fs .wp-tile:not(.is-fs) { display: none; }
+.wp-layer.wp-fs .wp-grid { padding: 0; gap: 0; }
+
+/* --- the bar ----------------------------------------------------- */
+.wp-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px 0 8px;
+  background: #121315;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  min-width: 0;
+}
+.wp-grow { flex: 1 1 auto; min-width: 8px; }
+.wp-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font: inherit;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.wp-btn:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.16); }
+.wp-btn:active { background: rgba(255, 255, 255, 0.14); }
+.wp-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wp-btn:disabled { opacity: 0.55; cursor: default; }
+.wp-btn.wp-back { padding-left: 10px; }
+.wp-btn.wp-back::before { content: '\E72B'; font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets'; font-size: 11px; margin-right: 7px; }
+.wp-btn.wp-close { width: 30px; padding: 0; border-color: transparent; background: transparent; font-size: 12px; }
+.wp-btn.wp-close:hover { background: rgba(255, 255, 255, 0.08); }
+.wp-btn[hidden] { display: none; }
+.wp-btn.wp-primary { background: rgba(114, 173, 202, 0.20); border-color: rgba(114, 173, 202, 0.45); }
+.wp-btn.wp-primary:hover { background: rgba(114, 173, 202, 0.30); }
+
+.wp-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font: 700 10.5px/1 var(--font-display);
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: #3a3c40;
+}
+.wp-mark:empty { display: none; }
+.wp-mark[data-svc="youtube"] { background: #c4302b; }
+.wp-mark[data-svc="disney"]  { background: #113ccf; }
+.wp-mark[data-svc="hulu"]    { background: #1ce783; color: #0b0c0d; text-transform: lowercase; }
+.wp-mark[data-svc="prime"]   { background: #00a8e1; color: #0b0c0d; text-transform: lowercase; }
+.wp-mark[data-svc="espn"]    { background: #cc0000; }
+.wp-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 14px/1.2 var(--font-display);
+}
+.wp-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a9adb3;
+  font-size: 12px;
+}
+
+/* --- the views ----------------------------------------------------- */
+.wp-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  background: #000;
+}
+.wp-tile { position: relative; min-width: 0; min-height: 0; background: #000; overflow: hidden; }
+.wp-view { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+.wp-tile.has-state .wp-view { visibility: hidden; }
+
+/* A slot that cannot play (DRM, a refusal, a failed load): the reason in words, and the ways on. */
+.wp-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: #0b0c0d; }
+.wp-state[hidden] { display: none; }
+.wp-state-box { max-width: 520px; text-align: center; }
+.wp-state-text { margin: 0 0 14px; font-size: 14px; line-height: 1.45; color: #e9eaec; }
+.wp-state-acts { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+/* --- a sign-in sheet: main lays the popup's own view into the hole ---------- */
+.wp-sheet { position: absolute; inset: 44px 0 0 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.62); }
+.wp-sheet[hidden] { display: none; }
+.wp-sheet-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100% - 48px));
+  height: min(680px, calc(100% - 48px));
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+.wp-sheet-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; background: #1b1c1f; color: #e9eaec; font-size: 12.5px; }
+.wp-sheet-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-sheet-head .wp-btn { height: 26px; }
+.wp-sheet-hole { flex: 1 1 auto; background: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-layer, .wp-layer.wp-in, .wp-layer.wp-out { transform: none; transition: opacity var(--m-dur-rm) linear; }
+}
