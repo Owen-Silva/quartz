@@ -134,7 +134,10 @@ const cardOf = (key) => windows.filter((w) => !w.destroyed && decodeURIComponent
   ipc.emit('scorepin:ready', w.webContents);
   await sleep(80);
   let s = P.state().pins[0];
-  check(s.nhlId === '2026020124' && feed.hits.some((u) => /v1\/score\/2026-10-17/.test(u)) && feed.hits.some((u) => /landing/.test(u)), 'NHL: the game id looked up once, then the landing read', feed.hits);
+  // The day asked for is the game's own day in Eastern time (the NHL's schedule day), never a fixed
+  // date: NHL_GAME starts an hour before the run, so a hardcoded day failed every night after midnight ET.
+  const nhlDay = require('../watch/scores').nhlDay(NHL_GAME.startsAt);
+  check(s.nhlId === '2026020124' && feed.hits.some((u) => u.indexOf('/v1/score/' + nhlDay) !== -1) && feed.hits.some((u) => /landing/.test(u)), 'NHL: the game id looked up once (for ' + nhlDay + ', its Eastern day), then the landing read', feed.hits);
   check(s.reading && s.reading.source === 'nhl' && s.reading.phase === 'break' && s.timer === true, 'read, and the next poll armed', s.reading);
   const st0 = lastState(w);
   check(st0 && st0.reading && st0.reading.home.score === 3 && st0.events.length === 0 && st0.sound === true && st0.muted === false, 'the card got the reading, no events (history is never replayed)', st0 && st0.events);

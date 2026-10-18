@@ -30,12 +30,14 @@ const PORT = Number(opt('port', '9418'));
 const ONLY = opt('only', '');
 const KEEP = argv.includes('--keep');
 const APP = __dirname;
-const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
+// QUARTZ_E2E_ELECTRON: the same app code on another Electron build (stock vs castlabs A/B); default = this checkout's.
+const ELECTRON = process.env.QUARTZ_E2E_ELECTRON || path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
 const PROFILE = 'lse2e' + process.pid;
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'looksync-e2e-'));
 if (/AppData[\\/]Roaming[\\/]look-sync/i.test(DIR)) { console.error('never the real store'); process.exit(2); }
 // The fake writer vendored at the same look-sync commit as the module Quartz runs (looksync/vendor.js).
 const FW = path.join(APP, 'looksync', 'fake-writer.js');
+const LS = require('./looksync/look-sync');
 if (!fs.existsSync(FW)) { console.log('looksync-e2e: cannot run: the fake writer is missing at ' + FW); process.exit(2); }
 const BG = path.join(APP, 'assets', 'backgrounds');
 let MAINPID = 0;
@@ -361,15 +363,18 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
   // Hand-written desktop.guard (fake-writer has no guard). Written as Mantle
   // (another instance), atomically, with both revs bumped; the doc stays valid
   // per look-sync.js checkDesktop (guard is an extra field it does not check).
-  function writeGuard(guard) {
+  // Written the way Mantle writes it: look-sync's writeAtomic, which retries a rename that
+  // Windows refuses for a moment (a scanner or a reader holding look.json). A bare renameSync
+  // here failed the run with EPERM where Mantle itself would have retried and landed.
+  async function writeGuard(guard) {
     const f = path.join(DIR, 'look.json');
     const d = JSON.parse(fs.readFileSync(f, 'utf8'));
     d.rev += 1;
     d.writer = { app: 'mantle', instance: 'functest-guard', pid: 1, at: new Date().toISOString() };
     d.desktop = Object.assign({}, d.desktop, { rev: d.desktop.rev + 1, by: 'mantle' });
     if (guard === undefined) delete d.desktop.guard; else d.desktop.guard = guard;
-    fs.writeFileSync(f + '.tmp-functest', JSON.stringify(d, null, 2));
-    fs.renameSync(f + '.tmp-functest', f);
+    const w = await LS.writeAtomic(DIR, JSON.stringify(d, null, 2) + '\n', { app: 'mantle' });
+    if (!w.ok) throw new Error('guard write: ' + w.reason);
     return d.rev;
   }
   const ACTIVE_NT = "(() => { const t = getActiveTab(); return !!t && t.kind === 'page' && isNewTabUrl(t.url); })()";
@@ -410,7 +415,7 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
     must(await waitFor("Backdrop.state().kind === 'desktop' && Backdrop.state().state === 'ok' && Backdrop.state().glass.floor === 0.5 && Backdrop.state().glass.blurPx === 5", 3000), 'desktop ok at dim .5 / blur 5');
     const RK = '(Backdrop._lastRender() || {}).key';
     const key0 = await ev(RK);
-    writeGuard({ dark: { alpha: 0.6, dim: 0.5, blurPx: 5, contrast: 4.3 } });
+    await writeGuard({ dark: { alpha: 0.6, dim: 0.5, blurPx: 5, contrast: 4.3 } });
     const a = must(await waitFor("(() => { const g = Backdrop.state().glass; const css = Number(getComputedStyle(document.documentElement).getPropertyValue('--chrome-glass-a')); return g.source === 'shared' && g.alpha === 0.6 && css === 0.6 ? g : null; })()", 3000), 'shared .6 on --chrome-glass-a');
     // CONTRACT: a guard change comes with a desktop rev bump, and the still URL
     // carries ?rev=, so a re-read of the still is expected here (the node
@@ -419,11 +424,11 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
     await ev('Settings.open(), 1');
     const NOTE = "(() => { const e = document.querySelector('[data-glass-guard]'); return e ? { hidden: e.hidden, text: e.textContent } : null; })()";
     const n1 = must(await waitFor(NOTE + " && /shared with Mantle and Helm/.test(" + NOTE + '.text) && !' + NOTE + '.hidden ? ' + NOTE + ' : null', 3000), 'Settings note says shared') && await ev(NOTE);
-    writeGuard({ dark: { alpha: 0.6, dim: 0.6, blurPx: 5, contrast: 4.3 } });
+    await writeGuard({ dark: { alpha: 0.6, dim: 0.6, blurPx: 5, contrast: 4.3 } });
     const b = must(await waitFor("(() => { const g = Backdrop.state().glass; const css = Number(getComputedStyle(document.documentElement).getPropertyValue('--chrome-glass-a')); return g.source === 'own' && /Dim \\.60/.test(g.sourceReason || '') && css === g.alpha ? g : null; })()", 3000), 'stale dim .6 -> own with a reason');
     const n2 = must(await waitFor(NOTE + " && /worked out by Quartz: .*Dim \\.60/.test(" + NOTE + '.text) ? ' + NOTE + ' : null', 3000), 'Settings note says Quartz + reason') && await ev(NOTE);
     await ev('Settings.close && Settings.close(), 1');
-    writeGuard(undefined);
+    await writeGuard(undefined);
     must(await waitFor("Backdrop.state().glass.source === 'own' && /no shared value/.test(Backdrop.state().glass.sourceReason || '')", 3000), 'guard removed -> own, "no shared value"');
     return 'shared ' + a + ' ms (still re-read for the rev bump: ' + reread + '), stale ' + b + ' ms\n    note shared: "' + n1.text + '"\n    note own:    "' + n2.text + '"';
   });
@@ -432,18 +437,18 @@ const alpha = (rgba) => { const m = /rgba?\(([^)]+)\)/.exec(rgba || ''); return 
     fw('--app', 'helm', 'set', 'theme', 'light');
     must(await waitFor("document.documentElement.getAttribute('data-theme') === 'light' && Backdrop.state().kind === 'desktop' && Backdrop.state().state === 'ok' && Backdrop.state().glass.blurPx === 12", 3000), 'light desktop ok');
     const WASH = "Number((/rgba?\\(([^)]+)\\)/.exec(getComputedStyle(document.querySelector('.backdrop > .bg-wash')).backgroundColor) || [0, '0,0,0,1'])[1].split(/[ ,/]+/).filter(Boolean)[3] || 1)";
-    writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 } });
+    await writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 } });
     const m = must(await waitFor("(() => { const g = Backdrop.state().glass; return g.source === 'own' && /light top band not published by Mantle yet/.test(g.sourceReason || '') && g.alpha === 0.45 && " + WASH + " === 0.45 ? g : null; })()", 3000), 'no light entry: dim .45 with the reason');
-    writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 }, light: { alpha: 0.55, contrast: 4.9, dim: 0.45, blurPx: 12, region: { topDip: 0, heightDip: 100 }, monitor: [1536, 864] } });
+    await writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 }, light: { alpha: 0.55, contrast: 4.9, dim: 0.45, blurPx: 12, region: { topDip: 0, heightDip: 100 }, monitor: [1536, 864] } });
     const a = must(await waitFor("(() => { const g = Backdrop.state().glass; return g.source === 'shared' && g.alpha === 0.55 && g.raised && " + WASH + " === 0.55 && Number(getComputedStyle(document.documentElement).getPropertyValue('--chrome-glass-a')) === 0.55 ? g : null; })()", 3000), 'shared light .55 is the wash');
     await ev('Settings.open(), 1');
     const NOTE = "(() => { const e = document.querySelector('[data-glass-guard]'); return e ? { hidden: e.hidden, text: e.textContent } : null; })()";
     const n1 = must(await waitFor(NOTE + " && /^Light wash \\.55, shared with Mantle and Helm/.test(" + NOTE + '.text) && !' + NOTE + '.hidden ? ' + NOTE + ' : null', 3000), 'Settings note: light shared') && await ev(NOTE);
-    writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 }, light: { alpha: 0.55, contrast: 4.9, dim: 0.45, blurPx: 8 } });
+    await writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 }, light: { alpha: 0.55, contrast: 4.9, dim: 0.45, blurPx: 8 } });
     const b = must(await waitFor("(() => { const g = Backdrop.state().glass; return g.source === 'own' && /stale/.test(g.sourceReason || '') && g.alpha === 0.45 && " + WASH + " === 0.45 ? g : null; })()", 3000), 'stale blur -> dim .45, reason says stale');
     const n2 = must(await waitFor(NOTE + " && /^Light wash \\.45 \\(the Dim, not raised\\): light top band is stale/.test(" + NOTE + '.text) ? ' + NOTE + ' : null', 3000), 'Settings note: stale reason') && await ev(NOTE);
     await ev('Settings.close && Settings.close(), 1');
-    writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 } });
+    await writeGuard({ dark: { alpha: 0.5, dim: 0.5, blurPx: 5, contrast: 4.21 } });
     fw('--app', 'helm', 'set', 'theme', 'dark');
     must(await waitFor("document.documentElement.getAttribute('data-theme') === 'dark' && Backdrop.state().glass.source === 'shared' && Backdrop.state().glass.alpha === 0.5", 3000), 'dark: shared .5 as before');
     return 'missing ' + m + ' ms, shared ' + a + ' ms, stale ' + b + ' ms\n    note shared: "' + n1.text + '"\n    note stale:  "' + n2.text + '"';

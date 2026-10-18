@@ -364,7 +364,7 @@
       try { var pr = ref ? one.view.loadURL(u, { httpReferrer: ref }) : one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
     } else {
       clearSlots();
-      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', multi: !!o.multi });
+      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', note: o.note || '', multi: !!o.multi });
       L.slots.push(s);
       L.focus = 0;
       L.grid.appendChild(s.tile);

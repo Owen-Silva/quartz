@@ -145,13 +145,16 @@ function findStore(dir) {
     const pt = await waitTarget((x) => x.type === 'webview' && /\/search\.html\?/.test(String(x.url)), 15000);
     page = await new Cdp(pt.webSocketDebuggerUrl).open();
     await page.waitFor('document.readyState === "complete"', 8000);
-    await page.ev("window.__ans = []; window.__applyAnswer = (o) => { window.__ans.push(o); }; 1");
+    // The redesigned page asks for its own answer on load (seq 1): let that finish first, then take over
+    // __applyAnswer and speak with seqs from 101, so the page's own answer can never land in __ans.
+    await page.waitFor("!!window.__answerState && ['done', 'fail', 'off', 'stopped'].includes(window.__answerState().view)", 15000).catch(() => 0);
+    await page.ev("window.__ans = []; window.__applyAnswer = (o) => { if (o && o.seq >= 100) window.__ans.push(o); }; 1");
     const line = (o) => page.ev('console.log(' + JSON.stringify('quartz-search:answer ' + JSON.stringify(o)) + '), 1');
     const n0 = mock.requests.filter((r) => r.path === '/v1/messages').length;
-    await line({ q: 'what is quartz', seq: 1, mode: 'auto' });
+    await line({ q: 'what is quartz', seq: 101, mode: 'auto' });
     const got = await page.waitFor("(() => { const d = window.__ans.find((o) => o.phase === 'done' || o.phase === 'fail'); return d ? JSON.stringify(window.__ans) : null; })()", 15000).then(JSON.parse);
     const done = got[got.length - 1];
-    check(got[0].phase === 'start' && got[0].model === 'claude-haiku-5-5' && got[0].seq === 1, 'page: start with the quick model', got[0]);
+    check(got[0].phase === 'start' && got[0].model === 'claude-haiku-5-5' && got[0].seq === 101, 'page: start with the quick model', got[0]);
     check(done.phase === 'done' && done.text === 'Quartz is a hard mineral made of silica [1], and it keeps time in watches [2][1] because it vibrates at a steady frequency.', 'page: done with [n] markers, lead-in dropped', done.text || done);
     check(got.filter((o) => o.phase === 'delta').map((o) => o.text).join('') === done.text, 'page: the deltas add up to the final text');
     check(Array.isArray(done.citations) && done.citations.length === 2 && done.citations[0].host === 'en.wikipedia.org' && done.costUsd > 0.01 && done.usage.searches === 1, 'page: citations, usage and cost', done.citations);
@@ -160,20 +163,20 @@ function findStore(dir) {
     check(r1 && r1.key === KEY && r1.body.model === 'claude-haiku-5-5' && r1.body.tools[0].type === 'web_search_20250305' && JSON.stringify(r1.body).indexOf('brave') < 0, 'wire: one Messages request, key only in x-api-key, no Brave results', r1 && r1.body && r1.body.tools);
 
     await page.ev('window.__ans = []; 1');
-    await line({ q: 'mock:slow e2e', seq: 2, mode: 'ask' });
+    await line({ q: 'mock:slow e2e', seq: 102, mode: 'ask' });
     await page.waitFor("window.__ans.some((o) => o.phase === 'delta')", 10000);
-    await page.ev('console.log(' + JSON.stringify('quartz-search:answer-stop {"seq":2}') + '), 1');
+    await page.ev('console.log(' + JSON.stringify('quartz-search:answer-stop {"seq":102}') + '), 1');
     const stopped = await page.waitFor("(() => { const f = window.__ans.find((o) => o.phase === 'fail'); return f ? f : null; })()", 8000);
     check(stopped.state === 'stopped' && /You stopped this answer/.test(stopped.detail), 'page: the stop line stops it', stopped);
     await sleep(200);
     check(mock.requests.filter((r) => r.scenario === 'slow').every((r) => r.aborted), 'wire: the stopped fetch was aborted');
 
     await page.ev('window.__ans = []; 1');
-    await line({ q: 'mock:credit e2e', seq: 3, mode: 'ask' });
+    await line({ q: 'mock:credit e2e', seq: 103, mode: 'ask' });
     const cr = await page.waitFor("(() => { const f = window.__ans.find((o) => o.phase === 'fail'); return f ? f : null; })()", 8000);
     check(cr.state === 'no-credit' && /credit balance is too low/.test(cr.detail), 'page: no-credit arrives with Anthropic’s own message', cr.detail);
     await page.ev('window.__ans = []; 1');
-    await line({ q: 'mock:nosearch deeper', seq: 4, mode: 'deep' });
+    await line({ q: 'mock:nosearch deeper', seq: 104, mode: 'deep' });
     const dd = await page.waitFor("(() => { const f = window.__ans.find((o) => o.phase === 'done' || o.phase === 'fail'); return f ? f : null; })()", 8000);
     const rdeep = mock.requests.filter((r) => r.path === '/v1/messages').pop();
     check(dd.phase === 'done' && dd.model === 'claude-haiku-5-5' && rdeep.body.model === 'claude-haiku-5-5' && rdeep.body.max_tokens === 8192 && rdeep.body.tools[0].max_uses === 4 && rdeep.body.output_config.effort === 'high', 'page: "Deeper answer" is Haiku, 8192, 4 searches, high', dd.model);
@@ -192,7 +195,8 @@ function findStore(dir) {
     // ---- the month line in Settings after the answers ------------------------------------------------------
     await chrome.ev("Settings.open('Search'), 1");
     const usage = await chrome.waitFor("(() => { const p = document.querySelector('.set-claude-usage'); return p && /answers? \\(cap/.test(p.textContent) && !/· 0 answers/.test(p.textContent) ? p.textContent : null; })()", 8000);
-    check(/^This month: \$0\.0\d estimated · 2 answers \(cap \$25\.00\)\./.test(usage), 'Settings: this month’s estimate and count', usage);
+    // 3: the page's own answer on load, 'what is quartz' and the deeper one (the stopped and the refused ones cost nothing).
+    check(/^This month: \$0\.0\d estimated · 3 answers \(cap \$25\.00\)\./.test(usage), 'Settings: this month’s estimate and count', usage);
     const status = await chrome.ev("(document.querySelector('.set-claude-status') || {}).textContent || ''");
     check(/^Last answer: /.test(status), 'Settings: the last answer’s outcome is shown', status);
     // Remove the key: the guest is told "no key" without spending anything.
@@ -200,7 +204,7 @@ function findStore(dir) {
     await chrome.waitFor("(() => { const i = document.querySelector('#set-claude-key'); return i && i.placeholder === 'Paste your key (sk-ant-…)'; })()", 6000);
     await page.ev('window.__ans = []; 1');
     const nr = mock.requests.length;
-    await line({ q: 'what is quartz again', seq: 5, mode: 'auto' });
+    await line({ q: 'what is quartz again', seq: 105, mode: 'auto' });
     const off = await page.waitFor("window.__ans.length ? window.__ans[0] : null", 6000);
     check(off.phase === 'off' && off.reason === 'no-key' && mock.requests.length === nr, 'no key: the page gets "off: no-key", nothing sent', off);
     check(!/keyEnc/.test(fs.readFileSync(store, 'utf8')), 'Remove: the blob is gone from disk');

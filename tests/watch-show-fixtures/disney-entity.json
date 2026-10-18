@@ -1,0 +1,390 @@
+{
+ "_fixture": "Hand-made Disney+ explore v1.7 entity page for Andor (pydisney/slyguy field names). S1 watched, S2 E1 part-way.",
+ "finalPath": "/browse/entity-aB3dE5fG7hJ9",
+ "title": "Andor | Disney+",
+ "captures": [
+  {
+   "path": "/explore/v1.7/page/entity-aB3dE5fG7hJ9?disableSmartFocus=true&limit=15",
+   "json": {
+    "data": {
+     "page": {
+      "id": "entity-aB3dE5fG7hJ9",
+      "visuals": {
+       "title": "Andor",
+       "description": {
+        "brief": "A thief becomes a rebel.",
+        "full": "In an era filled with danger, deception and intrigue, Cassian Andor discovers the difference he can make in the struggle against the tyrannical Galactic Empire."
+       },
+       "metastringParts": {
+        "releaseYearRange": {
+         "startYear": "2022"
+        },
+        "ratingInfo": {
+         "rating": {
+          "text": "TV-14"
+         }
+        },
+        "genres": {
+         "values": [
+          "Science Fiction",
+          "Drama"
+         ]
+        }
+       },
+       "artwork": {
+        "standard": {
+         "background": {
+          "1.78": {
+           "imageId": "IMGandorhero01"
+          }
+         }
+        }
+       }
+      },
+      "actions": [
+       {
+        "type": "playback",
+        "visuals": {
+         "displayText": "Continue S2 E1"
+        },
+        "deeplinkId": "dl-2-1"
+       },
+       {
+        "type": "modifySaves",
+        "modifySavesType": "remove",
+        "visuals": {
+         "displayText": "Remove from Watchlist"
+        }
+       }
+      ],
+      "containers": [
+       {
+        "id": "c-episodes",
+        "type": "episodes",
+        "visuals": {
+         "name": "Episodes"
+        },
+        "seasons": [
+         {
+          "id": "season-1",
+          "visuals": {
+           "name": "Season 1"
+          },
+          "items": [
+           {
+            "id": "ep-1-1",
+            "type": "view",
+            "visuals": {
+             "title": "Andor",
+             "episodeTitle": "Kassa",
+             "seasonNumber": 1,
+             "episodeNumber": 1,
+             "durationMs": 2460000,
+             "description": {
+              "brief": "Season 1, episode 1: Kassa."
+             },
+             "artwork": {
+              "standard": {
+               "thumbnail": {
+                "1.78": {
+                 "imageId": "IMGandor11xx"
+                }
+               }
+              }
+             }
+            },
+            "actions": [
+             {
+              "type": "playback",
+              "deeplinkId": "dl-1-1"
+             }
+            ],
+            "personalization": {
+             "pid": "p11"
+            }
+           },
+           {
+            "id": "ep-1-2",
+            "type": "view",
+            "visuals": {
+             "title": "Andor",
+             "episodeTitle": "That Would Be Me",
+             "seasonNumber": 1,
+             "episodeNumber": 2,
+             "durationMs": 2520000,
+             "description": {
+              "brief": "Season 1, episode 2: That Would Be Me."
+             },
+             "artwork": {
+              "standard": {
+               "thumbnail": {
+                "1.78": {
+                 "imageId": "IMGandor12xx"
+                }
+               }
+              }
+             }
+            },
+            "actions": [
+             {
+              "type": "playback",
+              "deeplinkId": "dl-1-2"
+             }
+            ],
+            "personalization": {
+             "pid": "p12"
+            }
+           },
+           {
+            "id": "ep-1-3",
+            "type": "view",
+            "visuals": {
+             "title": "Andor",
+             "episodeTitle": "Reckoning",
+             "seasonNumber": 1,
+             "episodeNumber": 3,
+             "durationMs": 2580000,
+             "description": {
+              "brief": "Season 1, episode 3: Reckoning."
+             },
+             "artwork": {
+              "standard": {
+               "thumbnail": {
+                "1.78": {
+                 "imageId": "IMGandor13xx"
+                }
+               }
+              }
+             }
+            },
+            "actions": [
+             {
+              "type": "playback",
+              "deeplinkId": "dl-1-3"
+             }
+            ],
+            "personalization": {
+             "pid": "p13"
+            }
+           }
+          ]
+         },
+         {
+          "id": "season-2",
+          "visuals": {
+           "name": "Season 2"
+          },
+          "items": []
+         }
+        ]
+       },
+       {
+        "id": "c-suggested",
+        "type": "set",
+        "style": {
+         "name": "standard_compact"
+        },
+        "visuals": {
+         "name": "Suggested"
+        },
+        "items": [
+         {
+          "id": "x1",
+          "visuals": {
+           "title": "The Mandalorian",
+           "metastringParts": {
+            "releaseYearRange": {
+             "startYear": "2019"
+            }
+           },
+           "artwork": {
+            "standard": {
+             "tile": {
+              "1.78": {
+               "imageId": "IMGmando00001"
+              }
+             }
+            }
+           }
+          },
+          "actions": [
+           {
+            "type": "browse",
+            "pageId": "entity-mando12345"
+           }
+          ]
+         },
+         {
+          "id": "x2",
+          "visuals": {
+           "title": "Rogue One",
+           "metastringParts": {
+            "releaseYearRange": {
+             "startYear": "2016"
+            }
+           },
+           "artwork": {
+            "standard": {
+             "tile": {
+              "1.78": {
+               "imageId": "IMGrogue00001"
+              }
+             }
+            }
+           }
+          },
+          "actions": [
+           {
+            "type": "browse",
+            "pageId": "entity-rogue123456"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "c-extras",
+        "type": "set",
+        "visuals": {
+         "name": "Extras"
+        },
+        "items": [
+         {
+          "id": "x3",
+          "visuals": {
+           "title": "Andor: Trailer"
+          },
+          "actions": [
+           {
+            "type": "browse",
+            "pageId": "entity-trailer9999"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "path": "/explore/v1.7/season/season-2?limit=30",
+   "json": {
+    "data": {
+     "season": {
+      "id": "season-2",
+      "visuals": {
+       "name": "Season 2"
+      },
+      "items": [
+       {
+        "id": "ep-2-1",
+        "type": "view",
+        "visuals": {
+         "title": "Andor",
+         "episodeTitle": "One Year Later",
+         "seasonNumber": 2,
+         "episodeNumber": 1,
+         "durationMs": 2460000,
+         "description": {
+          "brief": "Season 2, episode 1: One Year Later."
+         },
+         "artwork": {
+          "standard": {
+           "thumbnail": {
+            "1.78": {
+             "imageId": "IMGandor21xx"
+            }
+           }
+          }
+         }
+        },
+        "actions": [
+         {
+          "type": "playback",
+          "deeplinkId": "dl-2-1"
+         }
+        ],
+        "personalization": {
+         "pid": "p21"
+        }
+       },
+       {
+        "id": "ep-2-2",
+        "type": "view",
+        "visuals": {
+         "title": "Andor",
+         "episodeTitle": "Sagrona Teema",
+         "seasonNumber": 2,
+         "episodeNumber": 2,
+         "durationMs": 2520000,
+         "description": {
+          "brief": "Season 2, episode 2: Sagrona Teema."
+         },
+         "artwork": {
+          "standard": {
+           "thumbnail": {
+            "1.78": {
+             "imageId": "IMGandor22xx"
+            }
+           }
+          }
+         }
+        },
+        "actions": [
+         {
+          "type": "playback",
+          "deeplinkId": "dl-2-2"
+         }
+        ],
+        "personalization": {
+         "pid": "p22"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "path": "/explore/v1.7/userState",
+   "json": {
+    "data": {
+     "entityStates": {
+      "p11": {
+       "pid": "p11",
+       "progress": {
+        "progressPercentage": 100
+       }
+      },
+      "p12": {
+       "pid": "p12",
+       "progress": {
+        "progressPercentage": 98
+       }
+      },
+      "p13": {
+       "pid": "p13",
+       "progress": {
+        "progressPercentage": 100
+       }
+      },
+      "p21": {
+       "pid": "p21",
+       "progress": {
+        "progressPercentage": 35
+       }
+      },
+      "p22": {
+       "pid": "p22",
+       "progress": {
+        "progressPercentage": 0
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}
