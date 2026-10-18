@@ -84,6 +84,9 @@ const TESTS = [
   { name: 'sports', file: 'tests/sports-test.js' },
   // Lumen multiview (watch-player-multi.js, watch-player-main.js): the tile embed, the simulated RAM, the keys.
   { name: 'watch-multi', file: 'tests/watch-multi-test.js' },
+  // Lumen's own play bar (watch-playerbar.js, watch-playerbar-page.js, watch/playerbar/*): the time format, the seek
+  // maths, the key map, each adapter's menus, the page style (the ad UI kept), auto-hide and the fallback rules.
+  { name: 'watch-playerbar', file: 'tests/watch-playerbar-test.js' },
   // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
   // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
   { name: 'watch-shows', file: 'tests/watch-shows-test.js' },

@@ -56,7 +56,8 @@
   function X(ev) {
     var args = [CTX].concat([].slice.call(arguments, 1));
     var out;
-    [window.WatchPlayerExtras, window.WatchPlayerYT].forEach(function (x) {
+    // Lumen play bar hook (watch-playerbar.js): attach / destroy / sync, like the two above.
+    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayerBar].forEach(function (x) {
       if (!x || typeof x[ev] !== 'function') return;
       try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
         try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
@@ -596,6 +597,8 @@
     var mv = MV('shortcut', id);
     if (mv === true || mv === false) return mv;
     if (id === 'escape') {
+      // Lumen play bar hook: Esc closes its menu, then the service's own menu, then Lumen's full window.
+      if (window.LumenPlayerBar && typeof window.LumenPlayerBar.shortcut === 'function' && window.LumenPlayerBar.shortcut(id) === true) return true;
       if (L.fsSlot) { exitFs(); return true; }
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
       if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Esc'); return true; }
