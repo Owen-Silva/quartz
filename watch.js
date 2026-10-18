@@ -530,6 +530,8 @@
       images: arr(it.images).map(https).filter(Boolean),
       progress: p,
       url: url,
+      // straight to the service's player (watch/playurl.js); url stays the fallback
+      playUrl: https(it.playUrl) && Shape && Shape.serviceForUrl(https(it.playUrl)) === Shape.serviceForUrl(url) ? https(it.playUrl) : '',
       startsAt: num(it.startsAt),
       durationSec: num(it.durationSec),
       badge: cleanText(it.badge, 24),
