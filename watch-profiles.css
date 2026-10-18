@@ -1,0 +1,32 @@
+/* watch-profiles.css -- profiles inside Lumen (watch/profiles.js): the avatar on each service chip and
+   card, the profile's name where the strip has room, and the who's-watching state. Neutral greys. */
+
+.lp-av {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--text-2);
+  font: 600 10px/1 var(--font);
+  letter-spacing: 0;
+}
+.lp-av.md { width: 24px; height: 24px; font-size: 12px; align-self: center; }
+.lp-av.has-img { background: transparent; }
+.lp-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* The profile's name after the service's, in the strip: wide windows only (the avatar always). */
+.sp-prof { display: none; color: var(--text-3); font-weight: 500; max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 1500px) {
+  .sp-prof { display: inline; }
+  .sp-main.has-prof .sp-name::after { content: '\00b7'; margin-left: 6px; color: var(--text-3); }
+}
+
+/* The who's-watching state: a question, not an error. */
+.sp.st-picker .sp-name { color: var(--text); font-weight: 600; }
+.sp.st-picker > button:hover { background: var(--surface-3); }
+.fresh .fresh-pick { margin-left: 4px; }

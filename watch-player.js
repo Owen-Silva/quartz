@@ -31,7 +31,7 @@
   'use strict';
   var H = window.WatchPlayerHosts;
   var api = window.api && window.api.watchPlayer;
-  var NAME = H ? H.HUB_NAME : 'Watch';
+  var NAME = H ? H.HUB_NAME : 'Lumen';
   var ESC_AFTER_FS_MS = 500;   // an Esc this soon after the video left fullscreen was that same press
 
   var L = {
@@ -47,6 +47,18 @@
     noteTimer: 0,
     lastClosed: null          // the e2e's view of the last close: { wcIds, services, asked }
   };
+
+  // watch-player-extras.js (straight-to-player fallback, the quality note, Up next, the layer's menu)
+  // hooks in at a few points; with the file missing, nothing here changes.
+  var CTX = { L: L, focused: focused, note: note, toast: toast, toEdge: toEdge, showState: showState, open: openInLumen, close: close, svcInfo: svcInfo, api: api };
+  function X(ev) {
+    var x = window.WatchPlayerExtras;
+    if (!x || typeof x[ev] !== 'function') return undefined;
+    try { return x[ev].apply(null, [CTX].concat([].slice.call(arguments, 1))); } catch (e) {
+      try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
+      return undefined;
+    }
+  }
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -84,7 +96,7 @@
     layer.hidden = true;
 
     var bar = L.bar = el('header', 'wp-bar');
-    bar.appendChild(btn('wp-back', 'Back', function () { back(); }, 'Back (Alt+Left)'));
+    bar.appendChild(btn('wp-back', 'Back', function () { back('bar'); }, 'Back (Alt+Left)'));
     L.markEl = el('span', 'wp-mark');
     bar.appendChild(L.markEl);
     L.titleEl = el('span', 'wp-title');
@@ -97,6 +109,7 @@
     L.edgeBtn = btn('wp-edge', 'Open in Edge', function (b) { toEdge(focused(), b); });
     L.edgeBtn.hidden = true;
     bar.appendChild(L.edgeBtn);
+    X('bar', bar);
     bar.appendChild(btn('wp-close', '✕', function () { close('Close'); }, 'Close the player (Esc)'));
     layer.appendChild(bar);
 
@@ -117,7 +130,7 @@
 
     // The mouse's back button over the bar or a tile's own furniture (the guest's
     // presses come from main's app-command): the same Back.
-    layer.addEventListener('mouseup', function (e) { if (e.button === 3) { e.preventDefault(); back(); } });
+    layer.addEventListener('mouseup', function (e) { if (e.button === 3) { e.preventDefault(); back('mouse'); } });
     // A video that leaves fullscreen hands the slot back its bar.
     layer.addEventListener('transitionend', function (e) { if (e.target === layer && !L.open) teardownDom(); });
   }
@@ -143,6 +156,10 @@
       L.el.style.top = (r.top - hr.top) + 'px';
       L.el.style.width = r.width + 'px';
       L.el.style.height = r.height + 'px';
+    } else if (fs) {
+      // The video's fullscreen: .wp-fs is position:fixed; inset:0, which the tab-sized
+      // inline box would otherwise override (the layer stayed the Watch tab's size).
+      L.el.style.left = L.el.style.top = L.el.style.width = L.el.style.height = '';
     }
     placeSheet();
   }
@@ -171,7 +188,8 @@
     var s = {
       id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '',
       view: null, wcId: null, tile: el('div', 'wp-tile'), state: el('div', 'wp-state'),
-      blocked: o.blocked || '', refused: '', fs: false
+      blocked: o.blocked || '', refused: '', fs: false,
+      fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || ''
     };
     s.state.hidden = true;
     s.tile.appendChild(s.state);
@@ -216,9 +234,11 @@
       showState(s, 'failed', 'The player’s page stopped' + (why ? ' (' + why + ')' : '') + '.');
     });
     s.tile.insertBefore(v, s.state);
+    X('attach', s, v);
   }
 
   function destroySlot(s) {
+    X('destroy', s);
     if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
     if (s.view) {
       var v = s.view;
@@ -308,6 +328,8 @@
       // The same service: this page, in place (Back comes back to the last one).
       one.title = o.title || '';
       one.url = u;
+      one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
+      X('reuse', one);
       one.state.hidden = true;
       one.tile.classList.remove('has-state');
       try { var pr = one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
@@ -321,6 +343,7 @@
     layout();
     syncBar();
     show();
+    X('opened', focused());
     return true;
   }
 
@@ -385,17 +408,23 @@
     L.owner = null;
   }
 
-  function back() {
+  /** src 'mouse': the mouse's back button (the bar's mouseup, main's app-command). */
+  function back(src) {
     if (!L.open) return false;
     // One press of the mouse's back button can arrive twice (the bar's own mouseup and
-    // main's app-command): one Back.
-    if (Date.now() - (L.lastBackAt || 0) < 300) return true;
-    L.lastBackAt = Date.now();
+    // main's app-command): one Back. Only those two are folded together -- the bar's
+    // button and Alt+Left pressed quickly are each their own Back.
+    if (src === 'mouse') {
+      if (Date.now() - (L.lastMouseBackAt || 0) < 300) return true;
+      L.lastMouseBackAt = Date.now();
+    }
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Back'); return true; }
     var s = focused();
     var v = s && s.view;
     var can = false;
     try { can = !!(v && v.canGoBack()); } catch (e) { can = false; }
+    // test seam (_state().backs): the last few Backs, where each came from, whether the page could go back.
+    L.backs = (L.backs || []).slice(-5).concat([{ src: src || 'key', can: can, t: Date.now() % 100000 }]);
     if (can && !(s.state && !s.state.hidden && s.state.getAttribute('data-kind') === 'blocked')) {
       s.state.hidden = true;
       s.tile.classList.remove('has-state');
@@ -413,13 +442,13 @@
     try { createTab(url, { background: false }); } catch (e) { toast('Couldn’t open a tab: ' + ((e && e.message) || e), true); }
   }
 
-  function toEdge(s, b) {
+  function toEdge(s, b, why) {
     var slot = s || focused();
     var drm = window.api && window.api.drm;
     if (!slot) return;
     if (!drm || typeof drm.openInEdge !== 'function') { toast('Couldn’t open Microsoft Edge: this window has no channel to the browser', true); return; }
     if (b) b.disabled = true;
-    if (api) api.escape('Open in Edge' + (slot.blocked ? ': ' + slot.blocked : (slot.refused ? ': licence refused' : '')), slot.url);
+    if (api) api.escape('Open in Edge' + (why ? ': ' + why : slot.blocked ? ': ' + slot.blocked : (slot.refused ? ': licence refused' : '')), slot.url);
     drm.openInEdge(slot.url).then(function (r) {
       if (b) b.disabled = false;
       if (r && r.ok) {
@@ -515,7 +544,8 @@
 
   function onCommand(m) {
     if (!m || !L.open) return;
-    if (m.cmd === 'back') { if (!L.el.hidden) back(); return; }
+    L.lastCommand = String(m.cmd || '').slice(0, 40);   // test seam: the last command main sent
+    if (m.cmd === 'back') { if (!L.el.hidden) back('mouse'); return; }
     if (/^media-|^key-Media/.test(String(m.cmd))) media(String(m.cmd));
   }
 
@@ -525,11 +555,14 @@
     if (!api) return;
     api.on('play', function (m) {
       if (!m || typeof m.url !== 'string') return;
-      openInLumen(m.url, { service: m.service, title: m.title, multi: !!m.multi, blocked: m.blocked || '' });
+      openInLumen(m.url, { service: m.service, title: m.title, multi: !!m.multi, blocked: m.blocked || '', fallback: m.fallback || '', item: m.item || null, purpose: m.purpose || '', note: m.note || '' });
     });
     api.on('command', onCommand);
     api.on('key', onKeyFromGuest);
-    api.on('left', function (m) { if (m && L.open) toast('Opened ' + (m.host || 'that page') + ' in a new tab: it isn’t part of ' + (svcName(slotOf(m.wcId) && slotOf(m.wcId).service) || 'this service')); });
+    api.on('left', function (m) {
+      if (m && L.open && m.to === 'edge') { toast('Opened ' + (svcName(m.service) || m.host || 'that title') + ' in Microsoft Edge' + (m.reason ? ': ' + m.reason : ''), true); return; }
+      if (m && L.open) toast('Opened ' + (m.host || 'that page') + ' in a new tab: it isn’t part of ' + (svcName(slotOf(m.wcId) && slotOf(m.wcId).service) || 'this service'));
+    });
     api.on('blocked', function (m) { if (m && L.open) note('Stayed in ' + NAME + ': the page tried to open an app (' + (m.scheme || 'app') + ':)'); });
     api.on('gone', function (m) {
       var s = m && slotOf(m.wcId);
@@ -578,7 +611,10 @@
         note: L.noteEl ? L.noteEl.textContent : '',
         edge: L.edgeBtn ? !L.edgeBtn.hidden : false,
         lastClosed: L.lastClosed,
+        extras: X('state') || null,
         lastMedia: L.lastMedia || '',
+        lastCommand: L.lastCommand || '',
+        backs: L.backs || [],
         slots: L.slots.map(function (s) {
           return { wcId: s.wcId, url: s.url, service: s.service, title: s.title, blocked: s.blocked, refused: s.refused,
             state: s.state.hidden ? '' : s.state.getAttribute('data-kind'), stateText: s.state.hidden ? '' : s.state.textContent, view: !!s.view };

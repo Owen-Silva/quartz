@@ -427,7 +427,7 @@
   var DRM = { known: false, playable: false, reason: '', edgeHosts: [] };
   // "Play inside Watch" (watch-player-main.js): main says whether a title plays in the layer.
   var PLAYER = { inside: false };
-  var HUB = 'Watch';
+  var HUB = 'Lumen';
   function opensHere(dot) { return (PLAYER.inside ? 'Plays in ' + HUB : 'Opens in a new tab') + (dot ? '.' : ''); }
   function normDrm(d) {
     if (!d || typeof d !== 'object' || typeof d.playable !== 'boolean') return { known: false, playable: false, reason: '', edgeHosts: [] };
@@ -652,6 +652,7 @@
     if (boot) return S.failure ? { cls: 'st-error', dot: 'err', small: 'No answer' } : { cls: 'st-busy', dot: 'busy', small: 'Starting\u2026' };
     if (s.state === 'off') return { cls: 'st-off', dot: 'off', small: 'Off' };
     if (s.reading) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
+    if (s.picker) return { cls: 'st-error st-picker', dot: 'warn', small: 'Who’s watching?', act: 'Pick profile' };   // watch/profiles.js
     if (s.state === 'error') return { cls: 'st-error', dot: 'err', small: "Couldn't read", act: 'Retry' };
     if (s.state === 'signed-out') return { cls: 'st-signed-out', dot: 'out', small: 'Signed out', act: 'Sign in' };
     if (s.paused) return { cls: 'st-paused', dot: 'warn', small: shared ? 'Paused' : capFirst(s.paused.replace(/\s*\([^)]*\)\s*$/, '')) };
@@ -691,6 +692,7 @@
       main.appendChild(dot);
       main.appendChild(el('span', 'sp-name', s.name));
       if (look.small) main.appendChild(el('small', look.warn ? 'warn-mark' : '', look.small));
+      if (!boot && window.LumenProfiles) window.LumenProfiles.chip(main, s);
       if (boot) {
         main.disabled = true;
         main.setAttribute('aria-label', s.name + ': waiting for Lumen to start');
@@ -708,6 +710,7 @@
       if (!boot && look.act) {
         var act = button('sp-act', look.act, function () {
           if (look.act === 'Retry') send('refresh', { service: s.id });
+          else if (look.act === 'Pick profile') send('profile', { service: s.id });
           else send('signin', { service: s.id });
         });
         act.dataset.k = s.id + ':act';
@@ -808,6 +811,7 @@
       var why = failed[0].reason || 'no reason given';
       var full = failed.map(function (s) { return s.name + ': ' + (s.reason || 'no reason given'); }).join('\n');
       freshText(f, 'Couldn’t update ' + names + (failed.length === 1 ? ': ' + why : ''), full);
+      if (window.LumenProfiles) window.LumenProfiles.freshPick(f, failed, send);
       freshRetry(f, 'Retry ' + names, function () {
         failed.forEach(function (s) { send('refresh', { service: s.id }); });
       });
@@ -888,6 +892,7 @@
     var h = el('h3', '', s.name);
     h.id = 'pop-title';
     if (s.profile) h.appendChild(el('small', '', s.profile));
+    if (window.LumenProfiles) window.LumenProfiles.popHead(h, s);
     p.setAttribute('aria-labelledby', 'pop-title');
     p.appendChild(h);
 
@@ -908,7 +913,9 @@
     }
     p.appendChild(st);
 
-    if (s.state === 'error') {
+    if (s.state === 'error' && window.LumenProfiles && window.LumenProfiles.popWords(p, s)) {
+      /* who's watching: watch/profiles.js said it, and adds Pick profile below */
+    } else if (s.state === 'error') {
       p.appendChild(el('p', '', "Couldn't read " + s.name + ': ' + (s.reason || 'no reason was given') + '.'));
       if (s.lastOkAt) {
         var keepP = el('p', 'small');
@@ -933,7 +940,7 @@
     }
 
     var acts = el('div', 'acts');
-    var readBtn = button('btn sm' + (s.state === 'error' ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
+    var readBtn = button('btn sm' + (s.state === 'error' && !s.picker ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
     if (s.reading) readBtn.disabled = true;
     acts.appendChild(readBtn);
     if (s.needsSignIn && s.state !== 'ok') {
@@ -944,6 +951,7 @@
       if (edgeFor(s.home)) open.title = 'Opens in Microsoft Edge' + (DRM.reason ? ': ' + DRM.reason : '');
       acts.appendChild(open);
     }
+    if (window.LumenProfiles) window.LumenProfiles.popActs(acts, s, send, closePop, null);
     acts.appendChild(button('btn sm ghost', 'Settings', function () { send('settings', {}); closePop(true); }));
     p.appendChild(acts);
   }
@@ -960,11 +968,18 @@
     snap.rows.forEach(function (r) { if (/^(continue|foryou|watchlist)$/.test(r.id) && !by[r.id]) by[r.id] = r; else shelves.push(r); });
     var sp = snap.sports;
     var games = function (key, title, events) { if (events.length) out.push({ key: key, kind: 'sports', id: key, title: title, service: 'espn', events: events }); };
+    // Lumen sports (watch/sportspage.js): Live now leads while a favourite's or a big game is live
+    // (favourites first), and the favourites get a My teams row.
+    var LS = window.LumenSports || null;
+    var liveTop = !!(LS && LS.liveOnTop(sp.live));
+    if (liveTop) games('sports', 'Live now', LS.sortLive(sp.live));
     if (by.continue) out.push(itemRow(by.continue));
     // YouTube Subscriptions (watch/ytlib-page.js): up top with videos; a state card (sign in, failed) lower down.
     var yt = window.WatchYt ? window.WatchYt.row(snap) : null;
     if (yt && yt.top) out.push(yt);
-    games('sports', 'Live now', sp.live);
+    var mine = LS ? LS.myTeamsRow() : null;
+    if (mine) out.push(mine);
+    if (!liveTop) games('sports', 'Live now', sp.live);
     if (by.watchlist) out.push(itemRow(by.watchlist));
     if (by.foryou) out.push(itemRow(by.foryou));
     games('sports-soon', 'Upcoming games', sp.soon);
@@ -983,9 +998,16 @@
     return arr(list).filter(function (a) { return a && typeof a.service === 'string' && a.service && a.service !== own && https(a.url); })
       .slice(0, 3).map(function (a) { return { service: a.service, url: https(a.url) }; });
   }
+  /* Where a tile's title goes (the player layer or a tab; Quartz or Edge) is in every tile's
+     label, so a change of either ("Play inside Lumen", Widevine arriving, an Edge rule) rebuilds
+     the rows instead of leaving the old words on them. */
+  function routeSig() {
+    return (PLAYER.inside ? 'in' : 'tab') + '/' + (DRM.known ? 1 : 0) + (DRM.playable ? 1 : 0) + '/' + DRM.edgeHosts.join(',');
+  }
   function rowSig(m) {
-    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : ''];
+    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : '', routeSig()];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
+    else if (m.kind === 'teams') parts.push(window.LumenSports.rowSig(m));
     else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
     return parts.join('\u0001');
   }
@@ -1154,8 +1176,10 @@
       var sp = S.snap.sports;
       var t = sp.live.length ? sp.live.length + ' live now' : sp.soon.length ? 'next ' + dayClock(sp.soon[0].startsAt) : 'finals';
       head.appendChild(el('span', 'sub', 'ESPN \u00b7 ' + t));
+      if (window.LumenSports) window.LumenSports.headChips(m, head);
       return;
     }
+    if (m.kind === 'teams') { window.LumenSports.rowSub(m, head); return; }
     if (m.service) {
       var s = svcOf(m.service);
       head.appendChild(el('span', 'chip', svcShort(m.service)));
@@ -1209,6 +1233,7 @@
     var rv = el('div', 'rv');
     var rt = el('div', 'rt');
     if (m.kind === 'sports') m.events.forEach(function (ev) { rt.appendChild(gameEl(ev)); });
+    else if (m.kind === 'teams') m.teams.forEach(function (t) { rt.appendChild(window.LumenSports.teamCardEl(t)); });
     else m.items.forEach(function (it) { rt.appendChild(cardEl(it, m)); });
     rv.appendChild(rt);
     row.appendChild(rv);
@@ -1296,14 +1321,61 @@
    */
   var ART_MISS = new Set();
   function artMissKey(u) { return String(u).replace('/vi_webp/', '/vi/').replace(/\.webp$/, '.jpg'); }
-  function artSrcs(it) {
+  function artSrcs(it, needPx) {
     var list = arr(it.images).length > 1 && it.images[0] === it.image ? it.images
       : Shape && typeof Shape.ytThumbs === 'function' ? Shape.ytThumbs(it.image) : [it.image];
+    list = artOrder(list, needPx);
     var left = list.filter(function (u) { return u && !ART_MISS.has(artMissKey(u)); });
     return left.length ? left : list.slice(-1);
   }
+  /*
+   * Which of YouTube's stills to ask for first. The DECODE is what costs, not the bytes
+   * (watch-design-e2e --trace, 10-17, the user's 125%, on this laptop): a tile's 1280x720 maxres webp
+   * took 78 ms a decode on the raster workers, 137 ms at worst (Chromium decodes webp to RGB at full
+   * size, then scales it), an sd JPEG 2-6 ms (decoded straight to YUV); a row of webp tiles starved
+   * the frames (frames over 20 ms 13 -> 21, max 50 -> 150 ms). img.decode() of one 1280x720 picture,
+   * median of 12: webp 50 ms, JPEG 12 ms. So:
+   *   - JPEG before webp, always: the same picture for a quarter of the decode;
+   *   - a tile starts at sd when sd covers it in DEVICE pixels (sd's 16:9 picture is 640 wide: 4:3
+   *     with bars, which artCrop crops; the user's 125% tiles are 360-450 px, and watch.css keeps every
+   *     tile under ~370 CSS px, so that is every tile up to ~175% scaling), a wider one at maxres;
+   *     hq (480 wide) is never first;
+   *   - the hero (needPx Infinity) starts at maxres.
+   * Only YouTube's named stills move, and only among their own places: a Short's vertical still
+   * stays first, the page's own still stays last. The rest stay behind as fallbacks.
+   */
+  var YT_STILL = /\/vi(?:_webp)?\/[A-Za-z0-9_-]{11}\/(maxresdefault|sddefault|hqdefault)(?:_live)?\.(jpg|webp)(?:\?|$)/;
+  var SD_PICTURE_W = 640;
+  function artOrder(list, needPx) {
+    var slots = [];
+    var named = [];
+    list.forEach(function (u, k) {
+      var m = YT_STILL.exec(String(u));
+      if (m) { slots.push(k); named.push({ u: u, name: m[1], webp: m[2] === 'webp' ? 1 : 0, k: k }); }
+    });
+    if (named.length < 2) return list;
+    var pref = needPx > SD_PICTURE_W ? ['maxresdefault', 'sddefault', 'hqdefault'] : ['sddefault', 'maxresdefault', 'hqdefault'];
+    named.sort(function (a, b) { return pref.indexOf(a.name) - pref.indexOf(b.name) || a.webp - b.webp || a.k - b.k; });
+    var out = list.slice();
+    slots.forEach(function (k, i) { out[k] = named[i].u; });
+    return out;
+  }
+  /* The tiles' width in CSS px (watch.css --card-w), from a hidden probe a ResizeObserver reads after
+     layout, so choosing a still never forces one. Before the first reading: the widest a tile gets
+     (per >= 3 within a 1720 px column, watch.css) stands in, which errs sharp. */
+  var TILE = { css: 0, probe: null };
+  function tileNeedPx() {
+    if (!TILE.probe && document.body && typeof ResizeObserver === 'function') {
+      TILE.probe = el('div', 'tile-probe');
+      TILE.probe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(TILE.probe);
+      new ResizeObserver(function (en) { var w = en[0] && en[0].contentRect ? en[0].contentRect.width : 0; if (w > 0) TILE.css = w; }).observe(TILE.probe);
+    }
+    var css = TILE.css || Math.min(380, Math.max(240, (window.innerWidth || 1280) / 3));
+    return Math.ceil(css * (window.devicePixelRatio || 1));
+  }
   function artLoad(img, it, fail, hero) {
-    var srcs = artSrcs(it);
+    var srcs = artSrcs(it, hero ? Infinity : tileNeedPx());
     var i = 0;
     var step = function () {   // false when no candidate is left
       if (ART_MISS.size > 4000) ART_MISS.clear();
@@ -1354,7 +1426,7 @@
   }
 
   function cardSub(it, m) {
-    if (it.kind === 'resume') return joinDot([epText(it.subtitle), timeLeft(it)]);
+    if (it.kind === 'resume') return (window.LumenPlay && window.LumenPlay.resumeLabel(it)) || joinDot([epText(it.subtitle), timeLeft(it)]);
     if (it.kind === 'upcoming' && it.startsAt) return joinDot([it.subtitle, dayClock(it.startsAt)]);
     if (it.kind === 'live') return joinDot([it.subtitle, 'Live now']);
     if (it.subtitle) return it.kind === 'watchlist' || it.service === 'youtube' ? it.subtitle : epText(it.subtitle);
@@ -1478,12 +1550,12 @@
       tm.appendChild(el('span', 's', ev.state === 'pre' ? '' : t.score));
       g.appendChild(tm);
     });
-    var ft = el('span', 'ft', ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
+    var ft = el('span', 'ft', window.LumenSports ? window.LumenSports.cardFoot(ev) : ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
     ft.appendChild(icon('out', 's'));
     g.appendChild(ft);
     var label = gameTitle(ev) + '. ' + joinDot([ev.leagueName, ev.state === 'in' ? 'live, ' + clockText(ev) : clockText(ev)]);
     if (ev.state !== 'pre' && ev.away.score !== '' && ev.home.score !== '') label += '. ' + ev.away.abbr + ' ' + ev.away.score + ', ' + ev.home.abbr + ' ' + ev.home.score;
-    g.setAttribute('aria-label', label + '. ' + (ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
+    g.setAttribute('aria-label', label + '. ' + (window.LumenSports ? 'Opens the game page.' : ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     wrap.appendChild(g);
     var m = el('span', 'm');
     m.appendChild(el('b', '', gameTitle(ev)));
@@ -1606,7 +1678,8 @@
     S.stageSig = sig;
     S.stageIt = it;
     S.stageEv = ev;
-    var build = function () { return ev ? stageEvent(ev, m) : stageItem(it, m); };
+    var tm = !it && !ev && card._team && window.LumenSports ? card._team : null;   // a My teams card with no game to show
+    var build = function () { return tm ? window.LumenSports.stageTeam(tm) : ev ? stageEvent(ev, m) : stageItem(it, m); };
     swapStage(build, first);
     if (ev) setWash({ key: 'ev:' + ev.id, logos: [ev.away.logo, ev.home.logo] });
     else setWash(it && it.image ? { key: 'it:' + it.image, image: washSrc(it) } : null);
@@ -1687,7 +1760,7 @@
     }
     var acts = el('div', 'acts');
     var label = it.kind === 'resume' ? 'Resume' : it.kind === 'live' ? 'Watch live' : it.service === 'youtube' ? 'Play' : /^rent$/i.test(it.badge) ? 'Rent' : it.kind === 'upcoming' ? 'Open' : 'Watch';
-    var primary = button('btn primary', '', function () { openUrl(it.url, it.title); });
+    var primary = button('btn primary', '', function () { openUrl(it.url, it.title, false, it); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
@@ -1729,12 +1802,15 @@
       txt.appendChild(w);
     }
     var acts = el('div', 'acts');
-    var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
-    var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
-    primary.appendChild(icon('play'));
-    primary.appendChild(document.createTextNode(label));
-    acts.appendChild(primary);
-    acts.appendChild(opensNote(ev.url, ev.edge));
+    if (window.LumenSports) acts.appendChild(window.LumenSports.stageActs(ev));   // Game page, Watch this game
+    else {
+      var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
+      var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
+      primary.appendChild(icon('play'));
+      primary.appendChild(document.createTextNode(label));
+      acts.appendChild(primary);
+      acts.appendChild(opensNote(ev.url, ev.edge));
+    }
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -1962,6 +2038,7 @@
         eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Lumen couldn\u2019t read your services';
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
+        if (window.LumenProfiles) window.LumenProfiles.emptyPick(acts, en, send);
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failed') {
@@ -2057,18 +2134,25 @@
   /* ---------------------------------------------------------------- opening */
 
   /** title: the player layer's bar; multi: "Add to multiview" (watch-player.js). */
-  function openUrl(url, title, multi) {
+  function openUrl(url, title, multi, it) {
     var u = https(url);
     if (!u) return;
     if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
     var msg = { url: u };
+    // A tile: straight to the service's player where that is proven (watch/playurl.js), the title page
+    // as its fallback; and what it is, for Up next.
+    if (it && it.url === u && https(it.playUrl)) { msg.url = https(it.playUrl); msg.fallback = u; }
+    if (it && it.url === u && it.id) msg.item = { id: it.id, title: it.title || '', subtitle: it.subtitle || '' };
     if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
     if (multi === true) msg.multi = true;
     send('open', msg);
   }
   function openCard(card, multi) {
     if (!multi && window.WatchYt && window.WatchYt.openCard(card)) return;
-    if (card._item) openUrl(card._item.url, card._item.title, multi);
+    var LS = window.LumenSports;
+    if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
+    if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
+    if (card._item) openUrl(card._item.url, card._item.title, multi, card._item);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
   function eventTitle(ev) {
@@ -2077,6 +2161,8 @@
   }
   // "Add to multiview" from a tile's hover action or right-click (watch-tiles.js): the same open, marked.
   window.__watchOpenCard = function (card, multi) { if (card && (card._item || card._event)) openCard(card, multi === true); };
+  // Lumen sports: favourites or My teams changed, so the rows rebuild from the snapshot already here.
+  window.__lumenRerender = function () { if (S.ready && S.snap) renderLens(); };
 
   /* ----------------------------------------------------------------- toasts */
 

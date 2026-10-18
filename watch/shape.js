@@ -119,7 +119,8 @@
     { id: 'mlb', name: 'MLB', path: 'baseball/mlb' },
     { id: 'cfb', name: 'College football', path: 'football/college-football' },
     { id: 'mls', name: 'MLS', path: 'soccer/usa.1' },
-    { id: 'wnba', name: 'WNBA', path: 'basketball/wnba' }
+    { id: 'wnba', name: 'WNBA', path: 'basketball/wnba' },
+    { id: 'chky', name: 'College hockey', path: 'hockey/mens-college-hockey' }
   ];
   var DEFAULT_LEAGUES = ['nhl', 'nfl', 'nba', 'mlb'];
 
@@ -259,6 +260,9 @@
       type: type
     };
     if (images.length > 1) out.images = images;
+    // playUrl (watch/playurl.js): straight to the service's player, on the same service; url stays the fallback.
+    var play = cleanHttps(raw.playUrl);
+    if (play && play !== url && serviceForUrl(play) === service) out.playUrl = play;
     return out;
   }
 
@@ -355,6 +359,10 @@
       items: cleanItems(r.items),
       profile: cleanText(r.profile, 60)
     };
+    // The profile's picture (https only), and "the service stopped on its who's-watching picker".
+    var avatar = cleanHttps(r.avatar);
+    if (avatar && state === 'ok') out.avatar = avatar;
+    if (r.picker === true && state === 'error') out.picker = true;
     if (Array.isArray(r.events)) out.events = cleanEvents(r.events);
     // A part that failed while the rest read (history timed out, home worked) is a WARNING:
     // kept and shown, never dropped (no silent failures).

@@ -106,7 +106,8 @@
   try {
     new MutationObserver(sendLook).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-palette', 'style'] });
   } catch (e) { /* no observer: the first look still goes */ }
-  if (typeof api.onChanged === 'function') api.onChanged(function () { refresh(); });
+  // lumenShow: a score card was clicked and its game page is opening in Lumen (sports-main.js)
+  if (typeof api.onChanged === 'function') api.onChanged(function (m) { if (m && m.lumenShow && typeof window.openWatchTab === 'function') window.openWatchTab(); refresh(); });
 
   window.ScorePins = { commands: commands, refresh: refresh, _cache: function () { return cache; } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { sendLook(); refresh(); });

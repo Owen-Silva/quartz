@@ -1,0 +1,230 @@
+{
+ "_fixture": "Hand-made from the shape of ESPN's public JSON; not a capture, no real call was made. Shape: .../football/nfl/summary?event=<id>",
+ "header": {
+  "id": "401772900",
+  "competitions": [
+   {
+    "id": "401772900",
+    "date": "2026-10-16T00:15Z",
+    "status": {
+     "type": {
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "detail": "Final",
+      "shortDetail": "Final"
+     }
+    },
+    "competitors": [
+     {
+      "homeAway": "home",
+      "winner": true,
+      "score": "27",
+      "team": {
+       "id": "17",
+       "abbreviation": "NE",
+       "displayName": "New England Patriots",
+       "logos": [
+        {
+         "href": "https://a.espncdn.com/i/teamlogos/nfl/500/ne.png"
+        }
+       ]
+      },
+      "linescores": [
+       {
+        "displayValue": "7"
+       },
+       {
+        "displayValue": "10"
+       },
+       {
+        "displayValue": "3"
+       },
+       {
+        "displayValue": "7"
+       }
+      ],
+      "record": [
+       {
+        "type": "total",
+        "summary": "4-2"
+       }
+      ]
+     },
+     {
+      "homeAway": "away",
+      "winner": false,
+      "score": "20",
+      "team": {
+       "id": "15",
+       "abbreviation": "MIA",
+       "displayName": "Miami Dolphins",
+       "logos": [
+        {
+         "href": "https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"
+        }
+       ]
+      },
+      "linescores": [
+       {
+        "displayValue": "3"
+       },
+       {
+        "displayValue": "7"
+       },
+       {
+        "displayValue": "7"
+       },
+       {
+        "displayValue": "3"
+       }
+      ],
+      "record": [
+       {
+        "type": "total",
+        "summary": "2-4"
+       }
+      ]
+     }
+    ],
+    "broadcasts": [
+     {
+      "media": {
+       "shortName": "Prime Video"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "scoringPlays": [
+  {
+   "id": "1",
+   "type": {
+    "text": "Passing Touchdown"
+   },
+   "scoringType": {
+    "displayName": "Touchdown"
+   },
+   "text": "Drake Maye 12 Yd pass to Hunter Henry (Andres Borregales Kick)",
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "displayValue": "8:12"
+   },
+   "team": {
+    "id": "17"
+   },
+   "awayScore": 0,
+   "homeScore": 7
+  },
+  {
+   "id": "2",
+   "type": {
+    "text": "Field Goal Good"
+   },
+   "scoringType": {
+    "displayName": "Field Goal"
+   },
+   "text": "Jason Sanders 44 Yd Field Goal",
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "displayValue": "1:05"
+   },
+   "team": {
+    "id": "15"
+   },
+   "awayScore": 3,
+   "homeScore": 7
+  },
+  {
+   "id": "3",
+   "type": {
+    "text": "Rushing Touchdown"
+   },
+   "scoringType": {
+    "displayName": "Touchdown"
+   },
+   "text": "De'Von Achane 3 Yd Run (Jason Sanders Kick)",
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "displayValue": "10:40"
+   },
+   "team": {
+    "id": "15"
+   },
+   "awayScore": 10,
+   "homeScore": 7
+  }
+ ],
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "15",
+     "abbreviation": "MIA"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "19",
+      "label": "1st Downs"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "341",
+      "label": "Total Yards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "2",
+      "label": "Turnovers"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "27:40",
+      "label": "Possession"
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "17",
+     "abbreviation": "NE"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "23",
+      "label": "1st Downs"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "402",
+      "label": "Total Yards"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "0",
+      "label": "Turnovers"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "32:20",
+      "label": "Possession"
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Gillette Stadium"
+  }
+ }
+}

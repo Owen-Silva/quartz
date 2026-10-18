@@ -11,8 +11,9 @@
    domains (Google accounts, MyDisney, Amazon sign-in) stay in the
    layer, because signing in is part of watching.
 
-   HUB_NAME is the one place the hub's visible name lives ("Watch",
-   to be renamed): every string the player shows takes it from here.
+   HUB_NAME is the one place the hub's visible name lives ("Lumen";
+   the code and its ids keep "watch"): every string the player shows,
+   and every quartz.log line it writes, takes it from here.
    ============================================================ */
 (function (root, factory) {
   var api = factory();
@@ -21,7 +22,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var HUB_NAME = 'Watch';
+  var HUB_NAME = 'Lumen';
 
   /*
    * domains: the service's own sites (any subdomain).
@@ -56,6 +57,17 @@
       id: 'espn', name: 'ESPN', mark: 'ESPN', drm: true,
       domains: ['espn.com', 'espn.go.com', 'espnplus.com', 'espnqa.com'],
       auth: ['registerdisney.go.com', 'mydisney.com', 'disneyplus.com']
+    },
+    /*
+     * Not a service: TMDB's where-to-watch page (the JustWatch data Watch shows). It opens
+     * in the layer too, with JustWatch's click-through redirector; a link from it to one
+     * of the five services HANDS OVER (watch-player-main.js), so that title opens as the
+     * service's own page, routed like any title (the layer, or Edge with the reason).
+     */
+    tmdb: {
+      id: 'tmdb', name: 'TMDB', mark: 'TMDB', drm: false, guide: true,
+      domains: ['themoviedb.org', 'click.justwatch.com'],
+      auth: []
     }
   };
   var IDS = Object.keys(SERVICES);
@@ -80,7 +92,7 @@
     return false;
   }
 
-  /** 'youtube' | 'disney' | 'hulu' | 'prime' | 'espn' | '' by address (not counting sign-in hosts). */
+  /** 'youtube' | 'disney' | 'hulu' | 'prime' | 'espn' | 'tmdb' (the guide) | '' by address (not counting sign-in hosts). */
   function serviceFor(url) {
     var u = parse(url);
     if (!u || !/^https?:$/.test(u.protocol)) return '';
@@ -93,6 +105,14 @@
     return '';
   }
 
+  /** A where-to-watch guide (TMDB), not a streaming service. */
+  function isGuide(id) { return !!(SERVICES[id] && SERVICES[id].guide); }
+  /** The streaming service a guide page's link goes to ('' when it is no service, or another guide). */
+  function handoffFor(id, url) {
+    if (!isGuide(id)) return '';
+    var to = serviceFor(url);
+    return to && !isGuide(to) ? to : '';
+  }
   function isAuth(id, url) {
     var s = SERVICES[id];
     var u = parse(url);
@@ -166,6 +186,8 @@
     IDS: IDS,
     serviceFor: serviceFor,
     isAuth: isAuth,
+    isGuide: isGuide,
+    handoffFor: handoffFor,
     staysIn: staysIn,
     youtubeVideo: youtubeVideo,
     seconds: seconds,

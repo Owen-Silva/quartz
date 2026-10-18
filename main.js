@@ -599,6 +599,8 @@ const scorePins = (() => {
       getWindow: () => win,
       // The palette's rows: Lumen's cached ESPN games (no fetch).
       getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // A card's click: that game's page inside Lumen (sports-main.js), not the gamecast in a tab.
+      openInLumen: (url) => (lumenSports ? lumenSports.openGame(url) : null),
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[scores] ' + line); },
     });
   } catch (err) {
@@ -606,10 +608,42 @@ const scorePins = (() => {
     return null;
   }
 })();
+/*
+ * Lumen's sports pages (sports-main.js + watch/sportspage.js): the game page, favourite teams
+ * (My teams), team pages and standings, from ESPN's public JSON, read only while a page asks.
+ * A TEST profile may point ESPN and the NHL feed at a local mock (QUARTZ_SPORTS_REBASE, JSON
+ * [[from, to], ...]); a live Quartz ignores it.
+ */
+const lumenSports = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) {
+    try { if (process.env.QUARTZ_SPORTS_REBASE) test.rebase = JSON.parse(process.env.QUARTZ_SPORTS_REBASE); } catch { /* no rebase */ }
+  }
+  try {
+    return require('./sports-main').create({
+      app, test,
+      getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // a score pin's click: the chrome brings the Lumen tab forward (scorepins-chrome.js), Quartz comes to the front
+      showLumen: () => {
+        send('scores:changed', { pinned: null, lumenShow: true });
+        const w = win;
+        if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); }
+      },
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[sports] ' + line); },
+    });
+  } catch (err) {
+    console.error('[sports] Lumen sports could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
 // Fresh after watching: the layer closing re-reads what was playing; the setting relabels the tiles.
 if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
   watchPlayer.setOnInside(() => { try { watch.drmChanged(); } catch { /* Watch gone */ } });
+  // Up next (watch-player-extras.js): what follows a title that ended, from Lumen's own rows.
+  if (typeof watchPlayer.setUpNext === 'function' && typeof watch.upNext === 'function') watchPlayer.setUpNext((o) => watch.upNext(o));
+  // A where-to-watch (TMDB) link to a service: routed like any title Lumen opens.
+  if (typeof watchPlayer.setHandoff === 'function' && typeof watch.openTitle === 'function') watchPlayer.setHandoff((url, o) => watch.openTitle(url, o));
 }
 
 const budget = budgetModule.create({ app });
@@ -974,6 +1008,13 @@ function createWindow() {
     baseOptions.x = OFFSCREEN_XY;
     baseOptions.y = OFFSCREEN_XY;
     baseOptions.skipTaskbar = true;
+    // TEST ONLY (QUARTZ_TEST_NO_WINDOW_FULLSCREEN=1, watch-player-e2e.js): a <webview>'s html
+    // fullscreen is synced to its EMBEDDER (this window's webContents), whose own preference
+    // decides whether the OS window goes fullscreen -- onto a real monitor. Off here, both ways.
+    if (process.env.QUARTZ_TEST_NO_WINDOW_FULLSCREEN === '1') {
+      baseOptions.fullscreenable = false;
+      baseOptions.webPreferences = { ...baseOptions.webPreferences, disableHtmlFullscreenWindowResize: true };
+    }
   }
 
   // --no-acrylic gives a flat window; used to measure what the material costs.
@@ -5278,6 +5319,7 @@ function windowOpenDecision(details) {
  */
 function guestWindowOpenDecision(contents, details) {
   const raw = (details && details.url) || '';
+  traceFileNav('window-open', { url: raw, from: safeUrl(contents), disposition: details && details.disposition, referrer: details && details.referrer && details.referrer.url });
   if (!fileNav.isFileUrl(raw)) return windowOpenDecision(details);
   const referrer = (details && details.referrer && details.referrer.url) || '';
   if (fileNav.pageMayOpen(raw, safeUrl(contents), referrer, BUNDLED_PAGE_PREFIX)) {
@@ -5294,7 +5336,19 @@ function guestWindowOpenDecision(contents, details) {
 function fileNavBlocked(contents, url) {
   let wcId = null;
   try { wcId = contents && !contents.isDestroyed() ? contents.id : null; } catch { /* gone */ }
+  traceFileNav('blocked', { url, wcId });
   send('file-nav-blocked', { wcId, url: String(url || ''), text: fileNav.blockedNotice(url) });
+}
+
+/**
+ * Test runs only (--test-profile AND QUARTZ_TEST_FILENAV_TRACE=<file>): one
+ * JSON line per file:// decision, so filelinks-e2e.js can tell "the hook
+ * never fired" from "it fired and the chrome dropped it". Off otherwise.
+ */
+function traceFileNav(kind, info) {
+  const file = process.env.QUARTZ_TEST_FILENAV_TRACE;
+  if (!file || !process.argv.includes('--test-profile')) return;
+  try { fs.appendFileSync(file, JSON.stringify(Object.assign({ kind, at: Date.now() }, info)) + '\n'); } catch { /* a trace only */ }
 }
 
 /**
@@ -5438,8 +5492,26 @@ app.on('web-contents-created', (_event, contents) => {
     // get to borrow the page's file:// standing.
     let by = '';
     try { by = event && event.initiator ? String(event.initiator.url || '') : ''; } catch { by = ''; }
+    traceFileNav('will-navigate', { url, from: safeUrl(contents), by });
     if (fileNav.pageMayOpen(url, safeUrl(contents), by, BUNDLED_PAGE_PREFIX)) return;
     event.preventDefault();
+    fileNavBlocked(contents, url);
+  });
+
+  /*
+   * The FIRST lock is Chromium's: a web page's link, location.assign or
+   * window.open to file:// is refused inside Chromium before will-navigate or
+   * setWindowOpenHandler ever hear of it, and the only trace it leaves is a
+   * console line in the page: "Not allowed to load local resource: file:///…".
+   * That line is what makes the refusal visible on the tab. It also fires for
+   * an <img>/<iframe> pointing at file://, which is the same refusal ("this
+   * page tried to reach a file on your computer"), so it is said the same way.
+   */
+  contents.on('console-message', (event, legacyLevel, legacyMessage) => {
+    const message = String((event && event.message) || legacyMessage || '');
+    const url = fileNav.refusedLocalResource(message);
+    if (!url) return;
+    traceFileNav('chromium-refused', { url, from: safeUrl(contents) });
     fileNavBlocked(contents, url);
   });
 

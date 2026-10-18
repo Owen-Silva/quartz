@@ -8,6 +8,14 @@
 //
 // The rule is Chrome's: a file:// page may open another file:// page; nothing else may.
 //
+// Two locks, in this order (measured in filelinks-e2e.js's trace, Electron 44):
+//   1. Chromium's. A WEB page's link, location.assign or window.open to file:// is refused inside
+//      Chromium before either hook hears of it; the page's console gets "Not allowed to load local
+//      resource: file:///...". main.js reads that line (refusedLocalResource below) to put the
+//      notice on the tab, which is the only way that refusal becomes visible.
+//   2. Ours, pageMayOpen() below, for whatever reaches the hooks: a file:// page's own links, and
+//      anything a future Chromium lets through.
+//
 //   from a bundled Quartz page (newtab.html, reader.html)  -> allowed (our own pages)
 //   from a file:// page, started BY that file:// page       -> allowed (file -> file, as in Chrome)
 //   from http(s), data:, blob:, about:, anything else       -> blocked, and the tab says so
@@ -67,4 +75,16 @@ function blockedNotice(url) {
   return 'Quartz blocked this page from opening a file on your computer: ' + displayPath(url);
 }
 
-module.exports = { isFileUrl, pageMayOpen, displayPath, blockedNotice };
+/**
+ * Chromium's own refusal, as it lands in the page's console:
+ *   "Not allowed to load local resource: file:///C:/x/b.html"
+ * Returns the file:// URL it names, or '' for any other line. A page can print
+ * that line itself; all it buys is this same notice about its own tab, which
+ * is why nothing but the notice hangs off it.
+ */
+function refusedLocalResource(message) {
+  const hit = /^Not allowed to load local resource:\s*(file:\S+)/i.exec(String(message || ''));
+  return hit ? hit[1] : '';
+}
+
+module.exports = { isFileUrl, pageMayOpen, displayPath, blockedNotice, refusedLocalResource };

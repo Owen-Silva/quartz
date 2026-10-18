@@ -67,6 +67,9 @@ const TESTS = [
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
+  // look-sync's reads and writes when Windows refuses look.json for a moment (scanner, another app):
+  // a refused read is retried and re-checked, so a change that landed is followed, never lost.
+  { name: 'looksync', file: 'looksync-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.
@@ -74,6 +77,11 @@ const TESTS = [
   // Lumen's one search box: merge and ranking, the Disney+/Hulu/Prime search readers, the main half
   // (one reader at a time, signed-in first, the 5-min cache, cancel, Retry) and its watch-main hooks.
   { name: 'watch-find', file: 'watch-find-harness.js' },
+  // Lumen sports (watch/sports.js, sports-main.js): ESPN-shaped fixtures, a fake fetch, no network.
+  { name: 'sports', file: 'tests/sports-test.js' },
+  // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
+  // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
+  { name: 'watch-shows', file: 'tests/watch-shows-test.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
@@ -127,6 +135,11 @@ const TESTS = [
   { name: 'watch-thumbs-e2e', file: 'watch-thumbs-e2e.js', e2e: true },
   // The stage's hover preview against a mock player (quartz-preview.invalid via CDP Fetch) and a mock TMDB.
   { name: 'watch-preview-e2e', file: 'watch-preview-e2e.js', e2e: true },
+  // The Lumen player layer (watch-player.js + watch-player-main.js): titles play INSIDE Lumen, never a
+  // new tab. Local fixtures only (an HTML5 page per service, framing and licence refusals, a TMDB
+  // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
+  // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
+  { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,

@@ -30,7 +30,11 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { run, Cdp, sleep } = require('./tests/e2e-kit');
+// i.ytimg.com never resolves in this instance: a still this file doesn't answer (one asked before
+// its CDP client attached) fails here instead of reaching YouTube's real CDN
+const NO_YT_NET = ['--host-resolver-rules=MAP *.ytimg.com ~NOTFOUND'];
 const Mock = require('./tests/watch-mock');
+const Stills = require('./tests/watch-yt-stills');
 const Shape = require('./watch/shape');
 const Merge = require('./watch/merge');
 
@@ -266,9 +270,20 @@ async function openGuest(q, errors, ms) {
       if (e.source === 'network') errors.netCount = (errors.netCount || 0) + 1;
       else errors.push('log.' + e.source + ': ' + String(e.text || '').slice(0, 300) + (e.url ? ' @' + e.url : ''));
     }
+    if (m.method === 'Fetch.requestPaused') {
+      // YouTube's stills are drawn here (tests/watch-yt-stills.js, YouTube's own sizes and formats), never
+      // asked of the real CDN: every video shows the same still, keyed to one made-up id
+      const rid = m.params.requestId, u = m.params.request.url;
+      const p = Stills.parse(u);
+      const r = p ? Stills.answer(g, u.replace(/\/(vi|vi_webp)\/[A-Za-z0-9_-]{11}\//, '/$1/watchE2E000/'), 'Watch e2e still') : Promise.resolve(null);
+      r.then((x) => g.send('Fetch.fulfillRequest', x ? { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: x.mime }], body: x.body.toString('base64') }
+        : { requestId: rid, responseCode: 404, responseHeaders: [{ name: 'Content-Type', value: 'text/plain' }], body: '' }), () => g.send('Fetch.failRequest', { requestId: rid, errorReason: 'Failed' }));
+    }
     for (const h of g.handlers) { try { h(m); } catch (e) { /* a test's handler */ } }
   });
   await g.send('Runtime.enable');
+  await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*.ytimg.com/*', resourceType: 'Image', requestStage: 'Request' }] });
+  await Stills.prepare(g, [{ id: 'watchE2E000', title: 'Watch e2e still' }]).catch(() => 0);   // drawn once per machine, kept on disk
   await g.send('Log.enable');
   await g.send('Page.enable');
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -595,7 +610,7 @@ async function runMotion(ctx, N) {
   const per = [];
   try {
     for (let run = 1; run <= N; run++) {
-      const q = await launch({ cdp: CDP_PORT, env });
+      const q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env });
       setLive(q);
       try {
         await q.chrome.ev('setTheme(' + JSON.stringify(THEME) + '), 1').catch(() => 0);
@@ -642,7 +657,7 @@ async function runBoot2(ctx, N) {
   const rows = [];
   try {
     // The seed: one boot reads every service from the mock, writes the cache, quits.
-    let q = await launch({ cdp: CDP_PORT, env });
+    let q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env });
     setLive(q);
     try {
       await ctrlAltW(q.chrome);
@@ -660,7 +675,7 @@ async function runBoot2(ctx, N) {
       const watchFirst = run % 2 === 1;
       const grace = run <= Math.ceil(N / 2) ? 0 : 10000;   // first half: no boot grace; second half: the real 10 s
       const t0 = Date.now();
-      q = await launch({ cdp: CDP_PORT, env: mockEnv(mock, grace) });
+      q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env: mockEnv(mock, grace) });
       setLive(q);
       const r = { run, grace, first: watchFirst ? 'watch' : 'control', up: Date.now() - t0, watchMs: null, controlMs: null, control: '', pages: {}, errAt: null, mockBefore: null, readersBefore: null };
       const samples = [];
@@ -760,7 +775,7 @@ if (require.main === module) {
     /* ================================ boot 1 ================================ */
     const boot1 = Date.now();
     const appStart = boot1;
-    let q = await launch({ cdp: CDP_PORT, env: Object.assign({}, env, { QUARTZ_WATCH_BOOT_GRACE_MS: String(BOOT1_GRACE_MS) }) });
+    let q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env: Object.assign({}, env, { QUARTZ_WATCH_BOOT_GRACE_MS: String(BOOT1_GRACE_MS) }) });
     liveQ = q;
     const chrome = q.chrome;
     const pid = q.child.pid;
@@ -921,11 +936,13 @@ if (require.main === module) {
       return null;
     }
     const ytUrl = await openCardOf('youtube');
-    let ytTab = null;
-    try { ytTab = await chrome.waitFor(`tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0) ? tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0).url : null`, 6000); } catch (e) { ytTab = null; }
-    check(!!ytUrl && !!ytTab && ytTab === ytUrl.replace('https://www.youtube.com', mock.origin('youtube')), 'a YouTube card (real click) opens a Quartz tab on the title (rebased to the mock)', { card: ytUrl, tab: ytTab });
+    // "Play inside Lumen" is on by default (watch-player-e2e.js covers the layer itself): the title
+    // plays in the player layer over this tab, never a new tab.
+    let ytLayer = null;
+    try { ytLayer = await chrome.waitFor(`(() => { const s = window.WatchPlayer && WatchPlayer._state(); return s && s.open && s.slots[0] && String(s.slots[0].url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0 ? s.slots[0].url : null; })()`, 6000); } catch (e) { ytLayer = null; }
+    check(!!ytUrl && !!ytLayer && ytLayer === ytUrl.replace('https://www.youtube.com', mock.origin('youtube')) && (await chrome.ev('tabs.length')) === tabsBefore, 'a YouTube card (real click) plays the title in the player layer, no new tab (rebased to the mock)', { card: ytUrl, layer: ytLayer });
     check(readText(OPEN_STUB).indexOf(JSON.stringify({ url: ytUrl, edge: false })) !== -1, 'the YouTube open is recorded with edge:false');
-    await chrome.ev(`(() => { const t = tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube'))}) === 0); if (t) closeTab(t.id); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
+    await chrome.ev(`(() => { if (window.WatchPlayer && WatchPlayer.isOpen()) WatchPlayer.close('e2e'); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
     for (const id of ['disney', 'hulu', 'prime']) {
       const u = await openCardOf(id);
@@ -1244,7 +1261,7 @@ if (require.main === module) {
     /* ================================ boot 2: cache first ================================ */
     for (const id of IDS) await mock.setMode(id, 'slow');   // a read that starts can never finish
     const boot2 = Date.now();
-    q = await launch({ cdp: CDP_PORT, env });
+    q = await launch({ cdp: CDP_PORT, args: NO_YT_NET, env });
     liveQ = q;
     const chrome2 = q.chrome;
     const tw = Date.now();
