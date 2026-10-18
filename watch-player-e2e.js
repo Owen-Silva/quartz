@@ -352,14 +352,19 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     say('RAM (all Quartz processes, working set): before ' + memBefore.totalMb + ' MB / ' + memBefore.processes + ' procs; playing ' + memPlaying.totalMb + ' MB / ' + memPlaying.processes + ' procs (player ' + JSON.stringify(memPlaying.players) + '); after close ' + memAfter.totalMb + ' MB / ' + memAfter.processes + ' procs');
     check(memAfter.processes < memPlaying.processes && memAfter.totalMb < memPlaying.totalMb, 'closing frees the player\'s memory', { before: memBefore.totalMb, playing: memPlaying.totalMb, after: memAfter.totalMb });
 
-    // A link to another site: a normal tab, with a log line; the layer waits behind the Watch tab.
+    // A link to another site: a PAGE in the layer (a sheet), not a tab. The sheet's "Open in a tab" is
+    // his way to a normal tab (counted in the leak log), and the layer waits behind the Watch tab.
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/away-test')}, { service: 'youtube', title: 'Away test' }), 1`);
     pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/away-test', 10000); p = await cdpTo(pt);
     const nTabs = await chrome.ev('tabs.length');
     await gesture(p, 'document.getElementById("away").click(), 1');
+    const awaySheet = await chrome.waitFor(`(() => { const s = ${ST}; return s.sheet && s.sheet.kind === 'page' && s.sheet.shown ? s.sheet : null; })()`, 8000).catch(() => null);
+    check(!!awaySheet && (await chrome.ev('tabs.length')) === nTabs, 'a link to another site opens as a page in the layer, not a tab', awaySheet);
+    check(logHas(/a page from another site opened in the layer \(link to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: the page sheet has its line');
+    await chrome.ev('document.querySelector(".wp-sheet-tab").click(), 1');
     await chrome.waitFor(`tabs.length === ${nTabs + 1}`, 8000).catch(() => 0);
-    check((await chrome.ev(`tabs.length === ${nTabs + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/away')}) === 0)`)), 'a link to another site opens a normal Quartz tab');
-    check(logHas(/left the layer \(link to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: the way out has its line');
+    check((await chrome.ev(`tabs.length === ${nTabs + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/away')}) === 0)`)), 'the page\'s "Open in a tab" opens it in a normal Quartz tab');
+    check(logHas(/left the layer \(Open in a tab, from a page in the layer\): 127\.0\.0\.1:\d+/), 'quartz.log: the way out has its line');
     check((await chrome.ev(ST)).open && (await chrome.ev(ST)).hidden, 'the layer stays open behind the Watch tab (hidden while another tab is in front)');
     await chrome.ev('activateTab(findWatchTab().id), 1');
     await sleep(400);
@@ -418,9 +423,11 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
         await tp2.waitFor('!!document.getElementById("elsewhere")', 8000).catch(() => 0);
         const nb = await chrome.ev('tabs.length');
         await gesture(tp2, 'document.getElementById("elsewhere").click(), 1');
-        await chrome.waitFor(`tabs.length === ${nb + 1}`, 8000).catch(() => 0);
-        check((await chrome.ev(`tabs.length === ${nb + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/netflix')}) === 0)`)), 'a where-to-watch link to a service Watch does not read opens a tab');
-        check(logHas(/left the layer \(redirect to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: that way out has its line');
+        const es = await chrome.waitFor(`(() => { const s = ${ST}; return s.sheet && s.sheet.kind === 'page' && s.sheet.shown ? s.sheet : null; })()`, 8000).catch(() => null);
+        check(!!es && (await chrome.ev('tabs.length')) === nb, 'a where-to-watch link to a service Lumen does not read opens as a page in the layer, not a tab', es);
+        check(logHas(/a page from another site opened in the layer \(redirect to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: that page has its line');
+        await chrome.ev('document.querySelector(".wp-sheet-close").click(), 1');
+        await chrome.waitFor(`!${ST}.sheet`, 8000).catch(() => 0);
         tp2.close();
       } else check(false, 'the TMDB page came back for the second link');
       await chrome.ev('activateTab(findWatchTab().id), 1');

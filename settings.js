@@ -6076,9 +6076,17 @@
       field.appendChild(el('p', 'set-hint', why || (on
         ? 'A title plays in ' + hub + ' itself; Back returns to the rows. “Open in a tab” stays in the player’s bar.'
         : 'A title opens in a new tab, or in Microsoft Edge when Quartz can’t play it.')));
+      // Lumen's leak log (watch-leaks.js): each time it had to send him to a tab, Edge or an app.
+      if (leaks) {
+        var lk = el('p', 'set-hint set-lumen-leaks', 'Times ' + hub + ' had to leave: ' + (leaks.count || 0) +
+          (leaks.last && leaks.last.reason ? ', last: ' + leaks.last.reason + (leaks.last.at ? ' (' + watchAgo(leaks.last.at) + ')' : '') : ''));
+        lk.setAttribute('data-leaks', String(leaks.count || 0));
+        field.appendChild(lk);
+      }
     };
+    var leaks = null;
     if (wpInside !== null) draw(wpInside);
-    wp.get().then(function (r) { wpInside = !(r && r.inside === false); draw(wpInside); },
+    wp.get().then(function (r) { wpInside = !(r && r.inside === false); leaks = r && r.leaks && typeof r.leaks === 'object' ? r.leaks : null; draw(wpInside); },
       function (err) { draw(true, 'Couldn’t read the setting: ' + ((err && err.message) || err)); });
   }
 

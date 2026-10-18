@@ -930,7 +930,7 @@
         p.appendChild(keepP);
       } else p.appendChild(el('p', 'small', 'Nothing from ' + s.name + ' is cached yet.'));
     } else if (s.state === 'signed-out') {
-      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.'));
+      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + (PLAYER.inside ? 'Sign in opens ' + s.name + '’s own sign-in page here in Lumen; Lumen reads it again after.' : 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.')));
     }
     if (s.paused) p.appendChild(el('p', '', capFirst(s.paused) + '.'));
     if (s.warnings.length) {

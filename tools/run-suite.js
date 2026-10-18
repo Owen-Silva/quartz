@@ -77,6 +77,9 @@ const TESTS = [
   // Lumen's one search box: merge and ranking, the Disney+/Hulu/Prime search readers, the main half
   // (one reader at a time, signed-in first, the 5-min cache, cancel, Retry) and its watch-main hooks.
   { name: 'watch-find', file: 'watch-find-harness.js' },
+  // Lumen's leak-proof layer: the leak log, YouTube page vs embed, off-site pages as sheets, app links,
+  // the Settings count, and watch-main's counted fallbacks (fakes only).
+  { name: 'watch-leaks', file: 'watch-leaks-harness.js' },
   // Lumen sports (watch/sports.js, sports-main.js): ESPN-shaped fixtures, a fake fetch, no network.
   { name: 'sports', file: 'tests/sports-test.js' },
   // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
@@ -144,6 +147,9 @@ const TESTS = [
   // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
   // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
   { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
+  // Lumen leak-proof (watch-leak-e2e.js): every way out of a hosted page stays in the layer or is
+  // counted; YouTube's full page vs the embed and "Full page"; the Settings count. Local fixtures only.
+  { name: 'watch-leak-e2e', file: 'watch-leak-e2e.js', e2e: true, timeout: 420 },
   // Pinned score cards in a hidden instance against a local feed mock: goal, penalty, power play,
   // outage, restart; off-screen, never focused, muted (sounds counted, never played). ~4 min.
   { name: 'score-pins-e2e', file: 'score-pins-e2e.js', e2e: true, timeout: 600 },
