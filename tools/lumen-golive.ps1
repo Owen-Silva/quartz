@@ -132,7 +132,7 @@ $v = Run 'py' @('-3', '-m', 'castlabs_evs.vmp', '--version')
 if ($v.code -eq 0) { Pass ('preflight: castlabs-evs ' + (Tail $v.text 1)) } else { Stop-Golive 'castlabs-evs is not installed (py -3 -m pip install --upgrade castlabs-evs)' }
 $evsCfg = Join-Path $env:USERPROFILE '.config\evs\config.json'
 if ((Test-Path $evsCfg) -and ((Get-Item $evsCfg).Length -gt 2)) { Pass 'preflight: EVS config present (not printed)' } else { Stop-Golive 'no EVS account config (~/.config/evs/config.json); py -3 -m castlabs_evs.account reauth' }
-$tests = Test-Procs
+$tests = @(Test-Procs)
 if ($tests.Count) { Info ('preflight: ' + $tests.Count + ' test instance(s) from this checkout run (PID ' + (($tests | ForEach-Object { $_.ProcessId }) -join ', ') + '); the swap refuses until they end') }
 
 # ---- 1. snapshots --------------------------------------------------------------------------
@@ -147,7 +147,7 @@ $state = [ordered]@{ repo = $Repo; oldHead = $script:oldHead; target = $target; 
 [IO.File]::WriteAllText((Join-Path $StateDir ('state-' + $stamp + '.json')), ($state | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 
 # ---- 2. close Quartz cleanly ---------------------------------------------------------------
-$main = Main-Procs
+$main = @(Main-Procs)
 if ($DryRun) {
   if ($main.Count) { Info ('2. would close main Quartz PID ' + (($main | ForEach-Object { $_.ProcessId }) -join ', ') + ' (CloseMainWindow, then wait); dry run: not closed') }
   else { Info ('2. no Quartz runs from ' + $Dist + '; nothing to close') }
@@ -160,7 +160,7 @@ if ($DryRun) {
     $deadline = (Get-Date).AddSeconds($CloseTimeoutSec)
     $closed = @{}
     while ((Get-Date) -lt $deadline) {
-      $left = Main-Procs
+      $left = @(Main-Procs)
       if (-not $left.Count) { break }
       foreach ($m in $left) {
         $p = $null
@@ -176,7 +176,7 @@ if ($DryRun) {
       }
       Start-Sleep -Milliseconds 1000
     }
-    $left = Main-Procs
+    $left = @(Main-Procs)
     if ($left.Count) { Stop-Golive ('Quartz PID ' + (($left | ForEach-Object { $_.ProcessId }) -join ', ') + ' did not exit within ' + $CloseTimeoutSec + ' s of CloseMainWindow; NOT killed. Close it by hand, then run this again') }
     Pass '2. main Quartz exited after CloseMainWindow'
   }
