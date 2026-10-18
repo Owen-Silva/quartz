@@ -4666,6 +4666,21 @@ function openWatchTab() {
   return !!createTab(watchUrl());
 }
 
+/**
+ * The toolbar's Lumen button: lit (the accent, aria-current) while the tab in
+ * front IS Lumen. Repainted on every tabchange and on the front tab's own
+ * navigations, like the save star. Cheap: one class and one attribute.
+ */
+function updateLumenBtn() {
+  if (!lumenBtnEl) return;
+  const tab = getActiveTab();
+  const on = !!(tab && tab.kind === 'page' && isWatchUrl(tab.url));
+  if (lumenBtnEl.classList.contains('is-active') === on) return;
+  lumenBtnEl.classList.toggle('is-active', on);
+  if (on) lumenBtnEl.setAttribute('aria-current', 'page');
+  else lumenBtnEl.removeAttribute('aria-current');
+}
+
 /** The Files tab already open, or null. There is only ever one. */
 function findFilesTab() {
   for (const tab of tabs) {
@@ -5207,6 +5222,7 @@ let reloadBtn = null;
 let omniboxEl = null;
 let zoomBadgeEl = null;
 let saveStarEl = null;
+let lumenBtnEl = null;  // #lumen, the toolbar's Lumen button (index.html)
 let viewsEl = null;
 // Glass-redesign chrome (index.html owns the markup; every lookup is null-guarded
 // so the browser still boots against an older index.html).
@@ -10898,6 +10914,7 @@ function wireViewEvents(tab) {
       setOmniboxValue(tab.url, false); // guarded: never clobber live typing
       updateNavState();
       updateSaveStar();  // a new address: saved or not is a new question
+      updateLumenBtn();  // onto or off Lumen in the same tab
     }
     // Onto or off the new tab: the Home picture and the guest's see-through
     // element follow the address.
@@ -12072,6 +12089,12 @@ function wireChrome() {
   if (newTabBtn) {
     newTabBtn.addEventListener('click', () => createTab(HOME_URL));
   }
+  // The toolbar's Lumen button: the same call as Ctrl+Alt+W and the palette's
+  // Lumen row, so there is still only ever one Lumen tab. A native <button>,
+  // so Enter and Space click it too.
+  if (lumenBtnEl) {
+    lumenBtnEl.addEventListener('click', () => { openWatchTab(); });
+  }
   // Coming back to the window answers whatever chamber is already in front of
   // him. Anything still in the background keeps its mark until he switches to
   // it — that is the whole point of the mark.
@@ -12596,6 +12619,7 @@ function init() {
   omniboxEl = document.getElementById('omnibox');
   zoomBadgeEl = document.getElementById('zoom-badge');
   saveStarEl = document.getElementById('save-star');
+  lumenBtnEl = document.getElementById('lumen');
   viewsEl = document.getElementById('views');
   winMinBtn = document.getElementById('win-min');
   winMaxBtn = document.getElementById('win-max');
@@ -12616,6 +12640,7 @@ function init() {
   wireSettings();
   wireLookSyncBackground(); // kind 'desktop': lookdesktop / lookplace / layout -> new tabs
   updateSaveStar();  // the star as the list stands at boot (tabchange repaints it after)
+  updateLumenBtn();  // likewise the Lumen button (a restored session can boot onto Lumen)
   // The chips follow the history store: a visit moves the counts, and the row
   // is recomposed off its signal (debounced, and only when it really moved).
   wireNewtabChips();
@@ -12634,6 +12659,7 @@ function init() {
   document.addEventListener('tabchange', () => {
     updateZoomBadge();
     updateSaveStar();
+    updateLumenBtn();
     // Cheap: the counts are already in hand and the autopause word is cached,
     // so coming back to a new tab never costs a round trip to main.
     pushReadoutToAll();

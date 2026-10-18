@@ -104,6 +104,23 @@
         <span class="glyph">&#xE734;</span>
       </button>
 
+      <!-- Lumen: opens the streaming hub, or brings its one tab to the front
+           (openWatchTab in app.js, the same call Ctrl+Alt+W and the palette's
+           Lumen row make). The shield, downloads, reader and picture-in-
+           picture buttons are inserted at runtime; reader and pip go to the
+           LEFT of this one, so it always sits directly left of the shield.
+           app.js adds .is-active and aria-current while the tab in front is
+           Lumen. The glyph is the Lumen mark as a line icon (ring, aperture
+           blades, the hexagon), drawn on the 12 px grid the font glyphs use. -->
+      <button id="lumen" class="glass iconbtn no-drag" type="button"
+              title="Lumen (Ctrl+Alt+W)" aria-label="Lumen (Ctrl+Alt+W)">
+        <svg class="lumen-mark" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <circle cx="6" cy="6" r="5.5"/>
+          <path d="M6 3.6L8.08 4.8L8.08 7.2L6 8.4L3.92 7.2L3.92 4.8Z"/>
+          <path class="lumen-blades" d="M8.08 4.8L11.45 6.75M8.08 7.2L8.08 11.09M6 8.4L2.63 10.35M3.92 7.2L0.55 5.25M3.92 4.8L3.92 0.91M6 3.6L9.37 1.65"/>
+        </svg>
+      </button>
+
       <!-- glyph swaps to &#xE706; (sun) when the light theme is on -->
       <button id="theme" class="glass iconbtn no-drag" type="button" title="Switch theme" aria-label="Switch theme">
         <span class="glyph">&#xE708;</span>

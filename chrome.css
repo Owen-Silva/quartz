@@ -952,6 +952,24 @@ body.tab-dragging .tab.collapsed .tab-expand { opacity: 0; }
 #save-star.failed:hover { color: var(--warn); }
 #save-star[hidden] { display: none; }
 
+/* the Lumen button, left of the shield: an .iconbtn, so shape, hover, press
+   and the focus ring are its neighbours' own. The mark is a line SVG in
+   currentColor at the font glyphs' 12 px and 1 px stroke, so it takes the
+   same --text-2 / --text greys; the accent only while the tab in front IS
+   Lumen (.is-active, set by app.js). No glow, ever. */
+#lumen .lumen-mark {
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  overflow: visible;
+}
+#lumen.is-active,
+#lumen.is-active:hover { color: var(--accent); }
+
 /* --- session light --------------------------------------------- */
 /* Every status mark in the chrome is Helm's status dot: a flat 7px disc,
    never a glow. Idle is --st-idle; a live session is --st-working (the

@@ -143,6 +143,8 @@ const TESTS = [
   // every failure mode on its own tile, the game pause, opens, search, keyboard, reduced motion, a
   // cache-first second boot and Forget. ~6 min (four Retry rounds 30 s apart, one 20 s timeout).
   { name: 'watch-e2e', file: 'watch-e2e.js', e2e: true, timeout: 900 },
+  // The toolbar's Lumen button: one Lumen tab, reused; lit while Lumen is in front; keyboard; every palette.
+  { name: 'lumen-btn-e2e', file: 'lumen-btn-e2e.js', e2e: true },
   // Watch keeps itself up to date: the background refresh and its gates (battery saver, a game),
   // fresh on open (oldest first, rows in place), fresh after watching, the header and its time limit.
   { name: 'watch-auto-e2e', file: 'watch-auto-e2e.js', e2e: true, timeout: 600 },
