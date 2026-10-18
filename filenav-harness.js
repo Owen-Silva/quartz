@@ -50,6 +50,9 @@ const line = nav.blockedNotice('file:///C:/Users/you/My%20Docs/a.html');
 check(line === 'Quartz blocked this page from opening a file on your computer: C:\\Users\\you\\My Docs\\a.html'
   || (process.platform !== 'win32' && /My Docs\/a\.html$/.test(line)), 'the notice names the decoded path', line);
 check(nav.displayPath('not a url') === 'not a url', 'a broken URL is shown as given');
+check(nav.refusedLocalResource('Not allowed to load local resource: file:///C:/x/b.html') === 'file:///C:/x/b.html', 'Chromium\'s refusal line yields the file URL');
+check(nav.refusedLocalResource('Not allowed to load local resource: chrome://settings') === '', 'a refusal of a non-file URL is not ours');
+check(nav.refusedLocalResource('Uncaught TypeError: x') === '' && nav.refusedLocalResource(undefined) === '', 'any other console line is ignored');
 check(nav.isFileUrl(42) === false && nav.isFileUrl('file:x') === true, 'isFileUrl guards its input');
 
 console.log(`filenav: ${pass} passed, ${fail} failed`);

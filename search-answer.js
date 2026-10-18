@@ -379,7 +379,12 @@
     if (turn.text) renderText(body, turn.text, turn);
     if (turn.text) art.appendChild(body);
     if (!turn.text && (turn.state === 'pending' || turn.state === 'streaming')) art.appendChild(skeleton());
-    if (turn.state === 'streaming' && turn.text) body.appendChild(el('span', 'qa-caret'));
+    if (turn.state === 'streaming' && turn.text) {
+      // At the end of the last line being written, not on a line of its own under it.
+      var tail = body.lastElementChild;
+      while (tail && (tail.tagName === 'UL' || tail.tagName === 'OL') && tail.lastElementChild) tail = tail.lastElementChild;
+      (tail && (tail.tagName === 'P' || tail.tagName === 'LI') ? tail : body).appendChild(el('span', 'qa-caret'));
+    }
     if (turn.state === 'done') {
       if (turn.truncated) art.appendChild(el('p', 'qa-quiet qa-truncated', 'Answer cut short: Claude reached its length limit before finishing. Deeper answer may go further.'));
       var src = sourcesBox(turn);
@@ -453,8 +458,10 @@
   /** "Show more" only when the answer is taller than the clip. */
   function measure() {
     if (!root) return;
-    var over = view !== 'off' && els.thread.scrollHeight > els.clip.clientHeight + 4;
+    // The class first: measured while still expanded, the clip is as tall as the text, so
+    // "Show less" used to hide "Show more" and leave the answer cut off with no way to open it.
     root.classList.toggle('is-expanded', expanded);
+    var over = view !== 'off' && els.thread.scrollHeight > els.clip.clientHeight + 4;
     if (expanded) { els.more.hidden = false; els.more.textContent = 'Show less'; root.classList.add('is-long'); return; }
     root.classList.toggle('is-long', over);
     els.more.hidden = !over;

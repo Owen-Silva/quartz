@@ -50,8 +50,10 @@
 
 <main class="sr-main sr-wrap">
   <div class="sr-grid" id="sr-grid">
+    <!-- A grid item of its own (area "qa"), so under 1100 px the side panel can sit between the
+         answer and the results. Inside .sr-col it put the side panel above the answer. -->
+    <section class="qa" id="qa" hidden></section>
     <div class="sr-col" id="sr-col">
-      <section class="qa" id="qa" hidden></section>
       <p class="sr-altered" id="sr-altered" hidden></p>
       <section class="sr-problem" id="sr-problem" hidden role="alert">
         <div class="sr-problem-head"><span class="sr-pip" aria-hidden="true"></span><h2 class="sr-problem-title" id="sr-problem-title"></h2></div>

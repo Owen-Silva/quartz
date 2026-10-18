@@ -67,6 +67,9 @@ const TESTS = [
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
+  // look-sync's reads and writes when Windows refuses look.json for a moment (scanner, another app):
+  // a refused read is retried and re-checked, so a change that landed is followed, never lost.
+  { name: 'looksync', file: 'looksync-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.

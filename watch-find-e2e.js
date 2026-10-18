@@ -30,6 +30,7 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[
 const CDP_PORT = Number(opt('cdp', '9483'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-find-shots'));
 const YT_HTML = fs.readFileSync(path.join(__dirname, 'tests', 'watch-fixtures', 'youtube-search.html'), 'utf8');
+const EDGE_STUB = path.join(os.tmpdir(), 'quartz-find-e2e-' + process.pid + '-edge.txt');
 const TMDB_KEY = '0123456789abcdef0123456789abcdef';
 
 /* ---- the local servers ---- */
@@ -130,8 +131,11 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
   const LOG = path.join(profileDir, 'quartz.log');
   const logHas = (re) => { try { return re.test(fs.readFileSync(LOG, 'utf8')); } catch (e) { return false; } };
   try {
-    const q = await launch({ cdp: CDP_PORT, env: { QUARTZ_WATCH_BOOT_GRACE_MS: '0', QUARTZ_WATCH_REBASE: JSON.stringify(S.rebase), QUARTZ_WATCH_MIN_FREE_GB: '0', QUARTZ_WATCH_PREVIEW_MOCK: '0' } });
+    const q = await launch({ cdp: CDP_PORT, env: { QUARTZ_WATCH_BOOT_GRACE_MS: '0', QUARTZ_WATCH_REBASE: JSON.stringify(S.rebase), QUARTZ_WATCH_MIN_FREE_GB: '0', QUARTZ_WATCH_PREVIEW_MOCK: '0', QUARTZ_EDGE_STUB: EDGE_STUB, QUARTZ_TEST_VMP: 'signed' } });
     const chrome = q.chrome;
+    // Disney+, Hulu and Prime play here only with Widevine ready (the castlabs CDM, test-signed): else they go to Edge (a stub file here).
+    const wv = await chrome.waitFor('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine && s.widevine.available ? s.widevine : null; })()', 120000).catch(() => null);
+    check(!!wv, 'Widevine ready (test-signed): protected titles play in the layer', wv);
     await chrome.ev('openWatchTab(), 1');
     const gt = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
     const g = await new Cdp(gt.webSocketDebuggerUrl).open();
@@ -150,6 +154,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     check(searchHits('disney') + searchHits('hulu') + searchHits('prime') === 0, 'typing alone reads no service (only Enter does)', hits.map((h) => h.svc + h.path));
     await key(g, ...ENTER);
     const done1 = await g.waitFor(FS + '.done && ' + FS, 30000).catch(() => null);
+    await g.waitFor('!document.querySelector("#results .fd-spin")', 5000).catch(() => 0);   // the last answer drawn (one frame later)
     check(!!done1 && done1.services.join() === 'disney:ok,hulu:ok,prime:ok' && done1.youtube === 'ok', 'Enter: Disney+, Hulu, Prime Video and YouTube all answered', done1);
     const order = hits.filter((h) => h.path === '/search' || /^\/search\//.test(h.path)).map((h) => h.svc);
     check(order.join() === 'disney,hulu,prime', "one read of each service's own search page, one at a time, in order", order);
@@ -166,6 +171,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     check(view.attrib && view.wtw, "TMDB merged in: JustWatch attribution, a 'Where to watch' link for a title his services lack");
     const shot = async (name, w, h) => {
       await chrome.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await g.waitFor('innerWidth >= ' + (w - 40), 8000).catch(() => 0);
       await sleep(900);
       const file = path.join(SHOTS, 'lumen-n-search-' + name + '.png');
       try { await chrome.shot(file); say('shot ' + file); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
@@ -203,6 +209,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     const tabs0 = await chrome.ev('tabs.length');
     await g.ev('document.querySelector(\'[data-sec="best"] .fd-hit\').click(), 1');
     const p1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] ? s.slots[0].url : null; })()`, 15000).catch(() => null);
+    if (!p1) { let stub = ''; try { stub = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub = '(no Edge stub line)'; } say('no layer; Edge stub: ' + stub.slice(0, 200)); }
     check(!!p1 && p1.indexOf(S.hulu.origin + '/series/' + FX.UUID(1)) === 0 && (await chrome.ev('tabs.length')) === tabs0, 'a Best match click resumes his Hulu episode in the Lumen layer (no new tab)', p1);
     await chrome.ev('WatchPlayer.close(), 1');
     await chrome.waitFor('!' + ST + '.open', 8000).catch(() => 0);
@@ -221,6 +228,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     await g.send('Input.insertText', { text: 'cocaine bear' });
     await key(g, ...ENTER);
     const done3 = await g.waitFor(FS + '.done && ' + FS, 30000).catch(() => null);
+    await g.waitFor('!document.querySelector("#results .fd-spin")', 5000).catch(() => 0);   // the last answer drawn (one frame later)
     check(!!done3 && done3.services.join() === 'disney:ok,hulu:signed-out,prime:error' && done3.youtube === 'ok', 'cocaine bear: Disney+ ok, Hulu signed out, Prime Video failed, YouTube ok', done3);
     const fv = await g.ev(`(() => { const r = document.getElementById('results'); const sec = (k) => r.querySelector('[data-sec="' + k + '"]'); return { sign: (sec('hulu').querySelector('.fd-sign') || {}).textContent || '', err: (sec('prime').querySelector('.fd-note') || {}).textContent || '', retry: !!sec('prime').querySelector('.fd-note .btn'), disney: sec('disney').querySelectorAll('.fd-tile').length, yt: sec('youtube').querySelectorAll('.fd-tile').length }; })()`);
     check(fv.sign === 'Sign in to search Hulu', 'signed out: "Sign in to search Hulu"', fv.sign);
