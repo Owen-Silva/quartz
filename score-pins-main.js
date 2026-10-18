@@ -97,6 +97,16 @@ function create(d) {
   const pins = new Map();          // key -> pin record (order = pin order)
   const byContents = new Map();    // card webContents id -> key
   const lumenPages = new Set();    // Lumen page webContents that asked for the pinned keys
+  // A page's 'destroyed' listener goes on when it first speaks as a Lumen page, not on every
+  // webview: each guest already carries one per feature that watches it, and an 11th tripped
+  // Node's MaxListeners warning on a new tab (log-e2e). Once per webContents.
+  const lumenPagesListened = new WeakSet();
+  function trackLumenPage(contents) {
+    lumenPages.add(contents);
+    if (lumenPagesListened.has(contents)) return;
+    lumenPagesListened.add(contents);
+    try { contents.once('destroyed', () => lumenPages.delete(contents)); } catch { /* destroyed already */ }
+  }
   let prefs = { v: 1, sound: true, pins: [] };
   let look = cleanLook(null);
   let saveTimer = null;
@@ -497,7 +507,7 @@ function create(d) {
     let msg = {};
     try { msg = sp === -1 ? {} : JSON.parse(rest.slice(sp + 1)); } catch { return false; }
     if (!msg || typeof msg !== 'object') return false;
-    lumenPages.add(contents);
+    trackLumenPage(contents);
     if (verb === 'hello') pushTo(contents);
     else if (verb === 'pin') { const r = pin(msg.game); if (!r.ok) contents.executeJavaScript('window.__scorePinFailed && window.__scorePinFailed(' + JSON.stringify(r.reason) + ')').catch(() => {}); pushTo(contents); }
     else if (verb === 'unpin' && typeof msg.key === 'string') { unpin(msg.key); pushTo(contents); }
@@ -511,7 +521,6 @@ function create(d) {
       if (m.indexOf(LINE_PREFIX) !== 0) return;
       try { handleLine(contents, m); } catch (err) { log('Score pin line failed: ' + ((err && err.message) || 'error')); }
     });
-    contents.on('destroyed', () => lumenPages.delete(contents));
   }
 
   /* --- IPC ------------------------------------------------------------------------------------- */

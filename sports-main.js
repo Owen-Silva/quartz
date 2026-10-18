@@ -77,6 +77,16 @@ function create(deps) {
   const cache = new Map();          // url -> { at, value }
   const inflight = new Map();       // url -> Promise
   const pages = new Set();          // the Lumen pages that said hello
+  // A page's 'destroyed' listener goes on when it first speaks as a Lumen page, not on every
+  // webview: each guest already carries one per feature that watches it, and an 11th tripped
+  // Node's MaxListeners warning on a new tab (log-e2e). Once per webContents.
+  const pagesListened = new WeakSet();
+  function trackPage(contents) {
+    pages.add(contents);
+    if (pagesListened.has(contents)) return;
+    pagesListened.add(contents);
+    try { contents.once('destroyed', () => pages.delete(contents)); } catch { /* destroyed already */ }
+  }
   let pendingOpen = null;           // { league, id, at }: a score pin's click, waiting for a Lumen page
   let favs = loadFavs();
   const counts = { fetches: 0 };
@@ -227,13 +237,13 @@ function create(deps) {
   async function handle(contents, verb, msg) {
     const league = typeof msg.league === 'string' ? msg.league : '';
     if (verb === 'hello') {
-      pages.add(contents);
+      trackPage(contents);
       push(contents, favsMsg());
       if (pendingOpen && now() - pendingOpen.at < OPEN_FRESH_MS) { push(contents, { kind: 'open', league: pendingOpen.league, id: pendingOpen.id }); pendingOpen = null; }
       if (favs.length) await sendMyTeams(contents);
       return;
     }
-    pages.add(contents);
+    trackPage(contents);
     if (verb === 'myteams') { await sendMyTeams(contents); return; }
     if (verb === 'game') {
       const id = Sports.cleanId(msg.id);
@@ -300,7 +310,6 @@ function create(deps) {
       if (m.indexOf(LINE_PREFIX) !== 0) return;
       try { handleLine(contents, m); } catch (err) { log('Lumen sports line failed: ' + ((err && err.message) || 'error')); }
     });
-    contents.on('destroyed', () => pages.delete(contents));
   }
 
   /**
