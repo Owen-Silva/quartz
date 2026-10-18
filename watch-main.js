@@ -58,12 +58,14 @@
  *         quartz-watch:open     {"url":"https://..."}           (a title: Quartz tab, or Edge for DRM)
  *         quartz-watch:signin   {"service":"disney"}            (the sign-in page, in a Quartz tab)
  *         quartz-watch:search   {"q":"bluey","seq":3}           (YouTube results + TMDB slot)
+ *         quartz-watch:find     {"q":"bluey","seq":4}           (Enter: every service's own search, watch-find-main.js)
  *         quartz-watch:preview  {"title":"Terminator 2","tv":false,"seq":4}  (the hover preview's TMDB trailer)
  *         quartz-watch:forget   {}                              (delete the cache)
  *         quartz-watch:settings {}                              (handled by app.js: Settings > Watch)
  *   out   window.__applyWatch(snapshot)       after hello, and after every change; when the
  *                                             snapshot itself fails: { v: 1, now, fatal: reason }
  *         window.__applyWatchSearch(answer)
+ *         window.__applyWatchFind(part)          one per service as each answers (watch-find-main.js)
  *         window.__applyWatchResult({ action, ok, reason, how })
  *         window.__applyWatchPreview({ seq, state, reason, videoId })
  *
@@ -88,6 +90,10 @@ for (const id of Shape.SERVICE_IDS) {
 /* TMDB "where to watch" (watch/tmdb.js): only with a key the user pastes in Settings > Watch. */
 let Tmdb = null;
 try { Tmdb = require('./watch/tmdb'); } catch (err) { Tmdb = null; }
+
+/* Lumen's one search box, on Enter: every service's own search (watch-find-main.js). */
+let FindMain = null;
+try { FindMain = require('./watch-find-main'); } catch (err) { FindMain = null; }
 
 const LINE_PREFIX = 'quartz-watch:';
 const PAGE_FILE = 'watch.html';
@@ -228,6 +234,13 @@ function parseGuestLine(text) {
       const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
       if (!title) return null;
       return { verb, title, tv: msg.tv === true, seq };
+    }
+    case 'find': {
+      const q = typeof msg.q === 'string' ? msg.q.replace(/[ -]/g, ' ').trim().slice(0, QUERY_MAX) : '';
+      const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
+      if (!q) return null;
+      const only = typeof msg.only === 'string' && Shape.SERVICE_IDS.indexOf(msg.only) !== -1 ? msg.only : '';
+      return { verb, q, seq, only, force: msg.force === true };
     }
     case 'search': {
       const q = typeof msg.q === 'string' ? msg.q.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
@@ -376,6 +389,7 @@ function create(deps) {
   const searchCache = new Map();
   const trailerCache = new Map();   // 'tv|title' -> { at, answer }; hover previews, never written to disk
   const searchLive = new Map();  // guest -> its one search in flight { seq, ctrl, stale }
+  let finder = null;             // watch-find-main.js: Enter's search on every service (made on first use)
   // Boot grace: reads enqueued in the first bootGraceMs stay queued (the page says "Waiting to
   // read X") and the first reader starts at create() + bootGraceMs. The harness passes 0.
   const bootGraceMs = Number.isFinite(d.bootGraceMs) && d.bootGraceMs >= 0 ? d.bootGraceMs : BOOT_GRACE_MS;
@@ -1305,6 +1319,7 @@ function create(deps) {
     guestVisible.delete(contents);
     const job = searchLive.get(contents);
     if (job) { cancelSearch(job); searchLive.delete(contents); }
+    if (finder) finder.cancel(contents);
     return had;
   }
 
@@ -1419,7 +1434,9 @@ function create(deps) {
     if (test.openStub) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
     }
-    const inLayer = !!(player && player.inside() && !isTmdbPage(clean));
+    // TMDB's where-to-watch page (JustWatch's links) opens in the layer too: leaving Lumen for a
+    // tab is a bug. A link on it to another site leaves the layer with its own log line.
+    const inLayer = !!(player && player.inside());
     // A multiview tile that cannot play says why inside its tile; it never launches Edge by itself.
     if (route.edge && inLayer && x.multi) {
       player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: true, blocked: route.why || 'Quartz can’t play protected video here' });
@@ -1430,10 +1447,13 @@ function create(deps) {
       try { r = await openInEdge(x.fallback || clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
       return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
     }
-    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: !!x.multi,
+    const tmdbPage = isTmdbPage(clean);
+    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || (tmdbPage ? 'Where to watch' : ''), multi: !!x.multi,
       fallback: x.fallback ? rebase(x.fallback) : '', item: x.item || null })) {
+      if (tmdbPage) log('Lumen opened a TMDB where-to-watch page in the layer');
       return { ok: true, how: 'layer', reason: '' };
     }
+    if (tmdbPage) log('Lumen opened a TMDB where-to-watch page in a tab (' + (player && !player.inside() ? 'Play inside Lumen is off' : 'no layer to show it in') + ')');
     send('open-url', { url: rebase(clean), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }
@@ -1513,6 +1533,7 @@ function create(deps) {
     // stamps, and the reader page open now (the read it belonged to stops at once).
     searchCache.clear();
     trailerCache.clear();
+    if (finder) finder.forget();
     searchNext = 0;
     for (const k of Object.keys(paused)) delete paused[k];
     for (const k of Object.keys(pausedUntil)) delete pausedUntil[k];
@@ -1526,6 +1547,34 @@ function create(deps) {
     if (saveTimer) { clearTimer(saveTimer); saveTimer = null; }
     pushAll();
     return { ok, freed: ok ? freed : 0, reason: ok ? '' : 'the cache file could not be deleted' };
+  }
+
+  /* --- the one search box (Enter): watch-find-main.js ------------------------------------ */
+
+  /** Why Enter's hidden search readers must wait ('' = they may): the same gates as a read. */
+  function findBlocker() {
+    const game = gameRunning();
+    if (game) return 'paused while ' + (game === 'valorant' ? 'VALORANT' : game) + ' is running';
+    const free = freeGb();
+    if (free < minFreeGb) return 'paused: only ' + free.toFixed(1) + ' GB of memory free (Lumen reads with at least ' + minFreeGb + ' GB)';
+    return '';
+  }
+
+  function findMain() {
+    if (finder || !FindMain || stopped) return finder;
+    finder = FindMain.create({
+      runStep, now, log, sleep,
+      readers: test.findReaders || undefined,
+      gapMs: Number.isFinite(test.findGapMs) ? test.findGapMs : undefined,
+      enabled: (id) => !!loadPrefs().enabled[id],
+      serviceState: (id) => { const s = loadCache().services[id]; return s ? s.state : ''; },
+      blocker: findBlocker,
+      epoch: () => epoch,
+      youtube: (q, job) => searchYouTube(q, loadPrefs(), job),
+      tmdb: (q, job) => searchTmdb(q, loadPrefs().tmdbKey, job),
+      push: (contents, part) => pushTo(contents, '__applyWatchFind', part),
+    });
+    return finder;
   }
 
   /* --- search ------------------------------------------------------------------------- */
@@ -1614,7 +1663,8 @@ function create(deps) {
     else {
       let items = [];
       try { items = Shape.cleanItems(yt.parseSearch(r.text || ''), 20); } catch { items = []; }
-      answer = items.length ? { ok: true, state: 'ok', reason: '', items }
+      const channels = FindMain ? FindMain.channelsFrom(r.text || '') : [];
+      answer = items.length ? { ok: true, state: 'ok', reason: '', items, channels }
         : { ok: false, state: 'error', reason: "YouTube's results page had nothing Lumen could read (YouTube changed its layout?)", items: [] };
     }
     if (answer.ok) {
@@ -1695,6 +1745,14 @@ function create(deps) {
         search(req.q, req.seq, contents).then((a) => { if (a) pushTo(contents, '__applyWatchSearch', a); },
           (err) => pushTo(contents, '__applyWatchSearch', { seq: req.seq, q: req.q, links: Merge.searchLinks(req.q), youtube: { ok: false, state: 'error', reason: String((err && err.message) || err), items: [] }, tmdb: null }));
         break;
+      case 'find': {
+        const f = findMain();
+        if (!f) { pushTo(contents, '__applyWatchFind', { seq: req.seq, q: req.q, kind: 'fatal', reason: 'this build has no search across services' }); break; }
+        // Enter replaces the as-you-type search: one YouTube read, not two.
+        if (!req.only) { const job = searchLive.get(contents); if (job) { cancelSearch(job); searchLive.delete(contents); } }
+        f.run(req.q, req.seq, contents, { only: req.only, force: req.force }).catch((err) => log('Lumen search failed: ' + ((err && err.message) || err)));
+        break;
+      }
       case 'preview':
         previewTrailer(req.title, req.tv).then((a) => pushTo(contents, '__applyWatchPreview', Object.assign({ seq: req.seq }, a)),
           (err) => pushTo(contents, '__applyWatchPreview', { seq: req.seq, state: 'error', reason: 'No preview: ' + String((err && err.message) || err).slice(0, 120), videoId: '' }));
@@ -1826,6 +1884,7 @@ function create(deps) {
     for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     for (const job of searchLive.values()) cancelSearch(job);
     searchLive.clear();
+    if (finder) finder.stop();
     if (saveTimer) saveCacheNow();
     guests.clear();
     guestVisible.clear();
@@ -1864,7 +1923,7 @@ function create(deps) {
       pausedUntil: Object.assign({}, pausedUntil), viewAlive: liveReaders.size > 0, readers: liveReaders.size,
       searchCache: searchCache.size, trailerCache: trailerCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
       bgTimerAt, bgQueued: Array.from(bgQueued), bgLastAt, bgWaiting, bgPausedUntil, bgReads, watched: Object.assign({}, watched),
-      readStartedAt, readLimit,
+      readStartedAt, readLimit, find: finder ? finder.state() : null,
     }),
   };
 }
