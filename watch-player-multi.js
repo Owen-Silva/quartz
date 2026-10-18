@@ -734,6 +734,19 @@
     return undefined;
   }
 
+  /** Back in multiview: the selected tile's own history; with nothing earlier, a word about Esc. */
+  function onBack(ctx) {
+    CTX = ctx;
+    if (!isMulti() || M.mini) return undefined;
+    var s = ctx.focused();
+    var v = s && s.view;
+    var can = false;
+    try { can = !!(v && v.canGoBack()); } catch (e) { can = false; }
+    if (can) { try { var p = v.goBack(); if (p && p.catch) p.catch(function () { /* the page went */ }); } catch (e) { /* gone */ } }
+    else ctx.note('Nothing earlier in tile ' + (ctx.L.focus + 1) + ': Esc leaves multiview');
+    return true;
+  }
+
   function onClose(ctx) {
     M.mini = false; M.pick = false; M.drag = null; M.spot = false; M.muteAll = false;
     endSwap();
@@ -765,7 +778,7 @@
 
   window.WatchPlayerMulti = {
     build: onBuild, bar: onBar, slot: onSlot, view: onView, attach: onAttach, destroy: onDestroy,
-    open: onOpen, layout: onLayout, place: onPlace, shortcut: onShortcut, key: onKey, close: onClose, state: state,
+    open: onOpen, layout: onLayout, place: onPlace, shortcut: onShortcut, key: onKey, back: onBack, close: onClose, state: state,
     // for watch-player-multi-unit.js
     _embedFor: embedFor, _withStart: withStart
   };

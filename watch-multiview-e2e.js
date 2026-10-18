@@ -355,6 +355,19 @@ run('watch-multiview-e2e', async ({ check, launch, say }) => {
     mm = await chrome.waitFor(`!${MS}.mini ? ${MS} : null`, 3000).catch(() => null);
     check(!!mm && mm.n === 4 && mm.box[2] > vr[2] - 4, 'a click on the mini-player restores it, full size', mm && mm.box);
 
+    /* ===== 7b. Back (Alt+Left) in multiview: one tile's history, never the others ===== */
+    const bk = await targetWhere(q, (x) => String(x.url) === FD + '/__p/gameB', 3000);
+    const bkp = bk && await cdpTo(bk);
+    if (bkp) {
+      const k = { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37, modifiers: 1 };
+      await bkp.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, k));
+      await bkp.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, k));
+      bkp.close();
+    }
+    await sleep(700);
+    const sb = await chrome.ev(ST);
+    check(sb.open && sb.n === 4, 'Alt+Left in multiview never closes the tiles (Back is the selected tile’s own history)', { open: sb.open, n: sb.n, note: sb.note });
+
     /* ===== 8. Esc leaves multiview ===== */
     const keepWc = (await chrome.ev(ST)).slots[(await chrome.ev(ST)).focus].wcId;
     const anyT = await targetWhere(q, (x) => String(x.url) === FD + '/__p/gameB', 3000);

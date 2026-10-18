@@ -442,6 +442,8 @@
       L.lastMouseBackAt = Date.now();
     }
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Back'); return true; }
+    // Multiview: Back walks the selected tile's own history and never closes the other tiles.
+    if (MV('back', src) === true) return true;
     var s = focused();
     var v = s && s.view;
     var can = false;
