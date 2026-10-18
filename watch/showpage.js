@@ -232,7 +232,7 @@
       return banner('busy', svc ? 'Reading ' + name + '…' : 'Looking this up on TMDB…');
     }
     if (a.state === 'ok' || a.state === 'elsewhere') return null;
-    var tm = a.show ? ' Episodes are from TMDB; your progress isn’t shown.' : (a.tmdbReason ? ' TMDB: ' + a.tmdbReason + '.' : '');
+    var tm = a.show ? (a.show.type === 'movie' ? ' The details are from TMDB; your progress isn’t shown.' : ' Episodes are from TMDB; your progress isn’t shown.') : (a.tmdbReason ? ' TMDB: ' + a.tmdbReason + '.' : '');
     if (a.state === 'signed-out') return banner('warn', 'You’re signed out of ' + name + ' in Quartz.' + tm, [btn('btn sm', 'Sign in', function () { B.signin(svc); })]);
     if (a.state === 'off') return banner('warn', name + ' is off in Settings > Lumen.' + tm, [btn('btn sm', 'Settings', function () { B.settings(); })]);
     if (a.state === 'paused') return banner('warn', 'Lumen’s reader is paused: ' + String(a.reason || '').replace(/^Lumen’s reader is /, '') + '.' + tm, [retry()]);

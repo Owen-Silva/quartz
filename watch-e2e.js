@@ -927,7 +927,10 @@ if (require.main === module) {
           const c = [...document.querySelectorAll('#stack .lrow .rt > .card')].find((c) => { if (!c._item || c._item.service !== ${JSON.stringify(id)}) return false;
             const b = c.getBoundingClientRect(); if (b.width < 20 || b.left < 0 || b.right > innerWidth || b.top < 0 || b.bottom > innerHeight) return false;
             const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!h && c.contains(h); });
-          if (!c) return null; c.setAttribute('data-e2e-card', '1'); return c._item.url; })()`);
+          if (!c) return null; c.setAttribute('data-e2e-card', '1');
+          // a show or film with a Lumen show page (watch/showpage.js) opens that page; a Continue tile still plays
+          const page = c._item.kind !== 'resume' && !!window.LumenShowModel && !!window.LumenShowModel.requestFor(c._item);
+          return { url: c._item.url, kind: c._item.kind, page }; })()`);
         if (ok) { await click(g, '[data-e2e-card="1"]'); return ok; }
         await g.ev("document.activeElement && document.activeElement.blur && document.activeElement.blur(), 1");
         await press(g, 'ArrowDown');
@@ -935,7 +938,7 @@ if (require.main === module) {
       }
       return null;
     }
-    const ytUrl = await openCardOf('youtube');
+    const ytUrl = ((await openCardOf('youtube')) || {}).url;
     // "Play inside Lumen" is on by default (watch-player-e2e.js covers the layer itself): the title
     // plays in the player layer over this tab, never a new tab.
     let ytLayer = null;
@@ -945,10 +948,19 @@ if (require.main === module) {
     await chrome.ev(`(() => { if (window.WatchPlayer && WatchPlayer.isOpen()) WatchPlayer.close('e2e'); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
     for (const id of ['disney', 'hulu', 'prime']) {
-      const u = await openCardOf(id);
+      const o = await openCardOf(id);
+      const u = o && o.url;
+      if (o && o.page) {
+        // a show or film tile (not Continue) opens Lumen's own show page; nothing leaves Lumen
+        const sp = await g.waitFor('(() => { const s = window.LumenShows && LumenShows._state(); return s ? s.req : null; })()', 5000).catch(() => null);
+        await sleep(1200);
+        check(!!sp && sp.service === id && readText(EDGE_STUB).indexOf(u) === -1 && readText(OPEN_STUB).indexOf(u) === -1, 'a ' + NAMES[id] + ' ' + o.kind + ' card (real click) opens Lumen’s show page, not Edge', { card: u, page: sp });
+        await g.ev('(() => { if (window.LumenShows) LumenShows.close(); return 1; })()');
+        continue;
+      }
       let inEdge = false;
       try { inEdge = await new Promise((r) => { const t0 = Date.now(); const tk = setInterval(() => { if (u && readText(EDGE_STUB).indexOf(u) !== -1) { clearInterval(tk); r(true); } else if (Date.now() - t0 > 6000) { clearInterval(tk); r(false); } }, 150); }); } catch (e) { inEdge = false; }
-      check(!!u && inEdge && readText(OPEN_STUB).indexOf(JSON.stringify({ url: u, edge: true })) !== -1, 'a ' + NAMES[id] + ' card (real click) goes to Edge (the Edge stub has its URL; the open stub says edge:true)', u);
+      check(!!u && inEdge && readText(OPEN_STUB).indexOf(JSON.stringify({ url: u, edge: true })) !== -1, 'a ' + NAMES[id] + ' ' + ((o && o.kind) || '') + ' card (real click) goes to Edge (the Edge stub has its URL; the open stub says edge:true)', u);
     }
     check((await chrome.ev('tabs.length')) === tabsBefore, 'the Edge opens added no Quartz tab', await chrome.ev('tabs.length'));
 

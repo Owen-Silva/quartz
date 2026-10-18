@@ -137,6 +137,11 @@ const TESTS = [
   // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
   // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
   { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
+  // Lumen's show and movie pages (watch/showpage.js + watch-shows-main.js) against local fronts serving
+  // tests/watch-show-fixtures/ and a local TMDB: Resume SxEy, progress, watched checks, season tabs, a
+  // season from TMDB, a failing reader's TMDB fallback with its reason, a title on none of his services,
+  // plays in the layer (Widevine test-signed: castlabs only). The page's requests are held to local.
+  { name: 'watch-shows-e2e', file: 'watch-shows-e2e.js', e2e: true, timeout: 480, needs: () => castlabsBuild() },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,

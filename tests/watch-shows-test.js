@@ -124,6 +124,8 @@ async function main() {
     check(pk.state === 'error' && pk.picker === true && /who's watching/.test(pk.reason), "Hulu: the who's-watching picker says so", pk);
     const ch = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [{ url: 'https://x/content/v5/hubs/series/' + BEAR, status: 200, json: { components: [] } }] })), req);
     check(ch.state === 'error' && /changed its layout/.test(ch.reason), 'Hulu: a page with nothing readable is an error with the reason', ch);
+    const rf = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [{ url: 'https://x/content/v5/hubs/series/' + BEAR, status: 503, json: { message: 'Service Unavailable' } }] })), req);
+    check(rf.state === 'error' && rf.reason === 'Hulu’s servers answered HTTP 503 for this title’s data', 'Hulu: title data refused (HTTP 503) says so, not a layout guess', rf);
     const to = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [], error: { code: 'timeout', detail: 'x' } })), req);
     check(to.state === 'error' && /timed out after 18 s/.test(to.reason), 'Hulu: a timed-out read says how long', to);
     // the logged-out public page: the model in __NEXT_DATA__, no progress
