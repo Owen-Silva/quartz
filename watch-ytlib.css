@@ -89,7 +89,8 @@ body.searching .ytp { visibility: hidden; }
 .yt-chn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .yt-by > .yt-chn { color: var(--text-2); }
 .yt-age { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.yt-ch + .yt-age::before { content: '\00b7'; margin-right: 6px; }
+.yt-ch + .yt-age { margin-left: -8px; }   /* the pill's own right padding is the gap before the dot */
+.yt-ch + .yt-age::before, .yt-chn + .yt-age::before { content: '\00b7'; margin-right: 6px; }
 .yt-pl .yt-art .len { font-weight: 600; }
 
 /* states */

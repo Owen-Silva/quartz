@@ -124,7 +124,8 @@
       else if (a.state === 'ok') state = 'empty';
       else state = 'loading';
     }
-    var m = { key: 'r:yt-subs', kind: 'items', id: 'yt-subs', title: 'Subscriptions', service: '', yt: true, top: !state, items: [] };
+    // service: the whole row is YouTube, so its tiles carry no YouTube chip (the New mark has that corner).
+    var m = { key: 'r:yt-subs', kind: 'items', id: 'yt-subs', title: 'Subscriptions', service: 'youtube', yt: true, top: !state, items: [] };
     if (state) m.items = [stateItem(state, a)];
     else m.items = items;
     m.ytSig = '\u0002' + rowSigOf(a);
@@ -683,6 +684,14 @@
     if (e.key === '/' || ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !(e.target && e.target.closest && e.target.closest('.ytp')))) { return e.key !== '/'; }
     return !!(e.target && e.target.closest && e.target.closest('.ytp'));
   }
+
+  // The chrome's Back (Alt+Left and the toolbar never reach this page's keydown: main takes them as
+  // the browser's Back) asks here first (app.js goBack). Chained, so another Lumen page can join.
+  var prevBack = window.__watchBack;
+  window.__watchBack = function () {
+    if (isOpen()) { back(); return true; }
+    return typeof prevBack === 'function' ? !!prevBack() : false;
+  };
 
   function attach(helpers) {
     H = helpers;
