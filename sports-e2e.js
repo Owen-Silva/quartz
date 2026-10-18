@@ -123,6 +123,7 @@ run('sports-e2e', async ({ check, launch, say }) => {
     QUARTZ_WATCH_OPEN_STUB: OPEN_STUB, QUARTZ_EDGE_STUB: EDGE_STUB,
     QUARTZ_WATCH_REBASE: JSON.stringify([['https://www.espn.com', base + '/espnweb']]),   // ESPN's player page: the mock's
     QUARTZ_TEST_CDM: 'ready', QUARTZ_TEST_VMP: 'signed',   // DRM ready (test only), as on the user's signed Quartz
+    QUARTZ_TEST_WINDOW_SIZE: '1536x800',   // the window's real size: the layer's <webview> shot at 1536x800 (emulation never reaches a guest)
   };
   const q = await launch({ cdp: CDP_PORT, env, args: NO_ESPN_NET });
   await q.chrome.ev('openWatchTab(), 1');
@@ -238,13 +239,15 @@ run('sports-e2e', async ({ check, launch, say }) => {
   if (LAYER_SHOT && layer && layer.open) {
     // The layer is the chrome's (it covers the Watch tab): shot from the chrome, at 1536x800, once the mock player drew.
     await sleep(1500);
+    // The window IS 1536x800 (QUARTZ_TEST_WINDOW_SIZE); an emulated size would leave the guest at its own size.
+    // The capture is scaled to CSS pixels, so the file is 1536x800 whatever the display's scale.
     try {
-      await q.chrome.send('Emulation.setDeviceMetricsOverride', { width: 1536, height: 800, deviceScaleFactor: 1, mobile: false });
-      await sleep(900);
-      await q.chrome.shot(LAYER_SHOT);
-      say('shot ' + LAYER_SHOT);
+      const vp = await q.chrome.ev('[innerWidth, innerHeight, devicePixelRatio]');
+      const m = await q.chrome.send('Page.captureScreenshot', { format: 'png', fromSurface: true, clip: { x: 0, y: 0, width: vp[0], height: vp[1], scale: 1 / (vp[2] || 1) } });
+      if (!m.result || !m.result.data) throw new Error((m.error && m.error.message) || 'no data');
+      fs.writeFileSync(LAYER_SHOT, Buffer.from(m.result.data, 'base64'));
+      say('shot ' + LAYER_SHOT + ' (window ' + vp.join('x') + ')');
     } catch (e) { say('layer shot failed: ' + e.message); }
-    await q.chrome.send('Emulation.clearDeviceMetricsOverride').catch(() => 0);
   }
   await q.chrome.ev('window.WatchPlayer && window.WatchPlayer.close(), 1').catch(() => 0);
   await sleep(500);

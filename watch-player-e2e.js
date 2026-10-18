@@ -193,12 +193,15 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
       || [...document.querySelectorAll('*')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent))`;
     // A real click on a tile the way he does it: when its row is below the lens, the first click brings the
     // row up (watch.js onStackClick) and the second opens the title. Returns where the tile was.
-    const clickTile = async (page, svc) => {
-      const at = await page.ev(`(() => { const c = ${card(svc)}; if (!c) return null; const r = c.closest('.lrow'); const f = document.querySelector('#stack > .lrow[data-d="0"]'); const at = { row: r ? r.dataset.key : null, d: r ? r.dataset.d : null, focused: f ? f.dataset.key : null }; c.scrollIntoView({ block: 'nearest' }); c.click(); return at; })()`);
+    // kind: only tiles of that kind (resume = Continue watching, which plays on one click)
+    const cardK = (svc, kind) => kind ? `([...document.querySelectorAll('#stack .lrow[data-d="0"] *')].find((n) => n._item && n._item.service === '${svc}' && n._item.kind === '${kind}' && n.offsetParent)
+      || [...document.querySelectorAll('#stack *')].find((n) => n._item && n._item.service === '${svc}' && n._item.kind === '${kind}' && n.offsetParent))` : card(svc);
+    const clickTile = async (page, svc, kind) => {
+      const at = await page.ev(`(() => { const c = ${cardK(svc, kind)}; if (!c) return null; const r = c.closest('.lrow'); const f = document.querySelector('#stack > .lrow[data-d="0"]'); const at = { row: r ? r.dataset.key : null, d: r ? r.dataset.d : null, focused: f ? f.dataset.key : null }; c.scrollIntoView({ block: 'nearest' }); c.click(); return at; })()`);
       if (at && at.row && at.d !== '0') {
         await page.waitFor(`(() => { const r = [...document.querySelectorAll('#stack > .lrow')].find((x) => x.dataset.key === ${JSON.stringify(at.row)}); return !!r && r.dataset.d === '0'; })()`, 4000).catch(() => 0);
         await sleep(500);
-        await page.ev(`(() => { const c = ${card(svc)}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+        await page.ev(`(() => { const c = ${cardK(svc, kind)}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
       }
       return at;
     };
@@ -514,7 +517,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await c2.ev('openWatchTab(), 1');
     const gt2 = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
     const g2 = await cdpTo(gt2);
-    await g2.waitFor(`!!(${card('disney')})`, 60000);
+    await g2.waitFor(`!!(${cardK('disney', 'resume')})`, 60000);
     const checkLong = (c, label, d) => { check(c, label, d); if (!c) say("detail: " + JSON.stringify(d).slice(0, 2500)); };
     const SPY = `(() => { if (window.__e2eSpy) { window.__e2eSpy.sent = []; window.__e2eSpy.res = []; return 1; } const S = window.__e2eSpy = { sent: [], res: [] };
       const ol = console.log; console.log = function () { try { const s = String(arguments[0]); if (/^quartz-watch:/.test(s)) S.sent.push(s.slice(0, 240)); } catch (e) { /* not a string */ } return ol.apply(this, arguments); };
@@ -528,11 +531,11 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
       return 1; })()`;
     await g2.ev(SPY);
     const log0 = (() => { try { return fs.readFileSync(LOG, 'utf8').length; } catch (e) { return 0; } })();
-    const dTile = await clickTile(g2, 'disney');
+    const dTile = await clickTile(g2, 'disney', 'resume');
     await sleep(2500);
     let stub2 = ''; try { stub2 = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub2 = ''; }
     // Edge gets the title's REAL address (the tile's link), not the test mirror.
-    checkLong(/"?https:\/\/www\.disneyplus\.com\//.test(stub2) && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ tile goes to Edge (the stub), no layer', { stub: stub2.trim().slice(0, 120), tile: dTile, card: await g2.ev(`window.__e2eSpy.card(${card('disney')})`).catch((e) => String(e.message).slice(0, 120)), spy: await g2.ev('(() => { const s = Object.assign({}, window.__e2eSpy); delete s.card; return s; })()').catch(() => null), log: (() => { try { return fs.readFileSync(LOG, 'utf8').slice(log0).split('\n').filter((l) => /Lumen|watch/i.test(l)).slice(-6); } catch (e) { return []; } })(), drm: await c2.ev('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine ? { available: s.widevine.available, services: s.widevine.services } : null; })()').catch(() => null) });
+    checkLong(/"?https:\/\/www\.disneyplus\.com\//.test(stub2) && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ Continue watching tile goes to Edge (the stub), no layer', { stub: stub2.trim().slice(0, 120), tile: dTile, card: await g2.ev(`window.__e2eSpy.card(${cardK('disney', 'resume')})`).catch((e) => String(e.message).slice(0, 120)), spy: await g2.ev('(() => { const s = Object.assign({}, window.__e2eSpy); delete s.card; return s; })()').catch(() => null), log: (() => { try { return fs.readFileSync(LOG, 'utf8').slice(log0).split('\n').filter((l) => /Lumen|watch/i.test(l)).slice(-6); } catch (e) { return []; } })(), drm: await c2.ev('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine ? { available: s.widevine.available, services: s.widevine.services } : null; })()').catch(() => null) });
     await clickTile(g2, 'youtube');
     const y2 = await c2.waitFor(`${ST}.open`, 8000).catch(() => false);
     check(!!y2, 'DRM not ready: YouTube still plays in the layer');
