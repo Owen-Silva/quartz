@@ -438,7 +438,11 @@ function create(deps) {
   let bgReads = 0;
   // Subscriptions, channels and the Library (watch/ytlib-main.js): its reads go through runStep and
   // take turns with the services' (pump() holds its lock around each service read).
+  // Lumen Alerts (watch-alerts-main.js, set by main.js through setAlerts): rides on these reads only.
+  let alerts = null;
   const ytlib = YtLibMain && d.ytlib !== false ? YtLibMain.create({
+    wantSubs: () => { try { return !!(alerts && alerts.wantSubs()); } catch { return false; } },
+    onSubs: (answer) => { if (alerts) alerts.onSubs(answer); },
     runStep: (step) => runStep(step), now, log, setTimeout: setTimer, clearTimeout: clearTimer,
     file: () => fileIn('watch-ytlib.json'),
     push: (contents, answer) => pushTo(contents, '__applyWatchYt', answer),
@@ -1073,6 +1077,7 @@ function create(deps) {
         readStartedAt = 0;
         readLimit = 0;
         if (ytlib) { ytlib.release(); ytlib.afterRead(id, loadCache().services[id].state); }
+        if (alerts) { try { alerts.onRead(id, loadCache().services[id]); } catch (err) { log('Lumen Alerts failed after a read: ' + ((err && err.message) || err)); } }
         // A read that failed (or ran out of time) can be retried at once: the 30-s gap only
         // folds a double click on a read still on its way.
         if (loadCache().services[id].state === 'error') delete lastForced[id];
@@ -1191,8 +1196,16 @@ function create(deps) {
     const t = now();
     return Shape.SERVICE_IDS.filter((id) => {
       const s = c.services[id];
-      return p.enabled[id] && s.lastOkAt > 0 && s.state !== 'signed-out' && t - (s.attemptAt || 0) >= bgEveryMs;
+      return p.enabled[id] && s.lastOkAt > 0 && s.state !== 'signed-out' && t - (s.attemptAt || 0) >= bgEvery(id);
     }).sort((a, b) => (c.services[a].attemptAt || 0) - (c.services[b].attemptAt || 0));
+  }
+
+  /** A service's background floor: hourly, or ESPN's live cadence while Lumen Alerts says a favourite's game is on. */
+  function bgEvery(id) {
+    if (id !== 'espn' || !alerts) return bgEveryMs;
+    const svc = Shape.serviceById('espn');
+    try { if (svc && svc.liveEveryMin && alerts.espnHot(loadCache().services.espn.events)) return Math.min(bgEveryMs, Math.max(bgGapMs, svc.liveEveryMin * 60e3)); } catch { /* hourly */ }
+    return bgEveryMs;
   }
 
   /** The earliest a background read may start (boot delay, the gap since the last, a pause). */
@@ -1214,7 +1227,7 @@ function create(deps) {
     for (const id of Shape.SERVICE_IDS) {
       const s = c.services[id];
       if (!p.enabled[id] || !(s.lastOkAt > 0) || s.state === 'signed-out') continue;
-      soonest = Math.min(soonest, (s.attemptAt || 0) + bgEveryMs);
+      soonest = Math.min(soonest, (s.attemptAt || 0) + bgEvery(id));
     }
     if (soonest === Infinity) return;
     soonest = Math.max(soonest, bgEarliest());
@@ -1999,6 +2012,10 @@ function create(deps) {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
     openTitle, signIn, pickProfile, upNext, forget, setEnabled, setLeagues, setTmdbKey, setBackground, windowShown, windowFocused, stop, schedule, previewTrailer,
     isReaderContents, routeFor, drmView,
+    // Lumen Alerts: the hooks (watch-alerts-main.js), the cached game answer, and what its Settings field needs.
+    setAlerts: (a) => { alerts = a && typeof a === 'object' ? a : null; try { schedule(); } catch { /* next tick */ } },
+    gaming: () => gameRunning(),
+    alertsView: () => { const p = loadPrefs(); const c = loadCache(); return { leagues: p.leagues.slice(), background: p.background, youtube: p.enabled.youtube ? c.services.youtube.state : 'off', espn: p.enabled.espn ? c.services.espn.state : 'off' }; },
     // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
     drmChanged: () => pushAll(),
     // Fresh after watching (watch-player-main.js): the layer closed on this service; read it

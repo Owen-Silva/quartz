@@ -91,6 +91,9 @@ const TESTS = [
   // driven by fake windows (stacking, saved pins, polling cadence, Final, silence under tests).
   { name: 'scores', file: 'tests/scores-test.js' },
   { name: 'scorepins', file: 'tests/score-pins-main-test.js' },
+  // Lumen Alerts: the subscriptions diff and batch, the gaming/RAM gates, the toggles, favourite-team
+  // start/final on ESPN-shaped fixtures, watch-alerts-main.js on fakes, and ytlib-main's two hooks.
+  { name: 'watch-alerts', file: 'tests/watch-alerts-test.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.

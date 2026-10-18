@@ -828,6 +828,16 @@ contextBridge.exposeInMainWorld('api', {
     setBackground: (on) => ipcRenderer.invoke('watch:set-background', !!on),
     refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
   },
+  // Lumen Alerts (watch-alerts-main.js <-> watch-alerts-chrome.js): the alerts main sends, where
+  // each one went, a click's action, and Settings > Lumen > Alerts. test() answers only in a test profile.
+  lumenAlerts: {
+    describe: () => ipcRenderer.invoke('lumen-alerts:describe'),
+    set: (kind, on) => ipcRenderer.invoke('lumen-alerts:set', String(kind || ''), !!on),
+    act: (id, action, index) => ipcRenderer.invoke('lumen-alerts:act', { id: String(id || ''), action: String(action || ''), index: Number(index) || 0 }),
+    shown: (id, surface, ok, reason) => ipcRenderer.send('lumen-alerts:shown', { id: String(id || ''), surface: String(surface || ''), ok: !!ok, reason: String(reason || '') }),
+    onShow: (fn) => { ipcRenderer.on('lumen-alerts:show', (_e, a) => { try { fn(a); } catch (err) { /* the chrome answers shown() itself */ } }); },
+    test: (op) => ipcRenderer.invoke('lumen-alerts:test', op && typeof op === 'object' ? op : {})
+  },
   // Lumen's pinned scores (score-pins-main.js), for the palette rows and the cards' look
   // (scorepins-chrome.js). games() answers from Lumen's cached ESPN rows, never a fetch:
   // { games: [{ key, id, league, leagueName, state, startsAt, detail, away, home }], pinned: [key], sound }.

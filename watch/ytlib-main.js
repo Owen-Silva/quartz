@@ -86,6 +86,10 @@ function create(o) {
   const bootLeft = typeof opt.bootLeft === 'function' ? opt.bootLeft : () => 0;
   const setTimer = typeof opt.setTimeout === 'function' ? opt.setTimeout : setTimeout;
   const clearTimer = typeof opt.clearTimeout === 'function' ? opt.clearTimeout : clearTimeout;
+  // Lumen Alerts (watch-alerts-main.js): may the feed follow a YouTube read with no page open, and
+  // hear each Subscriptions read that lands. Both optional; neither starts a read of its own.
+  const wantSubs = typeof opt.wantSubs === 'function' ? opt.wantSubs : () => false;
+  const onSubs = typeof opt.onSubs === 'function' ? opt.onSubs : null;
 
   let data = null;
   let stopped = false;
@@ -232,6 +236,7 @@ function create(o) {
         s.items = []; s.empty = false; s.shortsHidden = 0;
       } else log('Lumen could not read YouTube Subscriptions: ' + s.reason);
       saveSoon();
+      if (onSubs) { try { onSubs(subsAnswer()); } catch (err) { log('Lumen Alerts failed on a Subscriptions read: ' + ((err && err.message) || err)); } }
     } else if (job.key === 'library') {
       const res = L.parseLibrary(read);
       const l = load().library;
@@ -382,9 +387,10 @@ function create(o) {
       if (d.subs.state !== 'signed-out') { Object.assign(d.subs, { state: 'signed-out', reason: 'sign in to YouTube to see your subscriptions', items: [], empty: false, shortsHidden: 0, readAt: now() }); changed = true; }
       if (d.library.state !== 'never' && d.library.state !== 'signed-out') { Object.assign(d.library, { state: 'signed-out', reason: 'sign in to YouTube to see your library', wl: null, ll: null, playlists: null, readAt: now() }); changed = true; }
       if (changed) { saveSoon(); pushSubs(); pushLibrary(); }
+      if (changed && onSubs) { try { onSubs(subsAnswer()); } catch { /* alerts only */ } }
       return;
     }
-    if (state === 'ok' && attached.size && !fresh(load().subs, SUBS_AFTER_YT_MS)) enqueue('subs', false);
+    if (state === 'ok' && !fresh(load().subs, SUBS_AFTER_YT_MS) && (attached.size || wantSubs())) enqueue('subs', false);
   }
 
   function dropGuest(contents) { attached.delete(contents); }
