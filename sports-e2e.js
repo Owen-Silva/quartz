@@ -2,6 +2,11 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 // sports-e2e.js -- Lumen's sports pages end to end: a REAL hidden Quartz test instance whose ESPN and NHL
 // feeds point at a LOCAL mock (tests/sports-fixtures/ + the score pins' NHL fixtures; never the real feeds,
 // never an account). Edge is a stub file and every open is recorded (QUARTZ_EDGE_STUB, QUARTZ_WATCH_OPEN_STUB).
+// ESPN's player page is the mock's (QUARTZ_WATCH_REBASE); the team logos are one local PNG
+// (tests/sports-fixtures/team-logo.png, answered over CDP), and ESPN's and the NHL's hosts never resolve in
+// this instance (--host-resolver-rules), so nothing here reaches a real ESPN server. The test profile has no
+// Widevine CDM and is not signed: QUARTZ_TEST_CDM=ready + QUARTZ_TEST_VMP=signed say DRM is ready
+// (TEST ONLY: drm-main.js testOverrides, inert without --test-profile).
 //
 //   node sports-e2e.js [--cdp 9243] [--shots C:\Users\you\next-week\morning-shots]
 //
@@ -23,10 +28,13 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9243'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'lumen-sports-shots'));
+const LAYER_SHOT = opt('layer-shot', '');   // a shot of ESPN+ playing in the layer, at 1536x800
 const TAG = 'lumen-sports-e2e-' + process.pid;
 const OPEN_STUB = path.join(os.tmpdir(), TAG + '-open.txt');
 const EDGE_STUB = path.join(os.tmpdir(), TAG + '-edge.txt');
 const FIX = path.join(__dirname, 'tests', 'sports-fixtures');
+const LOGO_PNG = fs.readFileSync(path.join(FIX, 'team-logo.png'));
+const NO_ESPN_NET = ['--host-resolver-rules=MAP *.espncdn.com ~NOTFOUND,MAP espncdn.com ~NOTFOUND,MAP *.espn.com ~NOTFOUND,MAP espn.com ~NOTFOUND,MAP *.nhle.com ~NOTFOUND,MAP *.nhl.com ~NOTFOUND'];
 const fx = (n) => JSON.parse(fs.readFileSync(path.join(FIX, n + '.json'), 'utf8'));
 const sfx = (n) => JSON.parse(fs.readFileSync(path.join(__dirname, 'tests', 'scores-fixtures', n + '.json'), 'utf8'));
 const clone = (j) => JSON.parse(JSON.stringify(j));
@@ -80,6 +88,10 @@ const server = http.createServer((req, res) => {
   mock.hits.push(u);
   const send = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
   const now = Date.now();
+  if (/^\/espnweb\/watch\/player\//.test(u)) {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return res.end('<!doctype html><title>ESPN player (mock)</title><body style="margin:0;background:#101114;color:#cfd2d6;font:15px Segoe UI,sans-serif;display:grid;place-items:center;height:100vh"><div><b>ESPN+</b> &middot; Seattle Kraken at Florida Panthers (local mock player)</div></body>');
+  }
   if (/\/hockey\/nhl\/summary\?event=401892522$/.test(u)) return send(200, summary());
   if (/\/hockey\/nhl\/summary\?event=401892515$/.test(u)) return send(200, postponed());
   if (/\/apis\/site\/v2\/sports\/hockey\/nhl\/teams$/.test(u)) return send(200, fx('nhl-teams'));
@@ -109,13 +121,38 @@ run('sports-e2e', async ({ check, launch, say }) => {
     QUARTZ_SPORTS_REBASE: rebase, QUARTZ_SCORES_REBASE: rebase, QUARTZ_SCORES_POLL_SCALE: '0.05',
     QUARTZ_WATCH_BOOT_GRACE_MS: '3600000',       // Lumen reads no real service during this run
     QUARTZ_WATCH_OPEN_STUB: OPEN_STUB, QUARTZ_EDGE_STUB: EDGE_STUB,
+    QUARTZ_WATCH_REBASE: JSON.stringify([['https://www.espn.com', base + '/espnweb']]),   // ESPN's player page: the mock's
+    QUARTZ_TEST_CDM: 'ready', QUARTZ_TEST_VMP: 'signed',   // DRM ready (test only), as on the user's signed Quartz
+    QUARTZ_TEST_WINDOW_SIZE: '1536x800',   // the window's real size: the layer's <webview> shot at 1536x800 (emulation never reaches a guest)
   };
-  const q = await launch({ cdp: CDP_PORT, env });
+  const q = await launch({ cdp: CDP_PORT, env, args: NO_ESPN_NET });
   await q.chrome.ev('openWatchTab(), 1');
   let lt = null;
   for (let i = 0; i < 100 && !lt; i++) { lt = (await q.targets()).find((x) => /watch\.html/.test(x.url)); if (!lt) await sleep(150); }
   const L = await new Cdp(lt.webSocketDebuggerUrl).open();
+  // Every ESPN logo the page asks for is the local PNG (one asked before this attached fails at DNS instead).
+  const logos = { local: 0, urls: new Set() };
+  L.ws.on('message', (raw) => {
+    let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
+    if (m.method !== 'Fetch.requestPaused') return;
+    logos.local++; logos.urls.add(m.params.request.url);
+    L.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/png' }, { name: 'Access-Control-Allow-Origin', value: '*' }], body: LOGO_PNG.toString('base64') });
+  });
+  await L.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*.espncdn.com/*', requestStage: 'Request' }, { urlPattern: 'https://*.espn.com/*', resourceType: 'Image', requestStage: 'Request' }] });
   await L.waitFor('window.LumenSports && typeof window.__applyWatch === "function" && typeof window.__applySports === "function"', 15000);
+  // The rows are the test's fixture snapshot (window.__e2eApply). Quartz's own Watch state reads no service
+  // in this run, and main pushes it whenever something changes (a DRM re-label, YouTube's subscriptions
+  // card): while a fixture is held, such a push keeps its drm / player / preview word, the rows stay the fixture's.
+  await L.ev(`(() => { const orig = window.__applyWatch;
+    window.__e2eApply = function (snap) { window.__e2eHeld = snap; return orig.call(window, snap); };
+    window.__applyWatch = function (raw) {
+      const held = window.__e2eHeld;
+      if (!held || !raw || typeof raw !== 'object' || raw.fatal) return orig.call(window, raw);
+      const m = Object.assign({}, held);
+      for (const k of ['drm', 'player', 'preview']) if (raw[k] !== undefined) m[k] = raw[k];
+      window.__e2eMainPushes = (window.__e2eMainPushes || 0) + 1;
+      return orig.call(window, m);
+    }; return 1; })()`);
   await sleep(1000);
   const LS = (expr) => L.ev('(function(){var S=window.LumenSports;return ' + expr + ';})()');
   const vis = (sel) => L.ev('(function(){var n=document.querySelector(' + JSON.stringify(sel) + ');return !!(n && n.offsetParent!==null);})()');
@@ -159,14 +196,14 @@ run('sports-e2e', async ({ check, launch, say }) => {
   const keys = () => L.ev('[].slice.call(document.querySelectorAll("#stack > .lrow")).map(function(r){return r.dataset.key})');
 
   // 1. Live now: no favourite and no big game live -> it stays after Continue
-  await L.ev('window.__applyWatch(' + JSON.stringify(quiet) + '), 1');
+  await L.ev('window.__e2eApply(' + JSON.stringify(quiet) + '), 1');
   await L.waitFor('document.querySelectorAll("#stack .gc").length > 2', 15000);
   let k = await keys();
   check(k[0] !== 'sports' && k.indexOf('sports') > 0, 'Live now stays below Continue while no favourite or big game is live', k);
   // a big game (the NBA on ESPN) live -> Live now leads
   const big = clone(snap);
   big.sports.live = [fla].concat(big.sports.live);
-  await L.ev('window.__applyWatch(' + JSON.stringify(big) + '), 1');
+  await L.ev('window.__e2eApply(' + JSON.stringify(big) + '), 1');
   await sleep(600);
   k = await keys();
   check(k[0] === 'sports', 'a big game live (national TV): Live now is the first row', k);
@@ -198,7 +235,20 @@ run('sports-e2e', async ({ check, launch, say }) => {
   let layer = null;
   for (let i = 0; i < 40; i++) { layer = await q.chrome.ev('window.WatchPlayer ? window.WatchPlayer._state() : null').catch(() => null); if (layer && layer.open) break; await sleep(150); }
   let edge = ''; try { edge = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { /* none */ }
-  check(layer && layer.open === true && !edge, 'it plays in the player layer, not Edge', { layer: layer && layer.open, edge });
+  check(layer && layer.open === true && !edge, 'it plays in the player layer, not Edge', { layer: layer && layer.open, edge, url: layer && layer.slots && layer.slots[0] && layer.slots[0].url });
+  if (LAYER_SHOT && layer && layer.open) {
+    // The layer is the chrome's (it covers the Watch tab): shot from the chrome, at 1536x800, once the mock player drew.
+    await sleep(1500);
+    // The window IS 1536x800 (QUARTZ_TEST_WINDOW_SIZE); an emulated size would leave the guest at its own size.
+    // The capture is scaled to CSS pixels, so the file is 1536x800 whatever the display's scale.
+    try {
+      const vp = await q.chrome.ev('[innerWidth, innerHeight, devicePixelRatio]');
+      const m = await q.chrome.send('Page.captureScreenshot', { format: 'png', fromSurface: true, clip: { x: 0, y: 0, width: vp[0], height: vp[1], scale: 1 / (vp[2] || 1) } });
+      if (!m.result || !m.result.data) throw new Error((m.error && m.error.message) || 'no data');
+      fs.writeFileSync(LAYER_SHOT, Buffer.from(m.result.data, 'base64'));
+      say('shot ' + LAYER_SHOT + ' (window ' + vp.join('x') + ')');
+    } catch (e) { say('layer shot failed: ' + e.message); }
+  }
   await q.chrome.ev('window.WatchPlayer && window.WatchPlayer.close(), 1').catch(() => 0);
   await sleep(500);
 
@@ -231,9 +281,15 @@ run('sports-e2e', async ({ check, launch, say }) => {
   k = await keys();
   const myTxt = await txt('.lrow[data-key="myteams"] .lsp-tc');
   check(k.indexOf('myteams') !== -1 && /Next/.test(myTxt) && /Last/.test(myTxt) && /L 2\u20133 OT/.test(myTxt), 'My teams row: next game and time, last result', [k, myTxt]);
-  const firstLive = await L.ev('(document.querySelector(\'.lrow[data-key="sports"] .gc\')||{}).dataset.key');
+  // The rows again (before the fixture holder, Quartz's own empty Watch state had left My teams alone here),
+  // his team's game LAST this time, so only the favourites sort can put it first.
+  const late = clone(snap);
+  late.sports.live = late.sports.live.concat([fla]);
+  await L.ev('window.__e2eApply(' + JSON.stringify(late) + '), 1');
+  await L.waitFor('!!document.querySelector(\'.lrow[data-key="sports"] .gc\')', 15000).catch(() => 0);
+  const firstLive = await L.ev('(document.querySelector(\'.lrow[data-key="sports"] .gc\')||{dataset:{}}).dataset.key || null');
   check(firstLive === fla.id, "Live now: his team's game first", firstLive);
-  await L.ev('window.__applyWatch(' + JSON.stringify(quiet) + '), 1');
+  await L.ev('window.__e2eApply(' + JSON.stringify(quiet) + '), 1');
   await sleep(500);
   k = await keys();
   check(k[0] === 'sports', "his team live (no national TV): Live now still leads", k);
@@ -270,20 +326,25 @@ run('sports-e2e', async ({ check, launch, say }) => {
 
   // 9. A score pin's click opens the game page in Lumen
   mock.game = 'live';
+  await L.ev('window.__e2eApply(' + JSON.stringify(quiet) + '), 1');
+  await L.waitFor('!!document.querySelector(\'.lrow[data-key="sports"] .gc\')', 15000).catch(() => 0);
   const pinBtn = '.lrow[data-key="sports"] .gw .spb';
   const pinned = await L.ev('(function(){var b=[].slice.call(document.querySelectorAll(' + JSON.stringify(pinBtn) + ')).filter(function(b){return b._key==="nhl:401892522"})[0];if(!b)return false;b.click();return true;})()');
   let cardT = null;
+  let pinReady = false;
   for (let i = 0; i < 100 && pinned && !cardT; i++) { cardT = (await q.targets()).find((x) => x.type === 'page' && /score-pin\.html/.test(x.url)); if (!cardT) await sleep(150); }
   if (cardT) {
     const c = await new Cdp(cardT.webSocketDebuggerUrl).open();
+    pinReady = !!(await c.waitFor('!!(window.api && typeof window.api.open === "function" && window.__scorePin)', 10000).catch(() => false));
     await c.ev('window.api && window.api.open && window.api.open(), 1');
     c.close();
     await L.waitFor('window.LumenSports.isOpen() && /SEA at FLA/.test((document.querySelector(".lsp-crumbs")||{}).textContent||"")', 15000).catch(() => false);
   }
-  check(!!cardT && (await LS('S.isOpen()')) && /SEA at FLA/.test(await txt('.lsp-crumbs')), "a score pin's click opens its game page in Lumen", { pinned, card: !!cardT });
+  check(!!cardT && (await LS('S.isOpen()')) && /SEA at FLA/.test(await txt('.lsp-crumbs')), "a score pin's click opens its game page in Lumen", { pinned, card: !!cardT, ready: pinReady, open: await LS('S.isOpen()').catch(() => null), crumbs: await txt('.lsp-crumbs').catch(() => null) });
 
   const own = mock.hits.length;
   check(own > 0, 'every sports read went to the local mock (' + own + ' requests)');
+  check(logos.local > 0 && [...logos.urls].every((x) => /^https:\/\/[a-z0-9.-]*espn(cdn)?\.com\//.test(x)), 'every ESPN logo was the local fixture PNG, none from ESPN (' + logos.local + ' answered, ' + logos.urls.size + ' addresses)');
   await q.quit();
   server.close();
 });
