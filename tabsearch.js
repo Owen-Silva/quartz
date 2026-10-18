@@ -1337,7 +1337,8 @@
     });
     // Watch, the streaming hub. Same story as Files: app.js hardcodes the combo.
     list.push({
-      id: 'watch', glyph: GLYPH.video, label: 'Lumen', aliases: ['watch'],
+      // It wears Lumen's own mark (the 16-grid colour drawing), not a glyph.
+      id: 'watch', glyph: GLYPH.video, iconDataUrl: 'assets/lumen-logo-small.svg', label: 'Lumen', aliases: ['watch'],
       hint: 'Continue watching, picks and live sports from your services', keys: ['Ctrl', 'Alt', 'W'],
       run: function () { callGlobal(function () { return typeof openWatchTab === 'function' ? openWatchTab : null; }); }
     });

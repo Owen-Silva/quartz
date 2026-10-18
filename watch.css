@@ -175,6 +175,9 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 50%,
     color-mix(in srgb, var(--bg) 56%, transparent) 68%, color-mix(in srgb, var(--bg) 22%, transparent) 85%, transparent 100%); }
 .brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
+/* The Aperture mark beside the name: the colour master (its own greys, an
+   amber opening), the same in light and dark. Centred, not on the baseline. */
+.brand-mark { width: 22px; height: 22px; flex: none; align-self: center; margin-right: 1px; }
 .brand-name { font: 600 20px/1 var(--font-display); letter-spacing: -.02em; }
 .brand-sub { color: var(--text-3); font-size: var(--fs-xs); }
 .find { position: relative; margin-left: 14px; width: var(--find-w); }

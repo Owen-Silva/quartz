@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
+  <title>Lumen</title>
+  <defs><mask id="blades" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+    <rect width="256" height="256" fill="#fff"/>
+    <path d="M173.03 102L240.55 140.98M173.03 154L173.03 231.96M128 180L60.49 218.98M82.97 154L15.45 115.02M82.97 102L82.97 24.04M128 76L195.51 37.02" stroke="#000" stroke-width="9" stroke-linecap="butt"/>
+  </mask></defs>
+  <path mask="url(#blades)" fill-rule="evenodd" d="M128 22A106 106 0 1 1 127.99 22Z M128 76L173.03 102L173.03 154L128 180L82.97 154L82.97 102Z"/>
+</svg>
