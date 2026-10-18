@@ -125,7 +125,7 @@ function create(deps) {
       blocked: typeof x.blocked === 'string' ? x.blocked.slice(0, 200) : '',
       // watch-player-extras.js: the title page when url is the player itself; what was opened (Up next);
       // 'profile' for the service's own picker, with where its menu is when it has no page of its own.
-      fallback: /^https?:///i.test(String(x.fallback || '')) ? String(x.fallback) : '',
+      fallback: /^https?:\/\//i.test(String(x.fallback || '')) ? String(x.fallback) : '',
       item: cleanItem(x.item),
       purpose: x.purpose === 'profile' ? 'profile' : '',
       note: typeof x.note === 'string' ? cleanTitle(x.note) : '',
