@@ -72,7 +72,8 @@ async function guest(q, errors) {
     }
   });
   await g.send('Runtime.enable');
-  await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] });
+  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] });
+  if (fe && fe.error) console.log('[e2e] Fetch.enable failed: ' + JSON.stringify(fe.error));
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
@@ -148,6 +149,12 @@ if (require.main === module) {
       // ... and no picture for that tile, so its title is the clamped title-card text (.noart b)
       const noPic = (o) => { if (Array.isArray(o)) o.forEach(noPic); else if (o && typeof o === 'object') { if (o.title === 'Gypsy Jump: a pygmy\'s journey') o.image = ''; Object.values(o).forEach(noPic); } };
       noPic(snap);
+      // every service still at a URL only this run asks for, so none can come from a cache (the profile's
+      // last rows, or the page's memory cache, both hold the real CDN's answer: Disney+ fixtures draw black)
+      const BUST = 'wde=' + process.pid;
+      const bust = (o) => { if (Array.isArray(o)) o.forEach(bust); else if (o && typeof o === 'object') for (const k of Object.keys(o)) { const v = o[k];
+        if (k === 'image' && typeof v === 'string' && /^https:\/\//.test(v) && !/i\.ytimg\.com|espncdn\.com/.test(v)) o[k] = v + (v.indexOf('?') >= 0 ? '&' : '?') + BUST; else bust(v); } };
+      bust(snap);
       for (const it of snap.items) if (it.image) titles.set(it.image, it.title);
       await g.ev('(() => { window.__designApply = window.__applyWatch; window.__applyWatch = function () { window.__designHeld = (window.__designHeld || 0) + 1; }; window.__designApply(' + JSON.stringify(snap) + '); return 1; })()');
       await sleep(1500);
@@ -201,6 +208,7 @@ if (require.main === module) {
         await go(0); await blurAll(); await settle();
         const top = await st();
         if (w === 1920) say('images: ' + JSON.stringify(g.fetched || {}) + '; first tiles: ' + JSON.stringify(await g.ev('[...document.querySelectorAll("#stack .lrow")[0].querySelectorAll(".rt > .card")].slice(0, 6).map((c) => { const i = c.querySelector(".art > img"); return (c._item || {}).service + ":" + (i ? (i.complete ? i.naturalWidth : "loading") : "noimg"); })').catch((e) => e.message)));
+        if (w === 1920 && !SHOTS_ONLY) check(!!g.fetched && g.fetched.drawn > 3, 'the services\' stills in the shots are the test\'s own title cards (' + ((g.fetched && g.fetched.drawn) || 0) + ' drawn; none from a real CDN or a cache)', g.fetched);
         await save(w + 'x' + h + '-top');
         await go(2); await blurAll(); await settle();
         const down = await st();
