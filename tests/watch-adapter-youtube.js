@@ -40,6 +40,8 @@ function fullRead() {
 function of(r, kind) { return r.items.filter(function (i) { return i.kind === kind; }); }
 function vids(list) { return list.map(function (i) { return i.id.replace(/^youtube:/, ''); }); }
 function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+/* The still the page itself gave (pickThumb): last of the candidates (first for a Short). */
+function pageThumb(it) { var l = it.images || [it.image]; return l[l.length - 1]; }
 function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === 'youtube:' + id) return list[i]; return null; }
 
 module.exports = async function (check) {
@@ -95,12 +97,12 @@ module.exports = async function (check) {
   var a = byId(rec, 'hmOldVid001');
   check(a.title === 'How Pro Chefs Read a Recipe Card' && a.subtitle === 'Recipe Breakdown · 412K views · 2 weeks ago', 'yt old videoRenderer: title + subtitle', a.subtitle);
   check(a.url === 'https://www.youtube.com/watch?v=hmOldVid001&t=240s' && a.progress === 0.4 && a.durationSec === 600, 'yt old videoRenderer: 40% of 10:00 -> &t=240s', a.url);
-  check(a.image === 'https://i.ytimg.com/vi/hmOldVid001/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLC3', 'yt thumb: the 480-wide one wins', a.image);
+  check(pageThumb(a) === 'https://i.ytimg.com/vi/hmOldVid001/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLC3', 'yt thumb: the 480-wide one wins', a.image);
   check(a.service === 'youtube' && a.edge === false && a.group === '' && a.badge === '', 'yt item: service, plays in Quartz, no group/badge');
   var b = byId(rec, 'hmLockup002');
   check(b.title === 'Total Eclipse Highlights: Iceland, Spain' && b.subtitle === 'ESA · 1.2M views · 3 days ago', 'yt lockup: title + metadata rows', b.subtitle);
   check(b.progress === 0.25 && b.durationSec === 3723 && b.url === 'https://www.youtube.com/watch?v=hmLockup002&t=930s', 'yt lockup: startPercent 25 of 1:02:03 -> &t=930s', b.url);
-  check(b.image === 'https://i.ytimg.com/vi/hmLockup002/hqdefault.jpg?sqp=a1', 'yt lockup: 360 beats 720 for ~480 (avatar not used)', b.image);
+  check(pageThumb(b) === 'https://i.ytimg.com/vi/hmLockup002/hqdefault.jpg?sqp=a1', 'yt lockup: 360 beats 720 for ~480 (avatar not used)', b.image);
   var live = byId(rec, 'hmLiveNow03');
   check(live.badge === 'Live' && live.durationSec === null && live.progress === null && live.url === 'https://www.youtube.com/watch?v=hmLiveNow03', 'yt lockup live: Live badge, no length');
   var s4 = byId(rec, 'hmShorts004');
@@ -112,9 +114,9 @@ module.exports = async function (check) {
   var t7 = byId(rec, 'hmTrend0007');
   check(t7.progress === 1 && t7.url === 'https://www.youtube.com/watch?v=hmTrend0007' && t7.durationSec === 899, 'yt finished rec: progress 1, no &t');
   var g9 = byId(rec, 'hmGrid00009');
-  check(g9.image === 'https://i.ytimg.com/vi/hmGrid00009/hqdefault.jpg' && g9.durationSec === 465 && g9.group === 'From your subscriptions', 'yt gridVideoRenderer: width-less thumb, length from overlay');
+  check(pageThumb(g9) === 'https://i.ytimg.com/vi/hmGrid00009/hqdefault.jpg' && g9.durationSec === 465 && g9.group === 'From your subscriptions', 'yt gridVideoRenderer: width-less thumb, length from overlay');
   var c10 = byId(rec, 'hmCompact10');
-  check(c10.image === 'https://i.ytimg.com/vi/hmCompact10/hqdefault.jpg', 'yt compactVideoRenderer: http thumb refused, //-relative made https', c10.image);
+  check(pageThumb(c10) === 'https://i.ytimg.com/vi/hmCompact10/hqdefault.jpg', 'yt compactVideoRenderer: http thumb refused, //-relative made https', c10.image);
   check(c10.group === 'Recommended for you' && c10.durationSec === 3723, 'yt compactVideoRenderer: group + length');
 
   // history -> resume
@@ -235,7 +237,7 @@ module.exports = async function (check) {
   check(threw === 0, 'yt: junk inputs never throw', threw);
   check(shaped, 'yt: junk inputs always give a state and items');
   var weird = yt.parse(junk[11], CTX);
-  check(weird.state === 'ok' && weird.items.length === 1 && weird.items[0].image === 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg' && weird.items[0].title === 'Half broken',
+  check(weird.state === 'ok' && weird.items.length === 1 && pageThumb(weird.items[0]) === 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg' && weird.items[0].title === 'Half broken',
     'yt: a half-broken renderer keeps what is usable (thumb falls back to hqdefault)', weird.items);
   var cyc = { loggedIn: true, ytInitialData: { contents: [] } };
   cyc.ytInitialData.self = cyc.ytInitialData;
@@ -273,6 +275,36 @@ module.exports = async function (check) {
   check(hx.length === 1 && hx[0].title === 'Hex form', 'yt search: hex-escaped string form', hx);
   var winForm = yt.parseSearch('<script>window["ytInitialData"] = ' + JSON.stringify(many) + ';</script>');
   check(winForm.length === 20, 'yt search: window["ytInitialData"] form');
+  // ------------------------------------------------------------ sharp thumbnails (ytThumbs)
+  var Y = 'https://i.ytimg.com/vi/';
+  var W = 'https://i.ytimg.com/vi_webp/';
+  var sv = byId(sr, 'srVideo0001');
+  check(sv.image === W + 'srVideo0001/maxresdefault.webp' && same(sv.images, [W + 'srVideo0001/maxresdefault.webp', Y + 'srVideo0001/maxresdefault.jpg',
+    Y + 'srVideo0001/sddefault.jpg', Y + 'srVideo0001/hqdefault.jpg', Y + 'srVideo0001/hqdefault.jpg?sqp=s1a']), 'yt thumbs: watch item = maxres webp, jpg, sd, hq, page still', sv.images);
+  check(same(shape.cleanItem(sv), sv), 'yt thumbs: images survive cleanItem unchanged');
+  var sl = byId(sr, 'srVideo0004');
+  check(sl.image === W + 'srVideo0004/maxresdefault_live.webp' && sl.images[3] === Y + 'srVideo0004/hqdefault_live.jpg' && sl.images.length === 4, 'yt thumbs: live item keeps the _live names', sl.images);
+  var ss = byId(sr, 'srShort0008');
+  check(/\/srShort0008\/oardefault\.jpg/.test(ss.image) && ss.images[1] === W + 'srShort0008/maxresdefault.webp' && ss.images.length === 5, 'yt thumbs: a Short keeps its vertical still first, then the chain', ss.images);
+  var T = shape.ytThumbs;
+  check(same(T('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg?sqp=-oay&rs=AOn4'), [W + 'dQw4w9WgXcQ/maxresdefault.webp', Y + 'dQw4w9WgXcQ/maxresdefault.jpg',
+    Y + 'dQw4w9WgXcQ/sddefault.jpg', Y + 'dQw4w9WgXcQ/hqdefault.jpg', Y + 'dQw4w9WgXcQ/hqdefault.jpg?sqp=-oay&rs=AOn4']), 'ytThumbs: watch still (sized params) -> maxres..hq, original last');
+  check(same(T('https://i9.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg'), [W + 'dQw4w9WgXcQ/maxresdefault.webp', Y + 'dQw4w9WgXcQ/maxresdefault.jpg',
+    Y + 'dQw4w9WgXcQ/sddefault.jpg', Y + 'dQw4w9WgXcQ/hqdefault.jpg', 'https://i9.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg']), 'ytThumbs: i9 host, mqdefault');
+  check(same(T('https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg'), [W + 'dQw4w9WgXcQ/maxresdefault.webp', Y + 'dQw4w9WgXcQ/maxresdefault.jpg',
+    Y + 'dQw4w9WgXcQ/sddefault.jpg', Y + 'dQw4w9WgXcQ/hqdefault.jpg']), 'ytThumbs: already maxres -> no duplicate');
+  check(same(T(W + 'dQw4w9WgXcQ/maxresdefault.webp'), [W + 'dQw4w9WgXcQ/maxresdefault.webp', Y + 'dQw4w9WgXcQ/maxresdefault.jpg',
+    Y + 'dQw4w9WgXcQ/sddefault.jpg', Y + 'dQw4w9WgXcQ/hqdefault.jpg']), 'ytThumbs: idempotent on its own first candidate');
+  check(T('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault_live.jpg')[0] === W + 'dQw4w9WgXcQ/maxresdefault_live.webp', 'ytThumbs: live -> _live names');
+  check(same(T('https://i.ytimg.com/vi/dQw4w9WgXcQ/oardefault.jpg', 'dQw4w9WgXcQ', true).slice(0, 2), ['https://i.ytimg.com/vi/dQw4w9WgXcQ/oardefault.jpg', W + 'dQw4w9WgXcQ/maxresdefault.webp']), 'ytThumbs: short -> page still first');
+  check(same(T('https://m.media-amazon.com/images/S/abc.jpg', 'dQw4w9WgXcQ'), ['https://m.media-amazon.com/images/S/abc.jpg']), 'ytThumbs: non-ytimg URL comes back alone (id ignored)');
+  check(same(T('https://yt3.ggpht.com/abc=s88'), ['https://yt3.ggpht.com/abc=s88']) && same(T('https://i.ytimg.com/an_webp/x/mqdefault_6s.webp'), ['https://i.ytimg.com/an_webp/x/mqdefault_6s.webp']), 'ytThumbs: no video id -> original alone');
+  check(T('', 'dQw4w9WgXcQ').length === 4 && same(T('', 'bad'), []) && same(T(null), []) && same(T('http://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'), []), 'ytThumbs: id only -> chain; nothing usable -> []');
+  var ci = shape.cleanItem({ service: 'youtube', kind: 'rec', title: 't', url: 'https://www.youtube.com/watch?v=x', image: 'https://a.example/1.jpg', images: ['https://a.example/2.jpg', 'https://a.example/1.jpg'] });
+  check(ci && !('images' in ci) && ci.image === 'https://a.example/1.jpg', 'cleanItem: images whose first is not image are dropped');
+  var cj = shape.cleanItem({ service: 'disney', kind: 'rec', title: 't', url: 'https://www.disneyplus.com/x', image: 'https://a.example/1.jpg' });
+  check(cj && !('images' in cj), 'cleanItem: no images field unless there are candidates');
+
   var sThrew = 0;
   [undefined, null, 5, '', '<html></html>', 'var ytInitialData = {', 'var ytInitialData = {"a":', "var ytInitialData = '\\x7b", 'var ytInitialData = ' + '{'.repeat(5000), { html: 1 }]
     .forEach(function (j) { try { var o = yt.parseSearch(j); if (!Array.isArray(o) || o.length) sThrew++; } catch (err) { sThrew++; } });

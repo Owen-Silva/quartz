@@ -460,6 +460,7 @@
       title: title,
       subtitle: cleanText(it.subtitle, 200),
       image: https(it.image),
+      images: arr(it.images).map(https).filter(Boolean),
       progress: p,
       url: url,
       startsAt: num(it.startsAt),
@@ -1151,18 +1152,68 @@
     na.appendChild(b);
     art.insertBefore(na, art.firstChild);
   }
-  function artImage(art, it, lazy) {
+  /*
+   * Art candidates, sharpest first (it.images, or Shape.ytThumbs() of it.image: YouTube maxres webp,
+   * maxres jpg, sd, hq, the page's own still). A miss (load error, or YouTube's 120x90 grey "no
+   * maxres" body) steps to the next. Misses are kept for this page only, so a repaint never
+   * re-requests a 404. Plain image loads: no-referrer, and i.ytimg.com is YouTube's cookieless host.
+   */
+  var ART_MISS = new Set();
+  function artMissKey(u) { return String(u).replace('/vi_webp/', '/vi/').replace(/\.webp$/, '.jpg'); }
+  function artSrcs(it) {
+    var list = arr(it.images).length > 1 && it.images[0] === it.image ? it.images
+      : Shape && typeof Shape.ytThumbs === 'function' ? Shape.ytThumbs(it.image) : [it.image];
+    var left = list.filter(function (u) { return u && !ART_MISS.has(artMissKey(u)); });
+    return left.length ? left : list.slice(-1);
+  }
+  function artLoad(img, it, fail, hero) {
+    var srcs = artSrcs(it);
+    var i = 0;
+    var step = function () {   // false when no candidate is left
+      if (ART_MISS.size > 4000) ART_MISS.clear();
+      ART_MISS.add(artMissKey(srcs[i]));
+      for (i++; i < srcs.length; i++) if (!ART_MISS.has(artMissKey(srcs[i]))) { img.src = srcs[i]; return true; }
+      return false;
+    };
+    img.addEventListener('load', function () {
+      if (srcs.length > 1 && img.naturalWidth <= 120) { if (!step()) fail(); return; }
+      artCrop(img, srcs[i]);
+      if (hero) artSoften(img);
+    });
+    img.addEventListener('error', function () { if (!step()) fail(); });
+    img.src = srcs[0];
+  }
+  /* YouTube's sd/hq stills are 4:3 with black bars above and below the 16:9 picture: show only the
+     picture (the middle 75%), so cover never lets a bar in, whatever the box or object-position. */
+  function artCrop(img, src) {
+    var nh = img.naturalHeight;
+    var bars = /\/(?:sd|hq)default(?:_live)?\.jpg(?:\?|$)/.test(src) && nh > 0 && Math.abs(img.naturalWidth / nh - 4 / 3) < 0.03;
+    if (bars) { img.dataset.crop = '16:9'; img.style.setProperty('object-view-box', 'inset(12.5% 0% 12.5% 0%)'); }
+    else if (img.dataset.crop) { delete img.dataset.crop; img.style.removeProperty('object-view-box'); }
+  }
+  /* Hero only: a still blown up past ~1.6x (only hq exists) is softened so its JPEG blocks don't show. */
+  function artSoften(img) {
+    var r = img.getBoundingClientRect();
+    var shown = (img.naturalHeight || 1) * (img.dataset.crop ? 0.75 : 1);
+    var scale = Math.max(r.width / (img.naturalWidth || 1), r.height / shown);
+    if (!(scale > 1.6)) { img.removeAttribute('data-lowres'); img.style.filter = ''; img.style.transform = ''; return; }
+    img.dataset.lowres = '1';
+    img.style.filter = 'blur(' + Math.min(5, (scale - 1) * 1.6).toFixed(1) + 'px)';
+    img.style.transform = 'scale(1.04)';
+  }
+  function washSrc(it) { var l = arr(it.images); return l.length > 1 ? l[l.length - 1] : it.image; }
+
+  function artImage(art, it, lazy, hero) {
     if (!it.image) { artFallback(art, it); return; }
     var img = el('img');
     img.alt = '';
     if (lazy) img.loading = 'lazy';
     img.decoding = 'async';
     img.referrerPolicy = 'no-referrer';
-    img.addEventListener('error', function () {
+    artLoad(img, it, function () {
       if (img.parentNode) img.parentNode.removeChild(img);
       artFallback(art, it);
-    }, { once: true });
-    img.src = it.image;
+    }, hero);
     art.insertBefore(img, art.firstChild);
   }
 
@@ -1415,7 +1466,7 @@
     var build = function () { return ev ? stageEvent(ev, m) : stageItem(it, m); };
     swapStage(build, first);
     if (ev) setWash({ key: 'ev:' + ev.id, logos: [ev.away.logo, ev.home.logo] });
-    else setWash(it && it.image ? { key: 'it:' + it.image, image: it.image } : null);
+    else setWash(it && it.image ? { key: 'it:' + it.image, image: washSrc(it) } : null);
   }
 
   function swapStage(build, instant) {
@@ -1501,7 +1552,7 @@
     var pic = el('div', 'pic');
     var w2 = el('div', 'w' + (s && s.state === 'error' ? ' stale' : ''));
     w2.setAttribute('aria-hidden', 'true');
-    artImage(w2, it, false);
+    artImage(w2, it, false, true);
     pic.appendChild(w2);
     return [txt, pic];
   }
@@ -1827,7 +1878,7 @@
       var k = fold(it.title);
       var row = byTitle[k];
       if (row) { if (!row.items.youtube) row.items.youtube = it; return; }
-      add(k, { key: 'y:' + itemKey(it), title: it.title, image: it.image, sub: joinDot([it.subtitle, lenText(it.durationSec)]), items: { youtube: it }, providers: null, elsewhere: [], yt: true, sporty: false });
+      add(k, { key: 'y:' + itemKey(it), title: it.title, image: it.image, images: it.images, sub: joinDot([it.subtitle, lenText(it.durationSec)]), items: { youtube: it }, providers: null, elsewhere: [], yt: true, sporty: false });
     });
     return rows;
   }
@@ -1913,7 +1964,7 @@
       var td0 = el('td');
       var tt = el('div', 'tt');
       var th = el('span', 'th');
-      artImage(th, { title: row.title, image: row.image, service: '' }, true);
+      artImage(th, { title: row.title, image: row.image, images: row.images, service: '' }, true);
       tt.appendChild(th);
       var words = el('div');
       words.appendChild(el('b', '', row.title));
