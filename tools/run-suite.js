@@ -71,6 +71,9 @@ const TESTS = [
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.
   { name: 'watch', file: 'watch-harness.js' },
+  // Lumen's one search box: merge and ranking, the Disney+/Hulu/Prime search readers, the main half
+  // (one reader at a time, signed-in first, the 5-min cache, cancel, Retry) and its watch-main hooks.
+  { name: 'watch-find', file: 'watch-find-harness.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.

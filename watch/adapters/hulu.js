@@ -584,3 +584,10 @@ module.exports = {
     SIGNED_OUT_REASON: SIGNED_OUT_REASON, MOVED_REASON: MOVED_REASON
   }
 };
+
+/* For watch/search/hulu.js (Lumen's one search box): the same tolerant item parser and page reads. */
+module.exports._search = {
+  EXTRACT: EXTRACT, parseItem: parseItem, locked: locked, errorReason: errorReason, stepView: stepView,
+  signedOutByUrl: signedOutByUrl, profilePickerByUrl: profilePickerByUrl, movedToDisney: movedToDisney, ready: ready,
+  SIGNED_OUT_REASON: SIGNED_OUT_REASON, PICKER_REASON: PICKER_REASON
+};
