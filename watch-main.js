@@ -59,6 +59,7 @@
  *         quartz-watch:signin   {"service":"disney"}            (the sign-in page, in a Quartz tab)
  *         quartz-watch:search   {"q":"bluey","seq":3}           (YouTube results + TMDB slot)
  *         quartz-watch:find     {"q":"bluey","seq":4}           (Enter: every service's own search, watch-find-main.js)
+ *         quartz-watch:show     {"what":"show","service","id",..}   (a tile's show page: watch-shows-main.js)
  *         quartz-watch:preview  {"title":"Terminator 2","tv":false,"seq":4}  (the hover preview's TMDB trailer)
  *         quartz-watch:forget   {}                              (delete the cache)
  *         quartz-watch:settings {}                              (handled by app.js: Settings > Watch)
@@ -66,6 +67,7 @@
  *                                             snapshot itself fails: { v: 1, now, fatal: reason }
  *         window.__applyWatchSearch(answer)
  *         window.__applyWatchFind(part)          one per service as each answers (watch-find-main.js)
+ *         window.__applyWatchShow(answer)        a show page's seasons and episodes (watch-shows-main.js)
  *         window.__applyWatchResult({ action, ok, reason, how })
  *         window.__applyWatchPreview({ seq, state, reason, videoId })
  *
@@ -99,6 +101,9 @@ try { Tmdb = require('./watch/tmdb'); } catch (err) { Tmdb = null; }
 /* Lumen's one search box, on Enter: every service's own search (watch-find-main.js). */
 let FindMain = null;
 try { FindMain = require('./watch-find-main'); } catch (err) { FindMain = null; }
+/* Lumen's show pages: seasons, episodes, progress, Resume SxEy (watch-shows-main.js). */
+let ShowsMain = null;
+try { ShowsMain = require('./watch-shows-main'); } catch (err) { ShowsMain = null; }
 
 const LINE_PREFIX = 'quartz-watch:';
 const PAGE_FILE = 'watch.html';
@@ -215,6 +220,10 @@ function parseGuestLine(text) {
       return { verb };
     case 'yt': {
       const req = YtLib ? YtLib.cleanLine(msg) : null;
+      return req ? { verb, req } : null;
+    }
+    case 'show': {
+      const req = ShowsMain ? ShowsMain.cleanLine(msg) : null;
       return req ? { verb, req } : null;
     }
     case 'refresh':
@@ -399,6 +408,7 @@ function create(deps) {
   const trailerCache = new Map();   // 'tv|title' -> { at, answer }; hover previews, never written to disk
   const searchLive = new Map();  // guest -> its one search in flight { seq, ctrl, stale }
   let finder = null;             // watch-find-main.js: Enter's search on every service (made on first use)
+  let shows = null;              // watch-shows-main.js: the show pages' reads (made on first use)
   // Boot grace: reads enqueued in the first bootGraceMs stay queued (the page says "Waiting to
   // read X") and the first reader starts at create() + bootGraceMs. The harness passes 0.
   const bootGraceMs = Number.isFinite(d.bootGraceMs) && d.bootGraceMs >= 0 ? d.bootGraceMs : BOOT_GRACE_MS;
@@ -1344,6 +1354,7 @@ function create(deps) {
     const had = guests.delete(contents);
     guestVisible.delete(contents);
     if (ytlib) { ytlib.dropGuest(contents); ytlib.sight(anyVisible()); }
+    if (shows) shows.dropGuest(contents);
     const job = searchLive.get(contents);
     if (job) { cancelSearch(job); searchLive.delete(contents); }
     if (finder) finder.cancel(contents);
@@ -1552,6 +1563,7 @@ function create(deps) {
     forgottenAt = now();
     cache = cleanCache(null);
     if (ytlib) ytlib.forget();
+    if (shows) shows.forget();
     // A read in flight writes into the old cache object, so its rows are dropped; a queued
     // one is cancelled; and nothing reads again until its normal floor (or a Retry), so
     // "Forget" leaves the page empty instead of refilling it a second later.
@@ -1605,6 +1617,23 @@ function create(deps) {
       push: (contents, part) => pushTo(contents, '__applyWatchFind', part),
     });
     return finder;
+  }
+
+  /* --- the show pages: watch-shows-main.js --------------------------------------------- */
+
+  function showsMain() {
+    if (shows || !ShowsMain || stopped) return shows;
+    shows = ShowsMain.create({
+      runStep, now, log,
+      fetchJson: (u, h) => fetchJson(u, h),
+      tmdbKey: () => loadPrefs().tmdbKey,
+      enabled: (id) => !!loadPrefs().enabled[id],
+      serviceState: (id) => { const s = loadCache().services[id]; return s ? s.state : ''; },
+      blocker: findBlocker,
+      readers: test.showReaders || undefined,
+      push: (contents, a) => pushTo(contents, '__applyWatchShow', a),
+    });
+    return shows;
   }
 
   /* --- search ------------------------------------------------------------------------- */
@@ -1789,6 +1818,12 @@ function create(deps) {
         break;
       case 'forget': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'forget' }, forget())); break;
       case 'yt': if (ytlib) ytlib.line(contents, req.req); break;
+      case 'show': {
+        const sm = showsMain();
+        if (sm) sm.line(contents, req.req);
+        else pushTo(contents, '__applyWatchShow', { what: req.req.what, seq: req.req.seq, state: 'error', reason: 'this build has no show pages', show: null });
+        break;
+      }
       case 'settings': break;   // app.js opens Settings > Watch; nothing for main to do
       default: return false;
     }
@@ -1913,6 +1948,7 @@ function create(deps) {
     forcedQueued.clear();
     bgQueued.clear();
     if (ytlib) ytlib.stop();
+    if (shows) shows.stop();
     for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     for (const job of searchLive.values()) cancelSearch(job);
     searchLive.clear();
