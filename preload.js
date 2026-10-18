@@ -805,7 +805,7 @@ contextBridge.exposeInMainWorld('api', {
     sheetClose: (id, why) => ipcRenderer.invoke('watch-player:sheet-close', { id: Number(id), why: String(why || '') }),
     sheetToTab: (id) => ipcRenderer.invoke('watch-player:sheet-to-tab', { id: Number(id) }),
     // TEST ONLY: main answers this only in a --test-profile instance (the e2e's whole-window shot).
-    testCapture: () => ipcRenderer.invoke('watch-player:test-capture'),
+    testCapture: (o) => ipcRenderer.invoke('watch-player:test-capture', { width: Number(o && o.width) || 0, height: Number(o && o.height) || 0, wait: Number(o && o.wait) || 0 }),
     // Up next: a title ended in the layer; main answers what follows it on that service (or why nothing).
     upNext: (item) => ipcRenderer.invoke('watch-player:up-next', { item: item && typeof item === 'object' ? { id: String(item.id || ''), service: String(item.service || ''), title: String(item.title || ''), subtitle: String(item.subtitle || '') } : null }),
     // main -> chrome: play / command / key / left / blocked / gone / sheet / sheet-gone

@@ -524,9 +524,15 @@ function create(deps) {
     // TEST ONLY (--test-profile): the whole window, sheets included (a sheet is a native view, so
     // the chrome's own screenshot cannot see it). A live Quartz has no such channel.
     if (test.capture) {
-      on('watch-player:test-capture', async () => {
+      on('watch-player:test-capture', async (p) => {
         const w = getWindow();
         if (!w || w.isDestroyed()) return { ok: false, png: '' };
+        const cw = Math.round(Number(p.width) || 0);
+        const ch = Math.round(Number(p.height) || 0);
+        if (cw >= 400 && ch >= 300) {
+          w.setContentSize(cw, ch);
+          await new Promise((res) => setTimeout(res, Math.min(3000, Math.max(200, Number(p.wait) || 900))));
+        }
         const img = await w.capturePage();
         return { ok: true, png: img.toPNG().toString('base64') };
       });
