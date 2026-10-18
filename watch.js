@@ -12,9 +12,11 @@
           quartz-watch:signin   {"service":"disney"}      Sign in
           quartz-watch:search   {"q":"bluey","seq":3}     debounced 300 ms
           quartz-watch:settings {}                        Settings > Watch (app.js)
+          quartz-watch:preview  {"title":"..","tv":false,"seq":4}  the hovered title's trailer (TMDB)
      in   window.__applyWatch(snapshot)
           window.__applyWatchSearch(answer)               stale seq = ignored
           window.__applyWatchResult({ action, ok, how, reason })
+          window.__applyWatchPreview({ seq, state, reason, videoId })  a TMDB trailer for the hover preview
           window.__watchFront(bool)                       app.js: is this tab on screen
      e2e  window.__watchVisible()                         read-only: what main was told
 
@@ -47,7 +49,11 @@
   var SEARCH_DEBOUNCE_MS = 300;
   var SEARCH_MIN_CHARS = 2;     // a shorter query searches his own rows only, never YouTube
   var BOOT_TIMEOUT_MS = 5000;   // no first answer from Quartz by then: say so, with a Retry
-  var FRONT_WAIT_MS = 3000;     // no word from the chrome on front/back by then (an older Quartz): in front
+  // no word from the chrome on front/back by then (an older Quartz): in front. Not 3 s: Quartz's word
+  // comes at dom-ready, after this page's boot, and on a loaded machine that took longer than 3 s, so a
+  // Watch tab moved to the background before dom-ready claimed "visible" and main ran due reads
+  // (watch-e2e "reads nothing for 5 s": hello:false visible:true visible:false).
+  var FRONT_WAIT_MS = 10000;
   var HOVER_MS = 140;
   var WHEEL_GAP_MS = 380;
   var STAGE_SWAP_MS = 150;
@@ -79,6 +85,10 @@
     stageKey: '',
     stageSig: '',
     stageTimer: 0,
+    stageIt: null,          // the item / ESPN event the stage shows (the hover preview reads it)
+    stageEv: null,
+    pvOn: false,            // main said the hover preview may play (snapshot.preview.on)
+    pvMock: false,          // ... from the test mock's origin (a --test-profile instance only)
     hoverTimer: 0,
     wheelAt: 0,
     q: '',
@@ -123,6 +133,14 @@
       if (!S.ready) { S.pendingFail = why; return; }
       showFailure('Lumen couldn’t load its saved rows', why);
       return;
+    }
+    // the hover preview's word from main (snapshot.preview): OFF until a snapshot says on, so a
+    // --test-profile instance (main says off, or mock) never loads a real embed; a snapshot without
+    // the field (a test's own fixture) keeps the last word
+    if (raw && typeof raw === 'object' && raw.preview && typeof raw.preview === 'object') {
+      S.pvOn = raw.preview.on === true;
+      S.pvMock = raw.preview.mock === true;
+      if (!S.pvOn) previewStop();
     }
     var snap;
     try { snap = normalize(raw); } catch (err) {
@@ -195,6 +213,7 @@
   /** The window was minimised / shown, or the chrome moved this tab: tell main, and run the
       minute timer only while the page is in sight. Before the first hello: hello carries it. */
   function sightChanged() {
+    if (document.hidden || S.front === false) previewStop();   // nothing plays out of sight
     if (S.told === null) return;
     var was = S.told;
     tellSight('visible');
@@ -499,6 +518,7 @@
       title: title,
       subtitle: cleanText(it.subtitle, 200),
       image: https(it.image),
+      images: arr(it.images).map(https).filter(Boolean),
       progress: p,
       url: url,
       startsAt: num(it.startsAt),
@@ -1258,18 +1278,115 @@
     na.appendChild(b);
     art.insertBefore(na, art.firstChild);
   }
-  function artImage(art, it, lazy) {
+  /*
+   * Art candidates, sharpest first (it.images, or Shape.ytThumbs() of it.image: YouTube maxres webp,
+   * maxres jpg, sd, hq, the page's own still). A miss (load error, or YouTube's 120x90 grey "no
+   * maxres" body) steps to the next. Misses are kept for this page only, so a repaint never
+   * re-requests a 404. Plain image loads: no-referrer, and i.ytimg.com is YouTube's cookieless host.
+   */
+  var ART_MISS = new Set();
+  function artMissKey(u) { return String(u).replace('/vi_webp/', '/vi/').replace(/\.webp$/, '.jpg'); }
+  function artSrcs(it, needPx) {
+    var list = arr(it.images).length > 1 && it.images[0] === it.image ? it.images
+      : Shape && typeof Shape.ytThumbs === 'function' ? Shape.ytThumbs(it.image) : [it.image];
+    list = artOrder(list, needPx);
+    var left = list.filter(function (u) { return u && !ART_MISS.has(artMissKey(u)); });
+    return left.length ? left : list.slice(-1);
+  }
+  /*
+   * Which of YouTube's stills to ask for first. The DECODE is what costs, not the bytes
+   * (watch-design-e2e --trace, 10-17, the user's 125%, on this laptop): a tile's 1280x720 maxres webp
+   * took 78 ms a decode on the raster workers, 137 ms at worst (Chromium decodes webp to RGB at full
+   * size, then scales it), an sd JPEG 2-6 ms (decoded straight to YUV); a row of webp tiles starved
+   * the frames (frames over 20 ms 13 -> 21, max 50 -> 150 ms). img.decode() of one 1280x720 picture,
+   * median of 12: webp 50 ms, JPEG 12 ms. So:
+   *   - JPEG before webp, always: the same picture for a quarter of the decode;
+   *   - a tile starts at sd when sd covers it in DEVICE pixels (sd's 16:9 picture is 640 wide: 4:3
+   *     with bars, which artCrop crops; the user's 125% tiles are 360-450 px, and watch.css keeps every
+   *     tile under ~370 CSS px, so that is every tile up to ~175% scaling), a wider one at maxres;
+   *     hq (480 wide) is never first;
+   *   - the hero (needPx Infinity) starts at maxres.
+   * Only YouTube's named stills move, and only among their own places: a Short's vertical still
+   * stays first, the page's own still stays last. The rest stay behind as fallbacks.
+   */
+  var YT_STILL = /\/vi(?:_webp)?\/[A-Za-z0-9_-]{11}\/(maxresdefault|sddefault|hqdefault)(?:_live)?\.(jpg|webp)(?:\?|$)/;
+  var SD_PICTURE_W = 640;
+  function artOrder(list, needPx) {
+    var slots = [];
+    var named = [];
+    list.forEach(function (u, k) {
+      var m = YT_STILL.exec(String(u));
+      if (m) { slots.push(k); named.push({ u: u, name: m[1], webp: m[2] === 'webp' ? 1 : 0, k: k }); }
+    });
+    if (named.length < 2) return list;
+    var pref = needPx > SD_PICTURE_W ? ['maxresdefault', 'sddefault', 'hqdefault'] : ['sddefault', 'maxresdefault', 'hqdefault'];
+    named.sort(function (a, b) { return pref.indexOf(a.name) - pref.indexOf(b.name) || a.webp - b.webp || a.k - b.k; });
+    var out = list.slice();
+    slots.forEach(function (k, i) { out[k] = named[i].u; });
+    return out;
+  }
+  /* The tiles' width in CSS px (watch.css --card-w), from a hidden probe a ResizeObserver reads after
+     layout, so choosing a still never forces one. Before the first reading: the widest a tile gets
+     (per >= 3 within a 1720 px column, watch.css) stands in, which errs sharp. */
+  var TILE = { css: 0, probe: null };
+  function tileNeedPx() {
+    if (!TILE.probe && document.body && typeof ResizeObserver === 'function') {
+      TILE.probe = el('div', 'tile-probe');
+      TILE.probe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(TILE.probe);
+      new ResizeObserver(function (en) { var w = en[0] && en[0].contentRect ? en[0].contentRect.width : 0; if (w > 0) TILE.css = w; }).observe(TILE.probe);
+    }
+    var css = TILE.css || Math.min(380, Math.max(240, (window.innerWidth || 1280) / 3));
+    return Math.ceil(css * (window.devicePixelRatio || 1));
+  }
+  function artLoad(img, it, fail, hero) {
+    var srcs = artSrcs(it, hero ? Infinity : tileNeedPx());
+    var i = 0;
+    var step = function () {   // false when no candidate is left
+      if (ART_MISS.size > 4000) ART_MISS.clear();
+      ART_MISS.add(artMissKey(srcs[i]));
+      for (i++; i < srcs.length; i++) if (!ART_MISS.has(artMissKey(srcs[i]))) { img.src = srcs[i]; return true; }
+      return false;
+    };
+    img.addEventListener('load', function () {
+      if (srcs.length > 1 && img.naturalWidth <= 120) { if (!step()) fail(); return; }
+      artCrop(img, srcs[i]);
+      if (hero) artSoften(img);
+    });
+    img.addEventListener('error', function () { if (!step()) fail(); });
+    img.src = srcs[0];
+  }
+  /* YouTube's sd/hq stills are 4:3 with black bars above and below the 16:9 picture: show only the
+     picture (the middle 75%), so cover never lets a bar in, whatever the box or object-position. */
+  function artCrop(img, src) {
+    var nh = img.naturalHeight;
+    var bars = /\/(?:sd|hq)default(?:_live)?\.jpg(?:\?|$)/.test(src) && nh > 0 && Math.abs(img.naturalWidth / nh - 4 / 3) < 0.03;
+    if (bars) { img.dataset.crop = '16:9'; img.style.setProperty('object-view-box', 'inset(12.5% 0% 12.5% 0%)'); }
+    else if (img.dataset.crop) { delete img.dataset.crop; img.style.removeProperty('object-view-box'); }
+  }
+  /* Hero only: a still blown up past ~1.6x (only hq exists) is softened so its JPEG blocks don't show. */
+  function artSoften(img) {
+    var r = img.getBoundingClientRect();
+    var shown = (img.naturalHeight || 1) * (img.dataset.crop ? 0.75 : 1);
+    var scale = Math.max(r.width / (img.naturalWidth || 1), r.height / shown);
+    if (!(scale > 1.6)) { img.removeAttribute('data-lowres'); img.style.filter = ''; img.style.transform = ''; return; }
+    img.dataset.lowres = '1';
+    img.style.filter = 'blur(' + Math.min(5, (scale - 1) * 1.6).toFixed(1) + 'px)';
+    img.style.transform = 'scale(1.04)';
+  }
+  function washSrc(it) { var l = arr(it.images); return l.length > 1 ? l[l.length - 1] : it.image; }
+
+  function artImage(art, it, lazy, hero) {
     if (!it.image) { artFallback(art, it); return; }
     var img = el('img');
     img.alt = '';
     if (lazy) img.loading = 'lazy';
     img.decoding = 'async';
     img.referrerPolicy = 'no-referrer';
-    img.addEventListener('error', function () {
+    artLoad(img, it, function () {
       if (img.parentNode) img.parentNode.removeChild(img);
       artFallback(art, it);
-    }, { once: true });
-    img.src = it.image;
+    }, hero);
     art.insertBefore(img, art.firstChild);
   }
 
@@ -1451,6 +1568,7 @@
   function setCompact(on, instant) {
     if (S.compact === on) return;
     S.compact = on;
+    if (on) previewStop();        // the stage fades away: so does its preview
     var b = document.body;
     if (instant) b.classList.add('top-instant');
     b.classList.toggle('is-compact', on);
@@ -1520,14 +1638,17 @@
     var first = !S.stageKey || key === S.stageKey;   // same title, fresher data: no swap animation
     S.stageKey = key;
     S.stageSig = sig;
+    S.stageIt = it;
+    S.stageEv = ev;
     var build = function () { return ev ? stageEvent(ev, m) : stageItem(it, m); };
     swapStage(build, first);
     if (ev) setWash({ key: 'ev:' + ev.id, logos: [ev.away.logo, ev.home.logo] });
-    else setWash(it && it.image ? { key: 'it:' + it.image, image: it.image } : null);
+    else setWash(it && it.image ? { key: 'it:' + it.image, image: washSrc(it) } : null);
   }
 
   function swapStage(build, instant) {
     clearTimeout(S.stageTimer);
+    previewStop();                // a new title (or a redraw): the old preview's frame goes with the old stage
     var put = function () {
       var nodes = build();
       $.stage.replaceChildren.apply($.stage, nodes);
@@ -1610,8 +1731,9 @@
     var pic = el('div', 'pic');
     var w2 = el('div', 'w' + (s && s.state === 'error' ? ' stale' : ''));
     w2.setAttribute('aria-hidden', 'true');
-    artImage(w2, it, false);
+    artImage(w2, it, false, true);
     pic.appendChild(w2);
+    pic.appendChild(el('div', 'pvhit'));   // the hover preview's pointer target (watch.css)
     return [txt, pic];
   }
 
@@ -1666,12 +1788,171 @@
       board.appendChild(side);
     });
     pic.appendChild(board);
+    pic.appendChild(el('div', 'pvhit'));   // hovering a game says why it has no preview
     return [txt, pic];
   }
+
+  /* ------------------------------------------------------- the hover preview */
+  /*
+   * The user: "can we make this preview the video too if you hover over it". Resting on the stage
+   * (pointer or keyboard focus), or on the tile the stage shows, for PREVIEW_DELAY_MS plays a
+   * MUTED preview over the still (watch/preview.js says what: the YouTube video itself, or the
+   * title's official trailer found on TMDB). Rules:
+   *   - one preview at a time, and only while hovered: leaving, a new title on the stage, the
+   *     slim top (stage hidden), search, a hidden window or a background tab all REMOVE the
+   *     frame (nothing decodes while not hovered; nothing is fetched for titles not hovered)
+   *   - prefers-reduced-motion: never autoplays
+   *   - no video, or a player error: a small note in the corner says why, never a broken box
+   * The frame fades in only once the player says it is playing (or, if its messages never
+   * reach this file:// page, PREVIEW_REVEAL_MS after it loaded).
+   */
+  var PV = window.WatchPreview || null;
+  var PREVIEW_REVEAL_MS = 2500;
+  var PREVIEW_LOAD_MS = 9000;
+  var P = { key: '', seq: 0, timer: 0, loadTimer: 0, revealTimer: 0, wrap: null, frame: null, origin: '', note: null, playing: false, title: '' };
+
+  function stagePic() {
+    var pic = $.stage ? $.stage.querySelector('.pic') : null;
+    return pic && pic.offsetParent !== null ? pic : null;   // narrow windows hide the still: no video either
+  }
+
+  /** The pointer or focus came to rest on the stage (or its tile): start the clock. */
+  function previewWant() {
+    if (!S.pvOn || !S.stageKey || S.stageKey.indexOf('special:') === 0) return;   // off (a test profile): no work at all
+    if (P.key === S.stageKey && (P.timer || P.wrap || P.note)) return;
+    previewStop();
+    if (S.compact || S.q || document.hidden || S.front === false) return;
+    if (!stagePic()) return;
+    P.key = S.stageKey;
+    P.timer = setTimeout(previewStart, PV ? PV.PREVIEW_DELAY_MS : 600);
+  }
+
+  function previewStart() {
+    P.timer = 0;
+    if (!S.pvOn || P.key !== S.stageKey || S.compact || S.q || document.hidden || S.front === false) { previewStop(); return; }
+    if (!PV) { previewNote('No preview: this build is missing watch/preview.js', 'err'); return; }
+    if (reduced()) { previewNote('Previews don’t autoplay while Windows is set to reduce motion', ''); return; }
+    var src = PV.sourceFor(S.stageIt, { event: !!S.stageEv, hasTmdbKey: !!(S.snap && S.snap.tmdb && S.snap.tmdb.hasKey) });
+    P.title = S.stageIt ? S.stageIt.title : '';
+    if (src.type === 'youtube') { previewMount(src.videoId, src.start); return; }
+    if (src.type === 'trailer') {
+      P.seq++;
+      previewNote('Finding the trailer on TMDB…', 'wait');
+      send('preview', { title: src.title, tv: !!src.tv, seq: P.seq });
+      return;
+    }
+    previewNote(src.reason || 'No preview for this title', '');
+  }
+
+  window.__applyWatchPreview = function (raw) {
+    if (!raw || typeof raw !== 'object' || raw.seq !== P.seq || !P.key || P.key !== S.stageKey || P.wrap) return;
+    if (raw.state === 'ok' && typeof raw.videoId === 'string' && raw.videoId) { previewMount(raw.videoId, 0); return; }
+    previewNote(cleanText(raw.reason, 200) || 'No trailer preview for this title', raw.state === 'none' || raw.state === 'no-key' ? '' : 'err');
+  };
+
+  function previewMount(videoId, start) {
+    var pic = stagePic();
+    var w = pic ? pic.querySelector('.w') : null;
+    var origin = PV.embedOrigin(S.pvMock);
+    var url = PV.embedUrl(videoId, start, origin);
+    if (!w || !url) { previewNote('No preview: ' + (url ? 'the artwork area is gone' : 'not a YouTube video id'), 'err'); return; }
+    var wrap = el('div', 'pv');
+    var f = document.createElement('iframe');
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    f.setAttribute('allow', 'autoplay; encrypted-media');
+    f.setAttribute('tabindex', '-1');
+    f.setAttribute('aria-hidden', 'true');
+    f.title = 'Muted preview' + (P.title ? ': ' + P.title : '');
+    f.addEventListener('load', function () {
+      if (P.frame !== f) return;
+      clearTimeout(P.loadTimer);
+      P.loadTimer = 0;
+      try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), P.origin); } catch (err) { /* the fallback reveal covers it */ }
+      clearTimeout(P.revealTimer);
+      P.revealTimer = setTimeout(previewReveal, PREVIEW_REVEAL_MS);
+    });
+    P.loadTimer = setTimeout(function () {
+      if (P.frame !== f) return;
+      previewNote('No preview: YouTube’s player didn’t load in ' + Math.round(PREVIEW_LOAD_MS / 1000) + ' s (offline?)', 'err');
+    }, PREVIEW_LOAD_MS);
+    wrap.appendChild(f);
+    w.appendChild(wrap);
+    P.wrap = wrap;
+    P.frame = f;
+    P.origin = origin;
+    P.playing = false;
+    previewNote('', '');
+    f.src = url;
+  }
+
+  function previewReveal() {
+    clearTimeout(P.revealTimer);
+    P.revealTimer = 0;
+    if (!P.wrap) return;
+    P.wrap.classList.add('on');
+    if (P.note) previewNote('', '');
+  }
+
+  /* The embedded player's own messages: playing -> fade in; an error -> the note, frame gone. */
+  function onPreviewMessage(e) {
+    if (!PV || !P.frame || e.origin !== P.origin) return;
+    var cw = null;
+    try { cw = P.frame.contentWindow; } catch (err) { cw = null; }
+    if (!cw || e.source !== cw) return;
+    var m = PV.readPlayerMessage(e.data);
+    if (!m) return;
+    if (m.error !== undefined) { previewNote(PV.errorWords(m.error), 'err'); return; }
+    if (m.playing && !P.playing) { P.playing = true; previewReveal(); }
+  }
+
+  /** The corner note: '' clears it. A note replaces the frame (never a broken video box). */
+  function previewNote(text, tone) {
+    if (P.note) { P.note.remove(); P.note = null; }
+    if (!text) return;
+    if (tone === 'err') previewDrop();
+    var pic = stagePic();
+    if (!pic) return;
+    var n = el('div', 'pvnote' + (tone ? ' ' + tone : ''), text);
+    n.title = text;
+    n.setAttribute('role', 'status');
+    pic.appendChild(n);
+    P.note = n;
+  }
+
+  /** Remove the frame: the document, its decoder and its network go with it. */
+  function previewDrop() {
+    clearTimeout(P.loadTimer); P.loadTimer = 0;
+    clearTimeout(P.revealTimer); P.revealTimer = 0;
+    if (P.frame) { try { P.frame.src = 'about:blank'; } catch (err) { /* going anyway */ } }
+    if (P.wrap) P.wrap.remove();
+    P.wrap = null;
+    P.frame = null;
+    P.playing = false;
+  }
+
+  function previewStop() {
+    clearTimeout(P.timer); P.timer = 0;
+    P.seq++;                      // a trailer answer still on its way is for nothing now
+    previewDrop();
+    if (P.note) { P.note.remove(); P.note = null; }
+    P.key = '';
+  }
+
+  /* Is `to` (a pointer's or focus's next element) still on the stage or the tile it shows? */
+  function previewKeeps(to) {
+    if (!to || !to.closest) return false;
+    if ($.stage.contains(to)) return true;
+    var card = to.closest('.card, .gc');
+    return !!(card && card.classList.contains('cur') && card.closest('.lrow[data-d="0"]'));
+  }
+
+  function previewOut(e) { if (!previewKeeps(e.relatedTarget)) previewStop(); }
 
   function showStageSpecial(mode) {
     S.stageKey = 'special:' + mode;
     S.stageSig = '';
+    S.stageIt = null;
+    S.stageEv = null;
     setWash(null);
     var en = enabledSvcs();
     var build = function () {
@@ -1872,6 +2153,7 @@
     if (document.body.classList.contains('searching')) return;
     closePop(false);
     document.body.classList.add('searching');
+    previewStop();
     setWash(null);
     $.results.hidden = false;
     S.gridPos = null;
@@ -1936,7 +2218,7 @@
       var k = fold(it.title);
       var row = byTitle[k];
       if (row) { if (!row.items.youtube) row.items.youtube = it; return; }
-      add(k, { key: 'y:' + itemKey(it), title: it.title, image: it.image, sub: joinDot([it.subtitle, lenText(it.durationSec)]), items: { youtube: it }, providers: null, elsewhere: [], yt: true, sporty: false });
+      add(k, { key: 'y:' + itemKey(it), title: it.title, image: it.image, images: it.images, sub: joinDot([it.subtitle, lenText(it.durationSec)]), items: { youtube: it }, providers: null, elsewhere: [], yt: true, sporty: false });
     });
     return rows;
   }
@@ -2022,7 +2304,7 @@
       var td0 = el('td');
       var tt = el('div', 'tt');
       var th = el('span', 'th');
-      artImage(th, { title: row.title, image: row.image, service: '' }, true);
+      artImage(th, { title: row.title, image: row.image, images: row.images, service: '' }, true);
       tt.appendChild(th);
       var words = el('div');
       words.appendChild(el('b', '', row.title));
@@ -2301,6 +2583,7 @@
     if (idx === -1) return;
     if (idx !== S.cur) { setRoving(row, card); activate(idx, {}); }
     mark(card);
+    previewWant();                // resting on it plays its preview on the stage (only while the stage shows)
   }
 
   function onStackClick(e) {
@@ -2322,7 +2605,7 @@
     var row = card.closest('.lrow');
     if (!row || row.dataset.d !== '0') return;
     clearTimeout(S.hoverTimer);
-    S.hoverTimer = setTimeout(function () { if (card.isConnected) mark(card); }, HOVER_MS);
+    S.hoverTimer = setTimeout(function () { if (card.isConnected) { mark(card); previewWant(); } }, HOVER_MS);
   }
 
   function onWheel(e) {
@@ -2385,6 +2668,14 @@
     $.stack.addEventListener('focusin', onStackFocus);
     $.stack.addEventListener('click', onStackClick);
     $.stack.addEventListener('pointerover', onStackHover);
+    // the hover preview: resting on the stage or its tile starts it, leaving both ends it
+    $.stage.addEventListener('pointerover', previewWant);
+    $.stage.addEventListener('focusin', previewWant);
+    $.stage.addEventListener('pointerout', previewOut);
+    $.stage.addEventListener('focusout', previewOut);
+    $.stack.addEventListener('pointerout', previewOut);
+    $.stack.addEventListener('focusout', previewOut);
+    window.addEventListener('message', onPreviewMessage);
     document.addEventListener('keydown', onKey);
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('resize', onResize);

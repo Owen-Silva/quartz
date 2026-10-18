@@ -448,12 +448,17 @@ const drm = drmModule.create({
  * (QUARTZ_WATCH_MIN_FREE_GB) and fake a running game (QUARTZ_WATCH_GAME_FILE:
  * present = a game is running) and change the first read's boot grace
  * (QUARTZ_WATCH_BOOT_GRACE_MS). A live Quartz ignores all five.
+ * A TEST profile's hover preview is OFF: no test ever loads a real YouTube
+ * embed or asks TMDB for a trailer. QUARTZ_WATCH_PREVIEW_MOCK=1 turns it on
+ * against the e2e's mock instead (watch/preview.js MOCK_ORIGIN, a .invalid
+ * host only CDP interception answers; trailers only through a rebased TMDB).
  */
 const watch = (() => {
   const t = process.argv.includes('--test-profile');
   const env = process.env;
   const test = {};
   if (t) {
+    test.preview = env.QUARTZ_WATCH_PREVIEW_MOCK === '1' ? 'mock' : 'off';
     try { if (env.QUARTZ_WATCH_REBASE) test.rebase = JSON.parse(env.QUARTZ_WATCH_REBASE); } catch { /* no rebase */ }
     if (env.QUARTZ_WATCH_OPEN_STUB) test.openStub = env.QUARTZ_WATCH_OPEN_STUB;
     if (env.QUARTZ_WATCH_MIN_FREE_GB !== undefined && Number.isFinite(Number(env.QUARTZ_WATCH_MIN_FREE_GB))) test.minFreeGb = Number(env.QUARTZ_WATCH_MIN_FREE_GB);
@@ -2333,6 +2338,11 @@ function safeUrl(contents) {
 /** Set once installClientHintFix() has taken the one onBeforeSendHeaders slot. */
 let clientHintsFixed = false;
 
+/* Watch's hover preview (watch/preview.js): the Referer YouTube's embed needs from a file://
+   page. Only the embed frame Watch's own page asks for gets one; see embedReferer(). */
+let WatchPreview = null;
+try { WatchPreview = require('./watch/preview'); } catch (err) { WatchPreview = null; }
+
 /*
  * The other half of the Chrome-only User-Agent (see chromeOnlyUserAgent()).
  *
@@ -2353,7 +2363,9 @@ let clientHintsFixed = false;
  * Every request in the browser goes through this callback, so it is written to
  * be incapable of stalling one: the whole body is inside a try/catch, the
  * catch passes the ORIGINAL headers straight through, and callback() is reached
- * on every path. Headers other than the three named here are untouched.
+ * on every path. Headers other than the three named here are untouched, except
+ * one: a Referer is ADDED to the YouTube embed frame Watch's own page asks for
+ * (its hover preview), which a file:// page cannot send (watch/preview.js).
  */
 function installClientHintFix(sess) {
   if (clientHintsFixed) return;
@@ -2389,6 +2401,8 @@ function installClientHintFix(sess) {
           if (lower === 'user-agent') requestHeaders[key] = app.userAgentFallback;
           else delete requestHeaders[key];
         }
+        const embedRef = WatchPreview ? WatchPreview.embedReferer(details) : '';
+        if (embedRef) requestHeaders.Referer = embedRef;
       } catch (err) {
         console.error('[ua] client-hint rewrite skipped for', (details && details.url) || '?', '-', (err && err.message) || err);
         return callback({ requestHeaders: (details && details.requestHeaders) || {} });

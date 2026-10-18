@@ -167,6 +167,13 @@ html[data-theme="light"] .wash::after {
   background: color-mix(in srgb, var(--bg) 96%, transparent); box-shadow: 0 1px 0 var(--hairline);
   opacity: 0; transition: opacity var(--m-dur-s-out) var(--m-fade-out); }
 body.is-compact .top::before, body.searching .top::before { opacity: 1; transition: opacity calc(var(--m-dur-s) * var(--m-fade-k)) var(--m-fade-in); }
+/* its scrim: at the top the bar's words (the services, "All read ...") sit on the hero's art, which can
+   be white (or, in light, black). A static veil of the page colour behind them keeps --text-2 at 4.5:1 on
+   any art (85% at the words' line): no blur, no animation, and it ends above the first row's title in
+   both states (the lens is at --lens-c, 78 px), so past the first row it is only under the opaque fill. */
+.top::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: calc(var(--top-h) + 20px); z-index: -2; pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 50%,
+    color-mix(in srgb, var(--bg) 56%, transparent) 68%, color-mix(in srgb, var(--bg) 22%, transparent) 85%, transparent 100%); }
 .brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
 .brand-name { font: 600 20px/1 var(--font-display); letter-spacing: -.02em; }
 .brand-sub { color: var(--text-3); font-size: var(--fs-xs); }
@@ -223,7 +230,7 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 /* Manage: the + alone (its words stay its accessible name; the tooltip says where it goes) */
 .sp.add > button { width: 30px; padding: 0; gap: 0; justify-content: center; font-size: 0; }
 .sp[aria-busy="true"] .sp-main { cursor: pointer; }
-.strip-end { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; color: var(--text-3); font-size: var(--fs-xs);
+.strip-end { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; color: var(--text-2); font-size: var(--fs-xs);
   margin-left: 4px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--hairline); }
 .fresh { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fresh.paused { color: var(--warn); font-weight: 600; }
@@ -250,6 +257,24 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .stage .pic .w > .noart { opacity: .5; }
 .stage .pic .w > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
 .stage .pic .w.stale > img { opacity: .8; }
+/* the hover preview (watch.js "the hover preview"): .pvhit takes the pointer over the still so resting
+   on it can start one. It starts where the text column ends (the still runs under the text's right
+   side on narrower windows, and the text's buttons must keep their clicks); the .pic itself stays
+   pointer-events: none. The muted YouTube frame sits inside .w, under the same edge mask, and fades in
+   once it plays. It covers the still like the img does (cover by container units), never takes the
+   pointer, and exists only while hovered. No blur, no glow, no animation but the one fade. */
+.stage .pic .pvhit { position: absolute; top: 0; bottom: 0; right: 0; z-index: 3; pointer-events: auto;
+  left: max(0px, calc(var(--gutter) + min(560px, 42vw) - 100vw + min(64vw, 1240px))); }
+.stage .pic .w > .pv { position: absolute; inset: 0; z-index: 1; overflow: hidden; container-type: size; opacity: 0;
+  transition: opacity var(--m-dur-m) var(--m-fade-in); pointer-events: none; }
+.stage .pic .w > .pv.on { opacity: 1; }
+.stage .pic .w > .pv > iframe { position: absolute; left: 50%; top: 50%; width: max(100cqw, 177.78cqh); height: max(100cqh, 56.25cqw);
+  transform: translate(-50%, -50%); border: 0; display: block; pointer-events: none; background: transparent; }
+.pvnote { position: absolute; right: var(--gutter); bottom: 14px; z-index: 2; max-width: min(46ch, 80%); padding: 5px 10px;
+  border-radius: var(--radius-l); background: var(--overlay); color: var(--text-2); font-size: var(--fs-xs);
+  line-height: 1.35; box-shadow: inset 0 0 0 1px var(--hairline); pointer-events: none; }
+.pvnote.wait { color: var(--text-3); }
+.pvnote.err { color: var(--danger); }
 .eyebrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
 .eyebrow .rn { text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
 /* clamped titles keep their descenders: line-height >= 1.12 and .12em of padding inside the clip (the
@@ -368,6 +393,8 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .art { position: relative; display: block; height: var(--art-h); overflow: hidden; border-radius: inherit; background: var(--surface-3);
   box-shadow: var(--shadow-1); isolation: isolate; }
 .art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+/* watch.js tileNeedPx(): a tile's width, read by a ResizeObserver (it picks each still's size) */
+.tile-probe { position: absolute; left: 0; top: 0; width: var(--card-w); height: 0; visibility: hidden; pointer-events: none; }
 .art::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / .18); opacity: 0; pointer-events: none; z-index: 4; }
 .card:active .art::after { opacity: 1; }
 /* hidden by visibility, not opacity 0: no effect node per tile for the layerizer to walk on every step */
