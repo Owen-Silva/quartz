@@ -11268,6 +11268,21 @@ function navigateActiveTab(input) {
 function goBack() {
   const tab = getActiveTab();
   if (!isViewUsable(tab)) return;
+  // Lumen's own pages (a channel, the Library: watch/ytlib-page.js) sit over the Watch document,
+  // so Back (Alt+Left, the toolbar, BrowserBack) walks out of them before the tab's history.
+  if (isWatchUrl(tab.url)) {
+    try {
+      const asked = tab.viewEl.executeJavaScript('!!(window.__watchBack && window.__watchBack())');
+      if (asked && typeof asked.then === 'function') {
+        asked.then((took) => { if (!took) historyBack(tab); }, () => historyBack(tab));
+        return;
+      }
+    } catch (err) { /* guest went away: the history below */ }
+  }
+  historyBack(tab);
+}
+function historyBack(tab) {
+  if (!isViewUsable(tab)) return;
   const history = historyTarget(tab.viewEl);
   try {
     if (history.canGoBack()) history.goBack();

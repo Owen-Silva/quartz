@@ -1,0 +1,148 @@
+{
+ "_fixture": "Hand-made Prime Video detail page hydration for The Boys season 1 (prime.js field names). E1 watched, E2 part-way; season 2 is its own detail page.",
+ "finalPath": "/detail/B07FMHTRFA/",
+ "title": "Prime Video: The Boys - Season 1",
+ "hydration": {
+  "init": {
+   "preparations": {
+    "body": {
+     "detail": {
+      "titleID": "B07FMHTRFA",
+      "title": "The Boys - Season 1",
+      "parentTitle": "The Boys",
+      "synopsis": "A group of vigilantes set out to take down corrupt superheroes who abuse their superpowers.",
+      "releaseYear": "2019",
+      "ratingBadge": {
+       "displayText": "18+"
+      },
+      "genres": [
+       {
+        "text": "Action"
+       },
+       {
+        "text": "Comedy"
+       }
+      ],
+      "entityType": "TV Show",
+      "seasonNumber": 1,
+      "images": {
+       "heroshot": {
+        "url": "https://m.media-amazon.com/images/S/pv-target-images/boyshero._UR1920,1080_.jpg"
+       }
+      },
+      "isInWatchlist": false
+     },
+     "seasons": [
+      {
+       "seasonNumber": 1,
+       "displayName": "Season 1",
+       "seasonLink": "/detail/B07FMHTRFA/"
+      },
+      {
+       "seasonNumber": 2,
+       "displayName": "Season 2",
+       "seasonLink": "/detail/B08BYYQZ3K/"
+      }
+     ],
+     "episodes": [
+      {
+       "titleID": "amzn1.dv.gti.boys1e1",
+       "title": "The Name of the Game",
+       "episodeNumber": 1,
+       "seasonNumber": 1,
+       "synopsis": "The Boys, episode 1: The Name of the Game.",
+       "runtimeSeconds": 3660,
+       "images": {
+        "packshot": {
+         "url": "https://m.media-amazon.com/images/S/pv-target-images/boys1e1._UR1920,1080_.jpg"
+        }
+       },
+       "link": {
+        "url": "/detail/B07FMHTRFA/ref=atv_dp_ep1"
+       },
+       "progress": {
+        "percentage": 100
+       },
+       "isWatched": true
+      },
+      {
+       "titleID": "amzn1.dv.gti.boys1e2",
+       "title": "Cherry",
+       "episodeNumber": 2,
+       "seasonNumber": 1,
+       "synopsis": "The Boys, episode 2: Cherry.",
+       "runtimeSeconds": 3720,
+       "images": {
+        "packshot": {
+         "url": "https://m.media-amazon.com/images/S/pv-target-images/boys1e2._UR1920,1080_.jpg"
+        }
+       },
+       "link": {
+        "url": "/detail/B07FMHTRFA/ref=atv_dp_ep2"
+       },
+       "progress": {
+        "percentage": 40
+       }
+      },
+      {
+       "titleID": "amzn1.dv.gti.boys1e3",
+       "title": "Get Some",
+       "episodeNumber": 3,
+       "seasonNumber": 1,
+       "synopsis": "The Boys, episode 3: Get Some.",
+       "runtimeSeconds": 3780,
+       "images": {
+        "packshot": {
+         "url": "https://m.media-amazon.com/images/S/pv-target-images/boys1e3._UR1920,1080_.jpg"
+        }
+       },
+       "link": {
+        "url": "/detail/B07FMHTRFA/ref=atv_dp_ep3"
+       }
+      }
+     ],
+     "containers": [
+      {
+       "title": "Customers also watched",
+       "entities": [
+        {
+         "titleID": "GEN1",
+         "title": "Invincible",
+         "entityType": "TV Show",
+         "releaseYear": "2021",
+         "link": {
+          "url": "/detail/0INVINCIBLE01/"
+         },
+         "images": {
+          "cover": {
+           "url": "https://m.media-amazon.com/images/S/inv._UR1920,1080_.jpg"
+          }
+         }
+        },
+        {
+         "titleID": "GEN2",
+         "title": "Reacher",
+         "entityType": "TV Show",
+         "releaseYear": "2022",
+         "link": {
+          "url": "/detail/0REACHER0001/"
+         },
+         "images": {
+          "cover": {
+           "url": "https://m.media-amazon.com/images/S/rea._UR1920,1080_.jpg"
+          }
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ },
+ "store": {
+  "RequestContext": {
+   "customerID": "A1FIXTURE"
+  }
+ }
+}

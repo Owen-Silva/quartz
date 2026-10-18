@@ -51,13 +51,18 @@
   // watch-player-extras.js (straight-to-player fallback, the quality note, Up next, the layer's menu)
   // hooks in at a few points; with the file missing, nothing here changes.
   var CTX = { L: L, focused: focused, note: note, toast: toast, toEdge: toEdge, showState: showState, open: openInLumen, close: close, svcInfo: svcInfo, api: api };
+  // watch-player-yt.js (YouTube: the full watch page, the embed for tiles and as the fallback,
+  // "Full page") hooks in the same way, after the extras.
   function X(ev) {
-    var x = window.WatchPlayerExtras;
-    if (!x || typeof x[ev] !== 'function') return undefined;
-    try { return x[ev].apply(null, [CTX].concat([].slice.call(arguments, 1))); } catch (e) {
-      try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
-      return undefined;
-    }
+    var args = [CTX].concat([].slice.call(arguments, 1));
+    var out;
+    [window.WatchPlayerExtras, window.WatchPlayerYT].forEach(function (x) {
+      if (!x || typeof x[ev] !== 'function') return;
+      try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
+        try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
+      }
+    });
+    return out;
   }
   // watch-player-multi.js (multiview: up to four tiles, one with the sound; the mini-player) hooks in
   // the same way; with the file missing, the layer is the single player it always was.
@@ -136,7 +141,17 @@
     var head = el('div', 'wp-sheet-head');
     head.appendChild(el('span', 'wp-sheet-host'));
     head.appendChild(el('span', 'wp-grow'));
-    head.appendChild(btn('wp-sheet-close', 'Close', function () { if (L.sheet && api) api.sheetClose(L.sheet.id, 'Close'); }, 'Close sign-in'));
+    L.sheetTabBtn = btn('wp-sheet-tab', 'Open in a tab', function (b) {
+      if (!L.sheet || !api || typeof api.sheetToTab !== 'function') return;
+      b.disabled = true;
+      api.sheetToTab(L.sheet.id).then(function (r) {
+        b.disabled = false;
+        if (!r || !r.ok) toast('Couldn’t open a tab: ' + ((r && r.reason) || 'no answer'), true);
+      }, function (err) { b.disabled = false; toast('Couldn’t open a tab: ' + ((err && err.message) || err), true); });
+    }, 'Open this page in a normal Quartz tab');
+    head.appendChild(L.sheetTabBtn);
+    L.sheetCloseBtn = btn('wp-sheet-close', 'Close', function () { if (L.sheet && api) api.sheetClose(L.sheet.id, 'Close'); }, 'Close sign-in');
+    head.appendChild(L.sheetCloseBtn);
     panel.appendChild(head);
     panel.appendChild(el('div', 'wp-sheet-hole'));
     sh.appendChild(panel);
@@ -204,8 +219,11 @@
       id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '',
       view: null, wcId: null, tile: el('div', 'wp-tile'), state: el('div', 'wp-state'),
       blocked: o.blocked || '', refused: '', fs: false,
-      fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || ''
+      fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || '', multi: !!o.multi
     };
+    // watch-player-yt.js: a YouTube video in a multiview tile plays as the embed.
+    url = X('slotUrl', s, url) || url;
+    s.url = url;
     s.state.hidden = true;
     s.tile.appendChild(s.state);
     s.tile._slot = s;
@@ -221,6 +239,9 @@
     // player handler answers -- in place, a sheet, a tab, or no.
     v.setAttribute('allowpopups', '');
     MV('view', s, v);
+    // The YouTube embed refuses to play without a Referer naming the app (watch-player-yt.js).
+    var ref = X('referrer', s, url);
+    if (ref) v.setAttribute('httpreferrer', ref);
     v.setAttribute('src', url);
     v.className = 'wp-view';
     s.view = v;
@@ -278,6 +299,7 @@
     var drmSvc = !!(svcInfo(s.service) && svcInfo(s.service).drm);
     if (kind === 'blocked' || kind === 'refused' || drmSvc) acts.appendChild(btn('wp-primary', 'Open in Edge', function (b) { toEdge(s, b); }));
     if (kind === 'failed' && s.view) acts.appendChild(btn('', 'Try again', function () { st.hidden = true; try { s.view.reload(); } catch (e) { /* gone */ } }));
+    X('stateActs', s, kind, acts);
     acts.appendChild(btn('', 'Open in a tab', function () { toTab(s); }));
     box.appendChild(acts);
     st.appendChild(box);
@@ -299,6 +321,7 @@
     L.titleEl.textContent = t;
     L.el.setAttribute('aria-label', t + (info ? ' on ' + info.name : '') + ', in ' + NAME);
     L.edgeBtn.hidden = !(info && info.drm);
+    X('sync', s);
   }
 
   function note(text) {
@@ -350,13 +373,19 @@
       one.title = o.title || '';
       one.url = u;
       one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
+      one.multi = !!o.multi;
+      u = X('slotUrl', one, u) || u;
+      one.url = u;
       X('reuse', one);
       one.state.hidden = true;
       one.tile.classList.remove('has-state');
-      try { var pr = one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
+      // The embed (watch-player-yt.js) needs its Referer on this load too, not only on a new view's src.
+      var ref = X('referrer', one, u);
+      if (ref) { try { one.view.setAttribute('httpreferrer', ref); } catch (e) { /* the load carries it */ } }
+      try { var pr = ref ? one.view.loadURL(u, { httpReferrer: ref }) : one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
     } else {
       clearSlots();
-      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '' });
+      var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', note: o.note || '', multi: !!o.multi });
       L.slots.push(s);
       L.focus = 0;
       L.grid.appendChild(s.tile);
@@ -516,11 +545,19 @@
     var mine = false;
     for (var i = 0; i < L.slots.length; i++) if (L.slots[i].wcId === m.opener) mine = true;
     if (!mine) return;
-    if (!L.sheet || L.sheet.id !== m.id) L.sheet = { id: m.id, host: '', title: '' };
+    if (!L.sheet || L.sheet.id !== m.id) L.sheet = { id: m.id, host: '', title: '', kind: 'signin', error: '' };
+    if (m.kind === 'page' || m.kind === 'signin') L.sheet.kind = m.kind;
+    if (m.fresh) { L.sheet.title = ''; L.sheet.error = ''; }
     if (m.host) L.sheet.host = m.host;
     if (m.title) L.sheet.title = m.title;
+    if (typeof m.error === 'string') L.sheet.error = m.error;
+    var page = L.sheet.kind === 'page';
     var label = L.sheetEl.querySelector('.wp-sheet-host');
-    label.textContent = (L.sheet.title ? L.sheet.title + ' · ' : '') + (L.sheet.host || 'Sign in');
+    label.textContent = (L.sheet.title ? L.sheet.title + ' · ' : '') + (L.sheet.host || (page ? 'Another site' : 'Sign in')) +
+      (L.sheet.error ? ' · didn’t load: ' + L.sheet.error : '');
+    L.sheetEl.setAttribute('data-kind', L.sheet.kind);
+    L.sheetCloseBtn.setAttribute('aria-label', page ? 'Close this page and go back to the player' : 'Close sign-in');
+    L.sheetCloseBtn.title = L.sheetCloseBtn.getAttribute('aria-label') + ' (Esc)';
     L.sheetEl.hidden = false;
     placeSheet();
   }
@@ -632,7 +669,7 @@
         n: L.slots.length,
         focus: L.focus,
         fs: !!L.fsSlot,
-        sheet: L.sheet ? { id: L.sheet.id, host: L.sheet.host, shown: !L.sheetEl.hidden } : null,
+        sheet: L.sheet ? { id: L.sheet.id, host: L.sheet.host, kind: L.sheet.kind, error: L.sheet.error, shown: !L.sheetEl.hidden } : null,
         title: L.titleEl ? L.titleEl.textContent : '',
         mark: L.markEl ? L.markEl.textContent : '',
         note: L.noteEl ? L.noteEl.textContent : '',

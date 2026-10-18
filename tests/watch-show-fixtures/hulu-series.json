@@ -1,0 +1,294 @@
+{
+ "_fixture": "Hand-made Hulu series hub for The Bear (hulu.js field names). Season 1 watched, S2 E3 part-way, season 3 tab not loaded.",
+ "finalPath": "/series/c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+ "title": "The Bear | Hulu",
+ "captures": [
+  {
+   "path": "/content/v5/hubs/series/c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e?schema=1&referralHost=production",
+   "json": {
+    "id": "series/c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+    "_type": "hub",
+    "name": "The Bear",
+    "details": {
+     "entity": {
+      "_type": "series",
+      "id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+      "name": "The Bear",
+      "description": "A young chef from the fine-dining world comes home to run his family’s sandwich shop in Chicago.",
+      "premiere_date": "2022-06-23T00:00:00Z",
+      "rating": {
+       "code": "TV-MA"
+      },
+      "genre_names": [
+       "Drama",
+       "Comedy"
+      ],
+      "artwork": {
+       "detail.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/bearhero000000000?base_image_bucket_name=image_manager&base_image=bearhero000000000"
+       }
+      },
+      "personalization": {
+       "is_in_my_stuff": true
+      }
+     }
+    },
+    "components": [
+     {
+      "_type": "collection_tabs",
+      "id": "tabs-1",
+      "tabs": [
+       {
+        "id": "tab-s1",
+        "name": "Season 1",
+        "model": {
+         "collection": {
+          "id": "col-s1",
+          "name": "Season 1",
+          "series_grouping_metadata": {
+           "season_number": 1
+          },
+          "items": [
+           {
+            "_type": "episode",
+            "id": "e101aaaa-1111-4222-8333-444455550101",
+            "name": "System",
+            "description": "Episode 1 of season 1: System.",
+            "season": "1",
+            "number": "1",
+            "duration": 1800,
+            "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+            "series_name": "The Bear",
+            "artwork": {
+             "video.horizontal.hero": {
+              "path": "https://img1.hulu.com/user/v3/artwork/ep11art0000000000?base_image_bucket_name=image_manager&base_image=ep11art0000000000"
+             }
+            },
+            "personalization": {
+             "bookmark": 1800,
+             "eab": "EAB::e101aaaa-1111-4222-8333-444455550101::1::1"
+            }
+           },
+           {
+            "_type": "episode",
+            "id": "e102aaaa-1111-4222-8333-444455550102",
+            "name": "Hands",
+            "description": "Episode 2 of season 1: Hands.",
+            "season": "1",
+            "number": "2",
+            "duration": 1800,
+            "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+            "series_name": "The Bear",
+            "artwork": {
+             "video.horizontal.hero": {
+              "path": "https://img1.hulu.com/user/v3/artwork/ep12art0000000000?base_image_bucket_name=image_manager&base_image=ep12art0000000000"
+             }
+            },
+            "personalization": {
+             "bookmark": 1750,
+             "eab": "EAB::e102aaaa-1111-4222-8333-444455550102::1::1"
+            }
+           },
+           {
+            "_type": "episode",
+            "id": "e103aaaa-1111-4222-8333-444455550103",
+            "name": "Brigade",
+            "description": "Episode 3 of season 1: Brigade.",
+            "season": "1",
+            "number": "3",
+            "duration": 1800,
+            "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+            "series_name": "The Bear",
+            "artwork": {
+             "video.horizontal.hero": {
+              "path": "https://img1.hulu.com/user/v3/artwork/ep13art0000000000?base_image_bucket_name=image_manager&base_image=ep13art0000000000"
+             }
+            },
+            "personalization": {
+             "bookmark": 1790,
+             "eab": "EAB::e103aaaa-1111-4222-8333-444455550103::1::1"
+            }
+           }
+          ]
+         }
+        }
+       },
+       {
+        "id": "tab-s2",
+        "name": "Season 2",
+        "model": {
+         "collection": {
+          "id": "col-s2",
+          "name": "Season 2",
+          "series_grouping_metadata": {
+           "season_number": 2
+          },
+          "items": []
+         }
+        }
+       },
+       {
+        "id": "tab-s3",
+        "name": "Season 3",
+        "model": {
+         "collection": {
+          "id": "col-s3",
+          "name": "Season 3",
+          "series_grouping_metadata": {
+           "season_number": 3
+          },
+          "items": []
+         }
+        }
+       }
+      ]
+     },
+     {
+      "_type": "collection",
+      "id": "more-1",
+      "name": "You May Also Like",
+      "items": [
+       {
+        "id": "f0000001-0000-4000-8000-000000000001",
+        "entity_metadata": {
+         "entity_type": "series",
+         "name": "Shōgun",
+         "premiere_date": "2024-02-27"
+        },
+        "visuals": {
+         "headline": "Shōgun",
+         "artwork": {
+          "horizontal": {
+           "path": "https://img1.hulu.com/user/v3/artwork/shogun0000000000?base_image_bucket_name=image_manager&base_image=shogun0000000000"
+          }
+         }
+        },
+        "actions": {
+         "browse": {
+          "target_type": "series",
+          "target_id": "f0000001-0000-4000-8000-000000000001",
+          "href": "/series/shogun-f0000001-0000-4000-8000-000000000001"
+         }
+        }
+       },
+       {
+        "id": "f0000002-0000-4000-8000-000000000002",
+        "entity_metadata": {
+         "entity_type": "movie",
+         "name": "Boiling Point",
+         "premiere_date": "2021-01-01"
+        },
+        "visuals": {
+         "headline": "Boiling Point",
+         "artwork": {
+          "horizontal": {
+           "path": "https://img1.hulu.com/user/v3/artwork/boiling000000000?base_image_bucket_name=image_manager&base_image=boiling000000000"
+          }
+         }
+        },
+        "actions": {
+         "browse": {
+          "target_type": "movie",
+          "target_id": "f0000002-0000-4000-8000-000000000002"
+         }
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "path": "/content/v5/hubs/series/c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e/collections/col-s2?schema=1&offset=0&limit=20",
+   "json": {
+    "id": "col-s2",
+    "name": "Season 2",
+    "series_grouping_metadata": {
+     "season_number": 2
+    },
+    "items": [
+     {
+      "_type": "episode",
+      "id": "e201aaaa-1111-4222-8333-444455550201",
+      "name": "Beef",
+      "description": "Episode 1 of season 2: Beef.",
+      "season": "2",
+      "number": "1",
+      "duration": 1800,
+      "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+      "series_name": "The Bear",
+      "artwork": {
+       "video.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/ep21art0000000000?base_image_bucket_name=image_manager&base_image=ep21art0000000000"
+       }
+      },
+      "personalization": {
+       "bookmark": 1800,
+       "eab": "EAB::e201aaaa-1111-4222-8333-444455550201::1::1"
+      }
+     },
+     {
+      "_type": "episode",
+      "id": "e202aaaa-1111-4222-8333-444455550202",
+      "name": "Pasta",
+      "description": "Episode 2 of season 2: Pasta.",
+      "season": "2",
+      "number": "2",
+      "duration": 1800,
+      "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+      "series_name": "The Bear",
+      "artwork": {
+       "video.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/ep22art0000000000?base_image_bucket_name=image_manager&base_image=ep22art0000000000"
+       }
+      },
+      "personalization": {
+       "bookmark": 1800,
+       "eab": "EAB::e202aaaa-1111-4222-8333-444455550202::1::1"
+      }
+     },
+     {
+      "_type": "episode",
+      "id": "e203aaaa-1111-4222-8333-444455550203",
+      "name": "Sundae",
+      "description": "Episode 3 of season 2: Sundae.",
+      "season": "2",
+      "number": "3",
+      "duration": 1800,
+      "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+      "series_name": "The Bear",
+      "artwork": {
+       "video.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/ep23art0000000000?base_image_bucket_name=image_manager&base_image=ep23art0000000000"
+       }
+      },
+      "personalization": {
+       "bookmark": 900,
+       "eab": "EAB::e203aaaa-1111-4222-8333-444455550203::1::1"
+      }
+     },
+     {
+      "_type": "episode",
+      "id": "e204aaaa-1111-4222-8333-444455550204",
+      "name": "Honeydew",
+      "description": "Episode 4 of season 2: Honeydew.",
+      "season": "2",
+      "number": "4",
+      "duration": 1900,
+      "series_id": "c3b4c2e2-3f1a-4b8e-9d0c-7a1e2b3c4d5e",
+      "series_name": "The Bear",
+      "artwork": {
+       "video.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/ep24art0000000000?base_image_bucket_name=image_manager&base_image=ep24art0000000000"
+       }
+      },
+      "personalization": {
+       "bookmark": 0,
+       "eab": "EAB::e204aaaa-1111-4222-8333-444455550204::1::1"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -467,6 +467,14 @@ const drm = drmModule.create({
  * (QUARTZ_PLAYER_AUTH_HOSTS, comma separated) and move the multiview RAM floor
  * (QUARTZ_PLAYER_FLOOR_GB). A live Quartz ignores both.
  */
+// Lumen's leak log (watch-leaks.js): each time Lumen has to send the user to a tab, Edge or an app,
+// one quartz.log line and a count Settings > Lumen shows. Shared by the player layer and Watch.
+const watchLeaks = (() => {
+  try { return require('./watch-leaks').create({ app, log: (line) => { if (qlog) qlog.log.line(line); else console.log('[lumen] ' + line); } }); } catch (err) {
+    console.error('[lumen] the leak log could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
 const watchPlayer = (() => {
   const t = process.argv.includes('--test-profile');
   const env = process.env;
@@ -475,6 +483,7 @@ const watchPlayer = (() => {
   if (t && env.QUARTZ_PLAYER_FLOOR_GB !== undefined && Number.isFinite(Number(env.QUARTZ_PLAYER_FLOOR_GB))) test.floorGb = Number(env.QUARTZ_PLAYER_FLOOR_GB);
   // Multiview's RAM guard, simulated: while this file exists its number is the free RAM (TEST profile only).
   if (t && env.QUARTZ_PLAYER_FREE_FILE) test.freeFile = String(env.QUARTZ_PLAYER_FREE_FILE);
+  if (t) test.capture = true;   // the e2e's whole-window shot (sheets are native views)
   try {
     const p = require('./watch-player-main').create({
       app,
@@ -486,6 +495,7 @@ const watchPlayer = (() => {
       isChromeSender: (event) => isChromeSender(event),
       windowOpenDecision: (details) => windowOpenDecision(details),
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch-player] ' + line); },
+      leaks: watchLeaks,
       test,
     });
     p.registerIpc();
@@ -555,6 +565,7 @@ const watch = (() => {
       drmRoute: (url) => drm.route(url),
       // The player layer: titles play inside Watch when "Play inside Watch" is on.
       player: watchPlayer,
+      leaks: watchLeaks,
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,
@@ -2593,6 +2604,8 @@ function attachSessionHandlers() {
     // Watch's hidden readers never prompt and never get anything: a dialog for a page the user
     // cannot see would make his answer stick for his real tabs of that site.
     if (isWatchReader(contents)) return callback(false);
+    // An app link from Lumen's player layer (a page or a sheet): stopped, said and counted there.
+    if (permission === 'openExternal' && watchPlayer && typeof watchPlayer.refuseExternal === 'function' && watchPlayer.refuseExternal(contents, details)) return callback(false);
     if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return callback(true);
     const prompts = permission === 'media' || permission in PERMISSION_PHRASES;
     if (!prompts) return callback(false);
@@ -5325,6 +5338,7 @@ function windowOpenDecision(details) {
  */
 function guestWindowOpenDecision(contents, details) {
   const raw = (details && details.url) || '';
+  traceFileNav('window-open', { url: raw, from: safeUrl(contents), disposition: details && details.disposition, referrer: details && details.referrer && details.referrer.url });
   if (!fileNav.isFileUrl(raw)) return windowOpenDecision(details);
   const referrer = (details && details.referrer && details.referrer.url) || '';
   if (fileNav.pageMayOpen(raw, safeUrl(contents), referrer, BUNDLED_PAGE_PREFIX)) {
@@ -5341,7 +5355,19 @@ function guestWindowOpenDecision(contents, details) {
 function fileNavBlocked(contents, url) {
   let wcId = null;
   try { wcId = contents && !contents.isDestroyed() ? contents.id : null; } catch { /* gone */ }
+  traceFileNav('blocked', { url, wcId });
   send('file-nav-blocked', { wcId, url: String(url || ''), text: fileNav.blockedNotice(url) });
+}
+
+/**
+ * Test runs only (--test-profile AND QUARTZ_TEST_FILENAV_TRACE=<file>): one
+ * JSON line per file:// decision, so filelinks-e2e.js can tell "the hook
+ * never fired" from "it fired and the chrome dropped it". Off otherwise.
+ */
+function traceFileNav(kind, info) {
+  const file = process.env.QUARTZ_TEST_FILENAV_TRACE;
+  if (!file || !process.argv.includes('--test-profile')) return;
+  try { fs.appendFileSync(file, JSON.stringify(Object.assign({ kind, at: Date.now() }, info)) + '\n'); } catch { /* a trace only */ }
 }
 
 /**
@@ -5485,8 +5511,26 @@ app.on('web-contents-created', (_event, contents) => {
     // get to borrow the page's file:// standing.
     let by = '';
     try { by = event && event.initiator ? String(event.initiator.url || '') : ''; } catch { by = ''; }
+    traceFileNav('will-navigate', { url, from: safeUrl(contents), by });
     if (fileNav.pageMayOpen(url, safeUrl(contents), by, BUNDLED_PAGE_PREFIX)) return;
     event.preventDefault();
+    fileNavBlocked(contents, url);
+  });
+
+  /*
+   * The FIRST lock is Chromium's: a web page's link, location.assign or
+   * window.open to file:// is refused inside Chromium before will-navigate or
+   * setWindowOpenHandler ever hear of it, and the only trace it leaves is a
+   * console line in the page: "Not allowed to load local resource: file:///…".
+   * That line is what makes the refusal visible on the tab. It also fires for
+   * an <img>/<iframe> pointing at file://, which is the same refusal ("this
+   * page tried to reach a file on your computer"), so it is said the same way.
+   */
+  contents.on('console-message', (event, legacyLevel, legacyMessage) => {
+    const message = String((event && event.message) || legacyMessage || '');
+    const url = fileNav.refusedLocalResource(message);
+    if (!url) return;
+    traceFileNav('chromium-refused', { url, from: safeUrl(contents) });
     fileNavBlocked(contents, url);
   });
 

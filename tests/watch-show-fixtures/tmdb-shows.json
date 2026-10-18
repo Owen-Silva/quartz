@@ -1,0 +1,383 @@
+{
+ "_fixture": "Hand-made TMDB answers, keyed by path (no host, no key). The Bear = tv 136315; Severance = tv 95396 (Apple TV+, on none of his services); Air = movie 964980.",
+ "routes": {
+  "/search/tv?query=The%20Bear": {
+   "results": [
+    {
+     "id": 136315,
+     "name": "The Bear",
+     "first_air_date": "2022-06-23",
+     "media_type": "tv"
+    },
+    {
+     "id": 1,
+     "name": "Bear Grylls",
+     "first_air_date": "2010-01-01"
+    }
+   ]
+  },
+  "/tv/136315": {
+   "id": 136315,
+   "name": "The Bear",
+   "first_air_date": "2022-06-23",
+   "overview": "Carmy, a young fine-dining chef, comes home to Chicago to run his family sandwich shop.",
+   "backdrop_path": "/bearback.jpg",
+   "genres": [
+    {
+     "id": 18,
+     "name": "Drama"
+    },
+    {
+     "id": 35,
+     "name": "Comedy"
+    }
+   ],
+   "content_ratings": {
+    "results": [
+     {
+      "iso_3166_1": "US",
+      "rating": "TV-MA"
+     }
+    ]
+   },
+   "seasons": [
+    {
+     "season_number": 0,
+     "name": "Specials",
+     "episode_count": 1
+    },
+    {
+     "season_number": 1,
+     "name": "Season 1",
+     "episode_count": 3
+    },
+    {
+     "season_number": 2,
+     "name": "Season 2",
+     "episode_count": 4
+    },
+    {
+     "season_number": 3,
+     "name": "Season 3",
+     "episode_count": 2
+    }
+   ],
+   "recommendations": {
+    "results": [
+     {
+      "id": 95396,
+      "name": "Severance",
+      "media_type": "tv",
+      "first_air_date": "2022-02-17",
+      "backdrop_path": "/sevback.jpg"
+     }
+    ]
+   },
+   "watch/providers": {
+    "results": {
+     "US": {
+      "link": "https://www.themoviedb.org/tv/136315-the-bear/watch?locale=US",
+      "flatrate": [
+       {
+        "provider_name": "Hulu",
+        "display_priority": 1,
+        "logo_path": "/hulu.png"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "/tv/136315/season/1": {
+   "id": 1363151,
+   "name": "Season 1",
+   "season_number": 1,
+   "episodes": [
+    {
+     "id": 13631510,
+     "episode_number": 1,
+     "season_number": 1,
+     "name": "System",
+     "overview": "System (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still11.jpg"
+    },
+    {
+     "id": 13631511,
+     "episode_number": 2,
+     "season_number": 1,
+     "name": "Hands",
+     "overview": "Hands (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still12.jpg"
+    },
+    {
+     "id": 13631512,
+     "episode_number": 3,
+     "season_number": 1,
+     "name": "Brigade",
+     "overview": "Brigade (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still13.jpg"
+    }
+   ]
+  },
+  "/tv/136315/season/2": {
+   "id": 1363152,
+   "name": "Season 2",
+   "season_number": 2,
+   "episodes": [
+    {
+     "id": 13631520,
+     "episode_number": 1,
+     "season_number": 2,
+     "name": "Beef",
+     "overview": "Beef (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still21.jpg"
+    },
+    {
+     "id": 13631521,
+     "episode_number": 2,
+     "season_number": 2,
+     "name": "Pasta",
+     "overview": "Pasta (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still22.jpg"
+    },
+    {
+     "id": 13631522,
+     "episode_number": 3,
+     "season_number": 2,
+     "name": "Sundae",
+     "overview": "Sundae (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still23.jpg"
+    },
+    {
+     "id": 13631523,
+     "episode_number": 4,
+     "season_number": 2,
+     "name": "Honeydew",
+     "overview": "Honeydew (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still24.jpg"
+    }
+   ]
+  },
+  "/tv/136315/season/3": {
+   "id": 1363153,
+   "name": "Season 3",
+   "season_number": 3,
+   "episodes": [
+    {
+     "id": 13631530,
+     "episode_number": 1,
+     "season_number": 3,
+     "name": "Tomorrow",
+     "overview": "Tomorrow (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still31.jpg"
+    },
+    {
+     "id": 13631531,
+     "episode_number": 2,
+     "season_number": 3,
+     "name": "Next",
+     "overview": "Next (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still32.jpg"
+    }
+   ]
+  },
+  "/search/tv?query=Severance": {
+   "results": [
+    {
+     "id": 95396,
+     "name": "Severance",
+     "first_air_date": "2022-02-17",
+     "media_type": "tv"
+    }
+   ]
+  },
+  "/search/multi?query=Severance": {
+   "results": [
+    {
+     "id": 95396,
+     "name": "Severance",
+     "first_air_date": "2022-02-17",
+     "media_type": "tv"
+    }
+   ]
+  },
+  "/tv/95396": {
+   "id": 95396,
+   "name": "Severance",
+   "first_air_date": "2022-02-17",
+   "overview": "Mark leads a team of office workers whose memories have been surgically divided between their work and personal lives.",
+   "backdrop_path": "/sevback.jpg",
+   "genres": [
+    {
+     "id": 18,
+     "name": "Drama"
+    },
+    {
+     "id": 9648,
+     "name": "Mystery"
+    }
+   ],
+   "content_ratings": {
+    "results": [
+     {
+      "iso_3166_1": "US",
+      "rating": "TV-MA"
+     }
+    ]
+   },
+   "seasons": [
+    {
+     "season_number": 1,
+     "name": "Season 1",
+     "episode_count": 2
+    },
+    {
+     "season_number": 2,
+     "name": "Season 2",
+     "episode_count": 2
+    }
+   ],
+   "recommendations": {
+    "results": [
+     {
+      "id": 136315,
+      "name": "The Bear",
+      "media_type": "tv",
+      "first_air_date": "2022-06-23",
+      "backdrop_path": "/bearback.jpg"
+     }
+    ]
+   },
+   "watch/providers": {
+    "results": {
+     "US": {
+      "link": "https://www.themoviedb.org/tv/95396-severance/watch?locale=US",
+      "flatrate": [
+       {
+        "provider_name": "Apple TV Plus",
+        "display_priority": 1,
+        "logo_path": "/atv.png"
+       }
+      ],
+      "buy": [
+       {
+        "provider_name": "Amazon Video",
+        "display_priority": 4,
+        "logo_path": "/amz.png"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "/tv/95396/season/1": {
+   "id": 953961,
+   "name": "Season 1",
+   "season_number": 1,
+   "episodes": [
+    {
+     "id": 9539610,
+     "episode_number": 1,
+     "season_number": 1,
+     "name": "Good News About Hell",
+     "overview": "Good News About Hell (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still11.jpg"
+    },
+    {
+     "id": 9539611,
+     "episode_number": 2,
+     "season_number": 1,
+     "name": "Half Loop",
+     "overview": "Half Loop (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still12.jpg"
+    }
+   ]
+  },
+  "/tv/95396/season/2": {
+   "id": 953962,
+   "name": "Season 2",
+   "season_number": 2,
+   "episodes": [
+    {
+     "id": 9539620,
+     "episode_number": 1,
+     "season_number": 2,
+     "name": "Hello, Ms. Cobel",
+     "overview": "Hello, Ms. Cobel (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still21.jpg"
+    },
+    {
+     "id": 9539621,
+     "episode_number": 2,
+     "season_number": 2,
+     "name": "Goodbye, Mrs. Selvig",
+     "overview": "Goodbye, Mrs. Selvig (from TMDB).",
+     "runtime": 30,
+     "still_path": "/still22.jpg"
+    }
+   ]
+  },
+  "/search/movie?query=Air": {
+   "results": [
+    {
+     "id": 964980,
+     "title": "Air",
+     "release_date": "2023-04-05"
+    }
+   ]
+  },
+  "/movie/964980": {
+   "id": 964980,
+   "title": "Air",
+   "release_date": "2023-04-05",
+   "overview": "Nike courts Michael Jordan.",
+   "runtime": 112,
+   "backdrop_path": "/airback.jpg",
+   "genres": [
+    {
+     "id": 18,
+     "name": "Drama"
+    }
+   ],
+   "release_dates": {
+    "results": [
+     {
+      "iso_3166_1": "US",
+      "release_dates": [
+       {
+        "certification": "R"
+       }
+      ]
+     }
+    ]
+   },
+   "recommendations": {
+    "results": []
+   },
+   "watch/providers": {
+    "results": {
+     "US": {
+      "flatrate": [
+       {
+        "provider_name": "Amazon Prime Video",
+        "display_priority": 1
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

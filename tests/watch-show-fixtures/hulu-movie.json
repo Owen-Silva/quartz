@@ -1,0 +1,47 @@
+{
+ "_fixture": "Hand-made Hulu movie hub (Palm Springs), 40 % watched.",
+ "finalPath": "/movie/d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70",
+ "title": "Palm Springs | Hulu",
+ "captures": [
+  {
+   "path": "/content/v5/hubs/movie/d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70?schema=1",
+   "json": {
+    "id": "movie/d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70",
+    "_type": "hub",
+    "name": "Palm Springs",
+    "details": {
+     "entity": {
+      "_type": "movie",
+      "id": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70",
+      "name": "Palm Springs",
+      "description": "Stuck in a time loop at a Palm Springs wedding, two strangers make the most of it.",
+      "premiere_date": "2020-07-10",
+      "rating": {
+       "code": "R"
+      },
+      "genre_names": [
+       "Comedy",
+       "Romance"
+      ],
+      "duration": 5400,
+      "artwork": {
+       "detail.horizontal.hero": {
+        "path": "https://img1.hulu.com/user/v3/artwork/palmhero00000000?base_image_bucket_name=image_manager&base_image=palmhero00000000"
+       }
+      },
+      "personalization": {
+       "bookmark": 2160,
+       "eab": "EAB::d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70::1::1"
+      },
+      "actions": {
+       "add_to_my_stuff": {
+        "href": "/my-stuff/add"
+       }
+      }
+     }
+    },
+    "components": []
+   }
+  }
+ ]
+}

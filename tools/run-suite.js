@@ -67,6 +67,9 @@ const TESTS = [
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
+  // look-sync's reads and writes when Windows refuses look.json for a moment (scanner, another app):
+  // a refused read is retried and re-checked, so a change that landed is followed, never lost.
+  { name: 'looksync', file: 'looksync-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.
@@ -74,10 +77,20 @@ const TESTS = [
   // Lumen's one search box: merge and ranking, the Disney+/Hulu/Prime search readers, the main half
   // (one reader at a time, signed-in first, the 5-min cache, cancel, Retry) and its watch-main hooks.
   { name: 'watch-find', file: 'watch-find-harness.js' },
+  // Lumen's leak-proof layer: the leak log, YouTube page vs embed, off-site pages as sheets, app links,
+  // the Settings count, and watch-main's counted fallbacks (fakes only).
+  { name: 'watch-leaks', file: 'watch-leaks-harness.js' },
   // Lumen sports (watch/sports.js, sports-main.js): ESPN-shaped fixtures, a fake fetch, no network.
   { name: 'sports', file: 'tests/sports-test.js' },
   // Lumen multiview (watch-player-multi.js, watch-player-main.js): the tile embed, the simulated RAM, the keys.
   { name: 'watch-multi', file: 'tests/watch-multi-test.js' },
+  // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
+  // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
+  { name: 'watch-shows', file: 'tests/watch-shows-test.js' },
+  // Lumen's pinned scores: feed parsing and the event diff (watch/scores.js), and score-pins-main.js
+  // driven by fake windows (stacking, saved pins, polling cadence, Final, silence under tests).
+  { name: 'scores', file: 'tests/scores-test.js' },
+  { name: 'scorepins', file: 'tests/score-pins-main-test.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
@@ -136,6 +149,12 @@ const TESTS = [
   // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
   // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
   { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
+  // Lumen leak-proof (watch-leak-e2e.js): every way out of a hosted page stays in the layer or is
+  // counted; YouTube's full page vs the embed and "Full page"; the Settings count. Local fixtures only.
+  { name: 'watch-leak-e2e', file: 'watch-leak-e2e.js', e2e: true, timeout: 420 },
+  // Pinned score cards in a hidden instance against a local feed mock: goal, penalty, power play,
+  // outage, restart; off-screen, never focused, muted (sounds counted, never played). ~4 min.
+  { name: 'score-pins-e2e', file: 'score-pins-e2e.js', e2e: true, timeout: 600 },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,

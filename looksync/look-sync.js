@@ -1,4 +1,4 @@
-/* VENDORED from ~/look-sync commit 0b55b9c (look-sync.js), Owen-Silva/look-sync.
+/* VENDORED from ~/look-sync commit 0e9f76f (look-sync.js), Owen-Silva/look-sync.
    Do not edit this copy: change ~/look-sync, run its tests, then `node looksync/vendor.js <commit>`. */
 'use strict';
 /*
@@ -224,6 +224,7 @@ class LookSync extends EventEmitter {
     this.retryDelays = opts.retryDelays || [50, 100, 200];
     this.debounceMs = opts.debounceMs != null ? opts.debounceMs : 50; // writes are atomic renames: 50 ms coalesces the burst (was 150; the 1 s follow target)
     this.corruptRetryMs = opts.corruptRetryMs != null ? opts.corruptRetryMs : 250;
+    this.recheckMs = opts.recheckMs != null ? opts.recheckMs : 1000; // a read still refused after its retries: look again this much later
     this.rewatchDelays = opts.rewatchDelays || [1000, 5000, 30000];
     this.now = opts.now || (() => new Date());
 
@@ -238,6 +239,7 @@ class LookSync extends EventEmitter {
     this.debounce = null;
     this.rewatchTimer = null;
     this.rewatchStep = 0;
+    this.recheckTimer = null;
     this.closed = false;
     this.queue = Promise.resolve();
     this._status = { state: this.enabled ? 'missing' : 'off', reason: 'not started', rev: null };
@@ -287,7 +289,7 @@ class LookSync extends EventEmitter {
 
   close() {
     this.closed = true;
-    clearTimeout(this.debounce); clearTimeout(this.rewatchTimer);
+    clearTimeout(this.debounce); clearTimeout(this.rewatchTimer); clearTimeout(this.recheckTimer);
     if (this.watcher) { try { this.watcher.close(); } catch (_) {} this.watcher = null; }
   }
 
@@ -337,6 +339,12 @@ class LookSync extends EventEmitter {
     if (this.rewatchTimer.unref) this.rewatchTimer.unref();
   }
 
+  _recheckLater() {
+    if (this.closed || this.recheckTimer) return;
+    this.recheckTimer = setTimeout(() => { this.recheckTimer = null; this._check({}); }, this.recheckMs);
+    if (this.recheckTimer.unref) this.recheckTimer.unref();
+  }
+
   // ---- reading + applying ----
   // Coalesce: at most one queued check; it runs on the same queue as writes,
   // so a check never interleaves with a publish, a seed or a recovery.
@@ -354,6 +362,13 @@ class LookSync extends EventEmitter {
   async _checkNow(ctx) {
     if (this.closed) return;
     let r = read(this.dir, this.fs);
+    // Windows refuses an open for a moment while a scanner or another app holds the file, or while a
+    // replace-rename is landing: the same 50/100/200 ms retries a writer gets, before it is an error.
+    for (let i = 0; r.state === 'error' && RETRY_CODES.has(r.code) && i < this.retryDelays.length; i++) {
+      await sleep(this.retryDelays[i]);
+      if (this.closed) return;
+      r = read(this.dir, this.fs);
+    }
     if (r.state === 'corrupt') {
       await sleep(this.corruptRetryMs); // a torn read mid-write: retry once
       if (this.closed) return;
@@ -368,7 +383,12 @@ class LookSync extends EventEmitter {
       if (this.hadFile) return this._emitStatus('missing', 'Not shared yet: file was removed');
       return this._emitStatus('missing', 'Not shared yet');
     }
-    if (r.state === 'error') return this._emitStatus('error', r.reason);
+    if (r.state === 'error') {
+      // Still refused: say so, and look again later, so a change that has already landed is followed
+      // late rather than lost (no further watch event comes for it).
+      if (RETRY_CODES.has(r.code)) this._recheckLater();
+      return this._emitStatus('error', r.reason);
+    }
     if (r.state === 'newer') {
       this.readOnly = true; this.lastHash = r.hash; this.hadFile = true;
       return this._emitStatus('newer', r.reason);
