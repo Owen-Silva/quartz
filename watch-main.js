@@ -342,6 +342,13 @@ function create(deps) {
   // The player layer (watch-player-main.js): with "Play inside Watch" on, a title plays in
   // Watch itself instead of a new tab. Without it (an older main), titles open in tabs.
   const player = d.player && typeof d.player.play === 'function' && typeof d.player.inside === 'function' ? d.player : null;
+  // watch-leaks.js: each time Lumen has to send a page to a tab or Edge, one log line and the count.
+  const leaks = d.leaks && typeof d.leaks.record === 'function' ? d.leaks : null;
+  function leftLumen(kind, reason, url, line) {
+    if (leaks) { try { leaks.record({ kind, reason, url, line }); return; } catch { /* the plain line */ } }
+    log(line);
+  }
+  function whyTab() { return player ? 'Play inside Lumen is off' : 'no player layer'; }
   const setTimer = typeof d.setTimeout === 'function' ? d.setTimeout : setTimeout;
   const clearTimer = typeof d.clearTimeout === 'function' ? d.clearTimeout : clearTimeout;
   const freeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
@@ -1474,7 +1481,7 @@ function create(deps) {
         log('Lumen: a TMDB where-to-watch page opened in the player layer: ' + hostOf(clean));
         return { ok: true, how: 'layer', reason: '' };
       }
-      log('Lumen: a TMDB where-to-watch page opened in a tab (' + (player ? 'Play inside Lumen is off' : 'no player layer') + '): ' + hostOf(clean));
+      leftLumen('tab', 'a TMDB where-to-watch page, in a tab (' + whyTab() + ')', clean, 'Lumen: a TMDB where-to-watch page opened in a tab (' + whyTab() + '): ' + hostOf(clean));
       send('open-url', { url: rebase(clean), background: false });
       return { ok: true, how: 'tab', reason: '' };
     }
@@ -1486,12 +1493,19 @@ function create(deps) {
     if (route.edge) {
       let r;
       try { r = await openInEdge(x.fallback || clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
+      // The player's where-to-watch handoff counts its own way out (via: 'handoff').
+      if (x.via !== 'handoff') {
+        const svcName = (Shape.serviceById(Shape.serviceForUrl(clean)) || {}).name || hostOf(clean);
+        leftLumen('edge', svcName + ' in Edge' + (route.why ? ': ' + route.why : '') + (r && r.ok ? '' : ' (Edge did not open)'), clean,
+          'Lumen: opened ' + hostOf(clean) + ' in Edge' + (route.why ? ' (' + route.why + ')' : '') + (r && r.ok ? '' : '; Edge did not open: ' + String((r && r.reason) || '').slice(0, 80)));
+      }
       return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
     }
     if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || '', multi: !!x.multi,
       fallback: x.fallback ? rebase(x.fallback) : '', item: x.item || null })) {
       return { ok: true, how: 'layer', reason: '' };
     }
+    if (x.via !== 'handoff') leftLumen('tab', 'a title, in a tab (' + (inLayer ? 'no window for the layer' : whyTab()) + ')', clean, 'Lumen: opened ' + hostOf(clean) + ' in a tab (' + (inLayer ? 'no window for the layer' : whyTab()) + ')');
     send('open-url', { url: rebase(clean), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }
@@ -1503,6 +1517,7 @@ function create(deps) {
     if (player && player.inside() && player.play({ url: rebase(svc.signIn), service: svc.id, title: 'Sign in to ' + svc.name })) {
       return { ok: true, how: 'layer', reason: '' };
     }
+    leftLumen('tab', 'Sign in to ' + svc.name + ', in a tab (' + whyTab() + ')', svc.signIn, 'Lumen: Sign in to ' + svc.name + ' opened in a tab (' + whyTab() + ')');
     send('open-url', { url: rebase(svc.signIn), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }
@@ -1522,6 +1537,7 @@ function create(deps) {
     if (player && player.inside() && player.play({ url: rebase(pg.url), service: svc.id, title: pg.label + ' · ' + svc.name, purpose: 'profile', note: pg.where })) {
       return { ok: true, how: 'layer', reason: '' };
     }
+    leftLumen('tab', pg.label + ' for ' + svc.name + ', in a tab (' + whyTab() + ')', pg.url, 'Lumen: ' + pg.label + ' for ' + svc.name + ' opened in a tab (' + whyTab() + ')');
     send('open-url', { url: rebase(pg.url), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }

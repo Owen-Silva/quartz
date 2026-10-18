@@ -467,12 +467,21 @@ const drm = drmModule.create({
  * (QUARTZ_PLAYER_AUTH_HOSTS, comma separated) and move the multiview RAM floor
  * (QUARTZ_PLAYER_FLOOR_GB). A live Quartz ignores both.
  */
+// Lumen's leak log (watch-leaks.js): each time Lumen has to send the user to a tab, Edge or an app,
+// one quartz.log line and a count Settings > Lumen shows. Shared by the player layer and Watch.
+const watchLeaks = (() => {
+  try { return require('./watch-leaks').create({ app, log: (line) => { if (qlog) qlog.log.line(line); else console.log('[lumen] ' + line); } }); } catch (err) {
+    console.error('[lumen] the leak log could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
 const watchPlayer = (() => {
   const t = process.argv.includes('--test-profile');
   const env = process.env;
   const test = {};
   if (t && env.QUARTZ_PLAYER_AUTH_HOSTS) test.authHosts = String(env.QUARTZ_PLAYER_AUTH_HOSTS).split(',').map((s) => s.trim()).filter(Boolean);
   if (t && env.QUARTZ_PLAYER_FLOOR_GB !== undefined && Number.isFinite(Number(env.QUARTZ_PLAYER_FLOOR_GB))) test.floorGb = Number(env.QUARTZ_PLAYER_FLOOR_GB);
+  if (t) test.capture = true;   // the e2e's whole-window shot (sheets are native views)
   try {
     const p = require('./watch-player-main').create({
       app,
@@ -484,6 +493,7 @@ const watchPlayer = (() => {
       isChromeSender: (event) => isChromeSender(event),
       windowOpenDecision: (details) => windowOpenDecision(details),
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch-player] ' + line); },
+      leaks: watchLeaks,
       test,
     });
     p.registerIpc();
@@ -553,6 +563,7 @@ const watch = (() => {
       drmRoute: (url) => drm.route(url),
       // The player layer: titles play inside Watch when "Play inside Watch" is on.
       player: watchPlayer,
+      leaks: watchLeaks,
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,
@@ -2587,6 +2598,8 @@ function attachSessionHandlers() {
     // Watch's hidden readers never prompt and never get anything: a dialog for a page the user
     // cannot see would make his answer stick for his real tabs of that site.
     if (isWatchReader(contents)) return callback(false);
+    // An app link from Lumen's player layer (a page or a sheet): stopped, said and counted there.
+    if (permission === 'openExternal' && watchPlayer && typeof watchPlayer.refuseExternal === 'function' && watchPlayer.refuseExternal(contents, details)) return callback(false);
     if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return callback(true);
     const prompts = permission === 'media' || permission in PERMISSION_PHRASES;
     if (!prompts) return callback(false);
