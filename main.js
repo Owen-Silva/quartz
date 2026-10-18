@@ -505,6 +505,22 @@ const watchPlayer = (() => {
     return null;
   }
 })();
+// Lumen's playback view (watch-playview-main.js + watch-playview.js): its setting, and a TEST-only window seam.
+const watchPlayview = (() => {
+  try {
+    const p = require('./watch-playview-main').create({
+      app, ipcMain, getWindow: () => win, isChromeSender: (event) => isChromeSender(event),
+      log: (line) => { if (qlog) qlog.log.line('[lumen view] ' + line); else console.log('[lumen view] ' + line); },
+      test: process.argv.includes('--test-profile'),
+    });
+    p.registerIpc();
+    return p;
+  } catch (err) {
+    console.error('[lumen view] could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+void watchPlayview;
 
 /**
  * Watch, the streaming hub (watch-main.js + watch.html). It reads the user's own

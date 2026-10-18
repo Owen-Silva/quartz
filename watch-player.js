@@ -56,7 +56,7 @@
   function X(ev) {
     var args = [CTX].concat([].slice.call(arguments, 1));
     var out;
-    [window.WatchPlayerExtras, window.WatchPlayerYT].forEach(function (x) {
+    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview].forEach(function (x) {
       if (!x || typeof x[ev] !== 'function') return;
       try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
         try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
