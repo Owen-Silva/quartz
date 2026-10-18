@@ -310,8 +310,47 @@ module.exports = async function (check) {
     var re = last(pageB, 'subs');
     check(re && re.items.length === 10 && re.state === 'error', 'file: after a restart the page draws the saved feed at once', re && { st: re.state, n: re.items.length });
     ym2.forget();
-    check(!fs.existsSync(path.join(dir, 'watch-ytlib.json')) && last(pageB, 'subs').state === 'never', 'forget: the file is gone and the page hears "never read"');
+    var fg = last(pageB, 'subs');
+    check(!fs.existsSync(path.join(dir, 'watch-ytlib.json')) && fg.state === 'never', 'forget: the file is gone and the page hears "never read"');
+    // ...and nothing is on the way, so the page draws no row (watch/ytlib-page.js rowState), never a
+    // "Reading your subscriptions…" card that stays after Forget (watch-e2e "Forget: the Watch page empties").
+    var pw = { window: {} };
+    require('vm').runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'watch', 'ytlib-page.js'), 'utf8'), pw);
+    var RS = pw.window.WatchYt._rowState;
+    check(fg.refreshing === false && !fg.paused && RS(fg, 0) === null, 'forget: never read and not reading is no Subscriptions row at all', { refreshing: fg.refreshing, paused: fg.paused, row: RS(fg, 0) });
+    check(RS({ state: 'never', refreshing: true }, 0) === 'loading' && RS({ state: 'never', refreshing: false, paused: 'a game is running' }, 0) === 'paused'
+      && RS({ state: 'error' }, 0) === 'error' && RS({ state: 'ok' }, 0) === 'empty' && RS({ state: 'ok' }, 3) === '' && RS({ state: 'signed-out' }, 0) === 'signed-out',
+      'rowState: reading = loading, held = paused, error, empty, tiles, signed out (unchanged)');
     ym2.stop();
+
+    // Visibility, like the service reads: a page in a background tab asks for the feed, and nothing
+    // reads until Lumen is on screen (watch-e2e "Watch in a background tab ... reads nothing").
+    var vdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytlib-vis-'));
+    try {
+      var vt = T, vis = false, vsteps = [], vpushed = [];
+      var ymv = YM.create({
+        now: function () { return vt; }, file: function () { return path.join(vdir, 'watch-ytlib.json'); },
+        setTimeout: function () { return {}; }, clearTimeout: function () {},
+        push: function (c, a) { vpushed.push(a); }, canRead: function () { return ''; }, bootLeft: function () { return 0; },
+        visible: function () { return vis; },
+        runStep: async function (s) { vsteps.push(s.name); await tick(); return step(fx('youtube-subs.json'), s.url); }
+      });
+      ymv.line(pageA, { op: 'subs', seq: 0, force: false });
+      await settle();
+      check(vsteps.length === 0 && ymv.state().jobs.indexOf('subs') === 0 && vpushed[0] && vpushed[0].refreshing === true, 'visibility: off screen, the feed waits in the queue (the page says it is on the way)', { steps: vsteps, st: ymv.state() });
+      vis = true;
+      ymv.sight(true);
+      await settle();
+      check(vsteps.length === 1 && vpushed[vpushed.length - 1].state === 'ok', 'visibility: Lumen on screen: the waiting feed reads', vsteps);
+      vis = false;
+      vt += 10 * 60e3;
+      ymv.afterRead('youtube', 'ok');
+      await settle();
+      check(vsteps.length === 2, 'visibility: the one feed read that follows a YouTube read (the background refresh road) still runs off screen', vsteps);
+      ymv.stop();
+    } finally {
+      try { fs.rmSync(vdir, { recursive: true, force: true }); } catch (e) { /* fine */ }
+    }
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* fine */ }
   }

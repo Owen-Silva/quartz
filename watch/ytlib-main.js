@@ -84,6 +84,8 @@ function create(o) {
   const push = typeof opt.push === 'function' ? opt.push : () => {};
   const canRead = typeof opt.canRead === 'function' ? opt.canRead : () => '';
   const bootLeft = typeof opt.bootLeft === 'function' ? opt.bootLeft : () => 0;
+  // Is a Lumen page on screen (watch-main's anyVisible)? The same gate its own service reads use.
+  const visible = typeof opt.visible === 'function' ? opt.visible : () => true;
   const setTimer = typeof opt.setTimeout === 'function' ? opt.setTimeout : setTimeout;
   const clearTimer = typeof opt.clearTimeout === 'function' ? opt.clearTimeout : clearTimeout;
 
@@ -173,11 +175,11 @@ function create(o) {
 
   /* --- the queue ------------------------------------------------------------------ */
 
-  function enqueue(key, front, asker) {
+  function enqueue(key, front, asker, anyTime) {
     if (stopped) return;
     let job = jobs.find((j) => j.key === key);
     if (!job) {
-      job = { key, askers: [] };
+      job = { key, askers: [], anyTime: !!anyTime };
       if (front) jobs.unshift(job); else jobs.push(job);
     } else if (front && jobs.indexOf(job) > 0) {
       jobs.splice(jobs.indexOf(job), 1);
@@ -286,7 +288,12 @@ function create(o) {
       }
       return;
     }
-    const job = jobs.shift();
+    // Like watch-main's own reads, nothing reads while no Lumen page is on screen (a background
+    // tab, a hidden window): the job waits, and sight(true) starts it. Only the one feed read that
+    // follows a YouTube read (afterRead, the road Lumen's background refresh takes) may run then.
+    let at = 0;
+    if (!visible()) { at = jobs.findIndex((j) => j.anyTime); if (at === -1) return; }
+    const job = jobs.splice(at, 1)[0];
     let why = '';
     try { why = canRead() || ''; } catch (err) { why = 'Lumen could not check whether it may read (' + String((err && err.message) || err).slice(0, 80) + ')'; }
     if (why) {
@@ -371,6 +378,7 @@ function create(o) {
       pushSubs();
       if (attached.size && !fresh(load().subs, SUBS_FRESH_MS)) enqueue('subs', false);
     }
+    pump();   // what waited while Lumen was off screen
   }
 
   /** watch-main read a service (state: its new state). After YouTube: the feed follows it. */
@@ -384,7 +392,7 @@ function create(o) {
       if (changed) { saveSoon(); pushSubs(); pushLibrary(); }
       return;
     }
-    if (state === 'ok' && attached.size && !fresh(load().subs, SUBS_AFTER_YT_MS)) enqueue('subs', false);
+    if (state === 'ok' && attached.size && !fresh(load().subs, SUBS_AFTER_YT_MS)) enqueue('subs', false, null, true);
   }
 
   function dropGuest(contents) { attached.delete(contents); }

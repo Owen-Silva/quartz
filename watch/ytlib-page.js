@@ -109,21 +109,27 @@
     return [a.state, a.reason, a.refreshing, a.paused, a.newCount, a.readAt].concat(a.items.slice(0, ROW_MAX).map(function (it) { return it.vid + (it.isNew ? '*' : '') + it.url; })).join('\u0001');
   }
 
+  /**
+   * The row's state card ('' = the tiles), or null for no row: never read and nothing on the way
+   * (what main says right after Lumen's Forget) is no row, never a "Reading…" card that stays.
+   */
+  function rowState(a, n) {
+    if (a.state === 'signed-out') return 'signed-out';
+    if (n) return '';
+    if (a.state === 'never') return a.refreshing ? 'loading' : a.paused ? 'paused' : null;
+    if (a.state === 'error') return 'error';
+    if (a.state === 'ok') return 'empty';
+    return 'loading';
+  }
+
   /** The Subscriptions row for watch.js's lens model, or null (YouTube off, nothing asked yet). */
   function row(snap) {
     if (!H || !ytOn(snap)) return null;
     var a = Y.subs;
     if (!a) return null;
     var items = a.items.slice(0, ROW_MAX);
-    var state = '';
-    if (a.state === 'signed-out') state = 'signed-out';
-    else if (!items.length) {
-      if (a.refreshing && a.state === 'never') state = 'loading';
-      else if (a.paused && a.state === 'never') state = 'paused';
-      else if (a.state === 'error') state = 'error';
-      else if (a.state === 'ok') state = 'empty';
-      else state = 'loading';
-    }
+    var state = rowState(a, items.length);
+    if (state === null) return null;
     // service: the whole row is YouTube, so its tiles carry no YouTube chip (the New mark has that corner).
     var m = { key: 'r:yt-subs', kind: 'items', id: 'yt-subs', title: 'Subscriptions', service: 'youtube', yt: true, top: !state, items: [] };
     if (state) m.items = [stateItem(state, a)];
@@ -702,7 +708,7 @@
   }
 
   window.WatchYt = {
-    attach: attach, row: row, head: head, card: card, openCard: openCard, stageState: stageState, stageActs: stageActs, onKey: onKey,
+    attach: attach, row: row, _rowState: rowState, head: head, card: card, openCard: openCard, stageState: stageState, stageActs: stageActs, onKey: onKey,
     open: open, back: back, close: close, isOpen: isOpen,
     _state: function () { return { subs: Y.subs && { state: Y.subs.state, n: Y.subs.items.length, newCount: Y.subs.newCount, refreshing: Y.subs.refreshing }, views: Y.views.map(viewKey), pages: Object.keys(Y.pages) }; }
   };

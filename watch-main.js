@@ -443,6 +443,7 @@ function create(deps) {
     file: () => fileIn('watch-ytlib.json'),
     push: (contents, answer) => pushTo(contents, '__applyWatchYt', answer),
     bootLeft: () => bootUntil - now(),
+    visible: () => anyVisible(),
     canRead: () => (!loadPrefs().enabled.youtube ? 'YouTube is off in Settings > Lumen' : blocker('youtube', true)),
   }) : null;
 
