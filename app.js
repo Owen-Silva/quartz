@@ -5306,6 +5306,9 @@ function filesUrl(folder) {
 // directly over console lines; the chrome only opens it, names it, keeps its
 // theme in step and opens Settings > Watch when it asks.
 const WATCH_URL = new URL('watch.html', window.location.href).href;
+// Lumen's mark (direction 2, Aperture) at 16 and 24 px: its tab chip and its
+// palette row. assets/lumen-logo.svg is the master for 32 px and up.
+const LUMEN_ICON_SMALL = new URL('assets/lumen-logo-small.svg', window.location.href).href;
 
 /** True for the bundled Watch page, query string and hash included. */
 function isWatchUrl(url) {
@@ -6390,10 +6393,20 @@ function syncTabFavicon(tab, force) {
     return;
   }
   const origin = TI ? TI.originOf(tab.url) : null;
-  const key = origin || ('glyph:' + chipGlyphFor(tab.url));
+  const lumen = !origin && isWatchUrl(tab.url);
+  const key = origin || (lumen ? 'lumen' : 'glyph:' + chipGlyphFor(tab.url));
   if (!force && key === tab.favKey) return;
   tab.favKey = key;
   const token = ++tab.favToken;
+
+  if (lumen) {
+    // Lumen wears its own mark: the 16-grid colour drawing (the mono one
+    // reads as a record button at this size). The glyph sits under it in
+    // case the file ever fails to decode.
+    setTabMono(tab, chipGlyphFor(tab.url), true);
+    showTabIconData(tab, LUMEN_ICON_SMALL, token);
+    return;
+  }
 
   if (!origin) {
     // A bundled page (the new tab, Phone): its glyph, until it reports an

@@ -124,6 +124,10 @@
     'Shortcuts': '\uE765',                // KeyboardClassic
     'About': '\uE946'                     // Info
   };
+  /* A section that is one of Quartz's own products shows its mark instead. */
+  var NAV_MARKS = {
+    'Lumen': 'assets/lumen-logo-small.svg'
+  };
 
   var STORAGE_KEY = 'settings';
   /* theme-boot.js reads this one, before anything else runs. */
@@ -2283,6 +2287,19 @@
         b.type = 'button';
         b.className = 'set-nav-item';
         var g = el('span', 'set-nav-glyph glyph', NAV_GLYPHS[name] || GLYPH_GEAR);
+        // Lumen is a product, not a setting: its row wears its own mark (the
+        // 16-grid colour drawing) where the others wear a glyph.
+        if (NAV_MARKS[name]) {
+          g.textContent = '';
+          g.className = 'set-nav-glyph set-nav-mark';
+          var mk = document.createElement('img');
+          mk.src = NAV_MARKS[name];
+          mk.alt = '';
+          mk.width = 16;
+          mk.height = 16;
+          mk.draggable = false;
+          g.appendChild(mk);
+        }
         g.setAttribute('aria-hidden', 'true');
         b.appendChild(g);
         b.appendChild(el('span', 'set-nav-text', name));

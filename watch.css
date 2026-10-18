@@ -168,6 +168,9 @@ html[data-theme="light"] .wash::after {
   opacity: 0; transition: opacity var(--m-dur-s-out) var(--m-fade-out); }
 body.is-compact .top::before, body.searching .top::before { opacity: 1; transition: opacity calc(var(--m-dur-s) * var(--m-fade-k)) var(--m-fade-in); }
 .brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
+/* The Aperture mark beside the name: the colour master (its own greys, an
+   amber opening), the same in light and dark. Centred, not on the baseline. */
+.brand-mark { width: 22px; height: 22px; flex: none; align-self: center; margin-right: 1px; }
 .brand-name { font: 600 20px/1 var(--font-display); letter-spacing: -.02em; }
 .brand-sub { color: var(--text-3); font-size: var(--fs-xs); }
 .find { position: relative; margin-left: 14px; width: var(--find-w); }
