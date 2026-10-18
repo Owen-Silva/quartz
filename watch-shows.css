@@ -43,7 +43,12 @@ body.shw-open .stage, body.shw-open .lens, body.shw-open .lens-ctl, body.shw-ope
 .shw-pic { min-width: 0; justify-self: end; width: 100%; max-width: calc(44vh * 16 / 9); }
 .shw-art { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius-l, 14px); overflow: hidden; background: var(--surface-2); border: 1px solid var(--hairline); }
 .shw-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.shw-art.noart, .shw-thumb.noart, .shw-card-a.noart { background: linear-gradient(135deg, var(--noart-a, #2c2d30), var(--noart-b, #1a1b1d)); }
+/* watch.css has its own .noart (a tile's placeholder: absolute, inset 0, flex, padding) and is loaded AFTER this
+   sheet (showpage.js adds it while watch.html's head is still parsing), so at equal weight .noart won: a box with
+   no art (none sent, or its image failed) became absolute over the whole page, a blank grey panel. The .shw
+   prefix keeps these boxes in the flow whatever the order. */
+.shw .shw-art.noart, .shw .shw-thumb.noart, .shw .shw-card-a.noart { position: relative; inset: auto; display: block; padding: 0;
+  background: linear-gradient(135deg, var(--noart-a, #2c2d30), var(--noart-b, #1a1b1d)); }
 
 /* ===== notes and states ===== */
 .shw-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: var(--radius-m, 10px);
@@ -124,6 +129,14 @@ body.shw-open .stage, body.shw-open .lens, body.shw-open .lens-ctl, body.shw-ope
 .shw-prov-t { color: var(--text-3); font-size: 12px; }
 .shw-attr { margin: 28px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.4; }
 
+/* Wide windows (1920x1000): the art is capped by the window height, so the text column is short beside it and sat
+   at its top with a hole below. There the text sits level with the art's middle, a little larger. */
+@media (min-width: 1600px) {
+  .shw-hero { align-items: center; }
+  .shw-txt { padding-top: 0; gap: 14px; }
+  .shw-h1:not(.mid):not(.long) { font-size: clamp(46px, 2.8vw, 56px); }
+  .shw-syn { font-size: 16px; }
+}
 @media (max-width: 1100px) {
   .shw-hero { grid-template-columns: minmax(0, 1fr); }
   .shw-pic { order: -1; max-width: min(640px, calc(44vh * 16 / 9)); justify-self: start; }

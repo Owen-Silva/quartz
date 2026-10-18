@@ -8,7 +8,8 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 // Lumen page's own requests go through CDP Fetch: local ones continue, art is a generated SVG, anything else is
 // refused and counted. Never a real account, cookie, service or TMDB; Edge is a stub file.
 //
-//   node watch-shows-e2e.js [--cdp 9487] [--shots <dir>] [--prefix lumen-n-shows]
+//   node watch-shows-e2e.js [--cdp 9487] [--shots <dir>] [--prefix lumen-n-shows] [--size 1536x800]
+//   (shots are taken only with --size: the test window really is that size)
 //
 // Checks: a Continue tile (The Bear) has Episodes for its page; the page's loading state; Hulu failing: TMDB's
 // episodes with the reason and Retry; More like this (TMDB's, on the fallback) -> Severance, on none of his
@@ -30,6 +31,10 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[
 const CDP_PORT = Number(opt('cdp', '9487'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-shows-shots'));
 const PREFIX = opt('prefix', 'lumen-n-shows');
+// --size 1536x800: the test window's REAL size (QUARTZ_TEST_WINDOW_SIZE, as watch-multiview-e2e does), and the
+// shots are taken at that size only, with no emulation. Emulating a size never reaches the <webview>'s guest
+// for real: the run4/run5 shots under emulation came out as blank grey panels.
+const SIZE = /^(\d{3,4})x(\d{3,4})$/.test(opt('size', '')) ? opt('size', '') : '';
 const TAG = 'quartz-shows-e2e-' + process.pid;
 const STUB = (n) => path.join(os.tmpdir(), TAG + '-' + n);
 const EDGE_STUB = STUB('edge.txt');
@@ -185,7 +190,10 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     const q = await launch({ cdp: CDP_PORT, env: {
       QUARTZ_WATCH_BOOT_GRACE_MS: '0', QUARTZ_WATCH_REBASE: JSON.stringify(srv.rebase), QUARTZ_EDGE_STUB: EDGE_STUB, QUARTZ_WATCH_OPEN_STUB: OPEN_STUB,
       QUARTZ_WATCH_MIN_FREE_GB: '0', QUARTZ_WATCH_GAME_FILE: STUB('game.flag'), QUARTZ_TEST_NO_WINDOW_FULLSCREEN: '1', QUARTZ_TEST_VMP: 'signed',
-    } });
+      ...(SIZE ? { QUARTZ_TEST_WINDOW_SIZE: SIZE } : {}),
+    }, // At Windows' 125% scale a 1920x1000 window is 2400x1250 device pixels, which Windows clips to the
+    // screen; scale 1 keeps the window, the page and the shot all SIZE.
+    args: SIZE ? ['--force-device-scale-factor=1'] : [] });
     const chrome = q.chrome;
     await chrome.ev('window.toggleFullscreen = function () {}; 1');
     const wv = await chrome.waitFor('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine && s.widevine.available ? s.widevine : null; })()', 120000).catch(() => null);
@@ -214,22 +222,27 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await g.send('Runtime.enable');
     await g.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0);
 
-    // A shot: Quartz's window emulated at w x h and the Lumen page at w x (h - Quartz's top bar), captured from the
-    // window (the guest's own capture under emulation came back blank over the fixed overlay: the run4 probe had the
-    // DOM right and the pixels empty). The off-screen view keeps its real surface size, so the page can draw narrower
-    // than w inside the shot. SHOWS_PROBE=1 logs the layout at each shot.
+    // A shot: the whole Quartz window captured as it is, at its REAL size (--size). Emulated sizes were dropped:
+    // under emulation the guest's pixels came back as blank grey panels (run4 and run5: right DOM, empty pixels).
+    // One size per launch, so the shot sizes are two runs. SHOWS_PROBE=1 logs the page's size at each shot.
     const barH = Math.round(await chrome.ev('(() => { const w = findWatchTab(); const v = w && w.viewEl; return v ? v.getBoundingClientRect().top : 85; })()')) || 85;
     const shoot = async (name, sizes) => {
-      for (const [w, h] of (sizes || [[1536, 800], [1920, 1000]])) {
-        await chrome.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
-        await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: h - barH, deviceScaleFactor: 1, mobile: false });
+      if (SIZE) {
+        // The window is really SIZE: the page draws at its own size, captured from the window as it is.
         await sleep(1200);
-        if (process.env.SHOWS_PROBE) say('probe ' + name + ' ' + w + 'x' + h + ': ' + JSON.stringify(await g.ev('(() => { const r = document.querySelector(".shw"); const b = r && r.getBoundingClientRect(); return { inner: [innerWidth, innerHeight], shw: b && [b.width, b.height], scroll: r && r.querySelector(".shw-body").scrollTop }; })()').catch((e) => e.message)));
-        try { await chrome.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
-        await g.send('Emulation.clearDeviceMetricsOverride');
-        await chrome.send('Emulation.clearDeviceMetricsOverride');
-        await sleep(300);
+        if (process.env.SHOWS_PROBE) {
+          const top = (x, y) => `(() => { const out = []; for (let e = document.elementFromPoint(${x}, ${y}); e && out.length < 4; e = e.parentElement) out.push(e.tagName + '.' + String(e.className).slice(0, 30) + (e.id ? '#' + e.id : '')); return out.join(' < '); })()`;
+          say('probe ' + name + ' ' + SIZE + ': ' + JSON.stringify({ guest: await g.ev('[innerWidth, innerHeight, document.visibilityState]').catch(() => null),
+            guestTop: await g.ev(top(400, 300)).catch(() => null), chromeTop: await chrome.ev(top(400, 400)).catch(() => null),
+            chromeView: await chrome.ev('[innerWidth, innerHeight]').catch(() => null),
+            box: await g.ev(`(() => { const out = []; for (let e = document.elementFromPoint(400, 300); e && out.length < 6; e = e.parentElement) { const b = e.getBoundingClientRect(); const cs = getComputedStyle(e);
+              out.push(String(e.className).slice(0, 24) + ' ' + [b.left, b.top, b.width, b.height].map(Math.round).join(',') + ' ' + cs.position + ' ' + cs.transform.slice(0, 40) + ' ' + cs.aspectRatio); } return out; })()`).catch((e) => 'err ' + e.message) }));
+        }
+        try { await chrome.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + SIZE + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
+        return;
       }
+      // No --size: no shots (an emulated size draws blank panels; see SIZE above).
+      void sizes; void barH;
     };
     const now = () => g.ev(PAGE_NOW);
     const until = (cond, ms) => g.waitFor(`(() => { const v = ${PAGE_NOW}; return v && (${cond}) ? v : null; })()`, ms || 30000).catch(() => null);
@@ -288,6 +301,13 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     const e3 = ok && ok.eps.find((e) => e.next);
     check(ok && ok.tabs.indexOf('Season 2*') !== -1 && e3 && /^3\. /.test(e3.t) && e3.prog > 0 && e3.prog < 1 && /% watched/.test(e3.m), 'season 2 is open on its own; S2 E3 is marked next, with a progress bar and "% watched"', ok && { tabs: ok.tabs, e3 });
     await shoot('show', [[1280, 800], [1536, 800], [1920, 1000]]);
+    // A box with no art (none sent, or its image failed) stays in its place: watch.css's .noart (absolute, inset 0)
+    // once won and covered the whole page with one grey panel.
+    const noart = await g.ev(`(() => { const host = document.querySelector('.shw .shw-body'); if (!host) return null; const out = {};
+      for (const cls of ['shw-art', 'shw-thumb', 'shw-card-a']) { const n = document.createElement('span'); n.className = cls + ' noart'; host.appendChild(n);
+        const cs = getComputedStyle(n); const b = n.getBoundingClientRect(); out[cls] = cs.position + ' ' + Math.round(b.width) + 'x' + Math.round(b.height); n.remove(); }
+      out.page = innerWidth + 'x' + innerHeight; return out; })()`).catch(() => null);
+    check(!!noart && ['shw-art', 'shw-thumb', 'shw-card-a'].every((k) => /^relative /.test(noart[k])), 'a show page box with no art stays in the flow (not watch.css’s absolute .noart over the page)', noart);
     await clickText('.shw-tab', 'Season 1');
     const s1 = await until(`v.tabs.indexOf('Season 1*') !== -1 && v.eps.length`, 5000);
     check(s1 && s1.eps.length === 3 && s1.eps.every((e) => e.done && e.check && /Watched/.test(e.m)), 'the Season 1 tab: every episode has its watched check', s1 && s1.eps);

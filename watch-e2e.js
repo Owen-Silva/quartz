@@ -325,6 +325,15 @@ const UI = {
     const m = p.querySelector('.sp-main'); const a = p.querySelector('.sp-act'); const sm = m && m.querySelector('small');
     return { cls: p.className, small: sm ? sm.textContent : '', title: m ? (m.title || '') : '', aria: m ? (m.getAttribute('aria-label') || '') : '', act: a ? a.textContent : '' }; })()`,
 };
+// Why no card of a service could be clicked: each row's place, and for the service's cards in view what is on top.
+const CARD_WHY = (id) => `(() => { const all = [...document.querySelectorAll('#stack .lrow .rt > .card')];
+  const rows = [...document.querySelectorAll('#stack .lrow')].map((r) => { const b = r.getBoundingClientRect(); return Math.round(b.top) + ':' + r.querySelectorAll('.rt > .card').length; });
+  const mine = all.filter((c) => c._item && c._item.service === ${JSON.stringify(id)});
+  const inView = mine.filter((c) => { const b = c.getBoundingClientRect(); return b.width >= 20 && b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight; });
+  const hit = inView.slice(0, 3).map((c) => { const b = c.getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return [Math.round(b.left), Math.round(b.top), h ? (h.tagName + '.' + String(h.className).slice(0, 40) + (h.id ? '#' + h.id : '')) : null]; });
+  return { view: [innerWidth, innerHeight], rows, mine: mine.length, inView: inView.length, hit, active: document.activeElement ? document.activeElement.tagName + '.' + String(document.activeElement.className).slice(0, 30) : null,
+    body: document.body.className.slice(0, 80), open: [!!(window.LumenShows && LumenShows.isOpen()), !!(window.LumenSports && LumenSports.isOpen && LumenSports.isOpen())] }; })()`;
 // An element whose middle is off screen or covered (e.g. Settings > Watch > Forget, below the fold of
 // the sheet) is scrolled into view first, as a user would; a click there would land on the scrim.
 const centerOf = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null;
@@ -370,16 +379,23 @@ async function retry(g, id) {
   const p = await g.ev(UI.pill(id));
   if (p && p.act === 'Retry') return click(g, '#pills .sp[data-svc="' + id + '"] .sp-act');
   if (!(await click(g, '#pills .sp[data-svc="' + id + '"] .sp-main'))) return false;
-  try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { return false; }
+  const why = async (what) => console.log('[e2e] retry ' + id + ': ' + what + ' ' + JSON.stringify(await g.ev(`(() => { const sn = window.__e2eSnap; const s = sn && Array.isArray(sn.services) ? sn.services.find((x) => x.id === ${JSON.stringify(id)}) : null;
+    return { svc: s && { state: s.state, reading: s.reading, queued: s.queued, paused: s.paused }, pop: !document.getElementById('pop').hidden, acts: [...document.querySelectorAll('#pop .acts button')].map((b) => b.textContent.trim() + (b.disabled ? '(disabled)' : '')), trace: (window.__e2eTrace || []).slice(-12) }; })()`).catch(() => null)));
+  try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { await why('the popover did not open with its buttons'); return false; }
   const ok = await g.ev(`(() => { const b = [...document.querySelectorAll('#pop .acts button')].find((x) => /^(Retry|Read now)$/.test(x.textContent.trim()));
     if (!b) return false; b.setAttribute('data-e2e-retry', '1'); return true; })()`);
-  if (!ok) return false;
+  if (!ok) { await why('no Retry / Read now in the popover'); return false; }
   // Say why, when the popover's button is not the thing on top where it is drawn (or is disabled).
   const at = await g.ev(centerOf('#pop [data-e2e-retry="1"]')).catch(() => null);
   const st = await g.ev(`(() => { const b = document.querySelector('#pop [data-e2e-retry="1"]'); const p = document.getElementById('pop');
     const h = at => { const e = document.elementFromPoint(at.x, at.y); return e ? (e.tagName + '.' + String(e.className)).slice(0, 60) : null; };
     return { popHidden: p.hidden, disabled: !!(b && b.disabled), text: b ? b.textContent : null, top: ${at ? 'h(' + JSON.stringify(at) + ')' : 'null'} }; })()`).catch(() => null);
-  if (!at || !at.hit || (st && (st.popHidden || st.disabled))) console.log('[e2e] retry diag ' + id + ': ' + JSON.stringify({ at, st }));
+  if (!at || !at.hit || (st && (st.popHidden || st.disabled))) {
+    const sv = await g.ev(`(() => { const sn = window.__e2eSnap; const s = sn && Array.isArray(sn.services) ? sn.services.find((x) => x.id === ${JSON.stringify(id)}) : null;
+      return s ? { state: s.state, reading: s.reading, queued: s.queued, readingFor: s.readingSince ? Date.now() - s.readingSince : 0, readLimitMs: s.readLimitMs, readAgo: s.readAt ? Date.now() - s.readAt : 0 } : null; })()`).catch(() => null);
+    console.log('[e2e] retry diag ' + id + ': ' + JSON.stringify({ at, st, svc: sv }));
+    if (st && st.disabled) console.log('[e2e] read trace (ms mod 1e6, R reading, Q queued, then Hulu state): ' + JSON.stringify(await g.ev('(window.__e2eTrace || []).slice(-30)').catch(() => null)) + ' now ' + (Date.now() % 1e6));
+  }
   return click(g, '#pop [data-e2e-retry="1"]');
 }
 
@@ -922,6 +938,7 @@ if (require.main === module) {
     // Card opens: YouTube -> a Quartz tab on the mock; Disney+ / Prime Video -> the Edge stub.
     const tabsBefore = await chrome.ev('tabs.length');
     async function openCardOf(id, wantPage) {
+      let why0 = null;   // why no card was clickable, seen on the first try (before any ArrowDown)
       for (let tries = 0; tries < 12; tries++) {
         const ok = await g.ev(`(() => { document.querySelectorAll('[data-e2e-card]').forEach((x) => x.removeAttribute('data-e2e-card'));
           const c = [...document.querySelectorAll('#stack .lrow .rt > .card')].find((c) => { if (!c._item || c._item.service !== ${JSON.stringify(id)}) return false;
@@ -933,10 +950,20 @@ if (require.main === module) {
           const page = c._item.kind !== 'resume' && !!window.LumenShowModel && !!window.LumenShowModel.requestFor(c._item);
           return { url: c._item.url, kind: c._item.kind, page }; })()`);
         if (ok) { await click(g, '[data-e2e-card="1"]'); return ok; }
+        if (tries === 0) why0 = await g.ev(CARD_WHY(id)).catch((e) => 'err ' + e.message);
+        if (why0 && typeof why0 === 'object') (why0.lens = why0.lens || []).push(await g.ev(`(() => { const rs = [...document.querySelectorAll('#stack .lrow')]; const i = rs.findIndex((r) => r.getAttribute('data-d') === '0'); const r = rs[i];
+          if (!r) return 'no d=0 row'; const cs = [...r.querySelectorAll('.rt > .card')]; return i + '@' + Math.round(r.getBoundingClientRect().top) + ':' + cs.length + ':' + [...new Set(cs.map((c) => (c._item && c._item.service) || '?'))].join('/') + ':' + ((r.querySelector('.lr-h') || {}).textContent || '').slice(0, 24); })()`).catch(() => 'err'));
         await g.ev("document.activeElement && document.activeElement.blur && document.activeElement.blur(), 1");
+        const lp0 = await g.ev('(document.getElementById("lpos") || {}).textContent || ""').catch(() => '');
         await press(g, 'ArrowDown');
+        await sleep(150);
+        const lp1 = await g.ev('(document.getElementById("lpos") || {}).textContent || ""').catch(() => '');
+        // ArrowDown that does not move the lens is said once; the lens's own Next row button is the way on.
+        if (lp0 && lp1 === lp0) { if (why0 && typeof why0 === 'object' && !why0.keyStuck) { why0.keyStuck = lp0; console.log('[e2e] openCardOf ' + id + ': ArrowDown did not move the lens (still ' + lp0 + '); pressing the lens Next row button'); } await click(g, '#ldn'); }
+        if (why0 && typeof why0 === 'object' && tries < 3) why0.lens.push(lp0 + ' -> ' + lp1 + ' -> ' + await g.ev('(document.getElementById("lpos") || {}).textContent || ""').catch(() => ''));
         await sleep(650);
       }
+      console.log('[e2e] openCardOf ' + id + (wantPage ? ' (page)' : '') + ': no clickable card; on the first try: ' + JSON.stringify(why0));
       return null;
     }
     const ytUrl = ((await openCardOf('youtube')) || {}).url;
@@ -1208,6 +1235,11 @@ if (require.main === module) {
       return cardsOfSvc(c, 'disney').length >= baseCount.disney && cardsOfSvc(cards1, 'disney').every((x) => now.has(x.url)); };
     const disneyWhat = (c) => cardsOfSvc(c, 'disney').length + ' Disney+ cards (round 0: ' + baseCount.disney + ')';
 
+    // A trace of which service reads / waits, from the page's snapshot (said with a retry diag).
+    await g.ev(`(() => { if (window.__e2eTraceT) return 1; window.__e2eTrace = []; let last = '';
+      window.__e2eTraceT = setInterval(() => { const sn = window.__e2eSnap; if (!sn || !Array.isArray(sn.services)) return;
+        const k = sn.services.filter((s) => s.reading).map((s) => 'R:' + s.id).concat(sn.services.filter((s) => s.queued).map((s) => 'Q:' + s.id)).join(',') + ' ' + (sn.services.find((s) => s.id === 'hulu') || {}).state;
+        if (k !== last) { last = k; window.__e2eTrace.push(Date.now() % 1e6 + ' ' + k); if (window.__e2eTrace.length > 80) window.__e2eTrace.shift(); } }, 200); return 1; })()`).catch(() => 0);
     const t1 = await round('round 1', { youtube: 'signed-out', hulu: 'signed-out', prime: 'robot' }, (p, c) => {
       check(failLine(p, 'hulu', /Signed out: sign in to hulu\.com in Quartz/i) && p.hulu.act === 'Sign in', 'signed-out (Hulu): its tile says sign in to hulu.com, and offers Sign in', p.hulu);
       check(cardsOfSvc(c, 'hulu').length === 0, 'signed-out (Hulu): its rows are no longer shown as his', cardsOfSvc(c, 'hulu').length);
@@ -1234,6 +1266,7 @@ if (require.main === module) {
     await shot(g, 'failures-1280', 1280, 800, 'failure states: YouTube changed layout, Disney+ down (popover open), Prime timed out, ESPN changed shape; cached rows dimmed', say);
     await press(g, 'Escape');
     await sleep(Math.max(0, t2 + FORCE_GAP_MS - Date.now()));
+    await g.ev('(() => { clearInterval(window.__e2eTraceT); return 1; })()').catch(() => 0);
     const t3 = await round('round 3', { disney: 'signed-out', hulu: 'down', espn: 'down', youtube: 'down', prime: 'changed-layout' }, (p, c) => {
       check(failLine(p, 'hulu', /offline|didn.t answer|refused|connect/i) && p.hulu.act === 'Retry', 'down (Hulu): the reason and Retry', p.hulu);
       check(failLine(p, 'disney', /Signed out: sign in to Disney\+/i) && p.disney.act === 'Sign in', 'signed-out (Disney+): the reason and Sign in', p.disney);
@@ -1250,6 +1283,8 @@ if (require.main === module) {
     // A quartz.log line for every forced failure.
     await sleep(800);
     const log = readText(LOG);
+    // WATCH_E2E_KEEP_LOG=<file>: keep this run's quartz.log for a post-mortem (the profile is removed after).
+    if (process.env.WATCH_E2E_KEEP_LOG) { try { fs.writeFileSync(process.env.WATCH_E2E_KEEP_LOG, log); } catch (e) { say('could not keep quartz.log: ' + e.message); } }
     const want = [
       ['YouTube', /signed out/], ['YouTube', /layout/i], ['YouTube', /offline|didn.t answer/i],
       ['Disney\\+', /offline|didn.t answer/i], ['Disney\\+', /signed out/],
