@@ -599,10 +599,40 @@ const scorePins = (() => {
       getWindow: () => win,
       // The palette's rows: Lumen's cached ESPN games (no fetch).
       getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // A card's click: that game's page inside Lumen (sports-main.js), not the gamecast in a tab.
+      openInLumen: (url) => (lumenSports ? lumenSports.openGame(url) : null),
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[scores] ' + line); },
     });
   } catch (err) {
     console.error('[scores] Score pins could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+/*
+ * Lumen's sports pages (sports-main.js + watch/sportspage.js): the game page, favourite teams
+ * (My teams), team pages and standings, from ESPN's public JSON, read only while a page asks.
+ * A TEST profile may point ESPN and the NHL feed at a local mock (QUARTZ_SPORTS_REBASE, JSON
+ * [[from, to], ...]); a live Quartz ignores it.
+ */
+const lumenSports = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) {
+    try { if (process.env.QUARTZ_SPORTS_REBASE) test.rebase = JSON.parse(process.env.QUARTZ_SPORTS_REBASE); } catch { /* no rebase */ }
+  }
+  try {
+    return require('./sports-main').create({
+      app, test,
+      getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // a score pin's click: the chrome brings the Lumen tab forward (scorepins-chrome.js), Quartz comes to the front
+      showLumen: () => {
+        send('scores:changed', { pinned: null, lumenShow: true });
+        const w = win;
+        if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); }
+      },
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[sports] ' + line); },
+    });
+  } catch (err) {
+    console.error('[sports] Lumen sports could not start: ' + String((err && err.message) || err).slice(0, 200));
     return null;
   }
 })();

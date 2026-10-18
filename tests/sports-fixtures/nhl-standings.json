@@ -1,0 +1,1310 @@
+{
+ "_fixture": "Hand-made from the shape of ESPN's public JSON; not a capture, no real call was made. Shape: site.api.espn.com/apis/v2/sports/hockey/nhl/standings?level=3",
+ "name": "National Hockey League",
+ "children": [
+  {
+   "name": "Eastern Conference",
+   "abbreviation": "East",
+   "children": [
+    {
+     "name": "Atlantic Division",
+     "abbreviation": "Atlantic",
+     "standings": {
+      "entries": [
+       {
+        "team": {
+         "id": "26",
+         "abbreviation": "FLA",
+         "displayName": "Florida Panthers",
+         "shortDisplayName": "Panthers",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 11,
+          "displayValue": "11"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 9,
+          "displayValue": "+9"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W2"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "21",
+         "abbreviation": "TOR",
+         "displayName": "Toronto Maple Leafs",
+         "shortDisplayName": "Leafs",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/tor.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 9,
+          "displayValue": "9"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 3,
+          "displayValue": "+3"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "20",
+         "abbreviation": "TBL",
+         "displayName": "Tampa Bay Lightning",
+         "shortDisplayName": "Lightning",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/tbl.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 6,
+          "displayValue": "6"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 8,
+          "displayValue": "8"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 5,
+          "displayValue": "+5"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "1",
+         "abbreviation": "BOS",
+         "displayName": "Boston Bruins",
+         "shortDisplayName": "Bruins",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/bos.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -2,
+          "displayValue": "-2"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L2"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "10",
+         "abbreviation": "MTL",
+         "displayName": "Montreal Canadiens",
+         "shortDisplayName": "Canadiens",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/mtl.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -6,
+          "displayValue": "-6"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L3"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "name": "Metropolitan Division",
+     "abbreviation": "Metropolitan",
+     "standings": {
+      "entries": [
+       {
+        "team": {
+         "id": "7",
+         "abbreviation": "CAR",
+         "displayName": "Carolina Hurricanes",
+         "shortDisplayName": "Hurricanes",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/car.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 6,
+          "displayValue": "6"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 12,
+          "displayValue": "12"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 11,
+          "displayValue": "+11"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W4"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "11",
+         "abbreviation": "NJ",
+         "displayName": "New Jersey Devils",
+         "shortDisplayName": "Devils",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/nj.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 8,
+          "displayValue": "8"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 2,
+          "displayValue": "+2"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "13",
+         "abbreviation": "NYR",
+         "displayName": "New York Rangers",
+         "shortDisplayName": "Rangers",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/nyr.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 6,
+          "displayValue": "6"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 1,
+          "displayValue": "+1"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "23",
+         "abbreviation": "WSH",
+         "displayName": "Washington Capitals",
+         "shortDisplayName": "Capitals",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/wsh.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 8,
+          "displayValue": "8"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W2"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "16",
+         "abbreviation": "PIT",
+         "displayName": "Pittsburgh Penguins",
+         "shortDisplayName": "Penguins",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/pit.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -9,
+          "displayValue": "-9"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L4"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "Western Conference",
+   "abbreviation": "West",
+   "children": [
+    {
+     "name": "Central Division",
+     "abbreviation": "Central",
+     "standings": {
+      "entries": [
+       {
+        "team": {
+         "id": "9",
+         "abbreviation": "DAL",
+         "displayName": "Dallas Stars",
+         "shortDisplayName": "Stars",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/dal.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 10,
+          "displayValue": "10"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 7,
+          "displayValue": "+7"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "28",
+         "abbreviation": "WPG",
+         "displayName": "Winnipeg Jets",
+         "shortDisplayName": "Jets",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/wpg.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 10,
+          "displayValue": "10"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 6,
+          "displayValue": "+6"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "17",
+         "abbreviation": "COL",
+         "displayName": "Colorado Avalanche",
+         "shortDisplayName": "Avalanche",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/col.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 9,
+          "displayValue": "9"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 4,
+          "displayValue": "+4"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W2"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "30",
+         "abbreviation": "MIN",
+         "displayName": "Minnesota Wild",
+         "shortDisplayName": "Wild",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/min.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "19",
+         "abbreviation": "STL",
+         "displayName": "St. Louis Blues",
+         "shortDisplayName": "Blues",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/stl.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 6,
+          "displayValue": "6"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -5,
+          "displayValue": "-5"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W1"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "name": "Pacific Division",
+     "abbreviation": "Pacific",
+     "standings": {
+      "entries": [
+       {
+        "team": {
+         "id": "37",
+         "abbreviation": "VGK",
+         "displayName": "Vegas Golden Knights",
+         "shortDisplayName": "Knights",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/vgk.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 11,
+          "displayValue": "11"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 10,
+          "displayValue": "+10"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W3"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "22",
+         "abbreviation": "EDM",
+         "displayName": "Edmonton Oilers",
+         "shortDisplayName": "Oilers",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/edm.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 9,
+          "displayValue": "9"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 2,
+          "displayValue": "+2"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "W1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "8",
+         "abbreviation": "LA",
+         "displayName": "Los Angeles Kings",
+         "shortDisplayName": "Kings",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/la.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 0,
+          "displayValue": "0"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 8,
+          "displayValue": "8"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": 1,
+          "displayValue": "+1"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L2"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "124292",
+         "abbreviation": "SEA",
+         "displayName": "Seattle Kraken",
+         "shortDisplayName": "Kraken",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/sea.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 3,
+          "displayValue": "3"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -1,
+          "displayValue": "-1"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       },
+       {
+        "team": {
+         "id": "12",
+         "abbreviation": "VAN",
+         "displayName": "Vancouver Canucks",
+         "shortDisplayName": "Canucks",
+         "logos": [
+          {
+           "href": "https://a.espncdn.com/i/teamlogos/nhl/500/van.png"
+          }
+         ]
+        },
+        "stats": [
+         {
+          "name": "gamesPlayed",
+          "abbreviation": "GP",
+          "value": 7,
+          "displayValue": "7"
+         },
+         {
+          "name": "wins",
+          "abbreviation": "W",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "losses",
+          "abbreviation": "L",
+          "value": 4,
+          "displayValue": "4"
+         },
+         {
+          "name": "otLosses",
+          "abbreviation": "OTL",
+          "value": 1,
+          "displayValue": "1"
+         },
+         {
+          "name": "points",
+          "abbreviation": "PTS",
+          "value": 5,
+          "displayValue": "5"
+         },
+         {
+          "name": "regulationWins",
+          "abbreviation": "RW",
+          "value": 2,
+          "displayValue": "2"
+         },
+         {
+          "name": "pointDifferential",
+          "abbreviation": "DIFF",
+          "value": -7,
+          "displayValue": "-7"
+         },
+         {
+          "name": "streak",
+          "abbreviation": "STRK",
+          "value": 1,
+          "displayValue": "L1"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

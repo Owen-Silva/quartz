@@ -449,6 +449,12 @@ function create(d) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean }) + '\n'); } catch { /* the e2e sees it missing */ }
       return { ok: true, how: 'stub' };
     }
+    // Lumen's own game page (sports-main.js) when it is there; the gamecast tab otherwise.
+    if (typeof d.openInLumen === 'function') {
+      let r = null;
+      try { r = d.openInLumen(clean); } catch { r = null; }
+      if (r && r.ok) return r;
+    }
     if (typeof d.send === 'function') d.send('open-url', { url: clean, background: false });
     const w = typeof d.getWindow === 'function' ? d.getWindow() : null;
     if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); }

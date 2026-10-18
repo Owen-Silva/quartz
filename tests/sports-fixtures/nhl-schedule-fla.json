@@ -1,0 +1,572 @@
+{
+ "_fixture": "Hand-made from the shape of ESPN's public JSON; not a capture, no real call was made. Shape: .../hockey/nhl/teams/26/schedule. Dates are rewritten relative to now by the tests.",
+ "team": {
+  "id": "26",
+  "abbreviation": "FLA",
+  "displayName": "Florida Panthers",
+  "logo": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png",
+  "recordSummary": "5-1-1",
+  "standingSummary": "1st in Atlantic Division"
+ },
+ "events": [
+  {
+   "id": "401892500",
+   "date": "@-4d",
+   "name": "Boston Bruins at Florida Panthers",
+   "shortName": "BOS @ FLA",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892500",
+     "date": "@-4d",
+     "status": {
+      "type": {
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     },
+     "competitors": [
+      {
+       "id": "26",
+       "homeAway": "home",
+       "winner": true,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       },
+       "score": {
+        "value": 4,
+        "displayValue": "4"
+       }
+      },
+      {
+       "id": "1",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "1",
+        "abbreviation": "BOS",
+        "displayName": "Boston Bruins",
+        "shortDisplayName": "Bruins",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/bos.png"
+         }
+        ]
+       },
+       "score": {
+        "value": 2,
+        "displayValue": "2"
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "ESPN+"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892510",
+   "date": "@-2d",
+   "name": "Florida Panthers at Toronto Maple Leafs",
+   "shortName": "FLA @ TOR",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892510",
+     "date": "@-2d",
+     "status": {
+      "type": {
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "detail": "Final/OT",
+       "shortDetail": "Final/OT"
+      }
+     },
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "winner": true,
+       "team": {
+        "id": "21",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Maple Leafs",
+        "shortDisplayName": "Leafs",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/tor.png"
+         }
+        ]
+       },
+       "score": {
+        "value": 3,
+        "displayValue": "3"
+       }
+      },
+      {
+       "id": "26",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       },
+       "score": {
+        "value": 2,
+        "displayValue": "2"
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "TNT"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892515",
+   "date": "@-1d",
+   "name": "Tampa Bay Lightning at Florida Panthers",
+   "shortName": "TBL @ FLA",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892515",
+     "date": "@-1d",
+     "status": {
+      "type": {
+       "name": "STATUS_POSTPONED",
+       "state": "post",
+       "completed": true,
+       "detail": "Postponed",
+       "shortDetail": "Postponed"
+      }
+     },
+     "competitors": [
+      {
+       "id": "26",
+       "homeAway": "home",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       }
+      },
+      {
+       "id": "20",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "20",
+        "abbreviation": "TBL",
+        "displayName": "Tampa Bay Lightning",
+        "shortDisplayName": "Lightning",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/tbl.png"
+         }
+        ]
+       }
+      }
+     ],
+     "broadcasts": []
+    }
+   ]
+  },
+  {
+   "id": "401892522",
+   "date": "@0",
+   "name": "Seattle Kraken at Florida Panthers",
+   "shortName": "SEA @ FLA",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892522",
+     "date": "@0",
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "detail": "",
+       "shortDetail": ""
+      }
+     },
+     "competitors": [
+      {
+       "id": "26",
+       "homeAway": "home",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       }
+      },
+      {
+       "id": "124292",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "124292",
+        "abbreviation": "SEA",
+        "displayName": "Seattle Kraken",
+        "shortDisplayName": "Kraken",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/sea.png"
+         }
+        ]
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "ESPN+"
+       }
+      },
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "SCRIPPS"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892540",
+   "date": "@+2d",
+   "name": "Florida Panthers at New York Rangers",
+   "shortName": "FLA @ NYR",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892540",
+     "date": "@+2d",
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "detail": "",
+       "shortDetail": ""
+      }
+     },
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "home",
+       "winner": false,
+       "team": {
+        "id": "13",
+        "abbreviation": "NYR",
+        "displayName": "New York Rangers",
+        "shortDisplayName": "Rangers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/nyr.png"
+         }
+        ]
+       }
+      },
+      {
+       "id": "26",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "ESPN"
+       }
+      },
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "Hulu"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892555",
+   "date": "@+4d",
+   "name": "Carolina Hurricanes at Florida Panthers",
+   "shortName": "CAR @ FLA",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892555",
+     "date": "@+4d",
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "detail": "",
+       "shortDetail": ""
+      }
+     },
+     "competitors": [
+      {
+       "id": "26",
+       "homeAway": "home",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       }
+      },
+      {
+       "id": "7",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "7",
+        "abbreviation": "CAR",
+        "displayName": "Carolina Hurricanes",
+        "shortDisplayName": "Hurricanes",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/car.png"
+         }
+        ]
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "TNT"
+       }
+      },
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "truTV"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892570",
+   "date": "@+6d",
+   "name": "Montreal Canadiens at Florida Panthers",
+   "shortName": "MTL @ FLA",
+   "seasonType": {
+    "id": "2",
+    "type": 2,
+    "name": "Regular Season"
+   },
+   "competitions": [
+    {
+     "id": "401892570",
+     "date": "@+6d",
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "detail": "",
+       "shortDetail": ""
+      }
+     },
+     "competitors": [
+      {
+       "id": "26",
+       "homeAway": "home",
+       "winner": false,
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers",
+        "shortDisplayName": "Panthers",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/fla.png"
+         }
+        ]
+       }
+      },
+      {
+       "id": "10",
+       "homeAway": "away",
+       "winner": false,
+       "team": {
+        "id": "10",
+        "abbreviation": "MTL",
+        "displayName": "Montreal Canadiens",
+        "shortDisplayName": "Canadiens",
+        "logos": [
+         {
+          "href": "https://a.espncdn.com/i/teamlogos/nhl/500/mtl.png"
+         }
+        ]
+       }
+      }
+     ],
+     "broadcasts": [
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "SCRIPPS"
+       }
+      },
+      {
+       "type": {
+        "shortName": "TV"
+       },
+       "market": {
+        "type": "National"
+       },
+       "media": {
+        "shortName": "TVAS"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
