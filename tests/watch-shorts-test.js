@@ -53,7 +53,7 @@ check(/shortsBtn\('Shorts', ORIGIN \+ v\.path \+ '\/shorts'/.test(ytp) && !/host
 check(/shortsBtn\('Open Shorts', ORIGIN \+ '\/feed\/subscriptions\/shorts'/.test(ytp) && /shortsBtn\('Shorts', ORIGIN \+ '\/shorts'/.test(ytp), 'Subscriptions’ Shorts note and the row’s plain Shorts entry open in Lumen');
 check(/function shortsBtn[\s\S]{0,200}H\.openUrl\(url, ttl\)/.test(ytp) && !/function shortsBtn[\s\S]{0,200}icon\('out'/.test(ytp), 'shortsBtn plays through openUrl (the player layer), never a tab');
 const wp = fs.readFileSync(path.join(ROOT, 'watch-player.js'), 'utf8');
-check(/window\.LumenPlayview, window\.LumenShorts\]/.test(wp), 'watch-player.js calls the Shorts view at its hooks');
+check(/window\.LumenPlayview,( window\.LumenPlayerBar,)? window\.LumenShorts\]/.test(wp), 'watch-player.js calls the Shorts view at its hooks (last, after the play bar when it is there)');
 
 /* ---- the wheel: one Short per gesture ---------------------------------------------------------- */
 function feed(events) {

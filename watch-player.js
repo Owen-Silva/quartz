@@ -56,8 +56,10 @@
   function X(ev) {
     var args = [CTX].concat([].slice.call(arguments, 1));
     var out;
-    // watch-shorts.js (Lumen's Shorts view) hooks in last, the same way.
-    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview, window.LumenShorts].forEach(function (x) {
+    // Lumen play view (watch-playview.js), Lumen play bar (watch-playerbar.js) and Lumen's Shorts view
+    // (watch-shorts.js) hooks: attach / destroy / sync, like the two before. The play bar runs after the
+    // play view, and Shorts hooks in last so it can fit the bar to the vertical player.
+    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview, window.LumenPlayerBar, window.LumenShorts].forEach(function (x) {
       if (!x || typeof x[ev] !== 'function') return;
       try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
         try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
@@ -597,6 +599,8 @@
     var mv = MV('shortcut', id);
     if (mv === true || mv === false) return mv;
     if (id === 'escape') {
+      // Lumen play bar hook: Esc closes its menu, then the service's own menu, then Lumen's full window.
+      if (window.LumenPlayerBar && typeof window.LumenPlayerBar.shortcut === 'function' && window.LumenPlayerBar.shortcut(id) === true) return true;
       if (L.fsSlot) { exitFs(); return true; }
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
       if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Esc'); return true; }

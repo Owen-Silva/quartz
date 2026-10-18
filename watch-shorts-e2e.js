@@ -27,7 +27,8 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9851'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-shorts-shots'));
-const CLIP = process.env.QUARTZ_SHORTS_CLIP || path.join('C:', 'Users', 'owens', 'next-week', 'scratch', 'n-shorts', 'synthetic-short.mp4');
+const CLIP = process.env.QUARTZ_SHORTS_CLIP || require('./tests/fixture-clip').CLIP;   // tests/media/lumen-test-clip.mp4 (testsrc2)
+const SHOT_PREFIX = opt('shot-prefix', 'playview-shorts-');
 const FIX = path.join(__dirname, 'tests', 'watch-fixtures');
 const fx = (name) => JSON.parse(fs.readFileSync(path.join(FIX, 'youtube-' + name + '.json'), 'utf8'));
 const CHANNEL = '/@guitarcoachryan';
@@ -65,7 +66,7 @@ async function startServers(mock) {
     hits.push(p);
     if (p === '/__media/short.mp4') return sendClip(req, res);
     let m = /^\/shorts\/([A-Za-z0-9_-]{6,20})$/.exec(p);
-    if (m) return sendHtml(res, F.shortsPage(m[1], { signedout: u.searchParams.has('signedout') }));
+    if (m) return sendHtml(res, F.shortsPage(m[1], { signedout: u.searchParams.has('signedout'), ad: u.searchParams.get('ad') }));
     if (p === '/shorts') return sendHtml(res, F.shortsPage('', {}));
     if (p === CHANNEL + '/shorts') return sendHtml(res, F.channelShorts(CHANNEL));
     if (p === CHANNEL + '/videos') return sendHtml(res, ytPage(fx('channel'), 'channel'));
@@ -157,6 +158,26 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       return x;
     };
     let req = [1280, 800];
+    // Lumen's play bar (watch-playerbar.js) on the Short.
+    const pb = () => chrome.ev('(() => { const s = LumenPlayerBar._state(); return s.slots[s.slots.length - 1] || null; })()');
+    const pbWait = (cond, ms) => chrome.waitFor(`(() => { const s = LumenPlayerBar._state(); const b = s.slots[s.slots.length - 1]; return b && (${cond}) ? b : null; })()`, ms || 10000).catch(() => null);
+    const bars = () => chrome.ev('document.querySelectorAll(".wp-layer .wp-tile .pb").length');
+    const inside = (a, o, tol) => !!a && !!o && a.x >= o.x - tol && a.y >= o.y - tol && a.x + a.w <= o.x + o.w + tol && a.y + a.h <= o.y + o.h + tol;
+    const meets = (a, o) => !!a && !!o && a.x < o.x + o.w && o.x < a.x + a.w && a.y < o.y + o.h && o.y < a.y + a.h;
+    const wake = async () => {
+      const z = await sh();
+      if (!z || !z.view) return;
+      await chrome.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: z.view.x + z.view.w / 2, y: z.view.y + z.view.h * 0.55 });
+      await chrome.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: z.view.x + z.view.w / 2 + 7, y: z.view.y + z.view.h * 0.55 + 5 });
+      await pbWait('b.on && !b.idle', 3000);
+    };
+    const vt = () => (guest ? guest.ev('(() => { const v = document.querySelector("ytd-reel-video-renderer[is-active] video"); return v ? v.currentTime : -1; })()') : -1);
+    const focusInfo = () => chrome.ev('(() => { const i = document.querySelector(".wp-layer .sh-info"); if (!i) return 0; i.setAttribute("tabindex", "-1"); i.focus(); return 1; })()');
+    const keyShift = async (c, key, code, vk) => {
+      const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 8 };
+      await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, base));
+      await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
+    };
     const resize = async (w, h) => {
       let rw = w, rh = h;
       for (let i = 0; i < 4; i++) {
@@ -167,10 +188,11 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       }
       await sleep(600);
     };
-    const shot = async (w, h) => {
+    const shot = async (w, h, tag) => {
+      if (tag !== 'idle') await wake();
       const r = await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${req[0]}, height: ${req[1]}, wait: 1400 })`).catch((e) => ({ ok: false, err: String(e && e.message) }));
       if (!r || !r.ok || !r.png) { check(false, 'shot at ' + w + 'x' + h, r && r.err); return ''; }
-      const f = path.join(SHOTS, 'playview-shorts-' + w + 'x' + h + '.png');
+      const f = path.join(SHOTS, SHOT_PREFIX + w + 'x' + h + (tag ? '-' + tag : '') + '.png');
       fs.writeFileSync(f, Buffer.from(r.png, 'base64'));
       const sz = pngSize(f);
       check(sz === w + 'x' + h, 'shot ' + path.basename(f) + ' is really ' + w + 'x' + h, sz);
@@ -211,12 +233,65 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     let t = await guest.ev(TRIM);
     check(t.flag && t.root && t.rootTag === 'ytd-shorts', 'the page marks YouTube’s Shorts app as the root', t);
     check(t.masthead && t.guide && t.actions && t.meta && t.nav, 'YouTube’s masthead, guide, action bar, title overlay and up/down buttons are hidden', t);
-    check(t.ctrl === false && t.playing && t.center, 'YouTube’s own player and its controls show, and the clip plays', t);
+    check(t.playing && t.center, 'YouTube’s own player shows, and the clip plays', t);
     check(!!t.player && t.player.every((n) => Math.abs(n) <= 2), 'the player fills the page’s whole viewport', t.player);
     x = await sh();
     check(Math.abs(t.vw - x.view.w) <= 2 && Math.abs(t.vh - x.view.h) <= 2, 'the page’s own viewport is the 9:16 box', { vp: [t.vw, t.vh], view: x.view });
     await layoutOk('1280x800', 'beside');
+
+    /* ============================ 1b. Lumen's play bar on the Short ============================ */
+    await wake();
+    let b = await pbWait('b.on && b.short && b.st && !b.idle', 12000);
+    x = await sh();
+    check(!!b && b.on && b.short && !b.fell, 'Lumen’s play bar is on over the Short', b ? { on: b.on, short: b.short, fell: b.fell, reason: b.reason } : await chrome.ev('LumenPlayerBar._state()'));
+    check(await bars() === 1, 'exactly one Lumen bar in the tile', await bars());
+    check(!!b && inside(b.bar, x.view, 1) && Math.abs(b.bar.w - x.view.w) <= 2 && Math.abs((b.bar.y + b.bar.h) - (x.view.y + x.view.h)) <= 14,
+      'the bar is fitted to the vertical player: its width, at its bottom edge', b && { bar: b.bar, view: x.view });
+    const want = ['play', 'mute', 'vol', 'time'], never = ['back', 'fwd', 'next', 'audio', 'quality', 'whole', 'fs'];
+    check(!!b && want.every((k) => b.shown.includes(k)) && never.every((k) => !b.shown.includes(k)),
+      'the Short’s bar: play/pause, the seek bar, the time, mute and the volume; no -10/+10, Next, audio, quality or full window', b && b.shown);
+    check(!!b && inside(b.seekRect, b.bar, 0) && b.seekRect.w >= b.bar.w - 40, 'the seek bar spans the player’s width', b && { seek: b.seekRect, bar: b.bar });
+    const fitOk = await chrome.ev(`(() => { const bar = document.querySelector('.wp-layer .wp-tile .pb'); const r = bar.getBoundingClientRect();
+      return [...bar.querySelectorAll('.pb-btn, .pb-vol, .pb-time')].filter((n) => n.getBoundingClientRect().width > 0).every((n) => { const q = n.getBoundingClientRect(); return q.left >= r.left - 0.5 && q.right <= r.right + 0.5 && q.bottom <= r.bottom + 0.5; }); })()`);
+    check(fitOk, 'every control of the Short’s bar sits inside it (nothing clipped)');
+    check(!!b && !meets(b.bar, x.info) && !meets(b.bar, x.nav), 'the bar covers neither Lumen’s side panel nor its Up/Down buttons', b && { bar: b.bar, info: x.info, nav: x.nav });
+    const tops = await chrome.ev(`(() => { const pts = [];
+      const add = (sel) => { const n = document.querySelector('.wp-layer ' + sel); if (!n) return; const r = n.getBoundingClientRect(); pts.push([sel, r.left + r.width / 2, r.top + r.height / 2]); pts.push([sel, r.left + 4, r.bottom - 4]); pts.push([sel, r.right - 4, r.bottom - 4]); };
+      add('.sh-prev'); add('.sh-next'); add('.sh-info');
+      return pts.map(([sel, px, py]) => { const n = document.elementFromPoint(px, py); return { sel, at: n ? n.className : '', ok: !!n && !!n.closest(sel) && !n.closest('.pb, .pb-menu, .pb-pill') }; }); })()`);
+    check(tops.length === 9 && tops.every((q) => q.ok), 'Lumen’s Up/Down buttons and its side panel are on top at their own points (nothing of the bar over them)', tops.filter((q) => !q.ok));
+    t = await guest.ev(TRIM);
+    check(t.ctrl === true, 'YouTube’s own Shorts play button gives way to Lumen’s bar (hidden while it is on)', t);
+    const inj0 = b ? b.injected : -1;
+    // Left/Right (and L) seek the Short with the bar; they never move a Short.
+    const mLR = await moves();
+    await guest.ev('(() => { const v = document.querySelector("ytd-reel-video-renderer[is-active] video"); v.currentTime = 8; return 1; })()');
+    await sleep(400);
+    let t0 = await vt();
+    await keyIn(guest, 'ArrowRight', 'ArrowRight', 39);
+    await sleep(500);
+    let t1 = await vt();
+    check(t1 - t0 > 3.5 && t1 - t0 < 7, 'ArrowRight in the page: Lumen’s bar seeks the Short 5 s on', { t0, t1 });
+    t0 = await vt();
+    await keyIn(guest, 'ArrowLeft', 'ArrowLeft', 37);
+    await sleep(500);
+    t1 = await vt();
+    check(t0 - t1 > 3 && t0 - t1 < 6.5, 'ArrowLeft in the page: 5 s back', { t0, t1 });
+    await focusInfo();
+    t0 = await vt();
+    await keyIn(chrome, 'ArrowRight', 'ArrowRight', 39);
+    await sleep(500);
+    t1 = await vt();
+    check(t1 - t0 > 3.5 && t1 - t0 < 7, 'ArrowRight with the focus on Lumen’s panel: the bar seeks 5 s on too', { t0, t1 });
+    check(await moves() === mLR && (await curId()) === homeId, 'Left/Right never move a Short', { moves: (await moves()) - mLR, cur: await curId() });
     await shot(1280, 800);
+    await sleep(3400);
+    b = await pb();
+    check(!!b && b.idle && b.on, 'still for 2.5 s while it plays: the bar hides', b && { idle: b.idle, on: b.on });
+    const line = await chrome.ev(`(() => { const bar = document.querySelector('.wp-layer .wp-tile .pb'); const tr = bar.querySelector('.pb-track').getBoundingClientRect(); const row = getComputedStyle(bar.querySelector('.pb-row'));
+      return { op: getComputedStyle(bar).opacity, h: Math.round(tr.height), w: Math.round(tr.width), bottom: Math.round(bar.getBoundingClientRect().bottom - tr.bottom), row: row.visibility }; })()`);
+    check(line.op === '1' && line.h >= 2 && line.h <= 4 && line.w > 200 && line.bottom <= 12 && line.row === 'hidden', 'idle on a Short: a thin progress line stays at the player’s bottom, the buttons go', line);
+    await shot(1280, 800, 'idle');
 
     /* ============================ 2. the wheel, one Short per gesture ============================ */
     let m0 = await moves();
@@ -258,6 +333,31 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     await keyIn(guest, 'ArrowDown', 'ArrowDown', 40);
     await settled('ArrowDown in the page', S[2].id);
     check(await moves() === m0 + 1, 'ArrowDown in the page: YouTube’s own key moves one Short');
+    b = await pbWait('b.on && b.short', 5000);
+    check(await bars() === 1 && !!b && b.injected === inj0, 'after 7 moves: still exactly one Lumen bar, and its page bridge was never put in again (no second set of listeners)', { bars: await bars(), injected: b && b.injected, inj0 });
+    await focusInfo();
+    await keyIn(chrome, 'k', 'KeyK', 75);
+    await sleep(500);
+    const pz = await guest.ev('(() => { const a = document.querySelector("ytd-reel-video-renderer[is-active] video"); return { act: a ? a.paused : null, id: location.pathname.split("/").pop() }; })()');
+    b = await pb();
+    check(pz.act === true && !!b && !!b.st && b.st.p === true, 'K after the moves pauses the Short now on screen (the bar follows each move) and the bar says paused', { pz, st: b && b.st });
+    await keyIn(chrome, 'k', 'KeyK', 75);
+    await sleep(500);
+    check(await guest.ev('!document.querySelector("ytd-reel-video-renderer[is-active] video").paused'), 'K again plays it');
+    m0 = await moves();
+    await wake();
+    const pp = await chrome.ev('(() => { const n = document.querySelector(".wp-layer .wp-tile .pb .pb-play"); const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()');
+    await wheelAt(pp.x, pp.y, 120);
+    await settled('the wheel over Lumen’s bar', S[3].id);
+    check(await moves() === m0 + 1, 'one wheel notch over Lumen’s bar: exactly one Short (the bar never eats the wheel)', { moves: (await moves()) - m0 });
+    await sleep(500);
+    await wake();
+    await chrome.ev('(() => { const n = document.querySelector(".wp-layer .wp-tile .pb .pb-play"); n.focus(); return 1; })()');
+    await keyIn(chrome, 'ArrowUp', 'ArrowUp', 38);
+    await settled('ArrowUp with the focus on Lumen’s play button', S[2].id);
+    check(await moves() === m0 + 2, 'ArrowUp with the focus on the bar’s own button: one Short back (never the volume)', { moves: (await moves()) - m0 });
+    b = await pb();
+    check(await bars() === 1 && !!b && b.on && b.short && b.injected === inj0, 'and still one bar', { bars: await bars(), b: b && { on: b.on, injected: b.injected } });
 
     /* ============================ 4. Lumen's Next and Previous ============================ */
     let pr0 = await presses();
@@ -325,6 +425,55 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     await layoutOk('900x800', 'below');
     await resize(1280, 800);
     await layoutOk('1280x800 again', 'beside');
+
+    /* ============================ 6b. an ad Short: the bar's ad rules ============================ */
+    await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[0].id + '?ad=1')}, { service: 'youtube', title: 'Shorts' }), 1`);
+    x = await shWait(`x.cur === ${JSON.stringify(S[0].id)} && x.on && x.applied && x.phase === 'ready' && /[?]ad=1/.test(x.url)`, 15000);
+    await guestNow();
+    b = await pbWait('b.on && b.short && b.st', 12000);
+    const prA = await presses();
+    await focusInfo();
+    await keyIn(chrome, 'ArrowDown', 'ArrowDown', 40);
+    await settled('ArrowDown onto the ad Short', S[1].id);
+    b = await pbWait('b.st && b.st.ad && b.st.ad.on', 6000);
+    check(!!b, 'the ad Short: Lumen’s bar knows an ad plays', b || await pb());
+    await wake();
+    const adLbl = await chrome.ev('(() => { const n = document.querySelector(".wp-layer .wp-tile .pb .pb-ad"); return n && !n.hidden ? n.textContent : ""; })()');
+    check(/^Ad/.test(adLbl), 'the bar says “Ad” with the time left', adLbl);
+    const bl0 = b ? b.blocked : 0;
+    await guest.ev('(() => { const v = document.querySelector("ytd-reel-video-renderer[is-active] video"); v.currentTime = 4; return 1; })()');
+    await sleep(400);
+    const a0 = await vt();
+    await focusInfo();
+    await keyIn(chrome, 'ArrowRight', 'ArrowRight', 39);
+    await keyIn(guest, 'l', 'KeyL', 76);
+    await sleep(600);
+    const a1 = await vt();
+    b = await pb();
+    check(a1 - a0 < 1.6 && !!b && b.blocked >= bl0 + 2, 'during the ad, ArrowRight and L never seek; the bar says why', { a0, a1, blocked: b && b.blocked, note: await chrome.ev('LumenPlayerBar._state().note') });
+    await focusInfo();
+    await keyShift(chrome, '>', 'Period', 190);
+    await sleep(500);
+    const rate = await guest.ev('document.querySelector("ytd-reel-video-renderer[is-active] video").playbackRate');
+    check(rate === 1, 'during the ad, Shift+> never speeds it up', { rate, note: await chrome.ev('LumenPlayerBar._state().note') });
+    await wake();
+    await sleep(300);
+    const cta = await guest.ev(`(() => { const n = document.querySelector('ytd-reel-video-renderer[is-active] .fx-ad-cta'); if (!n) return null; const r = n.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { x: r.left + r.width / 2, y: r.top + r.height / 2, vis: getComputedStyle(n).visibility, top: !!top && (top === n || n.contains(top)) }; })()`);
+    x = await sh();
+    const cp = cta && x && x.view ? { x: Math.round(x.view.x + cta.x), y: Math.round(x.view.y + cta.y) } : null;
+    const over = cp ? await chrome.ev(`(() => { const n = document.elementFromPoint(${cp.x}, ${cp.y}); return n ? n.tagName + ' ' + n.className : ''; })()`) : '';
+    check(!!cta && cta.vis === 'visible' && cta.top && /^WEBVIEW/.test(over), 'YouTube’s own ad button shows above Lumen’s bar, with nothing of Lumen’s over it', { cta, cp, over, bar: (await pb() || {}).bar });
+    await shot(1280, 800, 'ad');
+    if (cp) for (const type of ['mousePressed', 'mouseReleased']) await chrome.send('Input.dispatchMouseEvent', { type, x: cp.x, y: cp.y, button: 'left', clickCount: 1 });
+    await sleep(500);
+    check((await presses()).adCta === prA.adCta + 1, 'one click on YouTube’s own ad button: one press of it, through Lumen', { before: prA.adCta, after: (await presses()).adCta });
+    m0 = await moves();
+    await focusInfo();
+    await keyIn(chrome, 'ArrowDown', 'ArrowDown', 40);
+    await settled('ArrowDown past the ad Short (YouTube’s own Shorts move)', S[2].id);
+    b = await pbWait('b.st && !(b.st.ad && b.st.ad.on)', 6000);
+    check(!!b && await bars() === 1, 'the next Short is no ad: the full Short bar again, still one bar', b && b.st);
 
     /* ============================ 7. signed out, the page failed ============================ */
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[2].id + '?signedout=1')}, { service: 'youtube', title: 'Shorts' }), 1`);

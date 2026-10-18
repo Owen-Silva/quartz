@@ -26,6 +26,8 @@
   <link rel="stylesheet" href="watch-player.css">
   <link rel="stylesheet" href="watch-player-extras.css">
   <link rel="stylesheet" href="watch-player-multi.css">
+  <!-- Lumen play bar (watch-playerbar.js) -->
+  <link rel="stylesheet" href="watch-playerbar.css">
   <link rel="stylesheet" href="watch-leakproof.css">
   <link rel="stylesheet" href="watch-playview.css">
   <link rel="stylesheet" href="watch-shorts.css">
@@ -156,6 +158,14 @@
   <script src="watch-player-yt.js"></script>
   <script src="watch-playview.js"></script>
   <script src="watch-shorts.js"></script>
+  <!-- Lumen play bar: the per-service adapters, the page bridge, the bar (hooks into watch-player.js X()). -->
+  <script src="watch/playerbar/youtube.js"></script>
+  <script src="watch/playerbar/disney.js"></script>
+  <script src="watch/playerbar/hulu.js"></script>
+  <script src="watch/playerbar/prime.js"></script>
+  <script src="watch/playerbar/espn.js"></script>
+  <script src="watch-playerbar-page.js"></script>
+  <script src="watch-playerbar.js"></script>
   <script src="watch-player.js"></script>
   <!-- The new tab Home's layout rules (which pieces show, in which column).
        The page loads the same file, so both sides apply one set of rules;

@@ -8,7 +8,9 @@
 //                       action bar (like/dislike/menu), and YouTube's own up/down buttons. Its own wheel
 //                       (one Short per gesture), ArrowUp/ArrowDown and buttons move with history.pushState,
 //                       as YouTube's do. Every press is counted in window.__presses; every move in __moves.
-//                       q.signedout: ytcfg LOGGED_IN false.
+//                       q.signedout: ytcfg LOGGED_IN false. q.ad (a Short's index): that Short is an ad
+//                       Short (YouTube's ad slot in its player, "Sponsored", a "Visit advertiser" button at
+//                       its bottom; presses counted in __presses.adCta).
 //   channelShorts(path) a channel's Shorts tab: a grid of /shorts/<id> links.
 const SHORTS = [
   { id: 'Xk3pQ9vLm2A', title: 'Open chord swap drill in 30 seconds', channel: '@guitarcoachryan', name: 'Guitar Coach Ryan', likes: '12K' },
@@ -33,7 +35,8 @@ function shortsPage(id, q) {
   <ytd-reel-video-renderer id="r${i}" data-i="${i}"${i === start ? ' is-active' : ''}>
     <div id="player-container">
       <video class="html5-main-video" src="/__media/short.mp4" muted loop playsinline preload="${i === start ? 'auto' : 'none'}"></video>
-      <div class="ytp-chrome-top"><button class="ytp-play-button" aria-label="Pause (k)">II</button></div>
+      <div class="ytp-chrome-top"><button class="ytp-play-button" aria-label="Pause (k)">II</button></div>${String(i) === String(o.ad) ? `
+      <ytd-ad-slot-renderer class="fx-ad"><span class="fx-ad-badge">Sponsored</span><button class="fx-ad-cta" aria-label="Visit advertiser">Visit advertiser</button></ytd-ad-slot-renderer>` : ''}
       <yt-reel-metapanel-view-model id="metapanel">
         <yt-reel-channel-bar-view-model><img class="yt-core-image" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
           <span class="ytReelChannelBarViewModelChannelName"><a href="/${esc(s.channel)}">${esc(s.channel)}</a></span>
@@ -61,6 +64,9 @@ ytd-reel-video-renderer{display:flex;justify-content:center;align-items:flex-end
 #player-container{position:relative;height:100%;aspect-ratio:9/16;background:#000;border-radius:12px;overflow:hidden}
 #player-container video{width:100%;height:100%;object-fit:cover;display:block}
 .ytp-chrome-top{position:absolute;top:8px;left:8px;right:8px}
+ytd-ad-slot-renderer.fx-ad{position:absolute;left:12px;right:12px;bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;z-index:2}
+.fx-ad-badge{background:#ffd34d;color:#000;font-weight:700;font-size:12px;padding:2px 6px;border-radius:4px}
+.fx-ad-cta{height:36px;padding:0 14px;border:0;border-radius:18px;background:#3ea6ff;color:#000;font-weight:600}
 .ytp-chrome-top button{background:rgba(0,0,0,.4);color:#fff;border:0;border-radius:50%;width:36px;height:36px}
 #metapanel{position:absolute;left:0;right:0;bottom:0;padding:12px;background:linear-gradient(transparent,rgba(0,0,0,.7))}
 #metapanel h2{margin:6px 0 0;font-size:15px}
@@ -89,7 +95,7 @@ ytd-popup-container > *{pointer-events:auto}
   var PL = ${JSON.stringify(PLAYLISTS)};
   var cur = ${start};
   var subs = {}, liked = {}, disliked = {}, saved = {};
-  window.__presses = { like: 0, dislike: 0, sub: 0, confirm: 0, menu: 0, saveItem: 0, saveToggle: 0, saveClose: 0, next: 0, prev: 0 };
+  window.__presses = { like: 0, dislike: 0, sub: 0, confirm: 0, menu: 0, saveItem: 0, saveToggle: 0, saveClose: 0, next: 0, prev: 0, adCta: 0 };
   window.__moves = [];
   window.__born = Date.now();
   var box = document.getElementById('shorts-inner-container');
@@ -138,6 +144,7 @@ ytd-popup-container > *{pointer-events:auto}
     if (e.key === 'ArrowDown') { e.preventDefault(); go(cur + 1, 'key'); }
     if (e.key === 'ArrowUp') { e.preventDefault(); go(cur - 1, 'key'); }
   });
+  [].forEach.call(document.querySelectorAll('.fx-ad-cta'), function (b) { b.addEventListener('click', function (e) { e.stopPropagation(); window.__presses.adCta++; }); });
   var pop = document.getElementById('pop');
   function clearPop() { pop.innerHTML = ''; }
   document.addEventListener('click', function (e) {

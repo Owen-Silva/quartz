@@ -40,7 +40,9 @@
 
    Hooks: watch-player.js X() (attach, reuse, sync, destroy,
    stateActs); with this file missing, a Short is the page it always
-   was. watch-shorts-main.js logs the view's lines to quartz.log. Also
+   was. Lumen's play bar (watch-playerbar.js) fits itself to the
+   vertical player and leaves Up/Down, the wheel and swipes to this
+   view (move() takes an Up/Down the bar's page bridge saw). watch-shorts-main.js logs the view's lines to quartz.log. Also
    a CommonJS module for the unit harness (the pure parts).
    ============================================================ */
 (function (root, factory) {
@@ -1001,6 +1003,8 @@
   return Object.assign({}, PURE, {
     // watch-player.js X() hooks
     attach: attach, reuse: reuse, destroy: destroy, sync: sync, stateActs: stateActs,
+    // Lumen's play bar (watch-playerbar.js) hands Up/Down it got on a Short here: one Short, the same move.
+    move: function (s, dir, how) { return shOn(s) ? step(s, dir > 0 ? 1 : -1, how || 'key') : false; },
     _step: function (dir) { var L = layerOf(); var s = L && L.slots[L.focus]; return s ? step(s, dir, 'test') : false; },
     _state: function () { var L = layerOf(); return { slots: all.filter(function (s) { return !!s.view; }).map(stateOf), layerOn: !!(L && L.el && L.el.classList.contains('sh-on')) }; }
   });

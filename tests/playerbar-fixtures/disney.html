@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Play bar test - Disney+</title>
+<!-- A stand-in for Disney+'s player page: the video with two subtitle textTracks, Disney+'s own control
+     footer (.controls__footer) with its "Audio & subtitles" button, and an age-rating card inside it
+     that must stay visible. -->
+<style>
+html,body{margin:0;height:100%;background:#000;color:#eee;font:14px/1.4 "Segoe UI",sans-serif;overflow:hidden}
+.btm-media-player,.btm-media-client-element{position:absolute;inset:0}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+.controls__footer{position:absolute;left:0;right:0;bottom:0;height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;background:rgba(0,60,200,.85)}
+.controls__footer button{font:inherit;color:#fff;background:#024;border:0;padding:6px 10px}
+.rating-card{position:absolute;left:24px;bottom:80px;background:rgba(0,0,0,.6);padding:4px 8px}
+#dmenu{position:absolute;right:16px;bottom:72px;background:#024;padding:12px}
+</style></head><body>
+<div class="btm-media-player">
+<div class="btm-media-client-element">
+  <video id="hivePlayer" src="/__media/clip.mp4" autoplay muted loop playsinline>
+    <track kind="subtitles" label="English" srclang="en" src="/__vtt/en.vtt">
+    <track kind="subtitles" label="Fran&ccedil;ais" srclang="fr" src="/__vtt/fr.vtt">
+  </video>
+</div>
+<div class="controls__footer" id="dbar"><span>Disney+'s own bar</span><button class="audio-subtitles-control" id="dsub" onclick="document.getElementById('dmenu').hidden=false">Audio &amp; subtitles</button>
+  <div class="rating-card" id="drating">TV-PG</div></div>
+<div id="dmenu" hidden>Disney+ audio and subtitles</div>
+</div>
+</body></html>

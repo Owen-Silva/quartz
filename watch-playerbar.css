@@ -1,0 +1,200 @@
+/* ============================================================
+   watch-playerbar.css -- Lumen's own play bar (watch-playerbar.js).
+   Over the bottom of the video's box, inside the layer's tile.
+   Neutral greys, the accent only on the elapsed part and focus,
+   a dark scrim (never a glow) so it reads over bright video.
+   ============================================================ */
+.pb {
+  --pb-fg: #f4f4f5;
+  --pb-dim: #c8c8cd;
+  --pb-hover: rgba(255, 255, 255, 0.13);
+  --pb-accent: var(--accent, #7ea6e0);
+  position: absolute; left: 0; bottom: 0; width: 100%; z-index: 4;
+  color: var(--pb-fg);
+  font: 500 var(--fs-s, 13px)/1.35 var(--font, "Segoe UI Variable Text", "Segoe UI", sans-serif);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 180ms ease;
+  user-select: none;
+}
+.pb::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(100% + 72px);
+  background: linear-gradient(to top, rgba(8, 8, 10, 0.84) 0%, rgba(8, 8, 10, 0.62) 48%, rgba(8, 8, 10, 0) 100%);
+  pointer-events: none;
+}
+.pb.is-off, .pb.is-gone { display: none; }
+.pb.is-idle { opacity: 0; }
+.pb.is-idle * { pointer-events: none !important; }
+.pb.is-own { opacity: 0; }
+.pb.is-own * { pointer-events: none !important; }
+
+.pb-panel { position: relative; padding: 0 12px 8px; }
+
+/* ---- the seek bar ---- */
+.pb-seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; pointer-events: auto; outline: none; touch-action: none; }
+.pb-track { position: relative; flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.24); overflow: hidden; transition: height 120ms ease; }
+.pb-seek:hover .pb-track, .pb-seek.is-drag .pb-track, .pb-seek:focus-visible .pb-track { height: 6px; }
+.pb-buf, .pb-done, .pb-hov { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+.pb-buf { background: rgba(255, 255, 255, 0.4); }
+.pb-hov { background: rgba(255, 255, 255, 0.22); opacity: 0; }
+.pb-seek:hover .pb-hov { opacity: 1; }
+.pb-done { background: var(--pb-accent); }
+.pb-knob {
+  position: absolute; top: 50%; left: 0; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%;
+  background: #fafafa; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); transform: scale(0); transition: transform 120ms ease; pointer-events: none;
+}
+.pb-seek:hover .pb-knob, .pb-seek.is-drag .pb-knob, .pb-seek:focus-visible .pb-knob { transform: scale(1); }
+.pb-seek:focus-visible { box-shadow: 0 0 0 2px var(--pb-accent); border-radius: 4px; }
+.pb-tip {
+  position: absolute; bottom: 22px; left: 0; padding: 3px 7px 4px; border-radius: 6px; white-space: nowrap;
+  background: rgba(24, 24, 27, 0.94); border: 1px solid rgba(255, 255, 255, 0.1); color: var(--pb-fg);
+  font: 600 var(--fs-xs, 12px)/1.3 var(--font, "Segoe UI", sans-serif); font-variant-numeric: tabular-nums;
+  opacity: 0; transition: opacity 100ms ease; pointer-events: none;
+}
+.pb-seek:hover .pb-tip { opacity: 1; }
+
+/* ---- the row ---- */
+.pb-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; }
+.pb-left, .pb-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pb-right { flex: 0 1 auto; justify-content: flex-end; }
+.pb-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; min-width: 36px; padding: 0 7px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--pb-fg); cursor: pointer; pointer-events: auto;
+  font: 600 var(--fs-s, 13px)/1.3 var(--font, "Segoe UI", sans-serif); white-space: nowrap;
+  transition: background 120ms ease;
+}
+.pb-btn[hidden] { display: none; }
+.pb-btn:hover { background: var(--pb-hover); }
+.pb-btn:active { background: rgba(255, 255, 255, 0.18); }
+.pb-btn:focus-visible { outline: 2px solid var(--pb-accent); outline-offset: 0; }
+.pb-ic { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45)); }
+.pb-ic text { font-family: var(--font, "Segoe UI", sans-serif); }
+.pb-play .pb-ic { width: 24px; height: 24px; }
+.pb-btn.is-on { color: #fff; box-shadow: inset 0 -2px 0 var(--pb-accent); }
+.pb-btn-text { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.pb-speed { min-width: 46px; font-variant-numeric: tabular-nums; }
+.pb-next { padding: 0 12px 0 9px; background: rgba(255, 255, 255, 0.12); }
+.pb-next:hover { background: rgba(255, 255, 255, 0.2); }
+
+.pb-volwrap { display: flex; align-items: center; pointer-events: auto; }
+.pb-vol {
+  --pb-v: 100%;
+  -webkit-appearance: none; appearance: none; width: 84px; height: 18px; margin: 0 8px 0 2px; background: transparent; cursor: pointer; pointer-events: auto;
+}
+.pb-vol::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, #f4f4f5 var(--pb-v), rgba(255, 255, 255, 0.26) var(--pb-v)); }
+.pb-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fafafa; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.pb-vol:focus-visible { outline: 2px solid var(--pb-accent); outline-offset: 2px; border-radius: 4px; }
+
+.pb-time {
+  padding: 0 8px; white-space: nowrap; color: var(--pb-fg); font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); line-height: 1.35;
+}
+.pb-ad {
+  margin-left: 4px; padding: 3px 9px 4px; border-radius: 6px; white-space: nowrap;
+  background: rgba(255, 255, 255, 0.14); color: #f1dca6; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.35;
+}
+.pb-ad[hidden] { display: none; }
+
+/* ---- an ad: no seeking, nothing on the right (the service's Skip button lives there) ---- */
+.pb.is-ad .pb-seek { pointer-events: none; cursor: default; }
+.pb.is-ad .pb-done { background: #c9a958; }
+.pb.is-ad .pb-knob { display: none; }
+.pb.is-ad .pb-back, .pb.is-ad .pb-fwd, .pb.is-ad .pb-right, .pb.is-ad .pb-time { display: none; }
+
+/* ---- narrow boxes: the 10 s buttons and the volume slider go (J/L, the arrows and M still work) ---- */
+.pb.is-compact .pb-back, .pb.is-compact .pb-fwd, .pb.is-compact .pb-vol { display: none; }
+.pb.is-compact .pb-next .pb-btn-text { display: none; }
+.pb.is-tiny .pb-time { display: none; }
+
+/* ---- menus ---- */
+.pb-menu {
+  position: absolute; z-index: 6; right: 12px; bottom: 64px; width: 260px; overflow: auto;
+  padding: 6px; border-radius: 12px; background: rgba(28, 28, 31, 0.98); border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5); color: var(--pb-fg, #f4f4f5);
+  font: 500 var(--fs-s, 13px)/1.4 var(--font, "Segoe UI", sans-serif);
+}
+.pb-menu[hidden] { display: none; }
+.pb-menu-title { padding: 7px 10px 6px; color: #a9a9b0; font: 600 var(--fs-xs, 12px)/1.4 var(--font, "Segoe UI", sans-serif); letter-spacing: 0.02em; }
+.pb-menu-list { display: flex; flex-direction: column; }
+.pb-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 10px 7px 6px; border: 0; border-radius: 8px;
+  background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; line-height: 1.4;
+  justify-content: flex-start;
+}
+.pb-item-label { flex: 1 1 auto; min-width: 0; text-align: left; }
+.pb-item:hover { background: rgba(255, 255, 255, 0.08); }
+.pb-item:focus-visible { outline: 2px solid var(--pb-accent, #7ea6e0); outline-offset: -2px; }
+.pb-item.is-on { color: #fff; font-weight: 600; }
+.pb-item.has-sep { margin-top: 5px; position: relative; }
+.pb-item.has-sep::before { content: ''; position: absolute; left: 8px; right: 8px; top: -3px; height: 1px; background: rgba(255, 255, 255, 0.08); }
+.pb-item.is-own .pb-item-label { color: #dcdce0; }
+.pb-item-check { width: 18px; height: 18px; flex: none; display: inline-flex; color: var(--pb-accent, #7ea6e0); }
+.pb-item-check .pb-ic { width: 18px; height: 18px; stroke-width: 2.2; filter: none; }
+.pb-menu-note { margin: 4px 10px 6px 32px; color: #b4b4ba; font-size: var(--fs-xs, 12px); line-height: 1.45; }
+
+/* ---- the pills: the service's own menu is open; why the service's bar is back ---- */
+.pb-pill {
+  position: absolute; z-index: 6; left: 12px; top: 12px; max-width: min(620px, calc(100% - 24px));
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px 8px 12px; border-radius: 10px;
+  background: rgba(24, 24, 27, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  color: #ececee; font: 500 var(--fs-s, 13px)/1.4 var(--font, "Segoe UI", sans-serif);
+}
+.pb-pill[hidden] { display: none; }
+.pb-pill-text { min-width: 0; }
+.pb-pill-btn {
+  flex: none; height: 30px; padding: 0 11px 1px; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.12); color: #fff;
+  font: 600 var(--fs-s, 13px)/1.3 var(--font, "Segoe UI", sans-serif); cursor: pointer;
+}
+.pb-pill-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.pb-pill-btn:focus-visible { outline: 2px solid var(--accent, #7ea6e0); }
+.pb-reason .pb-btn { height: 28px; min-width: 28px; padding: 0; }
+.pb-reason .pb-ic { width: 16px; height: 16px; filter: none; }
+
+/* ---- Lumen's full window: the tile fills the window (wp-fs, watch-player.css); no screen change ---- */
+.wp-layer.pb-lumenfs .wp-tile.is-fs { cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pb, .pb-track, .pb-knob, .pb-tip, .pb-btn { transition: none; }
+}
+
+/* the layer's own state card (blocked, failed) covers the tile: no bar under it */
+.wp-tile.has-state .pb, .wp-tile.has-state .pb-menu { display: none; }
+
+/* In Lumen's play view (watch-playview.js), the bar lives in its mount at the video box's bottom edge. The
+   mount gives its children pointer-events:auto; the bar itself stays click-through (only its controls take
+   clicks), so the service's Skip button and the video under the empty middle stay clickable. */
+.pv-barmount > .pb { pointer-events: none; left: 0; right: 0; width: auto; bottom: 0; }
+
+/* Lumen's full window: the layer fills the window. watch-player.js place() writes the Watch tab's box
+   inline unless the PAGE went fullscreen; these win over that inline box (never the screen: no OS call). */
+.wp-layer.wp-fs.pb-lumenfs { left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important; width: auto !important; height: auto !important; }
+
+/* ---- a YouTube Short (Lumen's Shorts view, watch-shorts.js: the tile wears .sh) ----
+   The bar fits the vertical player's own width: play/pause, the seek bar, the time, mute and the volume,
+   captions and speed. No -10/+10 (J/L still work), Next, audio, quality or Lumen's full window. Its corners
+   follow the player's. Idle: a thin progress line stays, the way YouTube's Shorts keep theirs. */
+.pb.is-short .pb-back, .pb.is-short .pb-fwd, .pb.is-short .pb-next, .pb.is-short .pb-audio,
+.pb.is-short .pb-quality, .pb.is-short .pb-whole, .pb.is-short .pb-fs { display: none !important; }
+.pb.is-short::before { border-radius: 0 0 14px 14px; height: calc(100% + 56px); }
+.pb.is-short .pb-panel { padding: 0 10px 6px; }
+.pb.is-short .pb-row { gap: 4px; min-height: 38px; }
+.pb.is-short .pb-btn { min-width: 34px; padding: 0 6px; }
+.pb.is-short .pb-vol { width: 56px; margin: 0 4px 0 0; }
+.pb.is-short .pb-time { padding: 0 4px; font-size: var(--fs-xs, 12px); }
+.pb.is-short .pb-speed { min-width: 40px; }
+.pb.is-short.is-narrow .pb-vol, .pb.is-short.is-narrow .pb-speed { display: none; }
+.pb.is-short.is-idle { opacity: 1; }
+.pb.is-short.is-idle::before, .pb.is-short.is-idle .pb-row, .pb.is-short.is-idle .pb-knob, .pb.is-short.is-idle .pb-tip { opacity: 0; }
+.pb.is-short.is-idle .pb-row { visibility: hidden; }
+/* The line drops to where the row was: just above the player's bottom edge, inside its rounded corners. */
+.pb.is-short.is-idle .pb-seek { transform: translateY(46px); }
+.pb.is-short .pb-seek { transition: transform 180ms ease; }
+.pb.is-short .pb-row, .pb.is-short::before { transition: opacity 180ms ease, visibility 0s linear 0s; }
+.pb.is-short.is-idle .pb-row { transition: opacity 180ms ease, visibility 0s linear 180ms; }
+@media (prefers-reduced-motion: reduce) {
+  .pb.is-short .pb-seek, .pb.is-short .pb-row, .pb.is-short::before { transition: none; }
+}
+.pb.is-short.is-idle .pb-track { height: 3px; background: rgba(255, 255, 255, 0.2); }
+.pb.is-short.is-idle .pb-buf { opacity: 0; }
+/* Until the Shorts view has the player boxed (its cover shows), no bar over the cover. */
+.wp-tile.sh-wait > .pb, .wp-tile.sh-wait > .pb-menu { visibility: hidden; }

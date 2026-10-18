@@ -6046,6 +6046,10 @@
     var pl = el('div', 'set-field set-field-gap');
     pl.setAttribute('data-field', 'watchplayer');
     s.appendChild(pl);
+    // Lumen play bar (watch-playerbar.js draws it).
+    var pbar = el('div', 'set-field set-field-gap');
+    pbar.setAttribute('data-field', 'watchplaybar');
+    s.appendChild(pbar);
     var fg = el('div', 'set-field set-field-gap');
     fg.setAttribute('data-field', 'watchforget');
     s.appendChild(fg);
@@ -6059,6 +6063,7 @@
     renderWatchBackground();
     renderWatchAlerts();
     renderWatchPlayer();
+    renderWatchPlaybar();
     renderWatchForget();
   }
 
@@ -6474,6 +6479,18 @@
     field.appendChild(el('p', 'set-hint set-watch-bg-state', st));
     var res = watchResultRow('background');
     if (res) field.appendChild(res);
+  }
+
+  /* Lumen play bar: "Lumen (default) / The service's own"; watch-playerbar.js draws it and applies it. */
+  function renderWatchPlaybar() {
+    var field = watchField('watchplaybar');
+    if (!field || !window.LumenPlayerBar || typeof window.LumenPlayerBar.renderSetting !== 'function') return;
+    try {
+      window.LumenPlayerBar.renderSetting(field, { el: el, segmented: segmented });
+    } catch (err) {
+      field.textContent = '';
+      field.appendChild(el('p', 'set-hint', 'The play bar setting could not draw: ' + ((err && err.message) || 'no reason given') + '.'));
+    }
   }
 
   /* Lumen Alerts: its own file asks main and draws; this only hands it the field and the helpers. */
