@@ -6039,6 +6039,10 @@
     var bg = el('div', 'set-field set-field-gap');
     bg.setAttribute('data-field', 'watchbg');
     s.appendChild(bg);
+    // Lumen Alerts (watch-alerts-chrome.js draws it).
+    var al = el('div', 'set-field set-field-gap');
+    al.setAttribute('data-field', 'watchalerts');
+    s.appendChild(al);
     var pl = el('div', 'set-field set-field-gap');
     pl.setAttribute('data-field', 'watchplayer');
     s.appendChild(pl);
@@ -6053,6 +6057,7 @@
     renderWatchLeagues();
     renderWatchKey();
     renderWatchBackground();
+    renderWatchAlerts();
     renderWatchPlayer();
     renderWatchForget();
   }
@@ -6457,6 +6462,18 @@
     field.appendChild(el('p', 'set-hint set-watch-bg-state', st));
     var res = watchResultRow('background');
     if (res) field.appendChild(res);
+  }
+
+  /* Lumen Alerts: its own file asks main and draws; this only hands it the field and the helpers. */
+  function renderWatchAlerts() {
+    var field = watchField('watchalerts');
+    if (!field || !window.LumenAlertsSettings) return;
+    try {
+      window.LumenAlertsSettings.render(field, { el: el, switchRow: switchRow, textButton: textButton, ago: watchAgo });
+    } catch (err) {
+      field.textContent = '';
+      field.appendChild(el('p', 'set-hint', 'Lumen Alerts could not draw its settings: ' + ((err && err.message) || 'no reason given') + '.'));
+    }
   }
 
   function renderWatchForget() {

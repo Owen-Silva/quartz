@@ -852,14 +852,19 @@ if (require.main === module) {
     check(!!sightBg && sightBg.visible === false && sightBg.front === false, 'visibility: Watch in a background tab tells Quartz it is out of sight (the chrome said "back", main last heard visible:false)',
       sightBg && { visible: sightBg.visible, front: sightBg.front, hidden: sightBg.hidden, said: saidOf(sightBg) });
     await sleep(5000);
+    // Release 4: Lumen Alerts' subscription alerts (on by default) may follow a BACKGROUND-refresh
+    // YouTube read with one hidden Subscriptions read; at launch there is none, so this check runs
+    // with alerts ON and still means "no read storm in a background tab".
+    const alertsSubs = await chrome.ev("(window.api && window.api.lumenAlerts) ? window.api.lumenAlerts.describe().then((d) => (d && d.subs ? d.subs.on : 'none'), () => 'error') : 'no bridge'").catch(() => 'error');
     const bgHits = IDS.reduce((n, id) => n + mock.hits(id, appStart), 0);
     const bgWhat = IDS.map((id) => id + ':' + mock.hits(id, appStart)).join(' ');
     // Watch was the front tab for a moment (Ctrl+Alt+W). If its page heard "front" in that moment it
     // told main visible:true, main queued every due read, and main runs its queue past the boot grace
     // whatever the page says next: those reads are not a failure of the front signal, only noted.
     if (bgHits > 0 && frontBefore === true) say('visibility: NOTE: the page heard "front" before createTab() moved Watch back (it said ' + saidOf(sightBg) + '); main kept the reads it queued then and ran them past the boot grace with the page out of sight (' + bgWhat + '), so "a background tab reads nothing" is not checked this run');
-    else check(bgHits === 0, 'visibility: Watch in a background tab (another tab active, every service due, ' + Math.round((tBg - appStart) / 1000) + ' s after launch, past the ' + BOOT1_GRACE_MS / 1000 + ' s boot grace) reads nothing for 5 s', bgWhat + '; front before the switch: ' + frontBefore + '; the page said ' + saidOf(sightBg));
+    else check(bgHits === 0, 'visibility: Watch in a background tab (another tab active, every service due, ' + Math.round((tBg - appStart) / 1000) + ' s after launch, past the ' + BOOT1_GRACE_MS / 1000 + ' s boot grace, subscription alerts ' + (alertsSubs === true ? 'on' : String(alertsSubs)) + ') reads nothing for 5 s', bgWhat + '; front before the switch: ' + frontBefore + '; the page said ' + saidOf(sightBg));
 
+    check(alertsSubs === true, 'visibility: that check ran with the Lumen Alerts subscription alerts on (their default), the mode that may read Subscriptions in the background', alertsSubs);
     await ctrlAltW(chrome);
     let reused = false;
     try { reused = await chrome.waitFor(WATCH_TABS + '.length === 1 && ' + ACTIVE_IS_WATCH, 5000); } catch (e) { reused = false; }

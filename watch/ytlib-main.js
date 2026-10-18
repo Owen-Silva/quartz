@@ -88,6 +88,10 @@ function create(o) {
   const visible = typeof opt.visible === 'function' ? opt.visible : () => true;
   const setTimer = typeof opt.setTimeout === 'function' ? opt.setTimeout : setTimeout;
   const clearTimer = typeof opt.clearTimeout === 'function' ? opt.clearTimeout : clearTimeout;
+  // Lumen Alerts (watch-alerts-main.js): may the feed follow a YouTube read with no page open, and
+  // hear each Subscriptions read that lands. Both optional; neither starts a read of its own.
+  const wantSubs = typeof opt.wantSubs === 'function' ? opt.wantSubs : () => false;
+  const onSubs = typeof opt.onSubs === 'function' ? opt.onSubs : null;
 
   let data = null;
   let stopped = false;
@@ -234,6 +238,7 @@ function create(o) {
         s.items = []; s.empty = false; s.shortsHidden = 0;
       } else log('Lumen could not read YouTube Subscriptions: ' + s.reason);
       saveSoon();
+      if (onSubs) { try { onSubs(subsAnswer()); } catch (err) { log('Lumen Alerts failed on a Subscriptions read: ' + ((err && err.message) || err)); } }
     } else if (job.key === 'library') {
       const res = L.parseLibrary(read);
       const l = load().library;
@@ -381,8 +386,8 @@ function create(o) {
     pump();   // what waited while Lumen was off screen
   }
 
-  /** watch-main read a service (state: its new state). After YouTube: the feed follows it. */
-  function afterRead(id, state) {
+  /** watch-main read a service (state: its new state; background: it was a background-refresh read whose gates still pass). After YouTube: the feed follows it. */
+  function afterRead(id, state, background) {
     if (stopped || id !== 'youtube') return;
     if (state === 'signed-out') {
       const d = load();
@@ -390,9 +395,17 @@ function create(o) {
       if (d.subs.state !== 'signed-out') { Object.assign(d.subs, { state: 'signed-out', reason: 'sign in to YouTube to see your subscriptions', items: [], empty: false, shortsHidden: 0, readAt: now() }); changed = true; }
       if (d.library.state !== 'never' && d.library.state !== 'signed-out') { Object.assign(d.library, { state: 'signed-out', reason: 'sign in to YouTube to see your library', wl: null, ll: null, playlists: null, readAt: now() }); changed = true; }
       if (changed) { saveSoon(); pushSubs(); pushLibrary(); }
+      if (changed && onSubs) { try { onSubs(subsAnswer()); } catch { /* alerts only */ } }
       return;
     }
-    if (state === 'ok' && attached.size && !fresh(load().subs, SUBS_AFTER_YT_MS)) enqueue('subs', false, null, true);
+    if (state !== 'ok' || fresh(load().subs, SUBS_AFTER_YT_MS)) return;
+    // The one feed read that follows a YouTube read may run off screen (anyTime): for a page that
+    // has the row open, after any YouTube read (release 3). For Lumen Alerts with NO page open, only
+    // after a BACKGROUND-refresh read (background === true: watch-main's hourly cadence, with its
+    // gates -- battery saver, a game, 2.5 GB, the boot delay -- passed for that read and again now),
+    // so subscription alerts add one hidden read per background refresh and never a read at launch.
+    // Alerts off (wantSubs false): exactly release 3.
+    if (attached.size || (background === true && wantSubs())) enqueue('subs', false, null, true);
   }
 
   function dropGuest(contents) { attached.delete(contents); }

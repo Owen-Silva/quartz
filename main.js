@@ -649,6 +649,40 @@ const lumenSports = (() => {
     return null;
   }
 })();
+/*
+ * Lumen Alerts (watch-alerts-main.js): "New from your subscriptions" and favourite-team game
+ * start / final, from reads Lumen already makes (no timer, no read of its own). The chrome shows
+ * them (watch-alerts-chrome.js). A TEST profile is silent: no real notification, only counts.
+ */
+const lumenAlerts = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) { test.offscreen = true; test.silent = true; }
+  try {
+    if (!watch || watch.failed || typeof watch.setAlerts !== 'function') throw new Error('Lumen did not start');
+    const a = require('./watch-alerts-main').create({
+      app, ipcMain, test,
+      isChromeSender: (event) => isChromeSender(event),
+      send: (channel, payload) => { if (!canSend()) return false; win.webContents.send(channel, payload); return true; },
+      getWindow: () => win,
+      getFavs: () => (lumenSports ? lumenSports.favourites() : []),
+      lumenView: () => watch.alertsView(),
+      gaming: () => watch.gaming(),
+      openTitle: (url, o) => watch.openTitle(url, o),
+      openGame: (url) => (lumenSports ? lumenSports.openGame(url) : { ok: false, reason: 'Lumen sports is not running' }),
+      pin: (ev) => (scorePins ? scorePins.pin(ev) : { ok: false, reason: 'score pins are not running' }),
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[alerts] ' + line); },
+    });
+    watch.setAlerts(a);
+    return a;
+  } catch (err) {
+    const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);
+    console.error('[alerts] Lumen Alerts could not start: ' + why);
+    for (const ch of ['lumen-alerts:describe', 'lumen-alerts:set', 'lumen-alerts:act']) {
+      try { ipcMain.handle(ch, () => { throw new Error('Lumen Alerts could not start: ' + why); }); } catch { /* already registered */ }
+    }
+    return null;
+  }
+})();
 // Fresh after watching: the layer closing re-reads what was playing; the setting relabels the tiles.
 if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
