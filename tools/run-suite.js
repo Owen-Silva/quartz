@@ -48,6 +48,7 @@ function castlabsBuild() {
 const TESTS = [
   { name: 'argvurl', file: 'argvurl-harness.js' },
   { name: 'bravesearch', file: 'bravesearch-harness.js' },
+  { name: 'claudeanswer', file: 'claudeanswer-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
@@ -91,6 +92,7 @@ const TESTS = [
   // to a Google favicon host anywhere.
   { name: 'pagefavicons-e2e', file: 'pagefavicons-e2e.js', e2e: true },
   { name: 'bravesearch-e2e', file: 'bravesearch-e2e.js', e2e: true },
+  { name: 'claudeanswer-e2e', file: 'claudeanswer-e2e.js', e2e: true },
   { name: 'toprow-e2e', file: 'toprow-e2e.js', e2e: true },
   // The daily paths (tests/e2e-kit.js): session restore across restarts, tab sleep and wake,
   // find in page, downloads, the address bar.

@@ -589,6 +589,21 @@ contextBridge.exposeInMainWorld('api', {
     setKey: (key) => ipcRenderer.invoke('brave-search:set-key', String(key == null ? '' : key)),
     test: () => ipcRenderer.invoke('brave-search:test')
   },
+  // The AI answer above Quartz results (claudeanswer.js). Same one-way key:
+  // describe() -> { hasKey, keyMask, keyError, canEncrypt, mode, modes, capUsd,
+  // autoModel, deepModel, models, month: { id, label, spentUsd, answers, capUsd,
+  // capReached }, last, keysUrl, billingUrl, pricesChecked }. setKey('') removes
+  // it; a refused paste comes back with `error`. setConfig({ mode, capUsd,
+  // autoModel, deepModel }) saves any of those. test() is GET /v1/models (free)
+  // and adds `check: { ok, state, title, detail }`. Null if main refuses.
+  claudeAnswer: {
+    describe: () => ipcRenderer.invoke('claude-answer:describe'),
+    setKey: (key) => ipcRenderer.invoke('claude-answer:set-key', String(key == null ? '' : key)),
+    setConfig: (patch) => ipcRenderer.invoke('claude-answer:set-config', patch && typeof patch === 'object' ? {
+      mode: patch.mode, capUsd: patch.capUsd, autoModel: patch.autoModel, deepModel: patch.deepModel
+    } : {}),
+    test: () => ipcRenderer.invoke('claude-answer:test')
+  },
   // The first-run welcome (firstrun-main.js): whether to show it, the flag
   // that says it is done, and its default-browser step. Every call resolves;
   // a failure comes back with a plain `reason`, never a silent null.
