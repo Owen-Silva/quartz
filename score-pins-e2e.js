@@ -92,6 +92,73 @@ const server = http.createServer((req, res) => {
 });
 const hitsMatching = (re) => Object.keys(mock.hits).filter((k) => re.test(k)).reduce((n, k) => n + mock.hits[k], 0);
 
+/* ---- the focus watcher ------------------------------------------------------------------------------
+ * testwatch.js proves no window of the test touches the screen; this proves none ever takes FOCUS.
+ * Every 25 ms, from before the first launch: GetForegroundWindow's owner pid against every test pid
+ * (a FOCUS line if it is one), and how many visible top-level windows the test pids own (so the
+ * proof covers the card windows, not only the main one). Enumeration runs in C#: no PS callbacks. */
+const FOCUS_PS = String.raw`param([string]$PidFile)
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public static class F {
+  public delegate bool EnumProc(IntPtr h, IntPtr p);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public static HashSet<uint> Pids = new HashSet<uint>();
+  public static int CountVisible() {
+    int n = 0;
+    EnumWindows(delegate(IntPtr h, IntPtr p) { uint wp; GetWindowThreadProcessId(h, out wp); if (Pids.Contains(wp) && IsWindowVisible(h)) n++; return true; }, IntPtr.Zero);
+    return n;
+  }
+  public static uint FgPid() { uint wp = 0; IntPtr h = GetForegroundWindow(); if (h != IntPtr.Zero) GetWindowThreadProcessId(h, out wp); return wp; }
+}
+"@
+"READY"
+$samples = 0; $max = 0; $i = 0; $last = [DateTime]::Now
+while ($true) {
+  if (($i % 20) -eq 0 -and (Test-Path $PidFile)) { foreach ($l in Get-Content $PidFile) { if ($l -match '^\d+$') { [F]::Pids.Add([uint32]$l) | Out-Null } } }
+  $i++
+  if ([F]::Pids.Count -gt 0) {
+    $samples++
+    $fg = [F]::FgPid()
+    if ([F]::Pids.Contains($fg)) { "FOCUS pid $fg at sample $samples" }
+    $n = [F]::CountVisible(); if ($n -gt $max) { $max = $n }
+    if (([DateTime]::Now - $last).TotalSeconds -ge 2) { "STAT $samples $max"; $last = [DateTime]::Now }
+  }
+  Start-Sleep -Milliseconds 25
+}`;
+function startFocusWatch() {
+  const { spawn } = require('child_process');
+  const ps1 = path.join(os.tmpdir(), TAG + '-focus.ps1');
+  const pidFile = path.join(os.tmpdir(), TAG + '-focus.pid');
+  fs.writeFileSync(ps1, FOCUS_PS);
+  fs.writeFileSync(pidFile, '');
+  const proc = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-PidFile', pidFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const fw = { focus: [], samples: 0, maxWins: 0 };
+  const stop = () => { try { proc.kill(); } catch (e) { /* gone */ } for (const f of [ps1, pidFile]) { try { fs.unlinkSync(f); } catch (e) { /* gone */ } } };
+  process.on('exit', stop);
+  fw.stop = stop;
+  fw.watch = (pid) => fs.appendFileSync(pidFile, pid + '\n');
+  fw.ready = new Promise((resolve, reject) => {
+    let buf = '';
+    const t = setTimeout(() => reject(new Error('the focus watcher did not start within 30 s')), 30000);
+    proc.stdout.on('data', (d) => {
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (/^READY/.test(line)) { clearTimeout(t); resolve(fw); }
+        else if (/^FOCUS/.test(line)) { fw.focus.push(line); console.log('[e2e] ' + line); }
+        else if (/^STAT/.test(line)) { const m = line.split(' '); fw.samples = Number(m[1]); fw.maxWins = Number(m[2]); }
+      }
+    });
+    proc.on('exit', (c) => { clearTimeout(t); reject(new Error('the focus watcher exited (' + c + ')')); });
+  });
+  return fw;
+}
+
 /* ---- the run ------------------------------------------------------------------------------------- */
 run('score-pins-e2e', async ({ check, launch, say }) => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -104,7 +171,10 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     QUARTZ_SCORES_POLL_SCALE: '0.02',
     QUARTZ_WATCH_BOOT_GRACE_MS: '3600000',       // Lumen reads no real service during this run
   };
+  const fw = startFocusWatch();
+  await fw.ready;
   let q = await launch({ cdp: CDP_PORT, env });
+  fw.watch(q.child.pid);
   const T = (op) => q.chrome.ev('api.scores.test(' + JSON.stringify(op || {}) + ')');
   const state = () => T({ op: 'state' });
   const pinOf = async (key) => (await state()).pins.find((p) => p.key === key);
@@ -117,7 +187,10 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     }
     throw new Error('no card page for ' + key);
   }
+  // The logos are ESPN's public CDN images (no account): a shot waits until each has loaded or failed.
+  const settleImgs = (cdp) => (cdp ? cdp.waitFor('[].slice.call(document.images).every(function(i){return i.complete})', 8000).catch(() => 0) : 0);
   async function shot(key, name) {
+    await settleImgs(cards.nhl && key === nhlKey ? cards.nhl : cards.nba);
     const b64 = await T({ op: 'capture', key });
     const f = path.join(SHOTS, 'lumen-scores-' + name + '.png');
     fs.writeFileSync(f, Buffer.from(b64, 'base64'));
@@ -140,14 +213,23 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   await lumen.waitFor('window.ScorePinButton && typeof window.__applyWatch === "function"', 15000);
   await sleep(1200);
   const snap = Snap.full(Date.now());
-  await lumen.ev('window.__applyWatch(' + JSON.stringify(snap) + '), 1');
+  // Main pushes its own snapshot "after hello, and after every change" (watch-main.js); in a test
+  // profile that is the empty cache, and one landing AFTER this injection rebuilt the rows with no
+  // games (two runs lost the NHL button that way). From here the e2e owns Lumen's rows: later
+  // pushes are counted, not applied.
+  await lumen.ev('(function(s){window.__applyWatch(s);window.__e2eDropped=0;window.__applyWatch=function(){window.__e2eDropped++};return 1})(' + JSON.stringify(snap) + ')');
   const nhlKey = 'nhl:' + NHL_ESPN, nbaKey = 'nba:' + NBA_ESPN;
   await lumen.waitFor('document.querySelectorAll(".gw .spb").length >= 2', 15000);
   check(await lumen.ev('[].slice.call(document.querySelectorAll(".gw .spb")).every(function(b){return b.closest(".gw").querySelector(".gc")})'), "Lumen's game cards carry a Pin score control");
+  const spbKeys = await lumen.ev('JSON.stringify([].slice.call(document.querySelectorAll(".gw .spb")).map(function(b){var r=b.closest("section,.row,[data-row]");return b._key+"|"+b.getAttribute("aria-pressed")+"|"+(b.hidden?"hidden":"shown")+"|"+(r?(r.getAttribute("data-row")||r.className):"?")}))');
+  say('pin buttons: ' + spbKeys);
+  check(JSON.parse(spbKeys).some((k) => k.indexOf(nhlKey + '|') === 0), 'the NHL game has its Pin score button', spbKeys);
   await lumen.ev('[].slice.call(document.querySelectorAll(".gw .spb")).filter(function(b){return b._key===' + JSON.stringify(nhlKey) + '})[0].click(), 1');
-  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===1 && s.pins[0].ready && s.pins[0].reading})', 15000);
+  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===1 && s.pins[0].ready && s.pins[0].reading && s.pins[0].visible})', 15000);
   const lumenPinned = await lumen.waitFor('(function(){var b=[].slice.call(document.querySelectorAll(".gw .spb")).filter(function(b){return b._key===' + JSON.stringify(nhlKey) + '})[0];return b && b.getAttribute("aria-pressed")==="true" && b.textContent;})()', 8000).catch(() => '');
-  check(/Pinned/.test(lumenPinned), 'the Lumen button says Pinned once main has pinned it', lumenPinned);
+  const pinDiag = lumenPinned ? '' : await lumen.ev('(function(){var all=[].slice.call(document.querySelectorAll(".gw .spb")).filter(function(b){return b._key===' + JSON.stringify(nhlKey) + '});return JSON.stringify({n:all.length,states:all.map(function(b){return [b.getAttribute("aria-pressed"),b.textContent,b.className]}),pinned:window.ScorePinButton.pinned()})})()').catch((e) => e.message);
+  check(/Pinned/.test(lumenPinned), 'the Lumen button says Pinned once main has pinned it', lumenPinned || pinDiag);
+  say("main's Lumen pushes dropped after the injection so far: " + (await lumen.ev('window.__e2eDropped')));
   let p = await pinOf(nhlKey);
   check(p.alwaysOnTop === true && p.focusable === false && p.focused === false && p.visible === true, 'the card: always on top, never focusable, not focused, shown (inactive)', p);
   check(p.audioMuted === true && p.audible === false, 'TEST SILENCE: the card window is audio-muted', { audioMuted: p.audioMuted, audible: p.audible });
@@ -165,6 +247,12 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     mock.game = landing(REST);
     await c.waitFor('document.querySelector("#home .n:last-child").textContent==="2" && document.getElementById("strip").hidden', 10000);
     await sleep(400);
+    // What is HIDDEN must render nothing (a display rule once beat [hidden]: the strip's tag sat over
+    // the league, a recovered card kept its "paused" words), and the page is exactly the card: no
+    // band of window background under or beside it.
+    const rest = await c.ev('(function(){var r=function(id){return document.getElementById(id).getClientRects().length};var cb=document.getElementById("card").getBoundingClientRect();return {strip:r("strip"),note:r("note"),pp:r("pp"),vw:innerWidth,vh:innerHeight,cw:Math.round(cb.width),ch:Math.ceil(cb.height)}})()');
+    check(rest.strip === 0 && rest.note === 0 && rest.pp === 0, 'at rest the strip, the note and the pill render nothing' + sfx, rest);
+    check(rest.vw === 300 && rest.cw === 300 && Math.abs(rest.vh - rest.ch) <= 1, 'the card window is exactly the card: 300 px wide, as tall as its content' + sfx, rest);
     await shot(nhlKey, 'rest' + sfx);
     // Penalty: MTL trips, TOR goes on the power play.
     const before = (await played(c)).length;
@@ -182,15 +270,23 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     await sleep(300);
     await shot(nhlKey, 'powerplay' + sfx);
     // A power-play goal: the number rolls, the side washes, the strip, the horn; the pill goes.
+    // Every animation the goal starts is recorded as it starts (Element.animate is the only path:
+    // score-pin.js runs its motion through the Web Animations API), not sampled at one instant.
+    await c.ev('(function(){window.__animLog=[];if(window.__animHooked)return 1;window.__animHooked=1;var o=Element.prototype.animate;Element.prototype.animate=function(k){try{var ks=Array.isArray(k)?k:[k];var props={};ks.forEach(function(f){Object.keys(f||{}).forEach(function(x){if(["offset","easing","composite"].indexOf(x)<0)props[x]=1})});window.__animLog&&window.__animLog.push({el:this.id||this.className||this.tagName,props:Object.keys(props).sort().join("+")})}catch(e){}return o.apply(this,arguments)};return 1})()');
     mock.game = landing({ away: 1, home: 3, pens: [PEN_MTL], code: '1551', goals: BASE_GOALS.concat([GOAL_PP]) });
     const goal = await stripIs(c, '/^GOAL/');
     check(goal === 'GOAL \u00b7 TOR \u00b7 Matthews (12) \u00b7 PP', 'goal strip' + sfx, goal);
     await sleep(260);
     await shot(nhlKey, 'goal' + sfx);
-    const anim = await c.ev('document.getAnimations().map(function(a){return a.effect && a.effect.getKeyframes().map(function(k){return Object.keys(k).filter(function(x){return ["offset","easing","composite","computedOffset"].indexOf(x)<0}).join("+")}).join(",")})');
-    check(anim.length >= 2 && anim.every((k) => /^((transform|opacity)(\+(transform|opacity))?,?)+$/.test(k)), 'mid-goal: only transform/opacity animate' + sfx, anim);
+    const anim = await c.ev('window.__animLog.slice()');
+    const animEls = new Set(anim.map((a) => a.el));
+    check(anim.length >= 2 && animEls.size >= 2 && anim.every((a) => /^(opacity|transform|opacity\+transform)$/.test(a.props)), 'the goal animates at least two parts, and only transform/opacity' + sfx, anim);
     const pg = await played(c);
     check(pg[pg.length - 1] === 'horn', 'a goal WOULD play the horn (counted, muted)' + sfx, pg);
+    // While the horn's graph runs (about a second): the window is muted AND Chromium's audible monitor
+    // (which reads the signal level, so it sees the zero gain, not only the mute flag) says silent.
+    const au = await pinOf(nhlKey);
+    check(au.audioMuted === true && au.audible === false, 'TEST SILENCE during the horn: muted, and the audio monitor hears nothing' + sfx, { audioMuted: au.audioMuted, audible: au.audible });
     await c.waitFor('document.getElementById("pp").hidden && document.querySelector("#home .n:last-child").textContent==="3"', 6000);
     check(true, 'after the PP goal the pill is gone and TOR shows 3' + sfx);
     // The goal is disallowed.
@@ -198,6 +294,8 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     mock.game = landing(Object.assign({ pens: [PEN_MTL] }, REST));
     const ov = await stripIs(c, '/OVERTURNED/');
     check(ov === 'GOAL OVERTURNED \u00b7 TOR \u00b7 MTL 1\u20132 TOR' && (await played(c)).length === n0, 'a disallowed goal: OVERTURNED strip, the score rolls back, no sound' + sfx, ov);
+    const fit = await c.ev('(function(){var t=document.getElementById("stripTxt");return {sw:t.scrollWidth,cw:t.clientWidth}})()');
+    check(fit.sw <= fit.cw, 'the longest strip (OVERTURNED) fits the card unhovered: no ellipsis' + sfx, fit);
     await c.waitFor('document.getElementById("strip").hidden', 9000);
     // A power play that simply runs out: the pill goes, silently.
     mock.game = landing(Object.assign({ pens: [PEN_MTL, PEN_TOR], code: '1541' }, REST));
@@ -215,7 +313,7 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     await shot(nhlKey, 'failure' + sfx);
     mock.mode = 'ok';
     await c.waitFor('document.getElementById("note").hidden && !document.getElementById("card").classList.contains("paused")', 15000);
-    check(true, 'the feed back: the paused note goes' + sfx);
+    check(await c.ev('document.getElementById("note").getClientRects().length === 0'), 'the feed back: the paused note goes, and renders nothing' + sfx);
   }
   await scenario('dark');
 
@@ -260,7 +358,7 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   const nbaGame = snap.sports.live.find((e) => e.league === 'nba');
   const r2 = await q.chrome.ev('api.scores.pin(' + JSON.stringify(nbaGame) + ')');
   check(r2 && r2.ok && r2.key === nbaKey, 'palette path: api.scores.pin pins a second game', r2);
-  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===2 && s.pins.every(function(p){return p.ready && p.reading})})', 15000);
+  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===2 && s.pins.every(function(p){return p.ready && p.reading && p.visible})})', 15000);
   cards.nba = await cardCdp(nbaKey);
   st = await state();
   const [b1, b2] = st.pins.map((x) => x.bounds);
@@ -271,9 +369,9 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   async function stackShot(name) {
     const s2 = await state();
     const imgs = [];
-    for (const x of s2.pins) imgs.push({ b: x.bounds, d: await T({ op: 'capture', key: x.key }) });
+    for (const x of s2.pins) { await settleImgs(x.key === nhlKey ? cards.nhl : cards.nba); imgs.push({ b: x.bounds, d: await T({ op: 'capture', key: x.key }) }); }
     const minY = Math.min(...imgs.map((i) => i.b.y)), maxY = Math.max(...imgs.map((i) => i.b.y + i.b.height));
-    const out = await lumen.ev('(async function(){var imgs=' + JSON.stringify(imgs) + ';var cv=document.createElement("canvas");var pad=16,dpr=' + '1' + ';cv.width=' + (s2.pins[0].bounds.width + 32) + ';cv.height=' + (maxY - minY + 32) + ';var g=cv.getContext("2d");g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--bg")||"#888";g.fillRect(0,0,cv.width,cv.height);for(var i=0;i<imgs.length;i++){var im=new Image();im.src="data:image/png;base64,"+imgs[i].d;await im.decode();g.drawImage(im,pad,pad+imgs[i].b.y-' + minY + ',imgs[i].b.width,imgs[i].b.height);}return cv.toDataURL("image/png").split(",")[1];})()');
+    const out = await lumen.ev('(async function(){var imgs=' + JSON.stringify(imgs) + ';var cv=document.createElement("canvas");var pad=16,dpr=' + '1' + ';cv.width=' + (s2.pins[0].bounds.width + 32) + ';cv.height=' + (maxY - minY + 32) + ';var g=cv.getContext("2d");g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--bg")||"#888";g.fillRect(0,0,cv.width,cv.height);for(var i=0;i<imgs.length;i++){var im=new Image();im.src="data:image/png;base64,"+imgs[i].d;await im.decode();g.drawImage(im,pad,pad+imgs[i].b.y-(' + minY + '),imgs[i].b.width,imgs[i].b.height);}return cv.toDataURL("image/png").split(",")[1];})()');
     const f = path.join(SHOTS, 'lumen-scores-' + name + '.png');
     fs.writeFileSync(f, Buffer.from(out, 'base64'));
     say('shot ' + f);
@@ -327,7 +425,8 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   mock.game = landing({ away: 1, home: 2 });
   const env2 = Object.assign({}, env, { QUARTZ_SCORES_POLL_SCALE: '1' });
   q = await launch({ cdp: CDP_PORT, env: env2 });
-  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===2 && s.pins.every(function(p){return p.ready && p.reading})})', 20000);
+  fw.watch(q.child.pid);
+  await q.chrome.waitFor('api.scores.test({op:"state"}).then(function(s){return s.pins.length===2 && s.pins.every(function(p){return p.ready && p.reading && p.visible})})', 20000);
   st = await state();
   const back = st.pins.find((x) => x.key === nhlKey);
   check(back && back.pos && back.bounds.x === moved.pos.x && back.bounds.y === moved.pos.y, 'after a restart the pins are back, the dragged card where it was left', [back && back.bounds, moved.pos]);
@@ -339,13 +438,25 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
     await q.chrome.ev('api.scores.unpin(' + JSON.stringify(nbaKey) + ')');
     await sleep(3000);
     const pid = (await state()).pins[0].pid;
-    await T({ op: 'metrics' });
+    // Two readings: Electron's getAppMetrics (its percent is of the WHOLE machine, all cores), and the
+    // OS's own CPU seconds per process over the same window (unambiguous: seconds / 60 = one core's share).
+    const cpuSec = (pids) => {
+      const out = require('child_process').execFileSync('powershell', ['-NoProfile', '-Command', 'Get-Process -Id ' + pids.join(',') + ' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Id + " " + $_.TotalProcessorTime.TotalSeconds }'], { encoding: 'utf8' });
+      const r = {}; out.trim().split(/\r?\n/).forEach((l) => { const [a, b] = l.trim().split(' '); if (a) r[a] = Number(b); }); return r;
+    };
+    const m0 = await T({ op: 'metrics' });
+    const pids = m0.map((x) => x.pid);
+    const s0 = cpuSec(pids), t0 = Date.now();
     await sleep(60000);
     const m = await T({ op: 'metrics' });
+    const s1 = cpuSec(pids), secs = (Date.now() - t0) / 1000;
+    const core = (p) => (s1[p] !== undefined && s0[p] !== undefined ? (s1[p] - s0[p]) / secs * 100 : NaN);
     const card = m.find((x) => x.pid === pid) || {};
-    const total = m.reduce((n, x) => n + x.cpu, 0);
-    say('IDLE CPU over 60 s, one live card at 15 s polls: card renderer ' + (card.cpu || 0).toFixed(2) + '% of one core, ' + (card.wakeups || 0) + ' wakeups/s; all Quartz processes ' + total.toFixed(2) + '%; ' + m.map((x) => x.type + ' ' + x.cpu.toFixed(2)).join(', '));
-    check(card.cpu !== undefined && card.cpu < 1, 'idle: the card renderer stays under 1% of a core', card);
+    const cardCore = core(pid);
+    const allCore = pids.reduce((n, p) => n + (core(p) || 0), 0);
+    const nCpu = os.cpus().length;
+    say('IDLE CPU over ' + secs.toFixed(0) + ' s, one live card at 15 s polls: card renderer ' + cardCore.toFixed(2) + '% of one core (OS CPU time), Electron metrics ' + (card.cpu || 0).toFixed(3) + '% of the machine (' + nCpu + ' logical CPUs), ' + (card.wakeups || 0) + ' idle wakeups/s; all Quartz processes ' + allCore.toFixed(2) + '% of one core; ' + m.map((x) => x.type + ' ' + core(x.pid).toFixed(2)).join(', '));
+    check(Number.isFinite(cardCore) && cardCore < 1, 'idle: the card renderer stays under 1% of one core', { cardCore, metrics: card });
   }
   // The close control drops the pin and its saved entry.
   await rc.ev('document.getElementById("close").click(), 1');
@@ -355,6 +466,9 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   const left = (await state()).pins.length;
   for (const k of (await state()).pins.map((x) => x.key)) await q.chrome.ev('api.scores.unpin(' + JSON.stringify(k) + ')');
   check((await state()).pins.length === 0, 'every pin closed (' + left + ' left before the sweep)');
+  await sleep(2200);   // one more STAT line from the focus watcher
+  check(fw.focus.length === 0 && fw.samples > 400 && fw.maxWins >= 3, 'NEVER FOCUSED: no test window (Quartz or any card) was the foreground window at any poll (a 25 ms sleep between polls); ' + fw.samples + ' polls, up to ' + fw.maxWins + ' visible test windows watched at once', { focus: fw.focus.slice(0, 3), samples: fw.samples, maxWins: fw.maxWins });
+  fw.stop();
   await q.quit();
   server.close();
   try { fs.unlinkSync(OPEN_STUB); } catch (e) { /* none */ }

@@ -82,6 +82,10 @@ const TESTS = [
   // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
   // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
   { name: 'watch-shows', file: 'tests/watch-shows-test.js' },
+  // Lumen's pinned scores: feed parsing and the event diff (watch/scores.js), and score-pins-main.js
+  // driven by fake windows (stacking, saved pins, polling cadence, Final, silence under tests).
+  { name: 'scores', file: 'tests/scores-test.js' },
+  { name: 'scorepins', file: 'tests/score-pins-main-test.js' },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
@@ -140,6 +144,9 @@ const TESTS = [
   // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
   // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
   { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
+  // Pinned score cards in a hidden instance against a local feed mock: goal, penalty, power play,
+  // outage, restart; off-screen, never focused, muted (sounds counted, never played). ~4 min.
+  { name: 'score-pins-e2e', file: 'score-pins-e2e.js', e2e: true, timeout: 600 },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,
