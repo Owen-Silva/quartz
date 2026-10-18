@@ -108,6 +108,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('open-url', handler);
     return () => ipcRenderer.removeListener('open-url', handler);
   },
+  // A page tried to open a file:// URL and main refused (filenav.js):
+  // { wcId, url, text }. The chrome puts `text` on that tab's note bar.
+  onFileNavBlocked: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on('file-nav-blocked', handler);
+    return () => ipcRenderer.removeListener('file-nav-blocked', handler);
+  },
   // A page's context menu asked for what is on screen to be handed to a Claude
   // chamber: { url, title, selection, mode? }. `selection` is '' for the
   // whole-page items, and is Chromium's already-truncated selectionText for the

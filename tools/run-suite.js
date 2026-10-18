@@ -50,6 +50,8 @@ const TESTS = [
   { name: 'bravesearch', file: 'bravesearch-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
+  // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
+  { name: 'filenav', file: 'filenav-harness.js' },
   // Drives an instance it does not start itself (CDP_PORT): the suite launches one for it.
   { name: 'files', file: 'files-harness.js', launch: 9241, e2e: true },
   { name: 'keywords', file: 'keywords-harness.js' },
@@ -95,6 +97,9 @@ const TESTS = [
   { name: 'sessions-e2e', file: 'sessions-e2e.js', e2e: true },
   { name: 'sleep-e2e', file: 'sleep-e2e.js', e2e: true },
   { name: 'find-e2e', file: 'find-e2e.js', e2e: true },
+  // Links on a local page: file -> file navigates, target=_blank opens a tab, the web is refused
+  // with a note on the tab.
+  { name: 'filelinks-e2e', file: 'filelinks-e2e.js', e2e: true },
   { name: 'downloads-e2e', file: 'downloads-e2e.js', e2e: true },
   { name: 'omnibox-e2e', file: 'omnibox-e2e.js', e2e: true },
   // Drives the shared look file with looksync/fake-writer.js (vendored, so it runs anywhere).

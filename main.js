@@ -37,6 +37,7 @@ const { createSession, killAll, listPrograms, hasProgram } = require('./pty');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
+const fileNav = require('./filenav');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
 const braveSearchModule = require('./bravesearch');
@@ -5146,6 +5147,37 @@ function windowOpenDecision(details) {
 }
 
 /**
+ * A guest's own window-open decision: windowOpenDecision() above, plus the one
+ * case it cannot judge without knowing the opener -- a file:// target. A local
+ * page's target="_blank" link (or window.open) to another local file becomes a
+ * Quartz tab on that file, as it would in Chrome. Asked by anything else it is
+ * refused and the tab says so; before this, both halves vanished silently.
+ * The rule and its reasoning live in filenav.js. The handler is given no
+ * initiator frame here, so the referrer stands in for it: a file:// page sends
+ * none, a web frame inside one sends its own origin.
+ */
+function guestWindowOpenDecision(contents, details) {
+  const raw = (details && details.url) || '';
+  if (!fileNav.isFileUrl(raw)) return windowOpenDecision(details);
+  const referrer = (details && details.referrer && details.referrer.url) || '';
+  if (fileNav.pageMayOpen(raw, safeUrl(contents), referrer, BUNDLED_PAGE_PREFIX)) {
+    let href = raw;
+    try { href = new URL(raw).href; } catch { /* the guest's own spelling, then */ }
+    send('open-url', { url: href, background: (details && details.disposition) === 'background-tab' });
+  } else {
+    fileNavBlocked(contents, raw);
+  }
+  return { action: 'deny' };
+}
+
+/** Tell the chrome a page was stopped from opening a file, so the tab can say it. */
+function fileNavBlocked(contents, url) {
+  let wcId = null;
+  try { wcId = contents && !contents.isDestroyed() ? contents.id : null; } catch { /* gone */ }
+  send('file-nav-blocked', { wcId, url: String(url || ''), text: fileNav.blockedNotice(url) });
+}
+
+/**
  * A child window just opened. Give it the same rules its opener had: no menu
  * bar, its links become tabs in the chrome, its own popups nest, its title
  * follows the page, and it never outlives the browser window.
@@ -5254,7 +5286,7 @@ app.on('web-contents-created', (_event, contents) => {
    * modern path -- and it only runs at all because will-attach-webview turns
    * `allowpopups` on.
    */
-  contents.setWindowOpenHandler(windowOpenDecision);
+  contents.setWindowOpenHandler((details) => guestWindowOpenDecision(contents, details));
 
   // The window the decision above allowed. Everything the popup needs that is
   // not a BrowserWindow option is wired here.
@@ -5272,14 +5304,23 @@ app.on('web-contents-created', (_event, contents) => {
    * drives, omnibox included -- do not emit it. So typing a file:// path stays
    * exactly as it was.
    *
-   * The one page-initiated file:// navigation we do want is our own: the new
-   * tab page calls location.assign() for whatever was typed into its field,
-   * and reader.html links back with location.href. Both are bundled pages.
+   * Two page-initiated file:// navigations go through. Our own: the new tab
+   * page calls location.assign() for whatever was typed into its field, and
+   * reader.html links back with location.href -- both bundled pages. And a
+   * local page's own links (<a href="1-prism.html"> on a file:// page), which
+   * Chrome follows and this lock used to eat without a word. filenav.js holds
+   * the rule and why file -> file is safe; everything else is still refused,
+   * and now the tab says so instead of the click doing nothing.
    */
   contents.on('will-navigate', (event, url) => {
-    if (typeof url !== 'string' || !/^file:/i.test(url)) return;
-    if (isBundledPageUrl(safeUrl(contents))) return;
+    if (typeof url !== 'string' || !fileNav.isFileUrl(url)) return;
+    // The frame that started it: an http iframe inside a local page does not
+    // get to borrow the page's file:// standing.
+    let by = '';
+    try { by = event && event.initiator ? String(event.initiator.url || '') : ''; } catch { by = ''; }
+    if (fileNav.pageMayOpen(url, safeUrl(contents), by, BUNDLED_PAGE_PREFIX)) return;
     event.preventDefault();
+    fileNavBlocked(contents, url);
   });
 
   // A click inside a guest never reaches the chrome renderer; split view needs
