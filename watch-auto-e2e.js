@@ -67,6 +67,10 @@ function seedCache(dir, ages, dflt) {
   const enabled = {}; for (const id of off) enabled[id] = false;
   fs.writeFileSync(path.join(dir, 'watch.json'), JSON.stringify({ enabled, background: true }));   // boot 1 turns it off; each boot starts at the default
   fs.writeFileSync(path.join(dir, 'watch-cache.json'), JSON.stringify({ v: 1, services }));
+  // "Play inside Lumen" off (watch-player-main.js, default on): "fresh after watching" here is the
+  // road where a title opens in a Quartz tab and Lumen goes behind it. The player layer's own
+  // re-read after it closes is watch-player-e2e's.
+  fs.writeFileSync(path.join(dir, 'watch-player.json'), JSON.stringify({ inside: false }));
 }
 
 /* ---- the process tree's working set and CPU, sampled (for --measure) ------------------------------ */

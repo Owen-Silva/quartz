@@ -194,10 +194,15 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     const memBefore = await chrome.ev('window.api.watchPlayer.memory()');
 
     // Move down the rows (Watch's rows are a stack moved by the wheel, not a scrolling page), then
-    // open a YouTube title with a real click. "Where he was" = the stack's offset, the row in focus,
-    // and any scroll a container has.
+    // open a YouTube title with a real click. "Where he was" = the row in focus, where that row sits on
+    // the screen, and any scroll a container has. The stack's own offset is printed but not compared:
+    // the re-read after watching may add a row ABOVE his (rows in place, watch-auto), and then the
+    // stack moves one row further to keep his row exactly where it was.
     const where = `(() => { const st = document.getElementById('stack'); const cur = st && st.querySelector('.lrow[data-d="0"]');
-      return JSON.stringify([st ? st.style.transform : null, cur ? cur.dataset.key : null, document.scrollingElement ? document.scrollingElement.scrollTop : 0, st && st.parentNode ? st.parentNode.scrollTop || 0 : 0]); })()`;
+      return JSON.stringify([st ? st.style.transform : null, cur ? cur.dataset.key : null, document.scrollingElement ? document.scrollingElement.scrollTop : 0, st && st.parentNode ? st.parentNode.scrollTop || 0 : 0,
+        cur ? Math.round(cur.getBoundingClientRect().top) : null, st ? [...st.querySelectorAll('.lrow')].map((r) => r.dataset.key).join(',') : '']); })()`;
+    // the same row in focus, at the same place on screen (1 px), the same scroll
+    const samePlace = (a, b) => { try { const x = JSON.parse(a), y = JSON.parse(b); return x[1] === y[1] && x[2] === y[2] && x[3] === y[3] && x[4] !== null && Math.abs(x[4] - y[4]) <= 1; } catch (e) { return false; } };
     // Down to the first row below the top one that has a YouTube tile (the wheel moves one row per turn).
     const ytRow = await g.ev(`(() => { const rows = [...document.querySelectorAll('#stack .lrow')];
       for (let i = 1; i < rows.length; i++) if ([...rows[i].querySelectorAll('*')].some((n) => n._item && n._item.service === 'youtube')) return i; return 0; })()`);
@@ -344,7 +349,8 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     check(!(await targetWhere(q, (x) => String(x.url).indexOf(FY + '/') === 0 && x.type !== 'page', 1500)), 'no player target is left');
     const scrollNow = await g.ev(where);
     const moved = (() => { try { return JSON.parse(scrolled); } catch (e) { return []; } })();
-    check((ytRow === 0 || (!!moved[0] && /translateY\(-\d/.test(moved[0]))) && scrollNow === scrolled, 'Back returns to the rows where he was (the same row, the same offset)', { before: scrolled, after: scrollNow });
+    // the stack had moved down (watch.js writes translateY(calc(-Npx + var(--lift))) since the compact bar)
+    check((ytRow === 0 || (!!moved[0] && /translateY\((calc\()?-\d/.test(moved[0]))) && samePlace(scrolled, scrollNow), 'Back returns to the rows where he was (the same row in focus, at the same place on screen)', { before: scrolled, after: scrollNow });
     const asked = await chrome.waitFor(`(() => { const c = ${ST}.lastClosed; return c && c.asked ? c.asked : null; })()`, 5000).catch(() => null);
     check(Array.isArray(asked) && asked.indexOf('youtube') !== -1 && logHas(/re-reading youtube after watching/), 'closing asks Watch to re-read YouTube (fresh after watching)', asked);
     await sleep(2500);
