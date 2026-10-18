@@ -35,7 +35,8 @@ const WIDEVINE = !argv.includes('--no-widevine');
 const SHOT_BACK = opt('back-shot', '');   // a shot of the rows after Back, at 1536x800
 const TAG = 'quartz-player-e2e-' + process.pid;
 const EDGE_STUB = path.join(os.tmpdir(), TAG + '-edge.txt');
-const CLIP = process.env.QUARTZ_PLAYER_CLIP || path.join(os.homedir(), 'Videos', 'Roblox', 'Roblox-2026-07-24T03_40_51.629Z.mp4');
+// The playing video: a synthetic clip (testsrc2 + a sine tone), never a real recording.
+const { CLIP, sendClip } = require('./tests/fixture-clip');
 const PLAY_HTML = fs.readFileSync(path.join(__dirname, 'tests', 'drm-fixtures', 'widevine-play.html'), 'utf8');
 // drm-castlabs-e2e.js's licence page: Widevine granted, then a junk licence -- a service refusing this build.
 const LICENCE_PAGE = `<!doctype html><title>Licence test</title><video id="v"></video><script>
@@ -62,20 +63,6 @@ function listen(handler) {
 function sendHtml(res, body, headers) {
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, headers || {}));
   res.end(body);
-}
-function sendClip(req, res) {
-  let st;
-  try { st = fs.statSync(CLIP); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
-  const m = /bytes=(\d+)-(\d*)/.exec(String(req.headers.range || ''));
-  if (m) {
-    const start = Number(m[1]);
-    const end = m[2] ? Math.min(Number(m[2]), st.size - 1) : Math.min(start + 4 * 1024 * 1024 - 1, st.size - 1);
-    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size, 'Content-Length': end - start + 1 });
-    fs.createReadStream(CLIP, { start, end }).pipe(res);
-    return;
-  }
-  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
-  fs.createReadStream(CLIP).pipe(res);
 }
 /** The fixture "service watch page": a playing HTML5 video and every kind of link a service page has. */
 function playerPage(name, other, auth) {

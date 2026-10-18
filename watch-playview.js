@@ -745,12 +745,25 @@
     info.hidden = false;
     var phase = !online() ? 'offline' : p.phase;
     var moved = !!(p.read && p.read.url && p.itemUrl && stripT(p.read.url) !== stripT(p.itemUrl) && s.service !== 'youtube');
+    // Rebuild only when what it shows changed: the layer's own class changes and the page reads call
+    // update() often, and a rebuild between his mouse press and release would swallow that click.
+    var key = renderKey(s, p, phase, moved);
+    if (key && key === p.rkey && info.firstChild) return;
+    p.rkey = key;
     var m = model(s.service, p.read, p.item, s.title, { moved: moved });
     info.setAttribute('data-svc', s.service);
     info.setAttribute('data-phase', phase);
     info.replaceChildren();
     if (s.service === 'youtube') renderYT(s, p, m, phase, info);
     else renderOther(s, p, m, phase, info);
+  }
+  /** Everything the info is drawn from; '' (always redraw) if it can't be written down. */
+  function renderKey(s, p, phase, moved) {
+    var it = p.item || {};
+    try {
+      return JSON.stringify([s.service, s.id, s.wcId, s.title, phase, moved, p.why, p.busy, p.confirm, p.more, p.save, p.spKnown,
+        p.lastShowPage || 0, it.id, it.title, it.subtitle, p.read]);
+    } catch (e) { return ''; }
   }
   function stripT(u) { return String(u || '').replace(/[?&]t=\d+s?/, ''); }
 

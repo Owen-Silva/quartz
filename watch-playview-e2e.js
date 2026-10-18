@@ -29,7 +29,8 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9771'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-playview-shots'));
-const CLIP = process.env.QUARTZ_PLAYER_CLIP || path.join(os.homedir(), 'Videos', 'Roblox', 'Roblox-2026-07-24T03_40_51.629Z.mp4');
+// The playing video: a synthetic clip (testsrc2 + a sine tone), never a real recording.
+const { CLIP, sendClip } = require('./tests/fixture-clip');
 const SIZES = [[1280, 800], [1536, 800], [1920, 1000]];
 const VID = 'pvTest00001';
 
@@ -42,20 +43,6 @@ function listen(handler) {
   });
 }
 function sendHtml(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
-function sendClip(req, res) {
-  let st;
-  try { st = fs.statSync(CLIP); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
-  const m = /bytes=(\d+)-(\d*)/.exec(String(req.headers.range || ''));
-  if (m) {
-    const start = Number(m[1]);
-    const end = m[2] ? Math.min(Number(m[2]), st.size - 1) : Math.min(start + 4 * 1024 * 1024 - 1, st.size - 1);
-    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size, 'Content-Length': end - start + 1 });
-    fs.createReadStream(CLIP, { start, end }).pipe(res);
-    return;
-  }
-  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
-  fs.createReadStream(CLIP).pipe(res);
-}
 const EMBED = '<!doctype html><title>embed</title><style>body{margin:0;background:#000}#movie_player{position:fixed;inset:0}video{width:100%;height:100%}</style>' +
   '<div id="movie_player"><video id="v" src="/__media/clip.mp4" autoplay muted loop playsinline></video></div>';
 const hits = { youtube: 0, disney: 0, hulu: 0, prime: 0, espn: 0 };
@@ -151,10 +138,17 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     const pvWait = (cond, ms) => chrome.waitFor(`(() => { const s = ${PS}; const x = s.slots.find((y) => y.boxed) || s.slots[s.slots.length - 1]; return x && (${cond}) ? x : null; })()`, ms || 15000).catch(() => null);
     const guestFor = async (prefix) => { const t = await targetWhere(q, (x) => String(x.url).indexOf(prefix) === 0, 15000); return t ? cdpTo(t) : null; };
     const grid = () => chrome.ev('(() => { const g = document.querySelector(".wp-grid").getBoundingClientRect(); return { x: Math.round(g.left), y: Math.round(g.top), w: Math.round(g.width), h: Math.round(g.height) }; })()');
-    const clickAt = async (sel, label) => {
-      const r = await chrome.ev(`(() => { const n = document.querySelector(${JSON.stringify(sel)}); if (!n) return null; n.scrollIntoView({ block: 'nearest' }); const b = n.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, dis: !!n.disabled }; })()`);
+    const clickAt = async (sel, label, between) => {
+      // Scroll it into view, let that paint, then aim at the node that is there now (and say if something else is on top).
+      const r = await chrome.ev(`(async () => { const q = () => document.querySelector(${JSON.stringify(sel)}); if (!q()) return null; q().scrollIntoView({ block: 'nearest' });
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        const n = q(); if (!n) return null; const b = n.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2; const h = document.elementFromPoint(x, y);
+        return { x, y, dis: !!n.disabled, hit: !!h && n.contains(h), at: h ? h.tagName + '.' + String(h.className).slice(0, 60) : null }; })()`);
       if (!r) { say('click: no ' + (label || sel)); return false; }
-      for (const type of ['mousePressed', 'mouseReleased']) await chrome.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      if (!r.hit) say('click: ' + (label || sel) + ' is not under its own centre: ' + JSON.stringify(r));
+      await chrome.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      if (between) await between();   // something else happens while the button is held down
+      await chrome.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
       return true;
     };
     const shot = async (name, w, h) => {
@@ -474,10 +468,20 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       await chrome.ev(`openInLumen(${JSON.stringify(srv.fronts.hulu.origin + '/watch/show-page-test')}, { service: 'hulu', title: ${JSON.stringify(huluTile.title)}, item: ${JSON.stringify({ id: huluTile.id, service: 'hulu', title: huluTile.title, subtitle: 'S1 E2 · Second' })} }), 1`);
       st = await pvWait('x.service === "hulu" && x.showPage && !x.showPage.disabled', 15000);
       check(!!st, 'a Hulu title from Lumen’s rows: “Show page” is on', st && st.showPage);
-      await clickAt('.wp-layer .pv-showpage', 'Show page');
+      // While the button is held down, the layer's class changes (as the page's reads and the bar do): the
+      // view updates, and the click must still land (a redraw between press and release would swallow it).
+      await clickAt('.wp-layer .pv-showpage', 'Show page', async () => {
+        await chrome.ev('(() => { const l = document.querySelector(".wp-layer"); l.classList.add("pv-e2e-poke"); return 1; })()');
+        await sleep(60);
+        await chrome.ev('(() => { document.querySelector(".wp-layer").classList.remove("pv-e2e-poke"); return 1; })()');
+        await sleep(60);
+      });
       const shown = await g.waitFor('window.LumenShows && LumenShows.isOpen() ? 1 : 0', 6000).catch(() => 0);
-      const after = await chrome.ev(`(() => { const s = ${ST}; return { open: s.open, mini: !!(s.multi && s.multi.mini) }; })()`);
-      check(shown === 1 && (after.mini || !after.open), 'Show page: Lumen’s show page opens; the player waits in the corner', after);
+      // The show page opens in the Lumen tab first; the chrome hears back from it, then sends the player to the corner.
+      const AFTER = `(() => { const s = ${ST}; return { open: s.open, mini: !!(s.multi && s.multi.mini) }; })()`;
+      const after = (await chrome.waitFor(`(() => { const a = ${AFTER}; return a.mini || !a.open ? a : null; })()`, 4000).catch(() => null)) || await chrome.ev(AFTER);
+      check(shown === 1 && (after.mini || !after.open), 'Show page: Lumen’s show page opens; the player waits in the corner',
+        Object.assign({ shown }, after, after.mini || !after.open ? {} : await chrome.ev(`(() => { const s = ${PS}.slots.find((y) => y.service === 'hulu'); const L = WatchPlayer._state(); const b = document.querySelector('.wp-layer .mv-minibtn'); return { why: s && s.why, showPage: s && s.showPage, fs: L.fs, sheet: L.sheet, minibtn: b ? { hidden: b.hidden, disabled: b.disabled } : null }; })()`).catch((e) => ({ err: e.message }))));
       await shot('showpage', 1280, 800);
       await chrome.ev('(() => { if (WatchPlayer.isOpen()) WatchPlayer.close("Close"); return 1; })()');
       await g.ev('(() => { if (window.LumenShows) LumenShows.close(); return 1; })()');

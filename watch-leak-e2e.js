@@ -196,7 +196,17 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
     }
     let sl = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].wcId !== null ? s.slots[0] : null; })()`, 15000).catch(() => null);
     checkLong(!!sl && sl.url.indexOf(FY + '/watch?v=') === 0 && (await tabsN()) === tabs0, 'a YouTube tile plays YouTube\'s FULL watch page in the layer, no tab', sl ? { url: sl.url, tile: ytAt } : { tile: ytAt, card: await g.ev(`window.__e2eSpy.card(${card('youtube')})`).catch((e) => String(e.message).slice(0, 120)), spy: await g.ev('(() => { const s = Object.assign({}, window.__e2eSpy); delete s.card; return s; })()').catch(() => null), log: logText().slice(log0).split('\n').filter((l) => /Lumen|watch/i.test(l)).slice(-6) });
-    check(!(await chrome.ev('WatchPlayerYT._state().fullShown')), 'the full page has no "Full page" button (it is the full page)');
+    // The watch page opens in Lumen's view (watch-playview.js, the default "When a video plays"). While it
+    // looks for YouTube's player, the bar's one button is that view's own toggle to the full page, never the
+    // embed's "Full page" (this is already the watch page). This fixture page has no player, so the view
+    // gives the whole page back and says why, and then there is no "Full page" button: it is the full page.
+    const PVS = `(() => { const y = WatchPlayerYT._state(); const p = window.LumenPlayview ? LumenPlayview._state() : null; const s = p && p.slots[0]; return { y, pref: p && p.pref, s: s ? { mode: s.mode, kind: s.kind, boxed: s.boxed, noRoot: s.noRoot, why: s.why } : null }; })()`;
+    const fb = await chrome.waitFor(`(() => { const x = ${PVS}; return x.y.pv && x.s && x.s.boxed ? x : null; })()`, 8000).catch(() => null);
+    check(!!fb && fb.pref === 'lumen' && fb.s.mode === 'lumen' && fb.s.kind === 'watch' && fb.y.fullShown && fb.y.pv === true && fb.y.label === 'Full page',
+      'the watch page opens in Lumen’s view: its only button is the view’s own “Full page” toggle, not the embed’s', fb || await chrome.ev(PVS));
+    const nr = await chrome.waitFor(`(() => { const x = ${PVS}; return x.s && x.s.noRoot && !x.s.boxed && !x.y.fullShown ? x : null; })()`, 14000).catch(() => null);
+    check(!!nr && /couldn’t find YouTube’s player on this page, so the whole page shows/.test(nr.s.why) && !nr.y.pv,
+      'no player on that page: the view gives the full page back, says why, and the full page has no “Full page” button', nr || await chrome.ev(PVS));
     // Sign in (the chip's and the popover's button send this line).
     await line('signin', { service: 'hulu' });
     sl = await layerAt(srv.fronts.hulu.origin);

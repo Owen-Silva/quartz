@@ -31,7 +31,8 @@ const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-multiview-shots'));
 const SIZE = opt('size', '1536x800');
 const SHOTS_ONLY = argv.includes('--shots-only');
 const PREFIX = opt('prefix', 'lumen-n-multiview');
-const CLIP = process.env.QUARTZ_PLAYER_CLIP || path.join(os.homedir(), 'Videos', 'Roblox', 'Roblox-2026-07-24T03_40_51.629Z.mp4');
+// The playing video: a synthetic clip (testsrc2 + a sine tone), never a real recording.
+const { CLIP, sendClip } = require('./tests/fixture-clip');
 const FREE_FILE = path.join(os.tmpdir(), 'quartz-multiview-free-' + process.pid + '.txt');
 const LIMIT_TEXT = 'Too many people are using your account right now. Stop playing on another device to continue.';
 
@@ -44,20 +45,6 @@ function listen(handler) {
   });
 }
 function sendHtml(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
-function sendClip(req, res) {
-  let st;
-  try { st = fs.statSync(CLIP); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
-  const m = /bytes=(\d+)-(\d*)/.exec(String(req.headers.range || ''));
-  if (m) {
-    const start = Number(m[1]);
-    const end = m[2] ? Math.min(Number(m[2]), st.size - 1) : Math.min(start + 4 * 1024 * 1024 - 1, st.size - 1);
-    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size, 'Content-Length': end - start + 1 });
-    fs.createReadStream(CLIP, { start, end }).pipe(res);
-    return;
-  }
-  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
-  fs.createReadStream(CLIP).pipe(res);
-}
 // A playing HTML5 video (with its sound, when autoplay allows it), and a stamp that changes on every load.
 const VIDEO = '<video id="v" src="/__media/clip.mp4" autoplay loop playsinline style="display:block;width:100%;height:100%;object-fit:contain;background:#000"></video>' +
   '<script>window.__born = Date.now() + Math.random(); window.addEventListener("keydown", function (e) { window.__lastKey = e.key; }, true); var v = document.getElementById("v"); v.play().catch(function () { v.muted = true; v.play().catch(function () {}); });</script>';

@@ -285,6 +285,8 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await shoot('elsewhere');
     await clickText('.shw-prov-r .btn', 'Watch on Prime Video');
     const pv = await layerAt(FP + '/search/');
+    // The slot has the URL before its page asks the fixture for it: give the request a moment to land.
+    for (let i = 0; pv && i < 50 && st.searched.indexOf('Severance') === -1; i++) await sleep(100);
     check(!!pv && st.searched.indexOf('Severance') !== -1, '"Watch on Prime Video" opens Prime Video’s search for Severance in the layer (no tab, no Edge)', pv);
     await closeLayer();
     check(await g.ev('LumenShows.isOpen()'), 'closing the layer leaves the Severance page where it was');
