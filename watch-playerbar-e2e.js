@@ -315,7 +315,7 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(!(await chrome.ev(S)).idle, 'the bar shows on a mouse move');
     await sleep(3200);
     st = await chrome.ev(S);
-    check(st.idle && (await chrome.ev('getComputedStyle(document.querySelector(".pb")).opacity')) === '0' && (await g.ev('document.documentElement.classList.contains("lumen-pb-idle")')), 'still for 2.5 s while playing: the bar and the cursor hide');
+    check(st.idle && (await chrome.ev('getComputedStyle(document.querySelector(".pb")).opacity')) === '0' && (await g.ev('document.documentElement.classList.contains("lumen-pb-idle")')), 'still for 2.5 s while playing: the bar and the cursor hide', { idle: st.idle, hover: st.hover, p: st.st && st.st.p, op: await chrome.ev('getComputedStyle(document.querySelector(".pb")).opacity'), cur: await g.ev('document.documentElement.className') });
     await key(g, 'ArrowDown'); await sleep(400);
     check(!(await chrome.ev(S)).idle, 'any key shows it again');
     await sleep(3200);
@@ -337,13 +337,14 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     await key(g, 'l'); await sleep(400);
     await key(g, 'ArrowRight'); await sleep(400);
     const adT2 = await vid(g, 'v.currentTime');
-    check(adT2 - adT < 2 && adT2 >= adT - 0.05, 'seeking is blocked during the ad (L, Right)', { from: adT, to: adT2 });
+    // It keeps playing (at 1.25x) through the waits; L + Right would have been +15 s.
+    check(adT2 - adT < 6 && adT2 >= adT - 0.05, 'seeking is blocked during the ad (L, Right)', { from: adT, to: adT2 });
     await wake();
     const sk2 = await chrome.ev('(() => { const r = document.querySelector(".pb-seek").getBoundingClientRect(); return [r.left + r.width * 0.2, r.top + r.height / 2]; })()');
     await click(chrome, sk2[0], sk2[1]);
     await sleep(400);
     const adT3 = await vid(g, 'v.currentTime');
-    check(adT3 - adT2 < 2 && adT3 >= adT2 - 0.05, 'a click on the seek bar during the ad does not seek', { from: adT2, to: adT3 });
+    check(adT3 - adT2 < 6 && adT3 >= adT2 - 0.05, 'a click on the seek bar during the ad does not seek', { from: adT2, to: adT3 });
     check(/Seeking is off while the ad plays/.test((await chrome.ev('LumenPlayerBar._state()')).note), 'and it says why', (await chrome.ev('LumenPlayerBar._state()')).note);
     check(await g.ev('getComputedStyle(document.getElementById("whyad")).visibility === "visible" && getComputedStyle(document.getElementById("whyad")).pointerEvents !== "none"'), '"Why this ad" inside YouTube\'s hidden bar stays visible and clickable');
     check(await g.ev('!document.documentElement.classList.contains("lumen-pv-bar") && document.documentElement.classList.contains("lumen-pb-on")'), 'during the ad the play view\'s display:none hook is off (ad pieces inside YouTube\'s bar stay), Lumen\'s bar stays on');

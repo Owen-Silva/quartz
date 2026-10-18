@@ -162,3 +162,7 @@
    mount gives its children pointer-events:auto; the bar itself stays click-through (only its controls take
    clicks), so the service's Skip button and the video under the empty middle stay clickable. */
 .pv-barmount > .pb { pointer-events: none; left: 0; right: 0; width: auto; bottom: 0; }
+
+/* Lumen's full window: the layer fills the window. watch-player.js place() writes the Watch tab's box
+   inline unless the PAGE went fullscreen; these win over that inline box (never the screen: no OS call). */
+.wp-layer.wp-fs.pb-lumenfs { left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important; width: auto !important; height: auto !important; }

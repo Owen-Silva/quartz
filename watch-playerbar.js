@@ -466,7 +466,8 @@
         break;
       case 'state': take(s, m.st); break;
       case 'rect': if (P.st) { P.st.rect = m.rect; place(s); } break;
-      case 'act': activity(s); break;
+      // A move the page saw: the pointer is in the page, so not on the bar (its pointerleave may never come).
+      case 'act': P.hover = false; activity(s); break;
       case 'key': key(s, m.k, m.s); break;
       case 'dbl': case 'fs': setFs(s, !P.fs); break;
       case 'novideo': clearTimeout(P.findT); if (!P.fell && getMode() !== 'service' && !isMulti()) fallback(s, P.health.novideo(m.ms)); break;
@@ -927,7 +928,7 @@
         if (!P) return { svc: s.service, none: true };
         var b = P.el.bar.getBoundingClientRect();
         return {
-          svc: s.service, on: P.on, ready: P.ready, fell: P.fell, idle: P.idle, fs: P.fs, whole: P.whole, own: P.own, menu: P.menu ? { kind: P.menu.kind, model: P.menu.model } : null,
+          svc: s.service, on: P.on, ready: P.ready, fell: P.fell, idle: P.idle, hover: P.hover, drag: P.drag, lastAct: P.lastAct, fs: P.fs, whole: P.whole, own: P.own, menu: P.menu ? { kind: P.menu.kind, model: P.menu.model } : null,
           st: P.st ? { p: P.st.p, c: P.st.c, d: P.st.d, vol: P.st.vol, m: P.st.m, r: P.st.r, ad: P.st.ad, next: P.st.next } : null,
           menus: P.menus, cmds: P.cmds, fails: P.fails, blocked: P.blocked, injected: P.injected, multiOff: P.multiOff,
           bar: { x: Math.round(b.left), y: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height) },
