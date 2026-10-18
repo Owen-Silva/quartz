@@ -407,7 +407,9 @@ html[data-theme="light"] .sr-brave-on-light { display: block; }
 }
 a.qa-cite:hover { background: var(--accent-soft); color: var(--text); }
 .qa-cite-n { color: var(--text-3); font-variant-numeric: tabular-nums; }
-.qa-cite-host { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+/* Its own line box tall enough for descenders: under the chip's line-height 1, overflow:hidden cut
+   the g in "wikipedia.org" and the p in "anthropic.com". */
+.qa-cite-host { max-width: 140px; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
 .qa-cite.is-pending { padding: 0 6px; color: var(--text-3); }
 
 .qa-sources { margin-top: 14px; }
