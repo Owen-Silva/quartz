@@ -473,6 +473,8 @@ const watchPlayer = (() => {
   const test = {};
   if (t && env.QUARTZ_PLAYER_AUTH_HOSTS) test.authHosts = String(env.QUARTZ_PLAYER_AUTH_HOSTS).split(',').map((s) => s.trim()).filter(Boolean);
   if (t && env.QUARTZ_PLAYER_FLOOR_GB !== undefined && Number.isFinite(Number(env.QUARTZ_PLAYER_FLOOR_GB))) test.floorGb = Number(env.QUARTZ_PLAYER_FLOOR_GB);
+  // Multiview's RAM guard, simulated: while this file exists its number is the free RAM (TEST profile only).
+  if (t && env.QUARTZ_PLAYER_FREE_FILE) test.freeFile = String(env.QUARTZ_PLAYER_FREE_FILE);
   try {
     const p = require('./watch-player-main').create({
       app,
@@ -1008,6 +1010,10 @@ function createWindow() {
     baseOptions.x = OFFSCREEN_XY;
     baseOptions.y = OFFSCREEN_XY;
     baseOptions.skipTaskbar = true;
+    // TEST ONLY (QUARTZ_TEST_WINDOW_SIZE=1536x800, watch-multiview-e2e.js): the window's real size, so
+    // the pages inside <webview>s are that size too (an emulated size never reaches a guest).
+    const sz = /^(\d{3,4})x(\d{3,4})$/.exec(String(process.env.QUARTZ_TEST_WINDOW_SIZE || ''));
+    if (sz) { baseOptions.width = Number(sz[1]); baseOptions.height = Number(sz[2]); }
     // TEST ONLY (QUARTZ_TEST_NO_WINDOW_FULLSCREEN=1, watch-player-e2e.js): a <webview>'s html
     // fullscreen is synced to its EMBEDDER (this window's webContents), whose own preference
     // decides whether the OS window goes fullscreen -- onto a real monitor. Off here, both ways.

@@ -59,6 +59,18 @@
       return undefined;
     }
   }
+  // watch-player-multi.js (multiview: up to four tiles, one with the sound; the mini-player) hooks in
+  // the same way; with the file missing, the layer is the single player it always was.
+  var MCTX = { L: L, focused: focused, note: note, toast: toast, place: place, layout: layout, syncBar: syncBar, show: show, close: close,
+    makeSlot: makeSlot, destroySlot: destroySlot, svcInfo: svcInfo, svcName: svcName, el: el, btn: btn, api: api, NAME: NAME };
+  function MV(ev) {
+    var m = window.WatchPlayerMulti;
+    if (!m || typeof m[ev] !== 'function') return undefined;
+    try { return m[ev].apply(null, [MCTX].concat([].slice.call(arguments, 1))); } catch (e) {
+      try { console.warn('[lumen multiview] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
+      return undefined;
+    }
+  }
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -110,11 +122,13 @@
     L.edgeBtn.hidden = true;
     bar.appendChild(L.edgeBtn);
     X('bar', bar);
+    MV('bar', bar);
     bar.appendChild(btn('wp-close', '✕', function () { close('Close'); }, 'Close the player (Esc)'));
     layer.appendChild(bar);
 
     L.grid = el('div', 'wp-grid');
     layer.appendChild(L.grid);
+    MV('build', layer);
 
     var sh = L.sheetEl = el('div', 'wp-sheet');
     sh.hidden = true;
@@ -151,7 +165,8 @@
     var hr = views.getBoundingClientRect();
     var shown = fs || (r.width > 2 && r.height > 2 && activeId() === owner.id) || (r.width > 2 && r.height > 2 && isSplitShown(owner));
     L.el.hidden = !shown;
-    if (shown && !fs) {
+    if (shown && !fs && MV('place', r, hr) === true) { /* the mini-player sits in a corner of the tab */ }
+    else if (shown && !fs) {
       L.el.style.left = (r.left - hr.left) + 'px';
       L.el.style.top = (r.top - hr.top) + 'px';
       L.el.style.width = r.width + 'px';
@@ -194,6 +209,7 @@
     s.state.hidden = true;
     s.tile.appendChild(s.state);
     s.tile._slot = s;
+    MV('slot', s, o);
     if (s.blocked) showState(s, 'blocked', s.blocked);
     else attachView(s, url);
     return s;
@@ -204,6 +220,7 @@
     // Same as a tab (app.js buildWebview): allowpopups makes Chromium ASK, and main's
     // player handler answers -- in place, a sheet, a tab, or no.
     v.setAttribute('allowpopups', '');
+    MV('view', s, v);
     v.setAttribute('src', url);
     v.className = 'wp-view';
     s.view = v;
@@ -235,10 +252,12 @@
     });
     s.tile.insertBefore(v, s.state);
     X('attach', s, v);
+    MV('attach', s, v);
   }
 
   function destroySlot(s) {
     X('destroy', s);
+    MV('destroy', s);
     if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
     if (s.view) {
       var v = s.view;
@@ -323,6 +342,8 @@
     if (!L.el.parentNode) host().appendChild(L.el);
     if (L.owner !== owner) watchOwner(owner);
     var service = o.service && svcInfo(o.service) ? o.service : (H ? H.serviceFor(u) : '');
+    // Multiview: "Add to multiview" (or a pick after the bar's button) adds a tile; it says no itself.
+    if (MV('open', u, service, o) === true) return true;
     var one = L.slots.length === 1 ? L.slots[0] : null;
     if (one && !one.blocked && one.view && one.service === service && !o.blocked) {
       // The same service: this page, in place (Back comes back to the last one).
@@ -357,6 +378,7 @@
   function layout() {
     L.grid.setAttribute('data-n', String(L.slots.length));
     if (api) api.mode(L.slots.length > 1 ? 'grid' : 'single');
+    MV('layout');
   }
 
   function show() {
@@ -376,6 +398,7 @@
   function close(why) {
     if (!L.open) return false;
     L.open = false;
+    MV('close', why);
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'the player closed'); }
     hideSheet();
     var gone = clearSlots();
@@ -531,6 +554,8 @@
   /** app.js runShortcut: true when the layer took the action. */
   function takeShortcut(id) {
     if (!L.open || !L.el || L.el.hidden) return false;
+    var mv = MV('shortcut', id);
+    if (mv === true || mv === false) return mv;
     if (id === 'escape') {
       if (L.fsSlot) { exitFs(); return true; }
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
@@ -545,11 +570,11 @@
   function onCommand(m) {
     if (!m || !L.open) return;
     L.lastCommand = String(m.cmd || '').slice(0, 40);   // test seam: the last command main sent
-    if (m.cmd === 'back') { if (!L.el.hidden) back('mouse'); return; }
+    if (m.cmd === 'back') { if (!L.el.hidden && MV('shortcut', 'back') !== false) back('mouse'); return; }
     if (/^media-|^key-Media/.test(String(m.cmd))) media(String(m.cmd));
   }
 
-  function onKeyFromGuest() { /* multiview keys: phase 2 */ }
+  function onKeyFromGuest(m) { if (m && L.open) MV('key', m); }
 
   function wire() {
     if (!api) return;
@@ -612,6 +637,7 @@
         edge: L.edgeBtn ? !L.edgeBtn.hidden : false,
         lastClosed: L.lastClosed,
         extras: X('state') || null,
+        multi: MV('state') || null,
         lastMedia: L.lastMedia || '',
         lastCommand: L.lastCommand || '',
         backs: L.backs || [],
