@@ -40,7 +40,8 @@ const titles = new Map();
 function hue(s) { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 360; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function still(url) {
-  const t = titles.get(url) || 'Untitled';
+  const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(url);
+  const t = titles.get(url) || (v && titles.get('yt:' + v[1])) || 'Untitled';
   const h1 = hue(t), h2 = (h1 + 40) % 360, size = t.length > 24 ? 64 : 92;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">' +
     '<defs><radialGradient id="a" cx="22%" cy="18%" r="90%"><stop offset="0" stop-color="hsl(' + h1 + ',38%,46%)"/><stop offset="1" stop-color="hsl(' + h2 + ',30%,12%)"/></radialGradient>' +
@@ -155,7 +156,7 @@ if (require.main === module) {
       const bust = (o) => { if (Array.isArray(o)) o.forEach(bust); else if (o && typeof o === 'object') for (const k of Object.keys(o)) { const v = o[k];
         if (k === 'image' && typeof v === 'string' && /^https:\/\//.test(v) && !/i\.ytimg\.com|espncdn\.com/.test(v)) o[k] = v + (v.indexOf('?') >= 0 ? '&' : '?') + BUST; else bust(v); } };
       bust(snap);
-      for (const it of snap.items) if (it.image) titles.set(it.image, it.title);
+      for (const it of snap.items) if (it.image) { titles.set(it.image, it.title); const v = /i\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//.exec(it.image); if (v) titles.set('yt:' + v[1], it.title); }   // the sharp-art chain asks other URLs of the same video
       await g.ev('(() => { window.__designApply = window.__applyWatch; window.__applyWatch = function () { window.__designHeld = (window.__designHeld || 0) + 1; }; window.__designApply(' + JSON.stringify(snap) + '); return 1; })()');
       await sleep(1500);
       await chrome.ev('(() => { const w = findWatchTab(); if (w && w.viewEl) w.viewEl.focus(); return 1; })()').catch(() => 0);
