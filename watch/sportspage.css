@@ -51,7 +51,7 @@ body.lsp-open .stage, body.lsp-open .lens, body.lsp-open .lens-ctl, body.lsp-ope
 .lsp-tbl td.tm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lsp-tbl .tot, .lsp-tbl .pts { font-weight: 700; }
 .lsp-scroll { overflow-x: auto; }
-.live { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-weight: 700; }
+.lsp .live { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-weight: 700; }
 
 /* ===== the game page ===== */
 .lsp-hero { padding: 18px 20px 16px; border-radius: var(--radius-l, 14px); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline), inset 0 1px 0 var(--panel-edge); }

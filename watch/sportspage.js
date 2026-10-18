@@ -322,7 +322,7 @@
     var v = cur();
     if (v.type === 'game') schedulePoll(v);
   }
-  function closeAll() {
+  function closeAll(keepFocus) {
     stopPoll();
     S.views = [];
     if (!S.root) return;
@@ -331,7 +331,7 @@
     document.body.classList.remove('lsp-open');
     var f = S.returnFocus;
     S.returnFocus = null;
-    if (f && f.isConnected && typeof f.focus === 'function') { try { f.focus({ preventScroll: true }); } catch (e) { /* fine */ } }
+    if (!keepFocus && f && f.isConnected && typeof f.focus === 'function') { try { f.focus({ preventScroll: true }); } catch (e) { /* fine */ } }
   }
   function load(v) {
     if (v.type === 'game') { v.loading = true; send('game', gameAsk(v)); }
@@ -399,6 +399,8 @@
     if (v && v.type === 'game') { if (v.game && pollMs(v) !== null && Date.now() - v.at > 10000) send('game', gameAsk(v)); else schedulePoll(v); }
     myLiveTimer();
   });
+  // Lumen's search field sits above the page: starting a search closes the sports page.
+  document.addEventListener('focusin', function (e) { if (S.views.length && e.target && e.target.id === 'q') closeAll(true); });
   function myLiveTimer() {
     clearTimeout(S.myTimer);
     S.myTimer = 0;
