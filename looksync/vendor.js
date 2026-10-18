@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const PINNED = '0b55b9c';
+const PINNED = '0e9f76f';
 const SRC_REPO = process.env.LOOK_SYNC_REPO || path.join(require('os').homedir(), 'look-sync');
 // fake-writer.js is the test tool looksync-e2e drives the shared file with (it needs ./look-sync).
 const FILES = ['look-sync.js', 'accent.js', 'windows-mode.js', 'fake-writer.js'];
