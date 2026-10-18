@@ -19,24 +19,31 @@ const ROOT = path.join(__dirname, '..');
 const Hosts = require(path.join(ROOT, 'watch-player-hosts'));
 
 /* ---- watch-player-multi.js in a bare window ---------------------------------------------------- */
+// A tile's YouTube address is watch-player-yt.js's alone (one path): multi only asks it.
+const YT = require(path.join(ROOT, 'watch-player-yt'));
 const win = { WatchPlayerHosts: Hosts };
 const ctx = vm.createContext({ window: win, document: {}, URL, setTimeout, clearTimeout, Promise, console, JSON, Math, Number, String, Object, Date });
 vm.runInContext(fs.readFileSync(path.join(ROOT, 'watch-player-multi.js'), 'utf8'), ctx, { filename: 'watch-player-multi.js' });
 const Multi = win.WatchPlayerMulti;
 check(!!Multi && typeof Multi.open === 'function' && typeof Multi.layout === 'function', 'watch-player-multi.js loads and exposes its hooks');
+check(!('view' in Multi) && !('_withStart' in Multi), 'multi has no Referer or embed address of its own (watch-player-yt.js has them)');
 const E = Multi._embedFor;
+check(E('https://www.youtube.com/watch?v=abcdefghijk') === '', 'with watch-player-yt.js missing: no embed (the watch page plays as it is)');
+win.WatchPlayerYT = YT;
 const Q = '?autoplay=1&playsinline=1&rel=0';
 check(E('https://www.youtube.com/watch?v=abcdefghijk') === 'https://www.youtube.com/embed/abcdefghijk' + Q, 'a watch page -> its embed');
 check(E('https://www.youtube.com/watch?v=abcdefghijk&t=90') === 'https://www.youtube.com/embed/abcdefghijk' + Q + '&start=90', 't=90 -> start=90');
 check(E('https://www.youtube.com/watch?v=abcdefghijk&t=1m30s') === 'https://www.youtube.com/embed/abcdefghijk' + Q + '&start=90', 't=1m30s -> start=90');
 check(E('https://youtu.be/abcdefghijk?t=5') === 'https://www.youtube.com/embed/abcdefghijk' + Q + '&start=5', 'youtu.be -> www.youtube.com embed');
-check(E('https://m.youtube.com/watch?v=abcdefghijk') === 'https://www.youtube.com/embed/abcdefghijk' + Q, 'm.youtube.com -> www');
 check(E('https://www.youtube.com/live/abcdefghijk') === 'https://www.youtube.com/embed/abcdefghijk' + Q, 'a /live/ video -> its embed');
 check(E('https://www.youtube.com/@channel') === '' && E('https://www.youtube.com/feed/subscriptions') === '' && E('not a url') === '', 'a channel, a feed, junk: no embed (the page plays as it is)');
 check(E('https://www.youtube.com/watch?v=<script>') === '', 'a bad id: no embed');
 check(E('http://127.0.0.1:5555/watch?v=hiLockupB02') === 'http://127.0.0.1:5555/embed/hiLockupB02' + Q, 'a rebased (test) origin keeps its origin');
-check(Multi._withStart('https://www.youtube.com/embed/x' + Q + '&start=4', 61.7) === 'https://www.youtube.com/embed/x' + Q + '&start=61', 'withStart replaces the start, whole seconds');
-check(Multi._withStart('https://www.youtube.com/embed/x' + Q, 0) === 'https://www.youtube.com/embed/x' + Q, 'withStart 0: no start');
+check(E('https://www.youtube.com/watch?v=abcdefghijk&t=4', 61.7) === 'https://www.youtube.com/embed/abcdefghijk' + Q + '&start=61', 'a start time given (the single page’s own) replaces the address’s, whole seconds');
+check(E('https://www.youtube.com/watch?v=abcdefghijk&t=4', 0) === 'https://www.youtube.com/embed/abcdefghijk' + Q, 'start 0: no start');
+for (const u of ['https://www.youtube.com/watch?v=abcdefghijk&t=90', 'https://youtu.be/abcdefghijk', 'http://127.0.0.1:5555/watch?v=hiLockupB02']) {
+  check(E(u) === YT.slotUrlFor(u, { service: 'youtube', multi: true }), 'the same embed as the layer’s own slotUrl for a tile: ' + u);
+}
 
 /* ---- watch-player-main.js with fakes ------------------------------------------------------------ */
 const Main = require(path.join(ROOT, 'watch-player-main'));
