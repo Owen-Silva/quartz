@@ -374,12 +374,22 @@ html[data-theme="light"] [data-palette="mono"] {
   --mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --icon-font: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
 
-  --fs-2xs: 11px;
-  --fs-xs: 12px;
-  --fs-s: 13px;
-  --fs-m: 14px;
-  --fs-l: 16px;
-  --fs-xl: 20px;
+  /* Six text sizes, nothing between them. They are Helm's (helm ui/styles/tokens.css --fs-2xs..--fs-xl)
+     and Mantle's --lg-text-* steps: caption 11, label 12, body 13, title 14, headline 16, display 20.
+     Every UI text size in Quartz takes one of these; it was 21 literal sizes, down to 8 and 9 px. Each
+     old size went UP to the nearest step, never down: 10 and 10.5 -> 11, 12.5 -> 13, 15 -> 16,
+     18 -> 20. Literal sizes left on purpose, each with its reason beside it: icon-font glyphs and the
+     x / + / > marks (sized to their button, circle or tile, not type), letters inside small fixed
+     tiles, three words in 56-60 px dock tiles and the shield's count pill (10 px, the floor), the
+     Home clock and the shield's blocked count (display readouts), the welcome page's --wc-* hero
+     sizes, and the reader's article (it follows the reader's own size setting in em). Weights sit
+     on 400 / 500 / 600; line-heights are ratios, or px where they pin a fixed row height. */
+  --fs-2xs: 11px;                        /* caption */
+  --fs-xs: 12px;                         /* label */
+  --fs-s: 13px;                          /* body */
+  --fs-m: 14px;                          /* title */
+  --fs-l: 16px;                          /* headline */
+  --fs-xl: 20px;                         /* display */
   --lh: 1.5;
 
   /* motion: short and stepped-feeling; nothing in Quartz runs longer */

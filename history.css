@@ -121,7 +121,7 @@
   border-radius: var(--radius-pill);
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   font-weight: 500;
   vertical-align: middle;

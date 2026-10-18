@@ -252,7 +252,7 @@ body {
   margin-top: -2px;
 }
 .rail-sound-label {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   letter-spacing: 0.02em;
 }
@@ -366,8 +366,10 @@ body {
   .rail { width: 150px; padding: 10px 8px 12px; }
   .rail-read { grid-template-columns: minmax(0, auto) minmax(0, 1fr); }
   /* 134 px for three words: "Computer" gives way to an ellipsis before the
-     strip wraps; every segment keeps its full title. */
-  .rail-seg-btn { padding: 5px 1px; font-size: 10px; }
+     strip wraps; every segment keeps its full title. The type stays on the
+     11 px step (it was 10 px here, under the scale); the ellipsis comes a
+     letter sooner. */
+  .rail-seg-btn { padding: 5px 1px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

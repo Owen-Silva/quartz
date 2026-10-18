@@ -125,7 +125,7 @@
 #bm-overflow .bm-fallback {
   width: 16px;
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: 13px;  /* the globe icon glyph, sized to the 16 px favicon slot */
   text-align: center;
   color: var(--text-3);
 }
