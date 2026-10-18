@@ -233,12 +233,16 @@ if ($DryRun) {
   if ($sc.TargetPath -ieq $want) { Pass '6. the shortcut targets this checkout' } else { Info ('6. the shortcut targets ' + $sc.TargetPath + ', not this checkout (expected for a worktree dry run)') }
 } else {
   if ($sc.TargetPath -ine $want) { Stop-Golive ('the shortcut targets ' + $sc.TargetPath + ', not ' + $want) }
+  $launchAt = Get-Date
   Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $Lnk + '"')
-  $deadline = (Get-Date).AddSeconds(45)
-  while ((Get-Date) -lt $deadline -and -not (Main-Procs).Count) { Start-Sleep -Milliseconds 500 }
-  $up = Main-Procs
-  if ($up.Count) { Pass ('6. Quartz relaunched through the shortcut (PID ' + (($up | ForEach-Object { $_.ProcessId }) -join ', ') + ', ' + (Split-Path -Leaf $up[0].ExecutablePath) + ')') }
-  else { Fail '6. Quartz did not start within 45 s of explorer.exe on the shortcut' }
+  # The first start after the swap runs a freshly written, freshly signed dist that Defender scans
+  # on first use: on this laptop that took over 45 s on 10-18 (main Quartz created 00:37:15, after
+  # the old 45 s window had closed). Wait 120 s, and look once more before the verdict.
+  $deadline = $launchAt.AddSeconds(120)
+  while ((Get-Date) -lt $deadline -and -not @(Main-Procs).Count) { Start-Sleep -Milliseconds 500 }
+  $up = @(Main-Procs)
+  if ($up.Count) { Pass ('6. Quartz relaunched through the shortcut (PID ' + (($up | ForEach-Object { $_.ProcessId }) -join ', ') + ', ' + (Split-Path -Leaf $up[0].ExecutablePath) + ', up ' + [math]::Round(($up[0].CreationDate - $launchAt).TotalSeconds) + ' s after explorer.exe)') }
+  else { Info '6. no main Quartz yet 120 s after explorer.exe on the shortcut; looked at again before the verdict' }
   Start-Sleep -Seconds 10   # let it finish starting before the registry is compared
 }
 
@@ -248,6 +252,12 @@ if ($regAfter -eq $regBefore) { Pass '7. QuartzURL / QuartzHTML / StartMenuInter
 else {
   $a = $regBefore -split "`n"; $b = $regAfter -split "`n"
   Fail ('7. the default-browser registry changed: ' + ((Compare-Object $a $b | ForEach-Object { $_.SideIndicator + ' ' + $_.InputObject }) -join ' ; ') + ' (snapshot: ' + $regFile + ')')
+}
+# Step 6 again, when it saw no main Quartz in its 120 s: a late start is a start (with its time).
+if (-not $DryRun -and $launchAt -and -not $up.Count) {
+  $late = @(Main-Procs)
+  if ($late.Count) { Pass ('6. Quartz started late (PID ' + (($late | ForEach-Object { $_.ProcessId }) -join ', ') + ', up ' + [math]::Round(($late[0].CreationDate - $launchAt).TotalSeconds) + ' s after explorer.exe)') }
+  else { Fail ('6. Quartz did not start within ' + [math]::Round(((Get-Date) - $launchAt).TotalSeconds) + ' s of explorer.exe on the shortcut') }
 }
 
 # ---- 8. rollback -----------------------------------------------------------------------------

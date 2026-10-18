@@ -133,7 +133,10 @@ async function waitTarget(pred, ms) {
     try { const t = (await targets()).find(pred); if (t) return t; } catch (e) { /* not up yet */ }
     await sleep(120);
   }
-  throw new Error('no such target');
+  // say what there WAS, so a miss is not a bare "no such target"
+  let seen = '';
+  try { seen = (await targets()).map((x) => x.type + ' ' + String(x.url).replace(/[?#].*$/, '').slice(-60)).join(' | '); } catch (e) { seen = 'CDP gone: ' + e.message; }
+  throw new Error('no such target; there were: ' + seen.slice(0, 600));
 }
 
 /* ---- the answer Claude "gives", as fixture events --------------------------------------- */
