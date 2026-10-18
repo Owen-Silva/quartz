@@ -178,7 +178,8 @@
     v.loading = false;
     v.partial = null;
     var sh = a.show;
-    if (sh && sh.type === 'show' && (v.season === undefined || v.season === null)) v.season = M.startSeason(sh);
+    // the resume season, unless he picked a tab (a partial or fallback render shows S1 until then)
+    if (sh && sh.type === 'show' && !v.picked) v.season = M.startSeason(sh);
     render();
   };
 
@@ -332,6 +333,7 @@
         t.setAttribute('role', 'tab');
         t.setAttribute('aria-selected', s.n === cur.n ? 'true' : 'false');
         t.dataset.n = String(s.n);
+        if (s.fromTmdb) { t.appendChild(el('span', 'shw-tab-src', 'TMDB')); t.title = s.label + ': episodes from TMDB, no progress'; }
         tabs.appendChild(t);
       });
       head.appendChild(tabs);
@@ -356,6 +358,7 @@
 
   function pickSeason(v, n) {
     v.season = n;
+    v.picked = true;
     var sh = v.answer && v.answer.show;
     var s = sh && sh.seasons.filter(function (x) { return x.n === n; })[0];
     if (s && !s.episodes.length && !s.asking && !s.error) {

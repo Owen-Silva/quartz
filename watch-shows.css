@@ -75,6 +75,7 @@ body.shw-open .stage, body.shw-open .lens, body.shw-open .lens-ctl, body.shw-ope
 .shw-tab:hover { background: var(--surface-2); color: var(--text); }
 .shw-tab.on { background: var(--surface-3); color: var(--text); border-color: var(--hairline-strong, var(--hairline)); }
 .shw-tab:focus-visible { box-shadow: var(--focus-ring-inset); outline: none; }
+.shw-tab-src { margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: .04em; color: var(--text-3, var(--text-2)); }
 .shw-eps { display: flex; flex-direction: column; gap: 4px; }
 .shw-ep { display: grid; grid-template-columns: clamp(168px, 14vw, 232px) minmax(0, 1fr); gap: 18px; align-items: start; width: 100%;
   padding: 10px; border-radius: var(--radius-m, 10px); border: 1px solid transparent; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }

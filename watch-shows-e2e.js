@@ -165,7 +165,7 @@ const PAGE_NOW = `(() => {
     done: b.classList.contains('done'), next: b.classList.contains('next'), check: !!b.querySelector('.shw-check'), prog: (() => { const i = b.querySelector('.shw-prog i'); return i ? Number(i.style.getPropertyValue('--p')) : null; })() }));
   return { s: ${LS}, h1: tx('.shw-h1'), meta: tx('.shw-meta'), play: tx('.shw-play'), left: tx('.shw-left'), why: tx('.shw-why'), chip: tx('.shw-svc-n'), wl: tx('.shw-wl'),
     note: tx('.shw-note .shw-note-t'), noteKind: (r.querySelector('.shw-note') || { className: '' }).className, noteBtns: [...r.querySelectorAll('.shw-note .btn')].map((b) => b.textContent),
-    fine: [...r.querySelectorAll('.shw-fine')].map((n) => n.textContent), tabs: [...r.querySelectorAll('.shw-tab')].map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')),
+    fine: [...r.querySelectorAll('.shw-fine')].map((n) => n.textContent), tabs: [...r.querySelectorAll('.shw-tab')].map((b) => b.firstChild.textContent + (b.querySelector('.shw-tab-src') ? '(TMDB)' : '') + (b.classList.contains('on') ? '*' : '')),
     eps, more: [...r.querySelectorAll('.shw-more .shw-card b')].map((n) => n.textContent), prov: [...r.querySelectorAll('.shw-prov-r')].map((n) => n.textContent),
     hasEps: !!r.querySelector('.shw-eps-wrap'), sk: !!r.querySelector('.shw-sk-lines, .shw-sk-btn'), attr: tx('.shw-attr') };
 })()`;
@@ -225,7 +225,7 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     };
     const now = () => g.ev(PAGE_NOW);
     const until = (cond, ms) => g.waitFor(`(() => { const v = ${PAGE_NOW}; return v && (${cond}) ? v : null; })()`, ms || 30000).catch(() => null);
-    const clickText = (sel, text) => g.ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((n) => n.textContent.trim() === ${JSON.stringify(text)}); if (!b) return 0; b.scrollIntoView({ block: 'nearest' }); b.click(); return 1; })()`);
+    const clickText = (sel, text) => g.ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((n) => (n.firstChild ? n.firstChild.textContent : n.textContent).trim() === ${JSON.stringify(text)}); if (!b) return 0; b.scrollIntoView({ block: 'nearest' }); b.click(); return 1; })()`);
     const layerAt = (prefix, ms) => chrome.waitFor(`(() => { const s = ${ST}; return s && s.open && s.slots[0] && String(s.slots[0].url).indexOf(${JSON.stringify(prefix)}) === 0 ? s.slots[0].url : null; })()`, ms || 15000).catch(() => null);
     const closeLayer = async () => { await chrome.ev('(() => { if (window.WatchPlayer && WatchPlayer.isOpen()) WatchPlayer.close("Close"); return 1; })()'); await chrome.waitFor(`!${ST}.open`, 5000).catch(() => 0); await sleep(400); };
     const openItem = (it) => g.ev(`LumenShows.open(${JSON.stringify(it)})`);
@@ -284,8 +284,8 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await shoot('watched', [[1536, 800]]);
     const tm0 = st.tmdb.length;
     await clickText('.shw-tab', 'Season 3');
-    const s3 = await until(`v.tabs.indexOf('Season 3*') !== -1 && v.eps.length`, 15000);
-    check(s3 && s3.eps.map((e) => e.t).join('|') === '1. Tomorrow|2. Next' && s3.fine.some((t) => /from TMDB: Hulu didn’t send them/.test(t)), 'the Season 3 tab (Hulu sent none): filled from TMDB, and it says so', s3 && { eps: s3.eps.map((e) => e.t), fine: s3.fine });
+    const s3 = await until(`v.tabs.indexOf('Season 3(TMDB)*') !== -1 && v.eps.length`, 15000);
+    check(s3 && s3.eps.map((e) => e.t).join('|') === '1. Tomorrow|2. Next' && s3.fine.some((t) => /from TMDB: Hulu didn’t send them/.test(t)), 'the Season 3 tab (Hulu sent none): filled from TMDB, its tab marked TMDB, and it says so', s3 && { eps: s3.eps.map((e) => e.t), fine: s3.fine });
     check(st.tmdb.slice(tm0).indexOf('/tv/136315/season/3') !== -1, 'S3 came from TMDB’s /tv/136315/season/3 (the local mock)', st.tmdb.slice(tm0));
     await shoot('s3-tmdb', [[1920, 1000]]);
 
