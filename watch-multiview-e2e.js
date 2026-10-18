@@ -224,6 +224,10 @@ run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
     let box = m1 && m1.box;
     check(!!box && Math.abs((box[0] + box[2]) - (vr[0] + vr[2] - 16)) <= 2 && Math.abs((box[1] + box[3]) - (vr[1] + vr[3] - 16)) <= 2 && box[2] < vr[2] / 2, 'the mini-player sits in the bottom-right corner of the Lumen tab, small', { box, view: vr });
     check((await chrome.ev(`WatchPlayer._state().title`)) !== '' && (await chrome.ev('document.querySelector(".mv-mini-title").textContent')).indexOf('Pick a title') === 0, 'its header says to pick a title');
+    // The shot waits for the corner's video to be painting (a fresh embed is black for its first second).
+    const miniT = m1 && await targetWhere(q, (x) => String(x.url) === m1.tiles[0].url, 4000);
+    const miniP = miniT && await cdpTo(miniT).catch(() => null);
+    if (miniP) { await miniP.waitFor('(() => { const v = document.querySelector("video"); return !!v && !v.paused && v.currentTime > 0.5; })()', 8000).catch(() => 0); miniP.close(); }
     await shoot('mini-pick');
     // Esc in the rows is the rows' own while the player sits in a corner.
     check((await chrome.ev('WatchPlayer.handleShortcut("escape")')) === false && (await chrome.ev(`${MS}.mini`)), 'Esc with the mini-player up is not the player’s (it stays playing)');
