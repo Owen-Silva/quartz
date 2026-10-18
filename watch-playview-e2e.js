@@ -284,6 +284,9 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     await chrome.ev('(() => { const v = document.querySelector(".wp-layer .wp-tile.pv webview"); v.focus(); return 1; })()');
     await p.ev('(() => { const v = document.getElementById("v"); v.currentTime = 20; return 1; })()');
     const vs = () => p.ev('(() => { const v = document.getElementById("v"); return { paused: v.paused, t: Math.round(v.currentTime), muted: v.muted }; })()');
+    // With Lumen's play bar (watch-playerbar.js) on this video, the bar owns the keys and F is Lumen's full window.
+    const PBS = '(() => { const z = window.LumenPlayerBar && LumenPlayerBar._state(); return z ? z.slots[z.slots.length - 1] || null : null; })()';
+    const barOn = !!(await chrome.waitFor(`(() => { const b = ${PBS}; return b && b.on ? 1 : 0; })()`, 6000).catch(() => 0));
     const v0 = await vs();
     await keyIn(p, ' ', 'Space', 32); await sleep(250);
     const v1 = await vs();
@@ -302,15 +305,19 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     check(Math.abs(v3.t - 5) <= 1 && Math.abs(v4.t - 15) <= 1, 'J and L seek back and forward 10 s', { v3, v4 });
     check(v5.muted !== v4.muted, 'M mutes', { v4, v5 });
     await keyIn(p, 'f', 'KeyF', 70);
-    const fsIn = await chrome.waitFor(`${ST}.fs ? 1 : 0`, 5000).catch(() => 0);
+    const fsIn = barOn ? await chrome.waitFor(`(() => { const b = ${PBS}; return b && b.fs && document.querySelector('.wp-layer').classList.contains('wp-fs') ? 1 : 0; })()`, 5000).catch(() => 0)
+      : await chrome.waitFor(`${ST}.fs ? 1 : 0`, 5000).catch(() => 0);
     const gfs = await p.ev('document.fullscreenElement ? document.fullscreenElement.id : ""');
     const wfs = await win();
-    check(fsIn === 1 && gfs === 'movie_player', 'F: YouTube’s player goes fullscreen inside the window', { fsIn, gfs });
+    if (barOn) check(fsIn === 1 && gfs === '', 'F (Lumen’s play bar on): Lumen’s full window, the video fills it; YouTube’s page never goes fullscreen', { fsIn, gfs });
+    else check(fsIn === 1 && gfs === 'movie_player', 'F: YouTube’s player goes fullscreen inside the window', { fsIn, gfs });
     check(wfs.fullScreen === false && wfs.entered === 0 && wfs.content.width === 1280, 'and the OS window did NOT go fullscreen', wfs);
     await keyIn(p, 'f', 'KeyF', 70);
-    await chrome.waitFor(`!${ST}.fs`, 5000).catch(() => 0);
+    if (barOn) await chrome.waitFor(`(() => { const b = ${PBS}; return b && !b.fs ? 1 : 0; })()`, 5000).catch(() => 0);
+    else await chrome.waitFor(`!${ST}.fs`, 5000).catch(() => 0);
     const keys = await p.ev('window.__keys.join(",")');
-    check(keys === ' ,k,j,l,m,m,f,f', 'every key reached the player’s page (and only those)', keys);
+    if (barOn) check(keys === '', 'Lumen’s play bar took every one of those keys (none reached YouTube’s page as well: no double action)', keys);
+    else check(keys === ' ,k,j,l,m,m,f,f', 'every key reached the player’s page (and only those)', keys);
     st = await pvWait('x.boxed && x.applied', 4000);
     check(!!st && !(await chrome.ev(`${ST}.fs`)), 'out of fullscreen: back in the box');
 

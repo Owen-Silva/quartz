@@ -189,6 +189,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       await sleep(600);
     };
     const shot = async (w, h, tag) => {
+      await chrome.ev('(() => { const a = document.activeElement; if (a && a.closest && a.closest(".sh-info")) a.blur(); return 1; })()');
       if (tag !== 'idle') await wake();
       const r = await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${req[0]}, height: ${req[1]}, wait: 1400 })`).catch((e) => ({ ok: false, err: String(e && e.message) }));
       if (!r || !r.ok || !r.png) { check(false, 'shot at ' + w + 'x' + h, r && r.err); return ''; }
@@ -256,7 +257,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     check(fitOk, 'every control of the Short’s bar sits inside it (nothing clipped)');
     check(!!b && !meets(b.bar, x.info) && !meets(b.bar, x.nav), 'the bar covers neither Lumen’s side panel nor its Up/Down buttons', b && { bar: b.bar, info: x.info, nav: x.nav });
     const tops = await chrome.ev(`(() => { const pts = [];
-      const add = (sel) => { const n = document.querySelector('.wp-layer ' + sel); if (!n) return; const r = n.getBoundingClientRect(); pts.push([sel, r.left + r.width / 2, r.top + r.height / 2]); pts.push([sel, r.left + 4, r.bottom - 4]); pts.push([sel, r.right - 4, r.bottom - 4]); };
+      const add = (sel) => { const n = document.querySelector('.wp-layer ' + sel); if (!n) return; const r = n.getBoundingClientRect(); pts.push([sel, r.left + r.width / 2, r.top + r.height / 2]); pts.push([sel, r.left + r.width * 0.3, r.top + r.height * 0.75]); pts.push([sel, r.left + r.width * 0.7, r.top + r.height * 0.75]); };
       add('.sh-prev'); add('.sh-next'); add('.sh-info');
       return pts.map(([sel, px, py]) => { const n = document.elementFromPoint(px, py); return { sel, at: n ? n.className : '', ok: !!n && !!n.closest(sel) && !n.closest('.pb, .pb-menu, .pb-pill') }; }); })()`);
     check(tops.length === 9 && tops.every((q) => q.ok), 'Lumen’s Up/Down buttons and its side panel are on top at their own points (nothing of the bar over them)', tops.filter((q) => !q.ok));
@@ -267,16 +268,20 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     const mLR = await moves();
     await guest.ev('(() => { const v = document.querySelector("ytd-reel-video-renderer[is-active] video"); v.currentTime = 8; return 1; })()');
     await sleep(400);
+    // Keys in YouTube's page arrive there as key events (dispatched in the page: CDP key injection into the focused
+    // <webview> guest never reaches the page in the test instance). The bar's page bridge takes them on the window.
+    await guest.ev('(() => { window.__kd = []; addEventListener("keydown", (e) => window.__kd.push(e.key + ":" + e.defaultPrevented), true); return 1; })()');
+    const pageKey = (k) => guest.ev('(() => { (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: ' + JSON.stringify(k) + ', code: ' + JSON.stringify(k) + ', bubbles: true, cancelable: true })); return 1; })()');
     let t0 = await vt();
-    await keyIn(guest, 'ArrowRight', 'ArrowRight', 39);
+    await pageKey('ArrowRight');
     await sleep(500);
     let t1 = await vt();
     check(t1 - t0 > 3.5 && t1 - t0 < 7, 'ArrowRight in the page: Lumen’s bar seeks the Short 5 s on', { t0, t1 });
     t0 = await vt();
-    await keyIn(guest, 'ArrowLeft', 'ArrowLeft', 37);
+    await pageKey('ArrowLeft');
     await sleep(500);
     t1 = await vt();
-    check(t0 - t1 > 3 && t0 - t1 < 6.5, 'ArrowLeft in the page: 5 s back', { t0, t1 });
+    check(t0 - t1 > 3 && t0 - t1 < 6.5 && (await guest.ev('window.__kd.length')) === 0, 'ArrowLeft in the page: 5 s back (both taken by the bar, not passed on)', { t0, t1, kd: await guest.ev('window.__kd.slice()') });
     await focusInfo();
     t0 = await vt();
     await keyIn(chrome, 'ArrowRight', 'ArrowRight', 39);
@@ -358,6 +363,20 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     check(await moves() === m0 + 2, 'ArrowUp with the focus on the bar’s own button: one Short back (never the volume)', { moves: (await moves()) - m0 });
     b = await pb();
     check(await bars() === 1 && !!b && b.on && b.short && b.injected === inj0, 'and still one bar', { bars: await bars(), b: b && { on: b.on, injected: b.injected } });
+    // Up/Down as key events in YouTube's page: the bridge leaves them to YouTube's own Shorts keys (one Short, never the volume).
+    m0 = await moves();
+    const vol0 = await guest.ev('document.querySelector("ytd-reel-video-renderer[is-active] video").volume');
+    const cmdsUD = (await pb() || {}).cmds;
+    await guest.ev('window.__kd = [], 1');
+    await pageKey('ArrowDown');
+    await settled('ArrowDown in YouTube’s page, the bar on', S[3].id);
+    await sleep(450);
+    await pageKey('ArrowUp');
+    await settled('ArrowUp in YouTube’s page, the bar on', S[2].id);
+    const kdUD = await guest.ev('window.__kd.slice()');
+    check(await moves() === m0 + 2 && kdUD.join() === 'ArrowDown:false,ArrowUp:false' && (await pb() || {}).cmds === cmdsUD,
+      'ArrowDown/ArrowUp in YouTube’s page with the bar on: YouTube’s own keys move one Short each; the bar passes them on untouched', { moves: (await moves()) - m0, kd: kdUD });
+    check(await guest.ev('document.querySelector("ytd-reel-video-renderer[is-active] video").volume') === vol0, 'and the volume never moved', vol0);
 
     /* ============================ 4. Lumen's Next and Previous ============================ */
     let pr0 = await presses();
@@ -446,7 +465,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     const a0 = await vt();
     await focusInfo();
     await keyIn(chrome, 'ArrowRight', 'ArrowRight', 39);
-    await keyIn(guest, 'l', 'KeyL', 76);
+    await pageKey('l');
     await sleep(600);
     const a1 = await vt();
     b = await pb();

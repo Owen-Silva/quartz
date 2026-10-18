@@ -194,7 +194,7 @@
 @media (prefers-reduced-motion: reduce) {
   .pb.is-short .pb-seek, .pb.is-short .pb-row, .pb.is-short::before { transition: none; }
 }
-.pb.is-short.is-idle .pb-track { height: 3px; background: rgba(255, 255, 255, 0.2); }
+.pb.is-short.is-idle .pb-track { height: 3px; background: rgba(128, 128, 132, 0.5); }   /* mid grey: seen over bright and dark video */
 .pb.is-short.is-idle .pb-buf { opacity: 0; }
 /* Until the Shorts view has the player boxed (its cover shows), no bar over the cover. */
 .wp-tile.sh-wait > .pb, .wp-tile.sh-wait > .pb-menu { visibility: hidden; }
