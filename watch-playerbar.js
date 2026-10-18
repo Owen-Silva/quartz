@@ -205,7 +205,18 @@
   function adapterFor(svc) { return adapters()[svc] || null; }
   function getMode() { try { return modeFrom(root.localStorage.getItem(STORE)); } catch (e) { return 'lumen'; } }
   function slots() { return (CTX && CTX.L && CTX.L.slots) || []; }
-  function isMulti() { return tileRule(slots().length) === 'none'; }
+  function isMulti() {
+    var mini = !!(CTX && CTX.L && CTX.L.el && CTX.L.el.classList.contains('mv-mini'));   // the corner mini-player: like a tile
+    return tileRule(slots().length) === 'none' || mini;
+  }
+  /** Lumen's play view's mount (watch-playview.js): the video box's bottom edge, while boxed and not in a full window. */
+  function mountOf(s) {
+    var m = null;
+    for (var i = 0; i < s.tile.children.length; i++) { var c = s.tile.children[i]; if (c.id === 'lumen-pv-barmount') { m = c; break; } }
+    if (!m || m.hidden) return null;
+    try { if (getComputedStyle(m).display === 'none') return null; } catch (e) { return null; }
+    return m;
+  }
   function svcName(s) { var a = adapterFor(s.service); return (a && a.name) || 'The service'; }
   function say(text) { lastNote = text; if (CTX && CTX.note) CTX.note(text); }
   function remember(kind, text) { LOG.push({ at: Date.now(), kind: kind, text: text }); if (LOG.length > 20) LOG.shift(); }
@@ -555,15 +566,29 @@
     var bottom = Math.min(vh, (r.y + r.h) * k);
     var top = Math.max(0, r.y * k);
     var bar = P.el.bar;
-    var gone = w < 160 || bottom - top < 90;
-    bar.classList.toggle('is-gone', gone);
-    if (gone) return;
     // The <webview> need not fill the tile (Lumen's play view sizes it to the video box): offsets from real rects.
     var vr = s.view.getBoundingClientRect(), tr = s.tile.getBoundingClientRect();
     var ox = vr.left - tr.left, oy = vr.top - tr.top, th = s.tile.clientHeight || vh;
-    bar.style.left = Math.round(ox + x) + 'px';
-    bar.style.width = Math.round(w) + 'px';
-    bar.style.bottom = Math.round(th - (oy + bottom)) + 'px';
+    // The pills sit at the video's own top-left, wherever the box is.
+    [P.el.ownPill, P.el.reason].forEach(function (p) { p.style.left = Math.round(ox + x + 12) + 'px'; p.style.top = Math.round(oy + top + 12) + 'px'; });
+    var m = mountOf(s);
+    if (m) {
+      // Lumen's play view: in its mount at the box's bottom edge; the mount's CSS places it.
+      if (bar.parentNode !== m) m.appendChild(bar);
+      bar.classList.add('in-mount');
+      bar.classList.remove('is-gone');
+      bar.style.left = bar.style.width = bar.style.bottom = '';
+      w = m.offsetWidth || w;
+    } else {
+      if (bar.parentNode !== s.tile) s.tile.insertBefore(bar, P.el.menu.parentNode === s.tile ? P.el.menu : null);
+      bar.classList.remove('in-mount');
+      var gone = w < 160 || bottom - top < 90;
+      bar.classList.toggle('is-gone', gone);
+      if (gone) return;
+      bar.style.left = Math.round(ox + x) + 'px';
+      bar.style.width = Math.round(w) + 'px';
+      bar.style.bottom = Math.round(th - (oy + bottom)) + 'px';
+    }
     bar.classList.toggle('is-compact', w < 620);
     bar.classList.toggle('is-tiny', w < 400);
     if (P.menu) placeMenu(s);
@@ -647,6 +672,7 @@
     }
     s.tile.classList.toggle('is-fs', P.fs || s.fs);
     paint(s);
+    place(s);   // the play view's mount is hidden in a full window: the bar moves to the tile
     activity(s);
   }
   /** The second action: the whole screen. Only ever on his ask (Shift+F, or the button in Lumen's full window). */
@@ -721,8 +747,10 @@
     var P = s._pb, E = P.el;
     if (!P.menu) return;
     var tile = s.tile, tw = tile.clientWidth, th = tile.clientHeight;
-    var bl = E.bar.offsetLeft, bw = E.bar.offsetWidth, bt = E.bar.offsetTop;
-    var a = P.menu.anchor, ar = a.getBoundingClientRect(), tr = tile.getBoundingClientRect();
+    // From rects: the bar may sit in the play view's mount, whose offsets are not the tile's.
+    var br = E.bar.getBoundingClientRect(), tr = tile.getBoundingClientRect();
+    var bl = br.left - tr.left, bw = br.width, bt = br.top - tr.top;
+    var a = P.menu.anchor, ar = a.getBoundingClientRect();
     var mw = Math.min(300, Math.max(220, bw - 24));
     var right = Math.max(8, Math.min(tw - mw - 8, tw - (ar.right - tr.left) - 4));
     E.menu.style.width = mw + 'px';
@@ -826,6 +854,7 @@
         P.multiOff = false;
         if (P.ready) { quiet2(s, { c: 'on' }); setOn(s, true); activity(s); } else if (P.injected > 0) inject(s);
       }
+      if (P.on) place(s);   // the play view boxes and unboxes the video: follow its mount
     });
   }
   /** watch-player.js takeShortcut: Esc closes a menu, then the service's own menu, then Lumen's full window. */

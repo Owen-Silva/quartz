@@ -149,7 +149,7 @@ check(PB.tileRule(1) === 'full' && PB.tileRule(2) === 'none' && PB.tileRule(4) =
 
 /* ---- the hooks ---- */
 const wp = fs.readFileSync(path.join(ROOT, 'watch-player.js'), 'utf8');
-check(/\[window\.WatchPlayerExtras, window\.WatchPlayerYT, window\.LumenPlayerBar\]/.test(wp), 'watch-player.js X() hands attach / destroy / sync to the bar');
+check(/\[window\.WatchPlayerExtras, window\.WatchPlayerYT,( window\.LumenPlayview,)? window\.LumenPlayerBar\]/.test(wp), 'watch-player.js X() hands attach / destroy / sync to the bar');
 check(/LumenPlayerBar\.shortcut\(id\) === true\) return true;\s*\n\s*if \(L\.fsSlot\)/.test(wp), 'Esc asks the bar first (menu, own menu, Lumen\'s window), then the layer');
 const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const order = ['watch/playerbar/youtube.js', 'watch/playerbar/hulu.js', 'watch-playerbar-page.js', 'watch-playerbar.js', 'watch-player.js'].map((f) => idx.indexOf('src="' + f + '"'));

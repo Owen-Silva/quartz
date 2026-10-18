@@ -56,8 +56,8 @@
   function X(ev) {
     var args = [CTX].concat([].slice.call(arguments, 1));
     var out;
-    // Lumen play bar hook (watch-playerbar.js): attach / destroy / sync, like the two above.
-    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayerBar].forEach(function (x) {
+    // Lumen play view (watch-playview.js) and Lumen play bar (watch-playerbar.js) hooks: attach / destroy / sync, like the two before.
+    [window.WatchPlayerExtras, window.WatchPlayerYT, window.LumenPlayview, window.LumenPlayerBar].forEach(function (x) {
       if (!x || typeof x[ev] !== 'function') return;
       try { var r = x[ev].apply(null, args); if (out === undefined) out = r; } catch (e) {
         try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }

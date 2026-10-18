@@ -184,6 +184,11 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(await g.ev('document.documentElement.classList.contains("lumen-pb-on") && getComputedStyle(document.getElementById("ytbar")).visibility === "hidden" && getComputedStyle(document.getElementById("yttop")).visibility === "hidden"'),
       'YouTube\'s own bar is hidden (one class on <html>) while Lumen\'s is on');
     check(await g.ev('getComputedStyle(document.getElementById("ytbar")).pointerEvents === "none"'), 'and it takes no clicks');
+    // Lumen's play view (merged): the bar sits in its mount at the video box's bottom edge, and the view's own
+    // YouTube-bar hook (html.lumen-pv-bar) is set while Lumen's bar is on.
+    const pv = await chrome.ev('(() => { const m = document.getElementById("lumen-pv-barmount"); const b = document.querySelector(".pb"); if (!b) return null; const br = b.getBoundingClientRect(); const mr = m && m.getBoundingClientRect(); return { inMount: !!m && b.parentNode === m, barBottom: Math.round(br.bottom), mountTop: mr ? Math.round(mr.top) : null, boxed: !!document.querySelector(".wp-tile.pv") }; })()');
+    check(pv && (!pv.boxed || (pv.inMount && Math.abs(pv.barBottom - pv.mountTop) <= 2)), 'in Lumen\'s play view the bar is in #lumen-pv-barmount, at the video box\'s bottom edge', pv);
+    check(!pv || !pv.boxed || (await g.ev('document.documentElement.classList.contains("lumen-pv-bar")')), 'the play view\'s hook class lumen-pv-bar is on the page while Lumen\'s bar is');
     const dur = await vid(g, 'v.duration');
     // play / pause
     const p0 = await vid(g, 'v.paused');
@@ -281,6 +286,9 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     const fsBox = await chrome.ev('(() => { const r = document.querySelector(".wp-layer").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), innerWidth, innerHeight, document.body.classList.contains("page-fullscreen"), window.__fsCalls, !!document.querySelector(".wp-layer.wp-fs.pb-lumenfs")]; })()');
     check(fsBox[0] === fsBox[2] && fsBox[1] === fsBox[3] && fsBox[6], 'F: the video fills the Lumen window', fsBox);
     check(fsBox[5] === 0 && !fsBox[4] && (await g.ev('!document.fullscreenElement')), 'F never makes the window or the page fullscreen', fsBox);
+    await wake();
+    const fsBar = await chrome.ev('(() => { const b = document.querySelector(".pb"); const r = b.getBoundingClientRect(); return { inTile: b.parentNode.classList.contains("wp-tile"), bottom: Math.round(r.bottom), w: Math.round(r.width), idle: b.classList.contains("is-idle"), ih: innerHeight }; })()');
+    check(fsBar.inTile && Math.abs(fsBar.bottom - fsBar.ih) <= 2 && !fsBar.idle, 'in Lumen\'s full window the bar is on the tile, at the bottom of the window', fsBar);
     await key(g, 'Escape'); await sleep(700);
     st = await chrome.ev(S);
     check(!st.fs && (await chrome.ev('!!document.querySelector(".wp-layer") && !document.querySelector(".wp-layer.wp-fs") && WatchPlayer._state().n === 1')), 'Esc leaves Lumen\'s full window and the player stays open');
@@ -338,6 +346,7 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(adT3 - adT2 < 2 && adT3 >= adT2 - 0.05, 'a click on the seek bar during the ad does not seek', { from: adT2, to: adT3 });
     check(/Seeking is off while the ad plays/.test((await chrome.ev('LumenPlayerBar._state()')).note), 'and it says why', (await chrome.ev('LumenPlayerBar._state()')).note);
     check(await g.ev('getComputedStyle(document.getElementById("whyad")).visibility === "visible" && getComputedStyle(document.getElementById("whyad")).pointerEvents !== "none"'), '"Why this ad" inside YouTube\'s hidden bar stays visible and clickable');
+    check(await g.ev('!document.documentElement.classList.contains("lumen-pv-bar") && document.documentElement.classList.contains("lumen-pb-on")'), 'during the ad the play view\'s display:none hook is off (ad pieces inside YouTube\'s bar stay), Lumen\'s bar stays on');
     await wake();
     await shoot('youtube-ad', wake);
     // The Skip button: where it is on screen, nothing of Lumen's is over it, and a real click lands.

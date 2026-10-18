@@ -77,7 +77,7 @@
 
   /* ---------------------------------------------------------------- the layer's hooks */
 
-  var UI = { fullBtn: null, lastFull: '' };
+  var UI = { fullBtn: null, lastFull: '', pv: false };
 
   function slotUrl(ctx, s, url) {
     var next = slotUrlFor(url, { service: s.service, multi: !!s.multi });
@@ -106,12 +106,31 @@
     b.title = 'YouTube’s full page: comments, Like, Subscribe, Save';
     b.setAttribute('aria-label', 'Open YouTube’s full page for this video: comments, Like, Subscribe and Save');
     b.hidden = true;
-    b.addEventListener('click', function (e) { e.stopPropagation(); fullPage(ctx); });
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      // Lumen's view (watch-playview.js): the same button switches between the view and the full page.
+      var PV = window.LumenPlayview;
+      if (UI.pv && PV && typeof PV.toggle === 'function' && PV.toggle(ctx.focused())) { sync(ctx, ctx.focused()); return; }
+      fullPage(ctx);
+    });
     UI.fullBtn = b;
     barEl.appendChild(b);
   }
   function sync(ctx, s) {
     if (!UI.fullBtn) return;
+    var PV = typeof window !== 'undefined' ? window.LumenPlayview : null;
+    var pv = PV && typeof PV.toggleFor === 'function' && s ? PV.toggleFor(s) : null;
+    UI.pv = !!pv;
+    if (pv) {
+      UI.fullBtn.hidden = false;
+      UI.fullBtn.textContent = pv.label;
+      UI.fullBtn.title = pv.title;
+      UI.fullBtn.setAttribute('aria-label', pv.title);
+      return;
+    }
+    UI.fullBtn.textContent = 'Full page';
+    UI.fullBtn.title = 'YouTube’s full page: comments, Like, Subscribe, Save';
+    UI.fullBtn.setAttribute('aria-label', 'Open YouTube’s full page for this video: comments, Like, Subscribe and Save');
     var v = s && s.view ? videoOf(s.url, s.service) : null;
     UI.fullBtn.hidden = !(v && v.embed);
   }
@@ -152,6 +171,6 @@
     stateActs: stateActs,
     // e2e: press "Full page" the way a click does, and what the button shows
     _fullPage: function () { return UI.fullBtn && !UI.fullBtn.hidden ? (UI.fullBtn.click(), true) : false; },
-    _state: function () { return { fullShown: !!(UI.fullBtn && !UI.fullBtn.hidden), lastFull: UI.lastFull }; }
+    _state: function () { return { fullShown: !!(UI.fullBtn && !UI.fullBtn.hidden), lastFull: UI.lastFull, label: UI.fullBtn ? UI.fullBtn.textContent : '', pv: UI.pv }; }
   };
 });

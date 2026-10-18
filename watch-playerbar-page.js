@@ -119,13 +119,21 @@
     function setOn(on) {
       B.on = !!on && !!B.video;
       R.classList.toggle('lumen-pb-on', B.on);
+      pvBar();
       if (!B.on) { R.classList.remove('lumen-pb-own'); R.classList.remove('lumen-pb-idle'); }
       var fake = function () { post({ t: 'fs' }); return Promise.resolve(); };
       Element.prototype.requestFullscreen = B.on ? fake : RF;
       if (RFW) Element.prototype.webkitRequestFullscreen = B.on ? fake : RFW;
     }
+    // Lumen's play view (watch-playview.js) hides YouTube's bar with display:none under html.lumen-pv-bar: set while
+    // Lumen's bar is on, but never during an ad (an ad piece inside that bar must stay; this file's own
+    // visibility-only rules keep it visible then).
+    function pvBar() {
+      var ad = B.on && A.ad && B.video ? safe(function () { return A.ad(D, B.video); }) : null;
+      R.classList.toggle('lumen-pv-bar', B.on && !(ad && ad.on));
+    }
     function soon() { if (!B.pushT) B.pushT = setTimeout(push, 40); }
-    function push() { clearTimeout(B.pushT); B.pushT = 0; if (B.video) post({ t: 'state', st: state(false) }); }
+    function push() { clearTimeout(B.pushT); B.pushT = 0; if (B.video) { pvBar(); post({ t: 'state', st: state(false) }); } }
 
     function rect() {
       var v = B.video;

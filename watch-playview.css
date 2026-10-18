@@ -1,0 +1,168 @@
+/* ============================================================
+   watch-playview.css -- Lumen's playback view (watch-playview.js).
+
+   The one player (not a multiview tile, not the mini-player, not the
+   video's own fullscreen): the service's player in a 16:9 box as wide
+   as the layer allows, capped so Lumen's info always peeks under it
+   (PEEK = 128px), and the info below in Lumen's own look. The tile
+   scrolls from the video down to the info. Neutral greys; the accent
+   only on focus. No backdrop-filter, no glow.
+   ============================================================ */
+.wp-layer.pv-on:not(.mv-mini):not(.wp-fs) .wp-grid { container-type: size; }
+
+.wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.pv {
+  --pv-top: 14px;
+  --pv-w: min(calc(100cqw - 48px), calc((100cqh - var(--pv-top) - 128px) * 16 / 9));
+  --pv-h: calc(var(--pv-w) * 9 / 16);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--pv-top) 0 56px;
+  background: #0b0c0d;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.pv > .wp-view {
+  position: relative;
+  inset: auto;
+  width: var(--pv-w);
+  height: var(--pv-h);
+  margin: 0 auto;
+  border-radius: 12px;
+  overflow: hidden;
+}
+/* Outside the view (a grid, the corner, fullscreen, Full page): none of Lumen's furniture. */
+.wp-tile:not(.pv) > .pv-cover,
+.wp-tile:not(.pv) > .pv-info,
+.wp-tile:not(.pv) > .pv-barmount,
+.wp-layer.mv-mini .pv-cover, .wp-layer.mv-mini .pv-info, .wp-layer.mv-mini .pv-barmount,
+.wp-layer.wp-fs .pv-cover, .wp-layer.wp-fs .pv-info, .wp-layer.wp-fs .pv-barmount { display: none !important; }
+
+/* Loading: Lumen's box over the page until only the player shows (no flash of the whole page). */
+.pv-cover {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: var(--pv-top);
+  width: var(--pv-w);
+  height: var(--pv-h);
+  transform: translateX(-50%);
+  border-radius: 12px;
+  background: #111214;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #a9adb3;
+  font-size: 13px;
+}
+.pv-cover[hidden] { display: none; }
+.pv-cover-bar { position: relative; width: 120px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.pv-cover-bar::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: 2px; background: rgba(255, 255, 255, 0.34); animation: pv-load 1.1s ease-in-out infinite; }
+@keyframes pv-load { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* The overlay play bar's mount (the playerbar lane): the video box's bottom edge, click-through. */
+.pv-barmount { position: absolute; z-index: 3; left: 50%; top: calc(var(--pv-top) + var(--pv-h)); width: var(--pv-w); height: 0; transform: translateX(-50%); pointer-events: none; }
+.pv-barmount[hidden] { display: none; }
+.pv-barmount > * { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: auto; }
+
+/* --- the info ------------------------------------------------------ */
+.pv-info { width: var(--pv-w); margin: 14px auto 0; color: #e9eaec; font: 13px/1.4 var(--font); }
+.pv-info[hidden] { display: none; }
+.pv-title {
+  margin: 0 0 12px;
+  padding-bottom: 0.1em;
+  font: 650 clamp(18px, 1.35vw, 23px)/1.3 var(--font-display);
+  letter-spacing: -0.012em;
+  color: #f1f2f3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.pv-skel { color: #75767a !important; }
+.pv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; min-width: 0; }
+.pv-chan { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 1 auto; }
+.pv-avatar {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #24262a; color: #c9ccd1; font: 600 16px/1 var(--font);
+}
+.pv-avatar.pv-skel { background: #1b1d20; }
+.pv-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pv-chan-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pv-chan-name { font-size: 15px; font-weight: 600; line-height: 1.35; color: #eef0f2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; padding-bottom: 1px; }
+.pv-subs { font-size: 12.5px; line-height: 1.35; color: #a9adb3; white-space: nowrap; }
+.pv-subs:empty { display: none; }
+
+.pv-btn {
+  appearance: none; border: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 16px; border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08); color: #e9eaec; font-size: 13.5px; font-weight: 600; line-height: 1.2;
+  white-space: nowrap;
+}
+.pv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.pv-btn:focus-visible { outline: 2px solid var(--accent, #8ab4d8); outline-offset: 2px; }
+.pv-btn:disabled { opacity: 0.45; cursor: default; }
+.pv-btn-txt { padding-bottom: 1px; }
+.pv-sub { margin-left: 8px; background: #e9eaec; color: #0d0e10; }
+.pv-sub:hover:not(:disabled) { background: #ffffff; }
+.pv-sub.is-on { background: rgba(255, 255, 255, 0.10); color: #e9eaec; }
+.pv-sub.is-on:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.pv-acts { display: flex; align-items: center; gap: 8px; flex: none; }
+.pv-pair { display: inline-flex; align-items: center; height: 36px; border-radius: 18px; background: rgba(255, 255, 255, 0.08); }
+.pv-pair .pv-btn { background: transparent; }
+.pv-pair .pv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.pv-pair .pv-like { border-radius: 18px 0 0 18px; padding: 0 14px 0 13px; }
+.pv-pair .pv-dislike { border-radius: 0 18px 18px 0; padding: 0 14px 0 12px; }
+.pv-pair-sep { width: 1px; height: 22px; background: rgba(255, 255, 255, 0.16); }
+.pv-ico { display: inline-flex; width: 20px; height: 20px; }
+.pv-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.pv-btn.is-on .pv-ico svg { fill: currentColor; }
+.pv-dislike .pv-ico { transform: rotate(180deg); }
+.pv-save.is-open { background: rgba(255, 255, 255, 0.16); }
+
+.pv-why { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; font-size: 12.5px; line-height: 1.45; color: #a9adb3; }
+.pv-why-warn .pv-why-txt { color: var(--warn, #d6b46a); }
+.pv-why-err .pv-why-txt { color: var(--danger, #e58e8e); }
+.pv-why .pv-btn { height: 28px; padding: 0 12px; font-size: 12.5px; }
+.pv-ghost { background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.pv-danger { background: #e9eaec; color: #0d0e10; }
+
+.pv-confirm, .pv-savelist {
+  margin-top: 12px; padding: 12px; border-radius: 12px;
+  background: #16171a; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+.pv-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pv-confirm-txt { flex: 1 1 auto; font-size: 13.5px; padding-bottom: 1px; }
+.pv-confirm .pv-btn, .pv-savelist .pv-btn { height: 32px; font-size: 13px; }
+.pv-savelist { display: flex; flex-direction: column; gap: 2px; max-width: 360px; }
+.pv-savelist-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.pv-savelist-title { font-weight: 600; font-size: 13.5px; }
+.pv-saveopt { justify-content: flex-start; background: transparent; border-radius: 8px; font-weight: 500; padding: 0 10px; }
+.pv-check { flex: none; width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.4); }
+.pv-saveopt.is-on .pv-check { background: #e9eaec; box-shadow: none; position: relative; }
+.pv-saveopt.is-on .pv-check::after { content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px; border: solid #0d0e10; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+.pv-desc { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
+.pv-desc-meta { font-size: 13px; font-weight: 600; color: #e9eaec; margin-bottom: 4px; }
+.pv-desc-text { font-size: 13.5px; line-height: 1.5; color: #c9ccd1; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pv-desc.is-more .pv-desc-text { display: block; -webkit-line-clamp: unset; }
+.pv-more { margin-top: 8px; height: 28px; padding: 0 12px; font-size: 12.5px; }
+.pv-comments { margin-top: 18px; }
+.pv-comments[hidden] { display: none; }
+
+/* Disney+, Hulu, Prime Video, ESPN */
+.pv-svc { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #a9adb3; font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em; }
+.pv-mark { font-size: 10.5px; }
+.pv-info:not([data-svc="youtube"]) .pv-title { font-size: clamp(20px, 1.6vw, 27px); margin-bottom: 6px; }
+.pv-ep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; line-height: 1.4; color: #c9ccd1; }
+.pv-ep-num { font-weight: 600; color: #e9eaec; }
+.pv-dot { width: 3px; height: 3px; border-radius: 50%; background: #75767a; flex: none; }
+.pv-row-other { justify-content: flex-start; }
+
+@media (prefers-reduced-motion: reduce) { .pv-cover-bar::after { animation: none; width: 100%; opacity: 0.4; } }

@@ -817,6 +817,13 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener(ch, handler);
     }
   },
+  // Lumen's playback view (watch-playview.js <-> watch-playview-main.js): "When a video plays".
+  // testWin() answers only in a --test-profile instance.
+  lumenPlayview: {
+    get: () => ipcRenderer.invoke('watch-playview:get'),
+    setView: (view) => ipcRenderer.invoke('watch-playview:set-view', { view: String(view || '') }),
+    testWin: () => ipcRenderer.invoke('watch-playview:test-win')
+  },
   watch: {
     describe: () => ipcRenderer.invoke('watch:describe'),
     setEnabled: (id, on) => ipcRenderer.invoke('watch:set-enabled', String(id == null ? '' : id), !!on),

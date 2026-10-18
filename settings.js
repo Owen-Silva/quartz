@@ -6086,6 +6086,18 @@
       field.appendChild(el('p', 'set-hint', why || (on
         ? 'A title plays in ' + hub + ' itself; Back returns to the rows. “Open in a tab” stays in the player’s bar.'
         : 'A title opens in a new tab, or in Microsoft Edge when Quartz can’t play it.')));
+      // Lumen's playback view (watch-playview.js): the player and Lumen's info, or the service's whole page.
+      var PV = window.LumenPlayview;
+      if (on && PV && typeof PV.setView === 'function') {
+        var seg = segmented([{ id: 'lumen', name: hub + ' view' }, { id: 'page', name: 'The service’s full page' }], PV.view(), function (next) {
+          PV.setView(next).then(function () { draw(on); }, function (err) { draw(on, 'Couldn’t save “When a video plays”: ' + ((err && err.message) || err)); });
+        });
+        seg.setAttribute('data-pv-view', PV.view());
+        field.appendChild(controlRow('When a video plays', null, seg));
+        field.appendChild(el('p', 'set-hint', PV.view() === 'lumen'
+          ? 'Just the service’s own player, with ' + hub + '’s title, channel, Like and Subscribe under it. “Full page” in the player’s bar shows the whole page.'
+          : 'The service’s whole page, as it looks in a tab.'));
+      }
       // Lumen's leak log (watch-leaks.js): each time it had to send him to a tab, Edge or an app.
       if (leaks) {
         var lk = el('p', 'set-hint set-lumen-leaks', 'Times ' + hub + ' had to leave: ' + (leaks.count || 0) +

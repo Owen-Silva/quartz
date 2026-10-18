@@ -157,3 +157,8 @@
 
 /* the layer's own state card (blocked, failed) covers the tile: no bar under it */
 .wp-tile.has-state .pb, .wp-tile.has-state .pb-menu { display: none; }
+
+/* In Lumen's play view (watch-playview.js), the bar lives in its mount at the video box's bottom edge. The
+   mount gives its children pointer-events:auto; the bar itself stays click-through (only its controls take
+   clicks), so the service's Skip button and the video under the empty middle stay clickable. */
+.pv-barmount > .pb { pointer-events: none; left: 0; right: 0; width: auto; bottom: 0; }
