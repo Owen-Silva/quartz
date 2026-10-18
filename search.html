@@ -5,32 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Nothing on this page is fetched but its own files and Brave's https
      thumbnails / favicons: no connect, no frames, no forms posting out.
-     Results are built with createElement + textContent only (search.js).
-     img-src file: is for Brave's logo in assets/brave/ (its API terms,
-     section 4(d)); result images stay https only (bravesearch.js imageHref). -->
+     Results are built with createElement + textContent only (search.js),
+     and so is Claude's answer (search-answer.js): model text never
+     becomes markup. img-src file: is for Brave's logo in assets/brave/
+     (its API terms, section 4(d)); result images stay https only
+     (bravesearch.js imageHref). -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: data: file:; base-uri 'none'; form-action 'none'">
 <title>Search</title>
 <!-- Quartz's own results page. A bundled, preload-less file:// guest like
      files.html: the theme, palette and accent arrive in the URL (read by
      newtab-theme.js before first paint), the question is ?q= / ?kind= /
-     ?page=, and the answer comes from main (bravesearch.js) on
-     window.__applySearch. The Brave key never reaches this page. -->
+     ?page=, the results come from main (bravesearch.js) on
+     window.__applySearch and Claude's answer on window.__applyAnswer.
+     Neither the Brave key nor the Claude key ever reaches this page. -->
 <script src="newtab-theme.js"></script>
+<script src="search-answer.js"></script>
 <script src="search.js"></script>
 <link rel="stylesheet" href="search.css">
 </head>
 <body>
 <header class="sr-head">
-  <div class="sr-head-in">
+  <div class="sr-wrap sr-head-in">
     <div class="sr-row1">
       <h1 class="sr-query" id="sr-query"></h1>
+      <div class="sr-box" role="search">
+        <span class="sr-box-glyph" aria-hidden="true">&#xE721;</span>
+        <input class="sr-q" id="sr-q" type="text" aria-label="Search" autocomplete="off" spellcheck="false" enterkeyhint="search">
+        <button class="sr-box-clear" id="sr-clear" type="button" title="Clear" aria-label="Clear the search">&#xE711;</button>
+        <kbd class="sr-kbd" title="Press / to search">/</kbd>
+      </div>
       <a class="sr-attrib" id="sr-attrib-top" href="https://brave.com/search/api/" title="Results come from the Brave Search API"><span class="sr-attrib-text">Powered by Brave</span><img class="sr-brave sr-brave-on-dark" src="assets/brave/brave-logo-on-dark.svg" alt="" width="42" height="13"><img class="sr-brave sr-brave-on-light" src="assets/brave/brave-logo-on-light.svg" alt="" width="42" height="13"></a>
     </div>
     <div class="sr-row2">
       <nav class="sr-tabs" id="sr-tabs" aria-label="Kind of results">
-        <a class="sr-tab" data-kind="web" href="#">All</a>
-        <a class="sr-tab" data-kind="news" href="#">News</a>
-        <a class="sr-tab" data-kind="videos" href="#">Videos</a>
+        <a class="sr-tab" data-kind="web" href="#"><span class="sr-tab-glyph" aria-hidden="true">&#xE721;</span>All</a>
+        <a class="sr-tab" data-kind="news" href="#"><span class="sr-tab-glyph" aria-hidden="true">&#xE12A;</span>News</a>
+        <a class="sr-tab" data-kind="videos" href="#"><span class="sr-tab-glyph" aria-hidden="true">&#xE714;</span>Videos</a>
       </nav>
       <span class="sr-meta" id="sr-meta" aria-live="polite"></span>
       <a class="sr-plain" id="sr-plain" href="#" title="The same search on Brave's own site, which needs no key">Open on search.brave.com <span class="sr-glyph" aria-hidden="true">&#xE8A7;</span></a>
@@ -38,24 +48,34 @@
   </div>
 </header>
 
-<main class="sr-main">
-  <p class="sr-altered" id="sr-altered" hidden></p>
-  <section class="sr-problem" id="sr-problem" hidden role="alert">
-    <div class="sr-problem-head"><span class="sr-pip" aria-hidden="true"></span><h2 class="sr-problem-title" id="sr-problem-title"></h2></div>
-    <p class="sr-problem-detail" id="sr-problem-detail"></p>
-    <div class="sr-actions" id="sr-actions"></div>
-  </section>
-  <ol class="sr-results" id="sr-results" aria-label="Results"></ol>
-  <nav class="sr-pager" id="sr-pager" hidden aria-label="Pages">
-    <a class="sr-btn" id="sr-prev" href="#">Previous</a>
-    <span class="sr-page" id="sr-page"></span>
-    <a class="sr-btn" id="sr-next" href="#">Next</a>
-  </nav>
+<main class="sr-main sr-wrap">
+  <div class="sr-grid" id="sr-grid">
+    <!-- A grid item of its own (area "qa"), so under 1100 px the side panel can sit between the
+         answer and the results. Inside .sr-col it put the side panel above the answer. -->
+    <section class="qa" id="qa" hidden></section>
+    <div class="sr-col" id="sr-col">
+      <p class="sr-altered" id="sr-altered" hidden></p>
+      <section class="sr-problem" id="sr-problem" hidden role="alert">
+        <div class="sr-problem-head"><span class="sr-pip" aria-hidden="true"></span><h2 class="sr-problem-title" id="sr-problem-title"></h2></div>
+        <p class="sr-problem-detail" id="sr-problem-detail"></p>
+        <div class="sr-actions" id="sr-actions"></div>
+      </section>
+      <div class="sr-top" id="sr-top" hidden></div>
+      <ol class="sr-results" id="sr-results" aria-label="Results"></ol>
+      <nav class="sr-pager" id="sr-pager" hidden aria-label="Pages">
+        <a class="sr-btn" id="sr-prev" href="#"><span class="sr-glyph" aria-hidden="true">&#xE76B;</span> Previous</a>
+        <span class="sr-page" id="sr-page"></span>
+        <a class="sr-btn" id="sr-next" href="#">Next <span class="sr-glyph" aria-hidden="true">&#xE76C;</span></a>
+      </nav>
+    </div>
+    <aside class="sr-side" id="sr-side" aria-label="About this search" hidden></aside>
+  </div>
 </main>
 
 <footer class="sr-foot">
-  <p><a class="sr-attrib" href="https://brave.com/search/api/"><span class="sr-attrib-text">Powered by Brave</span><img class="sr-brave sr-brave-on-dark" src="assets/brave/brave-logo-on-dark.svg" alt="" width="42" height="13"><img class="sr-brave sr-brave-on-light" src="assets/brave/brave-logo-on-light.svg" alt="" width="42" height="13"></a>
-  <span id="sr-foot-note">Results from the Brave Search API, in Brave's order. Quartz keeps them in memory for a few minutes so Back and reload are free, and never writes them to disk.</span></p>
+  <div class="sr-wrap"><p><a class="sr-attrib" href="https://brave.com/search/api/"><span class="sr-attrib-text">Powered by Brave</span><img class="sr-brave sr-brave-on-dark" src="assets/brave/brave-logo-on-dark.svg" alt="" width="42" height="13"><img class="sr-brave sr-brave-on-light" src="assets/brave/brave-logo-on-light.svg" alt="" width="42" height="13"></a>
+  <span id="sr-foot-note">Results from the Brave Search API, in Brave's order. Quartz keeps them in memory for a few minutes so Back and reload are free, and never writes them to disk. The answer at the top is Claude's, written for this search; it is not Brave's.</span>
+  <span class="sr-keys" id="sr-keys"><kbd>/</kbd> search <kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> open</span></p></div>
 </footer>
 </body>
 </html>
