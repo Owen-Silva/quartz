@@ -270,7 +270,7 @@
       c = c || {};
       var v = B.video && B.video.isConnected ? B.video : null;
       if (c.c === 'status') return status();
-      if (c.c === 'rescan') { if (!v) { B.video = null; find(true); } else post({ t: 'state', st: state(true) }); return status(); }
+      if (c.c === 'rescan') { if (!v) { B.video = null; find(true); } else post({ t: 'ready', st: state(true) }); return status(); }
       if (c.c === 'off') { B.want = false; setOn(false); return { ok: true }; }
       if (!v) return { ok: false, why: 'the video is not on the page' };
       var ad = A.ad ? safe(function () { return A.ad(D, v); }) : null;

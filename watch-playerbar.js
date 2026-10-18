@@ -238,7 +238,11 @@
     s.innerHTML = ICONS[name] || '';
     return s;
   }
-  function setIcon(b, name) { var old = b.querySelector('svg'); var n = icon(name); if (old) b.replaceChild(n, old); else b.insertBefore(n, b.firstChild); }
+  function setIcon(b, name) {
+    if (b.getAttribute('data-ic') === name) return;   // paint() runs on every time push: no churn
+    b.setAttribute('data-ic', name);
+    var old = b.querySelector('svg'); var n = icon(name); if (old) b.replaceChild(n, old); else b.insertBefore(n, b.firstChild);
+  }
   function button(cls, ic, label, fn) {
     var b = h('button', 'pb-btn ' + cls);
     b.type = 'button';
@@ -431,7 +435,7 @@
     P.findT = setTimeout(function () { if (!P.ready && !P.fell) fallback(s, P.health.novideo(FIND_MS)); }, FIND_MS + 1500);
     var code = Page.source({ find: FIND_MS, keys: PAGE_KEYS }, P.svc);
     js(s, code).then(function (r) {
-      if (r && r.found && !P.ready) quiet(s, { c: 'rescan' });
+      if (r && r.found && !P.ready) quiet2(s, { c: 'rescan' });
     }, function (e) { if (!P.fell) fallback(s, P.health.broken((e && e.message) || e)); });
   }
 
@@ -443,6 +447,7 @@
         clearTimeout(P.findT);
         if (P.fell || getMode() === 'service' || isMulti()) { quiet2(s, { c: 'off' }); return; }
         P.ready = true;
+        if (m.st && m.st.on === false) quiet2(s, { c: 'on' });
         if (m.st && m.st.menus) P.menus = m.st.menus;
         setOn(s, true);
         take(s, m.st);
@@ -553,9 +558,12 @@
     var gone = w < 160 || bottom - top < 90;
     bar.classList.toggle('is-gone', gone);
     if (gone) return;
-    bar.style.left = Math.round(x) + 'px';
+    // The <webview> need not fill the tile (Lumen's play view sizes it to the video box): offsets from real rects.
+    var vr = s.view.getBoundingClientRect(), tr = s.tile.getBoundingClientRect();
+    var ox = vr.left - tr.left, oy = vr.top - tr.top, th = s.tile.clientHeight || vh;
+    bar.style.left = Math.round(ox + x) + 'px';
     bar.style.width = Math.round(w) + 'px';
-    bar.style.bottom = Math.round(vh - bottom) + 'px';
+    bar.style.bottom = Math.round(th - (oy + bottom)) + 'px';
     bar.classList.toggle('is-compact', w < 620);
     bar.classList.toggle('is-tiny', w < 400);
     if (P.menu) placeMenu(s);
@@ -680,8 +688,8 @@
   function menuModel(s, kind) {
     var P = s._pb;
     var m = P.menus || {};
-    var hasMore = !!(P.svc.own && P.svc.own.more);
-    return buildMenu(kind, kind === 'speed' ? null : m[kind], P.name, { rate: P.st ? P.st.r : 1, ownMore: hasMore || true });
+    // The gear menu always offers the service's own controls (its bar, unhidden for that moment).
+    return buildMenu(kind, kind === 'speed' ? null : m[kind], P.name, { rate: P.st ? P.st.r : 1, ownMore: true });
   }
   function renderMenu(s) {
     var P = s._pb, box = P.el.menu;
@@ -810,9 +818,14 @@
       var P = s._pb;
       if (!P) return;
       var want = !multi && mode === 'lumen' && !P.fell;
-      if (want && !P.on && P.multiOff) { P.multiOff = false; if (P.ready) { quiet2(s, { c: 'on' }); setOn(s, true); activity(s); } else inject(s); }
-      else if (want && !P.on && !P.ready && P.injected === 0 && s.view) inject(s);
-      else if (!want && P.on) { P.multiOff = multi; setOn(s, false); quiet2(s, { c: 'off' }); }
+      if (!want) {
+        if (multi) P.multiOff = true;
+        if (P.on) { setOn(s, false); quiet2(s, { c: 'off' }); }
+      } else if (!P.on && P.multiOff) {
+        // Back to one video: Lumen's bar again (the page's injection happens on its dom-ready, never before).
+        P.multiOff = false;
+        if (P.ready) { quiet2(s, { c: 'on' }); setOn(s, true); activity(s); } else if (P.injected > 0) inject(s);
+      }
     });
   }
   /** watch-player.js takeShortcut: Esc closes a menu, then the service's own menu, then Lumen's full window. */
