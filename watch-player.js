@@ -31,7 +31,7 @@
   'use strict';
   var H = window.WatchPlayerHosts;
   var api = window.api && window.api.watchPlayer;
-  var NAME = H ? H.HUB_NAME : 'Watch';
+  var NAME = H ? H.HUB_NAME : 'Lumen';
   var ESC_AFTER_FS_MS = 500;   // an Esc this soon after the video left fullscreen was that same press
 
   var L = {
@@ -96,7 +96,7 @@
     layer.hidden = true;
 
     var bar = L.bar = el('header', 'wp-bar');
-    bar.appendChild(btn('wp-back', 'Back', function () { back(); }, 'Back (Alt+Left)'));
+    bar.appendChild(btn('wp-back', 'Back', function () { back('bar'); }, 'Back (Alt+Left)'));
     L.markEl = el('span', 'wp-mark');
     bar.appendChild(L.markEl);
     L.titleEl = el('span', 'wp-title');
@@ -130,7 +130,7 @@
 
     // The mouse's back button over the bar or a tile's own furniture (the guest's
     // presses come from main's app-command): the same Back.
-    layer.addEventListener('mouseup', function (e) { if (e.button === 3) { e.preventDefault(); back(); } });
+    layer.addEventListener('mouseup', function (e) { if (e.button === 3) { e.preventDefault(); back('mouse'); } });
     // A video that leaves fullscreen hands the slot back its bar.
     layer.addEventListener('transitionend', function (e) { if (e.target === layer && !L.open) teardownDom(); });
   }
@@ -156,6 +156,10 @@
       L.el.style.top = (r.top - hr.top) + 'px';
       L.el.style.width = r.width + 'px';
       L.el.style.height = r.height + 'px';
+    } else if (fs) {
+      // The video's fullscreen: .wp-fs is position:fixed; inset:0, which the tab-sized
+      // inline box would otherwise override (the layer stayed the Watch tab's size).
+      L.el.style.left = L.el.style.top = L.el.style.width = L.el.style.height = '';
     }
     placeSheet();
   }
@@ -404,17 +408,23 @@
     L.owner = null;
   }
 
-  function back() {
+  /** src 'mouse': the mouse's back button (the bar's mouseup, main's app-command). */
+  function back(src) {
     if (!L.open) return false;
     // One press of the mouse's back button can arrive twice (the bar's own mouseup and
-    // main's app-command): one Back.
-    if (Date.now() - (L.lastBackAt || 0) < 300) return true;
-    L.lastBackAt = Date.now();
+    // main's app-command): one Back. Only those two are folded together -- the bar's
+    // button and Alt+Left pressed quickly are each their own Back.
+    if (src === 'mouse') {
+      if (Date.now() - (L.lastMouseBackAt || 0) < 300) return true;
+      L.lastMouseBackAt = Date.now();
+    }
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Back'); return true; }
     var s = focused();
     var v = s && s.view;
     var can = false;
     try { can = !!(v && v.canGoBack()); } catch (e) { can = false; }
+    // test seam (_state().backs): the last few Backs, where each came from, whether the page could go back.
+    L.backs = (L.backs || []).slice(-5).concat([{ src: src || 'key', can: can, t: Date.now() % 100000 }]);
     if (can && !(s.state && !s.state.hidden && s.state.getAttribute('data-kind') === 'blocked')) {
       s.state.hidden = true;
       s.tile.classList.remove('has-state');
@@ -534,7 +544,8 @@
 
   function onCommand(m) {
     if (!m || !L.open) return;
-    if (m.cmd === 'back') { if (!L.el.hidden) back(); return; }
+    L.lastCommand = String(m.cmd || '').slice(0, 40);   // test seam: the last command main sent
+    if (m.cmd === 'back') { if (!L.el.hidden) back('mouse'); return; }
     if (/^media-|^key-Media/.test(String(m.cmd))) media(String(m.cmd));
   }
 
@@ -548,7 +559,10 @@
     });
     api.on('command', onCommand);
     api.on('key', onKeyFromGuest);
-    api.on('left', function (m) { if (m && L.open) toast('Opened ' + (m.host || 'that page') + ' in a new tab: it isn’t part of ' + (svcName(slotOf(m.wcId) && slotOf(m.wcId).service) || 'this service')); });
+    api.on('left', function (m) {
+      if (m && L.open && m.to === 'edge') { toast('Opened ' + (svcName(m.service) || m.host || 'that title') + ' in Microsoft Edge' + (m.reason ? ': ' + m.reason : ''), true); return; }
+      if (m && L.open) toast('Opened ' + (m.host || 'that page') + ' in a new tab: it isn’t part of ' + (svcName(slotOf(m.wcId) && slotOf(m.wcId).service) || 'this service'));
+    });
     api.on('blocked', function (m) { if (m && L.open) note('Stayed in ' + NAME + ': the page tried to open an app (' + (m.scheme || 'app') + ':)'); });
     api.on('gone', function (m) {
       var s = m && slotOf(m.wcId);
@@ -599,6 +613,8 @@
         lastClosed: L.lastClosed,
         extras: X('state') || null,
         lastMedia: L.lastMedia || '',
+        lastCommand: L.lastCommand || '',
+        backs: L.backs || [],
         slots: L.slots.map(function (s) {
           return { wcId: s.wcId, url: s.url, service: s.service, title: s.title, blocked: s.blocked, refused: s.refused,
             state: s.state.hidden ? '' : s.state.getAttribute('data-kind'), stateText: s.state.hidden ? '' : s.state.textContent, view: !!s.view };

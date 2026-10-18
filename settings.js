@@ -6064,7 +6064,7 @@
     var field = panelEl && panelEl.querySelector('[data-field="watchplayer"]');
     if (!field) return;
     var wp = window.api && window.api.watchPlayer;
-    var hub = (window.WatchPlayerHosts && window.WatchPlayerHosts.HUB_NAME) || 'Watch';
+    var hub = (window.WatchPlayerHosts && window.WatchPlayerHosts.HUB_NAME) || 'Lumen';
     field.textContent = '';
     if (!wp) { field.appendChild(el('p', 'set-hint', 'This build has no player channel, so titles open in a new tab.')); return; }
     var draw = function (on, why) {

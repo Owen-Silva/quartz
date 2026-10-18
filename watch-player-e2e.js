@@ -85,7 +85,7 @@ nav{display:flex;gap:16px;padding:14px 20px} a,button{color:#9cc8e0;font:inherit
 <nav><a id="next" href="/__p/next">More episodes</a><a id="blank" href="/__p/blank" target="_blank">Go to channel</a>
 <a id="away" href="${other}/away">A link to another site</a><button id="pop" onclick="window.open('${auth}/signin','signin','width=480,height=600')">Sign in (popup)</button>
 <button id="app" onclick="location.href='disneyplus://open/x'">Open in the app</button></nav>
-<script>window.addEventListener('message', (e) => { window.__got = e.data; });</script></body></html>`;
+<script>window.addEventListener('message', (e) => { window.__got = e.data; }); window.addEventListener('keydown', (e) => { window.__lastKey = e.key; });</script></body></html>`;
 }
 const PLAYER_PATH = /^\/(?:watch$|watch\/player|video\/|play\/|detail\/|movies\/|series\/|__p\/)/;
 
@@ -112,9 +112,21 @@ async function startServers(mock) {
       req.pipe(up);
     });
   }
-  const rebase = [];
+  // TMDB's where-to-watch page: provider links go through a click-through redirector (JustWatch's
+  // click.justwatch.com in life; /jw on this origin here) to the service's REAL address, which the
+  // layer hands over to watch-main before any request leaves (rebased to the fronts from there).
+  const tmdb = await listen((req, res) => {
+    const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
+    if (u.pathname === '/jw') { res.writeHead(302, { Location: u.searchParams.get('r') || '/', 'Cache-Control': 'no-store' }); res.end(); return; }
+    sendHtml(res, '<!doctype html><html><head><meta charset="utf-8"><title>Where to watch</title></head><body style="margin:0;padding:20px;background:#fff;color:#111;font:14px/1.5 \'Segoe UI\',sans-serif">' +
+      '<h1 id="tm" style="font-size:18px">Where to watch: Test Movie</h1><ul>' +
+      '<li><a id="dplus" target="_blank" rel="noopener" href="/jw?r=' + encodeURIComponent('https://www.disneyplus.com/play/tmdb-pick') + '">Disney Plus</a></li>' +
+      '<li><a id="elsewhere" target="_blank" rel="noopener" href="/jw?r=' + encodeURIComponent(other.origin + '/netflix') + '">Another service</a></li>' +
+      '<li><a id="overview" href="/movie/1">Overview</a></li></ul></body></html>');
+  });
+  const rebase = [['https://www.themoviedb.org', tmdb.origin]];
   for (const svc of Mock.SERVICES) for (const from of Mock.ORIGINS[svc]) rebase.push([from, fronts[svc].origin]);
-  return { other, auth, fronts, rebase, close: () => { other.server.close(); auth.server.close(); for (const f of Object.values(fronts)) f.server.close(); } };
+  return { other, auth, fronts, tmdb, rebase, close: () => { other.server.close(); auth.server.close(); tmdb.server.close(); for (const f of Object.values(fronts)) f.server.close(); } };
 }
 
 /* ---- CDP helpers ------------------------------------------------------------------------------ */
@@ -173,17 +185,32 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await chrome.ev('openWatchTab(), 1');
     const gt = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
     const g = await cdpTo(gt);
-    const card = (svc) => `[...document.querySelectorAll('*')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent)`;
+    // A tile of that service, from the row in focus first (a click on a row that is not in focus
+    // brings that row up instead of opening the title, as it would for him).
+    const card = (svc) => `([...document.querySelectorAll('#stack .lrow[data-d="0"] *')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent)
+      || [...document.querySelectorAll('*')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent))`;
     await g.waitFor(`!!(${card('youtube')}) && !!(${card('disney')})`, 60000);
-    check(await g.ev(`/Plays in Watch/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'a YouTube tile says it plays in Watch');
+    check(await g.ev(`/Plays in Lumen/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'a YouTube tile says it plays in Lumen');
     const memBefore = await chrome.ev('window.api.watchPlayer.memory()');
 
-    // Scroll the rows, then open a YouTube title with a real click.
-    const scroller = `(document.scrollingElement && document.scrollingElement.scrollHeight > innerHeight + 40 ? document.scrollingElement : [...document.querySelectorAll('*')].find((n) => n.scrollHeight > n.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(n).overflowY)))`;
-    const scrolled = await g.ev(`(() => { const s = ${scroller}; if (!s) return -1; s.scrollTop = 260; return s.scrollTop; })()`);
+    // Move down the rows (Watch's rows are a stack moved by the wheel, not a scrolling page), then
+    // open a YouTube title with a real click. "Where he was" = the stack's offset, the row in focus,
+    // and any scroll a container has.
+    const where = `(() => { const st = document.getElementById('stack'); const cur = st && st.querySelector('.lrow[data-d="0"]');
+      return JSON.stringify([st ? st.style.transform : null, cur ? cur.dataset.key : null, document.scrollingElement ? document.scrollingElement.scrollTop : 0, st && st.parentNode ? st.parentNode.scrollTop || 0 : 0]); })()`;
+    // Down to the first row below the top one that has a YouTube tile (the wheel moves one row per turn).
+    const ytRow = await g.ev(`(() => { const rows = [...document.querySelectorAll('#stack .lrow')];
+      for (let i = 1; i < rows.length; i++) if ([...rows[i].querySelectorAll('*')].some((n) => n._item && n._item.service === 'youtube')) return i; return 0; })()`);
+    for (let i = 0; i < ytRow; i++) {
+      await g.ev('window.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true })), 1');
+      await sleep(600);
+    }
+    say('rows: moved down to row ' + ytRow + ' (the first below the top with a YouTube tile; 0 = none, the position check is then equality only)');
     const ytTitle = await g.ev(`(${card('youtube')})._item.title`);
     const tabsBefore = await chrome.ev('tabs.length');
-    await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); return 1; })()`);
+    const scrolled = await g.ev(where);
+    await g.ev(`(() => { const c = ${card('youtube')}; c.click(); return 1; })()`);
     const s1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].wcId !== null ? s : null; })()`, 15000).catch(() => null);
     check(!!s1, 'a click on a YouTube tile opens the player layer', s1 && { title: s1.title, url: s1.slots[0].url });
     check(s1 && s1.title === ytTitle && s1.mark === 'YT' && !s1.edge, 'the bar: the title, the YouTube mark, no Edge button', s1 && { title: s1.title, mark: s1.mark, edge: s1.edge });
@@ -198,6 +225,10 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await p.waitFor('(() => { const v = document.getElementById("v"); return v && !v.paused && v.currentTime > 0.3; })()', 20000).catch(() => 0);
     const memPlaying = await chrome.ev('window.api.watchPlayer.memory()');
     check(await p.ev('(() => { const v = document.getElementById("v"); return !!v && !v.paused && v.readyState >= 2; })()'), 'the fixture video plays inside the layer');
+    // The page inside gets the whole tile: its viewport is the webview's box (no letterbox of the guest).
+    const gbox = await chrome.ev('(() => { const v = document.querySelector(".wp-layer webview"); if (!v) return null; const r = v.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })()');
+    const gview = await p.ev('[innerWidth, innerHeight]');
+    check(!!gbox && Math.abs(gbox[0] - gview[0]) <= 1 && Math.abs(gbox[1] - gview[1]) <= 1, 'the page inside the layer is the size of its tile', { webview: gbox, page: gview });
 
     // Shots of the layer open (dark, then light), at 1920x1000 and 1280x800.
     const shoot = async (name, w, h) => {
@@ -207,6 +238,10 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
       await chrome.send('Emulation.clearDeviceMetricsOverride');
       await sleep(300);
     };
+    // The window's real size first: an emulated size resizes the chrome but not the page inside a
+    // <webview> (its own widget), so only this shot shows the guest exactly as he would see it.
+    await sleep(600);
+    try { await chrome.shot(path.join(SHOTS, 'lumen-player-dark-actual.png')); } catch (e) { say('shot dark-actual failed: ' + e.message); }
     await shoot('dark-1920x1000', 1920, 1000);
     await shoot('dark-1280x800', 1280, 800);
     const themeWas = await chrome.ev('document.documentElement.getAttribute("data-theme") || "dark"');
@@ -217,7 +252,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await chrome.ev(`window.Settings && window.Settings.set({ siteTheme: "system" }), document.documentElement.setAttribute("data-theme", ${JSON.stringify(themeWas)}), 1`);
 
     // In-layer navigation: a link, then a target=_blank link; both stay in this layer, in place.
-    await p.ev('document.getElementById("next").click(), 1');
+    await gesture(p, 'document.getElementById("next").click(), 1');   // a real click: without a user gesture Chromium marks the page left behind skippable for Back
     await chrome.waitFor(`${ST}.slots[0].url === ${JSON.stringify(FY + '/__p/next')}`, 10000).catch(() => 0);
     check((await chrome.ev(ST)).slots[0].url === FY + '/__p/next', 'a link to another page of the service stays in the layer');
     pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/next', 8000); p = await cdpTo(pt);
@@ -265,15 +300,34 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     check((await chrome.ev(ST)).slots[0].url === FY + '/__p/next', 'Back (the bar) walks the layer\'s own history first');
     pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/next', 8000); p = await cdpTo(pt);
     await keyIn(p, 'ArrowLeft', 'ArrowLeft', 37, 1);
-    await chrome.waitFor(`${ST}.slots[0].url.indexOf(${JSON.stringify(FY + '/watch?v=')}) === 0`, 8000).catch(() => 0);
-    check((await chrome.ev(ST)).slots[0].url.indexOf(FY + '/watch?v=') === 0, 'Alt+Left inside the page is Back too');
+    await chrome.waitFor(`(() => { const s = ${ST}; return !!s.slots[0] && s.slots[0].url.indexOf(${JSON.stringify(FY + '/watch?v=')}) === 0; })()`, 8000).catch(() => 0);
+    await sleep(500);   // a second Back from the same press would close the layer by now
+    const ak = await chrome.ev(ST);
+    check(ak.open && !!ak.slots[0] && ak.slots[0].url.indexOf(FY + '/watch?v=') === 0, 'Alt+Left inside the page is Back too (one Back, the layer stays)', { open: ak.open, url: ak.slots[0] && ak.slots[0].url, backs: ak.backs, closed: ak.lastClosed });
+    if (!ak.open) {
+      await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=hiLockupB02')}, { service: 'youtube', title: 'Again' }), 1`);
+      await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].wcId !== null; })()`, 8000).catch(() => 0);
+    }
     // The media key: play/pause on the playing video.
-    pt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=') === 0, 8000); p = await cdpTo(pt);
+    // (When Alt+Left failed above, the player is still on a fixture page with the same video: carry on there.)
+    pt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=') === 0, 8000)
+      || await targetWhere(q, (x) => String(x.url) === FY + '/__p/next', 2000);
+    if (!pt) throw new Error('the player page is gone after Back (no target on ' + FY + ')');
+    p = await cdpTo(pt);
     await p.waitFor('(() => { const v = document.getElementById("v"); return v && !v.paused; })()', 10000).catch(() => 0);
+    // A media key sent over CDP reaches neither the page nor Electron's before-input-event (seen
+    // 10-17: no command, no keydown), so the KEY itself is not verifiable here. When it does not
+    // arrive, the command main would send drives the chrome's half, and the run says so.
     await keyIn(p, 'MediaPlayPause', 'MediaPlayPause', 0xB3);
     await sleep(600);
-    check(await p.ev('document.getElementById("v").paused'), 'the play/pause media key pauses the player', await chrome.ev(ST + '.lastMedia'));
-    await keyIn(p, 'MediaPlayPause', 'MediaPlayPause', 0xB3);
+    const viaKey = !!(await chrome.ev(ST + '.lastCommand'));
+    if (!viaKey) {
+      say('media key: CDP could not deliver it (no command, page saw ' + JSON.stringify(await p.ev('window.__lastKey || ""')) + '); driving the command main sends instead -- the physical key is NOT verified');
+      await chrome.ev('WatchPlayer.media("key-MediaPlayPause"), 1');
+      await sleep(600);
+    }
+    check(await p.ev('document.getElementById("v").paused'), 'the play/pause media command pauses the player' + (viaKey ? ' (the key)' : ' (command only)'), { media: await chrome.ev(ST + '.lastMedia'), command: await chrome.ev(ST + '.lastCommand') });
+    if (viaKey) await keyIn(p, 'MediaPlayPause', 'MediaPlayPause', 0xB3); else await chrome.ev('WatchPlayer.media("key-MediaPlayPause"), 1');
     await sleep(600);
     check(await p.ev('!document.getElementById("v").paused'), 'and plays it again');
     // The mouse back button over the bar: at the first page, Back closes.
@@ -288,8 +342,9 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await sleep(1500);
     check(!(await chrome.ev(`window.api.watchPlayer.alive(${wc1}).then((r) => r.alive)`)), 'the player\'s webContents is destroyed on close');
     check(!(await targetWhere(q, (x) => String(x.url).indexOf(FY + '/') === 0 && x.type !== 'page', 1500)), 'no player target is left');
-    const scrollNow = await g.ev(`(() => { const s = ${scroller}; return s ? s.scrollTop : -1; })()`);
-    check(scrolled > 0 && scrollNow === scrolled, 'Back returns to the rows at the same scroll position', { before: scrolled, after: scrollNow });
+    const scrollNow = await g.ev(where);
+    const moved = (() => { try { return JSON.parse(scrolled); } catch (e) { return []; } })();
+    check((ytRow === 0 || (!!moved[0] && /translateY\(-\d/.test(moved[0]))) && scrollNow === scrolled, 'Back returns to the rows where he was (the same row, the same offset)', { before: scrolled, after: scrollNow });
     const asked = await chrome.waitFor(`(() => { const c = ${ST}.lastClosed; return c && c.asked ? c.asked : null; })()`, 5000).catch(() => null);
     check(Array.isArray(asked) && asked.indexOf('youtube') !== -1 && logHas(/re-reading youtube after watching/), 'closing asks Watch to re-read YouTube (fresh after watching)', asked);
     await sleep(2500);
@@ -335,6 +390,43 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     }
     if ((await chrome.ev(ST)).open) await chrome.ev('WatchPlayer.close("e2e"), 1');
 
+    // TMDB's where-to-watch page: in the layer (the TMDB guide), not a tab; its Disney Plus link,
+    // through the redirector, hands over to Disney+'s own page in the layer; another service, a tab.
+    const TMDB_URL = 'https://www.themoviedb.org/movie/1/watch';
+    const openTmdb = (gc) => gc.ev(`console.log("quartz-watch:open " + JSON.stringify({ url: ${JSON.stringify(TMDB_URL)} })), 1`);
+    const tTabs = await chrome.ev('tabs.length');
+    await openTmdb(g);
+    const tm = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].service === 'tmdb' && s.slots[0].wcId !== null ? s : null; })()`, 10000).catch(() => null);
+    check(!!tm && tm.slots[0].url === srv.tmdb.origin + '/movie/1/watch' && (await chrome.ev('tabs.length')) === tTabs, 'a TMDB where-to-watch page opens in the layer, not a tab', tm && { url: tm.slots[0].url, mark: tm.mark });
+    check(logHas(/TMDB where-to-watch page opened in the player layer: themoviedb\.org/), 'quartz.log: the TMDB page has its line');
+    pt = await targetWhere(q, (x) => String(x.url) === srv.tmdb.origin + '/movie/1/watch', 8000);
+    const tp = pt ? await cdpTo(pt) : null;
+    if (tp) {
+      await tp.waitFor('!!document.getElementById("dplus")', 8000).catch(() => 0);
+      await sleep(500);
+      try { await chrome.shot(path.join(SHOTS, 'lumen-player-tmdb-actual.png')); } catch (e) { say('shot tmdb failed: ' + e.message); }
+      await gesture(tp, 'document.getElementById("dplus").click(), 1');
+      const hd = await chrome.waitFor(`(() => { const s = ${ST}; return s.n === 1 && s.slots[0].service === 'disney' && s.slots[0].wcId !== null ? s : null; })()`, 10000).catch(() => null);
+      check(!!hd && hd.slots[0].url === FD + '/play/tmdb-pick' && hd.mark === 'D+' && (await chrome.ev('tabs.length')) === tTabs, 'its Disney Plus link hands over: Disney+\'s own page in the layer, no tab', hd && { url: hd.slots[0].url, mark: hd.mark });
+      check(logHas(/a where-to-watch link opened Disney\+ in the layer: www\.disneyplus\.com/), 'quartz.log: the handover has its line');
+      tp.close();
+      await openTmdb(g);
+      await chrome.waitFor(`(() => { const s = ${ST}; return s.n === 1 && s.slots[0].service === 'tmdb' && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);
+      pt = await targetWhere(q, (x) => String(x.url) === srv.tmdb.origin + '/movie/1/watch', 8000);
+      const tp2 = pt ? await cdpTo(pt) : null;
+      if (tp2) {
+        await tp2.waitFor('!!document.getElementById("elsewhere")', 8000).catch(() => 0);
+        const nb = await chrome.ev('tabs.length');
+        await gesture(tp2, 'document.getElementById("elsewhere").click(), 1');
+        await chrome.waitFor(`tabs.length === ${nb + 1}`, 8000).catch(() => 0);
+        check((await chrome.ev(`tabs.length === ${nb + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/netflix')}) === 0)`)), 'a where-to-watch link to a service Watch does not read opens a tab');
+        check(logHas(/left the layer \(redirect to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: that way out has its line');
+        tp2.close();
+      } else check(false, 'the TMDB page came back for the second link');
+      await chrome.ev('activateTab(findWatchTab().id), 1');
+    } else check(false, 'the TMDB page is a target');
+    if ((await chrome.ev(ST)).open) await chrome.ev('WatchPlayer.close("e2e"), 1');
+
     // The public Widevine test stream, inside the layer (castlabs CDM, the services' way).
     if (WIDEVINE) {
       await chrome.ev(`openInLumen(${JSON.stringify(FD + '/__p/widevine?ms=30000')}, { service: 'disney', title: 'Widevine test stream' }), 1`);
@@ -358,7 +450,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     // Settings > Watch: "Play inside Watch" off = the old behaviour (a new tab).
     await g.ev('console.log("quartz-watch:settings {}"), 1');
     const sw = await chrome.waitFor('(() => { const b = document.querySelector("[data-field=\\"watchplayer\\"] [role=switch]"); return b ? b.getAttribute("aria-checked") : null; })()', 8000).catch(() => null);
-    check(sw === 'true', 'Settings > Watch has "Play inside Watch", on by default', sw);
+    check(sw === 'true', 'Settings > Watch has "Play inside Lumen", on by default', sw);
     await chrome.ev('document.querySelector("[data-field=\\"watchplayer\\"] [role=switch]").click(), 1');
     await chrome.waitFor('window.api.watchPlayer.get().then((r) => r.inside === false)', 5000).catch(() => 0);
     check(await chrome.ev('window.api.watchPlayer.get().then((r) => r.inside === false)'), 'the switch turns it off (main has it)');
@@ -387,10 +479,27 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await g2.ev(`(${card('disney')}).click(), 1`);
     await sleep(2500);
     let stub2 = ''; try { stub2 = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub2 = ''; }
-    check(stub2.indexOf(FD) !== -1 && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ tile goes to Edge (the stub), no layer', stub2.trim().slice(0, 120));
+    // Edge gets the title's REAL address (the tile's link), not the test mirror.
+    check(/"?https:\/\/www\.disneyplus\.com\//.test(stub2) && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ tile goes to Edge (the stub), no layer', stub2.trim().slice(0, 120));
     await g2.ev(`(${card('youtube')}).click(), 1`);
     const y2 = await c2.waitFor(`${ST}.open`, 8000).catch(() => false);
     check(!!y2, 'DRM not ready: YouTube still plays in the layer');
+    // DRM not ready: a where-to-watch link to Disney+ goes to Edge (the stub) with the reason said.
+    try { fs.unlinkSync(EDGE_STUB); } catch (e) { /* none */ }
+    await g2.ev(`console.log("quartz-watch:open " + JSON.stringify({ url: "https://www.themoviedb.org/movie/1/watch" })), 1`);
+    await c2.waitFor(`(() => { const s = ${ST}; return s.n === 1 && s.slots[0].service === 'tmdb' && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);
+    const tt = await targetWhere(q, (x) => String(x.url) === srv.tmdb.origin + '/movie/1/watch', 8000);
+    const t3 = tt ? await cdpTo(tt) : null;
+    if (t3) {
+      await t3.waitFor('!!document.getElementById("dplus")', 8000).catch(() => 0);
+      await gesture(t3, 'document.getElementById("dplus").click(), 1');
+      await sleep(2500);
+      let stub3 = ''; try { stub3 = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub3 = ''; }
+      const s5 = await c2.ev(ST);
+      check(stub3.indexOf('/play/tmdb-pick') !== -1 && s5.slots[0] && s5.slots[0].service === 'tmdb', 'DRM not ready: a where-to-watch link to Disney+ goes to Edge (the stub); the TMDB page stays', { stub: stub3.trim().slice(0, 120), service: s5.slots[0] && s5.slots[0].service });
+      check(logHas(/left the layer \(where-to-watch link to Disney\+, opened in Edge/), 'quartz.log: the Edge handover has its line, with the reason');
+      t3.close();
+    } else check(false, 'DRM not ready: the TMDB page is a target');
     g2.close();
     await q.quit();
   } finally {

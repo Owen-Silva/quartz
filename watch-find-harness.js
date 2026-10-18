@@ -245,7 +245,7 @@ const qOfUrl = (u) => { const m = /[?&](?:q|phrase)=([^&]*)/.exec(u); return m ?
     wm.handleGuestLine(guest, 'quartz-watch:open {"url":"https://www.themoviedb.org/movie/346648/watch?locale=US"}');
     await settle(10);
     check(plays.length === 1 && /themoviedb\.org\/movie\/346648\/watch/.test(plays[0].url) && !sent.some((s) => s[0] === 'open-url'), "TMDB's where-to-watch page opens in the Lumen layer, not a tab", { plays, sent: sent.map((s) => s[0]) });
-    check(logs.some((l) => l === 'Lumen opened a TMDB where-to-watch page in the layer'), 'quartz.log: the TMDB open has its line');
+    check(logs.some((l) => /^Lumen: a TMDB where-to-watch page opened in the player layer: /.test(l)), 'quartz.log: the TMDB open has its line');
     wm.handleGuestLine(guest, 'quartz-watch:forget {}');
     check(wm.state().find.cache === 0, 'Forget empties the find cache too');
     wm.stop && wm.stop();
