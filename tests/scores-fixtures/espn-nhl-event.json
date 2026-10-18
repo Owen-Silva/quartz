@@ -1,0 +1,98 @@
+{
+ "id": "401892522",
+ "date": "2026-10-17T22:00Z",
+ "name": "Seattle Kraken at Florida Panthers",
+ "shortName": "SEA @ FLA",
+ "status": {
+  "clock": 0,
+  "displayClock": "0:00",
+  "period": 1,
+  "type": {
+   "id": "22",
+   "name": "STATUS_END_PERIOD",
+   "state": "in",
+   "completed": false,
+   "description": "End of Period",
+   "detail": "End of 1st Period",
+   "shortDetail": "End of 1st"
+  }
+ },
+ "competitions": [
+  {
+   "id": "401892522",
+   "date": "2026-10-17T22:00Z",
+   "competitors": [
+    {
+     "id": "26",
+     "homeAway": "home",
+     "score": "3",
+     "team": {
+      "id": "26",
+      "abbreviation": "FLA",
+      "displayName": "Florida Panthers",
+      "shortDisplayName": "Panthers",
+      "name": "Panthers",
+      "logo": "https://a.espncdn.com/i/teamlogos/nhl/500/scoreboard/fla.png"
+     }
+    },
+    {
+     "id": "124292",
+     "homeAway": "away",
+     "score": "1",
+     "team": {
+      "id": "124292",
+      "abbreviation": "SEA",
+      "displayName": "Seattle Kraken",
+      "shortDisplayName": "Kraken",
+      "name": "Kraken",
+      "logo": "https://a.espncdn.com/i/teamlogos/nhl/500/scoreboard/sea.png"
+     }
+    }
+   ],
+   "status": {
+    "clock": 0,
+    "displayClock": "0:00",
+    "period": 1,
+    "type": {
+     "id": "22",
+     "name": "STATUS_END_PERIOD",
+     "state": "in",
+     "completed": false,
+     "description": "End of Period",
+     "detail": "End of 1st Period",
+     "shortDetail": "End of 1st"
+    }
+   },
+   "situation": {
+    "lastPlay": {
+     "id": "401892522000005520",
+     "type": {
+      "id": "519",
+      "text": "Period End",
+      "abbreviation": "period-end"
+     },
+     "text": "End of 1st Period",
+     "scoreValue": 0
+    }
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": [
+    "live",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/nhl/game/_/gameId/401892522"
+  },
+  {
+   "rel": [
+    "boxscore",
+    "desktop",
+    "event"
+   ],
+   "href": "https://www.espn.com/nhl/boxscore/_/gameId/401892522"
+  }
+ ]
+}

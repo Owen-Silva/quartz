@@ -43,6 +43,7 @@
  * When Hulu is locked, missing or not linked, a warning says so and how to fix it.
  */
 var shape = require('../shape');
+var play = require('../playurl');
 
 var ID = 'disney';
 var SITE = 'https://www.disneyplus.com';
@@ -65,7 +66,7 @@ var ENTITY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{5,80}$/;
 var IMAGE_ID_RE = /^[A-Za-z0-9_-]{6,200}$/;
 
 var SIGNED_OUT_REASON = 'sign in to Disney+ in Quartz to see your rows';
-var PICKER_REASON = "Disney+ is asking who's watching; open Disney+ in Quartz and pick a profile";
+var PICKER_REASON = "Disney+ is asking who's watching; pick a profile and Lumen reads it again";
 
 /* Rows. A style that says hero/brand is a promo strip (slyguy skips the same). */
 var DECOY_STYLE_RE = /hero|brand|billboard|marquee|promo|upsell/i;
@@ -479,23 +480,28 @@ function parseItem(raw, set, cls, states) {
 
 /* ---------- profile ---------- */
 
-function profileOf(captures) {
+/* The active profile's name; with `avatar`, its picture's URL instead ('' when Disney+ names none). */
+function profileOf(captures, avatar) {
   var name = '';
   var activeId = '';
   var names = {};
+  var nodes = {};
+  var activeNode = null;
   (Array.isArray(captures) ? captures : []).forEach(function (c) {
     if (!obj(c) || !okStatus(c) || (c.url && !isGraph(c))) return;
     shape.walk(c.json, function (node, key) {
       if (key === 'activeProfile' && obj(node)) {
         if (!name && str(node.name)) name = node.name;
         if (!activeId && str(node.id)) activeId = node.id;
+        if (!activeNode) activeNode = node;
       }
       if (key === 'profiles' && Array.isArray(node)) {
-        node.forEach(function (p) { if (obj(p) && str(p.id) && str(p.name)) names[p.id] = p.name; });
+        node.forEach(function (p) { if (obj(p) && str(p.id) && str(p.name)) { names[p.id] = p.name; nodes[p.id] = p; } });
       }
     });
   });
   if (!name && activeId && names[activeId]) name = names[activeId];
+  if (avatar) return play.avatarOf('disney', play.avatarOf('disney', activeNode) ? activeNode : nodes[activeId]);
   return shape.cleanText(name, 60);
 }
 
@@ -584,7 +590,7 @@ function parseRead(read) {
   if (signedOutByUrl(finalUrl) || (str(ex.url) && signedOutByUrl(ex.url))) {
     return { state: 'signed-out', reason: SIGNED_OUT_REASON, items: [], profile: '', counts: counts };
   }
-  if (profilePickerByUrl(finalUrl) || (str(ex.url) && profilePickerByUrl(ex.url))) return fail(PICKER_REASON, counts);
+  if (profilePickerByUrl(finalUrl) || (str(ex.url) && profilePickerByUrl(ex.url))) { var pk = fail(PICKER_REASON, counts); pk.picker = true; return pk; }
 
   // 2. The reader itself failed (a timeout may still have captured rows; read them).
   var e = obj(step.error);
@@ -620,7 +626,7 @@ function parseRead(read) {
   var profile = profileOf(captures);
   var warnings = hub.warning ? [hub.warning] : [];
 
-  if (items.length) return { state: 'ok', reason: '', items: items, profile: profile, counts: counts, warnings: warnings };
+  if (items.length) return { state: 'ok', reason: '', items: items, profile: profile, avatar: profileOf(captures, true), counts: counts, warnings: warnings };
 
   // 4. Signed out, told by the data rather than the URL (before a timeout: a
   //    marketing page that never fetches rows would otherwise read as slow).
@@ -715,4 +721,10 @@ module.exports = {
     collectSets: collectSets, signedOutByUrl: signedOutByUrl,
     HULU_NOT_LINKED: HULU_NOT_LINKED, HULU_LOCKED: HULU_LOCKED, HULU_NO_HUB: HULU_NO_HUB, HULU_HUB_EMPTY: HULU_HUB_EMPTY
   }
+};
+
+/* For watch/search/disney.js (Lumen's one search box): the same tolerant item parser and page reads. */
+module.exports._search = {
+  EXTRACT: EXTRACT, EXPLORE_RE: EXPLORE_RE, parseItem: parseItem, hasUpsell: hasUpsell, errorReason: errorReason,
+  signedOutByUrl: signedOutByUrl, profilePickerByUrl: profilePickerByUrl, ready: ready, SIGNED_OUT_REASON: SIGNED_OUT_REASON, PICKER_REASON: PICKER_REASON
 };

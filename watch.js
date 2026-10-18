@@ -496,6 +496,10 @@
       readAt: num(s.readAt),
       lastOkAt: num(s.lastOkAt),
       profile: cleanText(s.profile, 60),
+      // Profiles in Lumen (watch/profiles.js): the picture, the who's-watching state, the service's own picker.
+      avatar: https(s.avatar),
+      picker: s.picker === true && enabled && state === 'error',
+      profilePage: s.profilePage && https(s.profilePage.url) ? { url: https(s.profilePage.url), label: cleanText(s.profilePage.label, 40), where: cleanText(s.profilePage.where, 160) } : null,
       reading: s.reading === true,
       queued: s.queued === true,
       readingSince: s.reading === true ? num(s.readingSince) : 0,
@@ -526,6 +530,8 @@
       images: arr(it.images).map(https).filter(Boolean),
       progress: p,
       url: url,
+      // straight to the service's player (watch/playurl.js); url stays the fallback
+      playUrl: https(it.playUrl) && Shape && Shape.serviceForUrl(https(it.playUrl)) === Shape.serviceForUrl(url) ? https(it.playUrl) : '',
       startsAt: num(it.startsAt),
       durationSec: num(it.durationSec),
       badge: cleanText(it.badge, 24),
@@ -652,6 +658,7 @@
     if (boot) return S.failure ? { cls: 'st-error', dot: 'err', small: 'No answer' } : { cls: 'st-busy', dot: 'busy', small: 'Starting\u2026' };
     if (s.state === 'off') return { cls: 'st-off', dot: 'off', small: 'Off' };
     if (s.reading) return { cls: 'st-busy', dot: 'busy', small: 'Reading\u2026' };
+    if (s.picker) return { cls: 'st-error st-picker', dot: 'warn', small: 'Who’s watching?', act: 'Pick profile' };   // watch/profiles.js
     if (s.state === 'error') return { cls: 'st-error', dot: 'err', small: "Couldn't read", act: 'Retry' };
     if (s.state === 'signed-out') return { cls: 'st-signed-out', dot: 'out', small: 'Signed out', act: 'Sign in' };
     if (s.paused) return { cls: 'st-paused', dot: 'warn', small: shared ? 'Paused' : capFirst(s.paused.replace(/\s*\([^)]*\)\s*$/, '')) };
@@ -691,6 +698,7 @@
       main.appendChild(dot);
       main.appendChild(el('span', 'sp-name', s.name));
       if (look.small) main.appendChild(el('small', look.warn ? 'warn-mark' : '', look.small));
+      if (!boot && window.LumenProfiles) window.LumenProfiles.chip(main, s);
       if (boot) {
         main.disabled = true;
         main.setAttribute('aria-label', s.name + ': waiting for Lumen to start');
@@ -708,6 +716,7 @@
       if (!boot && look.act) {
         var act = button('sp-act', look.act, function () {
           if (look.act === 'Retry') send('refresh', { service: s.id });
+          else if (look.act === 'Pick profile') send('profile', { service: s.id });
           else send('signin', { service: s.id });
         });
         act.dataset.k = s.id + ':act';
@@ -808,6 +817,7 @@
       var why = failed[0].reason || 'no reason given';
       var full = failed.map(function (s) { return s.name + ': ' + (s.reason || 'no reason given'); }).join('\n');
       freshText(f, 'Couldn’t update ' + names + (failed.length === 1 ? ': ' + why : ''), full);
+      if (window.LumenProfiles) window.LumenProfiles.freshPick(f, failed, send);
       freshRetry(f, 'Retry ' + names, function () {
         failed.forEach(function (s) { send('refresh', { service: s.id }); });
       });
@@ -888,6 +898,7 @@
     var h = el('h3', '', s.name);
     h.id = 'pop-title';
     if (s.profile) h.appendChild(el('small', '', s.profile));
+    if (window.LumenProfiles) window.LumenProfiles.popHead(h, s);
     p.setAttribute('aria-labelledby', 'pop-title');
     p.appendChild(h);
 
@@ -908,7 +919,9 @@
     }
     p.appendChild(st);
 
-    if (s.state === 'error') {
+    if (s.state === 'error' && window.LumenProfiles && window.LumenProfiles.popWords(p, s)) {
+      /* who's watching: watch/profiles.js said it, and adds Pick profile below */
+    } else if (s.state === 'error') {
       p.appendChild(el('p', '', "Couldn't read " + s.name + ': ' + (s.reason || 'no reason was given') + '.'));
       if (s.lastOkAt) {
         var keepP = el('p', 'small');
@@ -917,7 +930,7 @@
         p.appendChild(keepP);
       } else p.appendChild(el('p', 'small', 'Nothing from ' + s.name + ' is cached yet.'));
     } else if (s.state === 'signed-out') {
-      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.'));
+      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + (PLAYER.inside ? 'Sign in opens ' + s.name + '’s own sign-in page here in Lumen; Lumen reads it again after.' : 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.')));
     }
     if (s.paused) p.appendChild(el('p', '', capFirst(s.paused) + '.'));
     if (s.warnings.length) {
@@ -933,7 +946,7 @@
     }
 
     var acts = el('div', 'acts');
-    var readBtn = button('btn sm' + (s.state === 'error' ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
+    var readBtn = button('btn sm' + (s.state === 'error' && !s.picker ? ' primary' : ''), s.state === 'error' ? 'Retry' : 'Read now', function () { send('refresh', { service: s.id }); closePop(true); });
     if (s.reading) readBtn.disabled = true;
     acts.appendChild(readBtn);
     if (s.needsSignIn && s.state !== 'ok') {
@@ -944,6 +957,7 @@
       if (edgeFor(s.home)) open.title = 'Opens in Microsoft Edge' + (DRM.reason ? ': ' + DRM.reason : '');
       acts.appendChild(open);
     }
+    if (window.LumenProfiles) window.LumenProfiles.popActs(acts, s, send, closePop, null);
     acts.appendChild(button('btn sm ghost', 'Settings', function () { send('settings', {}); closePop(true); }));
     p.appendChild(acts);
   }
@@ -960,14 +974,25 @@
     snap.rows.forEach(function (r) { if (/^(continue|foryou|watchlist)$/.test(r.id) && !by[r.id]) by[r.id] = r; else shelves.push(r); });
     var sp = snap.sports;
     var games = function (key, title, events) { if (events.length) out.push({ key: key, kind: 'sports', id: key, title: title, service: 'espn', events: events }); };
+    // Lumen sports (watch/sportspage.js): Live now leads while a favourite's or a big game is live
+    // (favourites first), and the favourites get a My teams row.
+    var LS = window.LumenSports || null;
+    var liveTop = !!(LS && LS.liveOnTop(sp.live));
+    if (liveTop) games('sports', 'Live now', LS.sortLive(sp.live));
     if (by.continue) out.push(itemRow(by.continue));
-    games('sports', 'Live now', sp.live);
+    // YouTube Subscriptions (watch/ytlib-page.js): up top with videos; a state card (sign in, failed) lower down.
+    var yt = window.WatchYt ? window.WatchYt.row(snap) : null;
+    if (yt && yt.top) out.push(yt);
+    var mine = LS ? LS.myTeamsRow() : null;
+    if (mine) out.push(mine);
+    if (!liveTop) games('sports', 'Live now', sp.live);
     if (by.watchlist) out.push(itemRow(by.watchlist));
     if (by.foryou) out.push(itemRow(by.foryou));
     games('sports-soon', 'Upcoming games', sp.soon);
     games('sports-done', 'Recent games', sp.done);
+    if (yt && !yt.top) out.push(yt);
     shelves.forEach(function (r) { out.push(itemRow(r)); });
-    out.forEach(function (m) { m.sig = rowSig(m); });
+    out.forEach(function (m) { m.sig = rowSig(m) + (m.ytSig || ''); });
     return out;
   }
   function itemRow(r) {
@@ -980,7 +1005,7 @@
       .slice(0, 3).map(function (a) { return { service: a.service, url: https(a.url) }; });
   }
   /* Where a tile's title goes (the player layer or a tab; Quartz or Edge) is in every tile's
-     label, so a change of either ("Play inside Watch", Widevine arriving, an Edge rule) rebuilds
+     label, so a change of either ("Play inside Lumen", Widevine arriving, an Edge rule) rebuilds
      the rows instead of leaving the old words on them. */
   function routeSig() {
     return (PLAYER.inside ? 'in' : 'tab') + '/' + (DRM.known ? 1 : 0) + (DRM.playable ? 1 : 0) + '/' + DRM.edgeHosts.join(',');
@@ -988,6 +1013,7 @@
   function rowSig(m) {
     var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : '', routeSig()];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
+    else if (m.kind === 'teams') parts.push(window.LumenSports.rowSig(m));
     else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
     return parts.join('\u0001');
   }
@@ -1079,7 +1105,10 @@
     var idx = 0;
     for (var j = 0; j < els.length; j++) if (els[j].dataset.key === S.curKey) { idx = j; break; }
     if (S.curKey && els[idx].dataset.key !== S.curKey) idx = clamp(S.cur, 0, els.length - 1);
-    activate(idx, { instant: !S.curKey });
+    // A row that arrived (or left) above the one he is on -- Continue watching after a title, a game
+    // going live -- moves his row in the stack: keep it where it is on screen, with no slide.
+    var shifted = !!S.curKey && els[idx].dataset.key === S.curKey && idx !== S.cur;
+    activate(idx, { instant: !S.curKey || shifted });
     if (focusInfo) restoreStackFocus(focusInfo);
   }
 
@@ -1149,14 +1178,17 @@
   /* --- a row ------------------------------------------------------------- */
 
   function rowSub(m, head) {
+    if (m.yt && window.WatchYt) { window.WatchYt.head(m, head); return; }
     if (m.kind === 'sports') {
       var espn = svcOf('espn');
       if (espn && espn.state === 'error') { head.appendChild(staleSub(espn)); return; }
       var sp = S.snap.sports;
       var t = sp.live.length ? sp.live.length + ' live now' : sp.soon.length ? 'next ' + dayClock(sp.soon[0].startsAt) : 'finals';
       head.appendChild(el('span', 'sub', 'ESPN \u00b7 ' + t));
+      if (window.LumenSports) window.LumenSports.headChips(m, head);
       return;
     }
+    if (m.kind === 'teams') { window.LumenSports.rowSub(m, head); return; }
     if (m.service) {
       var s = svcOf(m.service);
       head.appendChild(el('span', 'chip', svcShort(m.service)));
@@ -1210,6 +1242,7 @@
     var rv = el('div', 'rv');
     var rt = el('div', 'rt');
     if (m.kind === 'sports') m.events.forEach(function (ev) { rt.appendChild(gameEl(ev)); });
+    else if (m.kind === 'teams') m.teams.forEach(function (t) { rt.appendChild(window.LumenSports.teamCardEl(t)); });
     else m.items.forEach(function (it) { rt.appendChild(cardEl(it, m)); });
     rv.appendChild(rt);
     row.appendChild(rv);
@@ -1402,7 +1435,7 @@
   }
 
   function cardSub(it, m) {
-    if (it.kind === 'resume') return joinDot([epText(it.subtitle), timeLeft(it)]);
+    if (it.kind === 'resume') return (window.LumenPlay && window.LumenPlay.resumeLabel(it)) || joinDot([epText(it.subtitle), timeLeft(it)]);
     if (it.kind === 'upcoming' && it.startsAt) return joinDot([it.subtitle, dayClock(it.startsAt)]);
     if (it.kind === 'live') return joinDot([it.subtitle, 'Live now']);
     if (it.subtitle) return it.kind === 'watchlist' || it.service === 'youtube' ? it.subtitle : epText(it.subtitle);
@@ -1469,6 +1502,7 @@
     c.setAttribute('aria-label', joinDot([it.title, svcName(it.service), sub, stale ? 'from an earlier read' : '']) + '. ' +
       (it.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     if (it.also.length) c.setAttribute('aria-label', c.getAttribute('aria-label') + ' Also on ' + listWords(it.also.map(function (a) { return svcName(a.service); })) + '.');
+    if ((it.yt || it.ytState) && window.WatchYt) window.WatchYt.card(c, it, m);
     return c;
   }
 
@@ -1525,17 +1559,19 @@
       tm.appendChild(el('span', 's', ev.state === 'pre' ? '' : t.score));
       g.appendChild(tm);
     });
-    var ft = el('span', 'ft', ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
+    var ft = el('span', 'ft', window.LumenSports ? window.LumenSports.cardFoot(ev) : ev.edge ? 'Opens in Edge' : 'Opens Gamecast');
     ft.appendChild(icon('out', 's'));
     g.appendChild(ft);
     var label = gameTitle(ev) + '. ' + joinDot([ev.leagueName, ev.state === 'in' ? 'live, ' + clockText(ev) : clockText(ev)]);
     if (ev.state !== 'pre' && ev.away.score !== '' && ev.home.score !== '') label += '. ' + ev.away.abbr + ' ' + ev.away.score + ', ' + ev.home.abbr + ' ' + ev.home.score;
-    g.setAttribute('aria-label', label + '. ' + (ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
+    g.setAttribute('aria-label', label + '. ' + (window.LumenSports ? 'Opens the game page.' : ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     wrap.appendChild(g);
     var m = el('span', 'm');
     m.appendChild(el('b', '', gameTitle(ev)));
     m.appendChild(el('span', '', joinDot([ev.state === 'in' ? clockText(ev) : ev.state === 'post' ? 'Final' : (dayClock(ev.startsAt) || ev.detail), ev.leagueName, ev.state === 'post' ? '' : ev.broadcasts[0]])));
     wrap.appendChild(m);
+    // Pin this game's score to the desktop (watch/pinbutton.js, score-pins-main.js).
+    if (window.ScorePinButton) wrap.appendChild(window.ScorePinButton.make(ev));
     return wrap;
   }
 
@@ -1651,7 +1687,8 @@
     S.stageSig = sig;
     S.stageIt = it;
     S.stageEv = ev;
-    var build = function () { return ev ? stageEvent(ev, m) : stageItem(it, m); };
+    var tm = !it && !ev && card._team && window.LumenSports ? card._team : null;   // a My teams card with no game to show
+    var build = function () { return tm ? window.LumenSports.stageTeam(tm) : ev ? stageEvent(ev, m) : stageItem(it, m); };
     swapStage(build, first);
     if (ev) setWash({ key: 'ev:' + ev.id, logos: [ev.away.logo, ev.home.logo] });
     else setWash(it && it.image ? { key: 'it:' + it.image, image: washSrc(it) } : null);
@@ -1689,6 +1726,7 @@
   }
 
   function stageItem(it, m) {
+    if (it.ytState && window.WatchYt) return window.WatchYt.stageState(it, m);
     var txt = el('div', 'txt');
     var eb = el('div', 'eyebrow');
     eb.appendChild(el('span', 'rn', m.title));
@@ -1731,12 +1769,15 @@
     }
     var acts = el('div', 'acts');
     var label = it.kind === 'resume' ? 'Resume' : it.kind === 'live' ? 'Watch live' : it.service === 'youtube' ? 'Play' : /^rent$/i.test(it.badge) ? 'Rent' : it.kind === 'upcoming' ? 'Open' : 'Watch';
-    var primary = button('btn primary', '', function () { openUrl(it.url, it.title); });
+    var primary = button('btn primary', '', function () { openUrl(it.url, it.title, false, it); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
     acts.appendChild(primary);
+    var epsBtn = window.LumenShows ? window.LumenShows.stageButton(it) : null;   // Episodes / Details: the show page
+    if (epsBtn) acts.appendChild(epsBtn);
     acts.appendChild(opensNote(it.url, it.edge));
+    if (it.yt && window.WatchYt) window.WatchYt.stageActs(acts, it);
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -1772,12 +1813,15 @@
       txt.appendChild(w);
     }
     var acts = el('div', 'acts');
-    var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
-    var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
-    primary.appendChild(icon('play'));
-    primary.appendChild(document.createTextNode(label));
-    acts.appendChild(primary);
-    acts.appendChild(opensNote(ev.url, ev.edge));
+    if (window.LumenSports) acts.appendChild(window.LumenSports.stageActs(ev));   // Game page, Watch this game
+    else {
+      var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
+      var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
+      primary.appendChild(icon('play'));
+      primary.appendChild(document.createTextNode(label));
+      acts.appendChild(primary);
+      acts.appendChild(opensNote(ev.url, ev.edge));
+    }
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -2005,6 +2049,7 @@
         eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Lumen couldn\u2019t read your services';
         lede = 'Each service above says what went wrong, with a way to fix it. Nothing was cached from an earlier read.';
+        if (window.LumenProfiles) window.LumenProfiles.emptyPick(acts, en, send);
         if (signedOut) acts.appendChild(button('btn primary', 'Sign in to ' + signedOut.name, function () { send('signin', { service: signedOut.id }); }));
         acts.appendChild(button('btn', 'Read again', function () { send('refresh', { service: null }); }));
       } else if (mode === 'failed') {
@@ -2100,17 +2145,32 @@
   /* ---------------------------------------------------------------- opening */
 
   /** title: the player layer's bar; multi: "Add to multiview" (watch-player.js). */
-  function openUrl(url, title, multi) {
+  function openUrl(url, title, multi, it) {
     var u = https(url);
     if (!u) return;
     if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
     var msg = { url: u };
+    // A tile: straight to the service's player where that is proven (watch/playurl.js), the title page
+    // as its fallback; and what it is, for Up next.
+    if (it && it.url === u && https(it.playUrl)) { msg.url = https(it.playUrl); msg.fallback = u; }
+    if (it && it.url === u && it.id) msg.item = { id: it.id, title: it.title || '', subtitle: it.subtitle || '' };
     if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
     if (multi === true) msg.multi = true;
     send('open', msg);
   }
   function openCard(card, multi) {
-    if (card._item) openUrl(card._item.url, card._item.title, multi);
+    if (!multi && window.WatchYt && window.WatchYt.openCard(card)) return;
+    var LS = window.LumenSports;
+    if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
+    if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
+    // a show or film with a Lumen show page (watch/showpage.js): seasons, episodes, Resume SxEy. A Continue
+    // tile still plays straight away (one click to resume); its stage has Episodes for the page.
+    if (card._item && !multi && card._item.kind !== 'resume' && window.LumenShows) {
+      var shown = false;
+      try { shown = window.LumenShows.open(card._item); } catch (e) { shown = false; try { window.LumenShows.close(); } catch (e2) { /* gone */ } }
+      if (shown) return;
+    }
+    if (card._item) openUrl(card._item.url, card._item.title, multi, card._item);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
   function eventTitle(ev) {
@@ -2119,6 +2179,8 @@
   }
   // "Add to multiview" from a tile's hover action or right-click (watch-tiles.js): the same open, marked.
   window.__watchOpenCard = function (card, multi) { if (card && (card._item || card._event)) openCard(card, multi === true); };
+  // Lumen sports: favourites or My teams changed, so the rows rebuild from the snapshot already here.
+  window.__lumenRerender = function () { if (S.ready && S.snap) renderLens(); };
 
   /* ----------------------------------------------------------------- toasts */
 
@@ -2186,6 +2248,7 @@
   }
 
   function exitSearch() {
+    if (window.WatchFindPage) window.WatchFindPage.close();
     S.q = '';
     S.answer = null;
     S.sentSeq = -1;
@@ -2284,6 +2347,7 @@
 
   function renderResults() {
     if (!S.q) return;
+    if (window.WatchFindPage && window.WatchFindPage.owns(S.q)) { window.WatchFindPage.render(); return; }
     var keepPos = gridFocusPos();
     var a = S.answer;
     var cols = services();
@@ -2530,6 +2594,7 @@
 
   function onKey(e) {
     if (e.defaultPrevented || e.isComposing) return;
+    if (window.WatchYt && window.WatchYt.onKey(e)) return;
     var t = e.target;
     var typing = isTyping(t);
     var mod = e.ctrlKey || e.metaKey || e.altKey;
@@ -2552,6 +2617,8 @@
       if (S.q) { e.preventDefault(); $.q.focus(); return; }
       return;
     }
+    // Enter: every service's own search (watch/find-page.js); recent searches; Down into its tiles.
+    if (t === $.q && !mod && window.WatchFindPage && window.WatchFindPage.key(e, S.q)) { if (e.key === 'Enter') clearTimeout(S.searchTimer); return; }
     if (t === $.q && S.q && (e.key === 'ArrowDown' || e.key === 'Enter') && !mod) {
       var stop = $.results.querySelector('.cell[tabindex="0"]') || $.results.querySelector('.cell');
       if (stop) { e.preventDefault(); stop.focus(); }
@@ -2698,6 +2765,10 @@
     $.stack.addEventListener('focusout', previewOut);
     window.addEventListener('message', onPreviewMessage);
     document.addEventListener('keydown', onKey);
+    if (window.WatchYt) {
+      window.WatchYt.attach({ send: send, openUrl: openUrl, renderLens: function () { if (S.snap) renderLens(); }, agoSpan: agoSpan, lenText: lenText,
+        artImage: artImage, icon: icon, focusLens: focusLens, previewStop: previewStop, snap: function () { return S.snap; } });
+    }
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('resize', onResize);
     document.addEventListener('pointerdown', function (e) {
@@ -2716,6 +2787,17 @@
       sightChanged();
     });
 
+    if (window.WatchFindPage) {
+      window.WatchFindPage.attach({
+        send: send, openUrl: openUrl, toast: toast, artImage: artImage, results: $.results, input: $.q,
+        snap: function () { return S.snap; }, services: services, isCurrent: function (q) { return S.q === q; },
+        signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); },
+        clear: function () { clearSearch(true); }
+      });
+    }
+    if (window.LumenShows) {
+      window.LumenShows.attach({ snap: function () { return S.snap; }, signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); } });
+    }
     S.ready = true;
     renderBoot();
     if (S.pending) {

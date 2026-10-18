@@ -108,6 +108,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('open-url', handler);
     return () => ipcRenderer.removeListener('open-url', handler);
   },
+  // A page tried to open a file:// URL and main refused (filenav.js):
+  // { wcId, url, text }. The chrome puts `text` on that tab's note bar.
+  onFileNavBlocked: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on('file-nav-blocked', handler);
+    return () => ipcRenderer.removeListener('file-nav-blocked', handler);
+  },
   // A page's context menu asked for what is on screen to be handed to a Claude
   // chamber: { url, title, selection, mode? }. `selection` is '' for the
   // whole-page items, and is Chromium's already-truncated selectionText for the
@@ -796,6 +803,11 @@ contextBridge.exposeInMainWorld('api', {
     closed: (services) => ipcRenderer.invoke('watch-player:closed', { services: Array.isArray(services) ? services.map(String) : [] }),
     sheetRect: (id, rect) => ipcRenderer.invoke('watch-player:sheet-rect', { id: Number(id), rect: rect && typeof rect === 'object' ? { x: +rect.x || 0, y: +rect.y || 0, width: +rect.width || 0, height: +rect.height || 0 } : null }),
     sheetClose: (id, why) => ipcRenderer.invoke('watch-player:sheet-close', { id: Number(id), why: String(why || '') }),
+    sheetToTab: (id) => ipcRenderer.invoke('watch-player:sheet-to-tab', { id: Number(id) }),
+    // TEST ONLY: main answers this only in a --test-profile instance (the e2e's whole-window shot).
+    testCapture: (o) => ipcRenderer.invoke('watch-player:test-capture', { width: Number(o && o.width) || 0, height: Number(o && o.height) || 0, wait: Number(o && o.wait) || 0 }),
+    // Up next: a title ended in the layer; main answers what follows it on that service (or why nothing).
+    upNext: (item) => ipcRenderer.invoke('watch-player:up-next', { item: item && typeof item === 'object' ? { id: String(item.id || ''), service: String(item.service || ''), title: String(item.title || ''), subtitle: String(item.subtitle || '') } : null }),
     // main -> chrome: play / command / key / left / blocked / gone / sheet / sheet-gone
     on: (name, cb) => {
       const ch = 'watch-player:' + String(name || '');
@@ -815,6 +827,19 @@ contextBridge.exposeInMainWorld('api', {
     forget: () => ipcRenderer.invoke('watch:forget'),
     setBackground: (on) => ipcRenderer.invoke('watch:set-background', !!on),
     refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
+  },
+  // Lumen's pinned scores (score-pins-main.js), for the palette rows and the cards' look
+  // (scorepins-chrome.js). games() answers from Lumen's cached ESPN rows, never a fetch:
+  // { games: [{ key, id, league, leagueName, state, startsAt, detail, away, home }], pinned: [key], sound }.
+  scores: {
+    games: () => ipcRenderer.invoke('scores:games'),
+    pin: (game) => ipcRenderer.invoke('scores:pin', game && typeof game === 'object' ? game : null),
+    unpin: (key) => ipcRenderer.invoke('scores:unpin', String(key == null ? '' : key)),
+    setSound: (on) => ipcRenderer.invoke('scores:set-sound', !!on),
+    look: (look) => ipcRenderer.send('scores:look', look && typeof look === 'object' ? look : {}),
+    onChanged: (fn) => { ipcRenderer.on('scores:changed', (_e, m) => { try { fn(m); } catch (err) { /* the palette refreshes next time */ } }); },
+    // TEST PROFILES ONLY (main registers it for --test-profile runs): the cards' state for the e2e.
+    test: (op) => ipcRenderer.invoke('scores:test', op && typeof op === 'object' ? op : {})
   },
   // The Files tab. files.html is a guest with no preload, so app.js reaches
   // these on its behalf once it has decided the console line it parsed was a

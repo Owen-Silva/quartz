@@ -42,7 +42,8 @@ const LAUNCH_TIMEOUT_MS = 5000;
  * @param {Function} [o.exists]      fs.existsSync (tests pass their own)
  * @param {Object} [o.electron]      the electron module, for the castlabs `components` API
  * @param {Function} [o.onChange]    called whenever state() may have changed (Watch re-labels)
- * @param {string} [o.cdmOverride]   TEST ONLY: 'missing' = report no Widevine
+ * @param {string} [o.cdmOverride]   TEST ONLY: 'missing' = report no Widevine; 'ready' = report it installed
+ *                                  (a fresh test profile has no CDM, and must not download one)
  * @param {string} [o.vmpOverride]   TEST ONLY: 'signed' | 'development' | 'unsigned' | 'stale'
  * @param {string} [o.execPath]      process.execPath (tests pass their own)
  * @param {Function} [o.statSync]    fs.statSync (tests pass their own)
@@ -131,6 +132,9 @@ function create(o) {
     const components = electron && electron.components;
     if (opts.cdmOverride === 'missing') {
       return { available: false, reason: 'Widevine is switched off for this test run.', short: 'Widevine is switched off for this test run' };
+    }
+    if (opts.cdmOverride === 'ready') {
+      return { available: true, reason: 'Widevine is reported installed for this test run (no CDM was downloaded).', short: '' };
     }
     if (!components || typeof components.status !== 'function') {
       return { available: false, reason: 'This Electron build has no Widevine module (stock Electron never ships one).', short: 'this build of Quartz has no Widevine' };
@@ -249,7 +253,7 @@ function create(o) {
   async function whenCdmReady(ms) {
     const electron = opts.electron || null;
     const components = electron && electron.components;
-    if (!components || typeof components.whenReady !== 'function') return widevine();
+    if (!components || typeof components.whenReady !== 'function' || opts.cdmOverride) return widevine();
     let timer = null;
     const ready = Promise.resolve()
       .then(() => components.whenReady())
@@ -414,4 +418,18 @@ function create(o) {
   return { start, state, openInEdge, setAlways, edge, widevine, route, vmp, whenCdmReady, _preloadId: () => preloadId };
 }
 
-module.exports = { create, PRELOAD_FILE };
+/*
+ * TEST ONLY: the CDM / signature overrides a test run may ask for (QUARTZ_TEST_CDM=missing|ready,
+ * QUARTZ_TEST_VMP=signed|development|unsigned|stale). Both are '' unless Quartz runs with
+ * --test-profile, so a live Quartz always routes by its real Widevine and its real signature.
+ */
+function testOverrides(argv, env) {
+  const t = Array.isArray(argv) && argv.includes('--test-profile');
+  const e = env || {};
+  return {
+    cdmOverride: t && /^(missing|ready)$/.test(e.QUARTZ_TEST_CDM || '') ? e.QUARTZ_TEST_CDM : '',
+    vmpOverride: t && /^(signed|development|unsigned|stale)$/.test(e.QUARTZ_TEST_VMP || '') ? e.QUARTZ_TEST_VMP : '',
+  };
+}
+
+module.exports = { create, PRELOAD_FILE, testOverrides };

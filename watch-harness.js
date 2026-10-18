@@ -229,13 +229,13 @@ function fakeWorld(opts) {
   for (const k of ['fetch', 'BrowserWindow', 'session']) if (o[k]) deps[k] = o[k];
   if (o.adapters) deps.adapters = Object.assign({}, adapters, o.adapters);
   if (o.drmRoute) deps.drmRoute = o.drmRoute;
+  if (o.player) deps.player = o.player;
   // The background refresh is off unless a test turns it on (bgTests): the visible-only tests
   // below keep their exact read counts.
   if (o.cache) fs.writeFileSync(path.join(dir, WM.CACHE_FILE), JSON.stringify(o.cache));
   if (!o.background) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(Object.assign({ background: false }, o.prefs || {})));
   else if (o.prefs) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(o.prefs));
   world.readers = Shape.SERVICE_IDS.filter((id) => !!deps.adapters[id]);
-  if (o.player) deps.player = o.player;
   world.wm = WM.create(deps);
   world.guest = (url) => {
     const pushed = [];
@@ -1184,7 +1184,7 @@ async function previewMainTests() {
 /* ------------------------------------------------------------------ 4. adapters + tmdb */
 async function moduleTests() {
   const dir = path.join(__dirname, 'tests');
-  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js' || f === 'watch-preview-test.js').sort();
+  const files = fs.readdirSync(dir).filter((f) => /^watch-adapter-.*\.js$/.test(f) || /^watch-lumen-.*-test\.js$/.test(f) || f === 'watch-tmdb-test.js' || f === 'watch-merge-test.js' || f === 'watch-preview-test.js').sort();
   for (const id of Shape.SERVICE_IDS) {
     check(files.indexOf('watch-adapter-' + id + '.js') !== -1, 'adapters: ' + id + ' has fixture tests');
     let a = null;

@@ -10885,6 +10885,9 @@ function wireViewEvents(tab) {
     // did-fail-load can land either side of the error page's own did-navigate,
     // so a navigation only clears the card when THIS load did not fail.
     if (!tab.failedThisLoad) clearTabCard(tab);
+    // "Quartz blocked this page from opening a file" belonged to the page that
+    // tried it; the tab has moved on.
+    if (tab.noteEl && tab.noteEl.dataset && tab.noteEl.dataset.fileBlocked) clearAppNote(tab);
     setTabTitle(tab, tab.title);
     // Zoom is remembered per site, so it is re-applied per navigation — a host
     // with nothing stored is explicitly put back to 100%.
@@ -11264,6 +11267,21 @@ function navigateActiveTab(input) {
 
 function goBack() {
   const tab = getActiveTab();
+  if (!isViewUsable(tab)) return;
+  // Lumen's own pages (a channel, the Library: watch/ytlib-page.js) sit over the Watch document,
+  // so Back (Alt+Left, the toolbar, BrowserBack) walks out of them before the tab's history.
+  if (isWatchUrl(tab.url)) {
+    try {
+      const asked = tab.viewEl.executeJavaScript('!!(window.__watchBack && window.__watchBack())');
+      if (asked && typeof asked.then === 'function') {
+        asked.then((took) => { if (!took) historyBack(tab); }, () => historyBack(tab));
+        return;
+      }
+    } catch (err) { /* guest went away: the history below */ }
+  }
+  historyBack(tab);
+}
+function historyBack(tab) {
   if (!isViewUsable(tab)) return;
   const history = historyTarget(tab.viewEl);
   try {
@@ -11976,6 +11994,18 @@ function wireWindowControls() {
       const url = search ? searchUrlFor(search) : payload && payload.url;
       if (!url) return;
       createTab(url, { background: !!(payload && payload.background) });
+    });
+  }
+
+  // A page tried to open a file on this computer and main refused it
+  // (filenav.js). The click used to do nothing at all; now that tab's note bar
+  // says what was stopped. Marked, so the tab's next navigation takes it down.
+  if (window.api && typeof window.api.onFileNavBlocked === 'function') {
+    window.api.onFileNavBlocked((payload) => {
+      const tab = tabForWebContentsId(payload && payload.wcId) || getActiveTab();
+      if (!tab || !payload || !payload.text) return;
+      showAppNote(tab, payload.text, '');
+      if (tab.noteEl) tab.noteEl.dataset.fileBlocked = '1';
     });
   }
 

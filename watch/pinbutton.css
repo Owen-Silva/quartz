@@ -1,0 +1,19 @@
+/* watch/pinbutton.css -- the "Pin score" control on Lumen's game cards (watch/pinbutton.js).
+   It sits over the card's bottom-right corner, in the card's wrapper, and lifts with the card
+   on hover (the same 5 px). transform/opacity only. */
+.gw { position: relative; }
+.spb {
+  position: absolute; right: 9px; top: calc(var(--art-h) - 33px); z-index: 2;
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; margin: 0;
+  border: 0; border-radius: 999px; background: var(--surface-3); color: var(--text-2);
+  font: 600 var(--fs-2xs)/1 var(--font); white-space: nowrap; cursor: default;
+  opacity: 0; transition: opacity var(--dur) var(--ease), transform var(--m-dur-s) var(--m-spring);
+}
+.spb-g { font: 11px/1 var(--icon-font); }
+.gw:hover .spb, .spb.on, .spb.err, .spb:focus-visible { opacity: 1; }
+.gw:hover .spb { transform: translateY(-5px); }
+.spb:hover { color: var(--text); background: var(--surface-press); }
+.spb.on { color: var(--accent-text, var(--accent)); background: var(--accent-soft); }
+.spb.err { color: var(--text); max-width: calc(var(--card-w) - 20px); overflow: hidden; text-overflow: ellipsis; }
+.lrow:not([data-d="0"]) .spb { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .spb, .gw:hover .spb { transition: none; transform: none; } }

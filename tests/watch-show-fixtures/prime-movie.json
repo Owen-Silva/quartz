@@ -1,0 +1,39 @@
+{
+ "_fixture": "Hand-made Prime Video detail page hydration for a film (Air), not started.",
+ "finalPath": "/detail/0AIRMOVIE0001/",
+ "title": "Prime Video: Air",
+ "hydration": {
+  "init": {
+   "preparations": {
+    "body": {
+     "detail": {
+      "titleID": "0AIRMOVIE0001",
+      "title": "Air",
+      "synopsis": "Shoe salesman Sonny Vaccaro and Nike pursue Michael Jordan for the deal of a lifetime.",
+      "releaseYear": "2023",
+      "ratingBadge": {
+       "displayText": "16+"
+      },
+      "genres": [
+       "Drama",
+       "Sports"
+      ],
+      "entityType": "Movie",
+      "runtime": "1 h 52 min",
+      "images": {
+       "heroshot": {
+        "url": "https://m.media-amazon.com/images/S/pv-target-images/airhero._UR1920,1080_.jpg"
+       }
+      },
+      "isInWatchlist": true
+     }
+    }
+   }
+  }
+ },
+ "store": {
+  "RequestContext": {
+   "customerID": "A1FIXTURE"
+  }
+ }
+}

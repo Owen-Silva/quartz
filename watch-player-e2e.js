@@ -32,6 +32,7 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[
 const CDP_PORT = Number(opt('cdp', '9471'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-player-shots'));
 const WIDEVINE = !argv.includes('--no-widevine');
+const SHOT_BACK = opt('back-shot', '');   // a shot of the rows after Back, at 1536x800
 const TAG = 'quartz-player-e2e-' + process.pid;
 const EDGE_STUB = path.join(os.tmpdir(), TAG + '-edge.txt');
 const CLIP = process.env.QUARTZ_PLAYER_CLIP || path.join(os.homedir(), 'Videos', 'Roblox', 'Roblox-2026-07-24T03_40_51.629Z.mp4');
@@ -166,6 +167,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     QUARTZ_PLAYER_AUTH_HOSTS: '127.0.0.1:' + srv.auth.port,
     QUARTZ_TEST_NO_WINDOW_FULLSCREEN: '1',
     QUARTZ_TEST_VMP: 'signed',
+    // (No QUARTZ_TEST_CDM=ready here: the licence-refusal check needs the real castlabs CDM in the profile.)
   }, extra || {});
   const LOG = path.join(profileDir, 'quartz.log');
   const logHas = (re) => { try { return re.test(fs.readFileSync(LOG, 'utf8')); } catch (e) { return false; } };
@@ -189,20 +191,33 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     // brings that row up instead of opening the title, as it would for him).
     const card = (svc) => `([...document.querySelectorAll('#stack .lrow[data-d="0"] *')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent)
       || [...document.querySelectorAll('*')].find((n) => n._item && n._item.service === '${svc}' && n.offsetParent))`;
+    // A real click on a tile the way he does it: when its row is below the lens, the first click brings the
+    // row up (watch.js onStackClick) and the second opens the title. Returns where the tile was.
+    // kind: only tiles of that kind (resume = Continue watching, which plays on one click)
+    const cardK = (svc, kind) => kind ? `([...document.querySelectorAll('#stack .lrow[data-d="0"] *')].find((n) => n._item && n._item.service === '${svc}' && n._item.kind === '${kind}' && n.offsetParent)
+      || [...document.querySelectorAll('#stack *')].find((n) => n._item && n._item.service === '${svc}' && n._item.kind === '${kind}' && n.offsetParent))` : card(svc);
+    const clickTile = async (page, svc, kind) => {
+      const at = await page.ev(`(() => { const c = ${cardK(svc, kind)}; if (!c) return null; const r = c.closest('.lrow'); const f = document.querySelector('#stack > .lrow[data-d="0"]'); const at = { row: r ? r.dataset.key : null, d: r ? r.dataset.d : null, focused: f ? f.dataset.key : null }; c.scrollIntoView({ block: 'nearest' }); c.click(); return at; })()`);
+      if (at && at.row && at.d !== '0') {
+        await page.waitFor(`(() => { const r = [...document.querySelectorAll('#stack > .lrow')].find((x) => x.dataset.key === ${JSON.stringify(at.row)}); return !!r && r.dataset.d === '0'; })()`, 4000).catch(() => 0);
+        await sleep(500);
+        await page.ev(`(() => { const c = ${cardK(svc, kind)}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+      }
+      return at;
+    };
     await g.waitFor(`!!(${card('youtube')}) && !!(${card('disney')})`, 60000);
     check(await g.ev(`/Plays in Lumen/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'a YouTube tile says it plays in Lumen');
     const memBefore = await chrome.ev('window.api.watchPlayer.memory()');
 
     // Move down the rows (Watch's rows are a stack moved by the wheel, not a scrolling page), then
-    // open a YouTube title with a real click. "Where he was" = the row in focus, where that row sits on
-    // the screen, and any scroll a container has. The stack's own offset is printed but not compared:
-    // the re-read after watching may add a row ABOVE his (rows in place, watch-auto), and then the
-    // stack moves one row further to keep his row exactly where it was.
-    const where = `(() => { const st = document.getElementById('stack'); const cur = st && st.querySelector('.lrow[data-d="0"]');
-      return JSON.stringify([st ? st.style.transform : null, cur ? cur.dataset.key : null, document.scrollingElement ? document.scrollingElement.scrollTop : 0, st && st.parentNode ? st.parentNode.scrollTop || 0 : 0,
-        cur ? Math.round(cur.getBoundingClientRect().top) : null, st ? [...st.querySelectorAll('.lrow')].map((r) => r.dataset.key).join(',') : '']); })()`;
-    // the same row in focus, at the same place on screen (1 px), the same scroll
-    const samePlace = (a, b) => { try { const x = JSON.parse(a), y = JSON.parse(b); return x[1] === y[1] && x[2] === y[2] && x[3] === y[3] && x[4] !== null && Math.abs(x[4] - y[4]) <= 1; } catch (e) { return false; } };
+    // open a YouTube title with a real click. "Where he was" = the stack's offset, the row in focus,
+    // and any scroll a container has.
+    // What he sees: the row in focus, where it sits on screen, how far along it is, any page scroll. (Not
+    // the stack's own offset: a row that arrives above his -- Continue watching after a title -- moves
+    // the stack by one row while his row stays put; `rows` and `stack` ride along for the detail.)
+    const where = `(() => { const st = document.getElementById('stack'); const cur = st && st.querySelector('.lrow[data-d="0"]'); const rt = cur && cur.querySelector('.rt');
+      return JSON.stringify([cur ? cur.dataset.key : null, cur ? Math.round(cur.getBoundingClientRect().top) : null, rt ? rt.style.transform : null, document.scrollingElement ? document.scrollingElement.scrollTop : 0, st && st.parentNode ? st.parentNode.scrollTop || 0 : 0]); })()`;
+    const stackNow = `(() => { const st = document.getElementById('stack'); return { stack: st ? st.style.transform : null, rows: [...document.querySelectorAll('#stack > .lrow')].map((r) => r.dataset.key) }; })()`;
     // Down to the first row below the top one that has a YouTube tile (the wheel moves one row per turn).
     const ytRow = await g.ev(`(() => { const rows = [...document.querySelectorAll('#stack .lrow')];
       for (let i = 1; i < rows.length; i++) if ([...rows[i].querySelectorAll('*')].some((n) => n._item && n._item.service === 'youtube')) return i; return 0; })()`);
@@ -215,6 +230,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     const tabsBefore = await chrome.ev('tabs.length');
     await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); return 1; })()`);
     const scrolled = await g.ev(where);
+    const stackBefore = await g.ev(stackNow);
     await g.ev(`(() => { const c = ${card('youtube')}; c.click(); return 1; })()`);
     const s1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].wcId !== null ? s : null; })()`, 15000).catch(() => null);
     check(!!s1, 'a click on a YouTube tile opens the player layer', s1 && { title: s1.title, url: s1.slots[0].url });
@@ -348,24 +364,42 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     check(!(await chrome.ev(`window.api.watchPlayer.alive(${wc1}).then((r) => r.alive)`)), 'the player\'s webContents is destroyed on close');
     check(!(await targetWhere(q, (x) => String(x.url).indexOf(FY + '/') === 0 && x.type !== 'page', 1500)), 'no player target is left');
     const scrollNow = await g.ev(where);
-    const moved = (() => { try { return JSON.parse(scrolled); } catch (e) { return []; } })();
-    // the stack had moved down (watch.js writes translateY(calc(-Npx + var(--lift))) since the compact bar)
-    check((ytRow === 0 || (!!moved[0] && /translateY\((calc\()?-\d/.test(moved[0]))) && samePlace(scrolled, scrollNow), 'Back returns to the rows where he was (the same row in focus, at the same place on screen)', { before: scrolled, after: scrollNow });
     const asked = await chrome.waitFor(`(() => { const c = ${ST}.lastClosed; return c && c.asked ? c.asked : null; })()`, 5000).catch(() => null);
     check(Array.isArray(asked) && asked.indexOf('youtube') !== -1 && logHas(/re-reading youtube after watching/), 'closing asks Watch to re-read YouTube (fresh after watching)', asked);
     await sleep(2500);
+    // Once more after the re-read has landed (it may add a row above his): still where he was, with no slide.
+    const scrollLate = await g.ev(where);
+    const stackLate = await g.ev(stackNow);
+    check((ytRow === 0 || (!!stackBefore.stack && /translateY\(calc\(-\d/.test(stackBefore.stack))) && scrollNow === scrolled && scrollLate === scrolled,
+      'Back returns to the rows where he was (the same row, at the same place on screen, as far along)', { before: scrolled, after: scrollNow, late: scrollLate, stack: [stackBefore, stackLate] });
+    if (SHOT_BACK) {
+      // The Watch page itself at 1536x800 (an emulated size on the chrome never reaches a <webview> guest):
+      // its view grown to that size for the shot, the page emulated to it, then both put back.
+      await chrome.ev('(() => { const v = findWatchTab().viewEl; v.dataset.e2eStyle = v.getAttribute("style") || ""; const s = v.style; s.setProperty("position", "fixed", "important"); s.setProperty("left", "0px", "important"); s.setProperty("top", "0px", "important"); s.setProperty("width", "1536px", "important"); s.setProperty("height", "800px", "important"); s.setProperty("z-index", "2147483647", "important"); return 1; })()').catch(() => 0);
+      await g.send('Emulation.setDeviceMetricsOverride', { width: 1536, height: 800, deviceScaleFactor: 1, mobile: false });
+      await sleep(900);
+      try { await g.shot(SHOT_BACK); say('shot ' + SHOT_BACK); } catch (e) { say('shot back-to-rows failed: ' + e.message); }
+      await g.send('Emulation.clearDeviceMetricsOverride');
+      await chrome.ev('(() => { const v = findWatchTab().viewEl; v.setAttribute("style", v.dataset.e2eStyle || ""); delete v.dataset.e2eStyle; return 1; })()').catch(() => 0);
+      await sleep(400);
+    }
     const memAfter = await chrome.ev('window.api.watchPlayer.memory()');
     say('RAM (all Quartz processes, working set): before ' + memBefore.totalMb + ' MB / ' + memBefore.processes + ' procs; playing ' + memPlaying.totalMb + ' MB / ' + memPlaying.processes + ' procs (player ' + JSON.stringify(memPlaying.players) + '); after close ' + memAfter.totalMb + ' MB / ' + memAfter.processes + ' procs');
     check(memAfter.processes < memPlaying.processes && memAfter.totalMb < memPlaying.totalMb, 'closing frees the player\'s memory', { before: memBefore.totalMb, playing: memPlaying.totalMb, after: memAfter.totalMb });
 
-    // A link to another site: a normal tab, with a log line; the layer waits behind the Watch tab.
+    // A link to another site: a PAGE in the layer (a sheet), not a tab. The sheet's "Open in a tab" is
+    // his way to a normal tab (counted in the leak log), and the layer waits behind the Watch tab.
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/away-test')}, { service: 'youtube', title: 'Away test' }), 1`);
     pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/away-test', 10000); p = await cdpTo(pt);
     const nTabs = await chrome.ev('tabs.length');
     await gesture(p, 'document.getElementById("away").click(), 1');
+    const awaySheet = await chrome.waitFor(`(() => { const s = ${ST}; return s.sheet && s.sheet.kind === 'page' && s.sheet.shown ? s.sheet : null; })()`, 8000).catch(() => null);
+    check(!!awaySheet && (await chrome.ev('tabs.length')) === nTabs, 'a link to another site opens as a page in the layer, not a tab', awaySheet);
+    check(logHas(/a page from another site opened in the layer \(link to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: the page sheet has its line');
+    await chrome.ev('document.querySelector(".wp-sheet-tab").click(), 1');
     await chrome.waitFor(`tabs.length === ${nTabs + 1}`, 8000).catch(() => 0);
-    check((await chrome.ev(`tabs.length === ${nTabs + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/away')}) === 0)`)), 'a link to another site opens a normal Quartz tab');
-    check(logHas(/left the layer \(link to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: the way out has its line');
+    check((await chrome.ev(`tabs.length === ${nTabs + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/away')}) === 0)`)), 'the page\'s "Open in a tab" opens it in a normal Quartz tab');
+    check(logHas(/left the layer \(Open in a tab, from a page in the layer\): 127\.0\.0\.1:\d+/), 'quartz.log: the way out has its line');
     check((await chrome.ev(ST)).open && (await chrome.ev(ST)).hidden, 'the layer stays open behind the Watch tab (hidden while another tab is in front)');
     await chrome.ev('activateTab(findWatchTab().id), 1');
     await sleep(400);
@@ -424,9 +458,11 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
         await tp2.waitFor('!!document.getElementById("elsewhere")', 8000).catch(() => 0);
         const nb = await chrome.ev('tabs.length');
         await gesture(tp2, 'document.getElementById("elsewhere").click(), 1');
-        await chrome.waitFor(`tabs.length === ${nb + 1}`, 8000).catch(() => 0);
-        check((await chrome.ev(`tabs.length === ${nb + 1} && tabs.some((t) => String(t.url).indexOf(${JSON.stringify(srv.other.origin + '/netflix')}) === 0)`)), 'a where-to-watch link to a service Watch does not read opens a tab');
-        check(logHas(/left the layer \(redirect to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: that way out has its line');
+        const es = await chrome.waitFor(`(() => { const s = ${ST}; return s.sheet && s.sheet.kind === 'page' && s.sheet.shown ? s.sheet : null; })()`, 8000).catch(() => null);
+        check(!!es && (await chrome.ev('tabs.length')) === nb, 'a where-to-watch link to a service Lumen does not read opens as a page in the layer, not a tab', es);
+        check(logHas(/a page from another site opened in the layer \(redirect to another site\): 127\.0\.0\.1:\d+/), 'quartz.log: that page has its line');
+        await chrome.ev('document.querySelector(".wp-sheet-close").click(), 1');
+        await chrome.waitFor(`!${ST}.sheet`, 8000).catch(() => 0);
         tp2.close();
       } else check(false, 'the TMDB page came back for the second link');
       await chrome.ev('activateTab(findWatchTab().id), 1');
@@ -464,7 +500,7 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await g.waitFor(`/Opens in a new tab/.test((${card('youtube')}).getAttribute('aria-label') || '')`, 8000).catch(() => 0);
     check(await g.ev(`/Opens in a new tab/.test((${card('youtube')}).getAttribute('aria-label') || '')`), 'off: the tiles say "Opens in a new tab" again');
     const nT = await chrome.ev('tabs.length');
-    await g.ev(`(${card('youtube')}).click(), 1`);
+    await clickTile(g, 'youtube');
     await chrome.waitFor(`tabs.length === ${nT + 1}`, 8000).catch(() => 0);
     check((await chrome.ev(`tabs.length === ${nT + 1}`)) && !(await chrome.ev(ST)).open, 'off: a YouTube tile opens a new tab, no layer');
     await chrome.ev('activateTab(findWatchTab().id), 1');
@@ -481,13 +517,26 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await c2.ev('openWatchTab(), 1');
     const gt2 = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000);
     const g2 = await cdpTo(gt2);
-    await g2.waitFor(`!!(${card('disney')})`, 60000);
-    await g2.ev(`(${card('disney')}).click(), 1`);
+    await g2.waitFor(`!!(${cardK('disney', 'resume')})`, 60000);
+    const checkLong = (c, label, d) => { check(c, label, d); if (!c) say("detail: " + JSON.stringify(d).slice(0, 2500)); };
+    const SPY = `(() => { if (window.__e2eSpy) { window.__e2eSpy.sent = []; window.__e2eSpy.res = []; return 1; } const S = window.__e2eSpy = { sent: [], res: [] };
+      const ol = console.log; console.log = function () { try { const s = String(arguments[0]); if (/^quartz-watch:/.test(s)) S.sent.push(s.slice(0, 240)); } catch (e) { /* not a string */ } return ol.apply(this, arguments); };
+      const ar = window.__applyWatchResult; window.__applyWatchResult = function (r) { try { S.res.push(JSON.stringify(r).slice(0, 240)); } catch (e) { /* no copy */ } return ar.apply(this, arguments); };
+      S.err = []; const oe = console.error; console.error = function () { try { S.err.push([...arguments].map(String).join(' ').slice(0, 240)); } catch (e) { /* none */ } return oe.apply(this, arguments); };
+      window.addEventListener('error', (e) => e.message && S.err.push('onerror: ' + String(e.message).slice(0, 200) + ' @' + e.lineno), true);
+      S.clicks = []; document.addEventListener('click', (e) => { const t = e.target; S.clicks.push('cap ' + (t.tagName || '') + '.' + String(t.className || '').slice(0, 40)); }, true);
+      const st = document.getElementById('stack'); if (st) st.addEventListener('click', (e) => S.clicks.push('stack-after prevented=' + e.defaultPrevented));
+      document.addEventListener('click', (e) => S.clicks.push('doc-bubble prevented=' + e.defaultPrevented));
+      S.card = (c) => { if (!c) return null; const it = c._item || {}; return { tag: c.tagName, cls: String(c.className).slice(0, 60), disabled: !!c.disabled, inStack: !!c.closest('#stack'), isCard: !!c.closest('.card, .gc'), url: String(it.url || '').slice(0, 120), playUrl: String(it.playUrl || '').slice(0, 120), kind: it.kind, id: String(it.id || '').slice(0, 60), toasts: (document.querySelector('.toasts') || {}).textContent || '' }; };
+      return 1; })()`;
+    await g2.ev(SPY);
+    const log0 = (() => { try { return fs.readFileSync(LOG, 'utf8').length; } catch (e) { return 0; } })();
+    const dTile = await clickTile(g2, 'disney', 'resume');
     await sleep(2500);
     let stub2 = ''; try { stub2 = fs.readFileSync(EDGE_STUB, 'utf8'); } catch (e) { stub2 = ''; }
     // Edge gets the title's REAL address (the tile's link), not the test mirror.
-    check(/"?https:\/\/www\.disneyplus\.com\//.test(stub2) && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ tile goes to Edge (the stub), no layer', stub2.trim().slice(0, 120));
-    await g2.ev(`(${card('youtube')}).click(), 1`);
+    checkLong(/"?https:\/\/www\.disneyplus\.com\//.test(stub2) && !(await c2.ev(ST)).open, 'DRM not ready: a Disney+ Continue watching tile goes to Edge (the stub), no layer', { stub: stub2.trim().slice(0, 120), tile: dTile, card: await g2.ev(`window.__e2eSpy.card(${cardK('disney', 'resume')})`).catch((e) => String(e.message).slice(0, 120)), spy: await g2.ev('(() => { const s = Object.assign({}, window.__e2eSpy); delete s.card; return s; })()').catch(() => null), log: (() => { try { return fs.readFileSync(LOG, 'utf8').slice(log0).split('\n').filter((l) => /Lumen|watch/i.test(l)).slice(-6); } catch (e) { return []; } })(), drm: await c2.ev('(() => { const s = window.Drm && window.Drm.state(); return s && s.widevine ? { available: s.widevine.available, services: s.widevine.services } : null; })()').catch(() => null) });
+    await clickTile(g2, 'youtube');
     const y2 = await c2.waitFor(`${ST}.open`, 8000).catch(() => false);
     check(!!y2, 'DRM not ready: YouTube still plays in the layer');
     // DRM not ready: a where-to-watch link to Disney+ goes to Edge (the stub) with the reason said.

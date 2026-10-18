@@ -1,0 +1,438 @@
+{
+ "_fixture": "shape from YouTube.js src/parser/classes (RichGrid, RichItem, RichSection, RichShelf, VideoRenderer as Video, LockupView, ShortsLockupView, DecoratedAvatarView, ContentMetadataView, PageHeaderView, C4TabbedHeader, ChannelMetadata, PlaylistVideoList, PlaylistVideo, GridPlaylist, CollectionThumbnailView, ThumbnailBadgeView, BackgroundPromo, AdSlot, ContinuationItem) for /playlist?list=PLbakingSourdough0000000001 (a saved playlist: PlaylistVideoList + PageHeaderView), unverified against a live account",
+ "loggedIn": true,
+ "ytInitialData": {
+  "responseContext": {
+   "serviceTrackingParams": [
+    {
+     "service": "GFEEDBACK",
+     "params": [
+      {
+       "key": "logged_in",
+       "value": "1"
+      },
+      {
+       "key": "browse_id",
+       "value": "VLPLbakingSourdough0000000001"
+      }
+     ]
+    }
+   ]
+  },
+  "contents": {
+   "twoColumnBrowseResultsRenderer": {
+    "tabs": [
+     {
+      "tabRenderer": {
+       "selected": true,
+       "content": {
+        "sectionListRenderer": {
+         "contents": [
+          {
+           "itemSectionRenderer": {
+            "contents": [
+             {
+              "playlistVideoListRenderer": {
+               "playlistId": "PLbakingSourdough0000000001",
+               "isEditable": true,
+               "contents": [
+                {
+                 "playlistVideoRenderer": {
+                  "videoId": "plVideo0001",
+                  "index": {
+                   "simpleText": "1"
+                  },
+                  "thumbnail": {
+                   "thumbnails": [
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0001/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                     "width": 168,
+                     "height": 94
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0001/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                     "width": 336,
+                     "height": 188
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0001/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                     "width": 480,
+                     "height": 270
+                    }
+                   ]
+                  },
+                  "title": {
+                   "runs": [
+                    {
+                     "text": "Sourdough Starter, Part 1"
+                    }
+                   ]
+                  },
+                  "shortBylineText": {
+                   "runs": [
+                    {
+                     "text": "Recipe Breakdown",
+                     "navigationEndpoint": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@recipebreakdown",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                       "canonicalBaseUrl": "/@recipebreakdown"
+                      }
+                     }
+                    }
+                   ]
+                  },
+                  "lengthText": {
+                   "simpleText": "12:11"
+                  },
+                  "lengthSeconds": "731",
+                  "videoInfo": {
+                   "runs": [
+                    {
+                     "text": "21K views"
+                    },
+                    {
+                     "text": " • "
+                    },
+                    {
+                     "text": "3 weeks ago"
+                    }
+                   ]
+                  },
+                  "isPlayable": true,
+                  "menu": {
+                   "menuRenderer": {
+                    "items": [
+                     {
+                      "menuServiceItemRenderer": {
+                       "text": {
+                        "runs": [
+                         {
+                          "text": "Save to Watch later"
+                         }
+                        ]
+                       }
+                      }
+                     }
+                    ]
+                   }
+                  },
+                  "thumbnailOverlays": [
+                   {
+                    "thumbnailOverlayTimeStatusRenderer": {
+                     "text": {
+                      "simpleText": "12:11"
+                     },
+                     "style": "DEFAULT"
+                    }
+                   }
+                  ]
+                 }
+                },
+                {
+                 "playlistVideoRenderer": {
+                  "videoId": "plVideo0002",
+                  "index": {
+                   "simpleText": "2"
+                  },
+                  "thumbnail": {
+                   "thumbnails": [
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0002/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                     "width": 168,
+                     "height": 94
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0002/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                     "width": 336,
+                     "height": 188
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0002/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                     "width": 480,
+                     "height": 270
+                    }
+                   ]
+                  },
+                  "title": {
+                   "runs": [
+                    {
+                     "text": "Sourdough Starter, Part 2"
+                    }
+                   ]
+                  },
+                  "shortBylineText": {
+                   "runs": [
+                    {
+                     "text": "Recipe Breakdown",
+                     "navigationEndpoint": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@recipebreakdown",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                       "canonicalBaseUrl": "/@recipebreakdown"
+                      }
+                     }
+                    }
+                   ]
+                  },
+                  "lengthText": {
+                   "simpleText": "14:02"
+                  },
+                  "lengthSeconds": "842",
+                  "videoInfo": {
+                   "runs": [
+                    {
+                     "text": "21K views"
+                    },
+                    {
+                     "text": " • "
+                    },
+                    {
+                     "text": "3 weeks ago"
+                    }
+                   ]
+                  },
+                  "isPlayable": true,
+                  "menu": {
+                   "menuRenderer": {
+                    "items": [
+                     {
+                      "menuServiceItemRenderer": {
+                       "text": {
+                        "runs": [
+                         {
+                          "text": "Save to Watch later"
+                         }
+                        ]
+                       }
+                      }
+                     }
+                    ]
+                   }
+                  },
+                  "thumbnailOverlays": [
+                   {
+                    "thumbnailOverlayResumePlaybackRenderer": {
+                     "percentDurationWatched": 50
+                    }
+                   },
+                   {
+                    "thumbnailOverlayTimeStatusRenderer": {
+                     "text": {
+                      "simpleText": "14:02"
+                     },
+                     "style": "DEFAULT"
+                    }
+                   }
+                  ]
+                 }
+                },
+                {
+                 "playlistVideoRenderer": {
+                  "videoId": "plVideo0003",
+                  "index": {
+                   "simpleText": "3"
+                  },
+                  "thumbnail": {
+                   "thumbnails": [
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0003/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLx1",
+                     "width": 168,
+                     "height": 94
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0003/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLx2",
+                     "width": 336,
+                     "height": 188
+                    },
+                    {
+                     "url": "https://i.ytimg.com/vi/plVideo0003/hq720.jpg?sqp=-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLx3",
+                     "width": 480,
+                     "height": 270
+                    }
+                   ]
+                  },
+                  "title": {
+                   "runs": [
+                    {
+                     "text": "Sourdough Starter, Part 3: With Whole Rye"
+                    }
+                   ]
+                  },
+                  "shortBylineText": {
+                   "runs": [
+                    {
+                     "text": "Recipe Breakdown",
+                     "navigationEndpoint": {
+                      "commandMetadata": {
+                       "webCommandMetadata": {
+                        "url": "/@recipebreakdown",
+                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                       }
+                      },
+                      "browseEndpoint": {
+                       "browseId": "UCa1b2c3d4e5f6g7h8i9j0kl",
+                       "canonicalBaseUrl": "/@recipebreakdown"
+                      }
+                     }
+                    }
+                   ]
+                  },
+                  "lengthText": {
+                   "simpleText": "11:38"
+                  },
+                  "lengthSeconds": "698",
+                  "videoInfo": {
+                   "runs": [
+                    {
+                     "text": "21K views"
+                    },
+                    {
+                     "text": " • "
+                    },
+                    {
+                     "text": "3 weeks ago"
+                    }
+                   ]
+                  },
+                  "isPlayable": true,
+                  "menu": {
+                   "menuRenderer": {
+                    "items": [
+                     {
+                      "menuServiceItemRenderer": {
+                       "text": {
+                        "runs": [
+                         {
+                          "text": "Save to Watch later"
+                         }
+                        ]
+                       }
+                      }
+                     }
+                    ]
+                   }
+                  },
+                  "thumbnailOverlays": [
+                   {
+                    "thumbnailOverlayTimeStatusRenderer": {
+                     "text": {
+                      "simpleText": "11:38"
+                     },
+                     "style": "DEFAULT"
+                    }
+                   }
+                  ]
+                 }
+                }
+               ]
+              }
+             }
+            ]
+           }
+          }
+         ]
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  "header": {
+   "pageHeaderRenderer": {
+    "pageTitle": "Recipes to try out",
+    "content": {
+     "pageHeaderViewModel": {
+      "title": {
+       "dynamicTextViewModel": {
+        "text": {
+         "content": "Recipes to try out"
+        }
+       }
+      },
+      "metadata": {
+       "contentMetadataViewModel": {
+        "metadataRows": [
+         {
+          "metadataParts": [
+           {
+            "avatarStack": {
+             "avatarStackViewModel": {
+              "text": {
+               "content": "by the user"
+              }
+             }
+            }
+           }
+          ]
+         },
+         {
+          "metadataParts": [
+           {
+            "text": {
+             "content": "Playlist"
+            }
+           },
+           {
+            "text": {
+             "content": "3 videos"
+            }
+           },
+           {
+            "text": {
+             "content": "Updated 2 days ago"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "metadata": {
+   "playlistMetadataRenderer": {
+    "title": "Recipes to try out"
+   }
+  },
+  "topbar": {
+   "desktopTopbarRenderer": {
+    "logo": {
+     "topbarLogoRenderer": {
+      "iconImage": {
+       "iconType": "YOUTUBE_LOGO"
+      }
+     }
+    },
+    "topbarButtons": [
+     {
+      "topbarMenuButtonRenderer": {
+       "avatar": {
+        "thumbnails": [
+         {
+          "url": "https://yt3.ggpht.com/ytc/meAvatar=s88",
+          "width": 88,
+          "height": 88
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

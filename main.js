@@ -37,6 +37,7 @@ const { createSession, killAll, listPrograms, hasProgram } = require('./pty');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
+const fileNav = require('./filenav');
 const appsModule = require('./apps');
 const stocksModule = require('./stocks');
 const braveSearchModule = require('./bravesearch');
@@ -204,7 +205,8 @@ if (process.argv.includes('--test-profile')) {
   // QUARTZ_TEST_CDM=missing: a castlabs test copy with NO Widevine for real. The CDM is a
   // component downloaded into userData on first run; a fresh test profile with the
   // component updater off never gets it, so pages are refused exactly as on stock.
-  if (process.env.QUARTZ_TEST_CDM === 'missing') app.commandLine.appendSwitch('disable-component-update');
+  // QUARTZ_TEST_CDM=ready reports it installed without downloading it (no component update either).
+  if (process.env.QUARTZ_TEST_CDM === 'missing' || process.env.QUARTZ_TEST_CDM === 'ready') app.commandLine.appendSwitch('disable-component-update');
 }
 
 /*
@@ -449,11 +451,10 @@ const drm = drmModule.create({
   extraSites: DRM_TEST && process.env.QUARTZ_DRM_TEST_SITE
     ? [{ id: 'test', name: 'Test Stream', exact: [String(process.env.QUARTZ_DRM_TEST_SITE).toLowerCase()] }]
     : [],
-  // TEST ONLY: report the CDM missing (QUARTZ_TEST_CDM=missing) or the streaming
+  // TEST ONLY: report the CDM missing or installed (QUARTZ_TEST_CDM=missing|ready) or the streaming
   // signature in a given state (QUARTZ_TEST_VMP=signed|development|unsigned|stale),
   // so the routing e2e can take both roads on one build. A live Quartz ignores both.
-  cdmOverride: DRM_TEST && process.env.QUARTZ_TEST_CDM === 'missing' ? 'missing' : '',
-  vmpOverride: DRM_TEST && /^(signed|development|unsigned|stale)$/.test(process.env.QUARTZ_TEST_VMP || '') ? process.env.QUARTZ_TEST_VMP : '',
+  ...drmModule.testOverrides(process.argv, process.env),   // '' and '' without --test-profile
   // Watch labels "Opens in Edge" by this state: re-label when it changes.
   onChange: () => { try { if (watch && typeof watch.drmChanged === 'function') watch.drmChanged(); } catch { /* Watch not built yet */ } },
 });
@@ -466,12 +467,23 @@ const drm = drmModule.create({
  * (QUARTZ_PLAYER_AUTH_HOSTS, comma separated) and move the multiview RAM floor
  * (QUARTZ_PLAYER_FLOOR_GB). A live Quartz ignores both.
  */
+// Lumen's leak log (watch-leaks.js): each time Lumen has to send the user to a tab, Edge or an app,
+// one quartz.log line and a count Settings > Lumen shows. Shared by the player layer and Watch.
+const watchLeaks = (() => {
+  try { return require('./watch-leaks').create({ app, log: (line) => { if (qlog) qlog.log.line(line); else console.log('[lumen] ' + line); } }); } catch (err) {
+    console.error('[lumen] the leak log could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
 const watchPlayer = (() => {
   const t = process.argv.includes('--test-profile');
   const env = process.env;
   const test = {};
   if (t && env.QUARTZ_PLAYER_AUTH_HOSTS) test.authHosts = String(env.QUARTZ_PLAYER_AUTH_HOSTS).split(',').map((s) => s.trim()).filter(Boolean);
   if (t && env.QUARTZ_PLAYER_FLOOR_GB !== undefined && Number.isFinite(Number(env.QUARTZ_PLAYER_FLOOR_GB))) test.floorGb = Number(env.QUARTZ_PLAYER_FLOOR_GB);
+  // Multiview's RAM guard, simulated: while this file exists its number is the free RAM (TEST profile only).
+  if (t && env.QUARTZ_PLAYER_FREE_FILE) test.freeFile = String(env.QUARTZ_PLAYER_FREE_FILE);
+  if (t) test.capture = true;   // the e2e's whole-window shot (sheets are native views)
   try {
     const p = require('./watch-player-main').create({
       app,
@@ -483,6 +495,7 @@ const watchPlayer = (() => {
       isChromeSender: (event) => isChromeSender(event),
       windowOpenDecision: (details) => windowOpenDecision(details),
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch-player] ' + line); },
+      leaks: watchLeaks,
       test,
     });
     p.registerIpc();
@@ -552,6 +565,7 @@ const watch = (() => {
       drmRoute: (url) => drm.route(url),
       // The player layer: titles play inside Watch when "Play inside Watch" is on.
       player: watchPlayer,
+      leaks: watchLeaks,
       getWindow: () => win,
       log: (line) => { if (qlog) qlog.log.line(line); else console.log('[watch] ' + line); },
       bootGraceMs,
@@ -567,12 +581,82 @@ const watch = (() => {
     return { failed: why, stop() {}, windowShown() {}, windowFocused() {}, isReaderContents() { return false; } };
   }
 })();
+
+/*
+ * Lumen's pinned scores (score-pins-main.js): small always-on-top cards on the desktop, one
+ * per pinned game, fed by public score JSON (ESPN; the NHL's own feed for hockey). Nothing
+ * runs with nothing pinned. A TEST profile's cards are always off-screen and silent, and it
+ * may point the feeds at a local mock (QUARTZ_SCORES_REBASE, JSON [[from, to], ...]), record
+ * card opens to a file (QUARTZ_SCORES_OPEN_STUB) and scale the poll cadence
+ * (QUARTZ_SCORES_POLL_SCALE). A live Quartz ignores all three.
+ */
+const scorePins = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) {
+    const env = process.env;
+    test.offscreen = true;
+    test.silent = true;
+    try { if (env.QUARTZ_SCORES_REBASE) test.rebase = JSON.parse(env.QUARTZ_SCORES_REBASE); } catch { /* no rebase */ }
+    if (env.QUARTZ_SCORES_OPEN_STUB) test.openStub = env.QUARTZ_SCORES_OPEN_STUB;
+    if (Number(env.QUARTZ_SCORES_POLL_SCALE) > 0) test.pollScale = Number(env.QUARTZ_SCORES_POLL_SCALE);
+  }
+  // Like Watch, it must never stop Quartz from starting.
+  try {
+    const electron = require('electron');
+    return require('./score-pins-main').create({
+      app, ipcMain, BrowserWindow, test,
+      screen: { getPrimaryDisplay: () => electron.screen.getPrimaryDisplay(), getAllDisplays: () => electron.screen.getAllDisplays() },
+      powerMonitor: { on: (e, fn) => electron.powerMonitor.on(e, fn), removeListener: (e, fn) => electron.powerMonitor.removeListener(e, fn) },
+      isChromeSender: (event) => isChromeSender(event),
+      send: (channel, payload) => send(channel, payload),
+      getWindow: () => win,
+      // The palette's rows: Lumen's cached ESPN games (no fetch).
+      getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // A card's click: that game's page inside Lumen (sports-main.js), not the gamecast in a tab.
+      openInLumen: (url) => (lumenSports ? lumenSports.openGame(url) : null),
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[scores] ' + line); },
+    });
+  } catch (err) {
+    console.error('[scores] Score pins could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
+/*
+ * Lumen's sports pages (sports-main.js + watch/sportspage.js): the game page, favourite teams
+ * (My teams), team pages and standings, from ESPN's public JSON, read only while a page asks.
+ * A TEST profile may point ESPN and the NHL feed at a local mock (QUARTZ_SPORTS_REBASE, JSON
+ * [[from, to], ...]); a live Quartz ignores it.
+ */
+const lumenSports = (() => {
+  const test = {};
+  if (process.argv.includes('--test-profile')) {
+    try { if (process.env.QUARTZ_SPORTS_REBASE) test.rebase = JSON.parse(process.env.QUARTZ_SPORTS_REBASE); } catch { /* no rebase */ }
+  }
+  try {
+    return require('./sports-main').create({
+      app, test,
+      getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
+      // a score pin's click: the chrome brings the Lumen tab forward (scorepins-chrome.js), Quartz comes to the front
+      showLumen: () => {
+        send('scores:changed', { pinned: null, lumenShow: true });
+        const w = win;
+        if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); }
+      },
+      log: (line) => { if (qlog) qlog.log.line(line); else console.log('[sports] ' + line); },
+    });
+  } catch (err) {
+    console.error('[sports] Lumen sports could not start: ' + String((err && err.message) || err).slice(0, 200));
+    return null;
+  }
+})();
 // Fresh after watching: the layer closing re-reads what was playing; the setting relabels the tiles.
 if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
   watchPlayer.setOnInside(() => { try { watch.drmChanged(); } catch { /* Watch gone */ } });
-  // A where-to-watch (TMDB) link to a service: routed like any title Watch opens.
-  if (typeof watch.openTitle === 'function') watchPlayer.setHandoff((url, o) => watch.openTitle(url, o));
+  // Up next (watch-player-extras.js): what follows a title that ended, from Lumen's own rows.
+  if (typeof watchPlayer.setUpNext === 'function' && typeof watch.upNext === 'function') watchPlayer.setUpNext((o) => watch.upNext(o));
+  // A where-to-watch (TMDB) link to a service: routed like any title Lumen opens.
+  if (typeof watchPlayer.setHandoff === 'function' && typeof watch.openTitle === 'function') watchPlayer.setHandoff((url, o) => watch.openTitle(url, o));
 }
 
 const budget = budgetModule.create({ app });
@@ -937,6 +1021,10 @@ function createWindow() {
     baseOptions.x = OFFSCREEN_XY;
     baseOptions.y = OFFSCREEN_XY;
     baseOptions.skipTaskbar = true;
+    // TEST ONLY (QUARTZ_TEST_WINDOW_SIZE=1536x800, watch-multiview-e2e.js): the window's real size, so
+    // the pages inside <webview>s are that size too (an emulated size never reaches a guest).
+    const sz = /^(\d{3,4})x(\d{3,4})$/.exec(String(process.env.QUARTZ_TEST_WINDOW_SIZE || ''));
+    if (sz) { baseOptions.width = Number(sz[1]); baseOptions.height = Number(sz[2]); }
     // TEST ONLY (QUARTZ_TEST_NO_WINDOW_FULLSCREEN=1, watch-player-e2e.js): a <webview>'s html
     // fullscreen is synced to its EMBEDDER (this window's webContents), whose own preference
     // decides whether the OS window goes fullscreen -- onto a real monitor. Off here, both ways.
@@ -2516,6 +2604,8 @@ function attachSessionHandlers() {
     // Watch's hidden readers never prompt and never get anything: a dialog for a page the user
     // cannot see would make his answer stick for his real tabs of that site.
     if (isWatchReader(contents)) return callback(false);
+    // An app link from Lumen's player layer (a page or a sheet): stopped, said and counted there.
+    if (permission === 'openExternal' && watchPlayer && typeof watchPlayer.refuseExternal === 'function' && watchPlayer.refuseExternal(contents, details)) return callback(false);
     if (PERMISSIONS_ALWAYS_ALLOW.has(permission)) return callback(true);
     const prompts = permission === 'media' || permission in PERMISSION_PHRASES;
     if (!prompts) return callback(false);
@@ -5237,6 +5327,50 @@ function windowOpenDecision(details) {
 }
 
 /**
+ * A guest's own window-open decision: windowOpenDecision() above, plus the one
+ * case it cannot judge without knowing the opener -- a file:// target. A local
+ * page's target="_blank" link (or window.open) to another local file becomes a
+ * Quartz tab on that file, as it would in Chrome. Asked by anything else it is
+ * refused and the tab says so; before this, both halves vanished silently.
+ * The rule and its reasoning live in filenav.js. The handler is given no
+ * initiator frame here, so the referrer stands in for it: a file:// page sends
+ * none, a web frame inside one sends its own origin.
+ */
+function guestWindowOpenDecision(contents, details) {
+  const raw = (details && details.url) || '';
+  traceFileNav('window-open', { url: raw, from: safeUrl(contents), disposition: details && details.disposition, referrer: details && details.referrer && details.referrer.url });
+  if (!fileNav.isFileUrl(raw)) return windowOpenDecision(details);
+  const referrer = (details && details.referrer && details.referrer.url) || '';
+  if (fileNav.pageMayOpen(raw, safeUrl(contents), referrer, BUNDLED_PAGE_PREFIX)) {
+    let href = raw;
+    try { href = new URL(raw).href; } catch { /* the guest's own spelling, then */ }
+    send('open-url', { url: href, background: (details && details.disposition) === 'background-tab' });
+  } else {
+    fileNavBlocked(contents, raw);
+  }
+  return { action: 'deny' };
+}
+
+/** Tell the chrome a page was stopped from opening a file, so the tab can say it. */
+function fileNavBlocked(contents, url) {
+  let wcId = null;
+  try { wcId = contents && !contents.isDestroyed() ? contents.id : null; } catch { /* gone */ }
+  traceFileNav('blocked', { url, wcId });
+  send('file-nav-blocked', { wcId, url: String(url || ''), text: fileNav.blockedNotice(url) });
+}
+
+/**
+ * Test runs only (--test-profile AND QUARTZ_TEST_FILENAV_TRACE=<file>): one
+ * JSON line per file:// decision, so filelinks-e2e.js can tell "the hook
+ * never fired" from "it fired and the chrome dropped it". Off otherwise.
+ */
+function traceFileNav(kind, info) {
+  const file = process.env.QUARTZ_TEST_FILENAV_TRACE;
+  if (!file || !process.argv.includes('--test-profile')) return;
+  try { fs.appendFileSync(file, JSON.stringify(Object.assign({ kind, at: Date.now() }, info)) + '\n'); } catch { /* a trace only */ }
+}
+
+/**
  * A child window just opened. Give it the same rules its opener had: no menu
  * bar, its links become tabs in the chrome, its own popups nest, its title
  * follows the page, and it never outlives the browser window.
@@ -5345,7 +5479,7 @@ app.on('web-contents-created', (_event, contents) => {
    * modern path -- and it only runs at all because will-attach-webview turns
    * `allowpopups` on.
    */
-  contents.setWindowOpenHandler(windowOpenDecision);
+  contents.setWindowOpenHandler((details) => guestWindowOpenDecision(contents, details));
 
   // The window the decision above allowed. Everything the popup needs that is
   // not a BrowserWindow option is wired here.
@@ -5363,14 +5497,41 @@ app.on('web-contents-created', (_event, contents) => {
    * drives, omnibox included -- do not emit it. So typing a file:// path stays
    * exactly as it was.
    *
-   * The one page-initiated file:// navigation we do want is our own: the new
-   * tab page calls location.assign() for whatever was typed into its field,
-   * and reader.html links back with location.href. Both are bundled pages.
+   * Two page-initiated file:// navigations go through. Our own: the new tab
+   * page calls location.assign() for whatever was typed into its field, and
+   * reader.html links back with location.href -- both bundled pages. And a
+   * local page's own links (<a href="1-prism.html"> on a file:// page), which
+   * Chrome follows and this lock used to eat without a word. filenav.js holds
+   * the rule and why file -> file is safe; everything else is still refused,
+   * and now the tab says so instead of the click doing nothing.
    */
   contents.on('will-navigate', (event, url) => {
-    if (typeof url !== 'string' || !/^file:/i.test(url)) return;
-    if (isBundledPageUrl(safeUrl(contents))) return;
+    if (typeof url !== 'string' || !fileNav.isFileUrl(url)) return;
+    // The frame that started it: an http iframe inside a local page does not
+    // get to borrow the page's file:// standing.
+    let by = '';
+    try { by = event && event.initiator ? String(event.initiator.url || '') : ''; } catch { by = ''; }
+    traceFileNav('will-navigate', { url, from: safeUrl(contents), by });
+    if (fileNav.pageMayOpen(url, safeUrl(contents), by, BUNDLED_PAGE_PREFIX)) return;
     event.preventDefault();
+    fileNavBlocked(contents, url);
+  });
+
+  /*
+   * The FIRST lock is Chromium's: a web page's link, location.assign or
+   * window.open to file:// is refused inside Chromium before will-navigate or
+   * setWindowOpenHandler ever hear of it, and the only trace it leaves is a
+   * console line in the page: "Not allowed to load local resource: file:///…".
+   * That line is what makes the refusal visible on the tab. It also fires for
+   * an <img>/<iframe> pointing at file://, which is the same refusal ("this
+   * page tried to reach a file on your computer"), so it is said the same way.
+   */
+  contents.on('console-message', (event, legacyLevel, legacyMessage) => {
+    const message = String((event && event.message) || legacyMessage || '');
+    const url = fileNav.refusedLocalResource(message);
+    if (!url) return;
+    traceFileNav('chromium-refused', { url, from: safeUrl(contents) });
+    fileNavBlocked(contents, url);
   });
 
   // A click inside a guest never reaches the chrome renderer; split view needs

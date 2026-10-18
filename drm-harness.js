@@ -247,6 +247,18 @@ function make(extraOpts) {
   eq('test override signed', t.m.widevine().services, true);
   t = make(Object.assign({ electron: CL, cdmOverride: 'missing', vmpOverride: 'signed' }));
   eq('test override: CDM missing wins over signed', [t.m.widevine().available, t.m.widevine().services, t.m.route('https://www.hulu.com/watch/1').edge], [false, false, true]);
+  // 'ready' = a fresh test profile's CDM, reported installed without a download: signed plays here, unsigned still goes to Edge
+  t = make(Object.assign({ electron: { components: { status: () => ({}), whenReady: () => new Promise(() => {}) } }, cdmOverride: 'ready', vmpOverride: 'signed' }));
+  eq('test override: CDM ready + signed plays in Quartz', [t.m.widevine().available, t.m.widevine().services, t.m.route('https://www.espn.com/watch/player/_/id/1').edge], [true, true, false]);
+  t = make(Object.assign({ electron: { components: { status: () => ({}), whenReady: () => new Promise(() => {}) } }, cdmOverride: 'ready', vmpOverride: 'unsigned' }));
+  eq('test override: CDM ready but unsigned still goes to Edge, with the reason', [t.m.route('https://www.disneyplus.com/video/1').edge, /isn.t signed for streaming/.test(t.m.route('https://www.disneyplus.com/video/1').reason)], [true, true]);
+  // the overrides are inert outside --test-profile (a live Quartz routes by its real CDM and signature)
+  const TOV = { QUARTZ_TEST_CDM: 'ready', QUARTZ_TEST_VMP: 'signed' };
+  eq('testOverrides: none without --test-profile', DrmMain.testOverrides(['electron.exe', '.'], TOV), { cdmOverride: '', vmpOverride: '' });
+  eq('testOverrides: none for a look-alike flag', DrmMain.testOverrides(['electron.exe', '.', '--test-profile=1', '--profile-name=x'], TOV), { cdmOverride: '', vmpOverride: '' });
+  eq('testOverrides: --test-profile passes them on', DrmMain.testOverrides(['electron.exe', '.', '--test-profile'], TOV), { cdmOverride: 'ready', vmpOverride: 'signed' });
+  eq('testOverrides: unknown values are ignored', DrmMain.testOverrides(['electron.exe', '.', '--test-profile'], { QUARTZ_TEST_CDM: 'yes', QUARTZ_TEST_VMP: 'evs' }), { cdmOverride: '', vmpOverride: '' });
+  eq('main.js takes its overrides from testOverrides only', (() => { const src = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8'); return [/drmModule\.testOverrides\(process\.argv, process\.env\)/.test(src), /cdmOverride\s*:/.test(src), /vmpOverride\s*:/.test(src)]; })(), [true, false, false]);
   // the person's rule wins on a build that can play
   t = make(Object.assign({ electron: CL, vmpOverride: 'signed' }));
   t.m.setAlways('disney', true);

@@ -36,6 +36,10 @@
  */
 
 var shape = require('../shape');
+var play = require('../playurl');
+
+/* The tile's own link, as Prime wrote it. */
+function linkOf(entity) { var l = entity && entity.link; return typeof l === 'string' ? l : (l && typeof l.url === 'string' ? l.url : ''); }
 
 var ORIGIN = 'https://www.primevideo.com';
 var BUDGET_MS = 20000;
@@ -229,7 +233,7 @@ function storeAuth(store) {
 }
 
 /* The active profile's name, only when the store names it outright (field names inferred). */
-function profileName(store) {
+function profileName(store, avatar) {
   var s = obj(store);
   if (!s) return '';
   var cands = [obj(s.Profile), obj(s.profile), obj(s.ActiveProfile), obj(s.activeProfile), obj(s.CurrentProfile)];
@@ -237,7 +241,7 @@ function profileName(store) {
     var p = cands[i];
     if (!p) continue;
     var n = str(p.name) || str(p.profileName) || str(p.displayName) || textOf(p.name);
-    if (n && n.trim()) return n.trim();
+    if (n && n.trim()) return avatar ? play.avatarOf('prime', p) : n.trim();
   }
   return '';
 }
@@ -526,6 +530,8 @@ function itemFrom(entity, container, kind, group, counts) {
     image: imageOf(e),
     progress: kind === 'resume' ? progressOf(e) : null,
     url: ORIGIN + '/detail/' + encodeURIComponent(detailId) + '/',
+    // Straight to playback only when Prime's own link already says so (watch/playurl.js).
+    playUrl: kind === 'resume' ? play.primeAutoplayUrl(linkOf(e), ORIGIN) : '',
     startsAt: null,
     durationSec: durationOf(e),
     badge: badge,
@@ -642,7 +648,7 @@ function parseSafe(read, ctx) {
     if (auth !== true && hasSignInCta(root)) return signedOut('sign-in buttons on the page');
   }
   if (!items.length) return fail(REASON_CHANGED, counts);
-  return { state: 'ok', reason: '', items: items, profile: profileName(store), counts: counts };
+  return { state: 'ok', reason: '', items: items, profile: profileName(store), avatar: profileName(store, true), counts: counts };
 }
 
 function parse(read, ctx) {
@@ -659,4 +665,12 @@ module.exports = {
   parse: parse,
   _internals: { EXTRACT: EXTRACT, pageExtract: pageExtract, ready: ready, storeAuth: storeAuth,
     progressOf: progressOf, entitlementOf: entitlementOf, findContainers: findContainers, reasonForError: reasonForError }
+};
+
+/* For watch/search/prime.js (Lumen's one search box): the same hydration read and tolerant parsers. */
+module.exports._search = {
+  EXTRACT: EXTRACT, ready: ready, findContainers: findContainers, itemFrom: itemFrom, entitlementOf: entitlementOf,
+  parseJsonish: parseJsonish, storeAuth: storeAuth, urlParts: urlParts, isSignInPath: isSignInPath, isCaptchaPath: isCaptchaPath,
+  hasSignInCta: hasSignInCta, reasonForError: reasonForError, DECOY_CONTAINER: DECOY_CONTAINER, containerTitle: containerTitle,
+  REASON_ROBOT: REASON_ROBOT
 };

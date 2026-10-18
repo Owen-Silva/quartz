@@ -11,7 +11,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const childProcess = require('child_process');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
 // Absolute path to the Claude CLI: where its native installer puts it, under THIS user's home
@@ -70,27 +69,29 @@ const DEFAULT_PROGRAM = 'claude';
 
 // System32 by absolute path: `where` itself is resolved off PATH otherwise,
 // and PATH is exactly what we are asking it about.
-const WHERE_EXE = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe');
 
 /** id -> absolute path | null. Resolved at most ONCE per program per process. */
 const binCache = new Map();
 
-/** Ask where.exe for a bare name; first hit wins. Swapped out by the harness. */
+/**
+ * Find a bare name on PATH the way where.exe does (each PATH folder in order, PATHEXT when the name
+ * has no extension; first hit wins), IN PROCESS. It used to run where.exe once per program with
+ * spawnSync: on this laptop that froze the main thread 0.8-1.0 s on the first pty:programs (process
+ * creation under the scanner), long enough to hold back look-sync's watch events past its 1 s follow
+ * target (looksync-e2e, main-process profiles, 2026-10-18). A few dozen stats cost milliseconds.
+ * Swapped out by the harness.
+ */
 function runWhere(bin) {
-  let res;
-  try {
-    res = childProcess.spawnSync(WHERE_EXE, [bin], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 5000,
-    });
-  } catch (err) {
-    console.warn('[pty] where.exe failed for', bin, err && err.message);
-    return null;
+  if (!bin || /[\\/]/.test(bin)) return null;
+  const exts = path.extname(bin) ? [''] : String(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const dirs = String(process.env.PATH || process.env.Path || '').split(';').map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, bin + ext);
+      if (isFile(candidate)) return candidate;
+    }
   }
-  if (!res || res.status !== 0 || typeof res.stdout !== 'string') return null;
-  const first = res.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
-  return first || null;
+  return null;
 }
 
 let whereRunner = runWhere;
