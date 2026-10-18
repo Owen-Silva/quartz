@@ -348,7 +348,9 @@
     var shield = document.getElementById('shield');
     var downloads = document.getElementById('downloads');
     var theme = document.getElementById('theme');
+    var lumen = document.getElementById('lumen');  // reader, then Lumen: both stay left of the shield
     if (reader && reader.parentNode === navrow) navrow.insertBefore(buttonEl, reader);
+    else if (lumen && lumen.parentNode === navrow) navrow.insertBefore(buttonEl, lumen);
     else if (shield && shield.parentNode === navrow) navrow.insertBefore(buttonEl, shield);
     else if (downloads && downloads.parentNode === navrow) navrow.insertBefore(buttonEl, downloads);
     else if (theme && theme.parentNode === navrow) navrow.insertBefore(buttonEl, theme);
