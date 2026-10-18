@@ -3246,6 +3246,11 @@
     bk.setAttribute('data-field', 'bravekey');
     s.appendChild(bk);
 
+    /* The Claude API key and settings for the AI answer above Quartz results. */
+    var ck = el('div', 'set-field set-field-gap');
+    ck.setAttribute('data-field', 'claudekey');
+    s.appendChild(ck);
+
     /* Keywords sit under the engine they bypass: same section, own field. */
     var kw = el('div', 'set-field');
     kw.setAttribute('data-field', 'keywords');
@@ -3261,6 +3266,7 @@
       set({ searchEngine: id });
     }));
     renderBraveKey();
+    renderClaudeKey();
   }
 
   /* ============================================================
@@ -3421,6 +3427,234 @@
       : has ? 'Quartz results uses this key. '
         : 'Quartz results needs this key: until it is saved, searches show a page saying so, with the plain Brave search one click away. ';
     field.appendChild(el('p', 'set-hint', lead + where));
+  }
+
+  /* ============================================================
+     The Claude API key (the AI answer above Quartz results)
+
+     main (claudeanswer.js) keeps the key in <userData>/claude-answer.json,
+     ENCRYPTED with safeStorage (DPAPI), and answers describe() with
+     `hasKey` and a mask, never the key. "Check key" is GET /v1/models,
+     which costs nothing. Under it: when answers run (the mode), a
+     read-only line naming the one model (Claude Haiku 5.5, high effort)
+     that writes every answer, the monthly cap, and this month's spend as
+     Quartz estimates it. Every refusal from main comes back with
+     `error` and is printed here, never swallowed.
+     ============================================================ */
+
+  var ckState = null;      // the last describe() from main, or null
+  var ckShowKey = false;   // the eye: reveals what is being TYPED only
+  var ckBusy = false;      // a Check in flight
+  var ckFocus = '';
+
+  function claudeApi() {
+    var api = window.api && window.api.claudeAnswer;
+    return api && typeof api.describe === 'function' ? api : null;
+  }
+
+  function claudeTake(answer) {
+    if (!answer || typeof answer !== 'object') return;
+    ckState = answer;
+    renderClaudeKey();
+    if (ckFocus) {
+      var back = panelEl && panelEl.querySelector(ckFocus);
+      ckFocus = '';
+      if (back) { try { back.focus(); } catch (err) { /* re-rendered away */ } }
+    }
+  }
+
+  function claudeCall(method, arg, failed) {
+    var api = claudeApi();
+    if (!api || typeof api[method] !== 'function') { showToast(failed); return; }
+    var answer;
+    try { answer = api[method](arg); } catch (err) { showToast(failed); return; }
+    Promise.resolve(answer).then(function (value) {
+      ckBusy = false;
+      if (value) claudeTake(value);
+      else { renderClaudeKey(); showToast(failed); }
+    }, function () { ckBusy = false; renderClaudeKey(); showToast(failed); });
+  }
+
+  /** One describe() when the pane opens. */
+  function claudeRefresh() {
+    var api = claudeApi();
+    if (!api) { ckState = null; renderClaudeKey(); return; }
+    try {
+      Promise.resolve(api.describe()).then(function (value) {
+        if (value) claudeTake(value);
+      }, function () { /* the last state stays up */ });
+    } catch (err) { /* nothing to take */ }
+  }
+
+  function claudeStatusLine(st) {
+    if (!st) return '';
+    if (st.check) {
+      return (st.check.ok ? 'Checked: ' : 'Check failed: ') + st.check.title + '. ' + (st.check.detail || '');
+    }
+    if (!st.hasKey || !st.last) return '';
+    return 'Last answer: ' + (st.last.ok ? 'worked.' : st.last.title + '. ' + (st.last.detail || ''));
+  }
+
+  function usd(n) {
+    var v = Number(n);
+    if (!isFinite(v)) v = 0;
+    return '$' + v.toFixed(2);
+  }
+
+  /** What leaves the machine, in plain words, for the mode that is set. */
+  function claudeDisclosure(st) {
+    var has = !!(st && st.hasKey);
+    var mode = (st && st.mode) || 'every';
+    var which = mode === 'manual' ? 'a search, when you press “Ask Claude” on Quartz results,'
+      : mode === 'questions' ? 'each web search on Quartz results that reads as a question'
+        : 'each web search on Quartz results';
+    var flow = which + ' is sent to Anthropic (api.anthropic.com), along with any follow-up you type into the answer box, ' +
+      'so Claude can write the answer and search the web for its sources. Brave still supplies the results list.';
+    return has
+      ? 'With this key, ' + flow
+      : 'Without a key nothing is sent to Anthropic. With one, ' + flow;
+  }
+
+  function renderClaudeKey() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="claudekey"]');
+    if (!field) return;
+    var typed = '';
+    var live = field.querySelector('#set-claude-key');
+    if (live) typed = live.value;
+    var capTyped = null;
+    var capLive = field.querySelector('#set-claude-cap');
+    if (capLive && capLive === document.activeElement) capTyped = capLive.value;
+    field.textContent = '';
+
+    var label = el('label', 'set-label', 'Claude API key (AI answers)');
+    label.setAttribute('for', 'set-claude-key');
+    field.appendChild(label);
+
+    if (!claudeApi()) {
+      field.appendChild(el('p', 'set-typing-notice',
+        'This build has no bridge for AI answers, so they cannot work here. Restart Quartz to pick up the newer build.'));
+      return;
+    }
+
+    var st = ckState || {};
+    var has = !!st.hasKey;
+    var row = el('div', 'set-path-row');
+
+    var input = document.createElement('input');
+    input.type = ckShowKey ? 'text' : 'password';
+    input.id = 'set-claude-key';
+    input.className = 'set-path';
+    input.value = typed;
+    input.placeholder = has ? (st.keyMask || '') : 'Paste your key (sk-ant-…)';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.title = has ? 'A key is saved. Type to replace it.' : 'Paste an API key from platform.claude.com/settings/keys';
+    row.appendChild(input);
+
+    row.appendChild(textButton(ckShowKey ? 'Hide' : 'Show', 'set-text set-claude-eye', function () {
+      ckShowKey = !ckShowKey;
+      renderClaudeKey();
+      var again = field.querySelector('#set-claude-key');
+      if (again) { try { again.focus(); } catch (err) { /* gone */ } }
+    }));
+
+    row.appendChild(textButton('Save', 'set-btn set-claude-save', function () {
+      var now = field.querySelector('#set-claude-key');
+      var next = now ? now.value.trim() : '';
+      if (!next) return;
+      ckShowKey = false;
+      ckFocus = '.set-claude-save';
+      if (now) now.value = '';
+      claudeCall('setKey', next, 'That key could not be saved');
+    }));
+
+    if (has) {
+      var check = textButton(ckBusy ? 'Checking…' : 'Check key', 'set-text set-claude-check', function () {
+        if (ckBusy) return;
+        ckBusy = true;
+        renderClaudeKey();
+        claudeCall('test', undefined, 'The key could not be checked');
+      });
+      check.title = 'Asks Anthropic for its model list: free, no answer is written';
+      row.appendChild(check);
+      row.appendChild(textButton('Remove', 'set-text set-claude-clear', function () {
+        ckShowKey = false;
+        ckFocus = '#set-claude-key';
+        claudeCall('setKey', '', 'That key could not be removed');
+      }));
+    }
+    field.appendChild(row);
+
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var save = field.querySelector('.set-claude-save');
+      if (save) save.click();
+    });
+
+    if (st.error) field.appendChild(el('p', 'set-note set-claude-error', st.error));
+    if (st.keyError) field.appendChild(el('p', 'set-note set-claude-error', st.keyError));
+    if (ckState && ckState.canEncrypt === false && !has) {
+      field.appendChild(el('p', 'set-note set-claude-error',
+        'Windows cannot encrypt a key in this profile right now (safeStorage is unavailable), so Quartz will not store one.'));
+    }
+    var status = claudeStatusLine(st);
+    if (status) field.appendChild(el('p', 'set-note set-claude-status', status));
+
+    field.appendChild(el('p', 'set-hint set-claude-privacy', claudeDisclosure(st) + ' ' +
+      'Make a key at platform.claude.com/settings/keys. Quartz encrypts it with Windows (DPAPI) in this profile and never gives it to a page.'));
+
+    /* When answers run, and the model that writes them. */
+    var modes = Array.isArray(st.modes) && st.modes.length ? st.modes
+      : [{ id: 'every', name: 'Answer every search' }, { id: 'questions', name: 'Only questions' }, { id: 'manual', name: 'Only when I ask' }];
+    field.appendChild(controlRow('AI answers', 'set-claude-mode', glassSelect('set-claude-mode',
+      modes.map(function (m) { return { value: m.id, name: m.name }; }), st.mode || 'every', function (v) {
+        ckFocus = '#set-claude-mode';
+        claudeCall('setConfig', { mode: v }, 'That could not be saved');
+      })));
+    /* One model only (The user, 10-17: "only haiku"): a quiet read-only line, no picker. */
+    var modelName = (st.answerModelLabel && String(st.answerModelLabel)) || 'Claude Haiku 5.5';
+    field.appendChild(el('p', 'set-hint set-claude-model',
+      'Answers by ' + modelName + ' (high effort), about a tenth of a cent an answer plus $0.01 a search. ' +
+      '“Deeper answer” searches more and writes more.'));
+
+    /* The monthly cap: answers stop with "cap reached" once the estimate gets there. */
+    var capRow = el('div', 'set-path-row');
+    var cap = document.createElement('input');
+    cap.type = 'text';
+    cap.id = 'set-claude-cap';
+    cap.className = 'set-path set-claude-cap';
+    cap.setAttribute('inputmode', 'decimal');
+    cap.spellcheck = false;
+    cap.autocomplete = 'off';
+    cap.value = capTyped !== null ? capTyped : (typeof st.capUsd === 'number' ? st.capUsd.toFixed(2) : '150.00');
+    cap.title = 'Answers stop for the rest of the month once Quartz’s estimate reaches this many dollars';
+    capRow.appendChild(cap);
+    capRow.appendChild(textButton('Save cap', 'set-text set-claude-capsave', function () {
+      var v = field.querySelector('#set-claude-cap');
+      ckFocus = '.set-claude-capsave';
+      claudeCall('setConfig', { capUsd: v ? v.value : '' }, 'The cap could not be saved');
+    }));
+    cap.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var b = field.querySelector('.set-claude-capsave');
+      if (b) b.click();
+    });
+    var capLabel = el('label', 'set-ctl-label', 'Monthly cap (US$)');
+    capLabel.setAttribute('for', 'set-claude-cap');
+    field.appendChild(capLabel);
+    field.appendChild(capRow);
+
+    var m = st.month || {};
+    var spend = 'This month: ' + usd(m.spentUsd) + ' estimated · ' + (m.answers || 0) + (m.answers === 1 ? ' answer' : ' answers') +
+      ' (cap ' + usd(typeof m.capUsd === 'number' ? m.capUsd : st.capUsd) + ')' + (m.capReached ? ' — cap reached, answers are paused until next month or a higher cap.' : '.');
+    field.appendChild(el('p', 'set-note set-claude-usage', spend));
+    field.appendChild(el('p', 'set-hint set-claude-estimate',
+      'That figure is Quartz’s own estimate: the token and web-search counts Anthropic reports for each answer, times the prices Anthropic published' +
+      (st.pricesChecked ? ' (as of ' + st.pricesChecked + ')' : '') + ', plus $0.01 a web search. ' +
+      'Quartz can’t see your real credit balance; that is at platform.claude.com/settings/billing.'));
   }
 
   /**
@@ -8201,6 +8435,8 @@
     stocksRefresh();
     /* And one for the Brave key under Search, for the same reason. */
     braveRefresh();
+    /* And one for the Claude key and this month's answer spend beside it. */
+    claudeRefresh();
     /* And one for Watch: main owns its state. While a read is in flight it
        asks again every few seconds (watchPollIfBusy); closePanel() stops that. */
     watchRefresh();
