@@ -2004,3 +2004,8 @@ html[data-theme="light"] #settings-panel {
     font-size: var(--fs-2xs);
   }
 }
+
+/* Settings > Search, the Claude key field: the cap label and the mode row had no room above them,
+   so "Monthly cap (US$)" sat on the model line and "AI answers" on the disclosure. */
+#settings-panel .set-claude-privacy + .set-ctl-row { margin-top: 12px; }
+#settings-panel .set-claude-model + .set-ctl-label { display: block; margin-top: 14px; }

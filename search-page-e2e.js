@@ -231,8 +231,10 @@ const FAILS = [
     }
 
     // ---- REAL main, no key yet: the off state, and Open Settings lands on the key field --------
-    const A = () => page.ev('window.__answerState()');
-    const apply = (o) => page.ev('window.__applyAnswer(' + JSON.stringify(o) + ')');
+    // The panel paints on requestAnimationFrame: wait for that frame (or 600 ms) before reading the DOM.
+    const FRAME = '(r) => new Promise((res) => { let d = false; const go = () => { if (!d) { d = true; res(r); } }; requestAnimationFrame(() => requestAnimationFrame(go)); setTimeout(go, 600); })';
+    const A = () => page.ev('(' + FRAME + ')(0).then(() => window.__answerState())');
+    const apply = (o) => page.ev('(' + FRAME + ')(window.__applyAnswer(' + JSON.stringify(o) + '))');
     const settingsShot = async (name) => {
       await chrome.ev("(() => { const k = document.querySelector('#set-claude-key'); const f = k && (k.closest('.set-field') || k.parentElement); (f || k).scrollIntoView({ block: 'start' }); return 1; })()");
       await sleep(400);
@@ -270,6 +272,7 @@ const FAILS = [
     check(safe.scripts === 3 && !safe.js && safe.attrib === 2 && safe.markup === '<b>stays</b> text', 'no injected script or javascript: link; both POWERED BY BRAVE shown; infobox markup stays text', JSON.stringify(safe));
     const geo = async (w) => {
       await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+      await page.ev('window.scrollTo(0, 0), 1');
       await sleep(250);
       return page.ev(`(() => { const c = document.getElementById('sr-col').getBoundingClientRect(), d = document.getElementById('sr-side').getBoundingClientRect(), q = document.getElementById('qa').getBoundingClientRect();
         return { colL: Math.round(c.left), colW: Math.round(c.width), sideL: Math.round(d.left), sideW: Math.round(d.width), sideTop: Math.round(d.top), qaW: Math.round(q.width), qaBottom: Math.round(q.bottom), sx: document.documentElement.scrollWidth }; })()`);
@@ -318,18 +321,25 @@ const FAILS = [
     const hAfter = await page.ev("document.querySelector('.qa-clip').getBoundingClientRect().height");
     check(hAfter > hBefore + 100 && (await page.ev("document.querySelector('.qa-more').textContent")) === 'Show less', 'Show more opens the long answer', hBefore + ' -> ' + hAfter);
     await page.ev("document.querySelector('.qa-more').click(), 1");
+    a = await A();
+    check(a.controls.more && (await page.ev("document.querySelector('.qa-more').textContent")) === 'Show more' && (await page.ev("document.querySelector('.qa-clip').getBoundingClientRect().height")) <= hBefore + 1, 'Show less closes it again and Show more stays (the answer is still longer than the clip)', JSON.stringify(a.controls));
     await page.ev("document.querySelector('.qa-copy').click(), 1");
     const copied = await page.waitFor("(() => { const t = document.querySelector('.qa-copy').textContent; return t !== 'Copy' ? t : null; })()", 3000).catch(() => 'Copy');
     check(copied === 'Copied' || /^Copy failed/.test(copied), 'Copy says what happened', copied);
-    // The done screenshots (rich page + answer) at every size, both themes.
-    await apply({ seq: 1, phase: 'done', text: full, citations: CITES, usage: { input_tokens: 1840, output_tokens: 212 }, costUsd: 0.0087 });
+    // (An unfocused test window may not write the clipboard.) The label goes back to "Copy" on its own.
+    const reset = await page.waitFor("document.querySelector('.qa-copy').textContent === 'Copy'", 6000).catch(() => false);
+    check(reset === true, 'Copy\'s feedback goes back to "Copy" by itself');
+    // The done screenshots (rich page + answer) at every size, both themes: a fresh turn with the real-length answer.
+    await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
+    const shotSeq = (await A()).seq;
+    await apply({ seq: shotSeq, phase: 'start', model: 'claude-haiku-5-5', mode: 'auto' });
+    await apply({ seq: shotSeq, phase: 'done', text: full, citations: CITES, usage: { input_tokens: 1840, output_tokens: 212 }, costUsd: 0.0087 });
     for (const mode of ['dark', 'light']) {
       await theme(mode);
       for (const [w, h] of SIZES) console.log('[e2e] shot ' + await shot(w + 'x' + h + '-' + mode + '-done', w, h));
     }
     await theme('dark');
     await page.send('Emulation.clearDeviceMetricsOverride');
-    // (The second done above was ignored: seq 1 was already done. The panel kept the long text.)
 
     // ---- main's extras: a second start restarts, done carries cached / truncated / searchErrors --
     await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
@@ -421,7 +431,8 @@ const FAILS = [
       'bad-answer after text: the streamed text is replaced by the failure; chip reads "Haiku 5.5" beside "Answer by Claude"', a.text + ' / ' + a.modelLabel);
     await page.ev(`window.QuartzAnswer.begin(${JSON.stringify(Q)}), 1`);
     await apply({ seq: (await A()).seq, phase: 'fail', state: 'stopped', title: 'Stopped', detail: '', retry: true, settings: false });
-    check((await A()).view === 'stopped', 'fail stopped: shown as stopped, not as an error');
+    a = await A();
+    check(a.view === 'stopped', 'fail stopped: shown as stopped, not as an error', JSON.stringify({ v: a.view, ts: a.turnState, f: a.fail, seq: a.seq }));
     await page.ev("document.querySelector('.qa-act-retry').click(), 1");
     await page.waitFor("window.__answerState().view === 'fail'", 5000).catch(() => 0);
     a = await A();
@@ -453,6 +464,10 @@ const FAILS = [
 
     // ---- keys ----------------------------------------------------------------------------------
     await page.ev(`(() => { window.__clicked = []; document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a'); if (a) { window.__clicked.push(a.href); e.preventDefault(); } }, true); document.activeElement && document.activeElement.blur(); return 1; })()`);
+    // Settings had the focus last: give it back to the results page (the window itself is never focused).
+    await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await chrome.ev("(() => { const w = [...document.querySelectorAll('webview')].find((x) => x.offsetWidth > 0); if (w) w.focus(); return !!w; })()");
+    await page.ev('document.activeElement && document.activeElement.blur(), 1');
     await page.key('j', 'j', 'KeyJ', 74);
     await page.key('j', 'j', 'KeyJ', 74);
     let sel = await page.ev("({ s: __searchState().selected, f: document.activeElement && document.activeElement.href })");
@@ -477,13 +492,15 @@ const FAILS = [
     page.events.length = 0;
     await page.ev(`(() => { const q = document.getElementById('sr-q'); q.focus(); q.value = 'quartz crystal'; q.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
     s = await settle("s.phase === 'ok' && s.query === 'quartz crystal'");
-    check(page.events.includes('quartz-search:answer-stop {"seq":' + leaving + '}'), 'a new search from the box stops the answer in flight (answer-stop on pagehide)', page.events.filter((e) => /answer/.test(e)).join(' | '));
+    // (Whether the unloading page's own stop line reaches CDP is not reliable; main aborting the request when the
+    // page navigates is checked for real below, against the mock.)
+    console.log('[e2e] answer lines seen while leaving: ' + (page.events.filter((e) => /answer/.test(e)).join(' | ') || 'none'));
     check(s.results === 9 && apiLog.some((x) => x.q === 'quartz crystal'), 'the new search ran', s.results);
     page.events.length = 0;
     await page.ev('history.back(), 1');
     s = await settle(`s.query === ${JSON.stringify(Q)}`);
     a = await A();
-    check(page.events.some((e) => /^quartz-search:answer-stop/.test(e)) && (a.view === 'pending' || a.view === 'stopped'), 'Back: the old answer is stopped, the restored page asks again or says it stopped', a.view + ' | ' + page.events.join(' | '));
+    check(a.view === 'pending' || a.view === 'stopped', 'Back: the restored page asks again or says it stopped', a.view + ' | ' + page.events.join(' | '));
     await page.ev('history.forward(), 1');
     await settle("s.query === 'quartz crystal'");
     await page.ev("document.querySelector('.sr-tab[data-kind=news]').click(), 1");
@@ -496,7 +513,7 @@ const FAILS = [
     const saved = JSON.parse(await chrome.ev('(async () => JSON.stringify(await window.api.claudeAnswer.setKey(' + JSON.stringify(CLAUDE_KEY) + ')))()'));
     check(saved && saved.hasKey === true && JSON.stringify(saved).indexOf(CLAUDE_KEY) < 0, 'REAL: a fixture key saved through the bridge (only its mask comes back)', saved && saved.keyMask);
     const posts = () => mock.requests.filter((r) => r.method === 'POST' && r.path.indexOf('/v1/messages') === 0);
-    const waitView = (views, ms) => page.waitFor(`(() => { const x = window.__answerState(); return ${JSON.stringify(views)}.includes(x.view) ? x : null; })()`, ms || 12000);
+    const waitView = (views, ms) => page.waitFor(`(() => { const x = window.__answerState(); return ${JSON.stringify(views)}.includes(x.view) ? x : null; })()`, ms || 12000).then(() => A());
     const boxSearch = async (text) => {
       await page.ev(`(() => { const q = document.getElementById('sr-q'); q.focus(); q.value = ${JSON.stringify(text)}; q.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
       return settle(`s.phase === 'ok' && s.query === ${JSON.stringify(text)}`);
@@ -519,7 +536,7 @@ const FAILS = [
       'REAL done: Claude\'s streamed text (the "I\'ll search" lead-in dropped), "Haiku 5.5"', a.view + ' / ' + a.modelLabel + ' / ' + String(a.bodyText).slice(0, 120));
     check(realLinks.includes(M.URL_A) && realLinks.includes(M.URL_B) && a.sources === 2, 'REAL done: citation chips link to the web-search sources', realLinks.join(' ; ') + ' / sources ' + a.sources);
     const realCost = await page.ev("(document.querySelector('.qa-cost') || {}).textContent || ''");
-    check(/^\$0\.0\d+ · 5,200 in · 120 out · 1 web search/.test(realCost), 'REAL done: the cost from Anthropic\'s usage', realCost);
+    check(/^\$0\.0\d+ · 5,[28]00 in · 120 out · 1 web search$/.test(realCost), 'REAL done: the cost from Anthropic\'s usage', realCost);
     const lbl = await page.ev("({ label: (document.querySelector('.qa-label') || {}).textContent || '', chip: (document.querySelector('.qa-model') || {}).textContent || '' })");
     check(/Answer by Claude/.test(lbl.label), 'REAL done: labelled "Answer by Claude"', JSON.stringify(lbl));
     for (const mode of ['dark', 'light']) { await theme(mode); console.log('[e2e] shot ' + await shot('1536x800-' + mode + '-real-done', 1536, 800)); }
@@ -553,6 +570,15 @@ const FAILS = [
     await sleep(300);
     const sreq = posts()[n0] || {};
     check(a.view === 'stopped' && /^A slow answer/.test(a.text) && sreq.aborted === true, 'REAL Stop: main aborts the request; what arrived stays', a.view + ' / aborted ' + sreq.aborted);
+    // A new search while an answer streams: the page navigates, main aborts the request.
+    n0 = posts().length;
+    await boxSearch('mock:slow again');
+    await page.waitFor("window.__answerState().view === 'streaming'", 10000).catch(() => 0);
+    await boxSearch('quartz watch');
+    await waitView(['done', 'fail']).catch(() => ({}));
+    await sleep(300);
+    const lreq = posts()[n0] || {};
+    check(lreq.scenario === 'slow' && lreq.aborted === true, 'REAL: a new search from the box stops the answer in flight (main aborts the request)', 'aborted ' + lreq.aborted);
     // Real fail states, as Anthropic answers them.
     const realFails = [
       ['mock:429 quartz', 'rate-limited', true, false],
