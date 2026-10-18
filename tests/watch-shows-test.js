@@ -124,6 +124,8 @@ async function main() {
     check(pk.state === 'error' && pk.picker === true && /who's watching/.test(pk.reason), "Hulu: the who's-watching picker says so", pk);
     const ch = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [{ url: 'https://x/content/v5/hubs/series/' + BEAR, status: 200, json: { components: [] } }] })), req);
     check(ch.state === 'error' && /changed its layout/.test(ch.reason), 'Hulu: a page with nothing readable is an error with the reason', ch);
+    const rf = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [{ url: 'https://x/content/v5/hubs/series/' + BEAR, status: 503, json: { message: 'Service Unavailable' } }] })), req);
+    check(rf.state === 'error' && rf.reason === 'Hulu’s servers answered HTTP 503 for this title’s data', 'Hulu: title data refused (HTTP 503) says so, not a layout guess', rf);
     const to = Hulu.parse(readOf(stepOf('https://www.hulu.com', fx('hulu-series.json'), { captures: [], error: { code: 'timeout', detail: 'x' } })), req);
     check(to.state === 'error' && /timed out after 18 s/.test(to.reason), 'Hulu: a timed-out read says how long', to);
     // the logged-out public page: the model in __NEXT_DATA__, no progress
@@ -219,7 +221,9 @@ async function main() {
   {
     const m = M.mergeTmdb(huluShow, bearTmdb.show);
     check(m.synopsis === huluShow.synopsis && m.seasons.find((x) => x.n === 2).episodes[2].progress === 0.5, "merge: the service's words and progress win");
-    check(m.seasons.some((x) => x.n === 0 && x.fromTmdb) && m.source === 'mixed', 'merge: a season the service never named comes from TMDB, marked', m.seasons.map((x) => [x.n, x.fromTmdb]));
+    const t4 = JSON.parse(JSON.stringify(bearTmdb.show)); t4.seasons.push({ n: 4, label: 'Season 4', episodes: [], loaded: false });
+    const m4 = M.mergeTmdb(huluShow, t4);
+    check(!m.seasons.some((x) => x.n === 0) && m4.seasons.some((x) => x.n === 4 && x.fromTmdb) && !m4.seasons.some((x) => x.n === 0) && m4.source === 'mixed', 'merge: a season the service never named comes from TMDB, marked; TMDB’s Specials stay out beside the service’s own seasons', m4.seasons.map((x) => [x.n, x.fromTmdb]));
     const s3 = m.seasons.find((x) => x.n === 3);
     check(s3 && s3.episodes.length === 0 && s3.loaded === false, 'merge: an unloaded season stays unloaded (asked for on the tab)');
   }
@@ -258,7 +262,7 @@ async function main() {
     ask(g1, { seq: 1, service: 'hulu', type: 'show', id: BEAR, url: 'https://www.hulu.com/series/' + BEAR, title: 'The Bear', year: 2022 });
     await until(() => finals().length >= 1);
     let a = finals()[0].a;
-    check(a.state === 'ok' && a.seq === 1 && a.key === 'hulu:' + BEAR && a.show.service === 'hulu' && a.show.source === 'mixed' && a.providers.length === 1 && /JustWatch/.test(a.attribution), 'main: a Hulu show reads, merged with TMDB, with providers', [a.state, a.reason, a.show && a.show.source]);
+    check(a.state === 'ok' && a.seq === 1 && a.key === 'hulu:' + BEAR && a.show.service === 'hulu' && a.show.source === 'service' && a.providers.length === 1 && /JustWatch/.test(a.attribution), 'main: a Hulu show reads (Hulu had every field: source service), with TMDB’s providers', [a.state, a.reason, a.show && a.show.source]);
     check(a.show.seasons.find((x) => x.n === 2).episodes[2].progress === 0.5 && M.resumePlan(a.show).label === 'Resume S2 E3', 'main: the answer keeps Hulu\'s progress and the Resume S2 E3 plan');
     check(pushed.some((p) => p.a.partial && p.a.state === 'loading' && /Reading Hulu/.test(p.a.show.notes[0])) || true, 'main: TMDB may draw first while the reader works (partial)');
     const before = stepCalls;

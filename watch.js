@@ -1774,6 +1774,8 @@
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
     acts.appendChild(primary);
+    var epsBtn = window.LumenShows ? window.LumenShows.stageButton(it) : null;   // Episodes / Details: the show page
+    if (epsBtn) acts.appendChild(epsBtn);
     acts.appendChild(opensNote(it.url, it.edge));
     if (it.yt && window.WatchYt) window.WatchYt.stageActs(acts, it);
     txt.appendChild(acts);
@@ -2161,6 +2163,13 @@
     var LS = window.LumenSports;
     if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
     if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
+    // a show or film with a Lumen show page (watch/showpage.js): seasons, episodes, Resume SxEy. A Continue
+    // tile still plays straight away (one click to resume); its stage has Episodes for the page.
+    if (card._item && !multi && card._item.kind !== 'resume' && window.LumenShows) {
+      var shown = false;
+      try { shown = window.LumenShows.open(card._item); } catch (e) { shown = false; try { window.LumenShows.close(); } catch (e2) { /* gone */ } }
+      if (shown) return;
+    }
     if (card._item) openUrl(card._item.url, card._item.title, multi, card._item);
     else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
@@ -2785,6 +2794,9 @@
         signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); },
         clear: function () { clearSearch(true); }
       });
+    }
+    if (window.LumenShows) {
+      window.LumenShows.attach({ snap: function () { return S.snap; }, signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); } });
     }
     S.ready = true;
     renderBoot();

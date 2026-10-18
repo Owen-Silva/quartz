@@ -58,7 +58,13 @@ function create(deps) {
   const log = typeof d.log === 'function' ? d.log : (line) => console.log('[watch-player] ' + line);
   const test = d.test && typeof d.test === 'object' ? d.test : {};
   const testAuth = Array.isArray(test.authHosts) ? test.authHosts.map(String) : [];
-  const freeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
+  const realFreeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
+  // TESTS ONLY (test.freeFile, QUARTZ_PLAYER_FREE_FILE): a file holding a number of GB stands in for
+  // the free RAM while it exists, so the multiview RAM guard can be tried without starving the box.
+  const freeGb = test.freeFile ? () => {
+    try { const n = Number(String(fs.readFileSync(test.freeFile, 'utf8')).trim()); if (Number.isFinite(n) && n >= 0) return n; } catch { /* no file: the real number */ }
+    return realFreeGb();
+  } : realFreeGb;
   const floorGb = Number.isFinite(test.floorGb) ? test.floorGb : FLOOR_GB;
   let afterWatching = typeof d.afterWatching === 'function' ? d.afterWatching : null;
   // handoff(url, { title }) -> Promise<{ how, why, reason }>: watch-main's openTitle, so a
@@ -299,11 +305,17 @@ function create(deps) {
         return;
       }
       if (mode !== 'grid' || input.shift) return;
-      if (/^[1-4]$/.test(key) || key === 'f' || key === 'F') {
+      // Multiview (watch-player-multi.js): 1-4 pick the tile with the sound, F expands it, X removes
+      // it, M mutes them all. A tile's page never sees these while there is more than one tile.
+      if (/^[1-4]$/.test(key) || /^[fxm]$/i.test(key)) {
         event.preventDefault();
         send('watch-player:key', { key: key.toLowerCase(), wcId });
       }
     });
+    // A click into a tile's page (it takes focus) moves the sound there, in multiview only.
+    contents.on('focus', () => { if (mode === 'grid') send('watch-player:key', { key: 'focus', wcId }); });
+    // ...and its mouse-down too: focus never arrives while the window itself is unfocused.
+    contents.on('input-event', (_e, input) => { if (mode === 'grid' && input && input.type === 'mouseDown') send('watch-player:key', { key: 'focus', wcId }); });
     contents.once('destroyed', () => {
       players.delete(wcId);
       for (const id of Array.from(p.sheets)) closeSheet(id, 'its player closed');
@@ -465,21 +477,30 @@ function create(deps) {
 
   function memory() {
     let total = 0;
+    let cpuSec = 0;
     const byPid = {};
+    const byType = {};
     try {
       for (const m of electronApp.getAppMetrics()) {
         const kb = (m.memory && m.memory.workingSetSize) || 0;
+        // cumulativeCPUUsage: CPU seconds since the process started (multiview's CPU is measured as a
+        // difference of two reads, so another caller of getAppMetrics never skews it).
+        const sec = (m.cpu && Number.isFinite(m.cpu.cumulativeCPUUsage)) ? m.cpu.cumulativeCPUUsage : 0;
         total += kb;
-        byPid[m.pid] = { type: m.type, mb: Math.round(kb / 1024) };
+        cpuSec += sec;
+        byPid[m.pid] = { type: m.type, mb: Math.round(kb / 1024), cpuSec: Math.round(sec * 1000) / 1000 };
+        byType[m.type] = (byType[m.type] || 0) + sec;
       }
     } catch { /* no metrics */ }
     const playersOut = [];
     for (const p of players.values()) {
       let pid = 0;
       try { pid = p.contents.getOSProcessId(); } catch { pid = 0; }
-      playersOut.push({ wcId: p.wcId, pid, mb: byPid[pid] ? byPid[pid].mb : 0 });
+      playersOut.push({ wcId: p.wcId, pid, mb: byPid[pid] ? byPid[pid].mb : 0, cpuSec: byPid[pid] ? byPid[pid].cpuSec : 0 });
     }
-    return { totalMb: Math.round(total / 1024), processes: Object.keys(byPid).length, players: playersOut, freeGb: Math.round(freeGb() * 100) / 100 };
+    for (const k of Object.keys(byType)) byType[k] = Math.round(byType[k] * 1000) / 1000;
+    return { totalMb: Math.round(total / 1024), processes: Object.keys(byPid).length, players: playersOut, freeGb: Math.round(freeGb() * 100) / 100,
+      cpuSec: Math.round(cpuSec * 1000) / 1000, cpuByType: byType, at: Date.now() };
   }
 
   /* --- IPC ----------------------------------------------------------------------------- */

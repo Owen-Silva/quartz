@@ -181,6 +181,9 @@ function parseShow(read, req) {
     var e = obj(step.error);
     if (e && e.code !== 'timeout') return { state: 'error', reason: X.errorReason(e, step, BUDGET_MS), show: null };
     if (e) return { state: 'error', reason: 'timed out after ' + Math.round(BUDGET_MS / 1000) + ' s', show: null };
+    // its title data was asked for and refused: say the server's answer, not a layout guess
+    var refused = X.stepView(step).captures.filter(function (c) { return CONTENT_RE.test(capUrl(c)) && !okStatus(c); })[0];
+    if (refused) return { state: 'error', reason: 'Hulu’s servers answered HTTP ' + num(refused.status) + ' for this title’s data', show: null };
     return { state: 'error', reason: "the hulu.com title page loaded but sent nothing Lumen could read (Hulu changed its layout?)", show: null };
   }
   var en = entity || {};
