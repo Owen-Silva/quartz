@@ -49,7 +49,11 @@
   var SEARCH_DEBOUNCE_MS = 300;
   var SEARCH_MIN_CHARS = 2;     // a shorter query searches his own rows only, never YouTube
   var BOOT_TIMEOUT_MS = 5000;   // no first answer from Quartz by then: say so, with a Retry
-  var FRONT_WAIT_MS = 3000;     // no word from the chrome on front/back by then (an older Quartz): in front
+  // no word from the chrome on front/back by then (an older Quartz): in front. Not 3 s: Quartz's word
+  // comes at dom-ready, after this page's boot, and on a loaded machine that took longer than 3 s, so a
+  // Watch tab moved to the background before dom-ready claimed "visible" and main ran due reads
+  // (watch-e2e "reads nothing for 5 s": hello:false visible:true visible:false).
+  var FRONT_WAIT_MS = 10000;
   var HOVER_MS = 140;
   var WHEEL_GAP_MS = 380;
   var STAGE_SWAP_MS = 150;
