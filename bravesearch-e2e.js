@@ -39,7 +39,7 @@ const SHOTS = path.resolve(opt('shots', process.env.QUARTZ_SHOTS || path.join(os
 const KEEP = argv.includes('--keep');
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
-const PROFILE = 'bravee2e' + process.pid;
+const PROFILE = opt('profile', 'bravee2e' + process.pid);
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const GOOD = 'good-key-e2e-7a1c';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -214,8 +214,8 @@ async function guest(urlRe, notId) {
     const hostile = await page.ev(`(() => { const r = [...document.querySelectorAll('.sr-result')].find((x) => x.querySelector('.sr-host').textContent === 'hostile.example');
       return { pwned: window.__pwned || null, scripts: document.querySelectorAll('script').length, imgs: [...document.querySelectorAll('img')].filter((i) => i.getAttribute('src') === 'x').length,
         text: r && r.querySelector('.sr-desc').textContent, js: [...document.querySelectorAll('a')].some((a) => /^javascript:/i.test(a.getAttribute('href') || '')) }; })()`);
-    check(!hostile.pwned && hostile.scripts === 2 && hostile.imgs === 0 && !hostile.js && !/__pwned/.test(hostile.text || '') && /stays text with bold/.test(hostile.text || ''),
-      'hostile row: no script ran, no <img> made, script text dropped, no javascript: link', JSON.stringify(hostile));
+    check(!hostile.pwned && hostile.scripts === 3 && hostile.imgs === 0 && !hostile.js && !/__pwned/.test(hostile.text || '') && /stays text with bold/.test(hostile.text || ''),
+      'hostile row (page scripts: newtab-theme, search-answer, search): no script ran, no <img> made, script text dropped, no javascript: link', JSON.stringify(hostile));
     const attrib = await page.ev(`[...document.querySelectorAll('.sr-attrib')].map((a) => getComputedStyle(a).textTransform + ':' + a.textContent + ':' + a.href + ':' + (a.getBoundingClientRect().height > 0))`);
     check(attrib.length === 2 && attrib.every((a) => a.startsWith('uppercase:Powered by Brave:https://brave.com/search/api/:true')), 'attribution "POWERED BY BRAVE" in the header and footer', attrib.join(' ; '));
     check(apiLog.length === 1 && apiLog[0].path === '/res/v1/web/search' && apiLog[0].q === 'quartz crystal' && apiLog[0].key === GOOD && apiLog[0].count === '20',
