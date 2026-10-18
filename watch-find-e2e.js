@@ -211,7 +211,7 @@ run('watch-find-e2e', async ({ check, launch, say, profileDir }) => {
     const p2 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] ? s.slots[0].url : null; })()`, 15000).catch(() => null);
     check(!!p2 && p2.indexOf(S.tmdbWww.origin + '/movie/346648/watch') === 0 && (await chrome.ev('tabs.length')) === tabs0, "TMDB's where-to-watch page opens in the layer, not a tab", p2);
     await sleep(500);
-    check(logHas(/Lumen opened a TMDB where-to-watch page in the layer/), 'quartz.log: the TMDB open has its line');
+    check(logHas(/TMDB where-to-watch page opened in the player layer/), 'quartz.log: the TMDB open has its line');
     await chrome.ev('WatchPlayer.close(), 1');
     await chrome.waitFor('!' + ST + '.open', 8000).catch(() => 0);
 
