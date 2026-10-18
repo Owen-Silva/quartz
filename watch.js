@@ -425,6 +425,10 @@
    * Without that word (an older main) a protected title is labelled Edge, as before.
    */
   var DRM = { known: false, playable: false, reason: '', edgeHosts: [] };
+  // "Play inside Watch" (watch-player-main.js): main says whether a title plays in the layer.
+  var PLAYER = { inside: false };
+  var HUB = 'Lumen';
+  function opensHere(dot) { return (PLAYER.inside ? 'Plays in ' + HUB : 'Opens in a new tab') + (dot ? '.' : ''); }
   function normDrm(d) {
     if (!d || typeof d !== 'object' || typeof d.playable !== 'boolean') return { known: false, playable: false, reason: '', edgeHosts: [] };
     return {
@@ -451,6 +455,7 @@
   function normalize(raw) {
     var o = (raw && typeof raw === 'object') ? raw : {};
     DRM = normDrm(o.drm);
+    PLAYER = { inside: !!(o.player && typeof o.player === 'object' && o.player.inside === true) };
     var services = arr(o.services).map(normService).filter(Boolean);
     var seen = {};
     services = services.filter(function (s) { if (seen[s.id]) return false; seen[s.id] = true; return true; });
@@ -974,8 +979,14 @@
     return arr(list).filter(function (a) { return a && typeof a.service === 'string' && a.service && a.service !== own && https(a.url); })
       .slice(0, 3).map(function (a) { return { service: a.service, url: https(a.url) }; });
   }
+  /* Where a tile's title goes (the player layer or a tab; Quartz or Edge) is in every tile's
+     label, so a change of either ("Play inside Watch", Widevine arriving, an Edge rule) rebuilds
+     the rows instead of leaving the old words on them. */
+  function routeSig() {
+    return (PLAYER.inside ? 'in' : 'tab') + '/' + (DRM.known ? 1 : 0) + (DRM.playable ? 1 : 0) + '/' + DRM.edgeHosts.join(',');
+  }
   function rowSig(m) {
-    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : ''];
+    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : '', routeSig()];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
     else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
     return parts.join('\u0001');
@@ -1456,7 +1467,7 @@
     c.appendChild(meta);
 
     c.setAttribute('aria-label', joinDot([it.title, svcName(it.service), sub, stale ? 'from an earlier read' : '']) + '. ' +
-      (it.edge ? 'Opens in Microsoft Edge.' : 'Opens in a new tab.'));
+      (it.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     if (it.also.length) c.setAttribute('aria-label', c.getAttribute('aria-label') + ' Also on ' + listWords(it.also.map(function (a) { return svcName(a.service); })) + '.');
     return c;
   }
@@ -1519,7 +1530,7 @@
     g.appendChild(ft);
     var label = gameTitle(ev) + '. ' + joinDot([ev.leagueName, ev.state === 'in' ? 'live, ' + clockText(ev) : clockText(ev)]);
     if (ev.state !== 'pre' && ev.away.score !== '' && ev.home.score !== '') label += '. ' + ev.away.abbr + ' ' + ev.away.score + ', ' + ev.home.abbr + ' ' + ev.home.score;
-    g.setAttribute('aria-label', label + '. ' + (ev.edge ? 'Opens in Microsoft Edge.' : 'Opens in a new tab.'));
+    g.setAttribute('aria-label', label + '. ' + (ev.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     wrap.appendChild(g);
     var m = el('span', 'm');
     m.appendChild(el('b', '', gameTitle(ev)));
@@ -1671,7 +1682,7 @@
   }
 
   function opensNote(url, edge) {
-    var span = el('span', 'opens', edge ? 'Opens in Microsoft Edge' : 'Opens in a new tab');
+    var span = el('span', 'opens', edge ? 'Opens in Microsoft Edge' : opensHere(false));
     if (edge && DRM.reason) span.title = 'Quartz can’t play it: ' + DRM.reason;
     span.appendChild(icon('out', 's'));
     return span;
@@ -1720,7 +1731,7 @@
     }
     var acts = el('div', 'acts');
     var label = it.kind === 'resume' ? 'Resume' : it.kind === 'live' ? 'Watch live' : it.service === 'youtube' ? 'Play' : /^rent$/i.test(it.badge) ? 'Rent' : it.kind === 'upcoming' ? 'Open' : 'Watch';
-    var primary = button('btn primary', '', function () { openUrl(it.url); });
+    var primary = button('btn primary', '', function () { openUrl(it.url, it.title); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
@@ -1762,7 +1773,7 @@
     }
     var acts = el('div', 'acts');
     var label = ev.state === 'in' ? 'Watch live' : 'Open in ESPN';
-    var primary = button('btn primary', '', function () { openUrl(ev.url); });
+    var primary = button('btn primary', '', function () { openUrl(ev.url, eventTitle(ev)); });
     primary.appendChild(icon('play'));
     primary.appendChild(document.createTextNode(label));
     acts.appendChild(primary);
@@ -2088,16 +2099,26 @@
 
   /* ---------------------------------------------------------------- opening */
 
-  function openUrl(url) {
+  /** title: the player layer's bar; multi: "Add to multiview" (watch-player.js). */
+  function openUrl(url, title, multi) {
     var u = https(url);
     if (!u) return;
     if (Shape && !Shape.serviceForUrl(u)) { toast('Lumen only opens pages on the services it reads', { err: true }); return; }
-    send('open', { url: u });
+    var msg = { url: u };
+    if (typeof title === 'string' && title) msg.title = title.slice(0, 200);
+    if (multi === true) msg.multi = true;
+    send('open', msg);
   }
-  function openCard(card) {
-    if (card._item) openUrl(card._item.url);
-    else if (card._event) openUrl(card._event.url);
+  function openCard(card, multi) {
+    if (card._item) openUrl(card._item.url, card._item.title, multi);
+    else if (card._event) openUrl(card._event.url, eventTitle(card._event), multi);
   }
+  function eventTitle(ev) {
+    var a = ev && ev.away && ev.away.name, h = ev && ev.home && ev.home.name;
+    return a && h ? a + ' at ' + h : cleanText(ev && (ev.name || ev.title), 120);
+  }
+  // "Add to multiview" from a tile's hover action or right-click (watch-tiles.js): the same open, marked.
+  window.__watchOpenCard = function (card, multi) { if (card && (card._item || card._event)) openCard(card, multi === true); };
 
   /* ----------------------------------------------------------------- toasts */
 
@@ -2239,7 +2260,7 @@
         : /^rent$/i.test(it.badge) ? 'Rent' : it.service === 'youtube' ? 'Free' : 'Included';
       var sub = it.kind === 'resume' ? timeLeft(it) : '';
       return { cls: /^rent$/i.test(it.badge) ? 'pay' : 'inc', label: label, sub: sub, stale: s.state === 'error' ? s : null,
-        go: function () { openUrl(it.url); }, aria: label + ': ' + row.title + ' on ' + s.name };
+        go: function () { openUrl(it.url, it.title); }, aria: label + ': ' + row.title + ' on ' + s.name };
     }
     var p = row.providers && row.providers[s.id];
     if (p) {

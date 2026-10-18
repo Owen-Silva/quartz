@@ -203,7 +203,9 @@ function parseGuestLine(text) {
       // Watch opens titles on the services it reads (and TMDB's where-to-watch
       // pages, which front JustWatch's links), and nothing else.
       if (!Shape.serviceForUrl(url) && !isTmdbPage(url)) return null;
-      return { verb, url };
+      // title: the player layer's top bar; multi: "Add to multiview".
+      const title = typeof msg.title === 'string' ? msg.title.replace(/[ -]+/g, ' ').trim().slice(0, 200) : '';
+      return { verb, url, title, multi: msg.multi === true };
     }
     case 'preview': {
       const title = typeof msg.title === 'string' ? msg.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
@@ -297,6 +299,9 @@ function create(deps) {
   // drm-main's route(url): { edge, rule, reason }. Without it, every protected title goes to Edge.
   const drmRoute = typeof d.drmRoute === 'function' ? d.drmRoute : () => ({ edge: true, rule: '', reason: 'Quartz can’t play protected video here' });
   const getWindow = typeof d.getWindow === 'function' ? d.getWindow : () => null;
+  // The player layer (watch-player-main.js): with "Play inside Watch" on, a title plays in
+  // Watch itself instead of a new tab. Without it (an older main), titles open in tabs.
+  const player = d.player && typeof d.player.play === 'function' && typeof d.player.inside === 'function' ? d.player : null;
   const setTimer = typeof d.setTimeout === 'function' ? d.setTimeout : setTimeout;
   const clearTimer = typeof d.clearTimeout === 'function' ? d.clearTimeout : clearTimeout;
   const freeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
@@ -1231,6 +1236,7 @@ function create(deps) {
       tmdb: { hasKey: !!p.tmdbKey },
       // the page never previews until a snapshot says on (a snapshot without this keeps its last word)
       preview: { on: previewMode !== 'off', mock: previewMode === 'mock' },
+      player: player ? { inside: !!player.inside() } : null,
       reading,
       forgottenAt,
     };
@@ -1382,17 +1388,39 @@ function create(deps) {
     return { playable, reason, edgeHosts };
   }
 
-  async function openTitle(url) {
+  async function openTitle(url, extra) {
+    const x = extra && typeof extra === 'object' ? extra : {};
     const clean = Shape.cleanHttps(url);
     if (!clean || (!Shape.serviceForUrl(clean) && !isTmdbPage(clean))) return { ok: false, how: '', reason: 'Lumen only opens pages on the services it reads' };
     const route = routeFor(clean);
     if (test.openStub) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
     }
+    const inLayer = !!(player && player.inside());
+    // TMDB's where-to-watch page is no service of ours, but it is still watching: it opens in
+    // the layer as the 'tmdb' guide (watch-player-hosts.js), and a link from it to a service
+    // comes back here (the player's handoff) to be routed like any title. Logged either way.
+    if (isTmdbPage(clean)) {
+      if (inLayer && player.play({ url: rebase(clean), service: 'tmdb', title: x.title || 'Where to watch' })) {
+        log('Lumen: a TMDB where-to-watch page opened in the player layer: ' + hostOf(clean));
+        return { ok: true, how: 'layer', reason: '' };
+      }
+      log('Lumen: a TMDB where-to-watch page opened in a tab (' + (player ? 'Play inside Lumen is off' : 'no player layer') + '): ' + hostOf(clean));
+      send('open-url', { url: rebase(clean), background: false });
+      return { ok: true, how: 'tab', reason: '' };
+    }
+    // A multiview tile that cannot play says why inside its tile; it never launches Edge by itself.
+    if (route.edge && inLayer && x.multi) {
+      player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: true, blocked: route.why || 'Quartz can’t play protected video here' });
+      return { ok: true, how: 'layer', reason: '' };
+    }
     if (route.edge) {
       let r;
       try { r = await openInEdge(clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
       return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
+    }
+    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: !!x.multi })) {
+      return { ok: true, how: 'layer', reason: '' };
     }
     send('open-url', { url: rebase(clean), background: false });
     return { ok: true, how: 'tab', reason: '' };
@@ -1401,6 +1429,10 @@ function create(deps) {
   function signIn(service) {
     const svc = Shape.serviceById(service);
     if (!svc) return { ok: false, how: '', reason: 'unknown service' };
+    // Signing in is part of watching: the layer too, when it is on.
+    if (player && player.inside() && player.play({ url: rebase(svc.signIn), service: svc.id, title: 'Sign in to ' + svc.name })) {
+      return { ok: true, how: 'layer', reason: '' };
+    }
     send('open-url', { url: rebase(svc.signIn), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }
@@ -1594,7 +1626,7 @@ function create(deps) {
         refresh(req.service);
         break;
       case 'open':
-        openTitle(req.url).then((r) => pushTo(contents, '__applyWatchResult', Object.assign({ action: 'open', url: req.url }, r)));
+        openTitle(req.url, { title: req.title, multi: req.multi }).then((r) => pushTo(contents, '__applyWatchResult', Object.assign({ action: 'open', url: req.url }, r)));
         break;
       case 'signin': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'signin', service: req.service }, signIn(req.service))); break;
       case 'search':
@@ -1755,6 +1787,13 @@ function create(deps) {
     previewTrailer, isReaderContents, routeFor, drmView,
     // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
     drmChanged: () => pushAll(),
+    // Fresh after watching (watch-player-main.js): the layer closed on this service; read it
+    // again now, so what he just watched moves in Continue watching. Same 30 s gap as Read now.
+    afterWatching: (id) => {
+      if (Shape.SERVICE_IDS.indexOf(id) === -1 || !loadPrefs().enabled[id]) return false;
+      log('re-reading ' + id + ' after watching');
+      return refresh(id) > 0;
+    },
     flush: saveCacheNow,
     state: () => ({
       guests: guests.size, visible: Array.from(guestVisible.entries()).filter(([g, v]) => v && guests.has(g)).length,

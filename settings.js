@@ -5805,6 +5805,9 @@
     var bg = el('div', 'set-field set-field-gap');
     bg.setAttribute('data-field', 'watchbg');
     s.appendChild(bg);
+    var pl = el('div', 'set-field set-field-gap');
+    pl.setAttribute('data-field', 'watchplayer');
+    s.appendChild(pl);
     var fg = el('div', 'set-field set-field-gap');
     fg.setAttribute('data-field', 'watchforget');
     s.appendChild(fg);
@@ -5816,7 +5819,33 @@
     renderWatchLeagues();
     renderWatchKey();
     renderWatchBackground();
+    renderWatchPlayer();
     renderWatchForget();
+  }
+
+  /* "Play inside Watch" (watch-player-main.js owns it): on, a title plays in Watch's own
+     player layer; off, it opens in a new tab (or Edge) as before. */
+  var wpInside = null;
+  function renderWatchPlayer() {
+    var field = panelEl && panelEl.querySelector('[data-field="watchplayer"]');
+    if (!field) return;
+    var wp = window.api && window.api.watchPlayer;
+    var hub = (window.WatchPlayerHosts && window.WatchPlayerHosts.HUB_NAME) || 'Lumen';
+    field.textContent = '';
+    if (!wp) { field.appendChild(el('p', 'set-hint', 'This build has no player channel, so titles open in a new tab.')); return; }
+    var draw = function (on, why) {
+      field.textContent = '';
+      field.appendChild(switchRow('Play inside ' + hub, on, function (next) {
+        wp.setInside(next).then(function (r) { wpInside = !!(r && r.inside); draw(wpInside); },
+          function (err) { draw(on, 'Couldn’t save it: ' + ((err && err.message) || err)); });
+      }));
+      field.appendChild(el('p', 'set-hint', why || (on
+        ? 'A title plays in ' + hub + ' itself; Back returns to the rows. “Open in a tab” stays in the player’s bar.'
+        : 'A title opens in a new tab, or in Microsoft Edge when Quartz can’t play it.')));
+    };
+    if (wpInside !== null) draw(wpInside);
+    wp.get().then(function (r) { wpInside = !(r && r.inside === false); draw(wpInside); },
+      function (err) { draw(true, 'Couldn’t read the setting: ' + ((err && err.message) || err)); });
   }
 
   function watchField(name) {
