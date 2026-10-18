@@ -80,6 +80,7 @@ const path = require('path');
 const cp = require('child_process');
 const Shape = require('./watch/shape');
 const Merge = require('./watch/merge');
+const Play = require('./watch/playurl');
 
 const ADAPTERS = {};
 for (const id of Shape.SERVICE_IDS) {
@@ -183,6 +184,15 @@ function maskKey(key) {
  * One console line from the page, as { verb, ...args }, or null when it is not a
  * well-formed Watch request. Pure and the whole of the validation.
  */
+/** The opened tile, as "Up next" needs it: { id, service, title, subtitle } on the url's own service, or null. */
+function cleanOpenItem(raw, service) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const id = Shape.cleanText(raw.id, 300);
+  const title = Shape.cleanText(raw.title, 200);
+  if (!service || !title || id.indexOf(service + ':') !== 0) return null;
+  return { id, service, title, subtitle: Shape.cleanText(raw.subtitle, 200) };
+}
+
 function parseGuestLine(text) {
   if (typeof text !== 'string') return null;
   const line = text.trim();
@@ -220,8 +230,14 @@ function parseGuestLine(text) {
       if (!Shape.serviceForUrl(url) && !isTmdbPage(url)) return null;
       // title: the player layer's top bar; multi: "Add to multiview".
       const title = typeof msg.title === 'string' ? msg.title.replace(/[ -]+/g, ' ').trim().slice(0, 200) : '';
-      return { verb, url, title, multi: msg.multi === true };
+      // fallback: the title page when url goes straight to the player (watch/playurl.js), same service only;
+      // item: what was opened, for "Up next" when it ends.
+      const fb = Shape.cleanHttps(msg.fallback);
+      const fallback = fb && fb !== url && Shape.serviceForUrl(fb) === Shape.serviceForUrl(url) ? fb : '';
+      return { verb, url, title, multi: msg.multi === true, fallback, item: cleanOpenItem(msg.item, Shape.serviceForUrl(url)) };
     }
+    case 'profile':
+      return Shape.SERVICE_IDS.indexOf(msg.service) !== -1 && Play.profilePage(msg.service) ? { verb, service: msg.service } : null;
     case 'preview': {
       const title = typeof msg.title === 'string' ? msg.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, QUERY_MAX) : '';
       const seq = Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
@@ -300,6 +316,8 @@ function cleanCache(raw) {
     for (const k of ['readAt', 'attemptAt', 'lastOkAt']) e[k] = Number.isFinite(s[k]) && s[k] > 0 ? s[k] : 0;
     e.items = Shape.cleanItems(s.items, ITEMS_PER_SERVICE).filter((it) => it.service === id);
     e.profile = Shape.cleanText(s.profile, 60);
+    if (Shape.cleanHttps(s.avatar)) e.avatar = Shape.cleanHttps(s.avatar);
+    if (s.picker === true && e.state === 'error') e.picker = true;
     e.warnings = Array.isArray(s.warnings) ? s.warnings.map((x) => Shape.cleanText(x, 160)).filter(Boolean).slice(0, 5) : [];
     e.events = id === 'espn' && Array.isArray(s.events) ? Shape.cleanEvents(s.events) : null;
     out.services[id] = e;
@@ -916,16 +934,19 @@ function create(deps) {
     s.state = result.state;
     s.reason = result.reason;
     s.warnings = result.state === 'ok' ? result.warnings : [];
+    if (result.picker === true) s.picker = true; else delete s.picker;
     if (s.warnings.length) log('Lumen read ' + svc.name + ' with warnings: ' + s.warnings.join('; '));
     if (result.state === 'ok') {
       s.items = result.items.filter((it) => it.service === id).slice(0, ITEMS_PER_SERVICE);
       s.profile = result.profile || '';
+      if (result.avatar) s.avatar = result.avatar; else delete s.avatar;
       s.lastOkAt = s.readAt;
       if (id === 'espn') s.events = result.events || [];
     } else if (result.state === 'signed-out') {
       // Rows from an account that is no longer signed in are not shown as his.
       s.items = [];
       s.profile = '';
+      delete s.avatar;
     }
     // An error keeps the last good rows: the page greys them with "as of".
     if (result.state !== 'ok') {
@@ -1246,6 +1267,8 @@ function create(deps) {
       reason: s.reason,
       warnings: s.warnings || [],
       readAt: s.readAt, lastOkAt: s.lastOkAt, profile: s.profile,
+      // Profiles in Lumen (watch/profiles.js): the picture, the picker state, the picker's own button.
+      avatar: s.avatar || '', picker: !!(p.enabled[id] && s.picker && s.state === 'error'), profilePage: Play.profilePage(id),
       reading: reading === id, queued: queue.indexOf(id) !== -1 || starting === id,
       // The read in flight: since when, and its time limit (the page's header counts against it).
       readingSince: reading === id ? readStartedAt : 0, readLimitMs: reading === id ? readLimit : 0,
@@ -1450,11 +1473,12 @@ function create(deps) {
     }
     if (route.edge) {
       let r;
-      try { r = await openInEdge(clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
+      try { r = await openInEdge(x.fallback || clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
       return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
     }
     const tmdbPage = isTmdbPage(clean);
-    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || (tmdbPage ? 'Where to watch' : ''), multi: !!x.multi })) {
+    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || (tmdbPage ? 'Where to watch' : ''), multi: !!x.multi,
+      fallback: x.fallback ? rebase(x.fallback) : '', item: x.item || null })) {
       if (tmdbPage) log('Lumen opened a TMDB where-to-watch page in the layer');
       return { ok: true, how: 'layer', reason: '' };
     }
@@ -1472,6 +1496,55 @@ function create(deps) {
     }
     send('open-url', { url: rebase(svc.signIn), background: false });
     return { ok: true, how: 'tab', reason: '' };
+  }
+
+  /*
+   * "Switch profile" / "Pick profile": the service's own picker, in the layer. The pick is a write the
+   * service makes itself; Lumen reads that service again when the layer closes (afterWatching), even
+   * inside Read now's 30 s gap, because the rows on screen belong to the old profile.
+   */
+  const profilePending = {};
+  function pickProfile(service) {
+    const svc = Shape.serviceById(service);
+    const pg = Play.profilePage(service);
+    if (!svc || !pg) return { ok: false, how: '', reason: (svc ? svc.name : 'This service') + ' has no profiles to pick' };
+    profilePending[svc.id] = true;
+    noteOpened(pg.url);
+    if (player && player.inside() && player.play({ url: rebase(pg.url), service: svc.id, title: pg.label + ' · ' + svc.name, purpose: 'profile', note: pg.where })) {
+      return { ok: true, how: 'layer', reason: '' };
+    }
+    send('open-url', { url: rebase(pg.url), background: false });
+    return { ok: true, how: 'tab', reason: '' };
+  }
+
+  /*
+   * Up next (watch-player-extras.js): what follows `item` on its service, from that service's own rows.
+   * A title that just ended moves on in the service's Continue watching, so the service is read again
+   * first (afterWatching's re-read, forced) and the answer comes from the fresh rows. Resolves to
+   * { ok, next: item | null, reason } within waitMs.
+   */
+  async function upNext(o, waitMs) {
+    const x = o && typeof o === 'object' ? o : {};
+    const raw = x.item && typeof x.item === 'object' ? x.item : {};
+    const item = cleanOpenItem(raw, Shape.SERVICE_IDS.indexOf(raw.service) !== -1 ? raw.service : '');
+    if (!item) return { ok: false, next: null, reason: 'Lumen doesn’t know what was playing' };
+    const id = item.service;
+    if (!loadPrefs().enabled[id]) return { ok: false, next: null, reason: Shape.serviceById(id).name + ' is off in Settings > Lumen' };
+    const pick = () => Play.upNextFor(item, loadCache().services[id].items);
+    const before = loadCache().services[id].readAt;
+    delete lastForced[id];
+    refresh(id);
+    const limit = Math.max(0, Math.min(Number.isFinite(waitMs) ? waitMs : 45000, 120000));
+    const t0 = now();
+    while (now() - t0 < limit && !stopped) {
+      if (loadCache().services[id].readAt > before && reading !== id) break;
+      await sleep(500);
+    }
+    const fresh = loadCache().services[id].readAt > before;
+    const next = pick();
+    if (next) return { ok: true, next: Object.assign({}, next, { url: rebase(next.playUrl || next.url), fallback: next.playUrl ? rebase(next.url) : '' }), reason: '' };
+    const s = loadCache().services[id];
+    return { ok: true, next: null, reason: !fresh ? Shape.serviceById(id).name + ' wasn’t read again in time' : s.state !== 'ok' ? 'Couldn’t read ' + Shape.serviceById(id).name + ': ' + (s.reason || s.state) : 'No next episode in ' + Shape.serviceById(id).name + '’s Continue watching' };
   }
 
   function forget() {
@@ -1694,9 +1767,10 @@ function create(deps) {
         refresh(req.service);
         break;
       case 'open':
-        openTitle(req.url, { title: req.title, multi: req.multi }).then((r) => pushTo(contents, '__applyWatchResult', Object.assign({ action: 'open', url: req.url }, r)));
+        openTitle(req.url, { title: req.title, multi: req.multi, fallback: req.fallback, item: req.item }).then((r) => pushTo(contents, '__applyWatchResult', Object.assign({ action: 'open', url: req.url }, r)));
         break;
       case 'signin': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'signin', service: req.service }, signIn(req.service))); break;
+      case 'profile': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'profile', service: req.service }, pickProfile(req.service))); break;
       case 'search':
         search(req.q, req.seq, contents).then((a) => { if (a) pushTo(contents, '__applyWatchSearch', a); },
           (err) => pushTo(contents, '__applyWatchSearch', { seq: req.seq, q: req.q, links: Merge.searchLinks(req.q), youtube: { ok: false, state: 'error', reason: String((err && err.message) || err), items: [] }, tmdb: null }));
@@ -1862,7 +1936,7 @@ function create(deps) {
 
   return {
     handleGuestLine, watchGuest, registerIpc, snapshot, describe, refresh, enqueue, readService, search,
-    openTitle, signIn, forget, setEnabled, setLeagues, setTmdbKey, setBackground, windowShown, windowFocused, stop, schedule, previewTrailer,
+    openTitle, signIn, pickProfile, upNext, forget, setEnabled, setLeagues, setTmdbKey, setBackground, windowShown, windowFocused, stop, schedule, previewTrailer,
     isReaderContents, routeFor, drmView,
     // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
     drmChanged: () => pushAll(),
@@ -1870,6 +1944,7 @@ function create(deps) {
     // again now, so what he just watched moves in Continue watching. Same 30 s gap as Read now.
     afterWatching: (id) => {
       if (Shape.SERVICE_IDS.indexOf(id) === -1 || !loadPrefs().enabled[id]) return false;
+      if (profilePending[id]) { delete profilePending[id]; delete lastForced[id]; }
       log('re-reading ' + id + ' after watching');
       return refresh(id) > 0;
     },

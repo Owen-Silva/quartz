@@ -48,6 +48,18 @@
     lastClosed: null          // the e2e's view of the last close: { wcIds, services, asked }
   };
 
+  // watch-player-extras.js (straight-to-player fallback, the quality note, Up next, the layer's menu)
+  // hooks in at a few points; with the file missing, nothing here changes.
+  var CTX = { L: L, focused: focused, note: note, toast: toast, toEdge: toEdge, showState: showState, open: openInLumen, close: close, svcInfo: svcInfo, api: api };
+  function X(ev) {
+    var x = window.WatchPlayerExtras;
+    if (!x || typeof x[ev] !== 'function') return undefined;
+    try { return x[ev].apply(null, [CTX].concat([].slice.call(arguments, 1))); } catch (e) {
+      try { console.warn('[lumen extras] ' + ev + ': ' + ((e && e.message) || e)); } catch (e2) { /* no console */ }
+      return undefined;
+    }
+  }
+
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -97,6 +109,7 @@
     L.edgeBtn = btn('wp-edge', 'Open in Edge', function (b) { toEdge(focused(), b); });
     L.edgeBtn.hidden = true;
     bar.appendChild(L.edgeBtn);
+    X('bar', bar);
     bar.appendChild(btn('wp-close', '✕', function () { close('Close'); }, 'Close the player (Esc)'));
     layer.appendChild(bar);
 
@@ -171,7 +184,8 @@
     var s = {
       id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '',
       view: null, wcId: null, tile: el('div', 'wp-tile'), state: el('div', 'wp-state'),
-      blocked: o.blocked || '', refused: '', fs: false
+      blocked: o.blocked || '', refused: '', fs: false,
+      fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || ''
     };
     s.state.hidden = true;
     s.tile.appendChild(s.state);
@@ -216,9 +230,11 @@
       showState(s, 'failed', 'The player’s page stopped' + (why ? ' (' + why + ')' : '') + '.');
     });
     s.tile.insertBefore(v, s.state);
+    X('attach', s, v);
   }
 
   function destroySlot(s) {
+    X('destroy', s);
     if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
     if (s.view) {
       var v = s.view;
@@ -308,6 +324,8 @@
       // The same service: this page, in place (Back comes back to the last one).
       one.title = o.title || '';
       one.url = u;
+      one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
+      X('reuse', one);
       one.state.hidden = true;
       one.tile.classList.remove('has-state');
       try { var pr = one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
@@ -321,6 +339,7 @@
     layout();
     syncBar();
     show();
+    X('opened', focused());
     return true;
   }
 
@@ -413,13 +432,13 @@
     try { createTab(url, { background: false }); } catch (e) { toast('Couldn’t open a tab: ' + ((e && e.message) || e), true); }
   }
 
-  function toEdge(s, b) {
+  function toEdge(s, b, why) {
     var slot = s || focused();
     var drm = window.api && window.api.drm;
     if (!slot) return;
     if (!drm || typeof drm.openInEdge !== 'function') { toast('Couldn’t open Microsoft Edge: this window has no channel to the browser', true); return; }
     if (b) b.disabled = true;
-    if (api) api.escape('Open in Edge' + (slot.blocked ? ': ' + slot.blocked : (slot.refused ? ': licence refused' : '')), slot.url);
+    if (api) api.escape('Open in Edge' + (why ? ': ' + why : slot.blocked ? ': ' + slot.blocked : (slot.refused ? ': licence refused' : '')), slot.url);
     drm.openInEdge(slot.url).then(function (r) {
       if (b) b.disabled = false;
       if (r && r.ok) {
@@ -525,7 +544,7 @@
     if (!api) return;
     api.on('play', function (m) {
       if (!m || typeof m.url !== 'string') return;
-      openInLumen(m.url, { service: m.service, title: m.title, multi: !!m.multi, blocked: m.blocked || '' });
+      openInLumen(m.url, { service: m.service, title: m.title, multi: !!m.multi, blocked: m.blocked || '', fallback: m.fallback || '', item: m.item || null, purpose: m.purpose || '', note: m.note || '' });
     });
     api.on('command', onCommand);
     api.on('key', onKeyFromGuest);
@@ -578,6 +597,7 @@
         note: L.noteEl ? L.noteEl.textContent : '',
         edge: L.edgeBtn ? !L.edgeBtn.hidden : false,
         lastClosed: L.lastClosed,
+        extras: X('state') || null,
         lastMedia: L.lastMedia || '',
         slots: L.slots.map(function (s) {
           return { wcId: s.wcId, url: s.url, service: s.service, title: s.title, blocked: s.blocked, refused: s.refused,
