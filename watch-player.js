@@ -358,7 +358,10 @@
       X('reuse', one);
       one.state.hidden = true;
       one.tile.classList.remove('has-state');
-      try { var pr = one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
+      // The embed (watch-player-yt.js) needs its Referer on this load too, not only on a new view's src.
+      var ref = X('referrer', one, u);
+      if (ref) { try { one.view.setAttribute('httpreferrer', ref); } catch (e) { /* the load carries it */ } }
+      try { var pr = ref ? one.view.loadURL(u, { httpReferrer: ref }) : one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
     } else {
       clearSlots();
       var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', multi: !!o.multi });
