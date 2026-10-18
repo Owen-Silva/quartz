@@ -418,11 +418,12 @@
 
   /* ---------------------------------------------------------- talking to the page */
 
-  function js(s, code) {
+  function js(s, code, ms) {
+    var lim = ms || CMD_MS;
     var v = s.view;
     if (!v) return Promise.reject(new Error('the player is gone'));
     return new Promise(function (resolve, reject) {
-      var t = setTimeout(function () { reject(new Error('no answer in ' + (CMD_MS / 1000) + ' s')); }, CMD_MS);
+      var t = setTimeout(function () { reject(new Error('no answer in ' + (lim / 1000) + ' s')); }, lim);
       try {
         v.executeJavaScript(code, false).then(function (r) { clearTimeout(t); resolve(r); }, function (e) { clearTimeout(t); reject(e); });
       } catch (e) { clearTimeout(t); reject(e); }
@@ -460,9 +461,11 @@
     P.ready = false;
     P.injected++;
     // The bridge says "no video" itself at FIND_MS; this catches a page that never answers at all.
-    P.findT = setTimeout(function () { if (!P.ready && !P.fell) fallback(s, P.health.novideo(FIND_MS)); }, FIND_MS + 1500);
+    P.findT = setTimeout(function () { if (!P.ready && !P.fell) fallback(s, P.health.novideo(FIND_MS), 'novideo'); }, FIND_MS + 1500);
     var code = Page.source({ find: FIND_MS, keys: PAGE_KEYS }, P.svc);
-    js(s, code).then(function (r) {
+    // A heavy page busy with its own scripts at dom-ready (a slow machine) can take seconds to run the bridge in:
+    // wait as long as the video search itself before calling it broken.
+    js(s, code, FIND_MS).then(function (r) {
       if (r && r.found && !P.ready) quiet2(s, { c: 'rescan' });
     }, function (e) { if (!P.fell) fallback(s, P.health.broken((e && e.message) || e)); });
   }
@@ -487,7 +490,7 @@
       case 'act': P.hover = false; activity(s); break;
       case 'key': key(s, m.k, m.s); break;
       case 'dbl': case 'fs': if (!inShorts(s)) setFs(s, !P.fs); break;   // a Short has no full window (YouTube's has none either)
-      case 'novideo': clearTimeout(P.findT); if (!P.fell && getMode() !== 'service' && !isMulti()) fallback(s, P.health.novideo(m.ms)); break;
+      case 'novideo': clearTimeout(P.findT); if (!P.fell && getMode() !== 'service' && !isMulti()) fallback(s, P.health.novideo(m.ms), 'novideo'); break;
       case 'err': failed(s, m.c || 'play', m.why); break;
       default: break;
     }
@@ -501,7 +504,7 @@
     if (!P.on) { closeMenu(s); P.el.ownPill.hidden = true; if (P.fs) setFs(s, false); }
   }
 
-  function fallback(s, reason) {
+  function fallback(s, reason, kind) {
     var P = s._pb;
     if (!P) return;
     clearTimeout(P.findT);
@@ -509,7 +512,8 @@
     setOn(s, false);
     quiet2(s, { c: 'off' });
     remember('fallback', reason);
-    say(reason);
+    // No video on a page Lumen's play view already said has no player: its line stays (the pill says the bar's part).
+    if (!(kind === 'novideo' && s._pv && s._pv.noRoot)) say(reason);
     P.el.reasonTx.textContent = reason;
     P.el.reason.hidden = false;
     clearTimeout(P.reasonT);
