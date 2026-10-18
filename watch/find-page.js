@@ -237,7 +237,6 @@
     var sec = el('section', 'fd-sec');
     sec.dataset.sec = key;
     var h = el('div', 'fd-sh');
-    if (key !== 'best') { var mk = el('span', 'chip mk fd-mk', svcShort(key)); mk.dataset.svc = key; h.appendChild(mk); }
     h.appendChild(el('h3', '', title));
     if (aside) h.appendChild(aside);
     sec.appendChild(h);
