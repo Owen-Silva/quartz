@@ -1105,7 +1105,10 @@
     var idx = 0;
     for (var j = 0; j < els.length; j++) if (els[j].dataset.key === S.curKey) { idx = j; break; }
     if (S.curKey && els[idx].dataset.key !== S.curKey) idx = clamp(S.cur, 0, els.length - 1);
-    activate(idx, { instant: !S.curKey });
+    // A row that arrived (or left) above the one he is on -- Continue watching after a title, a game
+    // going live -- moves his row in the stack: keep it where it is on screen, with no slide.
+    var shifted = !!S.curKey && els[idx].dataset.key === S.curKey && idx !== S.cur;
+    activate(idx, { instant: !S.curKey || shifted });
     if (focusInfo) restoreStackFocus(focusInfo);
   }
 

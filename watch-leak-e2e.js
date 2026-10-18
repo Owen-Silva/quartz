@@ -173,9 +173,29 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
 
     /* ---- 1. Lumen's own buttons ---- */
     // YouTube's tile: the FULL watch page, not the embed.
-    await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    // A real click, the way he does it: when the tile's row is below the lens (Live now or My teams can lead
+    // the rows now), the first click brings that row up (watch.js onStackClick) and the second opens the title.
+    const checkLong = (c, label, d) => { check(c, label, d); if (!c) say("detail: " + JSON.stringify(d).slice(0, 2500)); };
+    const SPY = `(() => { if (window.__e2eSpy) { window.__e2eSpy.sent = []; window.__e2eSpy.res = []; return 1; } const S = window.__e2eSpy = { sent: [], res: [] };
+      const ol = console.log; console.log = function () { try { const s = String(arguments[0]); if (/^quartz-watch:/.test(s)) S.sent.push(s.slice(0, 240)); } catch (e) { /* not a string */ } return ol.apply(this, arguments); };
+      const ar = window.__applyWatchResult; window.__applyWatchResult = function (r) { try { S.res.push(JSON.stringify(r).slice(0, 240)); } catch (e) { /* no copy */ } return ar.apply(this, arguments); };
+      S.err = []; const oe = console.error; console.error = function () { try { S.err.push([...arguments].map(String).join(' ').slice(0, 240)); } catch (e) { /* none */ } return oe.apply(this, arguments); };
+      window.addEventListener('error', (e) => e.message && S.err.push('onerror: ' + String(e.message).slice(0, 200) + ' @' + e.lineno), true);
+      S.clicks = []; document.addEventListener('click', (e) => { const t = e.target; S.clicks.push('cap ' + (t.tagName || '') + '.' + String(t.className || '').slice(0, 40)); }, true);
+      const st = document.getElementById('stack'); if (st) st.addEventListener('click', (e) => S.clicks.push('stack-after prevented=' + e.defaultPrevented));
+      document.addEventListener('click', (e) => S.clicks.push('doc-bubble prevented=' + e.defaultPrevented));
+      S.card = (c) => { if (!c) return null; const it = c._item || {}; return { tag: c.tagName, cls: String(c.className).slice(0, 60), disabled: !!c.disabled, inStack: !!c.closest('#stack'), isCard: !!c.closest('.card, .gc'), url: String(it.url || '').slice(0, 120), playUrl: String(it.playUrl || '').slice(0, 120), kind: it.kind, id: String(it.id || '').slice(0, 60), toasts: (document.querySelector('.toasts') || {}).textContent || '' }; };
+      return 1; })()`;
+    await g.ev(SPY);
+    const log0 = logText().length;
+    const ytAt = await g.ev(`(() => { const c = ${card('youtube')}; if (!c) return null; const r = c.closest('.lrow'); const f = document.querySelector('#stack > .lrow[data-d="0"]'); const at = { row: r ? r.dataset.key : null, d: r ? r.dataset.d : null, focused: f ? f.dataset.key : null }; c.scrollIntoView({ block: 'nearest' }); c.click(); return at; })()`);
+    if (ytAt && ytAt.row && ytAt.d !== '0') {
+      await g.waitFor(`(() => { const r = [...document.querySelectorAll('#stack > .lrow')].find((x) => x.dataset.key === ${JSON.stringify(ytAt.row)}); return !!r && r.dataset.d === '0'; })()`, 4000).catch(() => 0);
+      await sleep(500);
+      await g.ev(`(() => { const c = ${card('youtube')}; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    }
     let sl = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.n === 1 && s.slots[0].wcId !== null ? s.slots[0] : null; })()`, 15000).catch(() => null);
-    check(!!sl && sl.url.indexOf(FY + '/watch?v=') === 0 && (await tabsN()) === tabs0, 'a YouTube tile plays YouTube\'s FULL watch page in the layer, no tab', sl && sl.url);
+    checkLong(!!sl && sl.url.indexOf(FY + '/watch?v=') === 0 && (await tabsN()) === tabs0, 'a YouTube tile plays YouTube\'s FULL watch page in the layer, no tab', sl ? { url: sl.url, tile: ytAt } : { tile: ytAt, card: await g.ev(`window.__e2eSpy.card(${card('youtube')})`).catch((e) => String(e.message).slice(0, 120)), spy: await g.ev('(() => { const s = Object.assign({}, window.__e2eSpy); delete s.card; return s; })()').catch(() => null), log: logText().slice(log0).split('\n').filter((l) => /Lumen|watch/i.test(l)).slice(-6) });
     check(!(await chrome.ev('WatchPlayerYT._state().fullShown')), 'the full page has no "Full page" button (it is the full page)');
     // Sign in (the chip's and the popover's button send this line).
     await line('signin', { service: 'hulu' });

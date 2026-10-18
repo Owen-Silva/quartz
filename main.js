@@ -205,7 +205,8 @@ if (process.argv.includes('--test-profile')) {
   // QUARTZ_TEST_CDM=missing: a castlabs test copy with NO Widevine for real. The CDM is a
   // component downloaded into userData on first run; a fresh test profile with the
   // component updater off never gets it, so pages are refused exactly as on stock.
-  if (process.env.QUARTZ_TEST_CDM === 'missing') app.commandLine.appendSwitch('disable-component-update');
+  // QUARTZ_TEST_CDM=ready reports it installed without downloading it (no component update either).
+  if (process.env.QUARTZ_TEST_CDM === 'missing' || process.env.QUARTZ_TEST_CDM === 'ready') app.commandLine.appendSwitch('disable-component-update');
 }
 
 /*
@@ -450,11 +451,10 @@ const drm = drmModule.create({
   extraSites: DRM_TEST && process.env.QUARTZ_DRM_TEST_SITE
     ? [{ id: 'test', name: 'Test Stream', exact: [String(process.env.QUARTZ_DRM_TEST_SITE).toLowerCase()] }]
     : [],
-  // TEST ONLY: report the CDM missing (QUARTZ_TEST_CDM=missing) or the streaming
+  // TEST ONLY: report the CDM missing or installed (QUARTZ_TEST_CDM=missing|ready) or the streaming
   // signature in a given state (QUARTZ_TEST_VMP=signed|development|unsigned|stale),
   // so the routing e2e can take both roads on one build. A live Quartz ignores both.
-  cdmOverride: DRM_TEST && process.env.QUARTZ_TEST_CDM === 'missing' ? 'missing' : '',
-  vmpOverride: DRM_TEST && /^(signed|development|unsigned|stale)$/.test(process.env.QUARTZ_TEST_VMP || '') ? process.env.QUARTZ_TEST_VMP : '',
+  ...drmModule.testOverrides(process.argv, process.env),   // '' and '' without --test-profile
   // Watch labels "Opens in Edge" by this state: re-label when it changes.
   onChange: () => { try { if (watch && typeof watch.drmChanged === 'function') watch.drmChanged(); } catch { /* Watch not built yet */ } },
 });
