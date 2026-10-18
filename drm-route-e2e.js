@@ -128,6 +128,13 @@ async function run(mode, port, watcher) {
       for (const t of now || []) if (toasts.indexOf(t) === -1) toasts.push(t);
     };
 
+    // Where an open landed: 'layer' (Lumen's player shows that address, and no tab opened), 'tab', or null.
+    const where = (prefix, tabsBefore) => `(() => { const p = ${JSON.stringify(prefix)};
+      const s = window.WatchPlayer && WatchPlayer._state();
+      if (s && s.open && (s.slots || []).some((x) => String(x.url || '').indexOf(p) === 0) && tabs.length === ${tabsBefore}) return 'layer';
+      if (tabs.length > ${tabsBefore} && tabs.some((t) => String(t.url || '').indexOf(p) === 0)) return 'tab';
+      return null; })()`;
+
     for (const [id, url] of TITLES) {
       const before = await chrome.ev('tabs.length');
       await g.ev('(console.log("quartz-watch:open " + ' + JSON.stringify(JSON.stringify({ url })) + '), 1)');
@@ -138,9 +145,12 @@ async function run(mode, port, watcher) {
       if (!recorded) recorded = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const line = readText(openStub).split('\n').find((l) => l.indexOf(JSON.stringify(url)) !== -1); if (line) return JSON.parse(line); await sleep(100); } return null; })();
       if (mode === 'ready') {
         const rebased = url.replace(/^https:\/\/www\.[a-z]+\.com/, (m) => base + '/' + m.split('.')[1].replace('disneyplus', 'disney').replace('primevideo', 'prime'));
-        const opened = await chrome.waitFor('(() => tabs.length > ' + before + ' && tabs.some((t) => String(t.url || "").indexOf(' + JSON.stringify(rebased) + ') === 0))()', 8000).catch(() => false);
-        check(recorded && recorded.edge === false && opened === true && !readText(edgeStub).includes(url),
-          mode + ': ' + id + ' opens in a Quartz tab, not Edge', { recorded, opened, rebased });
+        // "Play inside Lumen" is on by default (watch-player-main.js), and since the leak-proof layer an
+        // open from the Lumen page plays in Lumen's own player layer, never a tab: "in Quartz, not Edge"
+        // is that layer showing the (rebased, local) address, with no new tab.
+        const opened = await chrome.waitFor(where(rebased, before), 8000).catch(() => null);
+        check(recorded && recorded.edge === false && opened === 'layer' && !readText(edgeStub).includes(url),
+          mode + ': ' + id + ' opens in Quartz (Lumen’s player layer, no tab), not Edge', { recorded, opened, rebased });
       } else {
         const sent = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { if (readText(edgeStub).includes(url)) return true; await sleep(100); } return false; })();
         const tabsNow = await chrome.ev('tabs.length');
@@ -151,11 +161,11 @@ async function run(mode, port, watcher) {
     if (mode === 'missing') check(toasts.some((t) => t === 'Opened in Microsoft Edge: Widevine is switched off for this test run'), mode + ': the toast says why it went to Edge', toasts);
     if (mode === 'real') check(toasts.some((t) => t === 'Opened in Microsoft Edge: this copy of Quartz isn\u2019t signed for streaming services yet'), mode + ': the toast says why it went to Edge', toasts);
     if (mode === 'ready') check(!toasts.some((t) => /Edge/.test(t)), mode + ': no Edge toast', toasts);
-    // YouTube never asks drm-main: always a Quartz tab.
+    // YouTube never asks drm-main: always Quartz (Lumen's layer), whatever the Widevine state.
     const ytBefore = await chrome.ev('tabs.length');
     await g.ev('(console.log("quartz-watch:open " + ' + JSON.stringify(JSON.stringify({ url: 'https://www.youtube.com/watch?v=e2e' })) + '), 1)');
-    const yt = await chrome.waitFor('tabs.length > ' + ytBefore, 8000).catch(() => false);
-    check(yt === true, mode + ': YouTube opens in a Quartz tab', yt);
+    const yt = await chrome.waitFor(where(base + '/youtube/watch?v=e2e', ytBefore), 8000).catch(() => null);
+    check(yt === 'layer', mode + ': YouTube opens in Quartz (Lumen’s player layer, no tab)', yt);
   } catch (e) {
     check(false, mode + ': HARNESS ERROR ' + (e && e.stack || e));
   } finally {
