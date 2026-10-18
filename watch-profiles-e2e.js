@@ -193,12 +193,25 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     await shoot('chips', 1536, 800);
     await shoot('chips', 1920, 1000);
 
+    // A real click, the way he does it (as watch-leak-e2e): when the card's row is not the one in the
+    // lens (the re-reads above can leave another row there), the first click brings that row up
+    // (watch.js onStackClick) and the second opens the title.
+    const clickCard = async (sel) => {
+      const at = await g.ev(`(() => { const c = ${sel}; if (!c) return null; const r = c.closest('.lrow'); const at = { key: r ? r.dataset.key : null, d: r ? r.dataset.d : null }; c.scrollIntoView({ block: 'nearest' }); c.click(); return at; })()`);
+      if (at && at.key && at.d !== '0') {
+        await g.waitFor(`(() => { const r = [...document.querySelectorAll('#stack > .lrow')].find((x) => x.dataset.key === ${JSON.stringify(at.key)}); return !!r && r.dataset.d === '0'; })()`, 4000).catch(() => 0);
+        await sleep(500);
+        await g.ev(`(() => { const c = ${sel}; if (!c) return 0; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+      }
+      return at;
+    };
+
     /* ---- 4. Resume straight to the player ---- */
     const bearCard = `[...document.querySelectorAll('.card')].find((n) => n._item && n._item.service === 'hulu' && n._item.kind === 'resume' && n._item.title === 'The Bear')`;
     const sub = await g.waitFor(`(() => { const c = ${bearCard}; return c ? c.querySelector('.m span').textContent : null; })()`, 30000).catch(() => null);
     check(sub === 'Resume S4 E3 \u00b7 15 min left', 'the Continue tile: "Resume S4 E3 · 15 min left"', sub);
-    await g.ev(`(() => { const c = ${bearCard}; if (!c) return 0; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
-    const s1 = await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].url.indexOf('/watch/') !== -1 ? s : null; })()`, 15000).catch(() => null);
+    await clickCard(bearCard);
+    const s1 =await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].url.indexOf('/watch/') !== -1 ? s : null; })()`, 15000).catch(() => null);
     check(s1 && s1.slots[0].url === FH + '/watch/' + BEAR_EP, 'a click goes straight to Hulu’s player: /watch/<episode>, not the series page', s1 && s1.slots[0].url);
     const q1 = await chrome.waitFor(`(() => { const x = ${XS}; return x && x.quality ? x : null; })()`, 20000).catch(() => null);
     check(q1 && q1.quality === '720p, browser limit' && q1.height === 720 && /720p/.test(q1.qualityWhy), 'the quality note: the video’s real height, "720p, browser limit", with its reason', q1 && { q: q1.quality, h: q1.height, why: q1.qualityWhy });
@@ -239,7 +252,7 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     const xCard = `[...document.querySelectorAll('.card')].find((n) => n._item && n._item.service === 'hulu' && n._item.kind === 'resume' && n._item.title === 'X')`;
     const xs = await g.waitFor(`(() => { const c = ${xCard}; return c ? c._item.playUrl || '' : null; })()`, 20000).catch(() => null);
     check(xs === 'https://www.hulu.com/watch/' + X_MOVIE, 'the film X in Keep Watching goes to /watch/ too', xs);
-    await g.ev(`(() => { const c = ${xCard}; if (!c) return 0; c.scrollIntoView({ block: 'nearest' }); c.click(); return 1; })()`);
+    await clickCard(xCard);
     const fb = await chrome.waitFor(`(() => { const x = ${XS}; const s = ${ST}; return x && x.fell && s.slots[0] && s.slots[0].url.indexOf('/movie/') !== -1 ? { fell: x.fell, url: s.slots[0].url, note: s.note } : null; })()`, 15000).catch(() => null);
     check(fb && /HTTP 404/.test(fb.fell) && fb.url === FH + '/movie/' + X_MOVIE && /opened the .*page instead/.test(fb.note), 'Hulu’s player refused (HTTP 404): the layer opened X’s title page and said why', fb);
     check(st.watched.indexOf(X_MOVIE) !== -1, 'the player URL was really tried first', st.watched.slice(-2));
