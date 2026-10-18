@@ -936,11 +936,13 @@ if (require.main === module) {
       return null;
     }
     const ytUrl = await openCardOf('youtube');
-    let ytTab = null;
-    try { ytTab = await chrome.waitFor(`tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0) ? tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0).url : null`, 6000); } catch (e) { ytTab = null; }
-    check(!!ytUrl && !!ytTab && ytTab === ytUrl.replace('https://www.youtube.com', mock.origin('youtube')), 'a YouTube card (real click) opens a Quartz tab on the title (rebased to the mock)', { card: ytUrl, tab: ytTab });
+    // "Play inside Lumen" is on by default (watch-player-e2e.js covers the layer itself): the title
+    // plays in the player layer over this tab, never a new tab.
+    let ytLayer = null;
+    try { ytLayer = await chrome.waitFor(`(() => { const s = window.WatchPlayer && WatchPlayer._state(); return s && s.open && s.slots[0] && String(s.slots[0].url).indexOf(${JSON.stringify(mock.origin('youtube') + '/watch')}) === 0 ? s.slots[0].url : null; })()`, 6000); } catch (e) { ytLayer = null; }
+    check(!!ytUrl && !!ytLayer && ytLayer === ytUrl.replace('https://www.youtube.com', mock.origin('youtube')) && (await chrome.ev('tabs.length')) === tabsBefore, 'a YouTube card (real click) plays the title in the player layer, no new tab (rebased to the mock)', { card: ytUrl, layer: ytLayer });
     check(readText(OPEN_STUB).indexOf(JSON.stringify({ url: ytUrl, edge: false })) !== -1, 'the YouTube open is recorded with edge:false');
-    await chrome.ev(`(() => { const t = tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube'))}) === 0); if (t) closeTab(t.id); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
+    await chrome.ev(`(() => { if (window.WatchPlayer && WatchPlayer.isOpen()) WatchPlayer.close('e2e'); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
     for (const id of ['disney', 'hulu', 'prime']) {
       const u = await openCardOf(id);

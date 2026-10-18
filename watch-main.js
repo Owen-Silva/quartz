@@ -1474,9 +1474,21 @@ function create(deps) {
     if (test.openStub) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
     }
-    // TMDB's where-to-watch page (JustWatch's links) opens in the layer too: leaving Lumen for a
-    // tab is a bug. A link on it to another site leaves the layer with its own log line.
     const inLayer = !!(player && player.inside());
+    // TMDB's where-to-watch page (JustWatch's links) is no service of ours, but it is still
+    // watching, and leaving Lumen for a tab is a bug: it opens in the layer as the 'tmdb' guide
+    // (watch-player-hosts.js), and a link from it to a service comes back here (the player's
+    // handoff) to be routed like any title. A link to another site leaves the layer with its own
+    // log line. Logged either way.
+    if (isTmdbPage(clean)) {
+      if (inLayer && player.play({ url: rebase(clean), service: 'tmdb', title: x.title || 'Where to watch' })) {
+        log('Lumen: a TMDB where-to-watch page opened in the player layer: ' + hostOf(clean));
+        return { ok: true, how: 'layer', reason: '' };
+      }
+      log('Lumen: a TMDB where-to-watch page opened in a tab (' + (player ? 'Play inside Lumen is off' : 'no player layer') + '): ' + hostOf(clean));
+      send('open-url', { url: rebase(clean), background: false });
+      return { ok: true, how: 'tab', reason: '' };
+    }
     // A multiview tile that cannot play says why inside its tile; it never launches Edge by itself.
     if (route.edge && inLayer && x.multi) {
       player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: true, blocked: route.why || 'Quartz can’t play protected video here' });
@@ -1487,13 +1499,10 @@ function create(deps) {
       try { r = await openInEdge(x.fallback || clean); } catch (err) { r = { ok: false, how: '', reason: String((err && err.message) || err) }; }
       return { ok: !!(r && r.ok), how: 'edge', reason: (r && r.reason) || '', why: route.why };
     }
-    const tmdbPage = isTmdbPage(clean);
-    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || (tmdbPage ? 'Where to watch' : ''), multi: !!x.multi,
+    if (inLayer && player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title || '', multi: !!x.multi,
       fallback: x.fallback ? rebase(x.fallback) : '', item: x.item || null })) {
-      if (tmdbPage) log('Lumen opened a TMDB where-to-watch page in the layer');
       return { ok: true, how: 'layer', reason: '' };
     }
-    if (tmdbPage) log('Lumen opened a TMDB where-to-watch page in a tab (' + (player && !player.inside() ? 'Play inside Lumen is off' : 'no layer to show it in') + ')');
     send('open-url', { url: rebase(clean), background: false });
     return { ok: true, how: 'tab', reason: '' };
   }

@@ -427,7 +427,7 @@
   var DRM = { known: false, playable: false, reason: '', edgeHosts: [] };
   // "Play inside Watch" (watch-player-main.js): main says whether a title plays in the layer.
   var PLAYER = { inside: false };
-  var HUB = 'Watch';
+  var HUB = 'Lumen';
   function opensHere(dot) { return (PLAYER.inside ? 'Plays in ' + HUB : 'Opens in a new tab') + (dot ? '.' : ''); }
   function normDrm(d) {
     if (!d || typeof d !== 'object' || typeof d.playable !== 'boolean') return { known: false, playable: false, reason: '', edgeHosts: [] };
@@ -994,8 +994,14 @@
     return arr(list).filter(function (a) { return a && typeof a.service === 'string' && a.service && a.service !== own && https(a.url); })
       .slice(0, 3).map(function (a) { return { service: a.service, url: https(a.url) }; });
   }
+  /* Where a tile's title goes (the player layer or a tab; Quartz or Edge) is in every tile's
+     label, so a change of either ("Play inside Lumen", Widevine arriving, an Edge rule) rebuilds
+     the rows instead of leaving the old words on them. */
+  function routeSig() {
+    return (PLAYER.inside ? 'in' : 'tab') + '/' + (DRM.known ? 1 : 0) + (DRM.playable ? 1 : 0) + '/' + DRM.edgeHosts.join(',');
+  }
   function rowSig(m) {
-    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : ''];
+    var parts = [m.key, m.title, m.service, m.service ? (svcOf(m.service) || {}).state : '', routeSig()];
     if (m.kind === 'sports') m.events.forEach(function (e) { parts.push(e.id, e.state, e.detail, e.home.score, e.away.score, e.home.logo, e.away.logo, e.url); });
     else if (m.kind === 'teams') parts.push(window.LumenSports.rowSig(m));
     else m.items.forEach(function (it) { parts.push(itemKey(it), it.title, it.subtitle, it.image, it.progress, it.badge, staleSvc(it.service) ? 's' : '', it.also.map(function (a) { return a.service; }).join('+')); });
