@@ -5436,10 +5436,14 @@ function roomForExecuteJavaScriptWaits(contents) {
   const original = contents.executeJavaScript;
   if (typeof original !== 'function') return;
   const base = contents.getMaxListeners();
+  // Each per-call wait also adds a 'destroyed' listener, and that event already carries one
+  // listener per feature that watches the guest (adblock, Lumen, sports, score pins, the
+  // Claude answer...), so it is the busier of the two: room is made for whichever is higher.
+  const busiest = () => Math.max(contents.listenerCount('did-stop-loading'), contents.listenerCount('destroyed'));
   contents.executeJavaScript = function executeJavaScriptWithRoom(...args) {
     try {
       const limit = contents.getMaxListeners();
-      if (limit > 0 && contents.listenerCount('did-stop-loading') + 1 >= limit) contents.setMaxListeners(limit + 10);
+      if (limit > 0 && busiest() + 1 >= limit) contents.setMaxListeners(limit + 10);
     } catch { /* the call goes on as it always did */ }
     return original.apply(contents, args);
   };
@@ -5448,7 +5452,7 @@ function roomForExecuteJavaScriptWaits(contents) {
   contents.on('did-stop-loading', () => setImmediate(() => {
     try {
       if (!contents.isDestroyed() && contents.getMaxListeners() !== base
-        && contents.listenerCount('did-stop-loading') < base) contents.setMaxListeners(base);
+        && busiest() < base) contents.setMaxListeners(base);
     } catch { /* destroyed meanwhile */ }
   }));
 }
