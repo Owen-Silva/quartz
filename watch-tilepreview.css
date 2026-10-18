@@ -1,0 +1,38 @@
+/* watch-tilepreview.css -- the hover preview inside a tile (watch-tilepreview.js).
+   The player sits in the tile's own art box (.art, which already clips to the tile's corners), over
+   the still, and fades in only once it plays: no black box, no resize, no jump (the tile keeps the
+   lift every hovered tile has). A thin progress line along the bottom, two small Lumen toggles in
+   the top right. Neutral greys and the one accent; no glow, no blur, and nothing exists at rest. */
+.tpv { position: absolute; inset: 0; z-index: 3; overflow: hidden; border-radius: inherit; container-type: size;
+  opacity: 0; pointer-events: none; transition: opacity var(--m-dur-s) var(--m-fade-in); }
+.tpv.on { opacity: 1; }
+.tpv-vid { position: absolute; inset: 0; overflow: hidden; }
+/* covers the box like the still does (16:9 player, cover by container units), never takes the pointer */
+.tpv-vid > iframe { position: absolute; left: 50%; top: 50%; width: max(100cqw, 177.78cqh); height: max(100cqh, 56.25cqw);
+  transform: translate(-50%, -50%); border: 0; display: block; pointer-events: none; background: transparent; }
+
+/* the progress line: one linear compositor animation for the rest of the video (no per-frame script) */
+.tpv-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgb(255 255 255 / .22); visibility: hidden; }
+.tpv-bar.run { visibility: visible; }
+.tpv-bar > i { position: absolute; inset: 0; transform-origin: 0 50%; transform: scaleX(var(--tpv-from, 0)); background: var(--accent); }
+.tpv-bar.run > i { animation: tpv-run var(--tpv-left, 60s) linear forwards; }
+@keyframes tpv-run { from { transform: scaleX(var(--tpv-from, 0)); } to { transform: scaleX(1); } }
+
+/* mute and captions: small discs like the tile's other marks, shown once it plays */
+.tpv-ctl { position: absolute; right: 8px; top: 8px; z-index: 2; display: flex; gap: 4px; pointer-events: auto; }
+.tpv:not(.on) .tpv-ctl { visibility: hidden; pointer-events: none; }
+.tpv-btn { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+  background: var(--art-chip); color: var(--on-art); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .12);
+  transition: background-color var(--m-dur-xs, 120ms) var(--m-fade-in); }
+.tpv-btn:hover { background: rgb(12 13 14 / .86); }
+.tpv-btn.on { background: var(--on-art); color: rgb(18 19 20); box-shadow: none; }
+.tpv-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+
+/* while it plays, the still's own overlays step aside: the play disc, the length, the resume bar, "Opens in Edge" */
+.card.tpv-on .frame::after { display: none; }
+.card.tpv-on .art > .len, .card.tpv-on .art > .prog, .card.tpv-on .art > .grad, .card.tpv-on .art > .hint, .card.tpv-on .art > .yt-new { visibility: hidden; }
+
+/* a blocked hover says why (a game, battery saver, memory, reduce motion), small, at the bottom */
+.tpv-note { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; padding: 4px 8px; border-radius: 6px;
+  background: var(--art-chip); color: var(--on-art); font: 500 11px/1.4 var(--font); pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1); overflow-wrap: anywhere; }

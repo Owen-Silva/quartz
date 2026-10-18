@@ -6039,6 +6039,9 @@
     var bg = el('div', 'set-field set-field-gap');
     bg.setAttribute('data-field', 'watchbg');
     s.appendChild(bg);
+    var tp = el('div', 'set-field set-field-gap');
+    tp.setAttribute('data-field', 'watchtilepv');
+    s.appendChild(tp);
     // Lumen Alerts (watch-alerts-chrome.js draws it).
     var al = el('div', 'set-field set-field-gap');
     al.setAttribute('data-field', 'watchalerts');
@@ -6057,6 +6060,7 @@
     renderWatchLeagues();
     renderWatchKey();
     renderWatchBackground();
+    renderWatchTilePreview();
     renderWatchAlerts();
     renderWatchPlayer();
     renderWatchForget();
@@ -6473,6 +6477,29 @@
     else st = 'Off: it updates only while it is on screen.';
     field.appendChild(el('p', 'set-hint set-watch-bg-state', st));
     var res = watchResultRow('background');
+    if (res) field.appendChild(res);
+  }
+
+  /* "Preview videos when I hover" (watch-tilepreview.js): on unless turned off. */
+  function renderWatchTilePreview() {
+    var field = watchField('watchtilepv');
+    if (!field) return;
+    if (!watchApi() || !wtState) return;
+    var on = !(wtState.tilePreview && wtState.tilePreview.on === false);
+    var row = switchRow('Preview videos when I hover', on, function (next) {
+      if (wtBusy) return;
+      wtFocus = '.set-watch-tilepv';
+      watchCall('setTilePreview', [next], 'tilepv', 'The hover preview setting could not be saved');
+    });
+    row.classList.add('set-watch-tilepv');
+    if (wtBusy === 'tilepv') row.disabled = true;
+    field.appendChild(row);
+    field.appendChild(el('p', 'set-hint',
+      'Rest the pointer on a tile for a moment and it plays inside the tile, muted, with a progress line; leave it and it stops. ' +
+      'YouTube tiles play the video; Disney+, Hulu and Prime Video tiles play the title’s trailer when TMDB lists one (with the TMDB key above). ' +
+      'A click opens the player where the preview was. Never while a game runs, on battery saver, under 1.5 GB of free memory, ' +
+      'or when Windows is set to reduce motion.'));
+    var res = watchResultRow('tilepv');
     if (res) field.appendChild(res);
   }
 
