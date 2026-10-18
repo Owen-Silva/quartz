@@ -837,6 +837,8 @@ contextBridge.exposeInMainWorld('api', {
     testTmdb: () => ipcRenderer.invoke('watch:test-tmdb'),
     forget: () => ipcRenderer.invoke('watch:forget'),
     setBackground: (on) => ipcRenderer.invoke('watch:set-background', !!on),
+    // Settings > Lumen "Preview videos when I hover" (watch-tilepreview.js)
+    setTilePreview: (on) => ipcRenderer.invoke('watch:set-tile-preview', !!on),
     refresh: (id) => ipcRenderer.invoke('watch:refresh', id == null ? null : String(id))
   },
   // Lumen Alerts (watch-alerts-main.js <-> watch-alerts-chrome.js): the alerts main sends, where
