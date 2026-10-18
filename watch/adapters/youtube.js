@@ -270,13 +270,17 @@ function videoFrom(key, node, group) {
     if (at >= 1) url += '&t=' + at + 's';
   }
 
+  // Sharpest first (maxres webp/jpg, sd, hq, then the still the page gave); the page steps down on a miss.
+  var images = shape.ytThumbs(pickThumb(thumbs, id), id, isShort);
+
   return {
     id: ID + ':' + id,
     service: ID,
     kind: 'rec',
     title: title,
     subtitle: joinDot([channel].concat(tail)),
-    image: pickThumb(thumbs, id),
+    image: images[0] || '',
+    images: images,
     progress: progress,
     url: url,
     startsAt: null,
