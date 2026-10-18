@@ -1,0 +1,17 @@
+/* watch-leakproof.css -- the layer's page sheet (a page of another site, shown in Lumen
+   instead of a tab) and YouTube's "Full page" button (watch-player-yt.js). Loaded after
+   watch-player.css; the sign-in sheet keeps its own small panel. */
+
+/* A page of another site is a web page, not a sign-in form: most of the layer, not a card. */
+.wp-sheet[data-kind="page"] .wp-sheet-panel {
+  width: min(1180px, calc(100% - 48px));
+  height: calc(100% - 32px);
+}
+/* The page paints its own background; until it does (and on a sub-pixel edge) the hole is the bar's grey, not a white flash. */
+.wp-sheet[data-kind="page"] .wp-sheet-hole { background: #1b1c1f; }
+/* The sign-in sheet can go to a tab too (Google may refuse an embedded sign-in), but quietly. */
+.wp-sheet[data-kind="signin"] .wp-sheet-tab { opacity: 0.78; }
+.wp-sheet[data-kind="signin"] .wp-sheet-tab:hover,
+.wp-sheet[data-kind="signin"] .wp-sheet-tab:focus-visible { opacity: 1; }
+
+.wp-yt-full[hidden] { display: none; }

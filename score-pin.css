@@ -5,9 +5,9 @@
 
    The look is Quartz's chrome: neutral surfaces, one accent, the
    theme's own tokens (tokens.css, switched by data-theme on <html>).
-   On Windows 11 the WINDOW wears Electron's 'acrylic' material, so the
-   card paints only a light tint over it (no CSS blur anywhere); older
-   Windows and test runs get the solid fallback (?material=solid).
+   The card paints its own solid surface everywhere (?material=solid):
+   Electron's acrylic material renders black on a frameless window (see
+   ACRYLIC in score-pins-main.js). No CSS blur anywhere.
 
    Motion: transform and opacity only, run by score-pin.js through the
    Web Animations API, so nothing animates (and nothing runs) between
@@ -16,6 +16,9 @@
    ============================================================ */
 
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+/* .strip and .note are display:flex, which beats the UA's [hidden] rule: without this a "hidden"
+   strip's tag sat over the league and a recovered card kept its stale "paused" words. */
+[hidden] { display: none !important; }
 body { font: 500 var(--fs-xs, 12px)/1.25 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 
 :root { --pin-tint: rgba(26, 27, 29, 0.58); --pin-solid: #202123; --pin-edge: rgba(255, 255, 255, 0.07); }
@@ -27,7 +30,7 @@ html[data-theme="light"] { --pin-tint: rgba(250, 250, 251, 0.62); --pin-solid: #
   box-shadow: inset 0 0 0 1px var(--pin-edge);
   overflow: hidden;
 }
-html[data-material="solid"] .card { background: var(--pin-solid); }
+html[data-material="solid"], html[data-material="solid"] body, html[data-material="solid"] .card { background: var(--pin-solid); }
 
 /* --- the top line: league, period/clock, power play; the strip slides over it --- */
 .top { position: relative; height: 18px; margin-bottom: 5px; }
@@ -38,11 +41,14 @@ html[data-material="solid"] .card { background: var(--pin-solid); }
 .pp {
   margin-left: auto; flex: none; padding: 1px 7px; border-radius: 999px;
   font-size: var(--fs-2xs, 11px); font-weight: 650; font-variant-numeric: tabular-nums;
-  color: var(--accent-text, var(--accent)); background: var(--accent-soft);
+  color: var(--accent-strong, var(--accent)); background: var(--accent-soft);   /* --accent-text is for text ON a solid accent fill */
   box-shadow: inset 0 0 0 1px var(--accent-line, transparent);
 }
 .pp.even { color: var(--text-2); background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); }
-.strip { inset: 0 52px 0 0; font-size: var(--fs-2xs, 11px); font-weight: 650; }
+.strip { inset: 0; font-size: var(--fs-2xs, 11px); font-weight: 650; }
+/* the controls show only on hover: the strip has the whole width until then (a long strip such as
+   "GOAL OVERTURNED · MTL · MTL 1–2 TOR" was cut short), and makes room for them on hover */
+.card:hover .strip { right: 52px; }
 .strip .tag { flex: none; width: 3px; height: 13px; border-radius: 2px; background: var(--accent); }
 .strip .txt { overflow: hidden; text-overflow: ellipsis; min-width: 0; letter-spacing: .01em; }
 .strip.penalty .tag { background: var(--text-3); }
@@ -68,7 +74,7 @@ html[data-material="solid"] .card { background: var(--pin-solid); }
 .logo { width: 22px; height: 22px; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: var(--text-3); }
 .logo img { width: 22px; height: 22px; object-fit: contain; }
 .ab { font-size: 14px; font-weight: 650; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mark { font-size: var(--fs-2xs, 11px); font-weight: 650; color: var(--accent-text, var(--accent)); }
+.mark { font-size: var(--fs-2xs, 11px); font-weight: 650; color: var(--accent-strong, var(--accent)); }
 .sc { position: relative; height: 26px; min-width: 44px; overflow: hidden; text-align: right; }
 .sc .n { position: absolute; right: 0; top: 0; font: 650 22px/26px var(--font-display); font-variant-numeric: tabular-nums; }
 .team.lo .ab, .team.lo .sc .n { color: var(--text-2); font-weight: 550; }

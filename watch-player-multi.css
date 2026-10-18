@@ -1,0 +1,172 @@
+/* ============================================================
+   watch-player-multi.css -- multiview tiles and the mini-player
+   (watch-player-multi.js), on the Lumen player layer.
+
+   The layer is dark in both themes, so the marker colour is fixed:
+   the dark theme's accent (--ion #9fb4cc), thin, no glow. Tiles are
+   placed by data-pos with grid areas -- a <webview> is NEVER moved
+   in the DOM (a moved guest reloads), only re-placed.
+   ============================================================ */
+.wp-layer { --mv-accent: #9fb4cc; --mv-head: 30px; }
+
+/* --- the grid ------------------------------------------------------ */
+/* The layer is the size container (an element can't query itself): the grid is its width, and its
+   height less the 44px bar; 6px padding and a 6px gap. */
+.wp-layer.mv-multi { container-type: size; }
+.wp-layer.mv-multi .wp-grid { gap: 6px; padding: 6px; background: #0b0c0d; }
+/* 2: side by side, each a 16:9 picture under its header, centred in the height */
+.wp-layer.mv-multi .wp-grid[data-n="2"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, min(calc(100cqh - 56px), calc((100cqw - 18px) * 0.5 * 0.5625 + var(--mv-head))));
+  align-content: center;
+}
+.wp-layer.mv-multi .wp-grid[data-n="2"].mv-spot {
+  grid-template-columns: 7fr 3fr;
+  grid-template-rows: minmax(0, min(calc(100cqh - 56px), calc((100cqw - 18px) * 0.7 * 0.5625 + var(--mv-head))));
+}
+.wp-layer.mv-multi .wp-grid[data-n="2"].mv-spot .wp-tile[data-pos="1"] {
+  align-self: center;
+  height: min(100%, calc((100cqw - 18px) * 0.3 * 0.5625 + var(--mv-head)));
+}
+/* 3: one big (left, both rows) and two small */
+.wp-layer.mv-multi .wp-grid[data-n="3"] { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; }
+.wp-layer.mv-multi .wp-grid[data-n="3"] .wp-tile[data-pos="0"] { grid-area: 1 / 1 / 3 / 2; }
+.wp-layer.mv-multi .wp-grid[data-n="3"] .wp-tile[data-pos="1"] { grid-area: 1 / 2 / 2 / 3; }
+.wp-layer.mv-multi .wp-grid[data-n="3"] .wp-tile[data-pos="2"] { grid-area: 2 / 2 / 3 / 3; }
+/* 4: 2 x 2, or one big and three small */
+.wp-layer.mv-multi .wp-grid[data-n="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.wp-layer.mv-multi .wp-grid[data-n="4"] .wp-tile[data-pos="0"] { grid-area: 1 / 1 / 2 / 2; }
+.wp-layer.mv-multi .wp-grid[data-n="4"] .wp-tile[data-pos="1"] { grid-area: 1 / 2 / 2 / 3; }
+.wp-layer.mv-multi .wp-grid[data-n="4"] .wp-tile[data-pos="2"] { grid-area: 2 / 1 / 3 / 2; }
+.wp-layer.mv-multi .wp-grid[data-n="4"] .wp-tile[data-pos="3"] { grid-area: 2 / 2 / 3 / 3; }
+.wp-layer.mv-multi .wp-grid[data-n="4"].mv-spot { grid-template-columns: 3fr 1fr; grid-template-rows: 1fr 1fr 1fr; }
+.wp-layer.mv-multi .wp-grid[data-n="4"].mv-spot .wp-tile[data-pos="0"] { grid-area: 1 / 1 / 4 / 2; }
+.wp-layer.mv-multi .wp-grid[data-n="4"].mv-spot .wp-tile[data-pos="1"] { grid-area: 1 / 2 / 2 / 3; }
+.wp-layer.mv-multi .wp-grid[data-n="4"].mv-spot .wp-tile[data-pos="2"] { grid-area: 2 / 2 / 3 / 3; }
+.wp-layer.mv-multi .wp-grid[data-n="4"].mv-spot .wp-tile[data-pos="3"] { grid-area: 3 / 2 / 4 / 3; }
+/* 2 in the big-slot layout: the small one at its own 16:9 height */
+.wp-layer.mv-multi .wp-grid[data-n="2"] .wp-tile[data-pos="0"] { grid-area: 1 / 1 / 2 / 2; }
+.wp-layer.mv-multi .wp-grid[data-n="2"] .wp-tile[data-pos="1"] { grid-area: 1 / 2 / 2 / 3; }
+
+/* --- a tile: its header, then the page --------------------------- */
+.wp-tile { border-radius: 0; }
+.wp-layer.mv-multi .wp-tile { border-radius: var(--radius-s); background: #000; }
+.mv-head { display: none; }
+.wp-layer.mv-multi .mv-head {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 7px;
+  height: var(--mv-head); padding: 0 4px 0 6px;
+  background: #141518; color: #a9adb3;
+  font: 12.5px/1.3 var(--font);
+  cursor: pointer; user-select: none;
+  min-width: 0;
+}
+.wp-layer.mv-multi .wp-view { top: var(--mv-head); height: calc(100% - var(--mv-head)); }
+.wp-layer.mv-multi .wp-state { top: var(--mv-head); }
+.mv-num {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.08); color: #cfd2d6;
+  font: 600 11px/1 var(--font-display); font-variant-numeric: tabular-nums;
+}
+.wp-mark.mv-mark { height: 18px; font-size: 10px; }
+.mv-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d6d8db; }
+.mv-limit { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e3c78f; }
+.mv-limit:empty { display: none; }
+.wp-tile.mv-limited .mv-name { flex-shrink: 3; min-width: min(7em, 30%); }
+
+/* the buttons in a header: quiet until hovered */
+.mv-ib, .mv-sound {
+  appearance: none; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 24px; min-width: 24px; padding: 0 5px;
+  border: 0; border-radius: var(--radius-xs);
+  background: transparent; color: #a9adb3;
+  font: inherit; cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.mv-ib:hover, .mv-sound:hover { background: rgba(255, 255, 255, 0.08); color: #e9eaec; }
+.mv-ib:focus-visible, .mv-sound:focus-visible { outline: 2px solid var(--mv-accent); outline-offset: 0; }
+.mv-glyph { font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets'; font-size: 12px; line-height: 1; }
+.mv-sound .mv-sound-txt { font-size: 12px; }
+.mv-sound.on { color: var(--mv-accent); }
+
+/* the tile with the sound: a thin outline over the page, and its number and speaker in the accent */
+.wp-layer.mv-multi .wp-tile::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  border-radius: inherit; border: 1.5px solid transparent;
+  transition: border-color var(--dur) var(--ease);
+}
+.wp-layer.mv-multi .wp-tile.mv-audio::after { border-color: rgba(159, 180, 204, 0.85); }
+.wp-layer.mv-multi .wp-tile.mv-audio .mv-head { background: #181a1e; color: #d6d8db; }
+.wp-layer.mv-multi .wp-tile.mv-audio .mv-num { background: var(--mv-accent); color: #0b0c0d; }
+.wp-layer.mv-multi .wp-tile.mv-selected:not(.mv-audio)::after { border-color: rgba(255, 255, 255, 0.22); }
+
+/* swapping: every other tile offers itself */
+.mv-swap-target {
+  position: absolute; inset: var(--mv-head) 0 0 0; z-index: 4;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 12, 13, 0.74);
+}
+.mv-swap-target[hidden] { display: none; }
+.wp-tile.mv-swap-from .mv-swap { background: rgba(159, 180, 204, 0.18); color: #e9eaec; }
+
+/* the bar's two buttons */
+.wp-btn.mv-add { display: inline-flex; align-items: center; gap: 7px; }
+.wp-btn.mv-add .mv-glyph { font-size: 11px; }
+.mv-ib.mv-minibtn { height: 30px; width: 30px; border: 1px solid rgba(255, 255, 255, 0.10); background: rgba(255, 255, 255, 0.05); border-radius: var(--radius-s); }
+.mv-ib.mv-minibtn:hover { background: rgba(255, 255, 255, 0.10); }
+
+/* --- the video's own fullscreen from a tile: that tile fills the window --- */
+.wp-layer.wp-fs .wp-grid { display: block; position: relative; }
+.wp-layer.wp-fs .wp-tile.is-fs { position: absolute; inset: 0; border-radius: 0; }
+.wp-layer.wp-fs .mv-head, .wp-layer.wp-fs .wp-tile::after { display: none; }
+.wp-layer.wp-fs .wp-view { top: 0; height: 100%; }
+
+/* --- the mini-player ---------------------------------------------- */
+.mv-mini-head, .mv-mini-hit { display: none; }
+.wp-layer.mv-mini {
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+.wp-layer.mv-mini .wp-bar { display: none; }
+.wp-layer.mv-mini .wp-grid { margin-top: var(--mv-head); gap: 2px; padding: 0; }
+.wp-layer.mv-mini .mv-head { display: none; }
+.wp-layer.mv-mini .wp-view, .wp-layer.mv-mini .wp-state { top: 0; height: 100%; }
+.wp-layer.mv-mini .wp-tile::after { display: none; }
+.wp-layer.mv-mini .wp-tile { border-radius: 0; }
+.wp-layer.mv-mini .wp-grid[data-n="2"] { grid-template-rows: 1fr; align-content: stretch; }
+.wp-layer.mv-mini .wp-grid[data-n="2"].mv-spot .wp-tile[data-pos="1"] { height: auto; align-self: stretch; }
+.wp-layer.mv-mini .mv-mini-head {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 7px;
+  height: var(--mv-head); padding: 0 3px 0 8px;
+  background: #141518; color: #d6d8db;
+  font: 12.5px/1.3 var(--font);
+  cursor: grab; user-select: none; min-width: 0;
+}
+.wp-layer.mv-mini .mv-mini-head .wp-mark { height: 18px; font-size: 10px; }
+.mv-mini-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-mini-head.picking .mv-mini-title { color: var(--mv-accent); }
+.mv-mini-head .wp-btn.mv-mini-cancel { height: 22px; padding: 0 8px; font-size: 12px; }
+.mv-mini-head .wp-btn.mv-mini-cancel[hidden] { display: none; }
+.wp-layer.mv-mini .mv-mini-hit {
+  position: absolute; left: 0; right: 0; top: var(--mv-head); bottom: 0; z-index: 4;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; background: transparent;
+  transition: background var(--dur) var(--ease);
+}
+.mv-mini-hint { font-size: 22px; color: #fff; opacity: 0; transition: opacity var(--dur) var(--ease); }
+.wp-layer.mv-mini .mv-mini-hit:hover { background: rgba(0, 0, 0, 0.30); }
+.wp-layer.mv-mini .mv-mini-hit:hover .mv-mini-hint { opacity: 0.9; }
+.wp-layer.mv-mini.mv-dragging { transition: none; cursor: grabbing; }
+.wp-layer.mv-mini.mv-dragging .mv-mini-hit, .wp-layer.mv-mini.mv-dragging .mv-mini-head { cursor: grabbing; }
+.wp-layer.mv-mini.mv-snap { transition: left 220ms var(--m-spring, ease-out), top 220ms var(--m-spring, ease-out); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-layer.mv-mini.mv-snap { transition: none; }
+}
+
+/* a mini-player drag: a clear shield over the whole window, so the Lumen tab's own page never takes the moves */
+.mv-drag-shield { position: fixed; inset: 0; z-index: 2147483646; cursor: grabbing; background: transparent; }

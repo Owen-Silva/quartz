@@ -496,6 +496,10 @@
       readAt: num(s.readAt),
       lastOkAt: num(s.lastOkAt),
       profile: cleanText(s.profile, 60),
+      // Profiles in Lumen (watch/profiles.js): the picture, the who's-watching state, the service's own picker.
+      avatar: https(s.avatar),
+      picker: s.picker === true && enabled && state === 'error',
+      profilePage: s.profilePage && https(s.profilePage.url) ? { url: https(s.profilePage.url), label: cleanText(s.profilePage.label, 40), where: cleanText(s.profilePage.where, 160) } : null,
       reading: s.reading === true,
       queued: s.queued === true,
       readingSince: s.reading === true ? num(s.readingSince) : 0,
@@ -526,6 +530,8 @@
       images: arr(it.images).map(https).filter(Boolean),
       progress: p,
       url: url,
+      // straight to the service's player (watch/playurl.js); url stays the fallback
+      playUrl: https(it.playUrl) && Shape && Shape.serviceForUrl(https(it.playUrl)) === Shape.serviceForUrl(url) ? https(it.playUrl) : '',
       startsAt: num(it.startsAt),
       durationSec: num(it.durationSec),
       badge: cleanText(it.badge, 24),
@@ -924,7 +930,7 @@
         p.appendChild(keepP);
       } else p.appendChild(el('p', 'small', 'Nothing from ' + s.name + ' is cached yet.'));
     } else if (s.state === 'signed-out') {
-      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.'));
+      p.appendChild(el('p', '', (s.reason ? capFirst(s.reason) + '. ' : '') + (PLAYER.inside ? 'Sign in opens ' + s.name + '’s own sign-in page here in Lumen; Lumen reads it again after.' : 'Sign in to ' + s.name + ' in a Quartz tab as usual; Lumen reads it again after.')));
     }
     if (s.paused) p.appendChild(el('p', '', capFirst(s.paused) + '.'));
     if (s.warnings.length) {
@@ -974,6 +980,9 @@
     var liveTop = !!(LS && LS.liveOnTop(sp.live));
     if (liveTop) games('sports', 'Live now', LS.sortLive(sp.live));
     if (by.continue) out.push(itemRow(by.continue));
+    // YouTube Subscriptions (watch/ytlib-page.js): up top with videos; a state card (sign in, failed) lower down.
+    var yt = window.WatchYt ? window.WatchYt.row(snap) : null;
+    if (yt && yt.top) out.push(yt);
     var mine = LS ? LS.myTeamsRow() : null;
     if (mine) out.push(mine);
     if (!liveTop) games('sports', 'Live now', sp.live);
@@ -981,8 +990,9 @@
     if (by.foryou) out.push(itemRow(by.foryou));
     games('sports-soon', 'Upcoming games', sp.soon);
     games('sports-done', 'Recent games', sp.done);
+    if (yt && !yt.top) out.push(yt);
     shelves.forEach(function (r) { out.push(itemRow(r)); });
-    out.forEach(function (m) { m.sig = rowSig(m); });
+    out.forEach(function (m) { m.sig = rowSig(m) + (m.ytSig || ''); });
     return out;
   }
   function itemRow(r) {
@@ -1165,6 +1175,7 @@
   /* --- a row ------------------------------------------------------------- */
 
   function rowSub(m, head) {
+    if (m.yt && window.WatchYt) { window.WatchYt.head(m, head); return; }
     if (m.kind === 'sports') {
       var espn = svcOf('espn');
       if (espn && espn.state === 'error') { head.appendChild(staleSub(espn)); return; }
@@ -1488,6 +1499,7 @@
     c.setAttribute('aria-label', joinDot([it.title, svcName(it.service), sub, stale ? 'from an earlier read' : '']) + '. ' +
       (it.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     if (it.also.length) c.setAttribute('aria-label', c.getAttribute('aria-label') + ' Also on ' + listWords(it.also.map(function (a) { return svcName(a.service); })) + '.');
+    if ((it.yt || it.ytState) && window.WatchYt) window.WatchYt.card(c, it, m);
     return c;
   }
 
@@ -1711,6 +1723,7 @@
   }
 
   function stageItem(it, m) {
+    if (it.ytState && window.WatchYt) return window.WatchYt.stageState(it, m);
     var txt = el('div', 'txt');
     var eb = el('div', 'eyebrow');
     eb.appendChild(el('span', 'rn', m.title));
@@ -1761,6 +1774,7 @@
     var epsBtn = window.LumenShows ? window.LumenShows.stageButton(it) : null;   // Episodes / Details: the show page
     if (epsBtn) acts.appendChild(epsBtn);
     acts.appendChild(opensNote(it.url, it.edge));
+    if (it.yt && window.WatchYt) window.WatchYt.stageActs(acts, it);
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -2142,6 +2156,7 @@
     send('open', msg);
   }
   function openCard(card, multi) {
+    if (!multi && window.WatchYt && window.WatchYt.openCard(card)) return;
     var LS = window.LumenSports;
     if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
     if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
@@ -2576,6 +2591,7 @@
 
   function onKey(e) {
     if (e.defaultPrevented || e.isComposing) return;
+    if (window.WatchYt && window.WatchYt.onKey(e)) return;
     var t = e.target;
     var typing = isTyping(t);
     var mod = e.ctrlKey || e.metaKey || e.altKey;
@@ -2746,6 +2762,10 @@
     $.stack.addEventListener('focusout', previewOut);
     window.addEventListener('message', onPreviewMessage);
     document.addEventListener('keydown', onKey);
+    if (window.WatchYt) {
+      window.WatchYt.attach({ send: send, openUrl: openUrl, renderLens: function () { if (S.snap) renderLens(); }, agoSpan: agoSpan, lenText: lenText,
+        artImage: artImage, icon: icon, focusLens: focusLens, previewStop: previewStop, snap: function () { return S.snap; } });
+    }
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('resize', onResize);
     document.addEventListener('pointerdown', function (e) {
