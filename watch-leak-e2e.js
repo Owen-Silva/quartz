@@ -265,8 +265,12 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
     await chrome.waitFor('WatchPlayerYT._state().fullShown', 5000).catch(() => 0);
     check(await chrome.ev('WatchPlayerYT._state().fullShown'), 'the embed has a "Full page" button');
     await sleep(600);
+    // The fixture is http, so Chromium drops an https Referer on that downgrade: what is checked here is
+    // that the layer asks for it (the webview's httpreferrer); YouTube itself is https.
     const ref = srv.referers.filter((r) => r.path === '/embed/' + VID).pop();
-    check(!!ref && ref.referer.indexOf('https://github.com/Owen-Silva/quartz') === 0, 'the embed is asked for with the app\'s Referer (YouTube refuses it without)', ref);
+    const refAttr = () => chrome.ev('(() => { const v = document.querySelector(".wp-layer webview"); return v ? v.getAttribute("httpreferrer") : null; })()');
+    const attr = await refAttr();
+    check(!!ref && attr === 'https://github.com/Owen-Silva/quartz', 'the embed loads with the app\'s Referer asked for (YouTube refuses an embed without one)', { attr, served: ref });
     await shot('embed-fullpage-button', 1536, 800);
     await chrome.ev('document.querySelector(".wp-yt-full").click(), 1');
     sl = await layerAt(FY + '/watch?v=' + VID);
@@ -284,7 +288,8 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
     sl = await layerAt(FY + '/embed/' + FAIL_VID);
     await sleep(600);
     const ref2 = srv.referers.filter((r) => r.path === '/embed/' + FAIL_VID).pop();
-    check(!!sl && !sl.state && !!ref2 && ref2.referer.indexOf('https://github.com/Owen-Silva/quartz') === 0 && (await chrome.ev('WatchPlayerYT._state().fullShown')), 'the fallback plays the embed (with the Referer) and offers "Full page"', { sl, ref2 });
+    const attr2 = await refAttr();
+    check(!!sl && !sl.state && !!ref2 && attr2 === 'https://github.com/Owen-Silva/quartz' && (await chrome.ev('WatchPlayerYT._state().fullShown')), 'the fallback plays the embed (the Referer asked for) and offers "Full page"', { url: sl && sl.url, attr2, served: !!ref2 });
     await chrome.ev('WatchPlayer.close("e2e"), 1');
     await chrome.waitFor(`!${ST}.open`, 8000).catch(() => 0);
 

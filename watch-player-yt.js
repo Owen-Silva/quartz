@@ -130,6 +130,7 @@
       s.state.hidden = true;
       s.tile.classList.remove('has-state');
       s.url = u;
+      try { s.view.setAttribute('httpreferrer', REFERER); } catch (err) { /* the load below carries it too */ }
       try { var pr = s.view.loadURL(u, { httpReferrer: REFERER }); if (pr && pr.catch) pr.catch(function () { /* did-fail-load */ }); } catch (err) { s.view.setAttribute('src', u); }
       sync(ctx, s);
     });
