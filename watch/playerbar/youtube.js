@@ -32,6 +32,8 @@
     // Inside a hidden part, these stay visible and clickable: every ad piece, its Skip button,
     // its "Why this ad" and the countdown, and YouTube's popups (age check, consent, errors).
     keep: ['[class*="ytp-ad"]', '[class*="skip"]', '.ytp-popup', '.ytp-error', '.ytp-offline-slate'],
+    // The hidden parts Lumen's bar sits over: their kept ad pieces are lifted above it during an ad.
+    lift: ['.ytp-chrome-bottom'],
     // The service's own buttons, for "open YouTube's own menu" (never needed while the API answers).
     own: { captions: '.ytp-subtitles-button', quality: '.ytp-settings-button', audio: '.ytp-settings-button', more: '.ytp-settings-button' },
     next: '.ytp-next-button',

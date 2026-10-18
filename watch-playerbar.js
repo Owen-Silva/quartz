@@ -585,11 +585,14 @@
       bar.classList.remove('in-mount');
       var gone = w < 160 || bottom - top < 90;
       bar.classList.toggle('is-gone', gone);
-      if (gone) return;
+      if (gone) { if (P.on && P.lift) { P.lift = 0; quiet(s, { c: 'lift', px: 0 }); } return; }
       bar.style.left = Math.round(ox + x) + 'px';
       bar.style.width = Math.round(w) + 'px';
       bar.style.bottom = Math.round(th - (oy + bottom)) + 'px';
     }
+    // The bar's height in the page's pixels: the page lifts its kept ad pieces above it (one command, on a change).
+    var lift = bar.classList.contains('is-gone') ? 0 : Math.round((bar.offsetHeight || 0) / (k || 1));
+    if (P.on && P.lift !== lift) { P.lift = lift; quiet(s, { c: 'lift', px: lift }); }
     bar.classList.toggle('is-compact', w < 620);
     bar.classList.toggle('is-tiny', w < 400);
     if (P.menu) placeMenu(s);
@@ -806,9 +809,21 @@
     var P = s._pb || make(s, a);
     P.view = v;
     P.fell = '';
+    // The window or the tile resizes and the play view re-centres the box without the video's own rect changing
+    // (no 'rect' message): re-place the bar's pills and an open menu from real rects. Fires only on a resize.
+    if (P.ro) P.ro.disconnect();
+    P.ro = null;
+    if (root.ResizeObserver) {
+      P.ro = new root.ResizeObserver(function () {
+        if (P.roF) return;
+        P.roF = root.requestAnimationFrame(function () { P.roF = 0; if (s._pb === P && P.on && s.view) place(s); });
+      });
+      P.ro.observe(s.tile);
+      P.ro.observe(v);
+    }
     v.addEventListener('dom-ready', function () {
       if (s.view !== v) return;
-      P.st = null; P.ready = false; P.own = '';
+      P.st = null; P.ready = false; P.own = ''; P.lift = null;
       setOn(s, false);
       inject(s);
     });
@@ -836,6 +851,8 @@
     if (!P) return;
     if (P.fs) setFs(s, false);
     clearTimeout(P.hideT); clearTimeout(P.findT); clearTimeout(P.reasonT);
+    if (P.ro) { P.ro.disconnect(); P.ro = null; }
+    if (P.roF) { try { root.cancelAnimationFrame(P.roF); } catch (e) { /* gone */ } P.roF = 0; }
     ['bar', 'menu', 'ownPill', 'reason'].forEach(function (k) { var e = P.el[k]; if (e && e.parentNode) e.parentNode.removeChild(e); });
     s._pb = null;
   }

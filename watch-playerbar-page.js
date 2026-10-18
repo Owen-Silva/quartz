@@ -37,12 +37,13 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
   var TAG = 'lumenpb:';
-  var VERSION = 3;
+  var VERSION = 4;
 
   /** The style the bridge puts in the page: hide H while on; K inside H stays visible and clickable. */
-  function css(hide, keep) {
+  function css(hide, keep, lift) {
     hide = (hide || []).filter(Boolean);
     keep = (keep || []).filter(Boolean);
+    lift = (lift || []).filter(Boolean);
     if (!hide.length) return '';
     var on = function (x) { return 'html.lumen-pb-on ' + x; };
     var out = [];
@@ -52,6 +53,14 @@
       var ks = [];
       hide.forEach(function (h) { keep.forEach(function (k) { ks.push(on(h + ' ' + k)); }); });
       out.push(ks.join(',\n') + ' { visibility: visible !important; pointer-events: auto !important; }');
+    }
+    // An ad piece kept inside a part Lumen's bar covers (YouTube's bottom bar: "Why this ad", the countdown) is
+    // lifted above Lumen's bar while it shows, so it is seen and clickable, never half under it. The outermost
+    // kept piece only (a nested one moves with it); the ad's progress line stays (Lumen's bar draws its own).
+    if (lift.length && keep.length) {
+      var ls = [];
+      lift.forEach(function (p) { keep.forEach(function (k) { ls.push('html.lumen-pb-on.lumen-pb-ad:not(.lumen-pb-idle):not(.lumen-pb-own) ' + p + ' ' + k + ':not(' + k + ' *):not([class*="progress"])'); }); });
+      out.push(ls.join(',\n') + ' { transform: translateY(calc(-1 * var(--lumen-pb-lift, 0px))) !important; }');
     }
     out.push('html.lumen-pb-on.lumen-pb-idle, html.lumen-pb-on.lumen-pb-idle * { cursor: none !important; }');
     return out.join('\n');
@@ -131,6 +140,7 @@
     function pvBar() {
       var ad = B.on && A.ad && B.video ? safe(function () { return A.ad(D, B.video); }) : null;
       R.classList.toggle('lumen-pv-bar', B.on && !(ad && ad.on));
+      R.classList.toggle('lumen-pb-ad', B.on && !!(ad && ad.on));
     }
     function soon() { if (!B.pushT) B.pushT = setTimeout(push, 40); }
     function push() { clearTimeout(B.pushT); B.pushT = 0; if (B.video) { pvBar(); post({ t: 'state', st: state(false) }); } }
@@ -286,6 +296,7 @@
         case 'on': B.want = true; setOn(true); break;
         case 'live': B.live = !!c.on; if (B.live) push(); break;
         case 'idle': R.classList.toggle('lumen-pb-idle', !!c.on && B.on); break;
+        case 'lift': R.style.setProperty('--lumen-pb-lift', Math.max(0, Math.min(400, num(c.px, 0))) + 'px'); break;
         case 'play': case 'pause': case 'toggle': {
           var go = c.c === 'play' || (c.c === 'toggle' && v.paused);
           if (go) { var pr = v.play(); if (pr && pr.catch) pr.catch(function (err) { post({ t: 'err', c: 'play', why: String((err && err.name) || err).slice(0, 80) }); }); }
@@ -336,7 +347,7 @@
     var c = {
       v: VERSION, tag: TAG, find: cfg && cfg.find || 8000, keys: (cfg && cfg.keys) || [],
       video: a.video || ['video'], adRoot: a.adRoot || '', own: a.own || {}, next: a.next || '', none: a.none || {},
-      css: css(a.hide, a.keep)
+      css: css(a.hide, a.keep, a.lift)
     };
     return '(' + bridge.toString() + ')(' + JSON.stringify(c) + ', {' + parts.join(',\n') + '})';
   }

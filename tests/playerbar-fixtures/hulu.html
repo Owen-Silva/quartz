@@ -3,6 +3,7 @@
      (.ControlsContainer) and its Settings button, which opens Hulu's own menu. __breakPause() makes the
      page refuse play/pause (the fallback check). -->
 <style>
+#web-player-app{position:absolute;inset:0}
 html,body{margin:0;height:100%;background:#000;color:#eee;font:14px/1.4 "Segoe UI",sans-serif;overflow:hidden}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
 .ControlsContainer{position:absolute;left:0;right:0;bottom:0;height:60px;display:flex;align-items:center;gap:12px;padding:0 16px;background:rgba(0,150,60,.85)}
@@ -10,8 +11,10 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 #hmenu{position:absolute;right:16px;bottom:70px;width:260px;background:#0b3a22;color:#fff;padding:14px;border-radius:6px}
 #hmenu p{margin:4px 0}
 </style></head><body>
+<div id="web-player-app" class="web-player-app">
 <video class="video-player" id="v" src="/__media/clip.mp4" autoplay muted loop playsinline></video>
 <div class="ControlsContainer" id="hbar"><span>Hulu's own bar</span><button class="SettingsButton" id="hset" onclick="document.getElementById('hmenu').hidden=!document.getElementById('hmenu').hidden">Settings</button></div>
 <div id="hmenu" hidden><p><b>Hulu settings</b></p><p>Subtitles: Off / English / Espa&ntilde;ol</p><p>Audio: English</p><p>Quality: Best available</p></div>
+</div>
 <script>window.__breakPause = function () { var v = document.getElementById('v'); v.pause = function () { throw new Error('Hulu refused'); }; v.play = function () { throw new Error('Hulu refused'); }; return 1; };</script>
 </body></html>

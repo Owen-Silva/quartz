@@ -60,6 +60,7 @@ function sendClip(req, res) {
 }
 const NOVIDEO = '<!doctype html><title>No video</title><body style="margin:0;background:#000;color:#eee;font:14px Segoe UI">' +
   '<p style="padding:20px">This page has no video yet.</p><div class="controls__footer" id="dbar" style="position:absolute;left:0;right:0;bottom:0;height:60px;background:#03c">Disney+\'s own bar</div></body>';
+const FIXPATH = { youtube: '/watch?v=pbtest', disney: '/video/pbtest', hulu: '/watch/pbtest' };
 async function startServers(mock) {
   const fronts = {};
   for (const svc of Mock.SERVICES) {
@@ -68,7 +69,9 @@ async function startServers(mock) {
       const p = u.pathname;
       if (p === '/__media/clip.mp4') return sendClip(req, res);
       if (p === '/__vtt/en.vtt' || p === '/__vtt/fr.vtt') return send(res, 'text/vtt', 'WEBVTT\n\n00:00.000 --> 59:00.000\nLumen test caption (' + (p.indexOf('fr') > 0 ? 'Fran\u00e7ais' : 'English') + ')\n');
-      const f = /^\/__pb\/(youtube|disney|hulu)$/.exec(p);
+      // Each fixture at its service's real player URL shape, so Lumen's play view goes boxed (watch-playview.js pageKind).
+      const real = svc === 'youtube' ? (p === '/watch' && u.searchParams.get('v') === 'pbtest') : (!!FIXPATH[svc] && p === FIXPATH[svc]);
+      const f = real ? [p, svc] : /^\/__pb\/(youtube|disney|hulu)$/.exec(p);
       if (f) return send(res, 'text/html; charset=utf-8', fs.readFileSync(path.join(FIX, f[1] + '.html'), 'utf8'));
       if (p === '/__pb/novideo') return send(res, 'text/html; charset=utf-8', NOVIDEO);
       const up = http.request({ host: '127.0.0.1', port: mock.ports[svc], path: req.url, method: req.method, headers: Object.assign({}, req.headers, { host: '127.0.0.1:' + mock.ports[svc] }) }, (r) => {
@@ -147,9 +150,21 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     await sleep(1500);
 
     const open = async (origin, svc, title) => {
-      await chrome.ev(`openInLumen(${JSON.stringify(origin + '/__pb/' + svc)}, { service: ${JSON.stringify(svc)}, title: ${JSON.stringify(title)} }), 1`);
-      const t = await targetWhere(q, (x) => String(x.url).indexOf(origin + '/__pb/' + svc) === 0, 15000);
+      const url = origin + FIXPATH[svc];
+      await chrome.ev(`openInLumen(${JSON.stringify(url)}, { service: ${JSON.stringify(svc)}, title: ${JSON.stringify(title)} }), 1`);
+      const t = await targetWhere(q, (x) => String(x.url).indexOf(url) === 0, 15000);
       return t ? cdpTo(t) : null;
+    };
+    // Lumen's play view boxes a service's player page (the fixtures sit at real player URL shapes), and the bar must
+    // then live in #lumen-pv-barmount at the video box's bottom edge. Not boxed is a failure, not a pass.
+    const PVQ = '(() => { const t = document.querySelector(".wp-tile.pv"); const m = document.getElementById("lumen-pv-barmount"); const b = document.querySelector(".pb"); if (!b) return null; const br = b.getBoundingClientRect(); const mr = m && m.getBoundingClientRect(); return { boxed: !!t, inMount: !!m && b.parentNode === m, mountInTile: !!t && !!m && m.parentNode === t, barBottom: Math.round(br.bottom), mountTop: mr ? Math.round(mr.top) : null, barW: Math.round(br.width), mountW: mr ? Math.round(mr.width) : null }; })()';
+    const pvMount = async (label) => {
+      await chrome.waitFor('(() => { const x = ' + PVQ + '; return x && x.boxed && x.inMount ? x : null; })()', 10000).catch(() => 0);
+      const pv = await chrome.ev(PVQ);
+      check(!!pv && pv.boxed, label + ': Lumen\'s play view is boxed at the player URL', pv);
+      check(!!pv && pv.boxed && pv.inMount && pv.mountInTile && Math.abs(pv.barBottom - pv.mountTop) <= 2 && Math.abs(pv.barW - pv.mountW) <= 2,
+        label + ': the bar is in #lumen-pv-barmount, at the video box\'s bottom edge and as wide as the box', pv);
+      return pv;
     };
     const vid = (g, expr) => g.ev(`(() => { const v = document.querySelector('video'); return ${expr}; })()`);
     const at = (sel) => chrome.ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || !e.offsetParent) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2, r.width, r.height]; })()`);
@@ -162,6 +177,9 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
         await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${w}, height: ${h}, wait: 1200 })`);
         if (prep) await prep();
         await sleep(500);
+        // An open menu follows its button when the window resizes (the box re-centres; the video's rect doesn't change).
+        const mp = await chrome.ev('(() => { const m = document.querySelector(".pb-menu:not([hidden])"); const a = document.querySelector(".pb [aria-expanded=\\"true\\"]"); if (!m || !a || !m.offsetParent) return null; const mr = m.getBoundingClientRect(), ar = a.getBoundingClientRect(); return { dRight: Math.round(mr.right - ar.right), above: Math.round(ar.top - mr.bottom) }; })()');
+        if (mp) check(Math.abs(mp.dRight) <= 40 && mp.above >= 0 && mp.above <= 80, name + ' ' + w + 'x' + h + ': the open menu sits just above its button', mp);
         const cap = await chrome.ev('window.api.watchPlayer.testCapture({ wait: 0 })');
         const file = path.join(SHOTS, 'playerbar-' + name + '-' + w + 'x' + h + '.png');
         if (cap && cap.ok && cap.png) fs.writeFileSync(file, Buffer.from(cap.png, 'base64'));
@@ -186,9 +204,8 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(await g.ev('getComputedStyle(document.getElementById("ytbar")).pointerEvents === "none"'), 'and it takes no clicks');
     // Lumen's play view (merged): the bar sits in its mount at the video box's bottom edge, and the view's own
     // YouTube-bar hook (html.lumen-pv-bar) is set while Lumen's bar is on.
-    const pv = await chrome.ev('(() => { const m = document.getElementById("lumen-pv-barmount"); const b = document.querySelector(".pb"); if (!b) return null; const br = b.getBoundingClientRect(); const mr = m && m.getBoundingClientRect(); return { inMount: !!m && b.parentNode === m, barBottom: Math.round(br.bottom), mountTop: mr ? Math.round(mr.top) : null, boxed: !!document.querySelector(".wp-tile.pv") }; })()');
-    check(pv && (!pv.boxed || (pv.inMount && Math.abs(pv.barBottom - pv.mountTop) <= 2)), 'in Lumen\'s play view the bar is in #lumen-pv-barmount, at the video box\'s bottom edge', pv);
-    check(!pv || !pv.boxed || (await g.ev('document.documentElement.classList.contains("lumen-pv-bar")')), 'the play view\'s hook class lumen-pv-bar is on the page while Lumen\'s bar is');
+    await pvMount('YouTube');
+    check(await g.ev('document.documentElement.classList.contains("lumen-pv-bar")'), 'the play view\'s hook class lumen-pv-bar is on the page while Lumen\'s bar is');
     const dur = await vid(g, 'v.duration');
     // play / pause
     const p0 = await vid(g, 'v.paused');
@@ -232,6 +249,8 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     st = await chrome.ev(S);
     const ql = st.menu && st.menu.model ? st.menu.model.items.map((i) => i.label) : [];
     check(st.menu && st.menu.kind === 'quality' && ql.join(',').indexOf('1080p,720p,480p,360p,Auto') === 0, 'the quality menu lists the player\'s own levels', ql);
+    const lab = await chrome.ev('(() => [...document.querySelectorAll(".pb-menu:not([hidden]) .pb-item")].map((b) => { const l = b.querySelector(".pb-item-label"); const br = b.getBoundingClientRect(), lr = l.getBoundingClientRect(); const c = b.querySelector(".pb-item-check"); const cr = c ? c.getBoundingClientRect() : br; return { jc: getComputedStyle(b).justifyContent, ta: getComputedStyle(l).textAlign, gap: Math.round(lr.left - (c ? cr.right : br.left)) }; }))()');
+    check(Array.isArray(lab) && lab.length > 0 && lab.every((x) => x.jc === 'flex-start' && x.ta === 'left' && x.gap >= 0 && x.gap <= 12), 'menu labels are left-aligned, right after the check column (not centred)', lab);
     await shoot('youtube-quality-menu');
     await press('.pb-quality');
     if (!(await chrome.ev('!document.querySelector(".pb-menu").hidden'))) await press('.pb-quality');
@@ -349,6 +368,12 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(await g.ev('getComputedStyle(document.getElementById("whyad")).visibility === "visible" && getComputedStyle(document.getElementById("whyad")).pointerEvents !== "none"'), '"Why this ad" inside YouTube\'s hidden bar stays visible and clickable');
     check(await g.ev('!document.documentElement.classList.contains("lumen-pv-bar") && document.documentElement.classList.contains("lumen-pb-on")'), 'during the ad the play view\'s display:none hook is off (ad pieces inside YouTube\'s bar stay), Lumen\'s bar stays on');
     await wake();
+    // "Why this ad" sits inside YouTube's bar, under where Lumen's bar is: lifted above it while Lumen's bar shows,
+    // so nothing of Lumen's is over it (never half under a translucent bar).
+    await sleep(300);
+    const wy = await g.ev('(() => { const r = document.getElementById("whyad").getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, h: r.height, iw: innerWidth, lift: getComputedStyle(document.documentElement).getPropertyValue("--lumen-pb-lift") }; })()');
+    const wyHost = await chrome.ev(`(() => { const w = ${JSON.stringify(wy)}; const vr = document.querySelector(".wp-layer webview").getBoundingClientRect(); const k = vr.width / w.iw; const x = vr.left + (w.l + w.w / 2) * k, y = vr.top + (w.t + w.h / 2) * k, bottom = vr.top + (w.t + w.h) * k; const pb = document.querySelector(".pb").getBoundingClientRect(); const e = document.elementFromPoint(x, y); return { bottom: Math.round(bottom), barTop: Math.round(pb.top), at: e ? e.tagName : null }; })()`);
+    check(wyHost.bottom <= wyHost.barTop + 2 && wyHost.at === 'WEBVIEW', '"Why this ad" is lifted above Lumen\'s bar during the ad, and nothing of Lumen\'s covers it', Object.assign({ lift: wy.lift }, wyHost));
     await shoot('youtube-ad', wake);
     // The Skip button: where it is on screen, nothing of Lumen's is over it, and a real click lands.
     await wake();
@@ -381,6 +406,7 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     await d.waitFor('(() => { const v = document.querySelector("video"); return !!v && v.readyState >= 2; })()', 20000);
     await chrome.waitFor(S + ' && ' + S + '.svc === "disney" && ' + S + '.on', 15000).catch(() => 0);
     check((await chrome.ev(S)).on && (await d.ev('getComputedStyle(document.getElementById("dbar")).visibility === "hidden"')), 'Disney+: Lumen\'s bar on, Disney+\'s own bar hidden');
+    await pvMount('Disney+');
     check(await d.ev('getComputedStyle(document.getElementById("drating")).visibility === "visible"'), 'Disney+\'s age-rating card inside its bar stays visible');
     await press('.pb-play');
     if (!(await vid(d, 'v.paused'))) await press('.pb-play');
@@ -407,6 +433,7 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     await hu.waitFor('(() => { const v = document.querySelector("video"); return !!v && v.readyState >= 2; })()', 20000);
     await chrome.waitFor(S + ' && ' + S + '.svc === "hulu" && ' + S + '.on', 15000).catch(() => 0);
     check((await chrome.ev(S)).on && (await hu.ev('getComputedStyle(document.getElementById("hbar")).visibility === "hidden"')), 'Hulu: Lumen\'s bar on, Hulu\'s own bar hidden');
+    await pvMount('Hulu');
     await press('.pb-play');
     if (!(await vid(hu, 'v.paused'))) await press('.pb-play');
     await press('.pb-cc');

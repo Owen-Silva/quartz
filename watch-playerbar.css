@@ -119,7 +119,9 @@
 .pb-item {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 10px 7px 6px; border: 0; border-radius: 8px;
   background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; line-height: 1.4;
+  justify-content: flex-start;
 }
+.pb-item-label { flex: 1 1 auto; min-width: 0; text-align: left; }
 .pb-item:hover { background: rgba(255, 255, 255, 0.08); }
 .pb-item:focus-visible { outline: 2px solid var(--pb-accent, #7ea6e0); outline-offset: -2px; }
 .pb-item.is-on { color: #fff; font-weight: 600; }
