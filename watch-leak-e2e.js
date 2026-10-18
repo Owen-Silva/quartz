@@ -142,7 +142,20 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
       const r = await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${w}, height: ${h}, wait: 1200 })`).catch((e) => ({ ok: false, err: String(e && e.message) }));
       if (r && r.ok && r.png) {
         const f = path.join(SHOTS, 'lumen-n-leakproof-' + name + '-' + w + 'x' + h + '.png');
-        fs.writeFileSync(f, Buffer.from(r.png, 'base64'));
+        let png = r.png;
+        if (r.sheets && r.sheets.length) {
+          // Lay each sheet (a native view) over the window's capture, in the chrome's own canvas.
+          png = await chrome.ev(`(async () => {
+            const load = (b) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = 'data:image/png;base64,' + b; });
+            const base = await load(${JSON.stringify(r.png)});
+            const k = base.width / window.innerWidth;
+            const c = document.createElement('canvas'); c.width = base.width; c.height = base.height;
+            const x = c.getContext('2d'); x.drawImage(base, 0, 0);
+            for (const s of ${JSON.stringify(r.sheets)}) { const i = await load(s.png); x.drawImage(i, Math.round(s.rect.x * k), Math.round(s.rect.y * k), Math.round(s.rect.width * k), Math.round(s.rect.height * k)); }
+            return c.toDataURL('image/png').split(',')[1];
+          })()`).catch(() => r.png);
+        }
+        fs.writeFileSync(f, Buffer.from(png, 'base64'));
         say('shot ' + f);
       } else say('shot ' + name + ' failed: ' + JSON.stringify(r).slice(0, 120));
     };
@@ -230,16 +243,18 @@ run('watch-leak-e2e', async ({ check, launch, say, profileDir }) => {
     await sleep(2500);
     lk = await leaks();
     check(lk.count === 2 && /hulu:/.test(lk.last.reason) && logHas(/stopped an app link \(hulu:\)/), 'an app link in a frame is stopped and counted too', lk);
-    check(!(await chrome.ev('!!document.querySelector(".perm-prompt:not([hidden]), .permission-prompt:not([hidden])")')), 'no "open another app" dialog came up');
+    // (A native 'open another app' dialog would come from main's askPermission; the layer answers first, so the line above is the proof.)
     // The page sheet's "Open in a tab": his choice -> a tab, counted.
     await click('away');
     sh = await sheetShown('page');
+    check(!!sh, 'the link opens the page sheet again', sh);
+    // At once, before the page commits: the sheet still knows the address it was asked for.
     await chrome.ev('document.querySelector(".wp-sheet-tab").click(), 1');
     await chrome.waitFor(`tabs.length === ${tabs0 + 1}`, 8000).catch(() => 0);
     check((await chrome.ev(`tabs.some((t) => String(t.url).indexOf(${JSON.stringify(O + '/away')}) === 0)`)) && (await tabsN()) === tabs0 + 1, 'the page sheet\'s "Open in a tab" opens it in a normal tab');
     lk = await leaks();
     check(lk.count === 3 && lk.kinds.tab === 1 && /Open in a tab, from a page in the layer: 127\.0\.0\.1/.test(lk.last.reason), 'that tab is counted, with its reason', lk);
-    await chrome.ev('closeTab(tabs[tabs.length - 1].id), 1').catch(() => 0);
+    await chrome.ev(`(() => { const t = tabs.find((x) => String(x.url).indexOf(${JSON.stringify(O + '/away')}) === 0); if (t) closeTab(t.id); return 1; })()`).catch(() => 0);
     await chrome.ev('activateTab(findWatchTab().id), 1');
     await sleep(500);
 

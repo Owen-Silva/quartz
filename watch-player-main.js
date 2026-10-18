@@ -349,6 +349,7 @@ function create(deps) {
     for (const sid of p.sheets) {
       const had = sheets.get(sid);
       if (had && had.kind === 'page' && !had.contents.isDestroyed()) {
+        had.url = url;
         try { had.contents.loadURL(url).catch(() => { /* a stop or a redirect */ }); } catch { /* gone */ }
         log(Hosts.HUB_NAME + ' player: a page from another site opened in the layer (' + why + '): ' + hostOf(url));
         send('watch-player:sheet', { id: sid, opener: p.wcId, url, host: hostOf(url), kind: 'page', fresh: true });
@@ -375,7 +376,8 @@ function create(deps) {
   function wireSheet(p, id, view, url, kind) {
     const w = getWindow();
     const wc = view.webContents;
-    const s = { id, view, contents: wc, opener: p.wcId, rect: null, kind };
+    // url: what the sheet shows (the address asked for until the page commits one).
+    const s = { id, view, contents: wc, opener: p.wcId, rect: null, kind, url: String(url || '') };
     sheets.set(id, s);
     p.sheets.add(id);
     try { view.setBackgroundColor('#ffffff'); } catch { /* older build */ }
@@ -395,7 +397,7 @@ function create(deps) {
       if (input.type === 'keyDown' && input.key === 'Escape') { event.preventDefault(); closeSheet(id, 'Esc'); }
     });
     wc.on('page-title-updated', (_e, title) => send('watch-player:sheet', { id, opener: p.wcId, title: cleanTitle(title), host: hostOf(safeUrl(wc)), kind }));
-    wc.on('did-navigate', (_e, to) => send('watch-player:sheet', { id, opener: p.wcId, host: hostOf(to), kind }));
+    wc.on('did-navigate', (_e, to) => { if (isWeb(to)) s.url = to; send('watch-player:sheet', { id, opener: p.wcId, host: hostOf(to), kind }); });
     wc.on('did-fail-load', (_e, code, desc, failed, isMain) => {
       if (isMain && code !== -3) send('watch-player:sheet', { id, opener: p.wcId, host: hostOf(failed), kind, error: cleanTitle(desc || ('error ' + code)) });
     });
@@ -414,7 +416,8 @@ function create(deps) {
   function sheetToTab(id) {
     const s = sheets.get(id);
     if (!s) return { ok: false, reason: 'that page is gone' };
-    const url = safeUrl(s.contents);
+    const now = safeUrl(s.contents);
+    const url = isWeb(now) ? now : s.url;
     if (!isWeb(url)) return { ok: false, reason: 'the page has no address yet' };
     exitLine('Open in a tab, from a ' + (s.kind === 'page' ? 'page' : 'sign-in') + ' in the layer', url);
     send('open-url', { url, background: false });
@@ -534,7 +537,14 @@ function create(deps) {
           await new Promise((res) => setTimeout(res, Math.min(3000, Math.max(200, Number(p.wait) || 900))));
         }
         const img = await w.capturePage();
-        return { ok: true, png: img.toPNG().toString('base64') };
+        // The window's capture is its own webContents only: each shown sheet comes separately, with
+        // its place (DIP), for the e2e to lay over it.
+        const shownSheets = [];
+        for (const sh of sheets.values()) {
+          if (!sh.rect || sh.contents.isDestroyed()) continue;
+          try { shownSheets.push({ rect: sh.rect, png: (await sh.contents.capturePage()).toPNG().toString('base64') }); } catch { /* not painted */ }
+        }
+        return { ok: true, png: img.toPNG().toString('base64'), sheets: shownSheets };
       });
     }
   }
