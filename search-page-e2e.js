@@ -1,8 +1,12 @@
 try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
 // search-page-e2e.js — the redesigned results page and its Claude answer panel, end to end, on a REAL
 // Quartz test instance against a MOCK Brave API. Never the real Brave or Claude APIs, never the user's
-// profile or keys: the Brave key is a fixture written into a temp test profile, and Claude's side is
-// played by this file calling window.__applyAnswer over CDP with fixture events.
+// profile or keys: the Brave key is a fixture written into a temp test profile. Claude's side runs
+// two ways: (1) the REAL claudeanswer.js in main, against the MOCK Anthropic API
+// (tests/anthropic-mock.js via QUARTZ_CLAUDE_API, honoured for test profiles only) with a fixture
+// key: the no-key state first, then a full answer, Deeper, a follow-up, Stop, and real fail states;
+// (2) this file calling window.__applyAnswer over CDP with fixture events, while the page's request
+// lines are muted (Page.addScriptToEvaluateOnNewDocument) so main never answers them.
 //
 //   node search-page-e2e.js [--app <dir>] [--cdp 9255] [--profile search-redesign] [--shots <dir>]
 //                           [--prefix search-after] [--before] [--cert <dir with cert.pem/key.pem>]
@@ -40,6 +44,10 @@ const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.ex
 const WS = require(path.join(APP, 'node_modules', 'ws'));
 const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require(path.join(APP, 'testwatch'));
 const F = require('./tests/brave-fixtures');
+const M = require('./tests/anthropic-mock');
+const CLAUDE_KEY = M.GOOD_KEY_PREFIX + '-search-page-e2e-0000';
+// Drops only the page's answer REQUEST lines before main can hear them (stop lines still go out).
+const MUTE = "(() => { const o = console.log; console.log = function () { const t = arguments[0]; if (typeof t === 'string' && t.indexOf('quartz-search:answer {') === 0) return; return o.apply(console, arguments); }; })();";
 const GOOD = 'good-key-e2e-5e4d';
 const Q = 'claude ai';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -154,7 +162,7 @@ const FAILS = [
 ];
 
 (async () => {
-  let child = null, watcher = null, chrome = null, page = null, imgSrv = null;
+  let child = null, watcher = null, chrome = null, page = null, imgSrv = null, mock = null;
   try {
     const free = freeRamGb();
     if (!(free >= MIN_FREE_GB)) { console.log('search-page-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
@@ -171,7 +179,8 @@ const FAILS = [
     fs.writeFileSync(path.join(PROFILE_DIR, 'brave-search.json'), JSON.stringify({ key: GOOD }));   // a fixture key in a temp profile
     watcher = startWatcher((l) => console.log('[e2e] ' + l));
     await watcher.ready;
-    const env = Object.assign({}, process.env, { QUARTZ_BRAVE_API: 'http://127.0.0.1:' + apiPort + '/res/v1' });
+    if (!BEFORE) mock = await M.start();
+    const env = Object.assign({}, process.env, { QUARTZ_BRAVE_API: 'http://127.0.0.1:' + apiPort + '/res/v1' }, mock ? { QUARTZ_CLAUDE_API: mock.base } : {});
     const args = ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS];
     if (imgSrv) args.push('--ignore-certificate-errors');
     child = spawn(ELECTRON, args, { cwd: APP, stdio: 'ignore', env });
@@ -221,6 +230,35 @@ const FAILS = [
       return;
     }
 
+    // ---- REAL main, no key yet: the off state, and Open Settings lands on the key field --------
+    const A = () => page.ev('window.__answerState()');
+    const apply = (o) => page.ev('window.__applyAnswer(' + JSON.stringify(o) + ')');
+    const settingsShot = async (name) => {
+      await chrome.ev("(() => { const k = document.querySelector('#set-claude-key'); const f = k && (k.closest('.set-field') || k.parentElement); (f || k).scrollIntoView({ block: 'start' }); return 1; })()");
+      await sleep(400);
+      const m = await chrome.send('Page.captureScreenshot', { format: 'png' });
+      const file = path.join(SHOTS, PREFIX + '-' + name + '.png');
+      if (m.result && m.result.data) fs.writeFileSync(file, Buffer.from(m.result.data, 'base64'));
+      return m.result && m.result.data ? file : 'NO DATA';
+    };
+    let a = await page.waitFor("(() => { const x = window.__answerState(); return x.view === 'off' ? x : null; })()", 8000).catch(() => null);
+    check(!!a && a.offText.includes('Add a Claude API key in Settings for answers') && a.controls.settings && mock.requests.length === 0,
+      'REAL main, no key: the panel says to add a key, with Open Settings; nothing was sent to Anthropic', a ? a.offText + ' / ' + mock.requests.length + ' requests' : 'no off reply');
+    for (const mode of ['dark', 'light']) { await theme(mode); console.log('[e2e] shot ' + await shot('1536x800-' + mode + '-nokey', 1536, 800)); }
+    await theme('dark');
+    await page.send('Emulation.clearDeviceMetricsOverride');
+    await page.ev("document.querySelector('.qa-act-settings').click(), 1");
+    const reach = await chrome.waitFor("(() => { if (!Settings.isOpen()) return null; const k = document.querySelector('#set-claude-key'); if (!k) return null; k.scrollIntoView({ block: 'center' }); const r = k.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight ? { w: Math.round(r.width), top: Math.round(r.top) } : null; })()", 8000).catch(() => null);
+    check(!!reach, 'REAL: Open Settings opens Settings with the Claude key field on screen', JSON.stringify(reach));
+    console.log('[e2e] shot ' + await settingsShot('settings-nokey-dark'));
+    await chrome.ev('Settings.close && Settings.close(), 1').catch(() => 0);
+    // Mute the page's answer requests for the CDP-driven states, then load it again.
+    await page.send('Page.enable');
+    const muteId = ((await page.send('Page.addScriptToEvaluateOnNewDocument', { source: MUTE })).result || {}).identifier;
+    await page.ev('window.__old = 1, location.reload(), 1').catch(() => 0);
+    await page.waitFor("!window.__old && !!window.__answerState && window.__answerState().view === 'pending'", 12000);
+    s = await settle("s.phase === 'ok'");
+
     // ---- the rich layout ------------------------------------------------------------------
     check(s.results === 10 && s.sitelinks === 5, 'rich query: 10 results, 5 sitelinks (the javascript: one dropped)', JSON.stringify(s).slice(0, 200));
     check(JSON.stringify(s.modules) === '["news","faq","videos","discussions"]' && JSON.stringify(s.side) === '["infobox"]', 'Brave\'s modules where mixed puts them; infobox in the side', s.modules + ' | ' + s.side);
@@ -245,9 +283,7 @@ const FAILS = [
     await page.send('Emulation.clearDeviceMetricsOverride');
 
     // ---- the answer: the auto line, skeleton, streaming --------------------------------------
-    const A = () => page.ev('window.__answerState()');
-    const apply = (o) => page.ev('window.__applyAnswer(' + JSON.stringify(o) + ')');
-    let a = await A();
+    a = await A();
     const first = JSON.parse((a.sent[0] || '').replace('quartz-search:answer ', '') || '{}');
     check(first.q === Q && first.mode === 'auto' && first.seq === 1 && Array.isArray(first.history) && first.history.length === 0, 'a web search sends quartz-search:answer mode "auto"', a.sent[0]);
     check(a.view === 'pending' && a.skeleton === 1 && a.controls.stop && /Thinking/.test(a.status), 'pending: skeleton, Stop, "Thinking"', JSON.stringify(a).slice(0, 220));
@@ -454,6 +490,100 @@ const FAILS = [
     s = await settle("s.kind === 'news' && s.phase === 'ok'");
     a = await A();
     check(s.results === 6 && a.hidden === true && a.view === 'idle', 'News tab: no answer panel, news results', s.results + ' / ' + a.view);
+
+    // ---- REAL main with a key: claudeanswer.js against the mock Anthropic API, end to end ---------
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: muteId });
+    const saved = JSON.parse(await chrome.ev('(async () => JSON.stringify(await window.api.claudeAnswer.setKey(' + JSON.stringify(CLAUDE_KEY) + ')))()'));
+    check(saved && saved.hasKey === true && JSON.stringify(saved).indexOf(CLAUDE_KEY) < 0, 'REAL: a fixture key saved through the bridge (only its mask comes back)', saved && saved.keyMask);
+    const posts = () => mock.requests.filter((r) => r.method === 'POST' && r.path.indexOf('/v1/messages') === 0);
+    const waitView = (views, ms) => page.waitFor(`(() => { const x = window.__answerState(); return ${JSON.stringify(views)}.includes(x.view) ? x : null; })()`, ms || 12000);
+    const boxSearch = async (text) => {
+      await page.ev(`(() => { const q = document.getElementById('sr-q'); q.focus(); q.value = ${JSON.stringify(text)}; q.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
+      return settle(`s.phase === 'ok' && s.query === ${JSON.stringify(text)}`);
+    };
+    // The All tab: a web search of 'quartz crystal', answered for real (the mock's 'ok' stream).
+    let n0 = posts().length;
+    await page.ev("document.querySelector('.sr-tab[data-kind=web]').click(), 1");
+    s = await settle("s.kind === 'web' && s.phase === 'ok' && s.query === 'quartz crystal'");
+    a = await waitView(['done', 'fail', 'off']).catch((e) => ({ view: 'timeout ' + e.message }));
+    let req = posts()[n0] || { body: {} };
+    const body = req.body || {};
+    const tool = (body.tools || []).find((t) => /^web_search/.test(t.type || '')) || {};
+    const lastMsg = (body.messages || [])[(body.messages || []).length - 1] || {};
+    const resultHrefs = await page.ev("[...document.querySelectorAll('#sr-results a.sr-link, #sr-results li a')].map((x) => x.href).filter((h) => /^https?:/.test(h))");
+    const leaked = resultHrefs.filter((h) => JSON.stringify(body).indexOf(h) >= 0);
+    check(posts().length === n0 + 1 && req.key === CLAUDE_KEY && body.model === 'claude-haiku-5-5' && body.stream === true && body.max_tokens === 4096 && tool.max_uses === 2 && (body.output_config || {}).effort === 'high' && lastMsg.content === 'quartz crystal' && leaked.length === 0,
+      'REAL auto answer: ONE POST /v1/messages, Haiku 5.5 at high effort, streamed, 4096 tokens, 2 web searches, the query only (no Brave result sent)', JSON.stringify({ n: posts().length - n0, model: body.model, max: body.max_tokens, uses: tool.max_uses, effort: body.output_config || body.effort || null, leaked }).slice(0, 260));
+    const realLinks = await page.ev("[...document.querySelectorAll('#qa a.qa-cite')].map((x) => x.getAttribute('href'))");
+    check(a.view === 'done' && a.modelLabel === 'Haiku 5.5' && /^Quartz is a hard mineral made of silica/.test(a.bodyText) && !/search for that/.test(a.bodyText) && /steady frequency/.test(a.bodyText),
+      'REAL done: Claude\'s streamed text (the "I\'ll search" lead-in dropped), "Haiku 5.5"', a.view + ' / ' + a.modelLabel + ' / ' + String(a.bodyText).slice(0, 120));
+    check(realLinks.includes(M.URL_A) && realLinks.includes(M.URL_B) && a.sources === 2, 'REAL done: citation chips link to the web-search sources', realLinks.join(' ; ') + ' / sources ' + a.sources);
+    const realCost = await page.ev("(document.querySelector('.qa-cost') || {}).textContent || ''");
+    check(/^\$0\.0\d+ · 5,200 in · 120 out · 1 web search/.test(realCost), 'REAL done: the cost from Anthropic\'s usage', realCost);
+    const lbl = await page.ev("({ label: (document.querySelector('.qa-label') || {}).textContent || '', chip: (document.querySelector('.qa-model') || {}).textContent || '' })");
+    check(/Answer by Claude/.test(lbl.label), 'REAL done: labelled "Answer by Claude"', JSON.stringify(lbl));
+    for (const mode of ['dark', 'light']) { await theme(mode); console.log('[e2e] shot ' + await shot('1536x800-' + mode + '-real-done', 1536, 800)); }
+    await theme('dark');
+    await page.send('Emulation.clearDeviceMetricsOverride');
+    // Deeper answer: the same model, more room and more searches.
+    n0 = posts().length;
+    await page.ev("document.querySelector('.qa-deeper').click(), 1");
+    a = await waitView(['done', 'fail']).catch(() => ({}));
+    req = posts()[n0] || { body: {} };
+    const dtool = ((req.body || {}).tools || []).find((t) => /^web_search/.test(t.type || '')) || {};
+    check(a.view === 'done' && req.body.model === 'claude-haiku-5-5' && req.body.max_tokens === 8192 && dtool.max_uses === 4, 'REAL Deeper answer: still Haiku 5.5, 8192 tokens, 4 searches', JSON.stringify({ v: a.view, model: req.body.model, max: req.body.max_tokens, uses: dtool.max_uses }));
+    // A follow-up carries the conversation.
+    n0 = posts().length;
+    const turns0 = (await A()).turns;
+    await page.ev(`(() => { const i = document.querySelector('.qa-input'); i.focus(); i.value = 'Is it hard?'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
+    a = await page.waitFor("(() => { const x = window.__answerState(); return x.turns > " + turns0 + " && (x.view === 'done' || x.view === 'fail') ? x : null; })()", 12000).catch(() => ({}));
+    req = posts()[n0] || { body: {} };
+    const msgs = (req.body || {}).messages || [];
+    check(a.view === 'done' && msgs.length >= 3 && msgs[0].role === 'user' && msgs[msgs.length - 1].content === 'Is it hard?' && msgs.some((m) => m.role === 'assistant'), 'REAL follow-up: the history goes with it, answered under the first', JSON.stringify({ v: a.view, turns: a.turns, roles: msgs.map((m) => m.role) }));
+    // Streaming, then Stop: main aborts the request.
+    n0 = posts().length;
+    await boxSearch('mock:slow quartz');
+    a = await page.waitFor("(() => { const x = window.__answerState(); return x.view === 'streaming' && x.text.length > 40 ? x : null; })()", 10000).catch(() => ({}));
+    check(a.view === 'streaming' && /^A slow answer/.test(a.text) && a.controls.stop, 'REAL streaming: text arrives while the stream is open, with Stop', a.view + ' / ' + String(a.text || '').slice(0, 60));
+    for (const mode of ['dark', 'light']) { await theme(mode); console.log('[e2e] shot ' + await shot('1536x800-' + mode + '-real-streaming', 1536, 800)); }
+    await theme('dark');
+    await page.send('Emulation.clearDeviceMetricsOverride');
+    await page.ev("document.querySelector('.qa-stop').click(), 1");
+    a = await waitView(['stopped', 'fail'], 6000).catch(() => ({}));
+    await sleep(300);
+    const sreq = posts()[n0] || {};
+    check(a.view === 'stopped' && /^A slow answer/.test(a.text) && sreq.aborted === true, 'REAL Stop: main aborts the request; what arrived stays', a.view + ' / aborted ' + sreq.aborted);
+    // Real fail states, as Anthropic answers them.
+    const realFails = [
+      ['mock:429 quartz', 'rate-limited', true, false],
+      ['mock:credit quartz', 'no-credit', false, false],
+      ['mock:wrong-model quartz', 'bad-answer', true, false],
+      ['mock:stream-overloaded quartz', 'overloaded', true, false],
+    ];
+    for (const [q, state, retry, settingsBtn] of realFails) {
+      await boxSearch(q);
+      a = await waitView(['fail', 'done', 'off']).catch(() => ({}));
+      const f = a.fail || {};
+      const extra = state === 'bad-answer' ? (a.text === '' && !/other model/.test(a.bodyText || '')) : true;
+      check(a.view === 'fail' && f.state === state && !!f.title && !!f.detail && a.controls.retry === retry && a.controls.settings === settingsBtn && extra,
+        'REAL fail ' + state + ': ' + f.title + (state === 'bad-answer' ? ' (streamed text wiped)' : ''), JSON.stringify({ v: a.view, f, c: a.controls, t: String(a.text || '').slice(0, 40) }).slice(0, 260));
+      if (state === 'rate-limited') {
+        for (const mode of ['dark', 'light']) { await theme(mode); console.log('[e2e] shot ' + await shot('1536x800-' + mode + '-real-fail', 1536, 800)); }
+        await theme('dark');
+        await page.send('Emulation.clearDeviceMetricsOverride');
+      }
+    }
+    // Settings with a key: one model line, cap, monthly estimate, mode, Check key, Remove.
+    await chrome.ev("Settings.open('Search'), 1");
+    await chrome.waitFor('Settings.isOpen() && !!document.querySelector("#set-claude-key")', 8000);
+    await sleep(300);
+    const sv = await chrome.ev(`(() => { const t = (s) => { const e = document.querySelector(s); return e ? e.textContent.trim() : ''; }; const vis = (s) => { const e = document.querySelector(s); return !!e && e.getBoundingClientRect().height > 0; };
+      return { model: t('.set-claude-model'), models: document.querySelectorAll('.set-claude-model').length, usage: t('.set-claude-usage'), cap: vis('.set-claude-cap'), mode: vis('#set-claude-mode') || vis('.set-claude-mode'), check: vis('.set-claude-check'), remove: vis('.set-claude-clear'), ph: (document.querySelector('#set-claude-key') || {}).placeholder || '' }; })()`);
+    check(sv.models === 1 && /Haiku 5\.5/.test(sv.model) && /This month: \$0\.\d\d estimated · \d+ answers? \(cap \$150\.00\)/.test(sv.usage) && sv.cap && sv.mode && sv.check && sv.remove && /^••••/.test(sv.ph),
+      'REAL Settings: one model line, the cap, this month\'s estimate (the answers above counted), mode, Check key, Remove', JSON.stringify(sv).slice(0, 280));
+    for (const mode of ['dark', 'light']) { await chrome.ev(`setThemeMode('${mode}'), 1`); await sleep(300); console.log('[e2e] shot ' + await settingsShot('settings-key-' + mode)); }
+    await chrome.ev("setThemeMode('dark'), 1");
+    await chrome.ev('Settings.close && Settings.close(), 1').catch(() => 0);
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));
   } finally {
@@ -466,6 +596,7 @@ const FAILS = [
     }
     try { api.close(); } catch (e) { /* closed */ }
     try { if (imgSrv) imgSrv.close(); } catch (e) { /* closed */ }
+    try { if (mock) await mock.close(); } catch (e) { /* closed */ }
     console.log(`search-page-e2e: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
   }
