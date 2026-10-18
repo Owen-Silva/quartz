@@ -294,7 +294,8 @@
       var also = el('span', 'fd-else', 'Also on ' + g.elsewhere.slice(0, 3).join(', '));
       chips.appendChild(also);
     }
-    if (g.watchLink) {
+    // TMDB's where-to-watch page, for a title that is somewhere he has no service (or nowhere of his).
+    if (g.watchLink && (!g.chips.length || (g.elsewhere && g.elsewhere.length))) {
       var w = btn('fd-chip look', 'Where to watch', function () { B.send('open', { url: g.watchLink, title: 'Where to watch ' + g.title }); },
         'Where to watch ' + g.title + ' (TMDB)');
       chips.appendChild(w);
