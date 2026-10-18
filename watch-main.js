@@ -1136,7 +1136,19 @@ function create(deps) {
     if (test.openStub) {
       try { fs.appendFileSync(test.openStub, JSON.stringify({ url: clean, edge: route.edge }) + '\n'); } catch { /* the e2e will see it missing */ }
     }
-    const inLayer = !!(player && player.inside() && !isTmdbPage(clean));
+    const inLayer = !!(player && player.inside());
+    // TMDB's where-to-watch page is no service of ours, but it is still watching: it opens in
+    // the layer as the 'tmdb' guide (watch-player-hosts.js), and a link from it to a service
+    // comes back here (the player's handoff) to be routed like any title. Logged either way.
+    if (isTmdbPage(clean)) {
+      if (inLayer && player.play({ url: rebase(clean), service: 'tmdb', title: x.title || 'Where to watch' })) {
+        log('Lumen: a TMDB where-to-watch page opened in the player layer: ' + hostOf(clean));
+        return { ok: true, how: 'layer', reason: '' };
+      }
+      log('Lumen: a TMDB where-to-watch page opened in a tab (' + (player ? 'Play inside Lumen is off' : 'no player layer') + '): ' + hostOf(clean));
+      send('open-url', { url: rebase(clean), background: false });
+      return { ok: true, how: 'tab', reason: '' };
+    }
     // A multiview tile that cannot play says why inside its tile; it never launches Edge by itself.
     if (route.edge && inLayer && x.multi) {
       player.play({ url: rebase(clean), service: Shape.serviceForUrl(clean), title: x.title, multi: true, blocked: route.why || 'Quartz can’t play protected video here' });

@@ -110,6 +110,11 @@ const TESTS = [
   // every failure mode on its own tile, the game pause, opens, search, keyboard, reduced motion, a
   // cache-first second boot and Forget. ~6 min (four Retry rounds 30 s apart, one 20 s timeout).
   { name: 'watch-e2e', file: 'watch-e2e.js', e2e: true, timeout: 900 },
+  // The Watch player layer (watch-player.js + watch-player-main.js): titles play INSIDE Watch, never a
+  // new tab. Local fixtures only (an HTML5 page per service, framing and licence refusals, a TMDB
+  // where-to-watch page and its handover), every way out logged, Esc/Back order, RAM before/during/
+  // after, the public Widevine test stream in the layer (castlabs only, needs the internet). Two launches.
+  { name: 'watch-player-e2e', file: 'watch-player-e2e.js', e2e: true, timeout: 420, needs: () => castlabsBuild() },
   // tools/overlap-audit.js (hover/focus paint over neighbours, every surface, light and dark, wide
   // and narrow) runs on its own, ~15-19 min. It comes back into this list once a full run is at 0
   // findings: on 10-16 it was at 4 (a judge flaw since fixed, a 1-row antialias edge on the shield,

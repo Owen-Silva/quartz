@@ -540,6 +540,8 @@ const watch = (() => {
 if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   watchPlayer.setAfterWatching((id) => watch.afterWatching(id));
   watchPlayer.setOnInside(() => { try { watch.drmChanged(); } catch { /* Watch gone */ } });
+  // A where-to-watch (TMDB) link to a service: routed like any title Watch opens.
+  if (typeof watch.openTitle === 'function') watchPlayer.setHandoff((url, o) => watch.openTitle(url, o));
 }
 
 const budget = budgetModule.create({ app });
@@ -904,6 +906,13 @@ function createWindow() {
     baseOptions.x = OFFSCREEN_XY;
     baseOptions.y = OFFSCREEN_XY;
     baseOptions.skipTaskbar = true;
+    // TEST ONLY (QUARTZ_TEST_NO_WINDOW_FULLSCREEN=1, watch-player-e2e.js): a <webview>'s html
+    // fullscreen is synced to its EMBEDDER (this window's webContents), whose own preference
+    // decides whether the OS window goes fullscreen -- onto a real monitor. Off here, both ways.
+    if (process.env.QUARTZ_TEST_NO_WINDOW_FULLSCREEN === '1') {
+      baseOptions.fullscreenable = false;
+      baseOptions.webPreferences = { ...baseOptions.webPreferences, disableHtmlFullscreenWindowResize: true };
+    }
   }
 
   // --no-acrylic gives a flat window; used to measure what the material costs.

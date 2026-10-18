@@ -16,6 +16,9 @@
  *       a sign-in popup (window.open with features) opens as a SHEET inside the
  *         layer (a WebContentsView over it, window.opener kept), never a window;
  *       a link to another site opens a normal Quartz tab, and says so;
+ *       on TMDB's where-to-watch page (the 'tmdb' guide), a link to one of the
+ *         services HANDS OVER to watch-main's openTitle (setHandoff): the layer,
+ *         or Edge with the reason, routed like any title;
  *       an app link (disneyplus://, intent:, ...) is stopped, and says so;
  *     every way out writes ONE quartz.log line with the reason;
  *   - multiview keys (1-4, F) from inside a tile, the mouse back button and the
@@ -53,6 +56,9 @@ function create(deps) {
   const freeGb = typeof d.freeGb === 'function' ? d.freeGb : () => os.freemem() / (1024 ** 3);
   const floorGb = Number.isFinite(test.floorGb) ? test.floorGb : FLOOR_GB;
   let afterWatching = typeof d.afterWatching === 'function' ? d.afterWatching : null;
+  // handoff(url, { title }) -> Promise<{ how, why, reason }>: watch-main's openTitle, so a
+  // where-to-watch link to a service is routed like any title (the layer, or Edge + why).
+  let handoff = typeof d.handoff === 'function' ? d.handoff : null;
   let onInside = typeof d.onInsideChanged === 'function' ? d.onInsideChanged : null;
 
   const players = new Map();   // wcId -> { wcId, contents, service, origins, fullscreen, sheets:Set }
@@ -87,7 +93,7 @@ function create(deps) {
       const tmp = f + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(prefs));
       fs.renameSync(tmp, f);
-    } catch (err) { log('Watch player: could not save "Play inside ' + Hosts.HUB_NAME + '": ' + String((err && err.message) || err).slice(0, 120)); }
+    } catch (err) { log(Hosts.HUB_NAME + ' player: could not save "Play inside ' + Hosts.HUB_NAME + '": ' + String((err && err.message) || err).slice(0, 120)); }
   }
   function inside() { return loadPrefs().inside; }
   function setInside(on) {
@@ -157,9 +163,34 @@ function create(deps) {
     return c;
   }
 
+  /*
+   * A where-to-watch guide (TMDB) linked to one of the services: that title opens as the
+   * service's own page, through watch-main's openTitle -- in the layer (the guide's player
+   * is replaced), or in Edge with the reason when this Quartz cannot play it. One log line.
+   */
+  function handOff(p, url, to) {
+    const name = (Hosts.SERVICES[to] && Hosts.SERVICES[to].name) || to;
+    if (!handoff) { toTab(p, url, 'where-to-watch link, no route to ' + name); return; }
+    Promise.resolve()
+      .then(() => handoff(url, { title: '' }))
+      .then((r) => {
+        const how = (r && r.how) || '';
+        if (how === 'layer') log(Hosts.HUB_NAME + ' player: a where-to-watch link opened ' + name + ' in the layer: ' + hostOf(url));
+        else if (how === 'edge') {
+          const why = String((r && (r.why || r.reason)) || '').slice(0, 160);
+          exitLine('where-to-watch link to ' + name + ', opened in Edge' + (why ? ': ' + why : ''), url);
+          send('watch-player:left', { wcId: p.wcId, url, host: hostOf(url), why: 'edge', to: 'edge', service: to, reason: why });
+        } else if (how === 'tab') exitLine('where-to-watch link to ' + name + ', opened in a tab', url);
+        else log(Hosts.HUB_NAME + ' player: a where-to-watch link to ' + name + ' did not open: ' + String((r && r.reason) || 'no answer').slice(0, 120));
+      })
+      .catch((err) => log(Hosts.HUB_NAME + ' player: a where-to-watch link to ' + name + ' failed: ' + String((err && err.message) || err).slice(0, 120)));
+  }
+
   function onNavigate(p, event, url, kind) {
     if (isLocal(url)) return;
     if (!isWeb(url)) { event.preventDefault(); blockApp(p, url); return; }
+    const to = Hosts.handoffFor(p.service, url);
+    if (to) { event.preventDefault(); handOff(p, url, to); return; }
     if (Hosts.staysIn(p.service, url, extraFor(p))) return;
     event.preventDefault();
     toTab(p, url, kind);
@@ -171,6 +202,8 @@ function create(deps) {
       const disp = details && details.disposition;
       const blank = url === '' || /^about:blank/i.test(url);
       if (!blank && !isWeb(url)) { blockApp(p, url); return { action: 'deny' }; }
+      const to = blank ? '' : Hosts.handoffFor(p.service, url);
+      if (to) { handOff(p, url, to); return { action: 'deny' }; }
       const stays = blank || Hosts.staysIn(p.service, url, extraFor(p));
       if (disp === 'new-window' || disp === 'other') {
         // A popup with features: sign-in (Google, MyDisney, Amazon) posts back through
@@ -380,6 +413,7 @@ function create(deps) {
     inside,
     setInside,
     setAfterWatching: (fn) => { afterWatching = typeof fn === 'function' ? fn : null; },
+    setHandoff: (fn) => { handoff = typeof fn === 'function' ? fn : null; },
     setOnInside: (fn) => { onInside = typeof fn === 'function' ? fn : null; },
     isPlayer: (wcId) => players.has(wcId),
     state: () => ({ players: players.size, sheets: sheets.size, mode, inside: inside() }),

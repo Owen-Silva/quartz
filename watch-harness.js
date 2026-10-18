@@ -225,6 +225,7 @@ function fakeWorld(opts) {
   for (const k of ['fetch', 'BrowserWindow', 'session']) if (o[k]) deps[k] = o[k];
   if (o.adapters) deps.adapters = Object.assign({}, adapters, o.adapters);
   if (o.drmRoute) deps.drmRoute = o.drmRoute;
+  if (o.player) deps.player = o.player;
   world.wm = WM.create(deps);
   world.guest = (url) => {
     const pushed = [];
@@ -968,6 +969,40 @@ async function mainTests() {
       g.say('quartz-watch:open {"url":"https://www.youtube.com/watch?v=abc"}');
       await w.settle();
       check(g.last('__applyWatchResult').how === 'tab', 'route: YouTube never asks drm-main, always a Quartz tab');
+    } finally { w.cleanup(); }
+  }
+
+  // --- TMDB's where-to-watch page: the player layer (the TMDB guide), never a silent tab
+  {
+    const Hosts = require('./watch-player-hosts');
+    check(Hosts.serviceFor('https://www.themoviedb.org/movie/1/watch') === 'tmdb' && Hosts.isGuide('tmdb') && !Hosts.isGuide('disney') && !Hosts.isGuide(''), 'hosts: TMDB is the where-to-watch guide, no service is');
+    check(Hosts.staysIn('tmdb', 'https://www.themoviedb.org/movie/1') && Hosts.staysIn('tmdb', 'https://click.justwatch.com/a?r=x') && !Hosts.staysIn('tmdb', 'https://www.justwatch.com/us') && !Hosts.staysIn('tmdb', 'http://www.themoviedb.org/movie/1'), 'hosts: the guide keeps TMDB and JustWatch\'s redirector (https), nothing else');
+    check(Hosts.handoffFor('tmdb', 'https://www.disneyplus.com/play/x') === 'disney' && Hosts.handoffFor('tmdb', 'https://www.hulu.com/watch/1') === 'hulu'
+      && Hosts.handoffFor('tmdb', 'https://www.netflix.com/title/1') === '' && Hosts.handoffFor('tmdb', 'https://www.themoviedb.org/tv/2') === ''
+      && Hosts.handoffFor('disney', 'https://www.primevideo.com/detail/X') === '' && Hosts.handoffFor('tmdb', 'disneyplus://open') === '', 'hosts: a guide link to a service hands over; other sites, other guides and service layers do not');
+    const plays = [];
+    const player = { on: true, inside() { return this.on; }, play(x) { plays.push(x); return true; } };
+    w = fakeWorld({ player, drmRoute: () => ({ edge: false, rule: '', reason: '' }), test: { rebase: [['https://www.themoviedb.org', 'http://127.0.0.1:9/tm']] } });
+    try {
+      const g = w.guest();
+      g.say('quartz-watch:hello {}');
+      await w.settle();
+      const tabs = () => w.sent.filter((x) => x[0] === 'open-url').length;
+      const t0 = tabs();
+      g.say('quartz-watch:open {"url":"https://www.themoviedb.org/movie/1/watch"}');
+      await w.settle();
+      let r = g.last('__applyWatchResult');
+      check(r && r.how === 'layer' && plays.length === 1 && plays[0].service === 'tmdb' && plays[0].url === 'http://127.0.0.1:9/tm/movie/1/watch' && tabs() === t0, 'tmdb: a where-to-watch page opens in the player layer as the TMDB guide, no tab', { r, plays });
+      check(w.logs.some((l) => /TMDB where-to-watch page opened in the player layer: themoviedb\.org/.test(l)), 'tmdb: opening it in the layer writes its log line');
+      player.on = false;
+      g.say('quartz-watch:open {"url":"https://www.themoviedb.org/movie/1/watch"}');
+      await w.settle();
+      r = g.last('__applyWatchResult');
+      check(r && r.how === 'tab' && tabs() === t0 + 1 && plays.length === 1, 'tmdb: "Play inside Lumen" off -> a tab', r);
+      check(w.logs.some((l) => /TMDB where-to-watch page opened in a tab \(Play inside Lumen is off\)/.test(l)), 'tmdb: the tab says why in the log');
+      player.on = true;
+      const h = await w.wm.openTitle('https://www.disneyplus.com/play/x', { title: '' });
+      check(h.how === 'layer' && plays.length === 2 && plays[1].service === 'disney', 'tmdb: the handover (openTitle) routes a guide link to Disney+ into the layer when Quartz can play it', { h, last: plays[1] });
     } finally { w.cleanup(); }
   }
 
