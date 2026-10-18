@@ -1149,6 +1149,13 @@ if (require.main === module) {
     const cardsOfSvc = (c, id) => c.filter((x) => x.service === id);
     const baseCount = { disney: cardsOfSvc(cards1, 'disney').length, hulu: cardsOfSvc(cards1, 'hulu').length, prime: cardsOfSvc(cards1, 'prime').length, youtube: cardsOfSvc(cards1, 'youtube').length };
     const failLine = (p, id, re) => !!p[id] && re.test(p[id].title + ' ' + p[id].aria);
+    // One tile per title across services (watch/merge.js): a title Disney+ shares with YouTube or Hulu
+    // is that service's tile while it reads, and Disney+'s once it is signed out, and fewer services
+    // leave more room under the row cap. So Disney+ keeping its rows = every Disney+ card of round 0
+    // is still a Disney+ card (it may gain some), not an exact count.
+    const disneyKept = (c) => { const now = new Set(cardsOfSvc(c, 'disney').map((x) => x.url));
+      return cardsOfSvc(c, 'disney').length >= baseCount.disney && cardsOfSvc(cards1, 'disney').every((x) => now.has(x.url)); };
+    const disneyWhat = (c) => cardsOfSvc(c, 'disney').length + ' Disney+ cards (round 0: ' + baseCount.disney + ')';
 
     const t1 = await round('round 1', { youtube: 'signed-out', hulu: 'signed-out', prime: 'robot' }, (p, c) => {
       check(failLine(p, 'hulu', /Signed out: sign in to hulu\.com in Quartz/i) && p.hulu.act === 'Sign in', 'signed-out (Hulu): its tile says sign in to hulu.com, and offers Sign in', p.hulu);
@@ -1157,7 +1164,7 @@ if (require.main === module) {
       check(cardsOfSvc(c, 'youtube').length === 0, 'signed-out (YouTube): its rows are no longer shown as his', cardsOfSvc(c, 'youtube').length);
       check(failLine(p, 'prime', /robot check/i) && p.prime.act === 'Retry' && /Couldn't read/.test(p.prime.small), 'robot check (Prime Video): its tile says "Couldn\'t read", the reason, and Retry', p.prime);
       check(cardsOfSvc(c, 'prime').length === baseCount.prime && cardsOfSvc(c, 'prime').every((x) => x.stale), 'robot check (Prime Video): its cached rows stay, marked stale', cardsOfSvc(c, 'prime').length);
-      check(cardsOfSvc(c, 'disney').length === baseCount.disney && cardsOfSvc(c, 'disney').every((x) => !x.stale) && p.disney && p.disney.cls.indexOf('st-ok') !== -1, 'while YouTube and Prime fail, Disney+ keeps its rows', cardsOfSvc(c, 'disney').length);
+      check(disneyKept(c) && cardsOfSvc(c, 'disney').every((x) => !x.stale) && p.disney && p.disney.cls.indexOf('st-ok') !== -1, 'while YouTube and Prime fail, Disney+ keeps its rows', disneyWhat(c));
     });
     await sleep(Math.max(0, t1 + FORCE_GAP_MS - Date.now()));
     const t2 = await round('round 2', { youtube: 'changed-layout', disney: 'down', hulu: 'changed-layout', prime: 'slow', espn: 'changed-layout' }, (p, c, sn) => {
@@ -1166,7 +1173,7 @@ if (require.main === module) {
       check(failLine(p, 'disney', /offline|didn.t answer|refused|connect/i) && p.disney.act === 'Retry', 'down (Disney+, connection refused): the reason and Retry', p.disney);
       check(failLine(p, 'prime', /timed out after 20 s/i) && p.prime.act === 'Retry', 'slow (Prime Video, never answers): "timed out after 20 s" and Retry', p.prime);
       check(failLine(p, 'espn', /shape|changed/i) && p.espn.act === 'Retry', 'changed layout (ESPN): the reason and Retry', p.espn);
-      check(cardsOfSvc(c, 'disney').length === baseCount.disney && cardsOfSvc(c, 'disney').every((x) => x.stale), 'down (Disney+): its cached rows stay, marked stale', cardsOfSvc(c, 'disney').length);
+      check(disneyKept(c) && cardsOfSvc(c, 'disney').every((x) => x.stale), 'down (Disney+): its cached rows stay, marked stale', disneyWhat(c));
       const sp = sn && sn.sports ? sn.sports.live.length : 0;
       check(sp > 0, 'changed layout (ESPN): the last good games stay on the strip', sp);
     });
