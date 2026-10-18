@@ -1,0 +1,103 @@
+/* watch-find.css -- Lumen's one search box: the results page (watch/find-page.js) and the
+   recent-searches list under the field. Quartz's look: neutral greys, the accent only on
+   focus and the one call to action, no glow. Nothing here animates at rest: the spinner turns
+   only while a service is being searched. */
+
+.fd { --fd-w: clamp(196px, calc((100vw - 2 * var(--gutter) - 5 * 16px) / 6), 300px); }
+.fd-h { flex-wrap: wrap; row-gap: 4px; }
+.fd-status { display: inline-flex; align-items: center; gap: 7px; }
+
+.fd-sec { margin: 22px 0 0; }
+.fd-sec:first-of-type { margin-top: 10px; }
+.fd-sh { display: flex; align-items: center; gap: 9px; min-height: 26px; margin: 0 0 10px; }
+.fd-sh h3 { margin: 0; font: 600 var(--fs-l, 15px)/1.3 var(--font-display); letter-spacing: -.005em; color: var(--text); }
+.fd-sec[data-sec="best"] .fd-sh h3 { font-size: var(--fs-xl, 18px); }
+.fd-mk.chip.mk { height: 20px; padding: 0 7px; background: var(--surface-3); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--hairline); }
+.fd-state { display: inline-flex; align-items: center; gap: 7px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
+
+/* Best match wraps; a service's row scrolls sideways. */
+.fd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--fd-w), 1fr)); gap: 18px 16px; }
+.fd-row { display: grid; grid-auto-flow: column; grid-auto-columns: var(--fd-w); gap: 16px; overflow-x: auto; overflow-y: hidden;
+  padding: 3px 3px 10px; margin: -3px -3px 0; scrollbar-width: thin; overscroll-behavior-x: contain; }
+
+.fd-tile { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.fd-hit { display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left;
+  font: inherit; cursor: pointer; outline: none; border-radius: var(--radius-m); }
+.fd-art { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radius-m); overflow: hidden;
+  background: linear-gradient(160deg, var(--noart-a), var(--noart-b)); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-1);
+  transition: box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease); }
+.fd-art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.fd-art .noart b { --ka-fs: 16px; }
+.fd-hit:hover .fd-art { filter: brightness(1.06); }
+.fd-hit:focus-visible .fd-art { box-shadow: 0 0 0 2px var(--accent), var(--shadow-1); }
+.fd-hit:active .fd-art { filter: brightness(.95); }
+/* Two lines of title, and room for descenders. */
+.fd-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 2px; }
+.fd-t b { font-weight: 600; font-size: var(--fs-s); line-height: 1.35; padding-bottom: .08em; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.fd-t span { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fd-t span.pay { color: var(--text-2); }
+
+.fd-prog { position: absolute; left: 10px; right: 10px; bottom: 9px; height: 3px; border-radius: 2px; background: rgb(255 255 255 / .28); overflow: hidden; }
+.fd-prog i { display: block; height: 100%; width: calc(var(--p) * 100%); background: var(--on-art); border-radius: 2px; }
+.fd-resume { position: absolute; left: 8px; top: 8px; height: 20px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 5px;
+  background: var(--art-chip); color: var(--on-art); font: 600 11px/1 var(--font); }
+.fd-resume.list { color: var(--on-art-2); }
+.fd-len { position: absolute; right: 8px; bottom: 8px; padding: 2px 5px; border-radius: 4px; background: var(--art-chip); color: var(--on-art);
+  font: 600 11px/1.2 var(--font); font-variant-numeric: tabular-nums; }
+
+/* A title's services: one chip each, his signed-in ones first. */
+.fd-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+.fd-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 0; border-radius: var(--radius-s);
+  font: 500 var(--fs-xs)/1 var(--font); white-space: nowrap; cursor: pointer; outline: none;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease); }
+.fd-chip b { font-weight: 650; }
+.fd-chip.inc { background: var(--ok-soft); color: var(--ok); }
+.fd-chip.inc:hover { background: color-mix(in srgb, var(--ok) 22%, transparent); }
+.fd-chip.pay { background: var(--surface-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--hairline); }
+.fd-chip.pay:hover { background: var(--surface-press); }
+.fd-chip.look { background: transparent; color: var(--text-2); padding: 0 6px; }
+.fd-chip.look:hover { background: var(--surface-3); color: var(--text); }
+.fd-chip:focus-visible { box-shadow: var(--focus-ring-inset); }
+.fd-else { align-self: center; color: var(--text-3); font-size: var(--fs-2xs, 11px); line-height: 1.4; }
+
+/* YouTube channels: a round face, the same footprint as a tile. */
+.fd-chan .fd-av { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radius-m);
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--hairline); }
+.fd-chan .fd-av > img, .fd-chan .fd-av-l { grid-area: 1 / 1; width: 46%; aspect-ratio: 1; border-radius: 50%; object-fit: cover; }
+.fd-chan .fd-av > img { position: relative; z-index: 1; }
+.fd-chan .fd-av-l { display: grid; place-items: center; background: var(--surface-press); color: var(--text-2); font: 650 26px/1 var(--font-display); }
+.fd-chan .fd-hit:focus-visible .fd-av { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Loading: still placeholders (no shimmer), and one small spinner where the words say so. */
+.fd-sk .fd-art { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--hairline); }
+.fd-sk .fd-t i { display: block; height: 10px; border-radius: 4px; background: var(--surface-3); width: 80%; margin-top: 4px; }
+.fd-sk .fd-t i + i { width: 46%; }
+.fd-spin { width: 12px; height: 12px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--hairline-strong);
+  border: 1.5px solid transparent; border-top-color: var(--text-2); box-sizing: border-box; animation: fd-turn .9s linear infinite; }
+@keyframes fd-turn { to { transform: rotate(360deg); } }
+
+.fd-note { margin-top: 0; }
+.fd-note.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, transparent); }
+.fd-note .btn { flex: none; }
+.fd-sign { color: var(--accent); }
+.fd-foot { margin-top: 22px; }
+.fd-foot .attrib { margin: 0; color: var(--text-3); font-size: var(--fs-2xs, 11px); }
+
+/* Recent searches, under the field while it is empty and focused. */
+.fd-recent { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 6px); padding: 6px; border-radius: var(--radius-m);
+  background: var(--surface-solid); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-2, var(--shadow-1)); }
+.fd-recent[hidden] { display: none; }
+.fd-rh { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px 8px; color: var(--text-3); font-size: var(--fs-2xs, 11px);
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.fd-rclear { border: 0; background: none; color: var(--text-2); font: 500 var(--fs-xs)/1.2 var(--font); padding: 4px 6px; border-radius: var(--radius-s); cursor: pointer;
+  text-transform: none; letter-spacing: 0; }
+.fd-rclear:hover { background: var(--surface-3); color: var(--text); }
+.fd-ri { display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-s); background: none; color: var(--text); text-align: left;
+  font: 400 var(--fs-s)/1.35 var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.fd-ri:hover, .fd-ri.on { background: var(--surface-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fd-spin { animation: none; border-top-color: var(--text-3); }
+  .fd-art { transition: none; }
+}

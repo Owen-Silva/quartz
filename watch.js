@@ -2135,6 +2135,7 @@
   }
 
   function exitSearch() {
+    if (window.WatchFindPage) window.WatchFindPage.close();
     S.q = '';
     S.answer = null;
     S.sentSeq = -1;
@@ -2233,6 +2234,7 @@
 
   function renderResults() {
     if (!S.q) return;
+    if (window.WatchFindPage && window.WatchFindPage.owns(S.q)) { window.WatchFindPage.render(); return; }
     var keepPos = gridFocusPos();
     var a = S.answer;
     var cols = services();
@@ -2501,6 +2503,8 @@
       if (S.q) { e.preventDefault(); $.q.focus(); return; }
       return;
     }
+    // Enter: every service's own search (watch/find-page.js); recent searches; Down into its tiles.
+    if (t === $.q && !mod && window.WatchFindPage && window.WatchFindPage.key(e, S.q)) { if (e.key === 'Enter') clearTimeout(S.searchTimer); return; }
     if (t === $.q && S.q && (e.key === 'ArrowDown' || e.key === 'Enter') && !mod) {
       var stop = $.results.querySelector('.cell[tabindex="0"]') || $.results.querySelector('.cell');
       if (stop) { e.preventDefault(); stop.focus(); }
@@ -2665,6 +2669,14 @@
       sightChanged();
     });
 
+    if (window.WatchFindPage) {
+      window.WatchFindPage.attach({
+        send: send, openUrl: openUrl, toast: toast, artImage: artImage, results: $.results, input: $.q,
+        snap: function () { return S.snap; }, services: services, isCurrent: function (q) { return S.q === q; },
+        signin: function (id) { send('signin', { service: id }); }, settings: function () { send('settings', {}); },
+        clear: function () { clearSearch(true); }
+      });
+    }
     S.ready = true;
     renderBoot();
     if (S.pending) {
