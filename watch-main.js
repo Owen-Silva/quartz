@@ -86,6 +86,11 @@ for (const id of Shape.SERVICE_IDS) {
   try { ADAPTERS[id] = require('./watch/adapters/' + id); } catch (err) { ADAPTERS[id] = null; }
 }
 
+/* YouTube past the home row (watch/ytlib.js + watch/ytlib-main.js): Subscriptions, channels, the Library. */
+let YtLib = null;
+let YtLibMain = null;
+try { YtLib = require('./watch/ytlib'); YtLibMain = require('./watch/ytlib-main'); } catch (err) { YtLib = null; YtLibMain = null; }
+
 /* TMDB "where to watch" (watch/tmdb.js): only with a key the user pastes in Settings > Watch. */
 let Tmdb = null;
 try { Tmdb = require('./watch/tmdb'); } catch (err) { Tmdb = null; }
@@ -198,6 +203,10 @@ function parseGuestLine(text) {
       return typeof msg.visible === 'boolean' ? { verb, visible: msg.visible } : null;
     case 'forget': case 'settings':
       return { verb };
+    case 'yt': {
+      const req = YtLib ? YtLib.cleanLine(msg) : null;
+      return req ? { verb, req } : null;
+    }
     case 'refresh':
       if (msg.service === null || msg.service === undefined) return { verb, service: null };
       return Shape.SERVICE_IDS.indexOf(msg.service) !== -1 ? { verb, service: msg.service } : null;
@@ -392,6 +401,15 @@ function create(deps) {
   let bgWaiting = '';             // why the last due background read did not start ('' = it did)
   let bgPausedUntil = 0;
   let bgReads = 0;
+  // Subscriptions, channels and the Library (watch/ytlib-main.js): its reads go through runStep and
+  // take turns with the services' (pump() holds its lock around each service read).
+  const ytlib = YtLibMain && d.ytlib !== false ? YtLibMain.create({
+    runStep: (step) => runStep(step), now, log, setTimeout: setTimer, clearTimeout: clearTimer,
+    file: () => fileIn('watch-ytlib.json'),
+    push: (contents, answer) => pushTo(contents, '__applyWatchYt', answer),
+    bootLeft: () => bootUntil - now(),
+    canRead: () => (!loadPrefs().enabled.youtube ? 'YouTube is off in Settings > Lumen' : blocker('youtube', true)),
+  }) : null;
 
   /* --- files --------------------------------------------------------------------- */
 
@@ -983,6 +1001,12 @@ function create(deps) {
           bgWaiting = '';
           bgReads++;
         }
+        if (ytlib) {
+          // A Subscriptions / channel read in flight ends first: one hidden reader at a time.
+          starting = id;
+          try { await ytlib.acquire(); } finally { starting = null; }
+          if (stopped || gen !== epoch || !loadPrefs().enabled[id]) { ytlib.release(); continue; }
+        }
         reading = id;
         delete watched[id];      // this read picks up whatever he watched
         readStartedAt = now();
@@ -1010,6 +1034,7 @@ function create(deps) {
         reading = null;
         readStartedAt = 0;
         readLimit = 0;
+        if (ytlib) { ytlib.release(); ytlib.afterRead(id, loadCache().services[id].state); }
         // A read that failed (or ran out of time) can be retried at once: the 30-s gap only
         // folds a double click on a read still on its way.
         if (loadCache().services[id].state === 'error') delete lastForced[id];
@@ -1021,6 +1046,7 @@ function create(deps) {
       pumping = false;
       reading = null;
       starting = null;
+      if (ytlib) ytlib.release();
       readStartedAt = 0;
       readLimit = 0;
       try { schedule(); } catch (err) { failLoud('plan its next read', err); }
@@ -1294,6 +1320,7 @@ function create(deps) {
   function dropGuest(contents) {
     const had = guests.delete(contents);
     guestVisible.delete(contents);
+    if (ytlib) { ytlib.dropGuest(contents); ytlib.sight(anyVisible()); }
     const job = searchLive.get(contents);
     if (job) { cancelSearch(job); searchLive.delete(contents); }
     if (finder) finder.cancel(contents);
@@ -1337,6 +1364,7 @@ function create(deps) {
   function hello(contents, visible) {
     guests.add(contents);
     guestVisible.set(contents, visible !== false);
+    if (ytlib) ytlib.sight(anyVisible());
     // Cache first: the page draws what it had before anything is read.
     pushTo(contents, '__applyWatch', safeSnapshot());
     try {
@@ -1350,6 +1378,7 @@ function create(deps) {
     if (!guests.has(contents)) { hello(contents, visible); return; }
     const was = guestVisible.get(contents) === true;
     guestVisible.set(contents, !!visible);
+    if (ytlib) ytlib.sight(anyVisible());
     try {
       if (visible && !was) readDue();
       else if (!visible) {
@@ -1449,6 +1478,7 @@ function create(deps) {
     epoch++;
     forgottenAt = now();
     cache = cleanCache(null);
+    if (ytlib) ytlib.forget();
     // A read in flight writes into the old cache object, so its rows are dropped; a queued
     // one is cancelled; and nothing reads again until its normal floor (or a Retry), so
     // "Forget" leaves the page empty instead of refilling it a second later.
@@ -1684,6 +1714,7 @@ function create(deps) {
           (err) => pushTo(contents, '__applyWatchPreview', { seq: req.seq, state: 'error', reason: 'No preview: ' + String((err && err.message) || err).slice(0, 120), videoId: '' }));
         break;
       case 'forget': pushTo(contents, '__applyWatchResult', Object.assign({ action: 'forget' }, forget())); break;
+      case 'yt': if (ytlib) ytlib.line(contents, req.req); break;
       case 'settings': break;   // app.js opens Settings > Watch; nothing for main to do
       default: return false;
     }
@@ -1807,6 +1838,7 @@ function create(deps) {
     queue.length = 0;
     forcedQueued.clear();
     bgQueued.clear();
+    if (ytlib) ytlib.stop();
     for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
     for (const job of searchLive.values()) cancelSearch(job);
     searchLive.clear();
