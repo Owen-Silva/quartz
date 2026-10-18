@@ -226,7 +226,9 @@ body.is-compact .top::before, body.searching .top::before { opacity: 1; transiti
 .sp.st-error > button:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
 .sp.st-signed-out small { color: var(--text-2); }
 .sp.st-paused small { color: var(--warn); font-weight: 600; }
-.sp.st-off { background: transparent; color: var(--text-3); }
+/* An off service reads as off by its grey dot (.dot.off) and its title; its name keeps the pills'
+   --text-2 so it stays 4.5:1 on the bar's scrim over bright hero art (--text-3 was 2.7:1 there). */
+.sp.st-off { background: transparent; color: var(--text-2); }
 .sp.st-off .sp-name { font-weight: 500; }
 .sp.st-busy small { color: var(--text-2); }
 .sp.add { background: transparent; color: var(--text-3); }

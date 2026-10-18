@@ -369,18 +369,48 @@ const ACTIVE_IS_WATCH = '(() => { const w = findWatchTab(); return !!w && active
 async function retry(g, id) {
   const p = await g.ev(UI.pill(id));
   if (p && p.act === 'Retry') return click(g, '#pills .sp[data-svc="' + id + '"] .sp-act');
-  if (!(await click(g, '#pills .sp[data-svc="' + id + '"] .sp-main'))) return false;
-  try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { return false; }
+  // Every way this can fail says which, with the pill and the popover as they were (a bare "could not
+  // press Retry" says nothing about why).
+  const why = async (step) => {
+    const d = await g.ev(`(() => { const s = document.querySelector('#pills .sp[data-svc="${id}"]'); const m = s && s.querySelector('.sp-main'); const p = document.getElementById('pop');
+      const b = m ? m.getBoundingClientRect() : null; const at = b ? document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) : null;
+      return { pill: s ? s.className : null, rect: b ? [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null,
+        top: at ? (at.tagName + '.' + String(at.className)).slice(0, 60) : null, popHidden: p ? p.hidden : null, popFor: p ? (p.getAttribute('data-svc') || p.getAttribute('aria-label') || '') : null,
+        acts: p ? [...p.querySelectorAll('.acts button')].map((x) => x.textContent.trim()) : null, active: document.activeElement ? (document.activeElement.tagName + '.' + String(document.activeElement.className)).slice(0, 60) : null }; })()`).catch((e) => ({ error: e.message }));
+    console.log('[e2e] retry diag ' + id + ' (' + step + '): ' + JSON.stringify(d));
+    return false;
+  };
+  if (!(await click(g, '#pills .sp[data-svc="' + id + '"] .sp-main'))) return why('no pill to click');
+  try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { return why('the popover did not open in 3 s'); }
+  // The button's own click handler is what sends the refresh: note whether it ran, and what (if
+  // anything) closed the popover before it could (a focusout with no new focus closes it).
   const ok = await g.ev(`(() => { const b = [...document.querySelectorAll('#pop .acts button')].find((x) => /^(Retry|Read now)$/.test(x.textContent.trim()));
-    if (!b) return false; b.setAttribute('data-e2e-retry', '1'); return true; })()`);
-  if (!ok) return false;
+    if (!b) return false; b.setAttribute('data-e2e-retry', '1');
+    window.__e2eRetry = { id: ${JSON.stringify(id)}, clicked: false, focusout: null, hasFocusAtOut: null };
+    b.addEventListener('click', () => { window.__e2eRetry.clicked = true; }, { capture: true, once: true });
+    document.getElementById('pop').addEventListener('focusout', (e) => { if (window.__e2eRetry.focusout === null) { const r = e.relatedTarget; window.__e2eRetry.focusout = r ? (r.tagName + '.' + String(r.className)).slice(0, 50) : 'none'; window.__e2eRetry.hasFocusAtOut = document.hasFocus(); } }, { once: true });
+    return true; })()`);
+  if (!ok) return why('no Retry or Read now in the popover');
   // Say why, when the popover's button is not the thing on top where it is drawn (or is disabled).
   const at = await g.ev(centerOf('#pop [data-e2e-retry="1"]')).catch(() => null);
   const st = await g.ev(`(() => { const b = document.querySelector('#pop [data-e2e-retry="1"]'); const p = document.getElementById('pop');
     const h = at => { const e = document.elementFromPoint(at.x, at.y); return e ? (e.tagName + '.' + String(e.className)).slice(0, 60) : null; };
     return { popHidden: p.hidden, disabled: !!(b && b.disabled), text: b ? b.textContent : null, top: ${at ? 'h(' + JSON.stringify(at) + ')' : 'null'} }; })()`).catch(() => null);
   if (!at || !at.hit || (st && (st.popHidden || st.disabled))) console.log('[e2e] retry diag ' + id + ': ' + JSON.stringify({ at, st }));
-  return click(g, '#pop [data-e2e-retry="1"]');
+  if (!(await click(g, '#pop [data-e2e-retry="1"]'))) return why('the popover\'s button went before the click');
+  await sleep(120);
+  const landed = await g.ev(`(() => { const r = window.__e2eRetry || {}; const p = document.getElementById('pop');
+    return Object.assign({}, r, { popHidden: p.hidden, popFor: p.getAttribute('data-svc') || '', pageFocus: document.hasFocus() }); })()`).catch((e) => ({ error: e.message }));
+  if (landed && landed.clicked) return true;
+  // The press did not reach the button: say exactly how, then press once more (the run still asks
+  // whether Retry re-reads; this line keeps the miss visible).
+  console.log('[e2e] retry diag ' + id + ' (the click did not reach Read now/Retry): ' + JSON.stringify(landed));
+  if (!(await click(g, '#pills .sp[data-svc="' + id + '"] .sp-main'))) return why('no pill to click (second press)');
+  try { await g.waitFor("!document.getElementById('pop').hidden && !!document.querySelector('#pop .acts button')", 3000); } catch (e) { return why('the popover did not open in 3 s (second press)'); }
+  const ok2 = await g.ev(`(() => { const b = [...document.querySelectorAll('#pop .acts button')].find((x) => /^(Retry|Read now)$/.test(x.textContent.trim()));
+    if (!b) return false; b.setAttribute('data-e2e-retry', '2'); return true; })()`);
+  if (!ok2) return why('no Retry or Read now in the popover (second press)');
+  return click(g, '#pop [data-e2e-retry="2"]');
 }
 
 async function shot(g, name, w, h, caption, say, chrome) {
@@ -1139,12 +1169,20 @@ if (require.main === module) {
       await waitReads(g, [], 0, 60000).catch(() => 0);
       for (const id of Object.keys(modes)) await mock.setMode(id, modes[id]);
       const t = Date.now();
+      const pressedAt = {};
       for (const id of Object.keys(modes)) {
         const ok = await retry(g, id);
+        pressedAt[id] = Date.now() - t;
         if (!ok) say(label + ': could not press Retry for ' + id);
         await sleep(150);
       }
-      try { await waitReads(g, Object.keys(modes), t, 150000); } catch (e) { say(label + ': reads did not settle: ' + e.message.slice(0, 160)); }
+      try { await waitReads(g, Object.keys(modes), t, 150000); } catch (e) {
+        const sn = await g.ev('window.__e2eSnap').catch(() => null);
+        const open = Object.keys(modes).map((id) => { const s = sn && Array.isArray(sn.services) ? sn.services.find((x) => x.id === id) : null;
+          return s && s.readAt >= t ? null : id + ' (' + (s ? s.state + ', read ' + (s.readAt ? (s.readAt - t) + ' ms' : 'never') : 'not in the snapshot') + ')'; }).filter(Boolean);
+        const busy = sn && Array.isArray(sn.services) ? sn.services.filter((s) => s.queued || s.reading).map((s) => s.id + (s.reading ? ' reading' : ' queued')) : [];
+        say(label + ': reads did not settle in 150 s; not read since the round began: ' + (open.join(', ') || 'none') + '; busy: ' + (busy.join(', ') || 'none') + (sn && sn.reading ? ' (reading ' + sn.reading + ')' : ''));
+      }
       // A 'down' service has no listener (connection refused), so the mock cannot count the try;
       // there the proof is a read that finished after the Retry, as an error, and nothing answered.
       const snR = await g.ev('window.__e2eSnap');
@@ -1154,6 +1192,13 @@ if (require.main === module) {
           check(!!s && s.readAt >= t && s.state === 'error' && mock.hits(id, t) === 0, label + ': Retry on ' + NAMES[id] + ' re-read it (down: a read ended ' + (s && s.readAt >= t ? (s.readAt - t) + ' ms after Retry' : 'never') + ', state ' + (s && s.state) + ', ' + mock.hits(id, t) + ' requests answered)', s && { state: s.state, reason: s.reason });
         } else {
           check(mock.hits(id, t) > 0, label + ': Retry on ' + NAMES[id] + ' re-read it (' + mock.hits(id, t) + ' requests to the mock)');
+          if (mock.hits(id, t) === 0) {
+            const s = snR && Array.isArray(snR.services) ? snR.services.find((x) => x.id === id) : null;
+            say(label + ': no read of ' + id + ' (pressed ' + pressedAt[id] + ' ms in, round began ' + new Date(t).toISOString().slice(11, 23) + '): ' + JSON.stringify(s).slice(0, 700));
+            let tail = '';
+            try { tail = fs.readFileSync(LOG, 'utf8').split(/\r?\n/).filter((l) => new RegExp(NAMES[id].replace('+', '\\+'), 'i').test(l)).slice(-6).join(' | '); } catch (e) { tail = 'no quartz.log: ' + e.code; }
+            say(label + ': quartz.log on ' + NAMES[id] + ': ' + tail.slice(-900));
+          }
         }
       }
       const p = await pills();
