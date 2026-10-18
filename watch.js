@@ -980,6 +980,9 @@
     var liveTop = !!(LS && LS.liveOnTop(sp.live));
     if (liveTop) games('sports', 'Live now', LS.sortLive(sp.live));
     if (by.continue) out.push(itemRow(by.continue));
+    // YouTube Subscriptions (watch/ytlib-page.js): up top with videos; a state card (sign in, failed) lower down.
+    var yt = window.WatchYt ? window.WatchYt.row(snap) : null;
+    if (yt && yt.top) out.push(yt);
     var mine = LS ? LS.myTeamsRow() : null;
     if (mine) out.push(mine);
     if (!liveTop) games('sports', 'Live now', sp.live);
@@ -987,8 +990,9 @@
     if (by.foryou) out.push(itemRow(by.foryou));
     games('sports-soon', 'Upcoming games', sp.soon);
     games('sports-done', 'Recent games', sp.done);
+    if (yt && !yt.top) out.push(yt);
     shelves.forEach(function (r) { out.push(itemRow(r)); });
-    out.forEach(function (m) { m.sig = rowSig(m); });
+    out.forEach(function (m) { m.sig = rowSig(m) + (m.ytSig || ''); });
     return out;
   }
   function itemRow(r) {
@@ -1171,6 +1175,7 @@
   /* --- a row ------------------------------------------------------------- */
 
   function rowSub(m, head) {
+    if (m.yt && window.WatchYt) { window.WatchYt.head(m, head); return; }
     if (m.kind === 'sports') {
       var espn = svcOf('espn');
       if (espn && espn.state === 'error') { head.appendChild(staleSub(espn)); return; }
@@ -1494,6 +1499,7 @@
     c.setAttribute('aria-label', joinDot([it.title, svcName(it.service), sub, stale ? 'from an earlier read' : '']) + '. ' +
       (it.edge ? 'Opens in Microsoft Edge.' : opensHere(true)));
     if (it.also.length) c.setAttribute('aria-label', c.getAttribute('aria-label') + ' Also on ' + listWords(it.also.map(function (a) { return svcName(a.service); })) + '.');
+    if ((it.yt || it.ytState) && window.WatchYt) window.WatchYt.card(c, it, m);
     return c;
   }
 
@@ -1717,6 +1723,7 @@
   }
 
   function stageItem(it, m) {
+    if (it.ytState && window.WatchYt) return window.WatchYt.stageState(it, m);
     var txt = el('div', 'txt');
     var eb = el('div', 'eyebrow');
     eb.appendChild(el('span', 'rn', m.title));
@@ -1765,6 +1772,7 @@
     primary.setAttribute('aria-label', label + ' ' + it.title + ' on ' + svcName(it.service));
     acts.appendChild(primary);
     acts.appendChild(opensNote(it.url, it.edge));
+    if (it.yt && window.WatchYt) window.WatchYt.stageActs(acts, it);
     txt.appendChild(acts);
 
     var pic = el('div', 'pic');
@@ -2146,6 +2154,7 @@
     send('open', msg);
   }
   function openCard(card, multi) {
+    if (!multi && window.WatchYt && window.WatchYt.openCard(card)) return;
     var LS = window.LumenSports;
     if (LS && card._team && !multi) { LS.openTeam(card._team); return; }       // My teams -> the team page
     if (LS && card._event && !multi) { LS.openGame(card._event); return; }     // a game -> its page in Lumen
@@ -2573,6 +2582,7 @@
 
   function onKey(e) {
     if (e.defaultPrevented || e.isComposing) return;
+    if (window.WatchYt && window.WatchYt.onKey(e)) return;
     var t = e.target;
     var typing = isTyping(t);
     var mod = e.ctrlKey || e.metaKey || e.altKey;
@@ -2743,6 +2753,10 @@
     $.stack.addEventListener('focusout', previewOut);
     window.addEventListener('message', onPreviewMessage);
     document.addEventListener('keydown', onKey);
+    if (window.WatchYt) {
+      window.WatchYt.attach({ send: send, openUrl: openUrl, renderLens: function () { if (S.snap) renderLens(); }, agoSpan: agoSpan, lenText: lenText,
+        artImage: artImage, icon: icon, focusLens: focusLens, previewStop: previewStop, snap: function () { return S.snap; } });
+    }
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('resize', onResize);
     document.addEventListener('pointerdown', function (e) {
