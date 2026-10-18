@@ -214,19 +214,20 @@ run('watch-shows-e2e', async ({ check, launch, say }) => {
     await g.send('Runtime.enable');
     await g.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0);
 
-    // A shot is the Lumen page in a w x h window: the tab's view grown to w x (h - Quartz's top bar) and the page
-    // emulated at that size (watch-preview-e2e's way), so it is the page itself, not a tiling of the smaller
-    // off-screen view. The file names say the window size.
+    // A shot: Quartz's window emulated at w x h and the Lumen page at w x (h - Quartz's top bar), captured from the
+    // window (the guest's own capture under emulation came back blank over the fixed overlay: the run4 probe had the
+    // DOM right and the pixels empty). The off-screen view keeps its real surface size, so the page can draw narrower
+    // than w inside the shot. SHOWS_PROBE=1 logs the layout at each shot.
     const barH = Math.round(await chrome.ev('(() => { const w = findWatchTab(); const v = w && w.viewEl; return v ? v.getBoundingClientRect().top : 85; })()')) || 85;
     const shoot = async (name, sizes) => {
       for (const [w, h] of (sizes || [[1536, 800], [1920, 1000]])) {
-        const ph = h - barH;
-        await chrome.ev(`(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return 0; const s = v.style; s.setProperty('position', 'fixed', 'important'); s.setProperty('left', '0px', 'important'); s.setProperty('top', '0px', 'important'); s.setProperty('width', '${w}px', 'important'); s.setProperty('height', '${ph}px', 'important'); s.setProperty('z-index', '2147483647', 'important'); return 1; })()`).catch(() => 0);
-        await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: ph, deviceScaleFactor: 1, mobile: false });
-        await sleep(1100);
-        try { await g.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
+        await chrome.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+        await g.send('Emulation.setDeviceMetricsOverride', { width: w, height: h - barH, deviceScaleFactor: 1, mobile: false });
+        await sleep(1200);
+        if (process.env.SHOWS_PROBE) say('probe ' + name + ' ' + w + 'x' + h + ': ' + JSON.stringify(await g.ev('(() => { const r = document.querySelector(".shw"); const b = r && r.getBoundingClientRect(); return { inner: [innerWidth, innerHeight], shw: b && [b.width, b.height], scroll: r && r.querySelector(".shw-body").scrollTop }; })()').catch((e) => e.message)));
+        try { await chrome.shot(path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png')); } catch (e) { say('shot ' + name + ' failed: ' + e.message); }
         await g.send('Emulation.clearDeviceMetricsOverride');
-        await chrome.ev(`(() => { const t = findWatchTab(); const v = t && t.viewEl; if (!v) return 0; for (const k of ['position', 'left', 'top', 'width', 'height', 'z-index']) v.style.removeProperty(k); return 1; })()`).catch(() => 0);
+        await chrome.send('Emulation.clearDeviceMetricsOverride');
         await sleep(300);
       }
     };
