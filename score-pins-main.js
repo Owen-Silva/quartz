@@ -41,7 +41,6 @@
  * monitor (-20000,-20000), so testwatch.js would fail the run if one ever touched the screen.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const Scores = require('./watch/scores');
@@ -60,11 +59,13 @@ const OFFSCREEN_AREA = { x: -20000, y: -20000, width: 1920, height: 1040 };
 const PAGE = path.join(__dirname, 'score-pin.html');
 const LUMEN_PAGE = pathToFileURL(path.join(__dirname, 'watch.html')).href;
 
-function isWin11Acrylic() {
-  if (process.platform !== 'win32') return false;
-  const build = Number(String(os.release()).split('.')[2]);
-  return Number.isFinite(build) && build >= 22621;
-}
+/* The card's surface is SOLID on every Windows, never Electron's 'acrylic' material. A system backdrop
+ * needs the native non-client frame: on a frame:false window backgroundMaterial renders solid black
+ * (measured for Quartz's own window, see the note in main.js createWindow), so a frameless acrylic
+ * card would be its tint over black, a muddy grey in the light theme. The card has to be frameless
+ * (no caption, no resize border), so it paints its own neutral surface, and what the e2e captures
+ * is exactly what the user sees. */
+const ACRYLIC = false;
 
 /** A fetch failure -> plain words. */
 function reasonOf(err) {
@@ -91,7 +92,7 @@ function create(d) {
   const log = typeof d.log === 'function' ? d.log : () => {};
   const now = typeof test.now === 'function' ? test.now : () => Date.now();
   const scale = Number.isFinite(test.pollScale) && test.pollScale > 0 ? test.pollScale : 1;
-  const acrylic = isWin11Acrylic() && !test.offscreen;
+  const acrylic = ACRYLIC && !test.offscreen;
 
   const pins = new Map();          // key -> pin record (order = pin order)
   const byContents = new Map();    // card webContents id -> key
@@ -179,7 +180,14 @@ function create(d) {
       width: CARD_W, height: p.height,
       x: a.x + a.width - MARGIN - CARD_W, y: a.y + a.height - MARGIN - p.height,
       show: false, frame: false, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
-      skipTaskbar: true, alwaysOnTop: true, focusable: false, hasShadow: true,
+      skipTaskbar: true, alwaysOnTop: true, focusable: false,
+      // thickFrame:false, MEASURED (lane lumen-scores2, 1920x1080 @125%, Electron's frameless window):
+      // with the thick frame a 300x120 request gave a 315x128 page and getBounds() 302x121 (the
+      // invisible resize border landed INSIDE the page, a band of window colour under the card, and
+      // the corner and stack were 2-3 px off); resizable:true and useContentSize made no difference.
+      // Without it the page and the bounds are exactly 300x120. The cost is the DWM shadow and
+      // rounded corners: the card's own hairline edge outlines it.
+      thickFrame: false,
       title: 'Score · ' + p.pin.title,
       backgroundColor: acrylic ? '#00000000' : (look.theme === 'light' ? '#f4f4f5' : '#202123'),
       backgroundMaterial: acrylic ? 'acrylic' : undefined,
@@ -535,7 +543,12 @@ function create(d) {
       const next = cleanLook(raw);
       if (JSON.stringify(next) === JSON.stringify(look)) return;
       look = next;
-      for (const p of pins.values()) if (p.win && !p.win.isDestroyed() && p.ready) p.win.webContents.send('scorepin:look', look);
+      for (const p of pins.values()) {
+        if (!p.win || p.win.isDestroyed()) continue;
+        // The window's own colour too, so a reload never flashes the old theme under the page.
+        if (!acrylic && typeof p.win.setBackgroundColor === 'function') p.win.setBackgroundColor(look.theme === 'light' ? '#f4f4f5' : '#202123');
+        if (p.ready) p.win.webContents.send('scorepin:look', look);
+      }
     });
     // From the cards themselves (score-pin-preload.js): each answers only for its own pin.
     ipcMain.on('scorepin:ready', (event) => { const p = cardOf(event); if (p) { p.ready = true; push(p); } });
