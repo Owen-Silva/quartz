@@ -156,10 +156,20 @@ async function ctrlAltW(chrome) {
 const ACTIVE_IS_WATCH = '(() => { const w = findWatchTab(); return !!w && activeTabId === w.id; })()';
 const FRESH = "(document.getElementById('fresh').textContent || '').replace(/\\s+/g, ' ').trim()";
 /** First request time per service since t (the mock's log): the order the reads started in. */
+// Lumen's YouTube library reads (watch/ytlib-main.js: Subscriptions, playlists) are not the schedule's
+// reads: they keep their own small queue and rule (the page asks for the feed once when it loads), so
+// the order of the schedule's service reads leaves them out. ytlibFirst() says when they came.
+const YTLIB_PATH = /^\/feed\/(subscriptions|playlists)(\?|$)/;
+const scheduled = (l) => !(l.svc === 'youtube' && YTLIB_PATH.test(String(l.path || '')));
 function startOrder(mock, t) {
   const first = {};
-  for (const l of mock.log) if (l.t >= t && IDS.indexOf(l.svc) !== -1 && first[l.svc] === undefined) first[l.svc] = l.t;
-  return Object.keys(first).sort((a, b) => first[a] - first[b]).map((id) => ({ id, t: first[id] }));
+  const path = {};
+  for (const l of mock.log) if (l.t >= t && IDS.indexOf(l.svc) !== -1 && scheduled(l) && first[l.svc] === undefined) { first[l.svc] = l.t; path[l.svc] = l.path; }
+  return Object.keys(first).sort((a, b) => first[a] - first[b]).map((id) => ({ id, t: first[id], path: path[id] }));
+}
+function ytlibFirst(mock, t) {
+  const l = mock.log.find((x) => x.t >= t && x.svc === 'youtube' && !scheduled(x));
+  return l ? { path: l.path, t: l.t } : null;
 }
 
 run('watch-auto-e2e', async (k) => {
@@ -302,8 +312,10 @@ run('watch-auto-e2e', async (k) => {
     if (done) break;
     await sleep(120);
   }
-  const order2 = startOrder(mock, t2).map((x) => x.id);
-  check(order2.join(',') === openWant.join(','), 'open: every service over 10 min old reads, oldest first', { got: order2, want: openWant });
+  const order2full = startOrder(mock, t2);
+  const order2 = order2full.map((x) => x.id);
+  const lib2 = ytlibFirst(mock, t2);
+  check(order2.join(',') === openWant.join(','), 'open: every service over 10 min old reads, oldest first', { got: order2, want: openWant, first: order2full.map((x) => x.id + ' ' + x.path + ' +' + (x.t - t2) + 'ms'), ytlib: lib2 && (lib2.path + ' +' + (lib2.t - t2) + 'ms') });
   check(poll.max <= 1, 'open: one hidden reader at a time', poll.max);
   const words = Array.from(new Set(Array.from(seen).concat(await g.ev('window.__freshSeen || []').catch(() => []))));
   check(words.some((w) => /^Updating Disney\+…$/.test(w)) && words.some((w) => /^Updating Prime Video…$/.test(w)), 'header: "Updating Disney+…" / "Updating Prime Video…" while each reads', words);
