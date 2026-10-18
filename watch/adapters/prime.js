@@ -660,3 +660,11 @@ module.exports = {
   _internals: { EXTRACT: EXTRACT, pageExtract: pageExtract, ready: ready, storeAuth: storeAuth,
     progressOf: progressOf, entitlementOf: entitlementOf, findContainers: findContainers, reasonForError: reasonForError }
 };
+
+/* For watch/search/prime.js (Lumen's one search box): the same hydration read and tolerant parsers. */
+module.exports._search = {
+  EXTRACT: EXTRACT, ready: ready, findContainers: findContainers, itemFrom: itemFrom, entitlementOf: entitlementOf,
+  parseJsonish: parseJsonish, storeAuth: storeAuth, urlParts: urlParts, isSignInPath: isSignInPath, isCaptchaPath: isCaptchaPath,
+  hasSignInCta: hasSignInCta, reasonForError: reasonForError, DECOY_CONTAINER: DECOY_CONTAINER, containerTitle: containerTitle,
+  REASON_ROBOT: REASON_ROBOT
+};

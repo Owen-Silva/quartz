@@ -716,3 +716,9 @@ module.exports = {
     HULU_NOT_LINKED: HULU_NOT_LINKED, HULU_LOCKED: HULU_LOCKED, HULU_NO_HUB: HULU_NO_HUB, HULU_HUB_EMPTY: HULU_HUB_EMPTY
   }
 };
+
+/* For watch/search/disney.js (Lumen's one search box): the same tolerant item parser and page reads. */
+module.exports._search = {
+  EXTRACT: EXTRACT, EXPLORE_RE: EXPLORE_RE, parseItem: parseItem, hasUpsell: hasUpsell, errorReason: errorReason,
+  signedOutByUrl: signedOutByUrl, profilePickerByUrl: profilePickerByUrl, ready: ready, SIGNED_OUT_REASON: SIGNED_OUT_REASON, PICKER_REASON: PICKER_REASON
+};
