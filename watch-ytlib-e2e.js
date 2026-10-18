@@ -286,7 +286,7 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
     // "Plays in Watch" there is watch.js's opensHere() (lumen-player's hub name), not this lane's words.
     check(r0 && /^New\. /.test(r0.aria) && /Plays in /.test(r0.aria), 'a New tile says "New." and that it plays here to a screen reader', r0 && r0.aria);
     check(r0 && r0.chips === 0, 'no YouTube chip on the row\'s tiles (the whole row is YouTube; the New mark has that corner)', r0 && r0.chips);
-    check(r0 && r0.hacts.join('|') === 'See all|Library', 'the row\'s header has See all and Library', r0 && r0.hacts);
+    check(r0 && r0.hacts.join('|') === 'See all|Library|Shorts', 'the row\'s header has See all, Library and Shorts (Lumen’s Shorts view)', r0 && r0.hacts);
     await sleep(1200);
     const f0 = fileNow();
     check(f0 && f0.subs && f0.subs.state === 'ok' && f0.mark && NEW_IDS.every((id) => typeof f0.mark.seen[id] === 'number' && f0.mark.seen[id] > f0.mark.cutoff), 'watch-ytlib.json keeps the feed and when the 2 new videos were first seen (after the cutoff)', f0 && f0.mark && { cutoff: f0.mark.cutoff, n: Object.keys(f0.mark.seen).length });
@@ -337,7 +337,7 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
       sec: (y.querySelector('.yt-sec-h h3') || {}).textContent, n: y.querySelectorAll('.yt-sec .yt-cell').length, acts: [...y.querySelectorAll('.ytp-acts .btn')].map((b) => b.textContent.trim()) }; })()`);
     check(!!c1 && cp.h2 === 'Guitar Coach Ryan' && cp.n === 6 && cp.av, 'a channel name opens its page in Lumen: the name, the avatar, its 6 videos', cp);
     check(/@guitarcoachryan/.test(cp.sub || '') && /subscriber/.test(cp.sub || ''), 'the channel\'s handle and subscriber count', cp.sub);
-    check(cp.acts.indexOf('Shorts') !== -1 && cp.acts.indexOf('Refresh') !== -1, 'the channel page offers Shorts (on YouTube) and Refresh', cp.acts);
+    check(cp.acts.indexOf('Shorts') !== -1 && cp.acts.indexOf('Refresh') !== -1, 'the channel page offers Shorts (in Lumen) and Refresh', cp.acts);
     check(hits(new RegExp('^' + CHANNEL + '/videos$'), t) === 1, 'the reader read the channel\'s Videos tab once', frontLog.filter((l) => l.t >= t).map((l) => l.path));
     await shots('channel', blur);
     await g.ev(`(() => { const b = document.querySelector('#ytp .ytp-back'); b.focus(); return 1; })()`);
