@@ -22,7 +22,7 @@ const { chromium } = require('playwright-core');
 const F = require('../tests/watch-snapshot');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.resolve(process.argv[2] || 'C:/Users/you/next-week/watch/shots');
+const OUT = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'quartz-watch-preview'));   // default: %TEMP%\quartz-watch-preview
 const ONLY = process.argv[3] ? new RegExp(process.argv[3]) : null;
 const PAGE = 'file:///' + path.join(ROOT, 'watch.html').replace(/\\/g, '/');
 const PASS_HOSTS = ['i.ytimg.com', 'a.espncdn.com'];

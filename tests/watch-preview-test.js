@@ -73,7 +73,7 @@ module.exports = async function (check) {
 
   // --- the Referer main.js adds
   const wc = (url) => ({ getURL: () => url });
-  const watchPage = 'file:///C:/Users/you/browser/watch.html?theme=dark';
+  const watchPage = 'file:///' + require('path').join(__dirname, '..', 'watch.html').replace(/\\/g, '/') + '?theme=dark';   // this checkout's own Watch page
   const emb = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1';
   check(Pv.embedReferer({ url: emb, resourceType: 'subFrame', requestHeaders: {}, webContents: wc(watchPage) }) === Pv.EMBED_REFERER, 'embedReferer: Watch\'s embed frame gets the Referer');
   check(Pv.embedReferer({ url: emb, resourceType: 'subFrame', requestHeaders: {}, webContents: wc('https://evil.example/watch.html') }) === '', 'embedReferer: a web page called watch.html gets none');

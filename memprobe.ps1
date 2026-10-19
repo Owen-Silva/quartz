@@ -12,8 +12,9 @@
             the round is judged on.
     wsMB    working set, what Task Manager's details tab shows; includes shared pages, so
             the total over-counts.
-  A copy is matched by command line: the live one runs from C:\Users\you\browser and
-  has no --test-profile; a test one carries --profile-name=<Match>. Either may run as
+  A copy is matched by command line: it runs from the checkout this script is in (run the
+  live checkout's memprobe.ps1 for the live browser). The live one has no --test-profile;
+  a test one carries --profile-name=<Match>. Either may run as
   Quartz.exe (the named launch, built by tools/make-quartz-exe.js) or as electron.exe
   (`npx electron .`); both are read. Mantle is also electron.exe, and is never counted.
 #>
@@ -30,9 +31,11 @@ Get-Process electron, Quartz -ErrorAction SilentlyContinue | ForEach-Object { $b
 # knows), so pick the MAIN process by command line and then take its children
 # by parent pid. Every Chromium child (gpu, renderers, utilities) is a direct
 # child of the main process.
+# "Runs from this checkout": its folder in the command line, either slash style, any case.
+$here = (($PSScriptRoot -split '[\\/]+' | Where-Object { $_ } | ForEach-Object { [regex]::Escape($_) }) -join '[\\/]+')
 $mains = @($procs | Where-Object {
   $cl = [string]$_.CommandLine
-  if ($cl -match '--type=' -or $cl -match 'mantle' -or $cl -notmatch 'owens[\\/]+browser') { return $false }
+  if ($cl -match '--type=' -or $cl -match 'mantle' -or $cl -notmatch $here) { return $false }
   if ($Match) { return $cl -match ('--profile-name=' + [regex]::Escape($Match) + '(\s|"|$)') }
   return $cl -notmatch 'test-profile'
 })
