@@ -15,6 +15,8 @@ What it does, in order (any failure stops it with "drm-swap: STOPPED - <reason>"
      registry (QuartzURL, QuartzHTML, StartMenuInternet\Quartz, RegisteredApplications,
      the http/https/.htm/.html UserChoice). It never writes any of them.
   1. git merge --ff-only <Branch> (a real merge only if master moved; aborted on conflict).
+     A real merge is committed as -CommitEmail, else $env:QUARTZ_COMMIT_EMAIL, else the repo's
+     git config user.email; with none of them it stops before merging.
   2. Moves node_modules\electron aside (kept for drm-rollback.ps1), then
      npm install --ignore-scripts (only electron changes: npm ci would delete node-pty's
      Electron build, which cannot be rebuilt from npm) and node node_modules\electron\install.js.
@@ -33,7 +35,8 @@ param(
   [string]$Branch = 'wk/quartz-drm2',
   [switch]$NoMerge,
   [switch]$SkipSign,
-  [switch]$ResignOnly
+  [switch]$ResignOnly,
+  [string]$CommitEmail = ''
 )
 $ErrorActionPreference = 'Stop'
 $Repo = (Resolve-Path $Repo).Path
@@ -59,6 +62,16 @@ function Run([string]$exe, [string[]]$argList) {
   if ($null -eq $text) { $text = '' } else { $text = [string]$text }
   Remove-Item $log -ErrorAction SilentlyContinue
   return @{ code = $code; text = $text }
+}
+
+# The e-mail on the merge commit (step 1): -CommitEmail, else $env:QUARTZ_COMMIT_EMAIL, else this
+# repo's own git config user.email. None of them set = a loud stop, never a made-up address.
+function Commit-Email {
+  if ($CommitEmail) { return $CommitEmail.Trim() }
+  if ($env:QUARTZ_COMMIT_EMAIL) { return $env:QUARTZ_COMMIT_EMAIL.Trim() }
+  $e = (Run 'git' @('config', 'user.email')).text.Trim()
+  if ($e) { return $e }
+  Stop-Swap 'no commit e-mail for the merge: pass -CommitEmail you@example.com, set QUARTZ_COMMIT_EMAIL, or run "git config user.email you@example.com" in this repo.'
 }
 
 function Running-Here {
@@ -170,7 +183,7 @@ if (-not $NoMerge) {
   $ff = Run 'git' @('merge', '--ff-only', $Branch)
   if ($ff.code -ne 0) {
     Say 'master moved since the branch was made: a real merge.'
-    $mg = Run 'git' @('-c', 'user.name=Owen Silva', '-c', 'user.email=272956043+Owen-Silva@users.noreply.github.com', 'merge', '--no-edit', $Branch)
+    $mg = Run 'git' @('-c', 'user.name=Owen Silva', '-c', ('user.email=' + (Commit-Email)), 'merge', '--no-edit', $Branch)
     if ($mg.code -ne 0) { Run 'git' @('merge', '--abort') | Out-Null; Stop-Swap ('merge conflict, merge aborted, nothing changed: ' + (Tail $mg.text 3)) }
   }
   Say ('merged ' + $Branch + ': ' + $preHead.Substring(0, 7) + ' -> ' + (Run 'git' @('rev-parse', '--short', 'HEAD')).text.Trim())

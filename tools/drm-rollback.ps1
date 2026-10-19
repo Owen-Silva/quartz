@@ -8,6 +8,8 @@ tools/drm-rollback.ps1 -- Quartz back on stock Electron after tools\drm-swap.ps1
      default-browser registry; never writes it.
   2. package.json + package-lock.json back as they were before the swap (swap-state.json's
      preHead), committed as "DRM rollback" (skipped with -NoCommit or when nothing changed).
+     The commit's e-mail: -CommitEmail, else $env:QUARTZ_COMMIT_EMAIL, else the repo's git config
+     user.email; with none of them (and no -NoCommit) it stops before changing anything.
      The DRM code stays: on stock Electron it reports no Widevine, so Watch sends protected
      titles to Edge with the reason and the bar offers Edge, exactly as before the swap.
   3. node_modules\electron: the castlabs one is moved aside; the pre-swap one the swap kept is
@@ -17,7 +19,8 @@ tools/drm-rollback.ps1 -- Quartz back on stock Electron after tools\drm-swap.ps1
 #>
 param(
   [string]$Repo = (Split-Path -Parent $PSScriptRoot),
-  [switch]$NoCommit
+  [switch]$NoCommit,
+  [string]$CommitEmail = ''
 )
 $ErrorActionPreference = 'Stop'
 $Repo = (Resolve-Path $Repo).Path
@@ -37,6 +40,15 @@ function Run([string]$exe, [string[]]$argList) {
   if ($null -eq $text) { $text = '' } else { $text = [string]$text }
   Remove-Item $log -ErrorAction SilentlyContinue
   return @{ code = $code; text = $text }
+}
+# The e-mail on the rollback commit: -CommitEmail, else $env:QUARTZ_COMMIT_EMAIL, else this repo's
+# own git config user.email. None of them set = a loud stop, never a made-up address.
+function Commit-Email {
+  if ($CommitEmail) { return $CommitEmail.Trim() }
+  if ($env:QUARTZ_COMMIT_EMAIL) { return $env:QUARTZ_COMMIT_EMAIL.Trim() }
+  $e = (Run 'git' @('config', 'user.email')).text.Trim()
+  if ($e) { return $e }
+  Stop-Back 'no commit e-mail for the rollback commit: pass -CommitEmail you@example.com, set QUARTZ_COMMIT_EMAIL, or run "git config user.email you@example.com" in this repo (or use -NoCommit).'
 }
 function Pty-Hash {
   if (-not (Test-Path $PtyDir)) { return '' }
@@ -74,6 +86,9 @@ if ((Run 'git' @('merge-base', '--is-ancestor', [string]$state.head, 'HEAD')).co
 $regBefore = Reg-Snapshot
 $ptyBefore = Pty-Hash
 
+# Resolved BEFORE anything changes, so a missing e-mail never leaves the package files half-restored.
+$CommitAs = if ($NoCommit) { '' } else { Commit-Email }
+
 # ---- package files back ------------------------------------------------------------------
 $co = Run 'git' @('checkout', [string]$state.preHead, '--', 'package.json', 'package-lock.json')
 if ($co.code -ne 0) { Stop-Back ('git checkout of the pre-swap package files failed: ' + (Tail $co.text 2)) }
@@ -82,7 +97,7 @@ if ($staged -and -not $NoCommit) {
   $msg = Join-Path $env:TEMP ('drm-rollback-msg-' + $PID + '.txt')
   $body = "DRM rollback: Quartz back on stock Electron`n`npackage.json and package-lock.json as before tools\drm-swap.ps1 (" + ([string]$state.preHead).Substring(0, 7) + ").`nThe DRM code stays; on stock Electron it reports no Widevine and offers Edge.`n"
   [IO.File]::WriteAllText($msg, $body, (New-Object Text.UTF8Encoding($false)))
-  $c = Run 'git' @('-c', 'user.name=Owen Silva', '-c', 'user.email=272956043+Owen-Silva@users.noreply.github.com', 'commit', '-q', '-F', $msg)
+  $c = Run 'git' @('-c', 'user.name=Owen Silva', '-c', ('user.email=' + $CommitAs), 'commit', '-q', '-F', $msg)
   Remove-Item $msg -ErrorAction SilentlyContinue
   if ($c.code -ne 0) { Stop-Back ('commit failed: ' + (Tail $c.text 2)) }
   Say ('committed ' + (Run 'git' @('rev-parse', '--short', 'HEAD')).text.Trim() + ' (package files as before the swap).')
