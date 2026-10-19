@@ -24,8 +24,23 @@
   'use strict';
 
   // The same app identity watch/preview.js sends: YouTube's embed refuses to play (error 153)
-  // without a Referer naming the app that embeds it. Only the embed gets it.
+  // without a Referer naming the app that embeds it. Only the embed gets it. REFERER is the
+  // project's public default; watch.json's optional "embedReferer" replaces it, and main hands
+  // that over in Settings' describe() (asked once below, when this file loads in the chrome).
   var REFERER = 'https://github.com/Owen-Silva/quartz';
+  var referer = REFERER;
+  function currentReferer() { return referer; }
+  /** main's answer (already checked there, watch/preview.js cleanReferer): an https URL, or keep the default. */
+  function setReferer(url) { referer = typeof url === 'string' && /^https:\/\/[^\s]+$/.test(url) && url.length <= 300 ? url : REFERER; return referer; }
+  if (typeof window !== 'undefined' && window.api && window.api.watch && typeof window.api.watch.describe === 'function') {
+    try {
+      var asked = window.api.watch.describe();
+      if (asked && typeof asked.then === 'function') {
+        asked.then(function (d) { if (d && d.embedReferer) setReferer(d.embedReferer); },
+          function (err) { console.warn('[lumen] embed Referer: Lumen did not answer (' + ((err && err.message) || err) + '); using ' + REFERER); });
+      }
+    } catch (err) { console.warn('[lumen] embed Referer: could not ask Lumen; using ' + REFERER); }
+  }
   var ID_RE = /^[A-Za-z0-9_-]{6,20}$/;
 
   function parse(url) { try { return new URL(String(url || '')); } catch (e) { return null; } }
@@ -85,7 +100,7 @@
   }
   function referrer(ctx, s, url) {
     var v = videoOf(url, s.service);
-    return v && v.embed ? REFERER : undefined;
+    return v && v.embed ? currentReferer() : undefined;
   }
   function fullPage(ctx, s) {
     var slot = s || ctx.focused();
@@ -149,8 +164,9 @@
       s.state.hidden = true;
       s.tile.classList.remove('has-state');
       s.url = u;
-      try { s.view.setAttribute('httpreferrer', REFERER); } catch (err) { /* the load below carries it too */ }
-      try { var pr = s.view.loadURL(u, { httpReferrer: REFERER }); if (pr && pr.catch) pr.catch(function () { /* did-fail-load */ }); } catch (err) { s.view.setAttribute('src', u); }
+      var ref = currentReferer();
+      try { s.view.setAttribute('httpreferrer', ref); } catch (err) { /* the load below carries it too */ }
+      try { var pr = s.view.loadURL(u, { httpReferrer: ref }); if (pr && pr.catch) pr.catch(function () { /* did-fail-load */ }); } catch (err) { s.view.setAttribute('src', u); }
       sync(ctx, s);
     });
     acts.appendChild(b);
@@ -158,6 +174,8 @@
 
   return {
     REFERER: REFERER,
+    referer: currentReferer,
+    setReferer: setReferer,
     videoOf: videoOf,
     embedUrl: embedUrl,
     pageUrl: pageUrl,

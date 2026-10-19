@@ -38,10 +38,30 @@
    * Referer that names the app embedding it, and Chromium never sends a file:// page's
    * referrer. YouTube's API client-identity guidance asks WebView-style apps to send their
    * own https identity instead; main.js adds this one, ONLY to embed-frame requests made by
-   * Watch's own page (embedReferer below). The user's call if he wants a different identity.
+   * Watch's own page (embedReferer below).
+   *
+   * WHICH IDENTITY. The project's own page, EMBED_REFERER, unless watch.json names another:
+   * its optional "embedReferer" key (an https URL), which watch-main.js hands to
+   * setEmbedReferer() each time it loads its settings. main.js and watch-main.js require this
+   * same file, so they share the one value; the chrome's player (watch-player-yt.js) gets it
+   * from Settings' describe(). Anything that is not a plain https URL is ignored.
    */
   var EMBED_REFERER = 'https://github.com/Owen-Silva/quartz';
+  var embedRef = EMBED_REFERER;
   var YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+  /** An embedReferer value as watch.json may give it: a plain https URL (no user:pass), or ''. */
+  function cleanReferer(raw) {
+    var s = typeof raw === 'string' ? raw.trim() : '';
+    if (!s || s.length > 300 || /[\s\u0000-\u001f\u007f]/.test(s)) return '';
+    try {
+      var u = new URL(s);
+      return u.protocol === 'https:' && u.hostname && !u.username && !u.password ? s : '';
+    } catch (e) { return ''; }
+  }
+  /** watch-main.js, from watch.json: the Referer the embed gets from now on (bad or '' = EMBED_REFERER). */
+  function setEmbedReferer(raw) { embedRef = cleanReferer(raw) || EMBED_REFERER; return embedRef; }
+  function currentEmbedReferer() { return embedRef; }
 
   /** The YouTube video id of a Watch item, or ''. */
   function youtubeIdOf(item) {
@@ -157,7 +177,7 @@
       if (wc && typeof wc.getURL === 'function') page = String(wc.getURL() || '');
       if (!page && typeof details.frame === 'object' && details.frame && details.frame.top && typeof details.frame.top.url === 'string') page = details.frame.top.url;
       if (!/^file:\/\/\/.*\/watch\.html(?:[?#]|$)/i.test(page)) return '';
-      return EMBED_REFERER;
+      return embedRef;
     } catch (e) { return ''; }
   }
 
@@ -173,7 +193,10 @@
     embedUrl: embedUrl,
     readPlayerMessage: readPlayerMessage,
     errorWords: errorWords,
-    embedReferer: embedReferer
+    embedReferer: embedReferer,
+    cleanReferer: cleanReferer,
+    setEmbedReferer: setEmbedReferer,
+    currentEmbedReferer: currentEmbedReferer
   };
 
   if (typeof module === 'object' && module && module.exports) module.exports = API;

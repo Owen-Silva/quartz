@@ -344,7 +344,7 @@
       s._mv.watchUrl = s.url;
       s._mv.embed = to;
       s.url = to;
-      var ref = YT().REFERER;
+      var ref = typeof YT().referer === 'function' ? YT().referer() : YT().REFERER;   // watch.json's embedReferer, else the default
       try { v.setAttribute('httpreferrer', ref); } catch (err) { /* the load carries it */ }
       try { var p = v.loadURL(to, { httpReferrer: ref }); if (p && p.catch) p.catch(function () { /* a redirect or a stop */ }); } catch (err) { /* gone */ }
     });
