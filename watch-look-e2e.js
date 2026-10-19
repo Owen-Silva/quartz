@@ -220,7 +220,7 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
         responseHeaders: [{ name: 'Content-Type', value: 'image/png' }, { name: 'Cache-Control', value: 'max-age=3600' }], body: (body || Buffer.alloc(0)).toString('base64') });
     });
     // long tasks in the chrome, from here on
-    await chrome.ev('(() => { window.__lt = []; try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: "longtask" }); } catch (e) { window.__lt = null; } return 1; })()');
+    await chrome.ev('(() => { window.__lt = []; window.__lt2 = []; window.__cap = []; try { new PerformanceObserver((l) => { for (const e of l.getEntries()) { window.__lt.push(Math.round(e.duration)); window.__lt2.push([e.startTime, e.duration]); } }).observe({ type: "longtask" }); } catch (e) { window.__lt = null; } return 1; })()');
 
     const PS = 'LumenPlayview._state()';
     const SS = 'LumenShorts._state()';
@@ -233,7 +233,7 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
     const resize = async (w, h) => {
       let rw = w, rh = h;
       for (let i = 0; i < 4; i++) {
-        await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${rw}, height: ${rh}, wait: 700 }).then(() => 1)`);
+        await chrome.ev(`(() => { const t0 = performance.now(); return window.api.watchPlayer.testCapture({ width: ${rw}, height: ${rh}, wait: 700 }).then(() => { window.__cap && window.__cap.push([t0, performance.now() + 50]); return 1; }); })()`);
         const c = (await win()).content;
         if (c.width === w && c.height === h) { req = [rw, rh]; break; }
         rw += w - c.width; rh += h - c.height;
@@ -242,7 +242,7 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
     };
     const shotFiles = [];
     const shot = async (name, w, h, wait) => {
-      const r = await chrome.ev(`window.api.watchPlayer.testCapture({ width: ${req[0]}, height: ${req[1]}, wait: ${wait || 1400} })`).catch((e) => ({ ok: false, err: String(e && e.message) }));
+      const r = await chrome.ev(`(() => { const t0 = performance.now(); return window.api.watchPlayer.testCapture({ width: ${req[0]}, height: ${req[1]}, wait: ${wait || 1400} }).then((r) => { window.__cap && window.__cap.push([t0, performance.now() + 50]); return r; }); })()`).catch((e) => ({ ok: false, err: String(e && e.message) }));
       if (!r || !r.ok || !r.png) { check(false, 'shot ' + name + ' at ' + w + 'x' + h, r && r.err); return null; }
       const f = path.join(SHOTS, PREFIX + '-' + name + '-' + w + 'x' + h + '.png');
       const buf = Buffer.from(r.png, 'base64');
@@ -488,7 +488,11 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
     /* ---- the numbers ---- */
     const lts = await chrome.ev('window.__lt');
     perf.longTasks = lts;
-    perf.longOver50 = Array.isArray(lts) ? lts.filter((d) => d > 50) : null;
+    // the harness's own window resizes and captures (a resize relayouts the whole chrome; a capture hands it a PNG of several MB) are not the app's
+    const own = await chrome.ev('(() => (window.__lt2 || []).filter((e) => e[1] > 50 && !(window.__cap || []).some((c) => e[0] + e[1] > c[0] && e[0] < c[1])).map((e) => Math.round(e[1])))()');
+    perf.longOver50All = Array.isArray(lts) ? lts.filter((d) => d > 50) : null;
+    perf.longOver50 = Array.isArray(own) ? own : perf.longOver50All;
+    say('long tasks over 50 ms: ' + JSON.stringify(perf.longOver50All) + ' in all, ' + JSON.stringify(perf.longOver50) + ' outside the harness’s own resizes and captures');
     if (AMB) perf.amb = await amb();
     if (PERF_OUT) fs.writeFileSync(PERF_OUT, JSON.stringify(perf, null, 1));
     say('perf ' + JSON.stringify({ scroll: perf.scroll && { n: perf.scroll.n, over: perf.scroll.over.length, max: perf.scroll.max }, comments: perf.comments && { n: perf.comments.n, over: perf.comments.over.length, max: perf.comments.max },
