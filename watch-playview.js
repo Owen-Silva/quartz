@@ -48,6 +48,7 @@
   var NAMES = { youtube: 'YouTube', disney: 'Disney+', hulu: 'Hulu', prime: 'Prime Video', espn: 'ESPN' };
   var PEEK = 128;          // px of the info that always shows under the video (1280x800 included)
   var READS = [250, 900, 2000, 4000, 8000];   // ms after a page loads: read until it is all there
+  var PRESS_HOLD_MAX_MS = 2000;   // a held rebuild waits for his release at most this long
 
   // The page's own furniture, hidden outright (display:none) while the view is on. Everything
   // else outside the player is only invisible (body visibility), so the page's own buttons and
@@ -501,6 +502,12 @@
     p.cover.appendChild(el('span', 'pv-cover-txt', 'Loading the player…'));
     p.info = el('div', 'pv-info');
     p.info.setAttribute('aria-live', 'polite');
+    p.info.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      p.pressing = true;
+      clearTimeout(p.pressT);
+      p.pressT = setTimeout(function () { releasedOne(s); }, PRESS_HOLD_MAX_MS);   // a release Lumen never heard
+    }, true);
     // The mount for an overlay play bar (the playerbar lane): the video box's bottom edge, over the
     // webview, empty and click-through until something is put in it. Its id is set only while boxed.
     p.mount = el('div', 'pv-barmount');
@@ -749,6 +756,9 @@
     // update() often, and a rebuild between his mouse press and release would swallow that click.
     var key = renderKey(s, p, phase, moved);
     if (key && key === p.rkey && info.firstChild) return;
+    // His button is down on the info (a page read or the play bar's sync landed mid-click): hold the
+    // rebuild until the release, so the click lands on the button he pressed; released() runs it.
+    if (p.pressing && info.firstChild) { p.pendingRender = true; return; }
     p.rkey = key;
     var m = model(s.service, p.read, p.item, s.title, { moved: moved });
     info.setAttribute('data-svc', s.service);
@@ -985,6 +995,19 @@
     if (!api || typeof api.setView !== 'function') return Promise.resolve({ view: next, saved: false });
     return api.setView(next).then(function (r) { PREF = (r && r.view) || next; return { view: PREF, saved: true }; });
   }
+
+  // The release (anywhere: he may drag off): the click is dispatched first, then any held rebuild runs.
+  function releasedOne(s) {
+    var p = pvOf(s);
+    if (!p || !p.pressing) return;
+    p.pressing = false;
+    clearTimeout(p.pressT);
+    if (p.pendingRender) { p.pendingRender = false; setTimeout(function () { render(s); }, 0); }
+  }
+  function released() { all.forEach(releasedOne); }
+  window.addEventListener('pointerup', released, true);
+  window.addEventListener('pointercancel', released, true);
+  window.addEventListener('blur', released);
 
   window.addEventListener('offline', function () { all.forEach(function (s) { render(s); }); });
   window.addEventListener('online', function () { all.forEach(function (s) { var p = pvOf(s); if (p && p.phase !== 'ready') startReads(s, true); else render(s); }); });
