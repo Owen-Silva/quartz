@@ -1864,7 +1864,7 @@
 
   /* --- the two screen-power buttons, and why they are shaped like this -----
 
-     MEASURED against the user's phone (Android phone, Android 16 / SDK 36) on
+     MEASURED against an Android 16 (SDK 36) phone on
      2026-09-13, with a control-only scrcpy v4.1 session and `dumpsys` read
      before and after every message:
 
@@ -1904,7 +1904,7 @@
   function screenOff() {
     var pressedAt = Date.now();
     if (!sendControl(msgSetDisplayPower(false), null)) return;
-    /* MEASURED on the user's Android phone, Android 16, 2026-09-13: with the panel powered
+    /* MEASURED on an Android 16 phone, 2026-09-13: with the panel powered
        off Android draws nothing for that display, so the mirror goes black
        too — the "phone dark, picture live" mode scrcpy advertises does not
        exist on this phone. Say it before he wonders, and remember it so the

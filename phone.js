@@ -5,11 +5,13 @@
  * scrcpy server), the device (pairing, connecting, pinning), the stream (the
  * scrcpy server running ON the phone, its three sockets tunnelled over adb),
  * and the relay that hands those sockets to the Phone page over a localhost
- * WebSocket. The user's phone is an Android phone (2025), Android 16 (ro.build.version.sdk
- * = 36, read off the phone 2026-09-13 — it was 15 when this was written),
- * reached over Tailscale (100.64.0.1) — never a cable, never the open
- * internet. Nothing here branches on the SDK level: adb and the scrcpy server
- * do all the version work, and v4.1 is current for API 36.
+ * WebSocket. The phone is an Android phone with Wireless debugging on (built
+ * and measured on Android 16 / SDK 36; it started on 15), reached over
+ * Tailscale or the LAN — never a cable, never the open internet. Its address
+ * is the user's own: there is no default; Settings → Phone (or mDNS discovery)
+ * fills it, and it is kept in <userData>/phone.json. Nothing here branches on
+ * the SDK level: adb and the scrcpy server do all the version work, and v4.1
+ * is current for API 36.
  *
  * CONTRACT (the single source of truth for phone.js, phone-page.js, and the
  * Settings → Phone section; change it here first, then everywhere)
@@ -527,7 +529,7 @@ function create(deps) {
     device: {
       state: 'unpaired',
       reason: 'not paired: Settings → Phone',
-      host: '100.64.0.1',
+      host: '',               // no default address: Settings → Phone (or mDNS) fills it
       port: 5555,
       serial: null,
       name: null,
@@ -570,7 +572,9 @@ function create(deps) {
       /* The master switch (Settings → Phone). false = the whole phone link is
          off: no stream, no timers, no adb process at all. */
       enabled: true,
-      host: '100.64.0.1',
+      /* The phone's address (Tailscale or LAN IP). Empty until the user sets
+         it; refreshReady then says so instead of a bare "not paired". */
+      host: '',
       port: 5555,
       pairPort: 0,
       profile: 'auto',
@@ -726,6 +730,10 @@ function create(deps) {
     /* The master switch wins over every other reason: nothing else is true
        while the link is off, and the way out is one switch. */
     if (linkOff()) { state.ready = false; state.reason = OFF_REASON; return; }
+    /* Settings → Phone's Device readout names a missing address even while
+       the tools are still downloading (the status sentence waits its turn below). */
+    const noHost = !String(state.settings.host || '').trim() && state.device.state !== 'connected';
+    if (noHost && (state.device.state === 'unpaired' || state.device.state === 'paired')) state.device.reason = NO_HOST_REASON;
     if (relayNote) { state.reason = relayNote; return; }
     if (wsLoadError) {
       state.reason = 'the ws module did not load (' + wsLoadError + ') — run npm install in the browser folder';
@@ -741,6 +749,10 @@ function create(deps) {
     }
     if (state.tools.state === 'error') { state.reason = state.tools.reason; return; }
     if (state.tools.state !== 'ready') { state.reason = state.tools.reason; return; }
+    /* No address at all (a fresh install: there is no default host). Say so on
+       the Phone tab AND in Settings → Phone's Device readout, rather than a
+       "not paired" that never names the missing piece. */
+    if (noHost) { state.reason = NO_HOST_REASON; return; }
     if (!state.device.paired) {
       state.reason = 'not paired: Settings → Phone, then Wireless debugging → Pair device with pairing code';
       return;
@@ -2409,6 +2421,9 @@ function create(deps) {
   /* One sentence, used everywhere something is refused for being switched off,
      so the page, the Settings section and every command reason agree. */
   const OFF_REASON = 'phone link is off — turn it on in Settings → Phone';
+  /* The same for a fresh install: there is no default address. */
+  const NO_HOST_REASON = "no phone address yet — set your phone's address in Settings → Phone "
+    + '(its Tailscale or LAN IP, shown under Wireless debugging), then pair it';
 
   function linkOff() { return state.settings.enabled === false; }
 

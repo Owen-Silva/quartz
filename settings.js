@@ -7494,7 +7494,7 @@
       'with pairing code". It shows an IP address, a PAIRING port and six digits - ' +
       'and that pairing port is not the same number as the connect port below.'));
 
-    field.appendChild(phoneInput('host', 'set-phone-host', 'Phone address', '100.64.0.1'));
+    field.appendChild(phoneInput('host', 'set-phone-host', 'Phone address', 'e.g. 100.64.0.1'));
     field.appendChild(phoneInput('pairPort', 'set-phone-pairport', 'Pairing port', '37419'));
     field.appendChild(phoneInput('code', 'set-phone-code', 'Pairing code', '123456'));
 
@@ -7553,7 +7553,7 @@
     field.appendChild(phoneRow('Model', d.model ? String(d.model) : 'not known yet'));
     field.appendChild(phoneRow('Android', d.android ? String(d.android) : 'not known yet'));
     field.appendChild(phoneRow('Address',
-      (d.host || '?') + ':' + (Number(d.port) > 0 ? d.port : '?')));
+      d.host ? d.host + ':' + (Number(d.port) > 0 ? d.port : '?') : 'not set: type it under Pairing'));
     field.appendChild(phoneRow('Round trip',
       (Number(d.latencyMs) > 0) ? Math.round(d.latencyMs) + ' ms' : 'not measured'));
     field.appendChild(phoneRow('Battery', d.battery
