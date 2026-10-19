@@ -37,13 +37,14 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
   var TAG = 'lumenpb:';
-  var VERSION = 5;
+  var VERSION = 6;
 
   /** The style the bridge puts in the page: hide H while on; K inside H stays visible and clickable. */
-  function css(hide, keep, lift) {
+  function css(hide, keep, lift, layer) {
     hide = (hide || []).filter(Boolean);
     keep = (keep || []).filter(Boolean);
     lift = (lift || []).filter(Boolean);
+    layer = (layer || []).filter(Boolean);
     if (!hide.length) return '';
     var on = function (x) { return 'html.lumen-pb-on ' + x; };
     var out = [];
@@ -59,8 +60,15 @@
     // kept piece only (a nested one moves with it); the ad's progress line stays (Lumen's bar draws its own).
     if (lift.length && keep.length) {
       var ls = [];
-      lift.forEach(function (p) { keep.forEach(function (k) { ls.push('html.lumen-pb-on.lumen-pb-ad:not(.lumen-pb-idle):not(.lumen-pb-own) ' + p + ' ' + k + ':not(' + k + ' *):not([class*="progress"])'); }); });
+      lift.forEach(function (p) { keep.forEach(function (k) { ls.push('html.lumen-pb-on.lumen-pb-ad:not(.lumen-pb-idle):not(.lumen-pb-own) ' + p + ' ' + k + ':not(' + k + ' *):not([class*="progress"]):not([class*="ad-module"])'); }); });
       out.push(ls.join(',\n') + ' { transform: translateY(calc(-1 * var(--lumen-pb-lift, 0px))) !important; }');
+    }
+    // The ad's own whole-player overlay layer (YouTube's .ytp-ad-player-overlay-layout: "Sponsored", the advertiser's
+    // link and card, Skip, all anchored to ITS bottom; read 10-18 from a real pre-roll) ends above Lumen's bar while
+    // an ad plays, so every piece of it is seen and clickable, never under the bar. Nothing is hidden or moved off.
+    if (layer.length) {
+      out.push(layer.map(function (x) { return 'html.lumen-pb-on.lumen-pb-ad:not(.lumen-pb-idle):not(.lumen-pb-own) ' + x; }).join(',\n') +
+        ' { top: 0 !important; bottom: var(--lumen-pb-lift, 0px) !important; height: auto !important; max-height: none !important; }');
     }
     out.push('html.lumen-pb-on.lumen-pb-idle, html.lumen-pb-on.lumen-pb-idle * { cursor: none !important; }');
     return out.join('\n');
@@ -85,11 +93,17 @@
     (D.head || R).appendChild(st);
 
     function area(v) { var r = v.getBoundingClientRect(); return r.width * r.height; }
-    // The adapter's own idea of the current video (YouTube's active Short among one <video> per Short), if it has one.
-    function current() { var c = A.current ? safe(function () { return A.current(D); }) : null; return c && c.tagName === 'VIDEO' && c.isConnected ? c : null; }
+    // The adapter's own idea of the current video (YouTube's current Short), if it has one: a <video>; false while
+    // its page has none yet (wait: never fall back to another video, e.g. a hidden page's); null: no idea.
+    function current() {
+      var c = A.current ? safe(function () { return A.current(D); }) : null;
+      if (c === false) return false;
+      return c && c.tagName === 'VIDEO' && c.isConnected ? c : null;
+    }
     function pick() {
       var cur = current();
       if (cur) return cur;
+      if (cur === false) return null;
       var seen = [], best = null;
       var sels = cfg.video && cfg.video.length ? cfg.video : ['video'];
       for (var i = 0; i < sels.length; i++) {
@@ -116,8 +130,9 @@
     var EV = ['play', 'pause', 'playing', 'waiting', 'ended', 'durationchange', 'loadedmetadata', 'volumechange', 'ratechange', 'progress', 'seeked', 'emptied'];
     function onEv(e) {
       if (e.target === B.video) { soon(); return; }
-      // Another Short started playing (YouTube moved on): the bar follows the video that plays now.
-      if (e.type === 'playing' && B.video && A.current && current() === e.target) attach(e.target);
+      // Another Short's video starts (YouTube moved on, or a neighbour it preloaded took over): the bar follows
+      // the current one at once, on the video's own event (no polling).
+      if ((e.type === 'playing' || e.type === 'play' || e.type === 'loadedmetadata') && A.current && e.target && e.target.tagName === 'VIDEO' && current() === e.target) attach(e.target);
     }
     function onTime(e) {
       if (e.target !== B.video) return;
@@ -130,6 +145,7 @@
       if (B.video && B.ro) { try { B.ro.unobserve(B.video); } catch (e) { /* gone */ } }
       B.video = v;
       if (B.ro) B.ro.observe(v);
+      watchAd(v);
       setOn(B.want);
       post({ t: first ? 'ready' : 'swap', st: state(true) });
     }
@@ -290,10 +306,19 @@
     for (var i = 0; i < EV.length; i++) listen(D, EV[i], onEv, true);
     listen(D, 'timeupdate', onTime, true);
     if (typeof ResizeObserver === 'function') B.ro = new ResizeObserver(onRect);
-    if (cfg.adRoot && typeof MutationObserver === 'function') {
-      var ar = D.querySelector(cfg.adRoot);
-      if (ar) { B.mo = new MutationObserver(soon); B.mo.observe(ar, { attributes: true, attributeFilter: ['class'] }); }
+    // The bound video's own player says "an ad is playing" in its class: ONE element's class watched, re-aimed on
+    // every bind (a Shorts page's player is #shorts-player; its #movie_player is a hidden watch page).
+    function watchAd(v) {
+      if (!cfg.adRoot || typeof MutationObserver !== 'function') return;
+      var ar = (v && v.closest ? safe(function () { return v.closest(cfg.adRoot); }) : null) || safe(function () { return D.querySelector(cfg.adRoot); });
+      if (ar === B.moEl) return;
+      if (B.mo) B.mo.disconnect();
+      B.moEl = ar || null;
+      if (!ar) return;
+      if (!B.mo) B.mo = new MutationObserver(soon);
+      B.mo.observe(ar, { attributes: true, attributeFilter: ['class'] });
     }
+    watchAd(null);
 
     function cmd(c) {
       c = c || {};
@@ -362,7 +387,7 @@
     var c = {
       v: VERSION, tag: TAG, find: cfg && cfg.find || 8000, keys: (cfg && cfg.keys) || [],
       video: a.video || ['video'], adRoot: a.adRoot || '', own: a.own || {}, next: a.next || '', none: a.none || {},
-      css: css(a.hide, a.keep, a.lift)
+      css: css(a.hide, a.keep, a.lift, a.adLayer)
     };
     return '(' + bridge.toString() + ')(' + JSON.stringify(c) + ', {' + parts.join(',\n') + '})';
   }
