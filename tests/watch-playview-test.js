@@ -55,6 +55,23 @@ check(/:not\(\[data-lumen-pv-pressing\]\) ytd-popup-container tp-yt-paper-dialog
 check(!/lumen-pv-bar/.test(PV.trimCss('hulu')) && /\[data-lumen-pv-root\]/.test(PV.trimCss('hulu')) && !/display: none/.test(PV.trimCss('hulu')), 'Hulu: the generic trim only, nothing of its page hidden outright');
 check(PV.trimCss('nope').length > 0 && !/undefined/.test(PV.trimCss('nope')), 'an unknown service: the generic trim, no junk');
 
+/* ---- the ad-slot rules follow Quartz's ad blocker ------------------------------------------------ */
+// The YouTube hide list as it was before the ad-slot rules became conditional, written out literally:
+// with the blocker on (or its state not known yet) the trim must be exactly this, in this order.
+const OLD_YT_HIDE = ['#masthead-container', 'ytd-masthead', 'tp-yt-app-drawer#guide', 'ytd-mini-guide-renderer', '#secondary', '#related',
+  '#comments', 'ytd-comments', '#chat', 'ytd-live-chat-frame', '#player-ads', 'ytd-ad-slot-renderer', 'ytd-companion-slot-renderer',
+  'ytd-merch-shelf-renderer', 'ytd-engagement-panel-section-list-renderer', '#panels', '#offer-module'];
+const AD_SLOTS = ['#player-ads', 'ytd-ad-slot-renderer', 'ytd-companion-slot-renderer', 'ytd-merch-shelf-renderer'];
+const hideBlock = (list) => list.map((s) => 'html[data-lumen-pv] ' + s).join(',\n') + ' { display: none !important; }';
+const ytOn = PV.trimCss('youtube', true), ytOff = PV.trimCss('youtube', false);
+check(JSON.stringify(PV.HIDE.youtube) === JSON.stringify(OLD_YT_HIDE) && JSON.stringify(PV.ADSLOTS.youtube) === JSON.stringify(AD_SLOTS), 'the YouTube hide list is unchanged; the ad slots are #player-ads, the ad-slot, companion-slot and merch-shelf renderers', PV.ADSLOTS);
+check(ytOn === css && PV.trimCss('youtube', undefined) === css && PV.trimCss('youtube', null) === css && PV.trimCss('youtube', 'yes') === css, 'blocker on, or not answered yet: the trim is byte for byte the one with no blocker state given');
+check(ytOn.endsWith('\n' + hideBlock(OLD_YT_HIDE)), 'blocker on: the hide rule is the literal old list, in order', ytOn.slice(-200));
+check(ytOff.endsWith('\n' + hideBlock(OLD_YT_HIDE.filter((s) => AD_SLOTS.indexOf(s) < 0))) && AD_SLOTS.every((s) => ytOff.indexOf(s) < 0), 'blocker off: the four ad/merch selectors are gone, the rest of the hide list as before, in order', ytOff.slice(-200));
+check(ytOff === ytOn.replace('\n' + hideBlock(OLD_YT_HIDE), '\n' + hideBlock(OLD_YT_HIDE.filter((s) => AD_SLOTS.indexOf(s) < 0))), 'blocker off: everything else in the trim (keep, bar, body, player root) is identical');
+check(['disney', 'hulu', 'prime', 'espn', 'nope'].every((s) => PV.trimCss(s, false) === PV.trimCss(s, true) && PV.trimCss(s, true) === PV.trimCss(s)), 'the other services: the blocker changes nothing');
+check(Object.keys(PV.ADSLOTS).every((s) => PV.ADSLOTS[s].every((x) => (PV.HIDE[s] || []).indexOf(x) >= 0)), 'every ad slot is a member of its service’s hide list (the blocker only ever removes, never adds)');
+
 /* ---- epParts / cleanPageTitle ------------------------------------------------------------------------ */
 const E = PV.epParts;
 check(JSON.stringify(E('S2 E4 · Honeydew')) === '{"ep":"S2 E4","name":"Honeydew"}', 'S2 E4 · Honeydew', E('S2 E4 · Honeydew'));

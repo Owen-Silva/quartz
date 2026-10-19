@@ -59,6 +59,16 @@
       'ytd-merch-shelf-renderer', 'ytd-engagement-panel-section-list-renderer', '#panels', '#offer-module'],
     disney: [], hulu: [], prime: [], espn: []
   };
+  // The members of HIDE that are display-ad slots and the merch shelf, not the page's own
+  // furniture. They are hidden only while Quartz's browser-wide ad blocker is on (Settings >
+  // Privacy, <userData>\adblock.json `enabled`, default on): with it switched off he has chosen to
+  // see the page's ads, so the view leaves these slots to the page like any other part of it
+  // (they still sit under the invisible body, so the boxed player shows the same either way).
+  // Only ever a subset of HIDE: with the blocker on, the trim is HIDE exactly as it always was.
+  var ADSLOTS = {
+    youtube: ['#player-ads', 'ytd-ad-slot-renderer', 'ytd-companion-slot-renderer', 'ytd-merch-shelf-renderer'],
+    disney: [], hulu: [], prime: [], espn: []
+  };
 
   // The service's own CONTROL BAR, for a Lumen-drawn bar (the playerbar lane): hidden only while
   // <html class="lumen-pv-bar"> is set by that bridge. Never the ad UI (Skip Ad, the countdown,
@@ -114,9 +124,15 @@
     return x.mode === 'lumen' && viewable(x.kind) && !x.multi && (x.n || 0) === 1 && !x.blocked && !x.noRoot;
   }
 
-  /** The CSS that trims a page to its player; inert until the page's <html data-lumen-pv> is set. */
-  function trimCss(service) {
-    var hide = (HIDE[service] || []).map(function (s) { return 'html[data-lumen-pv] ' + s; });
+  /**
+   * The CSS that trims a page to its player; inert until the page's <html data-lumen-pv> is set.
+   * adblockOn: whether Quartz's ad blocker is on. Only an explicit false drops the ADSLOTS rules;
+   * anything else (true, unknown, not yet answered) is today's trim, byte for byte.
+   */
+  function trimCss(service, adblockOn) {
+    var ads = adblockOn === false ? (ADSLOTS[service] || []) : [];
+    var hide = (HIDE[service] || []).filter(function (s) { return ads.indexOf(s) < 0; })
+      .map(function (s) { return 'html[data-lumen-pv] ' + s; });
     var bar = (BAR[service] || []).map(function (s) { return 'html[data-lumen-pv].lumen-pv-bar ' + s; });
     var keep = (KEEP[service] || []).map(function (s) { return 'html[data-lumen-pv]:not([data-lumen-pv-pressing]) ' + s; });
     return [
@@ -429,7 +445,7 @@
     return GUEST + 'window.__lumenPv.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
 
-  var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
+  var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
     epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -440,6 +456,25 @@
   var CTX = null;
   var obs = null;
   var all = [];   // slots this file has seen (the e2e's _state)
+
+  // Quartz's ad blocker, for the trim's ad-slot rules (ADSLOTS). Assumed ON until main answers,
+  // so a page that loads first gets today's trim and never flashes an ad slot. Read once through
+  // the existing window.api.adblock.state() and kept current by its onStateChanged push; a change
+  // applies from the next page the view trims (CSS already in a page stays as it was put in).
+  var adblockOn = true;
+  (function () {
+    var ab = window.api && window.api.adblock;
+    function take(st) { if (st && typeof st.enabled === 'boolean') adblockOn = st.enabled; }
+    if (!ab || typeof ab.state !== 'function') {
+      console.warn('[lumen-playview] window.api.adblock is missing: the ad-slot trim stays on');
+      return;
+    }
+    try {
+      var pr = ab.state();
+      if (pr && pr.then) pr.then(take, function (e) { console.warn('[lumen-playview] couldn’t read the ad blocker’s state, the ad-slot trim stays on: ' + ((e && e.message) || e)); });
+    } catch (e) { console.warn('[lumen-playview] couldn’t read the ad blocker’s state, the ad-slot trim stays on: ' + ((e && e.message) || e)); }
+    try { if (typeof ab.onStateChanged === 'function') ab.onStateChanged(take); } catch (e) { console.warn('[lumen-playview] couldn’t follow the ad blocker’s changes (the first read still holds): ' + ((e && e.message) || e)); }
+  })();
 
   if (api && typeof api.get === 'function') {
     api.get().then(function (r) { if (r && (r.view === 'lumen' || r.view === 'page')) { PREF = r.view; refreshAll(); } }, function () { /* the default */ });
@@ -517,7 +552,7 @@
     v.addEventListener('dom-ready', function () {
       if (s.view !== v) return;
       try {
-        var pr = v.insertCSS(trimCss(s.service));
+        var pr = v.insertCSS(trimCss(s.service, adblockOn));
         if (pr && pr.catch) pr.catch(function (e) { p.why = 'Lumen couldn’t trim the page: ' + ((e && e.message) || e); render(s); });
       } catch (e) { p.why = 'Lumen couldn’t trim the page: ' + ((e && e.message) || e); }
       startReads(s, false);
