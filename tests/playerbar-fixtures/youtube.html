@@ -16,6 +16,15 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .ytp-skip-ad-button{font:600 15px "Segoe UI",sans-serif;color:#fff;background:rgba(0,0,0,.75);border:1px solid #aaa;padding:10px 18px;cursor:pointer}
 .ytp-ad-button{display:none}
 #movie_player.ad-showing .ytp-ad-button{display:inline-block}
+/* Today's ad overlay (read 10-18 from a real pre-roll): one layer over the whole player, its pieces anchored to ITS
+   bottom: "Sponsored" and the advertiser's link 15px up, the advertiser's card 45px up. */
+.ytp-ad-player-overlay-layout{position:absolute;left:0;right:0;top:0;bottom:0;height:100%;pointer-events:none}
+.ytp-ad-player-overlay-layout__ad-info-container{position:absolute;left:22px;bottom:15px;display:flex;gap:8px;align-items:center;pointer-events:auto}
+.ytp-ad-badge--clean-player{font-weight:700;background:rgba(0,0,0,.5);padding:4px 6px}
+.ytp-visit-advertiser-link{color:#fff;background:rgba(0,0,0,.5);padding:4px 6px;cursor:pointer}
+.ytp-ad-player-overlay-layout__player-card-container{position:absolute;left:22px;bottom:45px;pointer-events:auto}
+.ytp-ad-player-card{display:flex;gap:10px;align-items:center;background:rgba(20,20,20,.85);padding:8px 10px;border-radius:8px}
+.ytp-ad-player-card button{font:600 13px "Segoe UI",sans-serif;background:#3ea6ff;color:#000;border:0;border-radius:14px;padding:6px 12px}
 </style></head><body>
 <div id="movie_player" class="html5-video-player">
   <video class="html5-main-video" id="v" src="/__media/clip.mp4" autoplay muted loop playsinline></video>
@@ -28,6 +37,10 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
   <div class="video-ads ytp-ad-module">
     <div class="ytp-ad-text" id="adtext">Ad 1 of 1 <span class="ytp-ad-duration-remaining">0:12</span></div>
     <div class="ytp-ad-skip-button-container"><button class="ytp-skip-ad-button" id="skip">Skip</button></div>
+    <div class="ytp-ad-player-overlay-layout" id="adlayer">
+      <div class="ytp-ad-player-overlay-layout__player-card-container"><div class="ytp-ad-player-card" id="adcard"><span>Advertiser one</span><span>advertiser.example</span><button id="adplay" onclick="window.__adClicks=(window.__adClicks||0)+1">Play now</button></div></div>
+      <div class="ytp-ad-player-overlay-layout__ad-info-container" id="adinfo"><span class="ytp-ad-badge--clean-player" id="adsponsored">Sponsored</span><div class="ytp-visit-advertiser-link ytp-ad-component--clickable" id="adlink" onclick="window.__adLinks=(window.__adLinks||0)+1">advertiser.example</div></div>
+    </div>
   </div>
 </div>
 <script>

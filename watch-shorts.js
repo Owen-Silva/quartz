@@ -196,6 +196,21 @@
     'ytd-reel-video-renderer #actions', 'reel-action-bar-view-model', 'ytd-reel-player-overlay-renderer #actions',
     'ytd-reel-video-renderer #metapanel', 'yt-reel-metapanel-view-model', 'ytd-reel-player-header-renderer', 'ytd-reel-video-renderer .metadata-container',
     'ytd-shorts #shorts-panel-container', 'ytd-shorts ytd-engagement-panel-section-list-renderer'];
+  // ...of which the Short's own overlay pieces (its title and channel, its action bar) are only VEILED (invisible,
+  // never hit, still laid out): YouTube loads their images, the channel's avatar among them, only once laid out
+  // (a display:none avatar never got its picture, and Lumen showed an initial). Read 10-18 from the real page.
+  var VEIL = ['ytd-reel-video-renderer #actions', 'reel-action-bar-view-model', 'ytd-reel-player-overlay-renderer #actions',
+    'ytd-reel-video-renderer #metapanel', 'yt-reel-metapanel-view-model', 'ytd-reel-player-header-renderer', 'ytd-reel-video-renderer .metadata-container'];
+  var GONE = HIDE.filter(function (s) { return VEIL.indexOf(s) < 0; });
+  // Today's Shorts page (read 10-18 from the real page): ONE ytd-reel-video-renderer, in #reel-overlay-container,
+  // which YouTube moves into the current sequence slot (div.reel-video-in-sequence-new: YouTube's own 9:16 size,
+  // a gap between slots, the neighbours' thumbnails above and below). Lumen pins that overlay over the whole page
+  // (the 9:16 webview) and sizes every box down to the player to it, so the Short shows edge to edge, centred, with
+  // no black strip and nothing cut off, and no neighbour peeks in. Older pages (a renderer per slot) keep the
+  // per-renderer rules below.
+  var FILL = ['#reel-overlay-container > ytd-reel-video-renderer', 'ytd-reel-video-renderer #short-video-container', 'ytd-reel-video-renderer .player-wrapper',
+    'ytd-reel-video-renderer #player-container', 'ytd-reel-video-renderer .player-container', 'ytd-reel-video-renderer ytd-player', 'ytd-reel-video-renderer ytd-player > #container',
+    'ytd-reel-video-renderer #shorts-player', '#reel-overlay-container #shorts-player'];
   var KEEP = ['ytd-popup-container tp-yt-paper-dialog:has(yt-confirm-dialog-renderer)', 'ytd-consent-bump-v2-lightbox',
     'ytd-popup-container tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)', 'yt-playability-error-supported-renderers',
     'ytd-reel-video-renderer ytd-ad-slot-renderer', 'ytd-reel-video-renderer ytd-reel-ad-metadata-renderer'];
@@ -211,11 +226,19 @@
         ' width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; min-width: 0 !important; min-height: 0 !important;' +
         ' max-width: none !important; max-height: none !important; transform: none !important; z-index: 2147483646 !important; background: #000 !important;' +
         ' --ytd-masthead-height: 0px; --ytd-toolbar-height: 0px; }',
-      R + ' #shorts-container, ' + R + ' #shorts-inner-container { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; top: 0 !important; transform: none !important; }',
-      R + ' ytd-reel-video-renderer { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; }',
+      R + ' #shorts-container, ' + R + ' #shorts-inner-container { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; top: 0 !important; transform: none !important; contain: none !important; filter: none !important; will-change: auto !important; }',
+      R + ' .reel-video-in-sequence-new { transform: none !important; contain: none !important; filter: none !important; will-change: auto !important; }',
+      R + ' #reel-overlay-container { position: fixed !important; left: 0 !important; top: 0 !important; right: auto !important; bottom: auto !important; width: 100vw !important; height: 100vh !important;' +
+        ' margin: 0 !important; padding: 0 !important; min-width: 0 !important; max-width: none !important; max-height: none !important; transform: none !important; border-radius: 0 !important; z-index: 2 !important; background: #000 !important; }',
+      R + ' ytd-reel-video-renderer { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; flex: none !important; min-width: 0 !important; max-width: none !important; }',
       R + ' ytd-reel-video-renderer #player-container, ' + R + ' ytd-reel-video-renderer .player-container, ' + R + ' ytd-reel-video-renderer #shorts-player' +
         ' { width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; margin: 0 !important; border-radius: 0 !important; }',
-      HIDE.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { display: none !important; }'
+      FILL.map(function (s) { return R + ' ' + s; }).join(', ') + ' { position: relative !important; left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important;' +
+        ' min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important; flex: none !important; border-radius: 0 !important; transform: none !important; }',
+      // The picture itself: the whole frame, never YouTube's pillarbox offset from a size it computed before the trim.
+      R + ' #shorts-player video.html5-main-video, ' + R + ' ytd-reel-video-renderer video.html5-main-video { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; object-fit: contain !important; }',
+      VEIL.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { visibility: hidden !important; pointer-events: none !important; }',
+      GONE.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { display: none !important; }'
     ].join('\n');
   }
 
@@ -227,7 +250,7 @@
    * opens a grid's first Short, and presses YouTube's own buttons. Serialised with String().
    */
   function guest() {
-    var V = 1;
+    var V = 2;
     if (window.__lumenSh && window.__lumenSh.v === V) return;
     function Q(sel, r) { try { return (r || document).querySelector(sel); } catch (e) { return null; } }
     function QA(sel, r) { try { return Array.prototype.slice.call((r || document).querySelectorAll(sel)); } catch (e) { return []; } }
@@ -285,14 +308,21 @@
 
     /* --- YouTube's own buttons, in the current Short ---- */
     function likeBtn(r) { return Q('like-button-view-model button', r) || Q('#like-button button', r) || Q('button[aria-label^="like this" i]', r); }
-    function dislikeBtn(r) { return Q('dislike-button-view-model button', r) || Q('#dislike-button button', r) || Q('button[aria-label^="dislike this" i]', r); }
-    function subBtn(r) { return Q('subscribe-button-view-model button', r) || Q('yt-subscribe-button-view-model button', r) || Q('#subscribe-button button', r) || Q('ytd-subscribe-button-renderer button', r); }
+    // Today's page (read 10-18): the action bar is reel-action-bar-view-model (like-button-view-model, comments,
+    // share, remix, the sound); signed out it has NO Dislike, signed in YouTube adds its own beside Like. Subscribe
+    // sits in the channel bar (yt-reel-channel-bar-view-model .ytReelChannelBarViewModelReelSubscribeButton
+    // button-view-model button), no subscribe-* element any more. Tag, class and label are all tried.
+    function dislikeBtn(r) { return Q('dislike-button-view-model button', r) || Q('#dislike-button button', r) || Q('[class*="DislikeButton"] button', r) || Q('button[aria-label^="dislike" i]', r) || Q('reel-action-bar-view-model button[aria-label*="dislike" i]', r); }
+    function subBtn(r) {
+      return Q('subscribe-button-view-model button', r) || Q('yt-subscribe-button-view-model button', r) || Q('#subscribe-button button', r) || Q('ytd-subscribe-button-renderer button', r) ||
+        Q('[class*="ReelSubscribeButton"] button', r) || Q('yt-reel-channel-bar-view-model button[aria-label^="subscribe" i]', r) || Q('yt-reel-channel-bar-view-model button[aria-label^="unsubscribe" i]', r) || Q('[class*="SubscribeButton"] button', r);
+    }
     function saveBtn(r) { return Q('button[aria-label="Save to playlist" i]', r) || Q('button[aria-label^="Save" i]', r); }
     function menuBtn(r) { return Q('#menu-button button', r) || Q('button[aria-label="More actions" i]', r); }
     function pressed(b) { return !!b && b.getAttribute('aria-pressed') === 'true'; }
     function subscribed(b) {
       if (!b) return false;
-      var host = b.closest('ytd-subscribe-button-renderer, subscribe-button-view-model, yt-subscribe-button-view-model');
+      var host = b.closest('ytd-subscribe-button-renderer, subscribe-button-view-model, yt-subscribe-button-view-model, [class*="SubscribeButton"]');
       if (host && host.hasAttribute('subscribed')) return true;
       if (/^unsubscribe/i.test(String(b.getAttribute('aria-label') || ''))) return true;
       return /^subscribed$/i.test(txt(b));
@@ -330,8 +360,11 @@
       out.title = txt(t);
       var ca = Q('yt-reel-channel-bar-view-model a[href*="/@"]', r) || Q('.ytReelChannelBarViewModelChannelName a', r) || Q('ytd-channel-name a', r) || Q('#channel-name a', r) || Q('a[href^="/@"]', r);
       if (ca && txt(ca)) {
-        var img = Q('yt-reel-channel-bar-view-model img', r) || Q('#avatar img', r) || Q('img.yt-core-image', r);
-        out.channel = { name: txt(ca).replace(/^@/, '@'), url: ca.href || '', avatar: (img && img.src) || '', subs: '' };
+        // The channel bar's own avatar (yt-decorated-avatar-view-model's img). An <img> YouTube hasn't loaded yet has
+        // no src: the next read gets it (the bar is veiled, never display:none, so YouTube does load it).
+        var img = Q('yt-reel-channel-bar-view-model img[src]', r) || Q('#avatar img[src]', r) || Q('img.yt-core-image[src]', r);
+        var av = img ? String(img.src || '') : '';
+        out.channel = { name: txt(ca).replace(/^@/, '@'), url: ca.href || '', avatar: /^(https?:\/\/|data:image\/)/.test(av) ? av : '', subs: '' };
       }
       var lb = likeBtn(r), db = dislikeBtn(r), sb = subBtn(r), vb = saveBtn(r) || menuBtn(r);
       if (lb) out.like = { found: true, on: pressed(lb), count: labelOf(lb), label: lb.getAttribute('aria-label') || '' };
@@ -449,6 +482,26 @@
       mo = new MutationObserver(function () { if (document.documentElement.hasAttribute('data-lumen-sh') && !Q('[data-lumen-sh-root]')) apply(true); });
       mo.observe(app, { subtree: true, attributes: true, attributeFilter: ['is-active'] });
     }
+    // The wheel over today's pinned Short (#reel-overlay-container, fixed over the page): a fixed box's wheel never
+    // reaches YouTube's snap container, so the page moves ONE Short per gesture itself, with YouTube's own
+    // Next/Previous (step()). A trackpad's burst and its inertia are one gesture (the chrome's gesture() rule: 220 ms
+    // of quiet ends it, 24 px moves, then 380 ms of lock). Older pages (no pinned overlay) keep YouTube's own wheel.
+    var wg = { last: 0, acc: 0, moved: false, lock: 0 };
+    function onWheel(e) {
+      if (!document.documentElement.hasAttribute('data-lumen-sh') || e.ctrlKey) return;
+      var t = e.target;
+      if (!t || !t.closest || !t.closest('[data-lumen-sh-root] #reel-overlay-container')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var now = Date.now();
+      var dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+      if (now - wg.last > 220) { wg.acc = 0; wg.moved = false; }
+      wg.last = now;
+      if (wg.moved || now < wg.lock) return;
+      wg.acc += dy;
+      if (Math.abs(wg.acc) >= 24) { wg.moved = true; wg.lock = now + 380; step(wg.acc > 0 ? 1 : -1); }
+    }
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
     window.__lumenSh = { v: V, apply: apply, read: read, step: step, openFirst: openFirst, press: press,
       tick: function (on) { var a = apply(on); if (a.on) watchActive(); var x = read(); x.applied = a.on; x.how = a.how || ''; return x; } };
   }

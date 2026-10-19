@@ -162,24 +162,42 @@ check(/data-field', 'watchplaybar'/.test(st) && /LumenPlayerBar\.renderSetting\(
   const yp = AD.youtube.page;
   const vid = { tagName: 'VIDEO' };
   const reel = { querySelector: (q) => (q === 'video' ? vid : null) };
-  const doc = { querySelector: (q) => (q === 'ytd-reel-video-renderer[is-active]' ? reel : null) };
+  const appOld = { querySelector: (q) => (q === 'ytd-reel-video-renderer[is-active]' ? reel : null), querySelectorAll: () => [] };
+  const doc = { querySelector: (q) => (q === 'ytd-shorts' ? appOld : q === 'ytd-reel-video-renderer[is-active]' ? reel : null) };
+  // Today's page (read 10-18): no is-active; the hidden watch page's paused #movie_player video is NOT in ytd-shorts;
+  // in it, the #shorts-player's one video on screen, plus (older layout) paused neighbours above and below.
+  const V = (x, y, w, h, paused) => ({ tagName: 'VIDEO', paused, getBoundingClientRect: () => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h }) });
+  const shown = V(0, 0, 468, 832, false), above = V(0, -848, 468, 832, true), below = V(0, 848, 468, 832, true), half = V(0, 416, 468, 832, true);
+  const appNew = (list, sp) => ({ querySelector: (q) => (q === '#shorts-player video' ? sp || null : null), querySelectorAll: (q) => (q === 'video' ? list : []) });
+  const docOf = (app) => ({ defaultView: { innerWidth: 468, innerHeight: 832 }, querySelector: (q) => (q === 'ytd-shorts' ? app : null) });
   const had = Object.prototype.hasOwnProperty.call(global, 'location'), old = global.location;
   global.location = { pathname: '/shorts/Xk3pQ9vLm2A' };
   const onShort = yp.current(doc);
+  const today = yp.current(docOf(appNew([above, shown, below], shown)));
+  const midMove = yp.current(docOf(appNew([shown, half], shown)));
+  const playingWins = yp.current(docOf(appNew([V(0, 0, 468, 832, true), V(0, 0, 468, 832, false)])));
+  const notYet = yp.current({ querySelector: () => null });
+  const noVideoYet = yp.current(docOf(appNew([], null)));
   global.location = { pathname: '/watch' };
   const onWatch = yp.current(doc);
   if (had) global.location = old; else delete global.location;
-  check(onShort === vid && onWatch === null, 'YouTube: on a Shorts page the current video is the ACTIVE Short\'s; on a watch page none (its #movie_player)');
+  check(onShort === vid && onWatch === null, 'YouTube: on an older Shorts page the current video is the is-active Short\'s; on a watch page none (its #movie_player)');
+  check(today === shown && midMove === shown && !!playingWins && playingWins.paused === false, 'today\'s Shorts page: the video ON SCREEN (a playing one first), never a paused neighbour or the hidden watch page\'s', { today: today === shown, midMove: midMove === shown });
+  const ytCss = Page.source({}, AD.youtube);
+  check(/lumen-pb-ad:not\(\.lumen-pb-idle\):not\(\.lumen-pb-own\) \.ytp-ad-player-overlay-layout,/.test(ytCss) && /bottom: var\(--lumen-pb-lift, 0px\) !important; height: auto/.test(ytCss) && !/display: none|opacity: 0/.test(ytCss),
+    'during an ad, YouTube\'s own overlay layer (Sponsored, the advertiser, Skip) ends above Lumen\'s bar; nothing of it is hidden');
+  check(notYet === false && noVideoYet === false, 'a Shorts page with no Short video yet: false (the bridge waits, never binding the hidden watch page\'s video)');
+  check(src.includes('if (cur === false) return null;') && src.includes("e.type === 'loadedmetadata'") && src.includes('watchAd(v);'), 'the bridge waits on false, re-binds on the new video\'s own play/playing/loadedmetadata, and re-aims its one ad observer per bind');
   check(AD.youtube.video.indexOf('ytd-reel-video-renderer[is-active] video') > AD.youtube.video.indexOf('#movie_player video'), 'the Shorts video comes after the watch player in the find list');
   const mk = (mark, showing) => {
     const r = { querySelector: (q) => (mark && /ytd-ad-slot-renderer/.test(q) ? {} : null) };
     const sp = { classList: { contains: (c) => c === 'ad-showing' && showing } };
-    return { duration: 20, currentTime: 5, closest: (q) => (q === 'ytd-reel-video-renderer' ? r : q === '.html5-video-player' ? sp : null) };
+    return { duration: 20, currentTime: 5, closest: (q) => (q === '#reel-overlay-container' ? r : q === '.html5-video-player' ? sp : null) };
   };
   const nd = { getElementById: () => null, querySelector: () => null };
   const a1 = yp.ad(nd, mk(true, false)), a2 = yp.ad(nd, mk(false, true)), a3 = yp.ad(nd, mk(false, false));
   check(!!a1 && a1.on && a1.left === 15 && a1.skip === false && !!a2 && a2.on && a3 === null, 'an ad Short (YouTube\'s ad slot in its reel, or the Shorts player\'s ad state) is an ad; a plain Short is not', { a1, a2, a3 });
-  check(AD.youtube.keep.indexOf('ytd-reel-ad-metadata-renderer') >= 0 && AD.youtube.lift.indexOf('ytd-reel-video-renderer[is-active]') >= 0, 'an ad Short\'s own pieces stay visible and are lifted above Lumen\'s bar');
+  check(AD.youtube.keep.indexOf('ytd-reel-ad-metadata-renderer') >= 0 && AD.youtube.lift.indexOf('#reel-overlay-container') >= 0 && /#shorts-player/.test(AD.youtube.adRoot), 'an ad Short\'s own pieces stay visible and are lifted above Lumen\'s bar');
   check(src.includes("(e.key === 'ArrowUp' || e.key === 'ArrowDown') && R.hasAttribute('data-lumen-sh')"), 'the page bridge leaves Up/Down to YouTube on Lumen\'s Shorts view (never the volume there)');
   check(src.includes("case 'rate': if (ad && ad.on) return { ok: false, blocked: 'ad' }"), 'no speed change while an ad plays (any service)');
   check(src.includes("current() === e.target) attach(e.target)") && src.includes('else if (now && now !== v) attach(now)'), 'the bridge swaps to the Short that plays now (on its playing, and on a rescan)');

@@ -34,7 +34,8 @@
     // ...or, on a Shorts page, the active Short's (page.current() picks it first).
     video: ['#movie_player video.html5-main-video', '#movie_player video', 'ytd-reel-video-renderer[is-active] video', '#shorts-player video'],
     // The element whose class says "an ad is playing": watched with one MutationObserver.
-    adRoot: '#movie_player',
+    // On a Shorts page the bound video's own player (#shorts-player; the page's #movie_player is a hidden watch page).
+    adRoot: '#movie_player, #shorts-player',
     // YouTube's own control bar and its top strip (title, share, Watch later in the embed).
     // On a Short: YouTube's own Shorts controls (play/pause, the volume, its progress line).
     hide: ['.ytp-chrome-bottom', '.ytp-gradient-bottom', '.ytp-chrome-top', '.ytp-gradient-top', '.ytp-large-play-button',
@@ -42,9 +43,11 @@
     // Inside a hidden part, these stay visible and clickable: every ad piece, its Skip button,
     // its "Why this ad" and the countdown, and YouTube's popups (age check, consent, errors).
     // An ad Short's own slot and metadata (its advertiser's button) too.
-    keep: ['[class*="ytp-ad"]', '[class*="skip"]', '.ytp-popup', '.ytp-error', '.ytp-offline-slate', 'ytd-ad-slot-renderer', 'ytd-reel-ad-metadata-renderer'],
+    keep: ['[class*="ytp-ad"]', '[class*="skip"]', '.ytp-popup', '.ytp-error', '.ytp-offline-slate', 'ytd-ad-slot-renderer', 'ytd-reel-ad-metadata-renderer', '#ads-overlay'],
     // The hidden parts Lumen's bar sits over: their kept ad pieces are lifted above it during an ad.
-    lift: ['.ytp-chrome-bottom', 'ytd-reel-video-renderer[is-active]'],
+    lift: ['.ytp-chrome-bottom', 'ytd-reel-video-renderer', '#reel-overlay-container'],
+    // The ad's own overlay layer over the whole player: during an ad it ends above Lumen's bar (watch and Shorts).
+    adLayer: ['.ytp-ad-player-overlay-layout', '.ytp-ad-player-overlay'],
     // The service's own buttons, for "open YouTube's own menu" (never needed while the API answers).
     own: { captions: '.ytp-subtitles-button', quality: '.ytp-settings-button', audio: '.ytp-settings-button', more: '.ytp-settings-button' },
     next: '.ytp-next-button',
@@ -152,17 +155,44 @@
         }
         return false;
       },
-      /** On a Shorts page: the active Short's own <video> (one per Short, or the one Shorts player moved into it). */
+      /**
+       * On a Shorts page: the CURRENT Short's own <video>; false while the Shorts app has none yet (the bridge then
+       * waits, never falling back to another video). Not a Shorts page: null (the selectors above decide).
+       * Read 10-18 from the real page: no reel wears is-active any more; ONE ytd-reel-video-renderer holds the
+       * #shorts-player, whose single <video> takes each Short in turn; and the page also keeps a hidden watch page
+       * (ytd-watch-flexy #movie_player) with its own paused <video>, which the bar had bound to (0:00, paused).
+       * Older pages (and preloaded neighbours) have one <video> per Short: the one on screen wins, a playing one
+       * first, so the bar follows every move.
+       */
       current: function (d) {
-        if (String(location.pathname).indexOf('/shorts/') !== 0 && String(location.pathname) !== '/shorts') return null;
-        var r = d.querySelector('ytd-reel-video-renderer[is-active]');
-        return (r && r.querySelector('video')) || null;
+        var path = String(location.pathname);
+        if (path.indexOf('/shorts/') !== 0 && path !== '/shorts') return null;
+        var app = d.querySelector('ytd-shorts');
+        if (!app) return false;
+        var r = app.querySelector('ytd-reel-video-renderer[is-active]');
+        var a = r && r.querySelector('video');
+        if (a) return a;
+        var vs = app.querySelectorAll('video'), W = d.defaultView || window;
+        var vw = W.innerWidth || 0, vh = W.innerHeight || 0;
+        var best = null, score = 0;
+        for (var i = 0; i < vs.length; i++) {
+          var b = vs[i].getBoundingClientRect();
+          var seen = Math.max(0, Math.min(b.right, vw) - Math.max(b.left, 0)) * Math.max(0, Math.min(b.bottom, vh) - Math.max(b.top, 0));
+          if (seen <= 0) continue;
+          // On screen is what counts; of two on screen, the one playing (a neighbour preloads paused).
+          var sc = seen * (vs[i].paused ? 1 : 2);
+          if (sc > score) { score = sc; best = vs[i]; }
+        }
+        if (best) return best;
+        var sp = app.querySelector('#shorts-player video');
+        return sp || false;
       },
       ad: function (d, v) {
-        var reel = v && v.closest ? v.closest('ytd-reel-video-renderer') : null;
+        // Today the reel's ad pieces sit beside it, in #reel-overlay-container (#ads-overlay); older pages, in the reel.
+        var reel = v && v.closest ? (v.closest('#reel-overlay-container') || v.closest('ytd-reel-video-renderer')) : null;
         if (reel) {
           // An ad Short: YouTube's ad slot or ad metadata in its reel, or the Shorts player in its ad state.
-          var mark = reel.querySelector('ytd-ad-slot-renderer, ytd-reel-ad-metadata-renderer, ad-badge-view-model, [class*="ad-badge"], [class*="AdBadge"]');
+          var mark = reel.querySelector('ytd-ad-slot-renderer, ytd-reel-ad-metadata-renderer, ad-badge-view-model, [class*="ad-badge"], [class*="AdBadge"], #ads-overlay [class*="ytp-ad"]');
           var sp = v.closest('.html5-video-player');
           if (!mark && !(sp && sp.classList.contains('ad-showing'))) return null;
           var sleft = isFinite(v.duration) && v.duration > 0 ? Math.max(0, v.duration - v.currentTime) : null;
