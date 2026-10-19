@@ -1,9 +1,9 @@
 // procfind.js -- "is a process with this exe name running?" without starting a process.
 //
-// school.js asks that every 5 s (is LessonPlayer up?). It used to spawn `tasklist /FI ...` for the
+// notes-pane-main.js asks that every 5 s (is the reader app up?). It used to spawn `tasklist /FI ...` for the
 // answer: a new tasklist.exe plus its conhost.exe every 5 s for the whole life of the browser,
-// about 60-95 ms of CPU each on the user's i3 (measured 2026-10-15), plus whatever Defender spends
-// on each new process, whether or not LessonPlayer was ever opened. This reads the same list
+// about 60-95 ms of CPU each on a Core i3 laptop (measured 2026-10-15), plus whatever Defender spends
+// on each new process, whether or not the reader app was ever opened. This reads the same list
 // tasklist reads (a Toolhelp snapshot) inside the main process: about a millisecond.
 //
 // Same answer as tasklist's IMAGENAME filter: the exe file name, compared case-insensitively.
@@ -56,7 +56,7 @@ const TH32CS_SNAPPROCESS = 0x2;
 const INVALID = BigInt.asUintN(64, -1n);
 
 /**
- * true / false: whether a process named exeName (e.g. 'LessonPlayerApp.exe') is running.
+ * true / false: whether a process named exeName (e.g. 'SomeApp.exe') is running.
  * null: this machine cannot answer without a child process (see reason()).
  */
 function running(exeName) {

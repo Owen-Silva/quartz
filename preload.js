@@ -614,17 +614,18 @@ contextBridge.exposeInMainWorld('api', {
     makeDefault: () => ipcRenderer.invoke('firstrun:make-default'),
     defaultStatus: () => ipcRenderer.invoke('firstrun:default-status')
   },
-  // The School workspace: classes, the current subject, the LessonPlayer reader,
-  // the headless-Claude helper and its match. State shape and command names
-  // are documented in school.js. Every call resolves; a refused or failing
-  // command answers { ok: false, reason } in plain words.
-  school: {
-    describe: () => ipcRenderer.invoke('school:describe'),
-    command: (name, arg) => ipcRenderer.invoke('school:command', String(name == null ? '' : name), arg == null ? null : arg),
+  // The notes pane: the notes folder's subjects, the current subject, the
+  // question reader, the headless-Claude helper and its match. State shape and
+  // command names are documented in notes-pane-main.js; `configured: false`
+  // means it is off (no notes folder in notes-pane.json). Every call resolves;
+  // a refused or failing command answers { ok: false, reason } in plain words.
+  notes: {
+    describe: () => ipcRenderer.invoke('notes:describe'),
+    command: (name, arg) => ipcRenderer.invoke('notes:command', String(name == null ? '' : name), arg == null ? null : arg),
     onUpdate: (cb) => {
       const handler = (_event, payload) => cb(payload);
-      ipcRenderer.on('school:update', handler);
-      return () => ipcRenderer.removeListener('school:update', handler);
+      ipcRenderer.on('notes:update', handler);
+      return () => ipcRenderer.removeListener('notes:update', handler);
     }
   },
 

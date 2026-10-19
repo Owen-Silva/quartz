@@ -1,20 +1,21 @@
 'use strict';
 
 /*
- * budget.js — the reader behind the School helper's budget guard (main process).
+ * budget.js — the reader behind the notes pane helper's budget guard (main process).
  *
- * The School helper (school.js) spends the user's Claude Code limits with
+ * The notes pane's helper (notes-pane-main.js) spends the user's Claude Code limits with
  * headless `claude -p` calls, so before every call it asks this module how
  * much of the five-hour and weekly windows is already used, and parks itself
- * when either is nearly gone (school.js budgetVerdict()). That guard is the
+ * when either is nearly gone (notes-pane-main.js budgetVerdict()). That guard is the
  * module's ONLY reader now: the titlebar budget pill (pills.js) and the new
  * tab page's "Claude 5H / week" row were removed with the rest of the Claude
  * Code chrome, and with them the 'budget:describe' IPC, the 'budget:update'
  * push and the `newtab:budget` guest console channel. There is no network
  * here and nothing is written to Claude Code's folder: this only reads it.
  *
- * SOURCE. Claude Code's statusLine hook writes one JSON per session to
- *   C:\Users\you\mission-control\data\statusline\<session>.json
+ * SOURCE. A Claude Code statusLine hook the user runs writes one JSON per
+ * session into a folder of their choosing:
+ *   <budgetDir>\<session>.json   (budgetDir in <userData>\notes-pane.json)
  * with `receivedAt`, `cost.total_cost_usd`, `rate_limits.five_hour
  * .{used_percentage,resets_at}` and `rate_limits.seven_day.{...}` (resets_at
  * is epoch SECONDS). The newest file by mtime is the truth; an age of ten
@@ -24,7 +25,7 @@
  * AGE IS NOT A FAULT. A Claude Code session that is idle simply stops writing:
  * the limits it last reported are still the truth, only older. So ten minutes
  * buys a note with the age in it, and only an hour earns the state 'stale'
- * (which the School guard still trusts). Unreadable or missing files are the
+ * (which the notes pane's guard still trusts). Unreadable or missing files are the
  * real fault and are still 'error'.
  *
  * TODAY'S SPEND IS A DELTA, NOT A TOTAL. Each statusline file carries its
@@ -38,7 +39,7 @@
  * HOW A SESSION'S START IS KNOWN. Not from the file's birthtime: the hook
  * writes a .tmp and renames it over the target on every tick, so the file is
  * brand new every 30 seconds and its birthtime always equals its mtime
- * (measured on the live folder — every one of the user's files had birth == mtime
+ * (measured on the live folder — every one of the author's files had birth == mtime
  * to the millisecond). The honest number is `receivedAt - cost
  * .total_duration_ms`, which is wall-clock since the session opened; checked
  * against the birthtimes of the matching .jsonl transcripts, it lands on the
@@ -65,7 +66,7 @@
  *   }
  *   FRESHNESS. A 30 s poll re-reads the folder (it also keeps today's
  *   baselines honest: a session is baselined within 30 s of first being seen,
- *   not whenever School next happens to ask). snapshot() is therefore at most
+ *   not whenever the notes pane next happens to ask). snapshot() is therefore at most
  *   one poll old, and if the poll has somehow stalled (a reading older than
  *   two polls) snapshot() takes a fresh reading on the spot before answering.
  *   stop() clears the poll's timer; a snapshot() after stop() still reads on
@@ -77,17 +78,18 @@
  *     create(), so snapshot() is a real answer from the first call onward.
  *   - `reason` is also set on an 'ok' snapshot when something partial
  *     happened (a file in the folder that would not parse). The state is
- *     honest — the numbers ARE good — and the note still reaches the School
+ *     honest — the numbers ARE good — and the note still reaches the notes
  *     pane's helper line, because a file we silently skipped is exactly the
  *     kind of thing that should not be silent.
- *   - The extra create() options `dir`, `now`, `setRepeat`, `clearRepeat`,
- *     `stateFile` and `stat` exist for the harness. Main passes none of them:
- *     it gets the folder from the home directory and the baseline file from
- *     app.getPath('userData').
+ *   - `dir` is REQUIRED: there is no default folder. notes-pane-main.js only
+ *     creates this reader when notes-pane.json names one (budgetDir), and
+ *     passes it here; without a `dir` every reading is an error that says so.
+ *   - The extra create() options `now`, `setRepeat`, `clearRepeat`,
+ *     `stateFile` and `stat` exist for the harness. The notes pane passes none
+ *     of them: the baseline file comes from app.getPath('userData').
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 /** How often the folder is re-read. The statusline hook ticks far faster. */
@@ -95,7 +97,7 @@ const POLL_MS = 30000;
 
 /**
  * From here the age is worth saying out loud: it goes into `reason`, which the
- * School helper shows. The numbers are still the truth — Claude Code only writes while
+ * notes pane's helper shows. The numbers are still the truth — Claude Code only writes while
  * a session is actually running, so a quiet afternoon is not a fault.
  */
 const AGE_NOTE_MS = 10 * 60 * 1000;
@@ -116,10 +118,6 @@ const STALE_MS = 60 * 60 * 1000;
  */
 const TODAY_SLACK_MS = 6 * 60 * 60 * 1000;
 
-/** The default folder. `dir` in the options overrides it (the harness does). */
-function defaultDir() {
-  return path.join(os.homedir(), 'mission-control', 'data', 'statusline');
-}
 
 /** Local midnight at the start of the day `ms` falls in. */
 function startOfLocalDay(ms) {
@@ -210,7 +208,7 @@ function create(options) {
      pill and new-tab row. They are deliberately not read: an old caller that
      still passes them gets no IPC handler and no pushes, and no throw. */
   const electronApp = opts.app;
-  const dir = opts.dir || defaultDir();
+  const dir = typeof opts.dir === 'string' ? opts.dir.trim() : '';
   const now = typeof opts.now === 'function' ? opts.now : () => Date.now();
   /* An interval, not a setTimeout re-armed from its own callback: in Electron's main process every
      setTimeout call also calls process.activateUvLoop(), and doing that from inside a timer
@@ -221,7 +219,7 @@ function create(options) {
   /* The harness fakes birthtimes through here; main never passes it. */
   const statFile = typeof opts.stat === 'function' ? opts.stat : (file) => fs.statSync(file);
 
-  /* Where the per-day baselines live. The user's userData, not the statusline
+  /* Where the per-day baselines live. The app's userData, not the statusline
      folder: that one is Claude Code's and this module never writes to it. */
   let stateFile = '';
   let stateWhy = '';
@@ -341,6 +339,7 @@ function create(options) {
    * tick never sees half a folder.
    */
   function read() {
+    if (!dir) return failed('no statusline folder was given (budgetDir in notes-pane.json)');
     let names;
     try {
       names = fs.readdirSync(dir);
@@ -470,7 +469,7 @@ function create(options) {
   /* --- reading on demand --------------------------------------------------- */
 
   /**
-   * The School guard's question. The 30 s poll normally keeps `last` at most
+   * The notes pane guard's question. The 30 s poll normally keeps `last` at most
    * one poll old; a reading older than two polls means the poll has stalled
    * (or stop() ran), and the guard is about to spend real limits on the
    * answer, so a fresh reading is taken right here instead of trusting it.

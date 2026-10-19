@@ -51,7 +51,7 @@ let lookSync = null;
 // the chrome's preload; main only tells it its HWND and the window events.
 const toprowMain = require('./toprow-main');
 let toprow = null;
-const schoolModule = require('./school');
+const notesPaneModule = require('./notes-pane-main');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
 const { urlFromArgv } = require('./argvurl');
@@ -428,10 +428,12 @@ const spell = spellModule.create({
 });
 
 /**
- * The School workspace's reader/helper, and the Claude Code budget reader
- * behind its guard (budget.js: no IPC, no UI; the helper asks it before every
- * `claude -p` call and parks itself near the limits). School registers its own
- * IPC; main only hands it the gate, the push function and the budget reader.
+ * The notes pane's reader/helper (notes-pane-main.js), off until
+ * <userData>\notes-pane.json names a notes folder. It makes its own Claude Code
+ * budget reader (budget.js: no IPC, no UI; the helper asks it before every
+ * `claude -p` call and parks itself near the limits) only when that file names
+ * a statusline folder. It registers its own IPC; main only hands it the gate,
+ * the push function and the budget module.
  */
 /**
  * Protected video (drm-main.js + drm-preload.js + drm.js). Stock Electron has
@@ -729,16 +731,15 @@ if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
   if (typeof watchPlayer.setHandoff === 'function' && typeof watch.openTitle === 'function') watchPlayer.setHandoff((url, o) => watch.openTitle(url, o));
 }
 
-const budget = budgetModule.create({ app });
 // The first-run welcome's flag and its default-browser step (firstrun-main.js).
 // Created here, before any window: it reads what the profile held before this run.
 require('./firstrun-main').create({ app, ipcMain, shell: require('electron').shell, isChromeSender: (event) => isChromeSender(event), appDir: __dirname });
-const school = schoolModule.create({
+const notesPane = notesPaneModule.create({
   app,
   ipcMain,
   isChromeSender: (event) => isChromeSender(event),
   send: (channel, payload) => send(channel, payload),
-  getBudget: () => budget.snapshot(),
+  budgetModule,
 });
 
 /**
@@ -5713,10 +5714,9 @@ app.on('before-quit', (event) => {
   try { watch.stop(); } catch { /* best effort */ }
   // The favicon cache: a logo learned a moment ago must be there next start.
   try { if (faviconStore) faviconStore.flushSync(); } catch { /* best effort */ }
-  // The budget poller's timer and the school helper's child processes (a
+  // The notes pane's budget poller, its timers and its child processes (a
   // headless claude, a UIA/OCR reader) must not outlive the quit either.
-  try { budget.stop(); } catch { /* best effort */ }
-  try { school.stop(); } catch { /* best effort */ }
+  try { notesPane.stop(); } catch { /* best effort */ }
   // The phone relay's adb daemon and the scrcpy server on the phone: stop()
   // tears the stream down and kills the adb server so nothing outlives us.
   try { phone.stop(); } catch { /* best effort */ }
