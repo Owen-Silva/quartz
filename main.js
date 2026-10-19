@@ -320,13 +320,16 @@ function send(channel, payload) {
 }
 
 /**
- * Spotify auto-pause. The user's ~/spotify-autopause bridge already pauses Spotify
- * for the LessonPlayer desktop app and for Opera GX tabs; this makes THIS browser's
- * tabs do the same, and puts the whole-computer switch in the settings pane.
- * The module owns all of it -- main only feeds it guests and pushes its state.
+ * Spotify auto-pause, built in: Spotify pauses while a tab plays a video and
+ * resumes after. Quartz hosts it alone, or joins another app that already
+ * hosts it (Mantle, or the earlier standalone helper) so they never fight; see
+ * docs/autopause-protocol.md. The module owns all of it -- main only feeds it
+ * guests and pushes its state. A test profile never hosts or joins on the
+ * real ports, and never sends Spotify a command itself.
  */
 const autoPause = autopauseModule.create({
   app,
+  test: process.argv.includes('--test-profile'),
   // withAdDuck() rides along: the bridge's ad-ducking state belongs to the same
   // settings section but is not a field autopause.js's parser keeps.
   onChange: (status) => send('autopause:changed', withAdDuck(status)),

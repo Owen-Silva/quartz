@@ -2,26 +2,31 @@
 
 // autopause.js — Spotify auto-pause, main-process side.
 //
-// The user already has a working auto-pause tool at ~/spotify-autopause: a local
-// PowerShell HTTP bridge (127.0.0.1, first free port of 8787-8790) driven by a
-// scheduled task, plus an Opera GX extension that speaks to it. This module is
-// the same client protocol, spoken from THIS browser, plus a switch that turns
-// the whole-computer half on and off.
+// Spotify pauses while a tab plays a video and resumes when it stops. Quartz
+// works alone, and next to Mantle (or the earlier standalone helper) it
+// cooperates instead of fighting: exactly one app, the HOST, decides when
+// Spotify pauses, and every other app sends its holds there. The protocol is
+// written down once in docs/autopause-protocol.md, and its three shared files
+// are byte-identical in both apps:
 //
-// Nothing under ~/spotify-autopause is modified from here. We are a client.
+//   autopause-core.js    the rules (holds, only resume what we paused, the
+//                        re-pause back-off, TTLs, inherit)
+//   autopause-compat.js  the host's HTTP API on 127.0.0.1:8787-8790
+//   autopause-link.js    the election: host, client, takeover
 //
-// Two prongs:
+// This file supplies Quartz's eyes and hands:
 //
-//   1. The whole-computer switch. ON means the scheduled task is enabled and
-//      the bridge is answering; OFF means the task is DISABLED and the bridge
-//      process is gone. Ending the task alone is not enough -- it carries a
-//      repeating keepalive trigger, so a merely-ended task restarts itself
-//      within minutes.
+//   Eyes: guest <webview>s that are audible, not muted and on a watched site
+//         (the hold machine below turns that count into one hold, with the
+//         same 1.5 s on and 1.5 s off delays the browser extension uses).
+//   Hands: Windows' media session API (WinRT SMTC) on Spotify's session,
+//         through a small PowerShell helper (autopause-smtc.js / .ps1),
+//         only while Quartz is the host.
 //
-//   2. The browser prong. Guest <webview>s that are audible on a watched site
-//      register a hold with the bridge, exactly the way the Opera extension
-//      does, under a DIFFERENT src id so the two browsers can never release
-//      each other's hold.
+// Two switches, both in autopause.json in userData:
+//   enabled      Quartz may be the host (and pause Spotify itself).
+//   browserHold  Quartz's tabs count as "a video is playing".
+// With both off Quartz binds no port, runs no timer and starts no helper.
 //
 // Everything here is best effort and nothing ever throws at the renderer: a
 // failure becomes plain-English text in `status.error`.
@@ -30,44 +35,41 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { spawn, execFile } = require('child_process');
+const { createEngine } = require('./autopause-core');
+const { createCompat } = require('./autopause-compat');
+const { createLink, httpGet: linkHttpGet } = require('./autopause-link');
+const { createSmtc } = require('./autopause-smtc');
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** The installed tool. Same layout install.ps1 created; we only read it. */
-const TOOL_DIR = path.join(os.homedir(), 'spotify-autopause');
-const BRIDGE_SCRIPT = path.join(TOOL_DIR, 'bridge', 'spotify-bridge.ps1');
-const DOCTOR_SCRIPT = path.join(TOOL_DIR, 'doctor.ps1');
-const TASK_NAME = '\\SpotifyAutoPause';
-
-/** The bridge binds the first free one of these and writes its choice to port.txt. */
+/** The host binds the first free one of these (docs/autopause-protocol.md). */
 const BRIDGE_PORTS = [8787, 8788, 8789, 8790];
 
 /**
- * The hold key. The bridge keys holds by `src` and only resumes when the LAST
- * hold is released, so Opera's 'browser' hold and ours have to be different
- * strings or one browser closing a video would hand back the other's hold.
- * The bridge validates src against ^[A-Za-z0-9:._-]{1,80}$ and silently falls
- * back to 'browser' for anything else -- 'owen-browser' passes.
+ * This app's name on the wire: the src of its holds when another app hosts,
+ * and the `server` field when it hosts. The host keys holds by src and only
+ * resumes when the LAST one is released, so each app needs its own string.
  */
-const BRIDGE_SRC = 'owen-browser';
+const BRIDGE_SRC = 'quartz';
 
 /**
- * Two budgets, for two different questions -- the same split the extension
- * makes, and for the same measured reason.
+ * The scheduled task the earlier standalone helper ran under. Read once, only
+ * to carry its on/off state into `enabled` for a config written before that
+ * field existed (see readConfig). Never started, stopped or changed here.
+ */
+const LEGACY_TASK = 'SpotifyAutoPause';
+
+/**
+ * Two budgets, for two different questions.
  *
  *   PROBE   "is anything listening on a port I am guessing at?" A dead local
  *           port refuses instantly, so this only has to outlast a firewalled
- *           one. status() probes the whole range at once, so this is also the
- *           floor under its ~1.5 s answer.
+ *           one. Probes run across the whole range at once.
  *
- *   ACTION  "the bridge is there -- let it finish." Its HTTP listener is
- *           single threaded and shares a thread with the native watcher tick
- *           (821 ms observed on this machine), so a short abort does NOT
- *           cancel the work: the bridge pauses Spotify and only fails to write
- *           the reply, which desyncs the client and stutters the music.
+ *   ACTION  "the host is there -- let it finish." A short abort does not
+ *           cancel the work on the other side; it only loses the reply.
  */
 const PROBE_TIMEOUT_MS = 600;
 const ACTION_TIMEOUT_MS = 6000;
@@ -79,10 +81,9 @@ const HOLD_AFTER_MS = 1500;
 const RESUME_DELAY_MS = 1500;
 
 /**
- * The bridge expires an HTTP hold after browserHoldTtlMs (180 s) unless it is
+ * A hold sent to another app's host expires after 180 s unless it is
  * refreshed -- that TTL is what stops a hold outliving the browser and pinning
- * Spotify paused forever. 60 s gives three missed beats before it trips, which
- * is the cadence the extension uses.
+ * Spotify paused forever. autopause-link.js re-sends it every 60 s.
  */
 const REFRESH_MS = 60000;
 
@@ -102,11 +103,14 @@ const REFRESH_MS = 60000;
  */
 const MUTE_POLL_MS = 500;
 
+/** While Quartz hosts and something holds (or it paused Spotify): one engine tick a second. */
+const TICK_MS = 1000;
+
 /**
  * Sites watched out of the box: the extension's list (minus the Spotify web
- * player) plus the streaming and video sites the user actually opens. Twitch was
- * the first miss reported (2026-09-11): a list only ever covers what someone
- * thought of, so "Any tab that makes sound" stays one switch away.
+ * player) plus the common streaming and video sites. Twitch was the first
+ * miss reported (2026-09-11): a list only ever covers what someone thought
+ * of, so "Any tab that makes sound" stays one switch away.
  */
 const DEFAULT_SITES = [
   'youtube.com',
@@ -123,31 +127,33 @@ const DEFAULT_SITES = [
   'max.com',
   'peacocktv.com',
   'crunchyroll.com',
-  'lessonplayer.example',
-  'lessonplayer-academy.example',
-  'lessons.example',
 ];
 
 /**
  * Never counted as "a video", even with `anySite` on. Spotify's own web player
- * making sound is the one thing that must never pause Spotify -- the bridge
+ * making sound is the one thing that must never pause Spotify -- the host
  * refuses a session whose AUMID matches /spotify/ for exactly this reason, and
  * the extension keeps open.spotify.com out of its match list on purpose.
  */
 const NEVER_SITES = ['spotify.com', 'open.spotify.com'];
 
-/** The defaults a config file written before `sitesBase` existed was built on. */
-const LEGACY_BASE_SITES = [
-  'youtube.com', 'youtube-nocookie.com', 'lessonplayer.example', 'lessonplayer-academy.example', 'lessons.example',
-];
+/**
+ * The defaults a config file written before `sitesBase` existed was built on.
+ * A saved list keeps whatever sites it already has; this only decides which
+ * newer defaults get merged into it (see readConfig).
+ */
+const LEGACY_BASE_SITES = ['youtube.com', 'youtube-nocookie.com'];
 
 const DEFAULT_CONFIG = {
+  // Quartz may host. A file written before this field existed gets it from
+  // the earlier helper's scheduled task on first read (see readConfig).
+  enabled: true,
   browserHold: true,
   anySite: false,
   sites: DEFAULT_SITES.slice(),
   sitesBase: DEFAULT_SITES.slice(),
-  // Only consulted when the scheduled task is missing: with no task to enable,
-  // the switch is a remembered choice plus a directly launched bridge.
+  // Legacy: the earlier helper's "launched directly" choice. Read only to
+  // migrate a file with no task behind it; kept so the field round-trips.
   directEnabled: false,
 };
 
@@ -515,33 +521,45 @@ function createBridgeClient(deps) {
 }
 
 // ---------------------------------------------------------------------------
-// Child processes
+// Migration from the earlier standalone helper
 // ---------------------------------------------------------------------------
 
-/** execFile that reports rather than throws: { code, stdout, stderr }. */
-function run(file, args, timeoutMs) {
-  return new Promise((resolve) => {
-    execFile(
-      file,
-      args,
-      { timeout: timeoutMs || 10000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        let code = 0;
-        if (err) code = Number.isInteger(err.code) ? err.code : 1;
-        resolve({
-          code,
-          stdout: String(stdout || ''),
-          stderr: String(stderr || (err && err.message) || ''),
-        });
-      }
-    );
-  });
+/** Where Windows keeps the legacy task's XML. */
+function legacyTaskFile(env) {
+  const e = env || process.env;
+  const root = e.SystemRoot || e.windir || 'C:\\Windows';
+  return path.join(root, 'System32', 'Tasks', LEGACY_TASK);
 }
 
-const POWERSHELL = 'powershell.exe';
+/** Task XML bytes -> text. Windows writes them UTF-16LE, usually with a BOM. */
+function decodeTaskXml(buf) {
+  if (!buf || !buf.length) return '';
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.toString('utf16le');
+  if (buf.length >= 2 && buf[1] === 0x00) return buf.toString('utf16le');
+  return buf.toString('utf8');
+}
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * 'enabled' | 'disabled' | 'unknown' from the task XML text (the same rule as
+ * Mantle's taskStateFromXml): the task-level <Enabled> inside <Settings>.
+ */
+function taskStateFromXml(text) {
+  const s = String(text || '');
+  if (!/<Task[\s>]/.test(s)) return 'unknown';
+  const m = /<Settings>[\s\S]*?<\/Settings>/.exec(s);
+  const en = m ? /<Enabled>\s*(true|false)\s*<\/Enabled>/i.exec(m[0]) : null;
+  return en && en[1].toLowerCase() === 'false' ? 'disabled' : 'enabled';
+}
+
+/** The legacy task's state, read synchronously: 'enabled' | 'disabled' | 'absent' | 'unknown'. */
+function readLegacyTask(file) {
+  let buf;
+  try {
+    buf = fs.readFileSync(file);
+  } catch (err) {
+    return err && err.code === 'ENOENT' ? 'absent' : 'unknown';
+  }
+  return taskStateFromXml(decodeTaskXml(buf));
 }
 
 // ---------------------------------------------------------------------------
@@ -551,39 +569,54 @@ function sleep(ms) {
 /**
  * @param {object} deps
  *   deps.app       Electron's app, for userData. Optional -- without it the
- *                  config lives next to the tool, which is what a harness gets.
+ *                  config lives in the temp dir, which is what a harness gets.
  *   deps.onChange  Called with a Status whenever anything moves.
+ *   deps.test      --test-profile: never binds 8787-8790 (only the port named
+ *                  by QUARTZ_AUTOPAUSE_PORT, if any), never reaches another
+ *                  app's host, and never sends Spotify a command.
+ * Injectable for a harness: configFile, taskFile, env, smtc, ports, linkGet,
+ * bridge, now, log, autoStart, setTimer/clearTimer/setRepeat/clearRepeat.
  */
 function create(deps) {
   const d = deps || {};
   const app = d.app || null;
   const onChange = typeof d.onChange === 'function' ? d.onChange : () => {};
-  const toolDir = d.toolDir || TOOL_DIR;
-  const bridgeScript = d.bridgeScript || path.join(toolDir, 'bridge', 'spotify-bridge.ps1');
-  const doctorScript = d.doctorScript || path.join(toolDir, 'doctor.ps1');
-  const taskName = d.taskName || TASK_NAME;
-  const exec = d.run || run;
-  const spawnFn = d.spawn || spawn;
+  const test = !!d.test;
+  const env = d.env || process.env;
+  const now = d.now || Date.now;
   const bridge = d.bridge || createBridgeClient({ get: d.get });
   /**
-   * Every timer this integration owns -- the hold machine's and the mute poll's
-   * -- goes through these, so a harness can drive the whole guest -> count ->
-   * hold path in virtual time without waiting on a real clock.
+   * Every timer this integration owns goes through these, so a harness can
+   * drive the whole guest -> count -> hold path in virtual time.
    */
   const setTimer = d.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = d.clearTimer || ((t) => clearTimeout(t));
   const setRepeat = d.setRepeat || ((fn, ms) => setInterval(fn, ms));
   const clearRepeat = d.clearRepeat || ((t) => clearInterval(t));
 
+  /** A test instance only ever touches the port it is given, and only on purpose. */
+  const envPort = (() => {
+    const n = Number(env.QUARTZ_AUTOPAUSE_PORT);
+    return test && Number.isInteger(n) && n > 1024 && n < 65536 ? n : null;
+  })();
+  const ports = d.ports || (test ? (envPort ? [envPort] : []) : BRIDGE_PORTS);
+
   let config = null;
   let lastError = null;
   /** webContents id -> { contents, audible, muted, host } for every live guest. */
   const guests = new Map();
-  /** Last probe result, so emit() can push without doing I/O. */
+  /** The host another app runs, as last probed while our link is off (status/_bridge). */
   let lastPing = null;
-  let lastTask = { exists: false, enabled: false, running: false, at: 0 };
   let lastSent = '';
   let quitting = false;
+  const recent = [];   // the last few log lines, for doctor()
+
+  function log(text) {
+    const line = new Date(now()).toISOString().slice(11, 19) + ' ' + String(text);
+    recent.push(line);
+    if (recent.length > 30) recent.shift();
+    if (typeof d.log === 'function') { try { d.log(String(text)); } catch { /* the owner's problem */ } }
+  }
 
   // -- config ---------------------------------------------------------------
 
@@ -592,20 +625,48 @@ function create(deps) {
    * after this file is required, and a test run must not write the real one.
    */
   function configPath() {
+    if (d.configFile) return d.configFile;
     const base = app ? app.getPath('userData') : path.join(os.tmpdir(), 'browser-autopause');
     return path.join(base, 'autopause.json');
+  }
+
+  /** `enabled` for a profile written before the field existed: the legacy task's state. */
+  function migratedEnabled(parsed) {
+    const task = readLegacyTask(d.taskFile || legacyTaskFile(env));
+    if (task === 'enabled') return { value: true, sure: true };
+    if (task === 'disabled') return { value: false, sure: true };
+    if (task === 'absent') {
+      // No task: the old switch was a remembered choice (directEnabled). With
+      // no file at all, a fresh install, auto-pause is simply on.
+      return { value: parsed ? parsed.directEnabled === true : true, sure: true };
+    }
+    // The task exists but could not be read: off for now, and not written
+    // down, so the next start asks again.
+    return { value: parsed ? parsed.directEnabled === true : false, sure: false };
   }
 
   function readConfig() {
     if (config) return config;
     config = { ...DEFAULT_CONFIG, sites: DEFAULT_SITES.slice() };
-    let parsed;
+    let raw = null;
+    let missing = false;
     try {
-      parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
-    } catch {
-      return config; // no file yet, unreadable, or not JSON -- defaults stand
+      raw = fs.readFileSync(configPath(), 'utf8');
+    } catch (err) {
+      missing = !!(err && err.code === 'ENOENT');
     }
-    if (!parsed || typeof parsed !== 'object') return config;
+    if (raw == null) {
+      // No file (a fresh profile) or one we cannot read right now: defaults,
+      // with `enabled` from the legacy task. Nothing is written until a change.
+      config.enabled = missing ? migratedEnabled(null).value : false;
+      return config;
+    }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { parsed = null; }
+    if (!parsed || typeof parsed !== 'object') {
+      config.enabled = migratedEnabled(null).value;
+      return config;
+    }
     if (typeof parsed.browserHold === 'boolean') config.browserHold = parsed.browserHold;
     if (typeof parsed.anySite === 'boolean') config.anySite = parsed.anySite;
     if (typeof parsed.directEnabled === 'boolean') config.directEnabled = parsed.directEnabled;
@@ -616,8 +677,8 @@ function create(deps) {
       // who had touched a Spotify setting. `sitesBase` records which defaults
       // the saved list was built on; anything that joined the defaults since
       // is merged in, while a default the user removed on purpose (present in
-      // the base, absent from the list) stays removed. Files written before
-      // the base existed were built on the original five.
+      // the base, absent from the list) stays removed. A site the user's list
+      // has stays, default or not.
       const base = sanitiseSites(parsed.sitesBase) || LEGACY_BASE_SITES;
       for (const site of DEFAULT_SITES) {
         if (!base.includes(site) && !sites.includes(site)) sites.push(site);
@@ -625,6 +686,15 @@ function create(deps) {
       config.sites = sites;
     }
     config.sitesBase = DEFAULT_SITES.slice();
+    if (typeof parsed.enabled === 'boolean') {
+      config.enabled = parsed.enabled;
+    } else {
+      // Written before `enabled` existed: carry the old switch over once and
+      // write it down, so the answer never changes under the user later.
+      const m = migratedEnabled(parsed);
+      config.enabled = m.value;
+      if (m.sure) writeConfig();
+    }
     return config;
   }
 
@@ -640,6 +710,256 @@ function create(deps) {
     }
   }
 
+  // -- Spotify, through Windows' media session (host role only) -------------
+
+  const smtc = d.smtc || createSmtc({ test, log: (t) => log(t) });
+  let link = null;
+  let sim = null;       // test mode: what Spotify WOULD be after our (unsent) command
+  let pending = null;   // live: { state, until } after a command, until the session catches up
+  let refreshing = null;
+
+  /** Spotify's session in the helper's last read, or null. */
+  function spotifySession() {
+    const s = smtc.last();
+    const list = s && Array.isArray(s.sessions) ? s.sessions : [];
+    return list.find((x) => x && /spotify/i.test(String(x.aumid || ''))) || null;
+  }
+
+  /** 'playing' | 'paused' | 'stopped' | ... | 'none', lowercased; 'none' when Spotify is absent. */
+  function spState() {
+    if (sim) return sim;
+    const sess = spotifySession();
+    let raw = sess ? String(sess.status || '').toLowerCase() : 'none';
+    if (!raw || raw === 'closed') raw = 'none';
+    if (pending && now() < pending.until && raw !== pending.state) return pending.state;
+    pending = null;
+    return raw;
+  }
+
+  /** Freshen the helper's read. One at a time; bounded by the helper's own timeout. */
+  function refresh() {
+    if (!refreshing) {
+      refreshing = Promise.resolve()
+        .then(() => smtc.state())
+        .catch(() => null)
+        .then((r) => {
+          refreshing = null;
+          if (r && r.ok === false && r.reason) log(`media session read failed: ${r.reason}`);
+          return r;
+        });
+    }
+    return refreshing;
+  }
+
+  /** The same, but never longer than `ms` (an HTTP caller has its own clock running). */
+  function refreshWithin(ms) {
+    let t = null;
+    return Promise.race([
+      refresh(),
+      new Promise((resolve) => { t = setTimer(resolve, ms); }),
+    ]).then(() => { if (t !== null) clearTimer(t); });
+  }
+
+  async function spotifyControl(action) {
+    const sess = spotifySession();
+    if (!sess) return { ok: false, reason: 'Spotify is not open' };
+    const r = await smtc.control(action, sess.aumid);
+    if (!r || r.ok !== true) return { ok: false, reason: (r && r.reason) || 'Windows did not answer' };
+    if (r.dryRun) {
+      log(`test: would ${action} Spotify (nothing sent)`);
+      sim = action === 'pause' ? 'paused' : action === 'play' ? 'playing' : sim;
+      return { ok: true };
+    }
+    if (r.sent === false) return { ok: false, reason: 'Spotify did not take the command' };
+    pending = { state: action === 'pause' ? 'paused' : 'playing', until: now() + 2000 };
+    return { ok: true };
+  }
+
+  /** The engine: the rules. Only the HOST's engine sees Spotify at all. */
+  const engine = createEngine({
+    now,
+    log: (t) => log(t),
+    spotify: {
+      state: () => (link && link.role() === 'host' ? spState() : 'none'),
+      pause: () => spotifyControl('pause'),
+      play: () => spotifyControl('play'),
+    },
+  });
+
+  /** The helper's sessions in the shape autopause-compat.js's /now reads. */
+  function mediaSessions() {
+    const s = smtc.last();
+    const list = s && Array.isArray(s.sessions) ? s.sessions : [];
+    const mapped = list.map((x) => ({
+      aumid: String(x.aumid || ''),
+      title: String(x.title || ''),
+      artist: String(x.artist || ''),
+      album: String(x.album || ''),
+      status: String(x.status || 'none').toLowerCase(),
+      playing: String(x.status || '').toLowerCase() === 'playing',
+      timeline: { positionMs: Number(x.positionMs) || 0, durationMs: Number(x.durationMs) || 0 },
+      can: x.can && typeof x.can === 'object' ? x.can : {},
+      art: null,
+    }));
+    const current = s && s.current ? String(s.current).toLowerCase() : '';
+    const shown = mapped.find((x) => current && x.aumid.toLowerCase() === current) || null;
+    return { sessions: mapped, shown };
+  }
+
+  const compat = createCompat({
+    engine,
+    now,
+    name: BRIDGE_SRC,
+    ports,
+    log: (t) => log(t),
+    refresh: () => refreshWithin(2500),
+    spotify: () => {
+      const sess = spotifySession();
+      return { found: !!sess, state: spState(), aumid: sess ? sess.aumid : null };
+    },
+    media: () => mediaSessions(),
+    // The now-playing card's transport buttons: whatever Windows calls current.
+    control: async (cmd) => {
+      const m = mediaSessions();
+      const target = m.shown || m.sessions.find((x) => x.playing) || m.sessions[0];
+      if (!target) return { ok: false, reason: 'no session' };
+      const r = await smtc.control(cmd, target.aumid);
+      if (r && r.dryRun) { log(`test: would send ${cmd} (nothing sent)`); return { ok: true }; }
+      return r && r.ok === true && r.sent !== false ? { ok: true } : { ok: false, reason: (r && r.reason) || 'Windows did not answer' };
+    },
+    changed: () => { syncTick(); emit(); },
+  });
+
+  /** Our own hold's key in our own engine (host role). */
+  const LOCAL_KEY = 'local:' + BRIDGE_SRC;
+
+  link = createLink({
+    name: BRIDGE_SRC,
+    ports,
+    get: d.linkGet || linkHttpGet,
+    log: (t) => log(t),
+    setTimer: d.linkSetTimer,
+    clearTimer: d.linkClearTimer,
+    canHost: () => !quitting && readConfig().enabled && (!test || envPort !== null),
+    host: {
+      start: () => (ports.length ? compat.start() : Promise.resolve(null)),
+      stop: (why) => compat.stop(why),
+      port: () => compat.port(),
+    },
+    localHold: async (held) => {
+      await refresh();
+      if (held) await engine.addHold(LOCAL_KEY, { native: true, kind: 'browser', label: 'Quartz tabs' }, now());
+      else await engine.removeHold(LOCAL_KEY, 'its tabs went quiet');
+      compat.notify();
+      syncTick();
+    },
+    onHost: async (x) => {
+      const prev = x && x.last;
+      if (prev) {
+        await refresh();
+        await engine.inherit({
+          paused: !!(prev.wePaused || prev.heldByUs),
+          suppressedForMs: prev.repauseSuppressed ? Number(prev.repauseSuppressedForMs) || 0 : 0,
+        });
+      }
+      compat.notify();
+      syncTick();
+      emit();
+    },
+    retire: async (why) => {
+      stopTick();
+      if (compat.successorWatching()) {
+        const r = engine.handOff();
+        log(`handed Spotify over to the other app (${r.action})`);
+      } else {
+        // Only a host with something to hand back needs Spotify's state (and the helper).
+        const snap = engine.snapshot(now());
+        if (snap.holds.length > 0 || snap.wePaused) await refresh();
+        await engine.releaseAll(why);
+        compat.notify();
+      }
+      sim = null;
+      pending = null;
+    },
+    onChange: () => { syncTick(); emit(); },
+  });
+
+  // -- the engine's clock (host role only) ----------------------------------
+  //
+  // TTLs and the re-pause check need a tick, but only while there is something
+  // to decide: Quartz hosts AND a hold exists or Spotify is paused by us. An
+  // idle host runs no timer and lets the helper exit.
+
+  let tickTimer = null;
+  let ticking = false;
+
+  function wantTick() {
+    if (!link || link.role() !== 'host' || quitting) return false;
+    const snap = engine.snapshot(now());
+    return snap.holds.length > 0 || snap.wePaused;
+  }
+
+  function stopTick() {
+    if (tickTimer !== null) { clearRepeat(tickTimer); tickTimer = null; }
+  }
+
+  async function tickOnce() {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await refresh();
+      if (link.role() === 'host') await engine.tick(now(), []);
+      compat.notify();
+    } catch (err) {
+      log(`the auto-pause tick threw: ${(err && err.message) || err}`);
+    } finally {
+      ticking = false;
+    }
+    syncTick();
+    emit();
+  }
+
+  function syncTick() {
+    const want = wantTick();
+    if (want === (tickTimer !== null)) return;
+    if (want) tickTimer = setRepeat(() => { tickOnce(); }, TICK_MS);
+    else stopTick();
+  }
+
+  // -- taking part ----------------------------------------------------------
+  //
+  // The link runs only while Quartz may host or its tabs count. Calls are
+  // queued, so a switch flipped twice in a row cannot start and stop at once.
+
+  let linkOn = false;
+  let linkQueue = Promise.resolve();
+
+  function wantLink() {
+    const cfg = readConfig();
+    return !quitting && (cfg.enabled || cfg.browserHold);
+  }
+
+  function syncLink(why) {
+    linkQueue = linkQueue.then(async () => {
+      try {
+        if (wantLink()) {
+          if (!linkOn) { linkOn = true; await link.start(); } else await link.sync();
+        } else if (linkOn) {
+          linkOn = false;
+          stopTick();
+          await link.stop(why || 'switched off');
+        }
+      } catch (err) {
+        lastError = 'Spotify auto-pause could not start: ' + ((err && err.message) || err);
+        log(`the auto-pause link threw: ${(err && err.stack) || err}`);
+      }
+      if (!linkOn && smtc.running && smtc.running()) smtc.stop();
+      syncTick();
+      emit();
+    });
+    return linkQueue;
+  }
+
   // -- the browser prong ----------------------------------------------------
 
   const machine = createHoldMachine({
@@ -648,27 +968,10 @@ function create(deps) {
     refreshMs: REFRESH_MS,
     setTimer,
     clearTimer,
-    onHold: async () => {
-      // Never start the bridge just because a tab played. If nothing answers,
-      // the whole-computer switch is off and that is the user's decision.
-      const reply = await bridge.pause(BRIDGE_SRC);
-      if (reply) { lastPing = reply; return true; }
-      lastError = 'The Spotify bridge did not answer, so nothing was paused.';
-      return false;
-    },
-    onRefresh: async () => {
-      const reply = await bridge.pause(BRIDGE_SRC);
-      if (reply) lastPing = reply;
-      return !!reply;
-    },
-    onRelease: async () => {
-      const reply = await bridge.resume(BRIDGE_SRC);
-      if (reply) { lastPing = reply; return true; }
-      // The hold stays flagged: it really does still exist on the bridge, and
-      // leaving it behind is what pins Spotify paused. Retried on next silence.
-      lastError = 'The Spotify bridge did not answer, so the hold is still out.';
-      return false;
-    },
+    onHold: async () => { await link.setHeld(true); return true; },
+    // The link re-sends a hold to another app's host on its own clock.
+    onRefresh: async () => true,
+    onRelease: async () => { await link.setHeld(false); return true; },
     onChange: () => emit(),
   });
 
@@ -734,7 +1037,7 @@ function create(deps) {
   // An interval while something is audible, not a timeout re-armed from its own callback: in
   // Electron's main process every setTimeout also calls process.activateUvLoop(), and doing that
   // from a timer callback twice a second can lock the main thread and libuv's poll thread into
-  // waking each other hundreds of times a second (next-week/quartz-efficiency.md).
+  // waking each other hundreds of times a second.
   function armMutePoll() {
     mutePollTimer = setRepeat(() => {
       let changed = false;
@@ -803,160 +1106,53 @@ function create(deps) {
     contents.on('destroyed', () => { guests.delete(id); recount(); });
   }
 
-  // -- the whole-computer switch -------------------------------------------
-
-  async function queryTask(maxAgeMs) {
-    const age = maxAgeMs == null ? 2000 : maxAgeMs;
-    if (lastTask.at && Date.now() - lastTask.at < age) return lastTask;
-    const r = await exec('schtasks', ['/Query', '/TN', taskName, '/FO', 'LIST', '/V'], 4000);
-    const parsed = parseTaskQuery(r.code, r.stdout);
-    lastTask = { ...parsed, at: Date.now() };
-    return lastTask;
-  }
-
-  /** Poll /ping until it answers (or does not), inside a bounded window. */
-  async function waitForBridge(wantRunning, budgetMs) {
-    const deadline = Date.now() + budgetMs;
-    for (;;) {
-      const found = await bridge.discover(PROBE_TIMEOUT_MS);
-      lastPing = found ? found.status : null;
-      if (!!found === wantRunning) return true;
-      if (Date.now() >= deadline) return false;
-      await sleep(400);
-    }
-  }
-
-  /**
-   * Every PID whose command line really does run the bridge script. We never
-   * match on image name: 'powershell.exe' is also this session's own shell.
-   */
-  async function findBridgePids() {
-    const ps =
-      "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe' OR Name='pwsh.exe'\" | " +
-      "Where-Object { $_.CommandLine -like '*spotify-bridge.ps1*' } | " +
-      'Select-Object -ExpandProperty ProcessId';
-    const r = await exec(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', ps], 8000);
-    if (r.code !== 0) return [];
-    return String(r.stdout)
-      .split(/\r?\n/)
-      .map((line) => Number(line.trim()))
-      .filter((pid) => Number.isInteger(pid) && pid > 0);
-  }
-
-  async function enable() {
-    const task = await queryTask(0);
-    if (!task.exists) {
-      // No task to enable: launch the bridge ourselves and remember the choice,
-      // because nothing else will bring it back after a reboot.
-      readConfig().directEnabled = true;
-      writeConfig();
-      try {
-        const child = spawnFn(
-          POWERSHELL,
-          [
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-            // -Quiet is what the scheduled task passes: with no console attached
-            // its output would go nowhere anyway, and bridge.log is unaffected.
-            '-File', bridgeScript, '-Quiet',
-          ],
-          { detached: true, stdio: 'ignore', windowsHide: true }
-        );
-        child.unref();
-      } catch (err) {
-        lastError = 'Could not start the Spotify bridge: ' + ((err && err.message) || err);
-        return;
-      }
-      if (!(await waitForBridge(true, 8000))) {
-        lastError = 'Started the Spotify bridge, but it never answered on 8787-8790.';
-      }
-      return;
-    }
-
-    const changed = await exec('schtasks', ['/Change', '/TN', taskName, '/ENABLE'], 8000);
-    if (changed.code !== 0) {
-      lastError = 'Could not enable the SpotifyAutoPause task: ' +
-        firstErrorLine(changed.stderr, changed.stdout, 'schtasks exited ' + changed.code);
-      return;
-    }
-    const started = await exec('schtasks', ['/Run', '/TN', taskName], 8000);
-    lastTask = { ...lastTask, at: 0 };   // whatever we cached is now stale
-    if (!(await waitForBridge(true, 8000))) {
-      // /Run can legitimately fail when an instance is already running
-      // (MultipleInstances = IgnoreNew), so its exit code only matters once we
-      // know nothing is actually listening.
-      lastError = started.code !== 0
-        ? 'Could not start the SpotifyAutoPause task: ' +
-          firstErrorLine(started.stderr, started.stdout, 'schtasks exited ' + started.code)
-        : 'The SpotifyAutoPause task started but the bridge never answered on 8787-8790.';
-    }
-  }
-
-  async function disable() {
-    // Our own hold goes back first: leaving it out would pin Spotify paused
-    // with the bridge gone and nothing left to release it.
-    try { await machine.releaseNow(); } catch { /* best effort */ }
-
-    const task = await queryTask(0);
-    if (task.exists) {
-      // /End alone is not enough. The task repeats every few minutes, so a
-      // merely-ended bridge is back before the user has finished reading the
-      // settings pane -- it has to be disabled as well, and the disable is the
-      // half that must succeed.
-      const ended = await exec('schtasks', ['/End', '/TN', taskName], 8000);
-      const changed = await exec('schtasks', ['/Change', '/TN', taskName, '/DISABLE'], 8000);
-      lastTask = { ...lastTask, at: 0 };
-      if (changed.code !== 0) {
-        lastError = 'Could not disable the SpotifyAutoPause task: ' +
-          firstErrorLine(changed.stderr, changed.stdout, 'schtasks exited ' + changed.code);
-        return;
-      }
-      if (ended.code !== 0 && !(await waitForBridge(false, 500))) {
-        // Only worth mentioning if the bridge really did survive /End.
-        lastError = 'Told the task to stop and it refused: ' +
-          firstErrorLine(ended.stderr, ended.stdout, 'schtasks exited ' + ended.code);
-      }
-    }
-    readConfig().directEnabled = false;
-    writeConfig();
-
-    // Give it the ~2 s the task needs to tear its own process down, then take
-    // the process out by PID if it is still there.
-    if (await waitForBridge(false, 2000)) { lastError = null; return; }
-
-    const pids = await findBridgePids();
-    if (!pids.length) {
-      lastError = 'The Spotify bridge is still answering and no bridge process was found.';
-      return;
-    }
-    for (const pid of pids) {
-      const killed = await exec('taskkill', ['/PID', String(pid), '/F'], 8000);
-      if (killed.code !== 0) {
-        lastError = 'Could not stop the Spotify bridge (pid ' + pid + '): ' +
-          firstErrorLine(killed.stderr, killed.stdout, 'taskkill exited ' + killed.code);
-      }
-    }
-    bridge.forget();
-    if (!(await waitForBridge(false, 3000))) {
-      lastError = 'The Spotify bridge is still answering after it was stopped.';
-    }
-  }
-
   // -- status ---------------------------------------------------------------
 
-  /** Build a Status from what we already know. No I/O -- safe to call on any change. */
-  function snapshot(ping, task) {
-    const cfg = readConfig();
-    const installed = (() => {
-      try { return fs.existsSync(bridgeScript); } catch { return false; }
-    })();
+  /** The host's picture: ours when we host, the other app's when we are its client. */
+  function hostPicture() {
+    const role = linkOn ? link.role() : 'off';
+    if (role === 'host') {
+      const snap = engine.snapshot(now());
+      const sess = spotifySession();
+      return {
+        port: link.port(),
+        spotify: !!sess,
+        wePaused: snap.wePaused && snap.holds.length > 0,
+        holds: snap.holds.map((h) => (h.key === LOCAL_KEY ? BRIDGE_SRC : h.native ? 'native' : h.key.replace(/^http:/, ''))),
+      };
+    }
+    const hs = role === 'client' ? link.hostStatus() : lastPing;
+    const ping = parseBridgeStatus(hs);
     return {
-      installed,
-      enabled: task && task.exists ? task.enabled : cfg.directEnabled,
-      bridge: ping ? 'running' : (installed ? 'stopped' : 'unknown'),
-      port: ping ? ping.port : null,
+      port: role === 'client' ? link.port() : (ping ? ping.port : null),
       spotify: !!(ping && ping.spotifyFound),
       wePaused: !!(ping && ping.heldByUs),
       holds: ping ? ping.holds.slice() : [],
+    };
+  }
+
+  /** Build a Status from what we already know. No I/O -- safe to call on any change. */
+  function snapshot() {
+    const cfg = readConfig();
+    const role = linkOn ? link.role() : 'off';
+    const pic = hostPicture();
+    let error = lastError;
+    if (!error && role === 'host' && link.port() == null && ports.length) {
+      error = 'Ports 8787-8790 are all taken, so other apps cannot share this auto-pause.';
+    }
+    if (!error && role === 'host') {
+      const snap = engine.snapshot(now());
+      if (snap.lastError) error = 'Spotify could not be paused: ' + snap.lastError;
+    }
+    return {
+      installed: true,
+      enabled: cfg.enabled,
+      bridge: role === 'host' || role === 'client' ? 'running' : 'stopped',
+      role,
+      port: pic.port,
+      spotify: pic.spotify,
+      wePaused: pic.wePaused,
+      holds: pic.holds,
       browserHold: machine.holding,
       // "Tabs counted as playing", which is what the settings line reads out --
       // a muted tab is audible to Chromium but is not one of these.
@@ -966,13 +1162,13 @@ function create(deps) {
         anySite: cfg.anySite,
         sites: cfg.sites.slice(),
       },
-      error: lastError,
+      error: error || null,
     };
   }
 
   /** Push the current picture at the renderer, but only when it actually moved. */
   function emit() {
-    const payload = snapshot(lastPing, lastTask);
+    const payload = snapshot();
     let key;
     try { key = JSON.stringify(payload); } catch { key = String(Math.random()); }
     if (key === lastSent) return payload;
@@ -982,29 +1178,26 @@ function create(deps) {
   }
 
   /**
-   * The renderer's read. Both halves run at once and both are short, so the
-   * answer lands inside ~1.5 s whether or not anything is running -- a settings
-   * pane polling every 4 s must never sit on a dead port waiting.
+   * The renderer's read, answered inside ~1.5 s whatever is running. Hosting:
+   * a fresh read of Spotify. Off: one probe of the ports for another app's
+   * host, so the readout and the now-playing card still know about it.
    */
   async function status() {
-    const [found, task] = await Promise.all([
-      bridge.discover(PROBE_TIMEOUT_MS).catch(() => null),
-      queryTask().catch(() => lastTask),
-    ]);
-    lastPing = found ? found.status : null;
-    if (task) lastTask = task;
-    if (lastPing) lastError = null;   // it is answering; whatever went wrong is over
+    const role = linkOn ? link.role() : 'off';
+    if (role === 'host') {
+      await refreshWithin(1200);
+    } else if (role !== 'client') {
+      const found = await discover().catch(() => null);
+      lastPing = found ? found.status : null;
+    }
     return emit();
   }
 
   async function setEnabled(on) {
     lastError = null;
-    try {
-      if (on) await enable();
-      else await disable();
-    } catch (err) {
-      lastError = 'The Spotify switch failed: ' + ((err && err.message) || err);
-    }
+    readConfig().enabled = !!on;
+    writeConfig();
+    await syncLink(on ? 'switched on' : 'switched off');
     return status();
   }
 
@@ -1021,46 +1214,114 @@ function create(deps) {
     // Turning the browser prong off (or narrowing the site list) has to hand
     // the hold back now, not at the next audio event that may never come.
     recount();
+    if (typeof p.browserHold === 'boolean') await syncLink('a switch moved');
     return status();
   }
 
-  /** doctor.ps1 -Json. Read-only: it starts nothing and stops nothing. */
+  /** A read-only report of who decides and what it sees. Starts nothing, sends nothing. */
   async function doctor() {
-    let exists = false;
-    try { exists = fs.existsSync(doctorScript); } catch { exists = false; }
-    if (!exists) {
-      return { ok: false, text: 'Spotify auto-pause is not installed on this computer.', json: null };
+    const st = await status();
+    const cfg = readConfig();
+    const role = st.role;
+    const snap = engine.snapshot(now());
+    const helper = smtc.stats ? smtc.stats() : null;
+    const sess = spotifySession();
+    const hs = role === 'client' ? link.hostStatus() : role === 'off' ? lastPing : null;
+    const json = {
+      role,
+      port: st.port,
+      enabled: cfg.enabled,
+      browserHold: cfg.browserHold,
+      test,
+      tabsPlaying: machine.playing,
+      holding: machine.holding,
+      host: role === 'host'
+        ? { server: BRIDGE_SRC, holds: st.holds, wePaused: snap.wePaused, repauseSuppressed: snap.suppressed,
+          lastAction: snap.lastAction, lastError: snap.lastError, spotify: sess ? spState() : 'none' }
+        : (hs ? { server: String(hs.server || hs.version || 'the standalone helper'), holds: st.holds,
+          wePaused: !!hs.wePaused, spotify: String(hs.spotifyState || 'unknown') } : null),
+      helper: helper ? Object.assign({ running: !!(smtc.running && smtc.running()) }, helper) : null,
+      log: recent.slice(-15),
+    };
+    const lines = [];
+    if (role === 'host') {
+      lines.push(`Quartz is the auto-pause host${st.port ? ' on port ' + st.port : ' (no free port: deciding alone)'}.`);
+      lines.push(sess ? `Spotify is open (${spState()}).` : 'Spotify is not open.');
+      lines.push(`Holds: ${st.holds.length ? st.holds.join(', ') : 'none'}${snap.wePaused ? '; Spotify is paused by auto-pause' : ''}.`);
+      if (snap.suppressed) lines.push('Spotify was restarted during a hold, so auto-pause is leaving it alone for a while.');
+    } else if (role === 'client') {
+      lines.push(`Another app (${json.host ? json.host.server : 'unknown'}) is the auto-pause host on port ${st.port}; Quartz sends it its holds.`);
+    } else if (role === 'none') {
+      lines.push('No app is the auto-pause host, and Quartz may not be one (the switch is off).');
+    } else {
+      lines.push(cfg.enabled || cfg.browserHold ? 'Auto-pause is starting.' : 'Auto-pause is off in Quartz.');
+      if (json.host) lines.push(`Another app (${json.host.server}) is the auto-pause host on port ${st.port}.`);
     }
-    const r = await exec(
-      POWERSHELL,
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', doctorScript, '-Json'],
-      30000
-    );
-    const text = r.stdout.trim() || r.stderr.trim();
-    let json = null;
-    try { json = JSON.parse(text); } catch { json = null; }
-    return { ok: r.code === 0, text, json };
+    if (cfg.browserHold) lines.push(`Tabs playing: ${machine.playing}${machine.holding ? ' (holding Spotify paused)' : ''}.`);
+    if (st.error) lines.push('Problem: ' + st.error);
+    return { ok: !st.error, text: lines.join('\n'), json };
   }
 
+  /** Another app's host, or ours: { port, status } or null. Probes only when the link has no port. */
+  async function discover() {
+    const role = linkOn ? link.role() : 'off';
+    if ((role === 'host' || role === 'client') && typeof link.port() === 'number') {
+      const status = role === 'client' ? link.hostStatus() : { ok: true, port: link.port() };
+      return { port: link.port(), status: parseBridgeStatus(status) || { ok: true, port: link.port() } };
+    }
+    const found = await bridge.discover(PROBE_TIMEOUT_MS);
+    lastPing = found ? found.status : lastPing;
+    return found;
+  }
+
+  /** What main.js's now-playing card reaches: the host's port (ours or theirs). */
+  const mediaBridge = {
+    get port() {
+      const role = linkOn ? link.role() : 'off';
+      if ((role === 'host' || role === 'client') && typeof link.port() === 'number') return link.port();
+      return bridge.port;
+    },
+    discover: () => discover(),
+    forget() { bridge.forget(); },
+  };
+
   /**
-   * before-quit. Handing the hold back is an HTTP round trip and quit is
-   * synchronous, so the quit is deferred exactly once and for at most ~1.5 s.
-   * Doing nothing here would leave Spotify paused until the bridge's 180 s TTL
-   * expired the hold.
+   * before-quit. Handing a hold back (or Spotify itself, when we host) is
+   * async and quit is synchronous, so the quit is deferred exactly once and
+   * for at most ~1.5 s. Doing nothing would leave Spotify paused until the
+   * host's 180 s TTL expired the hold, or with no host left at all.
    */
   function handleQuit(event) {
     machine.stop();
     stopMutePoll();
-    if (!machine.holding || quitting) return false;
+    stopTick();
+    if (quitting) return false;
     quitting = true;
+    const role = linkOn ? link.role() : 'off';
+    const snap = engine.snapshot(now());
+    const mustWait = (role === 'host' && (snap.holds.length > 0 || snap.wePaused)) || (role === 'client' && link.held());
+    if (!mustWait) {
+      linkOn = false;
+      link.stop('quitting').catch(() => {}).then(() => smtc.stop());
+      return false;
+    }
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
-    const finish = () => { if (app) app.quit(); };
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      try { smtc.stop(); } catch { /* gone */ }
+      if (app) app.quit();
+    };
     const timer = setTimeout(finish, 1500);
-    machine.releaseNow()
+    linkOn = false;
+    link.stop('quitting')
       .catch(() => {})
       .then(() => { clearTimeout(timer); finish(); });
     return true;
   }
+
+  if (d.autoStart !== false) setTimer(() => { if (wantLink()) syncLink('starting'); }, 0);
 
   return {
     status,
@@ -1069,10 +1330,19 @@ function create(deps) {
     doctor,
     watchGuest,
     handleQuit,
-    // Exposed for a harness; the app never reaches past the four above.
+    // Exposed for main.js's now-playing card and for a harness.
+    _bridge: mediaBridge,
     _machine: machine,
-    _bridge: bridge,
-    _snapshot: () => snapshot(lastPing, lastTask),
+    _snapshot: () => snapshot(),
+    _config: () => readConfig(),
+    _link: link,
+    _engine: engine,
+    _compat: compat,
+    _smtc: smtc,
+    _syncLink: syncLink,
+    _tick: tickOnce,
+    _ticking: () => tickTimer !== null,
+    _linkOn: () => linkOn,
   };
 }
 
@@ -1089,10 +1359,15 @@ module.exports = {
   parseBridgeStatus,
   parseTaskQuery,
   firstErrorLine,
+  taskStateFromXml,
+  decodeTaskXml,
+  readLegacyTask,
+  legacyTaskFile,
   BRIDGE_SRC,
   BRIDGE_PORTS,
   DEFAULT_SITES,
   DEFAULT_CONFIG,
+  LEGACY_BASE_SITES,
   HOLD_AFTER_MS,
   RESUME_DELAY_MS,
   REFRESH_MS,

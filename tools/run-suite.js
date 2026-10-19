@@ -47,6 +47,10 @@ function castlabsBuild() {
  */
 const TESTS = [
   { name: 'argvurl', file: 'argvurl-harness.js' },
+  // Spotify auto-pause: config migration, the hold machine -> link -> engine, the SMTC helper's wrapper
+  // (a fake child), and test mode never sending. Then the shared host protocol (byte-identical with Mantle's).
+  { name: 'autopause', file: 'autopause-harness.js' },
+  { name: 'autopause-link', file: 'autopause-harness.js', args: ['--link'] },
   { name: 'bravesearch', file: 'bravesearch-harness.js' },
   { name: 'claudeanswer', file: 'claudeanswer-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
