@@ -117,6 +117,23 @@ function makeApp(name, ports, sp, opt) {
     await q.link.stop();
   }
 
+  // 3b. The same with NO pause between the hold and the quit (the host's /watch answer for the pause and
+  //     the client's next poll race the quit), five times: never a resume across the change.
+  {
+    let good = 0;
+    for (let i = 0; i < 5; i++) {
+      const sp = spotify();
+      const m = makeApp('mantle', ports, sp), q = makeApp('quartz', ports, sp);
+      await m.link.start(); await q.link.start();
+      await q.hold(true); await m.engine.idle();
+      await m.link.stop('Mantle quits');
+      await until(() => q.link.role() === 'host', 3000);
+      if (q.link.role() === 'host' && sp.state === 'paused' && sp.total().plays === 0) good++;
+      await q.hold(false); await q.link.stop();
+    }
+    ok(good === 5, `takeover right after a status change: no resume-then-pause (${good}/5)`);
+  }
+
   // 4. Host quits with NO successor holding: it resumes what it paused (as always), the other app hosts.
   {
     const sp = spotify();

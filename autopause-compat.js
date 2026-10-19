@@ -56,6 +56,8 @@ function createCompat(deps) {
   const name = d.name || 'mantle';
   let server = null, port = null, starting = null, closing = false;
   const watchers = new Set();      // open /watch long polls: { res, src, since, timer }
+  const watchedAt = new Map();     // src -> last time it had a /watch open (a client re-opens right after each answer)
+  const WATCH_GAP_MS = 2000;
 
   function statusJson(extra) {
     const sp = d.spotify();
@@ -81,6 +83,7 @@ function createCompat(deps) {
   }
   function answerWatch(w, j) {
     if (!watchers.delete(w)) return;
+    if (w.src) watchedAt.set(w.src, Date.now());
     clearTimeout(w.timer);
     w.done = true;
     send(w.res, 200, j || statusJson());
@@ -148,11 +151,11 @@ function createCompat(deps) {
       const snap = d.engine.snapshot(d.now());
       if ((cmd === 'play' || cmd === 'toggle') && snap.wePaused && snap.holds.length) return [200, { ok: false, cmd, reason: 'held', holds: snap.holds.length }];
       const r = await d.control(CMDS[cmd]);
-      return [200, r.ok ? { ok: true, cmd, result: true, source: 'mantle' } : { ok: false, cmd, reason: r.reason || 'no session' }];
+      return [200, r.ok ? { ok: true, cmd, result: true, source: name } : { ok: false, cmd, reason: r.reason || 'no session' }];
     }
     if (p === '/config') {
-      if (req.method === 'POST') return [200, { ok: false, reason: 'Mantle does not turn Spotify’s ads down, so there is nothing to change here' }];
-      return [200, { ok: true, config: { adDuck: { enabled: false } }, server: 'mantle' }];
+      if (req.method === 'POST') return [200, { ok: false, reason: `${name.charAt(0).toUpperCase() + name.slice(1)} does not turn Spotify’s ads down, so there is nothing to change here` }];
+      return [200, { ok: true, config: { adDuck: { enabled: false } }, server: name }];
     }
     return [404, { ok: false, reason: 'not found' }];
   }
@@ -168,6 +171,7 @@ function createCompat(deps) {
     const j = statusJson();
     if (w.since !== j.sig) return send(res, 200, j);
     watchers.add(w);
+    if (src) watchedAt.set(src, Date.now());
     w.timer = setTimeout(() => answerWatch(w), WATCH_MS);
     if (w.timer.unref) w.timer.unref();
     res.on('close', () => {
@@ -175,6 +179,7 @@ function createCompat(deps) {
       watchers.delete(w);
       clearTimeout(w.timer);
       if (!src || [...watchers].some((x) => x.src === src)) return;
+      watchedAt.delete(src);
       d.engine.removeHold(`http:${src}`, 'its app closed').then((r) => {
         if (r && r.action !== 'skipped') d.log(`a client app went away: its hold was dropped (${r.action})`);
         if (d.changed) d.changed();
@@ -248,9 +253,12 @@ function createCompat(deps) {
     d.log(`bridge-compatible API closed (${why || 'stopped'})`);
   }
 
-  /** Live holds from clients that can take over AND still hold a /watch open (they will notice our exit). */
+  /** Live holds from clients that can take over AND hold a /watch open (or did within WATCH_GAP_MS, the moment
+   *  between an answer and their next poll): they will notice our exit and take the pause over. */
   function successorWatching() {
     const srcs = new Set([...watchers].map((w) => w.src).filter(Boolean));
+    const t = Date.now();
+    for (const [s, at] of watchedAt) if (t - at < WATCH_GAP_MS) srcs.add(s);
     return d.engine.snapshot(d.now()).holds.some((h) => h.successor && h.live && !h.native && srcs.has(h.key.replace(/^http:/, '')));
   }
 
