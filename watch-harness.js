@@ -231,10 +231,11 @@ function fakeWorld(opts) {
   if (o.drmRoute) deps.drmRoute = o.drmRoute;
   if (o.player) deps.player = o.player;
   // The background refresh is off unless a test turns it on (bgTests): the visible-only tests
-  // below keep their exact read counts.
+  // below keep their exact read counts. Every world has a watch.json from before opt-in (no "v"):
+  // absent = on, so every service reads as it did before opt-in (a fresh install: tests/watch-lumen-optin-test.js).
   if (o.cache) fs.writeFileSync(path.join(dir, WM.CACHE_FILE), JSON.stringify(o.cache));
   if (!o.background) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(Object.assign({ background: false }, o.prefs || {})));
-  else if (o.prefs) fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(o.prefs));
+  else fs.writeFileSync(path.join(dir, WM.PREFS_FILE), JSON.stringify(o.prefs || {}));
   world.readers = Shape.SERVICE_IDS.filter((id) => !!deps.adapters[id]);
   world.wm = WM.create(deps);
   world.guest = (url) => {
@@ -1322,7 +1323,7 @@ async function autoTests() {
   const bgWant = oldestFirst(w.readers, bgAges, 61);
   w.saver = false;
   try {
-    check(w.wm.describe().background.on === true, 'bg: on by default');
+    check(w.wm.describe().background.on === true, 'bg: on by default (a watch.json from before opt-in)');
     await runFor(w, 60e3);
     check(w.calls.length === 0, 'bg: nothing in the first 2 min after start (boot delay)', w.calls);
     await runFor(w, 70e3);

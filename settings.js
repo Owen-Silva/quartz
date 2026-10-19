@@ -6027,6 +6027,12 @@
       'picks and live sports from the services you are signed in to in Quartz. Reading happens ' +
       'in a hidden page: when it comes on screen (anything over 10 min old), every 15 min while it ' +
       'stays there, and hourly in the background if the switch below is on; nothing leaves this PC.'));
+    // Lumen is opt-in (watch-main.js cleanPrefs): a fresh install reads nothing until a service is on.
+    s.appendChild(el('p', 'set-hint set-watch-terms',
+      'Lumen is unofficial: it is not affiliated with or endorsed by YouTube, Disney+, Hulu, Prime Video or ESPN. ' +
+      'It reads pages from services you are signed in to, in a hidden window, with your own session. ' +
+      'Automated reading may be against a service’s terms of use, so turn on only the services you accept that for. ' +
+      'On a new install every service starts off.'));
     var svc = el('div', 'set-field');
     svc.setAttribute('data-field', 'watchservices');
     s.appendChild(svc);
@@ -6284,6 +6290,8 @@
         wtAskFailed ? 'Lumen settings could not be read: ' + wtAskFailed + '.' : 'Reading Lumen settings…'));
       return;
     }
+    // watch.json could not be read: say what Lumen did instead (watch-main.js loadPrefs).
+    if (wtState.prefsNote) field.appendChild(el('p', 'set-note', String(wtState.prefsNote)));
     wtState.services.forEach(function (v, i) {
       if (!v || !v.id) return;
       var box = el('div', i ? 'set-field-gap' : '');

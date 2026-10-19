@@ -32,7 +32,7 @@
  *     - then the one timer keeps each service to its floor: every 15 min (ESPN every 2 while
  *       one of his games is live).
  *   OFF SCREEN (no Watch page visible, or none open): the light background refresh, when
- *   Settings > Watch "Keep Watch up to date in the background" is on (the default): at most
+ *   Settings > Watch "Keep Watch up to date in the background" is on (off on a fresh install; see cleanPrefs): at most
  *   one read per BG_EVERY_MS (60 min) per service, one at a time and BG_GAP_MS apart, only for
  *   a service that has read fine before (a signed-out one would only say so again), never in
  *   the first BG_BOOT_DELAY_MS after create(), and only while Quartz is on screen (not
@@ -97,6 +97,9 @@ try { YtLib = require('./watch/ytlib'); YtLibMain = require('./watch/ytlib-main'
 /* TMDB "where to watch" (watch/tmdb.js): only with a key the user pastes in Settings > Watch. */
 let Tmdb = null;
 try { Tmdb = require('./watch/tmdb'); } catch (err) { Tmdb = null; }
+/* The hover preview's pure half (watch/preview.js): the embed Referer watch.json may set. */
+let Preview = null;
+try { Preview = require('./watch/preview'); } catch (err) { Preview = null; }
 let TilePv = null;   // the hover previews inside tiles: the gate's words (watch-tilepreview.js)
 try { TilePv = require('./watch-tilepreview'); } catch (err) { TilePv = null; }
 
@@ -111,6 +114,7 @@ const LINE_PREFIX = 'quartz-watch:';
 const PAGE_FILE = 'watch.html';
 const CACHE_FILE = 'watch-cache.json';
 const PREFS_FILE = 'watch.json';
+const PREFS_VERSION = 2;              // watch.json "v": 2 = written since Lumen became opt-in (cleanPrefs)
 const CACHE_VERSION = 1;
 
 const STEP_BUDGET_MS = 20000;
@@ -157,22 +161,47 @@ const GAME_PROCESSES = ['valorant-win64-shipping.exe', 'league of legends.exe', 
 
 /* ------------------------------------------------------------------ pure helpers */
 
-/** Watch's own settings, checked: which services are on, which leagues, the TMDB key. */
+/*
+ * Watch's own settings, checked: which services are on, which leagues, the TMDB key, the
+ * background refresh, hover previews and the optional embed Referer (watch/preview.js).
+ *
+ * OPT-IN (watch.json "v": 2). Lumen reads signed-in pages of services that offer it no API,
+ * so a fresh install reads NOTHING until the person turns a service on in Settings > Lumen:
+ *   raw null (no watch.json)      a fresh install: every service off, background off;
+ *   raw without "v"               a watch.json from before opt-in: everything absent reads ON,
+ *                                 exactly as it always did (loadPrefs() then rewrites the file
+ *                                 with those values made explicit, plus v: 2, once);
+ *   raw with "v" >= 2             only an explicit true turns a service or the background on.
+ * Hover previews stay on unless turned off in every case: they play only on tiles, and tiles
+ * come only from a service the person turned on.
+ */
 function cleanPrefs(raw) {
-  const r = raw && typeof raw === 'object' ? raw : {};
+  const fresh = !(raw && typeof raw === 'object');
+  const r = fresh ? {} : raw;
+  const legacy = !fresh && !(Number(r.v) >= PREFS_VERSION);
+  const asked = r.enabled && typeof r.enabled === 'object' ? r.enabled : {};
   const enabled = {};
   for (const id of Shape.SERVICE_IDS) {
-    enabled[id] = !(r.enabled && typeof r.enabled === 'object' && r.enabled[id] === false);
+    enabled[id] = legacy ? asked[id] !== false : asked[id] === true;
   }
   let leagues = Array.isArray(r.leagues) ? r.leagues.filter((l) => !!Shape.leagueById(l)) : null;
   if (!leagues) leagues = Shape.DEFAULT_LEAGUES.slice();
   leagues = leagues.filter((l, i) => leagues.indexOf(l) === i);
   const tmdbKey = cleanKey(r.tmdbKey);
-  // Keep Watch up to date in the background: on unless turned off.
-  const background = r.background !== false;
+  // Keep Watch up to date in the background: a pre-opt-in file, on unless turned off; else only when turned on.
+  const background = legacy ? r.background !== false : r.background === true;
   // Settings > Lumen "Preview videos when I hover": on unless turned off.
   const tilePreview = r.tilePreview !== false;
-  return { enabled, leagues, tmdbKey, background, tilePreview };
+  const out = { v: PREFS_VERSION, enabled, leagues, tmdbKey, background, tilePreview };
+  // The YouTube embed's Referer (watch/preview.js): kept only when watch.json names a valid one.
+  const ref = Preview && typeof Preview.cleanReferer === 'function' ? Preview.cleanReferer(r.embedReferer) : '';
+  if (ref) out.embedReferer = ref;
+  return out;
+}
+
+/** A parsed watch.json written before opt-in (no "v": 2): what loadPrefs() migrates once. */
+function isLegacyPrefs(raw) {
+  return !!(raw && typeof raw === 'object') && !(Number(raw.v) >= PREFS_VERSION);
 }
 
 /** A TMDB key as pasted (a v3 key or a v4 read token), or ''. */
@@ -398,6 +427,7 @@ function create(deps) {
   const fileIn = (name) => { const dir = userData(); return dir ? path.join(dir, name) : ''; };
 
   let prefs = null;
+  let prefsNote = '';                // watch.json could not be read: why, for Settings > Lumen ('' = fine)
   let cache = null;
   let saveTimer = null;
   let timer = null;
@@ -461,25 +491,65 @@ function create(deps) {
 
   /* --- files --------------------------------------------------------------------- */
 
+  /*
+   * watch.json, read once (see cleanPrefs for what each kind of file means):
+   *   - no file: a fresh install, every service off; nothing is written until a setting changes;
+   *   - a file from before opt-in (no "v"): read as it always was (absent = on) and rewritten
+   *     ONCE with those values explicit plus v: 2; every other key (leagues, the TMDB key, any
+   *     key this build does not know) is copied through untouched;
+   *   - a file that exists but cannot be read or parsed: read as a pre-opt-in file (absent = on,
+   *     what Lumen always did), NOT rewritten, and Settings > Lumen says so (prefsNote).
+   */
   function loadPrefs() {
     if (prefs) return prefs;
     let raw = null;
+    let unreadable = '';
     const file = fileIn(PREFS_FILE);
-    if (file) { try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { raw = null; } }
+    if (file) {
+      try {
+        raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!raw || typeof raw !== 'object') { raw = null; unreadable = 'it holds no settings'; }
+      } catch (err) {
+        raw = null;
+        if (!err || err.code !== 'ENOENT') unreadable = err && err.code ? err.code : 'it is not valid JSON';
+      }
+    }
+    if (unreadable) {
+      prefsNote = 'watch.json could not be read (' + unreadable + '), so Lumen used its older defaults: every service on. ' +
+        'Changing any Lumen setting writes a fresh file.';
+      log('Lumen settings could not be read (' + unreadable + '): using the pre-opt-in defaults');
+      raw = {};
+    }
     prefs = cleanPrefs(raw);
+    if (!unreadable && isLegacyPrefs(raw)) {
+      // Made explicit + v: 2, so this install keeps reading what it read before opt-in existed.
+      const enabled = Object.assign({}, prefs.enabled);
+      if (writePrefsFile(Object.assign({ v: PREFS_VERSION }, raw, { v: PREFS_VERSION, enabled, background: prefs.background, tilePreview: prefs.tilePreview }))) {
+        log('Lumen settings moved to opt-in (v' + PREFS_VERSION + '): every choice kept as it was');
+      }
+    }
+    if (Preview && typeof Preview.setEmbedReferer === 'function') Preview.setEmbedReferer(prefs.embedReferer || '');
     return prefs;
   }
 
-  function savePrefs() {
+  /** Write watch.json whole (a temp file, then a rename: a crash mid-write never leaves half a file). */
+  function writePrefsFile(obj) {
     const file = fileIn(PREFS_FILE);
     if (!file) return false;
     try {
-      fs.writeFileSync(file, JSON.stringify(prefs, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.renameSync(file + '.tmp', file);
       return true;
     } catch (err) {
       log('Lumen settings could not be saved: ' + ((err && err.code) || 'unknown'));
       return false;
     }
+  }
+
+  function savePrefs() {
+    if (!writePrefsFile(prefs)) return false;
+    prefsNote = '';
+    return true;
   }
 
   function loadCache() {
@@ -1915,6 +1985,10 @@ function create(deps) {
       reading,
       background: { on: !!p.background, waiting: p.background ? bgWaiting : '', lastAt: bgLastAt, nextAt: bgTimerAt, reads: bgReads },
       tilePreview: { on: p.tilePreview !== false },
+      // watch.json could not be read ('' = fine): Settings > Lumen shows it.
+      prefsNote,
+      // The YouTube embed's Referer (watch/preview.js; watch.json "embedReferer"): the chrome's player sends it too.
+      embedReferer: Preview && typeof Preview.currentEmbedReferer === 'function' ? Preview.currentEmbedReferer() : '',
     };
   }
 
@@ -2046,8 +2120,11 @@ function create(deps) {
     });
   }
   if (d.ipcMain) registerIpc(d.ipcMain, d.isChromeSender);
+  // watch.json now (a small file): a pre-opt-in one is made explicit at boot, and its embed
+  // Referer is in place before any page can ask for an embed.
+  try { loadPrefs(); } catch (err) { log('Lumen settings could not be loaded: ' + ((err && err.message) || 'error')); }
   // The background refresh's first look, at the end of its boot delay (no Watch page needs to
-  // be open). Nothing is loaded now: bgTick reads the prefs and the cache when it fires.
+  // be open). The cache is not loaded now: bgTick reads it when it fires.
   bgTimerAt = now() + Math.max(bgTimerMinMs, bgBootDelayMs);
   bgTimer = setTimer(bgTick, Math.max(bgTimerMinMs, bgBootDelayMs));
   if (bgTimer && typeof bgTimer.unref === 'function') bgTimer.unref();
@@ -2059,6 +2136,8 @@ function create(deps) {
     // Lumen Alerts: the hooks (watch-alerts-main.js), the cached game answer, and what its Settings field needs.
     setAlerts: (a) => { alerts = a && typeof a === 'object' ? a : null; try { schedule(); } catch { /* next tick */ } },
     gaming: () => gameRunning(),
+    // Is this service turned on in Settings > Lumen? (sports-main.js reads ESPN only while it is.)
+    isEnabled: (id) => Shape.SERVICE_IDS.indexOf(id) !== -1 && !!loadPrefs().enabled[id],
     alertsView: () => { const p = loadPrefs(); const c = loadCache(); return { leagues: p.leagues.slice(), background: p.background, youtube: p.enabled.youtube ? c.services.youtube.state : 'off', espn: p.enabled.espn ? c.services.espn.state : 'off' }; },
     // drm-main's state changed (Widevine arrived, a rule was added): re-label the tiles.
     drmChanged: () => pushAll(),
@@ -2085,6 +2164,7 @@ function create(deps) {
 module.exports = {
   create,
   cleanPrefs,
+  isLegacyPrefs,
   cleanCache,
   cleanKey,
   maskKey,
@@ -2094,6 +2174,7 @@ module.exports = {
   LINE_PREFIX,
   CACHE_FILE,
   PREFS_FILE,
+  PREFS_VERSION,
   STEP_BUDGET_MS,
   MIN_FREE_GB,
   GAME_PROCESSES,

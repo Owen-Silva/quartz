@@ -2077,7 +2077,9 @@
       } else {
         eb.appendChild(el('span', 'rn', 'Lumen'));
         h1Text = 'Every service is off';
-        lede = 'Turn on the services you use in Settings > Lumen, and Lumen reads them while this page is open.';
+        // Lumen is opt-in (watch-main.js cleanPrefs): a new install lands here until a service is on.
+        lede = 'Lumen reads nothing until you turn a service on. Settings > Lumen lists each one and what turning it on means: ' +
+          'Lumen reads that service’s pages with your own sign-in, in a hidden window, and it is not made by any of them.';
         acts.appendChild(button('btn primary', 'Open Settings', function () { send('settings', {}); }));
       }
       txt.appendChild(eb);

@@ -39,6 +39,7 @@ const { pathToFileURL } = require('url');
 const Sports = require('./watch/sports');
 
 const PREFS_FILE = 'lumen-sports.json';
+const ESPN_OFF = 'ESPN is off in Settings > Lumen; turn it on there to read scores, schedules and standings';
 const LINE_PREFIX = 'quartz-sports:';
 const FETCH_BUDGET_MS = 10000;
 const MAX_BODY = 6 * 1024 * 1024;
@@ -70,6 +71,9 @@ function create(deps) {
   const log = typeof d.log === 'function' ? d.log : (line) => console.log('[sports] ' + line);
   const now = typeof test.now === 'function' ? test.now : () => Date.now();
   const doFetch = typeof test.fetch === 'function' ? test.fetch : (typeof fetch === 'function' ? fetch : null);
+  // Lumen is opt-in: these pages read ESPN only while ESPN is on in Settings > Lumen (main.js passes
+  // watch-main's answer; no espnOn = on). Off, every read answers ESPN_OFF and the page shows it.
+  const espnOn = typeof d.espnOn === 'function' ? () => { try { return !!d.espnOn(); } catch { return false; } } : () => true;
   const rebase = Array.isArray(test.rebase) ? test.rebase.filter((p) => Array.isArray(p) && typeof p[0] === 'string' && typeof p[1] === 'string') : [];
   const userData = (() => { try { return test.userData || (d.app && d.app.getPath('userData')) || ''; } catch { return ''; } })();
   const prefsPath = userData ? path.join(userData, PREFS_FILE) : '';
@@ -114,6 +118,7 @@ function create(deps) {
   /** One public JSON read -> { json } or { error }. Never throws. */
   async function getJson(url, ttl) {
     if (!url) return { error: 'no address for that' };
+    if (!espnOn()) return { error: ESPN_OFF };
     const hit = cache.get(url);
     if (hit && ttl && now() - hit.at < ttl) return hit.value;
     if (inflight.has(url)) return inflight.get(url);
@@ -344,4 +349,4 @@ function create(deps) {
   };
 }
 
-module.exports = { create, PREFS_FILE, LINE_PREFIX, MAX_FAVS, reasonOf, cleanTeam };
+module.exports = { create, PREFS_FILE, LINE_PREFIX, MAX_FAVS, ESPN_OFF, reasonOf, cleanTeam };

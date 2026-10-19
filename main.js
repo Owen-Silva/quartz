@@ -669,6 +669,8 @@ const lumenSports = (() => {
   try {
     return require('./sports-main').create({
       app, test,
+      // Lumen is opt-in: these pages read ESPN only while ESPN is on in Settings > Lumen.
+      espnOn: () => !!(watch && typeof watch.isEnabled === 'function' && watch.isEnabled('espn')),
       getGames: () => { const sn = watch && typeof watch.snapshot === 'function' ? watch.snapshot() : null; const sp = sn && sn.sports; return sp ? [].concat(sp.live || [], sp.soon || [], sp.done || []) : []; },
       // a score pin's click: the chrome brings the Lumen tab forward (scorepins-chrome.js), Quartz comes to the front
       showLumen: () => {
