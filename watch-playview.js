@@ -900,7 +900,9 @@
     cm.setAttribute('aria-label', 'Comments');
     cm.hidden = true;
     info.appendChild(cm);
-    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, container: cm } })); } catch (e) { /* no listeners */ }
+    // view + toggle: for watch-comments.js (its reads in the page, and "Open comments on YouTube" = Full page).
+    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, container: cm,
+      view: s.view, toggle: function () { return toggle(s); } } })); } catch (e) { /* no listeners */ }
   }
 
   function renderOther(s, p, m, phase, info) {

@@ -88,6 +88,8 @@ const TESTS = [
   // maths, the key map, each adapter's menus, the page style (the ad UI kept), auto-hide and the fallback rules.
   { name: 'watch-playerbar', file: 'tests/watch-playerbar-test.js' },
   { name: 'watch-playview', file: 'tests/watch-playview-test.js' },
+  // Lumen's own YouTube comments (watch-comments.js): both answer shapes, links, the states, the in-page script.
+  { name: 'watch-comments', file: 'tests/watch-comments-test.js' },
   { name: 'watch-shorts', file: 'tests/watch-shorts-test.js' },
   // Lumen's show pages: every service's show reader on its hand-made fixture, TMDB's seasons (a fake fetch),
   // the big button, and watch-shows-main's states (fallback, signed out, paused, elsewhere, cache, cancel).
