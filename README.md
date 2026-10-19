@@ -76,9 +76,9 @@ outside the repo. The files the optional features read are:
 
 | File | What it holds |
 | --- | --- |
-| `watch.json` | Lumen: which services are on, background reading, an optional TMDB key |
+| `watch.json` | Lumen: which services are on, background reading, an optional TMDB key, an optional `embedReferer` for YouTube embeds |
 | `phone.json` | Phone tab: your phone's address and pairing state |
-| `notes-pane.json` | Notes pane: `{ "dir": "<folder of .html or .md notes>" }` plus optional keys |
+| `notes-pane.json` | Notes pane: `{ "dir": "<folder of .html notes>" }` plus optional keys (see [Notes pane](#notes-pane)) |
 
 API keys (Brave Search, Claude, TMDB, Finnhub) are pasted into Settings and stored in the profile.
 
@@ -132,10 +132,18 @@ Tailscale, never a cable and never the open internet.
 
 ## Notes pane
 
-Point Settings > Notes pane at a folder of `.html` or `.md` notes and the pane opens beside your
-tabs, one chip per notebook. Until a folder is set, the pane and every way into it are hidden, and
-Settings says how to turn it on. Its optional extras, each off until configured in
-`notes-pane.json`, are described in [docs/engineering-notes.md](docs/engineering-notes.md).
+Point Settings > Notes pane at a folder of `.html` notes (one file per notebook, `<section id>`s
+inside) and the pane opens beside your tabs, one chip per notebook, jumping to the section that
+matches what you are looking at. Until a folder is set, the pane and every way into it are hidden,
+and Settings says how to turn it on. Optional keys in `notes-pane.json`, each off until set (the
+full list is in the header of `notes-pane-main.js`):
+
+| Key | What it does |
+| --- | --- |
+| `reader` | `{ "exe", "name", "cdpPort", "urlPatterns", "topicSelectors" }`: read the question on screen from a WebView2/Chromium desktop app over CDP, so the pane can pick the right notebook and section |
+| `subjectAliases` | `{ "<notebook id>": ["phrase", ...] }`: extra words that mean that notebook |
+| `helperEnabled`, `helperModel`, `claudeBin` | the optional Claude helper (off by default; also a toggle in the pane): it runs your own Claude Code CLI, using your own usage, on each new question the reader sees or one you paste |
+| `budgetDir` | a folder of Claude Code statusline JSON files; when set, the helper pauses near your usage limits |
 
 ## Music auto-pause (optional companion)
 

@@ -54,7 +54,8 @@
  * CONFIG — <userData>\notes-pane.json. Every key is optional except `dir`:
  *   dir              the folder of notes files (.html). Unset = the whole pane is off.
  *   manualSubjectId  the subject picked by hand (written by the pane)
- *   helperEnabled    the Claude helper on/off (written by the pane; default true)
+ *   helperEnabled    the Claude helper on/off (written by the pane; default false: it spends the
+ *                    user's own Claude usage, so it is opt-in)
  *   helperModel      the helper's model (written by the pane; default HELPER_MODEL_DEFAULT)
  *   pinned           the pin (written by the pane)
  *   claudeBin        the claude executable; unset = %USERPROFILE%\.local\bin\claude.exe when it
@@ -353,7 +354,7 @@ function create(options) {
       port: CDP_PORT_DEFAULT, lastReadAt: 0, question: null
     },
     helper: {
-      enabled: true, state: 'idle', reason: 'idle',
+      enabled: false, state: 'idle', reason: 'idle',   // opt-in: it runs the user's own Claude CLI (their usage)
       model: HELPER_MODEL_DEFAULT, sessionId: null, lastMs: 0
     },
     match: null,
