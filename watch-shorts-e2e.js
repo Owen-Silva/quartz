@@ -572,6 +572,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
         b = await pbWait('b.st && b.st.p === false', 3000);
         lv = await live();
         perf[how] = { shownMs: mv ? mv.at - t0 : -1, barMs: bt ? bt - t0 : -1, moves: (await moves()) - m0 };
+        perf[how].hows = await guest.ev(`window.__moves.slice(${m0}).map((m) => m.how + '@' + (m.at - ${t0}))`).catch(() => null); perf[how].lumen = await sh().then((z) => z && { steps: z.steps.slice(-3), wheels: z.wheels }).catch(() => null);
         check(!!mv && perf[how].moves === 1 && mv.to === wantId, 'real page, ' + how + ': exactly ONE Short moved', perf[how]);
         check(perf[how].shownMs >= 0 && perf[how].shownMs <= 300, 'real page, ' + how + ': the next Short shows within 300 ms', perf[how]);
         check(perf[how].barMs >= 0 && perf[how].barMs <= 400 && !!b && Math.abs(b.st.c - lv.t) < 1.2 && b.st.p === lv.p, 'real page, ' + how + ': Lumen\'s bar re-binds at once (new time, play state)', { barMs: perf[how].barMs, bar: b && { c: b.st.c, p: b.st.p }, live: lv });
@@ -582,7 +583,10 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       await moveBy('ArrowDown', () => keyIn(chrome, 'ArrowDown', 'ArrowDown', 40), S[1].id);
       x = await sh();
       const wc = { x: Math.round(x.view.x + x.view.w / 2), y: Math.round(x.view.y + x.view.h / 2) };
-      await moveBy('a wheel burst over the player', async () => { for (let i = 0; i < 6; i++) { await wheelAt(wc.x, wc.y, 60); await sleep(25); } }, S[2].id);
+      await chrome.ev('(() => { window.__wt = []; document.addEventListener("wheel", (e) => window.__wt.push(String(e.target.tagName) + "." + String(e.target.className).slice(0, 30)), true); return 1; })()');
+      say('wheel point: ' + await chrome.ev(`(() => { const n = document.elementFromPoint(${wc.x}, ${wc.y}); return n ? n.tagName + '.' + String(n.className).slice(0, 40) : ''; })()`));
+      await moveBy('a wheel burst over the player', () => Promise.all([0, 1, 2, 3, 4, 5].map((i) => sleep(i * 16).then(() => wheelAt(wc.x, wc.y, 60)))), S[2].id);
+      say('wheel targets in Lumen: ' + JSON.stringify(await chrome.ev('window.__wt')));
       await moveBy('Lumen\'s Next', () => clickAt('.wp-layer .sh-next', 'Next'), S[3].id);
       av = await avatar();
       check(!!av && av.text === '', 'real page: after three moves the avatar is still a picture', av);
@@ -593,6 +597,8 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
 
       // A click gives visible feedback within 100 ms: the bar's play button flips at once.
       const pp0 = await chrome.ev('document.querySelector(".wp-layer .pb .pb-play").getAttribute("aria-label")');
+      await wake();
+      await sleep(200);
       const tc = Date.now();
       await clickAt('.wp-layer .pb .pb-play', 'play/pause');
       const flip = await chrome.waitFor(`(() => { const a = document.querySelector(".wp-layer .pb .pb-play").getAttribute("aria-label"); return a !== ${JSON.stringify(pp0)} ? Date.now() : 0; })()`, 2000).catch(() => 0);

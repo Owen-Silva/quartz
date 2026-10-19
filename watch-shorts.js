@@ -237,7 +237,7 @@
         ' min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important; flex: none !important; border-radius: 0 !important; transform: none !important; }',
       // The picture itself: the whole frame, never YouTube's pillarbox offset from a size it computed before the trim.
       R + ' #shorts-player video.html5-main-video, ' + R + ' ytd-reel-video-renderer video.html5-main-video { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; object-fit: contain !important; }',
-      VEIL.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { visibility: hidden !important; pointer-events: none !important; }',
+      VEIL.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { visibility: hidden !important; pointer-events: none !important; position: absolute !important; }',
       GONE.map(function (s) { return 'html[data-lumen-sh] ' + s + ':not(:has(' + AD + '))'; }).join(',\n') + ' { display: none !important; }'
     ].join('\n');
   }
@@ -493,13 +493,17 @@
       if (!t || !t.closest || !t.closest('[data-lumen-sh-root] #reel-overlay-container')) return;
       e.preventDefault();
       e.stopPropagation();
-      var now = Date.now();
+      // The event's own time (when the device sent it), so a page busy with the move never splits one gesture in two.
+      var now = e.timeStamp > 0 ? performance.timeOrigin + e.timeStamp : Date.now();
       var dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
       if (now - wg.last > 220) { wg.acc = 0; wg.moved = false; }
       wg.last = now;
       if (wg.moved || now < wg.lock) return;
       wg.acc += dy;
-      if (Math.abs(wg.acc) >= 24) { wg.moved = true; wg.lock = now + 380; step(wg.acc > 0 ? 1 : -1); }
+      if (Math.abs(wg.acc) >= 24) {
+        wg.moved = true; wg.lock = now + 380;
+        step(wg.acc > 0 ? 1 : -1);   // the one move (Lumen's chrome leaves a wheel over the page to the page: onWheel)
+      }
     }
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
     window.__lumenSh = { v: V, apply: apply, read: read, step: step, openFirst: openFirst, press: press,
@@ -774,7 +778,12 @@
 
   function onWheel(s, e) {
     if (!shOn(s)) return;
+    // A wheel over the page itself is the page's: YouTube's own wheel, or (today's pinned Short) the page script's
+    // one-Short-per-gesture (guest() onWheel). Stepping here too moved two Shorts for one gesture.
+    // So is one over Lumen's cover on the player while a move loads: the rest of that same gesture (a trackpad's
+    // inertia) landed there and moved a second Short.
     var p = shOf(s);
+    if (e.target === s.view || (p && p.cover && e.target && p.cover.contains(e.target))) { e.preventDefault(); return; }
     // The save list scrolls itself while it can; everything else is a Short move.
     var list = e.target && e.target.closest ? e.target.closest('.pv-savelist') : null;
     if (list && list.scrollHeight > list.clientHeight + 2) {
