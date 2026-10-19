@@ -21,8 +21,8 @@
  *                                   predates workspace sleep)
  *                           colour in null|'ion'|'ember'|'forest'|'ocean'|'midnight'
  *                           folder: the Claude pane's folder for the workspace, or null
- *                           pane:   null | 'school' (the side pane it wants)
- *                           preset: null | 'school' | 'project' | 'club' | 'trading' | 'phone'
+ *                           pane:   null | 'notes' (the side pane it wants)
+ *                           preset: null | 'project' | 'club' | 'trading' | 'phone'
  *                                   (a key this panel only ever passes through)
  *   currentWorkspace()   -> the current workspace (object or id; both accepted)
  *   switchWorkspace(id)
@@ -30,7 +30,11 @@
  *   renameWorkspace(id, name)
  *   setWorkspaceColour(id, colour)
  *   setWorkspaceFolder(id, folder)  // null clears it
- *   setWorkspacePane(id, kind)      // null | 'school'
+ *   setWorkspacePane(id, kind)      // null | 'notes'
+ *   notesPaneAvailable() -> true while the notes pane is configured (a notes
+ *                           folder is set in Settings > Notes pane). The 'notes'
+ *                           pane option is offered only while it says true;
+ *                           app.js fires workspacechange when it flips.
  *   deleteWorkspace(id)           // 'main' can never be deleted
  *   moveTabToWorkspace(tabId, wsId)
  *   moveActiveTabToWorkspace(wsId)
@@ -77,10 +81,11 @@
   };
 
   /* The side panes a workspace can ask for, in the order the toggle offers
-     them. null is "no pane", which is what every workspace starts on. */
-  var PANES = [null, 'school'];
+     them. null is "no pane", which is what every workspace starts on. A kind
+     in this list is only OFFERED while paneOffered() says so (see there). */
+  var PANES = [null, 'notes'];
   var PANE_LABEL = {
-    'school': 'School notes'
+    'notes': 'Notes'
   };
 
   /* ============================================================
@@ -119,6 +124,31 @@
   function isPane(kind) {
     for (var i = 0; i < PANES.length; i++) if (PANES[i] === kind) return true;
     return false;
+  }
+
+  /**
+   * Whether the toggle offers this pane kind right now. "None" always; the
+   * notes pane only while app.js's notesPaneAvailable() says a notes folder is
+   * configured. An unconfigured profile is never offered a pane that would
+   * open on an empty column; Settings > Notes pane is where it is turned on.
+   * A workspace that already HAS pane 'notes' keeps it stored while the pane
+   * is unavailable (isPane above still accepts it), so it comes back as soon
+   * as the folder does. app.js fires workspacechange when the answer flips,
+   * and wire() re-renders on that.
+   */
+  function paneOffered(kind) {
+    if (kind === null) return true;
+    if (kind === 'notes') {
+      return typeof notesPaneAvailable === 'function' && !!notesPaneAvailable();
+    }
+    return false;
+  }
+
+  /** The pane kinds the toggle offers right now, "None" first. */
+  function offeredPanes() {
+    var out = [];
+    for (var i = 0; i < PANES.length; i++) if (paneOffered(PANES[i])) out.push(PANES[i]);
+    return out;
   }
 
   /** The last segment of a path — what the folder button shows when it fits. */
@@ -331,6 +361,9 @@
     }
 
     /* --- Pane --------------------------------------------------- */
+    // Only when there is a pane to offer: a lone "None" is not a choice.
+    var panes = offeredPanes();
+    if (panes.length < 2) return wrap;
     var pRow = el('div', 'ws-setup-row');
     pRow.appendChild(el('span', 'ws-setup-label'));
     pRow.firstChild.textContent = 'Pane';
@@ -338,8 +371,8 @@
     var group = el('div', 'ws-panes');
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'Side pane');
-    for (var i = 0; i < PANES.length; i++) {
-      group.appendChild(paneOption(w, PANES[i]));
+    for (var i = 0; i < panes.length; i++) {
+      group.appendChild(paneOption(w, panes[i]));
     }
     pRow.appendChild(group);
     wrap.appendChild(pRow);
@@ -621,8 +654,9 @@
         render();
       });
       if (setupId === w.id) setupBtn.classList.add('is-on');
-      // A workspace with a folder or a pane says so without opening the block.
-      if (w.folder || w.pane) setupBtn.classList.add('is-set');
+      // A workspace with a folder or a pane says so without opening the block
+      // (a stored pane only counts while that pane is actually on offer).
+      if (w.folder || (w.pane && paneOffered(w.pane))) setupBtn.classList.add('is-set');
       acts.appendChild(setupBtn);
 
       acts.appendChild(iconButton(GLYPH_RENAME, 'Rename', 'ws-act-rename', function () {

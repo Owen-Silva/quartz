@@ -5186,17 +5186,18 @@ const DEFAULT_WORKSPACE_ID = 'main';
 const WORKSPACE_COLOURS = ['ion', 'ember', 'forest', 'ocean', 'midnight'];
 const WORKSPACE_NAME_MAX = 40;
 // The side panes a workspace can ask for. null is "no pane" and is the only
-// answer Home ever gives; 'school' is school-pane.js's. A kind this list does
+// answer Home ever gives; 'notes' is notes-pane.js's. A kind this list does
 // not name reads as null, so a session written by a newer build cannot leave
-// the well beside an empty column.
-const WORKSPACE_PANES = ['school'];
+// the well beside an empty column. (A snapshot written before the pane kinds
+// were renamed is read by sanitiseSession(): see `panesV` there.)
+const WORKSPACE_PANES = ['notes'];
 const WORKSPACE_FOLDER_MAX = 400;
 
 /**
  * A workspace's `folder` is where a Claude tab opened while it is on screen
  * starts (defaultClaudeCwd()), `pane` is the side pane it wants, and `preset`
- * is the stable key of a seeded workspace ('school' | 'project' | 'club' |
- * 'trading') so code can find "the School workspace" however it is renamed.
+ * is the stable key of a seeded workspace ('project' | 'club' | 'trading' |
+ * 'phone') so code can find "the Phone workspace" however it is renamed.
  * All three are null on a workspace the user made themselves.
  *
  * @type {Array<{id:string, name:string, colour:string|null,
@@ -6600,7 +6601,7 @@ function cleanWorkspacePreset(key) {
 
 /* --- the seeded presets ---------------------------------------------
  * The user works in the same few places, so the browser ships them rather than
- * making him build them: School, Project, Club, Trading and now Phone, each
+ * making him build them: Project, Club, Trading and now Phone, each
  * seeded once after the session is restored and never again - a preset he
  * deletes stays deleted (the list of keys already seeded rides in the session
  * snapshot, with a localStorage backstop for the sessions sanitiseSession()
@@ -6617,7 +6618,6 @@ function cleanWorkspacePreset(key) {
  * Ctrl+T in it still opens a new tab page, because that is what Ctrl+T means.
  */
 const WORKSPACE_PRESETS = [
-  { preset: 'school',  name: 'School',  colour: 'forest',   home: 'Documents\\notes', pane: 'school', opens: null },
   { preset: 'project',   name: 'Project',   colour: 'ion',      home: 'Downloads\\Project',  pane: null,     opens: null },
   { preset: 'club',    name: 'Club',    colour: 'ocean',    home: null,                pane: null,     opens: null },
   { preset: 'trading', name: 'Trading', colour: 'ember',    home: 'trading-bot',   pane: null,     opens: null },
@@ -6658,8 +6658,14 @@ function workspaceOpensUrl(ws) {
 const PRESETS_SEEDED_KEY = 'workspacePresetsSeeded';           // '1' = the original four
 const PRESETS_SEEDED_KEYS_KEY = 'workspacePresetsSeededKeys';  // JSON array of preset keys
 // What the old boolean stood for. Never reordered and never added to: a key
-// that ships later belongs in WORKSPACE_PRESETS, and only there.
-const ORIGINAL_PRESET_KEYS = ['school', 'project', 'club', 'trading'];
+// that ships later belongs in WORKSPACE_PRESETS, and only there. The first of
+// the original keys belonged to a preset that no longer ships (its side pane
+// is the notes pane now, which has no preset: it is turned on per workspace
+// from the workspace menu once Settings > Notes pane has a folder), so it is
+// left out. A stored seeded list that still names that key keeps it as data
+// (cleanSeededPresets keeps unknown keys), which is harmless: no row in
+// WORKSPACE_PRESETS carries it, so it is never seeded or looked up.
+const ORIGINAL_PRESET_KEYS = ['project', 'club', 'trading'];
 // Keys this profile has already been offered, whether or not the workspace is
 // still there. Empty means "this profile has never been seeded at all".
 let seededPresets = [];
@@ -6671,7 +6677,7 @@ function underHome(relative) {
   return home.replace(/[\\/]+$/, '') + '\\' + relative;
 }
 
-/** The workspace carrying a preset key ('school' ...), or null once deleted. */
+/** The workspace carrying a preset key ('phone' ...), or null once deleted. */
 function presetWorkspace(key) {
   return workspaces.find((w) => w.preset === key) || null;
 }
@@ -7241,8 +7247,9 @@ function setWorkspaceFolder(id, folder) {
 }
 
 /**
- * The side pane this workspace wants: null or 'school'. The pane opens the
- * moment the workspace being changed is the one on screen.
+ * The side pane this workspace wants: null or 'notes'. The pane opens the
+ * moment the workspace being changed is the one on screen (the notes pane
+ * only while it is configured: see notesPaneOn).
  */
 function setWorkspacePane(id, kind) {
   const ws = findWorkspace(id);
@@ -7372,12 +7379,12 @@ function syncStripTint() {
  *
  * This file owns the host — whether it is up, how wide it is, and the handle
  * that resizes it. What goes INSIDE it belongs to whoever owns the kind
- * (school-pane.js for 'school'), which is why the only contract is the
+ * (notes-pane.js for 'notes'), which is why the only contract is the
  * `sidepane` event and window.sidePane: no module here reaches into the other.
  */
 const SIDEPANE_WIDTH_KEY = 'sidepane.width';
-// 480 because the School pane's notebooks carry fixed-width cards and want
-// ~305px of page width; 360 is the floor school-pane.css holds them at, so the
+// 480 because notes in the notes pane can carry fixed-width cards and want
+// ~305px of page width; 360 is the floor notes-pane.css holds them at, so the
 // handle stops where the pane stops shrinking rather than in a dead zone below it.
 const SIDEPANE_WIDTH_DEFAULT = 480;
 const SIDEPANE_WIDTH_MIN = 360;
@@ -7426,10 +7433,61 @@ function writeSidePaneWidth() {
   }
 }
 
-/** The pane kind the workspace on screen asks for: 'school' or null. */
+/*
+ * Whether the notes pane is configured, as main reports it. notes-pane-main.js
+ * answers window.api.notes.describe() with state.configured (true = a notes
+ * folder is set in <userData>\notes-pane.json and exists) and pushes every
+ * change; this keeps the one boolean the host needs. Until the first answer
+ * the pane reads as off, so a profile with no notes never opens an empty
+ * column, and a profile with notes gets its pane one IPC round trip after
+ * boot. A missing bridge or a failed describe leaves it off without a word
+ * HERE on purpose: notes-pane.js and Settings > Notes pane are the UI that
+ * says why, in words, and both ask main themselves.
+ */
+let notesPaneOn = false;
+
+/** True while a notes folder is configured. workspaces.js offers the pane on it. */
+function notesPaneAvailable() {
+  return notesPaneOn;
+}
+
+/**
+ * One describe answer or push. When the answer flips, the side pane is
+ * re-applied (forced, so the `sidepane` event goes out even when the kind
+ * on screen did not change) and `workspacechange` fires, so the workspace
+ * menu re-renders its pane toggle. Pushes arrive every few seconds while the
+ * reader runs; one that changes nothing costs one comparison.
+ */
+function adoptNotesPaneState(state) {
+  const on = !!(state && typeof state === 'object' && state.configured === true);
+  if (on === notesPaneOn) return;
+  notesPaneOn = on;
+  syncSidePane(true);
+  emitWorkspaceChange();
+}
+
+/** Called once from init(): the first answer, then every push after it. */
+function watchNotesPane() {
+  const api = (window.api && window.api.notes) ? window.api.notes : null;
+  if (!api || typeof api.describe !== 'function') return;
+  try {
+    if (typeof api.onUpdate === 'function') api.onUpdate(adoptNotesPaneState);
+  } catch (err) { /* describe() below still answers once */ }
+  try {
+    Promise.resolve(api.describe()).then(adoptNotesPaneState, () => { /* stays off: see above */ });
+  } catch (err) { /* stays off: see above */ }
+}
+
+/**
+ * The pane kind the workspace on screen asks for: 'notes' or null. A workspace
+ * that keeps 'notes' while the notes pane is not configured gets no pane (and
+ * keeps the setting, so the pane comes back with the folder).
+ */
 function currentPaneKind() {
   const ws = findWorkspace(currentWorkspaceId);
-  return (ws && cleanWorkspacePane(ws.pane)) || null;
+  const kind = (ws && cleanWorkspacePane(ws.pane)) || null;
+  if (kind === 'notes' && !notesPaneOn) return null;
+  return kind;
 }
 
 /**
@@ -10303,9 +10361,13 @@ function sessionSnapshot() {
       return row;
     }),
     currentWorkspace: currentWorkspaceId,
+    // Which generation of pane kind names the workspaces' `pane` values use.
+    // sanitiseSession() reads a snapshot without it as written before the
+    // rename to 'notes' (see there). Written on every snapshot from now on.
+    panesV: 2,
     // Which presets this profile has been given, each seeded once. It rides
     // here so a preset the user DELETES stays deleted: without it every boot
-    // would put School back.
+    // would put that preset back.
     seededPresets: seededPresets.slice(),
     // The same fact in the shape a build without seededPresets understands:
     // it reads `true` as "the original four", which is what it always meant.
@@ -10380,6 +10442,16 @@ function sanitiseSession(parsed) {
   }];
   const wsSeen = new Set([DEFAULT_WORKSPACE_ID]);
   const wsRaw = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
+  // Pane kinds were renamed once, and every snapshot written since carries
+  // `panesV: 2`. One WITHOUT it was written before the rename, by a build
+  // whose WORKSPACE_PANES had exactly one entry: the notes pane under its old
+  // key (the writer only ever stores a kind that list accepted). So in such a
+  // snapshot any non-empty string pane IS the notes pane, and reads as
+  // 'notes' without the old key having to be named here. A panesV 2 snapshot
+  // is sanitised strictly, as before: a kind this build does not know reads as
+  // no pane. Both copies (the session file and the localStorage one) come
+  // through here, so a profile is carried over on its first boot either way.
+  const legacyPanes = parsed.panesV !== 2;
   for (const row of wsRaw) {
     const id = (row && typeof row.id === 'string') ? row.id.trim() : '';
     if (!id || id.length > 64) continue;
@@ -10390,7 +10462,9 @@ function sanitiseSession(parsed) {
     // name and the colour: anything a file says that this build does not know
     // reads as "none" rather than being carried into the model.
     const folder = cleanWorkspaceFolder(row && row.folder);
-    const pane = cleanWorkspacePane(row && row.pane);
+    const rawPane = row && row.pane;
+    const pane = (legacyPanes && typeof rawPane === 'string' && rawPane.trim())
+      ? 'notes' : cleanWorkspacePane(rawPane);
     const preset = cleanWorkspacePreset(row && row.preset);
     if (id === DEFAULT_WORKSPACE_ID) {
       wsList[0].name = cleanWorkspaceName(row && row.name, 'Home');
@@ -12632,6 +12706,9 @@ function init() {
   // The side pane host beside the well: resolved and wired now (the handle,
   // the stored width), shown only once a workspace with a pane is on screen.
   ensureSidePane();
+  // Whether the notes pane is configured: main's first answer (and every push
+  // after it) decides whether a workspace's 'notes' pane may open.
+  watchNotesPane();
 
   wireChrome();
   wireTabMenu();

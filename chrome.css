@@ -1520,7 +1520,7 @@ body,
              q-tab-born-fade calc(var(--m-dur-xs) * var(--m-fade-k)) var(--m-fade-in) backwards;
 }
 
-/* The School pane (#sidepane) arrives sliding 12 px in from the window edge, m. It sits in the
+/* The notes pane (#sidepane) arrives sliding 12 px in from the window edge, m. It sits in the
    flow, so leaving stays instant: the well takes its width back at once, never a frame late. */
 #sidepane:not([hidden]) {
   transition: opacity calc(var(--m-dur-m) * var(--m-fade-k)) var(--m-fade-in),

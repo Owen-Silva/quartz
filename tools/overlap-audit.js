@@ -5,7 +5,7 @@
 //
 // Every surface Quartz draws (the strip with few and many tabs, the toolbar and the address bar's
 // suggestions, Home and its dock, Settings, site info, the shield, downloads, the reader, the
-// history page, the phone page, the School pane, the tab menu, find, the palette, workspaces, the
+// history page, the phone page, the notes pane, the tab menu, find, the palette, workspaces, the
 // welcome, the protected-video bar) in light and dark, at the window's own 1280 px and at its
 // 720 px minimum. On each, every visible control is forced into :hover and then :focus-visible
 // (CDP CSS.forcePseudoState) and shot; the pixels that changed are compared with a still shot of
@@ -280,8 +280,11 @@ run('overlap-audit', async (k) => {
       teardown: async () => ev('(() => { const t = getActiveTab(); t.drmSeen = { denied: [], granted: [], encrypted: false }; Drm.evaluate(t); return 1; })()'),
     },
     {
-      name: 'school', roots: ['#sidepane'],
-      setup: async () => { await ev(`(() => { let ws = workspaces.find((w) => w.pane === 'school'); if (!ws) { ws = createWorkspace('School', 'forest'); ws.pane = 'school'; } switchWorkspace(ws.id); syncSidePane(true); return 1; })()`); await sleep(1200); },
+      // The notes pane only opens while it is configured (app.js notesPaneOn); a test profile
+      // usually has no notes folder, so the setup tells the host it is on. The pane body then
+      // shows whatever main reports, which on such a profile is the "notes pane is off" banner.
+      name: 'notes', roots: ['#sidepane'],
+      setup: async () => { await ev(`(() => { if (typeof adoptNotesPaneState === 'function') adoptNotesPaneState({ configured: true }); let ws = workspaces.find((w) => w.pane === 'notes'); if (!ws) { ws = createWorkspace('Notes', 'forest'); ws.pane = 'notes'; } switchWorkspace(ws.id); syncSidePane(true); return 1; })()`); await sleep(1200); },
       teardown: async () => { await ev('(switchWorkspace(DEFAULT_WORKSPACE_ID), syncSidePane(true), 1)'); await sleep(600); },
     },
     {

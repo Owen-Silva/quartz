@@ -21,8 +21,8 @@
         open tabs     page and Claude tabs whose title / URL / folder
                       the query hits; the row switches to that tab
         saved         the bookmarks, which are Settings.chips()
-        notes         sections of the School class notes, from the
-                      index school.js already keeps in main
+        notes         sections of the notes pane's notes, from the
+                      index notes-pane-main.js keeps in main
         folders       folders directly under ~ and ~/Downloads
                       (one cached IPC listing), opened in the Files tab
         apps          from tabsearch.js's app index, badged
@@ -67,7 +67,7 @@
   var MAX_APP_ROWS = 3;      // app rows, between the folders and history
   var MAX_TAB_ROWS = 3;      // "switch to tab" rows, right under the default row
   var MAX_SAVED_ROWS = 2;    // bookmark (chip) rows
-  var MAX_NOTE_ROWS = 2;     // School note sections
+  var MAX_NOTE_ROWS = 2;     // notes-pane note sections
   var MAX_FOLDER_ROWS = 2;   // project folders under ~ and ~/Downloads
   var MAX_TOTAL_ROWS = 10;   // every row for a typed query, the default row included
   var MIN_HISTORY_ROWS = 2;  // places history keeps when it has matches at all
@@ -84,12 +84,8 @@
   var GLYPH_TAB    = '\uE8AB';   // Switch: a tab that is already open
   var GLYPH_CLAUDE = '\uE756';   // CommandPrompt: a Claude session tab (tabsearch.js's mark)
   var GLYPH_STAR   = '\uE734';   // FavoriteStar: a saved site, as on the omnibox star
-  var GLYPH_NOTES  = '\uE82D';   // Dictionary: a section of the class notes
+  var GLYPH_NOTES  = '\uE82D';   // Dictionary: a section of the notes
   var GLYPH_FOLDER = '\uE8B7';   // Folder: a project folder
-
-  // Where the class notes live when school.js hands over a bare file name.
-  // school-pane.js carries the same constant; main never sends the folder.
-  var NOTES_DIR = 'C:/Users/you/Documents/notes/';
 
   // files.js boots into this localStorage key. The chrome and its file://
   // guests share one origin, so writing it here opens a NEW Files tab
@@ -934,7 +930,7 @@
 
   /**
    * A source that answers asynchronously (the app index, the folder list,
-   * the School index) landed: redraw the open panel in place. Skipped while
+   * the notes index) landed: redraw the open panel in place. Skipped while
    * a keyboard highlight is previewing a URL in the bar, because render()
    * reads the bar and would search the preview instead of what was typed.
    */
@@ -1056,55 +1052,77 @@
     return hits.slice(0, limit);
   }
 
-  /* --- School notes: the section index school.js keeps in main --- */
+  /* --- notes: the section index the notes pane keeps in main --- */
 
   /*
-   * school.js parses every class file in Documents\notes at startup (and on
-   * every change) into state.classes = [{ id, name, file, sections: [{ id,
+   * notes-pane-main.js parses every notes file in the configured notes folder
+   * (state.dir, from <userData>\notes-pane.json) at startup (and on every
+   * change) into state.subjects = [{ id, name, file, sections: [{ id,
    * title }] }] and already hands the chrome the whole state through
-   * api.school.describe() and its school:update pushes. This keeps a flat,
+   * api.notes.describe() and its notes:update pushes. This keeps a flat,
    * lowercased copy of just the sections, so a keystroke is a plain loop.
+   * With no notes folder configured (state.configured false) this source is
+   * simply off: no rows and no "Notes unavailable" line, because nothing is
+   * wrong; Settings > Notes pane is where it is turned on.
    */
-  var notesIndex = [];       // [{ cls, title, url, t, c }]
+  var notesIndex = [];       // [{ subj, title, url, t, c }]
   var notesWatching = false;
   var notesReady = false;    // true once a describe/push said ready
-  var notesReason = '';      // why there are no notes, in plain words ('' = fine or still loading)
+  var notesReason = '';      // why there are no notes, in plain words ('' = fine, still loading, or off)
   var notesSig = '';         // what the last adopted index looked like, to skip no-op pushes
 
-  /** The notes file as a file:// URL, the same rule school-pane.js's fileUrl() follows. */
-  function notesFileUrl(cls) {
-    var raw = cls && typeof cls.file === 'string' ? cls.file.trim() : '';
+  /**
+   * The notes file as a file:// URL, the same rule notes-pane.js's fileUrl()
+   * follows: a bare file name (or, failing that, the id + '.html') is glued
+   * onto the notes folder main reports as state.dir.
+   */
+  function notesFileUrl(subj, dir) {
+    var raw = subj && typeof subj.file === 'string' ? subj.file.trim() : '';
     if (/^file:\/\//i.test(raw)) return raw;
-    var p = raw || (String(cls && cls.id ? cls.id : '') + '.html');
+    var base = typeof dir === 'string' ? dir.trim().replace(/\\/g, '/') : '';
+    if (base && base.charAt(base.length - 1) !== '/') base += '/';
+    var p = raw || (String(subj && subj.id ? subj.id : '') + '.html');
     p = p.replace(/\\/g, '/');
-    if (!/^[a-zA-Z]:\//.test(p) && p.charAt(0) !== '/') p = NOTES_DIR + p;
+    if (!/^[a-zA-Z]:\//.test(p) && p.charAt(0) !== '/') p = base + p;
     return 'file:///' + p.replace(/^\//, '').replace(/[#?%]/g, function (c) {
       return '%' + c.charCodeAt(0).toString(16).toUpperCase();
     });
   }
 
-  function adoptSchool(state) {
+  function adoptNotes(state) {
     if (!state || typeof state !== 'object') {
       notesIndex = [];
       notesReady = false;
-      notesReason = 'the School index did not answer';
+      notesReason = 'the notes index did not answer';
       notesSig = '';
       redrawIfOpen();
       return;
     }
-    var classes = Array.isArray(state.classes) ? state.classes : [];
+    if (state.configured === false) {
+      // Off, not broken: no rows, and an empty reason so the state line
+      // stays quiet. The sig still changes, so an open panel drops any rows
+      // it was showing when the folder is turned off mid-session.
+      notesIndex = [];
+      notesReady = false;
+      notesReason = '';
+      if (notesSig === 'off') return;
+      notesSig = 'off';
+      redrawIfOpen();
+      return;
+    }
+    var subjects = Array.isArray(state.subjects) ? state.subjects : [];
     var next = [];
-    for (var i = 0; i < classes.length; i++) {
-      var cls = classes[i];
-      if (!cls || !Array.isArray(cls.sections)) continue;
-      var name = String(cls.name || cls.id || 'Notes');
-      var base = notesFileUrl(cls);
-      for (var j = 0; j < cls.sections.length; j++) {
-        var s = cls.sections[j];
+    for (var i = 0; i < subjects.length; i++) {
+      var subj = subjects[i];
+      if (!subj || !Array.isArray(subj.sections)) continue;
+      var name = String(subj.name || subj.id || 'Notes');
+      var base = notesFileUrl(subj, state.dir);
+      for (var j = 0; j < subj.sections.length; j++) {
+        var s = subj.sections[j];
         if (!s || typeof s.id !== 'string' || !s.id) continue;
         var title = String(s.title || s.id);
         next.push({
-          cls: name,
+          subj: name,
           title: title,
           url: base + '#' + encodeURIComponent(s.id),
           t: title.toLowerCase(),
@@ -1115,8 +1133,8 @@
       }
     }
     var ready = !!state.ready && next.length > 0;
-    var reason = ready ? '' : String(state.reason || 'the School index is empty');
-    // school:update fires for everything the workspace does (every LessonPlayer
+    var reason = ready ? '' : String(state.reason || 'the notes index is empty');
+    // notes:update fires for everything the pane does (every reader-app
     // read, every helper step), not just for the notes. Only a change in
     // the sections themselves is worth repainting an open panel for.
     var chars = 0;
@@ -1134,21 +1152,21 @@
   function watchNotes() {
     if (notesWatching) return;
     notesWatching = true;
-    var api = (typeof window !== 'undefined' && window.api) ? window.api.school : null;
+    var api = (typeof window !== 'undefined' && window.api) ? window.api.notes : null;
     if (!api || typeof api.describe !== 'function') {
-      notesReason = 'this build has no School index to search';
+      notesReason = 'this build has no notes index to search';
       return;
     }
     try {
-      if (typeof api.onUpdate === 'function') api.onUpdate(adoptSchool);
+      if (typeof api.onUpdate === 'function') api.onUpdate(adoptNotes);
     } catch (err) { /* describe() below still seeds it once */ }
     try {
-      Promise.resolve(api.describe()).then(adoptSchool, function (err) {
-        notesReason = 'the School index failed: ' + ((err && err.message) || 'no answer');
+      Promise.resolve(api.describe()).then(adoptNotes, function (err) {
+        notesReason = 'the notes index failed: ' + ((err && err.message) || 'no answer');
         redrawIfOpen();
       });
     } catch (err) {
-      notesReason = 'the School index failed: ' + ((err && err.message) || 'no answer');
+      notesReason = 'the notes index failed: ' + ((err && err.message) || 'no answer');
     }
   }
 
@@ -1159,9 +1177,9 @@
 
   /**
    * Sections whose title the query hits. Every word has to START a word in
-   * the section title or the class name ("git" must not find "Digital"),
-   * and at least one has to land in the title: "chem" alone must not list
-   * all 219 course sections by their class.
+   * the section title or the subject name ("git" must not find "Digital"),
+   * and at least one has to land in the title: a word that is only in a
+   * subject's name must not list all 200-odd of its sections by that name.
    */
   function noteMatches(lower, words, limit) {
     if (lower.length < MIN_WIDE_QUERY || !notesIndex.length || !words.length) return [];
@@ -1184,7 +1202,7 @@
       if (!ok || !inTitle) continue;
       // 0 the title starts with it, 1 it is a whole word of the title
       // ("matter" in "Classification of Matter" beats "mattered"), 2 the
-      // title contains it, 3 every word in the title, 4 split with the class.
+      // title contains it, 3 every word in the title, 4 split with the subject.
       var rank = n.t.indexOf(lower) === 0 ? 0
         : ((n.tw + ' ').indexOf(whole) >= 0 ? 1
           : (n.t.indexOf(lower) >= 0 ? 2 : (inTitle === needles.length ? 3 : 4)));
@@ -1505,14 +1523,14 @@
       });
     }
 
-    // Note sections open the class file at that section, in this tab.
+    // Note sections open the notes file at that section, in this tab.
     var nNotes = take(noteHits);
     for (var n = 0; n < nNotes; n++) {
       addRow({
         kind: 'notes',
         url: noteHits[n].url,
         glyph: GLYPH_NOTES,
-        primary: 'notes: ' + noteHits[n].cls + ' › ' + noteHits[n].title,
+        primary: 'notes: ' + noteHits[n].subj + ' › ' + noteHits[n].title,
         secondary: '',
         label: 'Notes',
         words: words
@@ -1910,13 +1928,13 @@
     _max: MAX_ITEMS,
     // The lens's sources, for probes that force a failure and read the
     // state line back: swap the folder lister (null restores the real
-    // one) and refetch, or feed the notes index a School state by hand.
+    // one) and refetch, or feed the notes index a notes-pane state by hand.
     _lens: {
       folderLister: function (fn) {
         folderListerOverride = typeof fn === 'function' ? fn : null;
         refreshFolders(true);
       },
-      adoptSchool: adoptSchool
+      adoptNotes: adoptNotes
     }
   };
 })();

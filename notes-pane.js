@@ -1,31 +1,40 @@
 'use strict';
 
 /*
- * school-pane.js — the School workspace's right-hand pane: the class chips, the
- * notes for the class that is up, and the auto-jump to the section the current
- * LessonPlayer question belongs to.
+ * notes-pane.js — the notes pane: a split pane beside the tab well that shows
+ * one note from the configured notes folder, the subject chips (one per notes
+ * file), and the auto-jump to the section the question on screen belongs to.
  *
  * HOST. app.js owns <aside id="sidepane"> (index.html): it shows and sizes it
  * for the current workspace's pane kind, sets #sidepane.dataset.kind, and
  * dispatches `sidepane` on document with detail { kind, open, width } on every
  * change (and once after init); window.sidePane = { kind(), isOpen(), width() }.
- * This file fills #sidepane-body while kind === 'school' and empties it
- * otherwise. Owns every .school-* class and everything inside #sidepane-body.
+ * This file fills #sidepane-body while kind === 'notes' and empties it
+ * otherwise. Owns every .notes-* class and everything inside #sidepane-body.
  * The one thing it says about the host itself is a min-width floor in
- * school-pane.css, and only while School's pane is up: the notebooks carry
- * fixed-width cards and cannot reflow under ~305px of page width. The width,
+ * notes-pane.css, and only while the notes pane is up: notes can carry
+ * fixed-width cards that cannot reflow under ~305px of page width. The width,
  * the drag handle and the real clamp stay app.js's.
  *
- * DATA. window.api.school.describe() / command(name, arg) / onUpdate(cb) — the
- * state shape is documented in school.js. Every state and reason string main
- * reports is shown in the pane: nothing here fails silently.
+ * CONFIG. Main reads <userData>\notes-pane.json; Settings > Notes pane picks
+ * its folder. state.configured is false while no folder is set (or the folder
+ * is missing): app.js then never shows the pane at all, and if a harness forces
+ * it up anyway the pane says plainly that it is off and why. state.dir is the
+ * folder, and every note URL is built from it (fileUrl below). The reader app
+ * (the program that shows the questions) is optional on top of that: with
+ * state.reader.configured false its policy button is hidden, the strip says no
+ * reader app is set, and picking a subject by hand keeps working.
+ *
+ * DATA. window.api.notes.describe() / command(name, arg) / onUpdate(cb) — the
+ * state shape is documented in notes-pane-main.js. Every state and reason
+ * string main reports is shown in the pane: nothing here fails silently.
  *
  * THE THREE THINGS THIS FILE HAS TO GET RIGHT
  *  1. It must be harmless before its host exists. The pane HOST (app.js) and the
- *     brain (school.js) are built in parallel with this file, so every reach for
- *     them is guarded: no host -> stay dormant, no api.school -> say so in the
- *     pane rather than throw. A scaffold state (ready:false) is not an error, it
- *     is a state, and it renders as one.
+ *     brain (notes-pane-main.js) were built in parallel with this file, so every
+ *     reach for them is guarded: no host -> stay dormant, no api.notes -> say so
+ *     in the pane rather than throw. A scaffold state (ready:false) is not an
+ *     error, it is a state, and it renders as one.
  *  2. Nothing fails quietly. Every command answer, every refused jump, every
  *     fallback (iframe instead of <webview>, a missing "Open in a tab") writes
  *     plain words into the pane, next to the control it belongs to AND in the
@@ -33,16 +42,13 @@
  *     row per status — but never at the cost of a reason: a FAILURE row is
  *     never clamped, a clamped row carries its whole text as its tooltip, and
  *     "Show all" appears the moment any row is actually cut short (checkClip).
- *  3. The notes view is reloaded only when the CLASS changes. State pushes land
- *     every few seconds; re-setting src would restart a 300KB page each time and
- *     throw away the reader's scroll position.
+ *  3. The notes view is reloaded only when the SUBJECT changes. State pushes
+ *     land every few seconds; re-setting src would restart a 300KB page each
+ *     time and throw away the reader's scroll position.
  */
 
 (function () {
   // ---------------------------------------------------------------- constants
-
-  /** Where the notes live when a class row does not carry its own file path. */
-  const NOTES_DIR = 'C:/Users/you/Documents/notes/';
 
   /** A refused command's reason stays next to its control this long. */
   const REASON_MS = 6000;
@@ -52,7 +58,7 @@
 
   // ------------------------------------------------------------------- state
 
-  /** The last state we painted. window.SchoolPane.state() hands this back. */
+  /** The last state we painted. window.NotesPane.state() hands this back. */
   let last = null;
 
   /** Live element handles, rebuilt by build(). Null while unmounted. */
@@ -61,7 +67,11 @@
   /** onUpdate's unsubscribe, kept so unmount() can stop the push feed. */
   let stopUpdates = null;
 
-  /** The class id the notes view currently holds, so we reload only on change. */
+  /**
+   * Which note the view currently holds: the subject id plus its URL (noteKey),
+   * so we reload only on change. The URL is part of it because the folder can
+   * change under the same subject id (Settings > Notes pane > Change folder).
+   */
   let notesId = null;
 
   /** 'webview' | 'iframe' | null — which element the notes are in right now. */
@@ -86,7 +96,7 @@
   const reasonTimers = new Map();
 
   /** localStorage key for "the strip prints every row in full". */
-  const STRIP_FULL_KEY = 'school-pane.strip-full';
+  const STRIP_FULL_KEY = 'notes-pane.strip-full';
 
   /** true: every status row in full; false: one row each, with "Show all". */
   let stripFull = readStripFull();
@@ -114,24 +124,24 @@
    */
   function showing(detail) {
     if (detail && typeof detail === 'object') {
-      return detail.kind === 'school' && detail.open !== false;
+      return detail.kind === 'notes' && detail.open !== false;
     }
     const host = window.sidePane;
     if (host && typeof host.kind === 'function') {
       const open = typeof host.isOpen === 'function' ? host.isOpen() : true;
-      return host.kind() === 'school' && open !== false;
+      return host.kind() === 'notes' && open !== false;
     }
     const pane = paneEl();
     if (pane && pane.dataset && pane.dataset.kind) {
-      return pane.dataset.kind === 'school' && !pane.hidden;
+      return pane.dataset.kind === 'notes' && !pane.hidden;
     }
     return false;
   }
 
-  /** window.api.school, or null while preload/main have not wired it. */
+  /** window.api.notes, or null while preload/main have not wired it. */
   function bridge() {
     const api = window.api;
-    return api && api.school && typeof api.school.describe === 'function' ? api.school : null;
+    return api && api.notes && typeof api.notes.describe === 'function' ? api.notes : null;
   }
 
   const text = (el, s) => { if (el && el.textContent !== s) el.textContent = s; };
@@ -147,7 +157,31 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
-  /** "Reader: CDP" + " · connected to LessonPlayer" only when there IS a reason. */
+  /**
+   * The reader app is the program that shows the questions (notes-pane.json
+   * names it; main reports it as state.reader). Two questions are asked of it:
+   *   readerOn  — main says one IS configured (reader.configured === true).
+   *               Strict on purpose: the debug-port policy button writes a
+   *               machine policy, so it never appears on a guess.
+   *   readerOff — main says plainly that NONE is configured (=== false). Only
+   *               then does the strip and the Auto chip say so; a state with no
+   *               word either way (the no-bridge fallbacks below) keeps the
+   *               wording it always had.
+   */
+  function readerOn(state) {
+    return !!(state && state.reader && state.reader.configured === true);
+  }
+  function readerOff(state) {
+    return !!(state && state.reader && state.reader.configured === false);
+  }
+
+  /** The reader app's name for a label: its exe name without ".exe". */
+  function readerName(state) {
+    const app = state && state.reader && typeof state.reader.app === 'string' ? state.reader.app.trim() : '';
+    return app ? app.replace(/\.exe$/i, '') : 'the reader app';
+  }
+
+  /** "Reader: CDP" + " · connected to <the reader app>" only when there IS a reason. */
   function withReason(head, reason) {
     const why = reasonOf(reason);
     if (!why) return head;
@@ -162,20 +196,41 @@
   }
 
   /**
-   * A class row's notes file as a URL the guest can load. Main may hand us a
-   * Windows path, a posix path or a file:// URL; anything else falls back to the
-   * id, which is how the files are actually named on disk.
+   * The notes folder from the last state (state.dir, an absolute path main
+   * validated), with forward slashes and one trailing slash, ready to have a
+   * bare file name glued on: 'C:\Users\you\Documents\notes' ->
+   * 'C:/Users/you/Documents/notes/'. '' while no folder is configured; no
+   * subject rows exist then, so nothing below ever needs it.
    */
-  function fileUrl(cls) {
-    const raw = cls && typeof cls.file === 'string' ? cls.file.trim() : '';
+  function notesBase() {
+    const dir = last && typeof last.dir === 'string' ? last.dir.trim() : '';
+    if (!dir) return '';
+    const fwd = dir.replace(/\\/g, '/');
+    return fwd.endsWith('/') ? fwd : fwd + '/';
+  }
+
+  /**
+   * A subject row's notes file as a URL the guest can load. Main hands us a bare
+   * file name inside state.dir, but a Windows path, a posix path or a file://
+   * URL work too; an empty `file` falls back to the id, which is how the files
+   * are actually named on disk.
+   */
+  function fileUrl(subj) {
+    const raw = subj && typeof subj.file === 'string' ? subj.file.trim() : '';
+    const base = notesBase();
     let path = raw;
     if (/^file:\/\//i.test(raw)) return raw;
-    if (!path) path = NOTES_DIR + String(cls && cls.id ? cls.id : '') + '.html';
+    if (!path) path = base + String(subj && subj.id ? subj.id : '') + '.html';
     path = path.replace(/\\/g, '/');
-    if (!/^[a-zA-Z]:\//.test(path) && !path.startsWith('/')) path = NOTES_DIR + path;
+    if (!/^[a-zA-Z]:\//.test(path) && !path.startsWith('/')) path = base + path;
     // Percent-encode the few characters that would otherwise end the path or
     // start a fragment. encodeURI would also mangle an already-encoded path.
     return 'file:///' + path.replace(/^\//, '').replace(/[#?%]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  }
+
+  /** What notesId holds for a subject: its id and the URL it loads from. */
+  function noteKey(subj) {
+    return subj ? String(subj.id) + '|' + fileUrl(subj) : null;
   }
 
   // --------------------------------------------------------- the guest script
@@ -185,12 +240,12 @@
    * things the chrome cannot see from out here: the guest's own scroll events
    * (so we can tell OUR scroll from the user's) and the highlight.
    *
-   * __schoolJump(id) answers with a word, and every word becomes a visible line
+   * __notesJump(id) answers with a word, and every word becomes a visible line
    * under the notes bar: 'jumped', 'busy' (he is scrolling — we retry), or
    * 'missing' (that section id is not in this file).
    */
   const GUEST_SCRIPT = `(function () {
-    if (window.__schoolJump) return 'ready';
+    if (window.__notesJump) return 'ready';
     var lastUserScroll = 0;
     var suppressUntil = 0;
     var clear = 0;
@@ -203,26 +258,26 @@
     }, { passive: true });
     var style = document.createElement('style');
     style.textContent =
-      '.__school-hit{outline:2px solid rgba(114,173,202,.95);outline-offset:6px;border-radius:6px}' +
-      '.__school-hit-soft{outline:2px solid rgba(114,173,202,.45);outline-offset:6px;border-radius:6px}';
+      '.__notes-hit{outline:2px solid rgba(114,173,202,.95);outline-offset:6px;border-radius:6px}' +
+      '.__notes-hit-soft{outline:2px solid rgba(114,173,202,.45);outline-offset:6px;border-radius:6px}';
     (document.head || document.documentElement).appendChild(style);
-    window.__schoolJump = function (id) {
+    window.__notesJump = function (id) {
       var el = document.getElementById(id);
       if (!el) return 'missing';
       // Never yank the page out from under a hand that is on the scrollbar.
       if (Date.now() - lastUserScroll < 2000) return 'busy';
       suppressUntil = Date.now() + 1500;
       try { el.scrollIntoView({ block: 'start' }); } catch (e) { el.scrollIntoView(); }
-      if (marked) { marked.classList.remove('__school-hit', '__school-hit-soft'); }
+      if (marked) { marked.classList.remove('__notes-hit', '__notes-hit-soft'); }
       if (clear) { clearTimeout(clear); clear = 0; }
       marked = el;
-      el.classList.add('__school-hit');
+      el.classList.add('__notes-hit');
       // Stepped, not eased: full for 750ms, half for 750ms, then gone.
       clear = setTimeout(function () {
-        el.classList.remove('__school-hit');
-        el.classList.add('__school-hit-soft');
+        el.classList.remove('__notes-hit');
+        el.classList.add('__notes-hit-soft');
         clear = setTimeout(function () {
-          el.classList.remove('__school-hit-soft');
+          el.classList.remove('__notes-hit-soft');
           if (marked === el) marked = null;
           clear = 0;
         }, 750);
@@ -244,48 +299,49 @@
     body.textContent = '';
 
     const root = document.createElement('div');
-    root.className = 'school-pane';
+    root.className = 'notes-pane';
     root.innerHTML = [
-      // ready:false, or a missing bridge: the loudest thing in the pane.
-      '<div class="school-alert" hidden></div>',
+      // ready:false, a missing bridge, or no notes folder (configured:false):
+      // the loudest thing in the pane.
+      '<div class="notes-alert" hidden></div>',
 
-      '<div class="school-head">',
-      '  <div class="school-chips" role="group" aria-label="Class"></div>',
-      '  <div class="school-why" hidden></div>',
+      '<div class="notes-head">',
+      '  <div class="notes-chips" role="group" aria-label="Subject"></div>',
+      '  <div class="notes-why" hidden></div>',
       '</div>',
 
-      '<div class="school-strip">',
-      '  <div class="school-line" data-line="reader"><span class="school-pip"></span><span class="school-text"></span></div>',
-      '  <div class="school-line" data-line="helper"><span class="school-pip"></span><span class="school-text"></span></div>',
-      '  <div class="school-line" data-line="match"><span class="school-pip"></span><span class="school-text"></span></div>',
-      '  <div class="school-controls">',
-      '    <span class="school-ctl"><button type="button" class="school-btn" data-cmd="set-helper"></button><span class="school-inline" data-for="set-helper" hidden></span></span>',
-      '    <span class="school-ctl"><button type="button" class="school-btn" data-cmd="pin"></button><span class="school-inline" data-for="pin" hidden></span></span>',
-      '    <span class="school-ctl"><button type="button" class="school-btn" data-cmd="probe">Retry</button><span class="school-inline" data-for="probe" hidden></span></span>',
-      '    <span class="school-ctl" data-wrap="install-policy" hidden><button type="button" class="school-btn" data-cmd="install-policy">Install LessonPlayer policy</button><span class="school-inline" data-for="install-policy" hidden></span></span>',
-      '    <span class="school-toggles">',
-      '      <button type="button" class="school-toggle" data-toggle="full" aria-expanded="false" hidden>Show all</button>',
-      '      <button type="button" class="school-toggle" data-toggle="ask" aria-expanded="false" aria-controls="school-ask">Paste a question</button>',
+      '<div class="notes-strip">',
+      '  <div class="notes-line" data-line="reader"><span class="notes-pip"></span><span class="notes-text"></span></div>',
+      '  <div class="notes-line" data-line="helper"><span class="notes-pip"></span><span class="notes-text"></span></div>',
+      '  <div class="notes-line" data-line="match"><span class="notes-pip"></span><span class="notes-text"></span></div>',
+      '  <div class="notes-controls">',
+      '    <span class="notes-ctl"><button type="button" class="notes-btn" data-cmd="set-helper"></button><span class="notes-inline" data-for="set-helper" hidden></span></span>',
+      '    <span class="notes-ctl"><button type="button" class="notes-btn" data-cmd="pin"></button><span class="notes-inline" data-for="pin" hidden></span></span>',
+      '    <span class="notes-ctl"><button type="button" class="notes-btn" data-cmd="probe">Retry</button><span class="notes-inline" data-for="probe" hidden></span></span>',
+      '    <span class="notes-ctl" data-wrap="install-policy" hidden><button type="button" class="notes-btn" data-cmd="install-policy">Install debug-port policy</button><span class="notes-inline" data-for="install-policy" hidden></span></span>',
+      '    <span class="notes-toggles">',
+      '      <button type="button" class="notes-toggle" data-toggle="full" aria-expanded="false" hidden>Show all</button>',
+      '      <button type="button" class="notes-toggle" data-toggle="ask" aria-expanded="false" aria-controls="notes-ask">Paste a question</button>',
       '    </span>',
       '  </div>',
-      '  <div class="school-note" data-note="policy" hidden></div>',
-      '  <div class="school-ask" id="school-ask" hidden>',
-      '    <textarea class="school-ask-text" rows="3" spellcheck="false" placeholder="Paste a question here to match it without LessonPlayer"></textarea>',
-      '    <div class="school-ask-row">',
-      '      <button type="button" class="school-btn" data-cmd="ask">Ask</button>',
-      '      <span class="school-inline" data-for="ask" hidden></span>',
+      '  <div class="notes-note" data-note="policy" hidden></div>',
+      '  <div class="notes-ask" id="notes-ask" hidden>',
+      '    <textarea class="notes-ask-text" rows="3" spellcheck="false" placeholder="Paste a question here to match it without the reader app"></textarea>',
+      '    <div class="notes-ask-row">',
+      '      <button type="button" class="notes-btn" data-cmd="ask">Ask</button>',
+      '      <span class="notes-inline" data-for="ask" hidden></span>',
       '    </div>',
       '  </div>',
       '</div>',
 
-      '<div class="school-notes">',
-      '  <div class="school-notes-bar">',
-      '    <span class="school-notes-title"></span>',
-      '    <button type="button" class="school-btn school-open">Open in a tab</button>',
+      '<div class="notes-doc">',
+      '  <div class="notes-doc-bar">',
+      '    <span class="notes-doc-title"></span>',
+      '    <button type="button" class="notes-btn notes-open">Open in a tab</button>',
       '  </div>',
-      '  <div class="school-notes-note" hidden></div>',
-      '  <div class="school-view"></div>',
-      '  <div class="school-empty" hidden></div>',
+      '  <div class="notes-doc-note" hidden></div>',
+      '  <div class="notes-view"></div>',
+      '  <div class="notes-empty" hidden></div>',
       '</div>'
     ].join('\n');
 
@@ -293,15 +349,15 @@
 
     els = {
       root,
-      alert: $('.school-alert', root),
-      chips: $('.school-chips', root),
-      why: $('.school-why', root),
-      strip: $('.school-strip', root),
-      reader: $('[data-line="reader"] .school-text', root),
+      alert: $('.notes-alert', root),
+      chips: $('.notes-chips', root),
+      why: $('.notes-why', root),
+      strip: $('.notes-strip', root),
+      reader: $('[data-line="reader"] .notes-text', root),
       readerRow: $('[data-line="reader"]', root),
-      helper: $('[data-line="helper"] .school-text', root),
+      helper: $('[data-line="helper"] .notes-text', root),
       helperRow: $('[data-line="helper"]', root),
-      match: $('[data-line="match"] .school-text', root),
+      match: $('[data-line="match"] .notes-text', root),
       matchRow: $('[data-line="match"]', root),
       helperBtn: $('[data-cmd="set-helper"]', root),
       pinBtn: $('[data-cmd="pin"]', root),
@@ -310,14 +366,14 @@
       policyNote: $('[data-note="policy"]', root),
       fullToggle: $('[data-toggle="full"]', root),
       askToggle: $('[data-toggle="ask"]', root),
-      ask: $('.school-ask', root),
-      askText: $('.school-ask-text', root),
-      notes: $('.school-notes', root),
-      notesTitle: $('.school-notes-title', root),
-      notesNote: $('.school-notes-note', root),
-      view: $('.school-view', root),
-      empty: $('.school-empty', root),
-      openBtn: $('.school-open', root),
+      ask: $('.notes-ask', root),
+      askText: $('.notes-ask-text', root),
+      notes: $('.notes-doc', root),
+      notesTitle: $('.notes-doc-title', root),
+      notesNote: $('.notes-doc-note', root),
+      view: $('.notes-view', root),
+      empty: $('.notes-empty', root),
+      openBtn: $('.notes-open', root),
       chipFor: new Map(),
       chipIds: ''
     };
@@ -362,7 +418,7 @@
     if (!els) return;
     show(els.ask, open);
     els.askToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    els.askToggle.title = open ? 'Hide the question box' : 'Match a pasted question without LessonPlayer';
+    els.askToggle.title = open ? 'Hide the question box' : 'Match a pasted question without the reader app';
     if (open) { try { els.askText.focus(); } catch (err) { /* a detached pane has nothing to focus */ } }
   }
 
@@ -390,7 +446,7 @@
     let cut = false;
     let wraps = false;
     for (const row of [els.readerRow, els.helperRow, els.matchRow]) {
-      const t = row.querySelector('.school-text');
+      const t = row.querySelector('.notes-text');
       if (!t) continue;
       const whole = t.textContent || '';
       if (t.title !== whole) t.title = whole;
@@ -421,7 +477,7 @@
   async function run(name, arg, where) {
     const api = bridge();
     if (!api || typeof api.command !== 'function') {
-      showReason(where, 'the browser has no School bridge (window.api.school)');
+      showReason(where, 'the browser has no notes bridge (window.api.notes)');
       return;
     }
     showReason(where, '\u2026', 0);
@@ -452,7 +508,7 @@
    */
   function showReason(where, why, ms) {
     if (!els) return;
-    const slot = els.root.querySelector('.school-inline[data-for="' + where + '"]');
+    const slot = els.root.querySelector('.notes-inline[data-for="' + where + '"]');
     if (slot) {
       text(slot, why);
       show(slot, true);
@@ -473,7 +529,7 @@
     const old = reasonTimers.get(where);
     if (old) { clearTimeout(old); reasonTimers.delete(where); }
     if (!els) return;
-    const slot = els.root.querySelector('.school-inline[data-for="' + where + '"]');
+    const slot = els.root.querySelector('.notes-inline[data-for="' + where + '"]');
     if (slot) { text(slot, ''); show(slot, false); }
   }
 
@@ -485,11 +541,11 @@
   }
   function paintStripReason() {
     if (!els) return;
-    let row = els.root.querySelector('.school-refusal');
+    let row = els.root.querySelector('.notes-refusal');
     if (!stripReason) { if (row) row.remove(); return; }
     if (!row) {
       row = document.createElement('div');
-      row.className = 'school-refusal';
+      row.className = 'notes-refusal';
       els.strip.appendChild(row);
     }
     text(row, stripReason);
@@ -502,21 +558,21 @@
   }
 
   function onClick(e) {
-    const toggle = e.target.closest ? e.target.closest('.school-toggle[data-toggle]') : null;
+    const toggle = e.target.closest ? e.target.closest('.notes-toggle[data-toggle]') : null;
     if (toggle && els.root.contains(toggle)) {
       if (toggle.dataset.toggle === 'full') setStripFull(!stripFull);
       else if (toggle.dataset.toggle === 'ask') setAskOpen(els.ask.hidden);
       return;
     }
-    const chip = e.target.closest ? e.target.closest('.school-chip') : null;
+    const chip = e.target.closest ? e.target.closest('.notes-chip') : null;
     if (chip && els.root.contains(chip)) {
       const id = chip.dataset.id ? chip.dataset.id : null;
       run('set-subject', { id }, 'set-subject');
       return;
     }
-    const open = e.target.closest ? e.target.closest('.school-open') : null;
+    const open = e.target.closest ? e.target.closest('.notes-open') : null;
     if (open) { openInTab(); return; }
-    const btn = e.target.closest ? e.target.closest('.school-btn[data-cmd]') : null;
+    const btn = e.target.closest ? e.target.closest('.notes-btn[data-cmd]') : null;
     if (!btn) return;
     const cmd = btn.dataset.cmd;
     if (cmd === 'set-helper') {
@@ -540,25 +596,25 @@
    * than doing nothing when pressed.
    */
   function openInTab() {
-    const cls = currentClass(last);
-    if (!cls) { showReason('open', 'there is no class to open'); return; }
+    const subj = currentSubject(last);
+    if (!subj) { showReason('open', 'there is no subject to open'); return; }
     if (typeof window.createTab !== 'function') {
       showReason('open', 'this build has no way to open a tab from the pane yet');
       return;
     }
-    window.createTab(fileUrl(cls), { background: false });
+    window.createTab(fileUrl(subj), { background: false });
   }
 
   // -------------------------------------------------------------- notes view
 
-  function currentClass(state) {
-    if (!state || !Array.isArray(state.classes) || !state.classes.length) return null;
+  function currentSubject(state) {
+    if (!state || !Array.isArray(state.subjects) || !state.subjects.length) return null;
     const want = state.subject ? state.subject.id : null;
     if (want) {
-      const hit = state.classes.find((c) => c && c.id === want);
+      const hit = state.subjects.find((c) => c && c.id === want);
       if (hit) return hit;
     }
-    return state.classes[0];
+    return state.subjects[0];
   }
 
   /**
@@ -574,8 +630,8 @@
    * close in this browser does the same thing; the fix belongs upstream.
    *
    * What we CAN do is remove the element as rarely as possible, and the normal
-   * path does: a class change navigates the guest we already have (loadNotes),
-   * so this runs only when the pane closes or the class list empties.
+   * path does: a subject change navigates the guest we already have (loadNotes),
+   * so this runs only when the pane closes or the subject list empties.
    */
   function dropView() {
     if (!els) return;
@@ -587,26 +643,26 @@
   }
 
   /**
-   * Loads a class's notes. Called only when the class id actually changes, so a
-   * state push every second never restarts a 300KB page.
+   * Loads a subject's notes. Called only when the subject (or its URL)
+   * changes, so a state push every second never restarts a 300KB page.
    *
-   * A class change NAVIGATES the guest we already have rather than building a
+   * A subject change NAVIGATES the guest we already have rather than building a
    * new one: it is cheaper, it keeps the element's listeners, and it is the
-   * only way to switch classes without risking the attach/detach race above.
+   * only way to switch subjects without risking the attach/detach race above.
    */
-  function loadNotes(cls) {
-    if (!els || !cls) return;
-    notesId = cls.id;
+  function loadNotes(subj) {
+    if (!els || !subj) return;
+    notesId = noteKey(subj);
     lastJumpKey = '';
     jumpNote = '';
     viewReady = false;
     if (jumpRetry) { clearTimeout(jumpRetry); jumpRetry = 0; }
 
-    const url = fileUrl(cls);
+    const url = fileUrl(subj);
     const existing = els.view.firstElementChild;
     if (existing && viewKind) {
       // Reuse. The iframe fallback stays the fallback: once file:// was refused
-      // for one class it will be refused for the next, and the pane keeps
+      // for one subject it will be refused for the next, and the pane keeps
       // saying so rather than silently flipping back.
       existing.setAttribute('src', url);
       paintNotesNote();
@@ -615,13 +671,13 @@
 
     viewFallbackReason = '';
     const view = document.createElement('webview');
-    view.className = 'school-guest';
+    view.className = 'notes-guest';
     view.setAttribute('src', url);
     viewKind = 'webview';
 
     view.addEventListener('dom-ready', () => {
       viewReady = true;
-      // Injected once per DOCUMENT: a class switch navigates this same element,
+      // Injected once per DOCUMENT: a subject switch navigates this same element,
       // so dom-ready fires again and the new page gets its own copy.
       let pending;
       try {
@@ -644,7 +700,7 @@
       // failure worth swapping the whole view for.
       if (e && (e.errorCode === -3 || (e.isMainFrame === false))) return;
       const why = 'error ' + (e && e.errorCode) + (e && e.errorDescription ? ' ' + e.errorDescription : '');
-      useIframe(cls, 'the <webview> would not load the file (' + why + ')');
+      useIframe(subj, 'the <webview> would not load the file (' + why + ')');
     });
 
     els.view.appendChild(view);
@@ -657,17 +713,17 @@
    * it — the deep link becomes a plain #anchor load, with no highlight. That
    * loss is printed in the pane, not swallowed.
    */
-  function useIframe(cls, why) {
+  function useIframe(subj, why) {
     if (!els) return;
     try { els.view.textContent = ''; } catch (err) { /* see dropView */ }
     viewKind = 'iframe';
     viewReady = false;
     viewFallbackReason = why;
     const frame = document.createElement('iframe');
-    frame.className = 'school-guest';
+    frame.className = 'notes-guest';
     frame.setAttribute('sandbox', 'allow-same-origin');
     frame.setAttribute('referrerpolicy', 'no-referrer');
-    frame.src = fileUrl(cls);
+    frame.src = fileUrl(subj);
     frame.addEventListener('load', () => { viewReady = true; maybeJump(last); });
     els.view.appendChild(frame);
     paintNotesNote();
@@ -726,7 +782,7 @@
     }
     let pending;
     try {
-      pending = view.executeJavaScript('window.__schoolJump && window.__schoolJump(' + JSON.stringify(String(sectionId)) + ')', false);
+      pending = view.executeJavaScript('window.__notesJump && window.__notesJump(' + JSON.stringify(String(sectionId)) + ')', false);
     } catch (err) {
       setJumpNote('could not reach the notes page to jump: ' + (err && err.message ? err.message : String(err)));
       return;
@@ -757,33 +813,42 @@
 
   // -------------------------------------------------------------- the render
 
-  /** Class chips + the Auto chip. Rebuilt only when the class LIST changes. */
+  /** Subject chips + the Auto chip. Rebuilt only when the subject LIST changes. */
   function paintChips(state) {
-    const classes = Array.isArray(state.classes) ? state.classes.filter(Boolean) : [];
-    const ids = classes.map((c) => c.id + ':' + (c.name || '')).join('|');
+    const subjects = Array.isArray(state.subjects) ? state.subjects.filter(Boolean) : [];
+    const ids = subjects.map((c) => c.id + ':' + (c.name || '')).join('|');
     if (ids !== els.chipIds) {
       els.chipIds = ids;
       els.chips.textContent = '';
       els.chipFor.clear();
-      for (const cls of classes) {
+      for (const subj of subjects) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'school-chip';
-        b.dataset.id = cls.id;
-        b.textContent = cls.name || cls.id;
-        b.title = 'Show ' + (cls.name || cls.id) + "'s notes";
+        b.className = 'notes-chip';
+        b.dataset.id = subj.id;
+        b.textContent = subj.name || subj.id;
+        b.title = 'Show ' + (subj.name || subj.id) + "'s notes";
         els.chips.appendChild(b);
-        els.chipFor.set(cls.id, b);
+        els.chipFor.set(subj.id, b);
       }
       const auto = document.createElement('button');
       auto.type = 'button';
-      auto.className = 'school-chip school-chip-auto';
+      auto.className = 'notes-chip notes-chip-auto';
       auto.dataset.id = '';
       auto.textContent = 'Auto';
-      auto.title = 'Follow whatever LessonPlayer is showing';
       els.chips.appendChild(auto);
       els.chipFor.set('', auto);
     }
+
+    // The Auto chip's tooltip names the reader app, which a state push can
+    // change, so it is set on every paint rather than once at build. With no
+    // reader app configured, Auto still means "not picked by hand"; it just has
+    // nothing to follow, and the tooltip says so.
+    const autoTitle = readerOff(state)
+      ? 'Follow whatever the reader app is showing (no reader app is configured, so pick a subject by hand)'
+      : 'Follow whatever ' + readerName(state) + ' is showing';
+    const autoChip = els.chipFor.get('');
+    if (autoChip && autoChip.title !== autoTitle) autoChip.title = autoTitle;
 
     const subject = state.subject || { id: null, source: 'none', reason: '' };
     for (const [id, b] of els.chipFor) {
@@ -794,7 +859,7 @@
       } else {
         const on = id === subject.id;
         klass(b, 'is-on', on);
-        klass(b, 'is-detected', on && subject.source === 'lessonplayer');
+        klass(b, 'is-detected', on && subject.source === 'reader');
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       }
     }
@@ -807,11 +872,19 @@
 
   function paintStrip(state) {
     const reader = state.reader || {};
-    const mode = reader.mode === 'off' || !reader.mode ? 'off' : String(reader.mode).toUpperCase();
-    text(els.reader, withReason('Reader: ' + mode, reader.reason));
-    setLevel(els.readerRow, reader.state === 'error' ? 'bad'
-      : reader.state === 'waiting' ? 'wait'
-        : mode === 'off' ? 'off' : 'ok');
+    if (readerOff(state)) {
+      // No reader app at all: an off row that says so in plain words (main's
+      // reason when it gave one), never a bare "Reader: off" that reads as a
+      // fault. Picking a subject by hand and the paste box still work.
+      text(els.reader, withReason('Reader: none', reasonOf(reader.reason) || 'no reader app is configured'));
+      setLevel(els.readerRow, 'off');
+    } else {
+      const mode = reader.mode === 'off' || !reader.mode ? 'off' : String(reader.mode).toUpperCase();
+      text(els.reader, withReason('Reader: ' + mode, reader.reason));
+      setLevel(els.readerRow, reader.state === 'error' ? 'bad'
+        : reader.state === 'waiting' ? 'wait'
+          : mode === 'off' ? 'off' : 'ok');
+    }
 
     const helper = state.helper || {};
     const hs = helper.state || 'off';
@@ -847,10 +920,16 @@
     els.pinBtn.title = pinned ? 'Unpin: follow the question again' : 'Pin: stop the notes jumping on their own';
     klass(els.pinBtn, 'is-on', pinned);
 
-    const policy = state.policy || {};
-    show(els.policyWrap, policy.installed === false);
+    // The debug-port policy belongs to the reader app, so with none configured
+    // the whole row (button and note) stays hidden: there is nothing to install.
+    const policy = readerOn(state) ? (state.policy || {}) : {};
+    show(els.policyWrap, readerOn(state) && policy.installed === false);
+    const policyBtn = els.policyWrap.querySelector('[data-cmd="install-policy"]');
+    const policyTitle = 'Write the machine policy that opens ' + readerName(state) +
+      "'s debug port, so the pane can read the question it shows";
+    if (policyBtn && policyBtn.title !== policyTitle) policyBtn.title = policyTitle;
     const notes = [];
-    if (policy.needsRestart) notes.push('The policy is written, but it needs an LessonPlayer restart to take.');
+    if (policy.needsRestart) notes.push('The policy is written, but ' + readerName(state) + ' needs a restart for it to take.');
     if (reasonOf(policy.reason) && policy.installed === false) notes.push(reasonOf(policy.reason));
     const noteText = notes.join(' ');
     text(els.policyNote, noteText);
@@ -866,26 +945,26 @@
   }
 
   function paintNotes(state) {
-    const classes = Array.isArray(state.classes) ? state.classes.filter(Boolean) : [];
-    const cls = currentClass(state);
+    const subjects = Array.isArray(state.subjects) ? state.subjects.filter(Boolean) : [];
+    const subj = currentSubject(state);
 
     // Empty and broken are real UI, not a blank box.
     let empty = '';
-    if (!classes.length) {
+    if (!subjects.length) {
       empty = state.ready === false
-        ? 'No classes yet \u2014 ' + (reasonOf(state.reason) || 'the School brain has not reported any.')
-        : 'No notes found in Documents\\notes';
+        ? 'No subjects yet \u2014 ' + (reasonOf(state.reason) || 'the notes index has not reported any.')
+        : 'No notes found in ' + ((typeof state.dir === 'string' && state.dir.trim()) || 'the notes folder');
     }
     text(els.empty, empty);
     show(els.empty, !!empty);
     show(els.view, !empty);
     show(els.notesTitle.parentElement, !empty);
 
-    if (!cls) { if (notesId !== null) dropView(); paintNotesNote(); return; }
+    if (!subj) { if (notesId !== null) dropView(); paintNotesNote(); return; }
 
-    text(els.notesTitle, cls.name || cls.id);
-    const sections = Array.isArray(cls.sections) ? cls.sections.length : 0;
-    els.notesTitle.title = (cls.name || cls.id) + ' \u2014 ' + sections + ' sections \u00b7 ' + fileUrl(cls);
+    text(els.notesTitle, subj.name || subj.id);
+    const sections = Array.isArray(subj.sections) ? subj.sections.length : 0;
+    els.notesTitle.title = (subj.name || subj.id) + ' \u2014 ' + sections + ' sections \u00b7 ' + fileUrl(subj);
 
     const canOpen = typeof window.createTab === 'function';
     klass(els.openBtn, 'is-off', !canOpen);
@@ -893,13 +972,24 @@
       ? 'Open these notes in a normal tab'
       : 'This build has no way to open a tab from the pane yet';
 
-    if (cls.id !== notesId) loadNotes(cls);
+    if (noteKey(subj) !== notesId) loadNotes(subj);
     else paintNotesNote();
   }
 
   /**
+   * The words for a pane that is switched off (state.configured false): no
+   * notes folder is set, or the one set is gone. Main's reason says which; the
+   * way back on is added unless main already named it.
+   */
+  function offText(state) {
+    const why = reasonOf(state.reason) || 'no notes folder is set';
+    const how = /settings/i.test(why) ? '' : ' Pick a folder in Settings › Notes pane.';
+    return 'The notes pane is off: ' + why.replace(/[.\s]+$/, '') + '.' + how;
+  }
+
+  /**
    * One entry point for every paint. Idempotent: called with the same state it
-   * changes nothing. window.SchoolPane.render() is this, so a harness can drive
+   * changes nothing. window.NotesPane.render() is this, so a harness can drive
    * the pane without main.
    */
   function render(state) {
@@ -912,8 +1002,24 @@
     }
     last = state;
 
+    // Switched off (no notes folder): app.js normally never shows the pane in
+    // this state, but a harness or a folder deleted mid-session can. Then the
+    // pane is one plain banner saying it is off and why; the chips, strip and
+    // notes view are hidden (.is-off in notes-pane.css) and the guest is torn
+    // down, so a stale note never sits under an "off" banner.
+    const off = state.configured === false;
+    klass(els.root, 'is-off', off);
+    if (off) {
+      text(els.alert, offText(state));
+      show(els.alert, true);
+      klass(els.root, 'is-unready', true);
+      if (notesId !== null) dropView();
+      paintStripReason();
+      return;
+    }
+
     const alert = state.ready === false
-      ? (reasonOf(state.reason) || 'The School brain is not ready and did not say why.')
+      ? (reasonOf(state.reason) || 'The notes pane is not ready and did not say why.')
       : '';
     text(els.alert, alert);
     show(els.alert, !!alert);
@@ -932,8 +1038,8 @@
     if (!api) {
       render({
         ready: false,
-        reason: 'The browser has no School bridge yet (window.api.school is missing), so nothing can load.',
-        classes: [],
+        reason: 'The browser has no notes bridge yet (window.api.notes is missing), so nothing can load.',
+        subjects: [],
         subject: { id: null, source: 'none', reason: 'no bridge' },
         reader: { mode: 'off', state: 'error', reason: 'no bridge', port: 0, lastReadAt: 0, question: null },
         helper: { enabled: false, state: 'off', reason: 'no bridge', model: '', sessionId: null, lastMs: 0 },
@@ -947,8 +1053,8 @@
       if (state) render(state);
       else render({
         ready: false,
-        reason: 'The School brain answered nothing (the browser refused the request).',
-        classes: [], subject: { id: null, source: 'none', reason: 'no answer' },
+        reason: 'The notes pane got no answer from the browser (it refused the request).',
+        subjects: [], subject: { id: null, source: 'none', reason: 'no answer' },
         reader: { mode: 'off', state: 'error', reason: 'no answer', port: 0, lastReadAt: 0, question: null },
         helper: { enabled: false, state: 'off', reason: 'no answer', model: '', sessionId: null, lastMs: 0 },
         match: null, pinned: false, policy: { installed: false, needsRestart: false, port: 0, reason: 'no answer' }
@@ -956,8 +1062,8 @@
     }).catch((err) => {
       render({
         ready: false,
-        reason: 'Could not read the School state: ' + (err && err.message ? err.message : String(err)),
-        classes: [], subject: { id: null, source: 'none', reason: 'error' },
+        reason: 'Could not read the notes pane state: ' + (err && err.message ? err.message : String(err)),
+        subjects: [], subject: { id: null, source: 'none', reason: 'error' },
         reader: { mode: 'off', state: 'error', reason: 'error', port: 0, lastReadAt: 0, question: null },
         helper: { enabled: false, state: 'error', reason: 'error', model: '', sessionId: null, lastMs: 0 },
         match: null, pinned: false, policy: { installed: false, needsRestart: false, port: 0, reason: 'error' }
@@ -1007,7 +1113,7 @@
   else boot();
 
   // The harness contract: inject a state, read back what was painted.
-  window.SchoolPane = {
+  window.NotesPane = {
     render,
     state: () => last,
     refresh,

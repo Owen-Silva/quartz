@@ -508,7 +508,6 @@ const FRIENDLY_NAMES = {
   dwm: 'Desktop Window Manager',
   msmpeng: 'Antimalware Service Executable',
   taskmgr: 'Task Manager',
-  lessonplayer: 'LessonPlayer',
   chrome: 'Google Chrome',
   msedge: 'Microsoft Edge',
   msedgewebview2: 'Microsoft Edge WebView2',

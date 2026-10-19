@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="favtile.css">
   <link rel="stylesheet" href="tabsearch.css">
   <link rel="stylesheet" href="workspaces.css">
-  <link rel="stylesheet" href="school-pane.css">
+  <link rel="stylesheet" href="notes-pane.css">
   <link rel="stylesheet" href="drm.css">
   <link rel="stylesheet" href="watch-player.css">
   <link rel="stylesheet" href="watch-player-extras.css">
@@ -147,7 +147,7 @@
     <!-- Side pane: a workspace-owned column BESIDE the tab well (never over it).
          app.js shows and sizes it for the current workspace's pane kind, sets
          data-kind, and puts its 6px drag handle in as the first child;
-         school-pane.js fills #sidepane-body while the kind is 'school'.
+         notes-pane.js fills #sidepane-body while the kind is 'notes'.
          Hidden here, so it costs no layout until a workspace asks for it. -->
     <aside id="sidepane" hidden>
       <div id="sidepane-body"></div>
@@ -206,8 +206,8 @@
   <script src="tabsearch.js"></script>
   <script src="scorepins-chrome.js"></script>
   <script src="workspaces.js"></script>
-  <!-- The School pane. It reads window.api only. -->
-  <script src="school-pane.js"></script>
+  <!-- The notes pane. It reads window.api only. -->
+  <script src="notes-pane.js"></script>
   <!-- node_modules/@mozilla/readability/Readability.js is deliberately NOT
        here: reader.js is the only thing that uses it and injects it itself the
        first time a reading page is opened, so boot does not pay for ~100KB

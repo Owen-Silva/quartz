@@ -121,6 +121,7 @@
     'Stocks': '\uEAFC',                   // Market
     'Lumen': '\uE7F4',                    // TVMonitor
     'Phone': '\uE8EA',                    // CellPhone
+    'Notes pane': '\uE70B',               // QuickNote
     'Shortcuts': '\uE765',                // KeyboardClassic
     'About': '\uE946'                     // Info
   };
@@ -7737,6 +7738,257 @@
   }
 
   /* ------------------------------------------------------------
+     Notes pane
+
+     The split pane beside the tabs that shows a note from a folder of
+     .html notes and jumps to the section matching the question on
+     screen (notes-pane.js draws it, notes-pane-main.js is its brain in
+     main). It is OFF until a folder is picked here: main keeps the
+     folder in <userData>\notes-pane.json, written through the
+     'set-dir' command, and this section is the one place that turns
+     the pane on or off. The optional keys in that file (a reader app
+     to follow, the helper, a budget source) have no rows of their own;
+     the section names the file so they can be set by hand, and each is
+     off while unset.
+
+     Contract: window.api.notes = { describe(), command(name, arg),
+     onUpdate(cb) -> unsubscribe }. state.configured / dir / configFile /
+     subjects / ready / reason. Like Phone, the section is live while
+     the panel is: one describe() and one subscription, both given back
+     in closePanel(). Nothing here fails quietly: a missing bridge, a
+     refused command and a folder main rejects all say so, in words.
+     ------------------------------------------------------------ */
+
+  var ntsState = null;        // the last describe() or push, or null before the first
+  var ntsStateReason = '';    // why there is no state, when there is none
+  var ntsOff = null;          // the onUpdate unsubscribe, while the panel is open
+  var ntsWatching = false;
+  var ntsBusy = '';           // 'pick' or 'set-dir' while that call is out
+  var ntsResult = null;       // { ok, reason }: the last folder change, shown under the buttons
+
+  /** window.api.notes, or null on a build whose preload has no notes bridge. */
+  function notesApi() {
+    var api = window.api;
+    return (api && api.notes && typeof api.notes.describe === 'function') ? api.notes : null;
+  }
+
+  function notesErrText(err) {
+    return (err && err.message) ? String(err.message) : String(err || 'unknown error');
+  }
+
+  /** Every state that lands - describe() or a push - comes through here. */
+  function notesTake(state) {
+    if (!state || typeof state !== 'object') return;
+    ntsState = state;
+    ntsStateReason = '';
+    renderNotesPane();
+    refreshFilter();
+  }
+
+  function notesRefresh() {
+    var api = notesApi();
+    if (!api) { ntsState = null; renderNotesPane(); return; }
+    var pending;
+    try { pending = api.describe(); } catch (err) {
+      ntsStateReason = 'the call threw: ' + notesErrText(err);
+      renderNotesPane();
+      return;
+    }
+    Promise.resolve(pending).then(function (state) {
+      if (state && typeof state === 'object') { notesTake(state); return; }
+      ntsStateReason = 'the browser answered nothing at all';
+      renderNotesPane();
+    }, function (err) {
+      ntsStateReason = 'the browser refused it: ' + notesErrText(err);
+      renderNotesPane();
+    });
+  }
+
+  /** Open: one describe() and a live subscription. Closed: neither. */
+  function notesWatch() {
+    if (ntsWatching) return;                   // opened twice is still one of each
+    ntsWatching = true;
+    var api = notesApi();
+    if (api && typeof api.onUpdate === 'function') {
+      try {
+        var off = api.onUpdate(function (state) { notesTake(state); });
+        if (typeof off === 'function') ntsOff = off;
+      } catch (err) { ntsOff = null; }
+    }
+    notesRefresh();
+  }
+
+  function notesRelease() {
+    ntsWatching = false;
+    if (ntsOff) {
+      try { ntsOff(); } catch (err) { /* the channel is already gone */ }
+    }
+    ntsOff = null;
+  }
+
+  /**
+   * 'set-dir' { dir }: main checks the folder, writes notes-pane.json (its
+   * other keys kept), rescans and pushes. null turns the pane off. Its answer
+   * - ok or not - is drawn under the buttons; nothing is assumed early.
+   */
+  function notesSetDir(dir) {
+    var api = notesApi();
+    if (!api || typeof api.command !== 'function') {
+      ntsResult = { ok: false, reason: 'this build has no notes bridge (window.api.notes)' };
+      renderNotesPane();
+      return;
+    }
+    ntsBusy = 'set-dir';
+    ntsResult = null;
+    renderNotesPane();
+    var settle = function (ok, reason) {
+      ntsBusy = '';
+      ntsResult = { ok: ok, reason: reason };
+      renderNotesPane();
+    };
+    var answer;
+    try { answer = api.command('set-dir', { dir: dir }); }
+    catch (err) { settle(false, 'the call threw: ' + notesErrText(err)); return; }
+    Promise.resolve(answer).then(function (value) {
+      if (!value || typeof value !== 'object') {
+        settle(false, 'the browser answered nothing at all');
+        return;
+      }
+      var done = dir ? 'the notes folder is set.' : 'the notes pane is off.';
+      settle(value.ok === true,
+        value.reason ? String(value.reason) : (value.ok === true ? done : 'no reason given'));
+      notesRefresh();          // whatever it did, the state may have moved
+    }, function (err) {
+      settle(false, 'the browser refused it: ' + notesErrText(err));
+    });
+  }
+
+  /** The folder picker, starting at the current folder; a cancel changes nothing. */
+  function notesChoose() {
+    var app = window.api && window.api.app;
+    if (!app || typeof app.pickFolder !== 'function') {
+      ntsResult = { ok: false, reason: 'this build has no folder picker (window.api.app.pickFolder is missing)' };
+      renderNotesPane();
+      return;
+    }
+    var start = (ntsState && typeof ntsState.dir === 'string') ? ntsState.dir : '';
+    var failed = function (err) {
+      ntsBusy = '';
+      ntsResult = { ok: false, reason: 'the folder picker failed: ' + notesErrText(err) };
+      renderNotesPane();
+    };
+    ntsBusy = 'pick';
+    ntsResult = null;
+    renderNotesPane();
+    var pending;
+    try { pending = app.pickFolder(start); } catch (err) { failed(err); return; }
+    Promise.resolve(pending).then(function (picked) {
+      ntsBusy = '';
+      if (typeof picked !== 'string' || !picked) { renderNotesPane(); return; } // cancelled
+      notesSetDir(picked);
+    }, failed);
+  }
+
+  function buildNotesPane() {
+    var s = section('Notes pane');
+    var f = el('div', 'set-field');
+    f.setAttribute('data-field', 'notespane');
+    s.appendChild(f);
+    return s;
+  }
+
+  /** A name on the left, a value on the right. Readouts only; nothing typed. */
+  function notesRow(label, value) {
+    var row = el('div', 'set-ctl-row');
+    row.appendChild(el('span', 'set-ctl-label', label));
+    row.appendChild(el('span', 'set-readout-text', value));
+    return row;
+  }
+
+  /** A pip and a line: live for a good answer, hold for one that says why not. */
+  function notesReadout(ok, text) {
+    var p = el('p', 'set-readout');
+    p.appendChild(el('span', 'set-pip' + (ok ? ' is-live' : ' is-hold')));
+    p.appendChild(el('span', 'set-readout-text', text));
+    return p;
+  }
+
+  function renderNotesPane() {
+    var field = panelEl && panelEl.querySelector('[data-field="notespane"]');
+    if (!field) return;
+    field.textContent = '';
+
+    if (!notesApi()) {
+      field.appendChild(el('p', 'set-hint',
+        'This build has no notes pane bridge (window.api.notes is missing), so the ' +
+        'notes pane cannot be set up or shown.'));
+      return;
+    }
+    if (!ntsState) {
+      field.appendChild(el('p', 'set-hint', ntsStateReason
+        ? 'Could not read the notes pane state: ' + ntsStateReason
+        : 'Reading the notes pane state…'));
+      return;
+    }
+
+    var st = ntsState;
+    var on = st.configured === true;
+    var busy = ntsBusy !== '';
+    var row = el('div', 'set-path-row');
+
+    if (!on) {
+      field.appendChild(el('p', 'set-hint',
+        'Shows a note from a folder of .html notes beside your tabs and jumps to the ' +
+        'section that matches the question on screen. Off until you pick a folder.'));
+      // A folder that was set and has gone missing is "off" too; main says which.
+      if (st.reason) field.appendChild(notesReadout(false, 'Off: ' + String(st.reason)));
+      var pick = textButton(busy ? 'Working…' : 'Choose folder…', 'set-btn', notesChoose);
+      if (busy) pick.disabled = true;
+      row.appendChild(pick);
+      field.appendChild(row);
+    } else {
+      var subjects = Array.isArray(st.subjects) ? st.subjects.filter(Boolean) : [];
+      var sections = 0;
+      for (var i = 0; i < subjects.length; i++) {
+        if (Array.isArray(subjects[i].sections)) sections += subjects[i].sections.length;
+      }
+      field.appendChild(notesRow('Folder', String(st.dir || '')));
+      field.appendChild(notesRow('Notes found', subjects.length
+        ? subjects.length + (subjects.length === 1 ? ' note, ' : ' notes, ') +
+          sections + (sections === 1 ? ' section' : ' sections')
+        : 'none'));
+      if (st.ready === false || !subjects.length) {
+        field.appendChild(notesReadout(false, st.reason
+          ? String(st.reason)
+          : 'No .html notes were found in this folder.'));
+      }
+      var change = textButton(busy ? 'Working…' : 'Change folder…', 'set-btn', notesChoose);
+      var off = textButton('Turn off', 'set-text', function () { notesSetDir(null); });
+      if (busy) { change.disabled = true; off.disabled = true; }
+      row.appendChild(change);
+      row.appendChild(off);
+      field.appendChild(row);
+    }
+
+    if (ntsResult) {
+      field.appendChild(notesReadout(ntsResult.ok,
+        (ntsResult.ok ? 'Done. ' : 'That did not work. ') + ntsResult.reason));
+    }
+
+    if (on) {
+      field.appendChild(el('p', 'set-hint',
+        'To show it, open the workspace menu from the pill in the title bar, press a ' +
+        'workspace’s “Folder and pane” button and pick Notes under Pane. It opens ' +
+        'beside the tabs whenever that workspace is on screen.'));
+      if (st.configFile) {
+        field.appendChild(el('p', 'set-hint',
+          'Optional extras (a reader app to follow, the helper, a budget source) are keys ' +
+          'in ' + String(st.configFile) + '. Each one is off while it is unset.'));
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------
      Shortcuts
 
      When shortcuts.js is loaded the section is an editor over
@@ -8492,6 +8744,7 @@
     bodyEl.appendChild(buildSpotify());
     bodyEl.appendChild(buildStocks());
     bodyEl.appendChild(buildPhone());
+    bodyEl.appendChild(buildNotesPane());
     bodyEl.appendChild(buildShortcuts());
     bodyEl.appendChild(buildAbout());
 
@@ -8624,6 +8877,9 @@
     /* And the Typing section: main owns it and a page's right-click menu
        changes it, so it is live while the pane is, like Phone. */
     spellWatch();
+    /* And the Notes pane section: main owns its folder and pushes on every
+       change, so it is live while the pane is, like Phone. */
+    notesWatch();
     if (buttonEl) {
       buttonEl.classList.add('is-open');
       buttonEl.setAttribute('aria-expanded', 'true');
@@ -8665,6 +8921,7 @@
     autopauseRelease();
     phoneRelease();
     spellRelease();
+    notesRelease();
     watchRelease();
     if (buttonEl) {
       buttonEl.classList.remove('is-open');
