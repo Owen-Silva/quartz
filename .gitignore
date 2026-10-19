@@ -1,6 +1,17 @@
 node_modules/
 *.log
---keep.png
---keep.txt
-smoke.png
-smoke.txt
+smoke.*
+
+# Test and bench output
+.cloudtest/
+wake-out/
+zf-out/
+dist/
+out/
+
+# Signing output (castlabs EVS) and anything secret: never committed
+*.sig
+quartz-vmp.json
+.env*
+*.pem
+*.key
