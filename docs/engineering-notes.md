@@ -706,7 +706,7 @@ page asked for a protected key system, was refused, AND its video got encrypted 
 alone is a probe that YouTube, Twitch and ad scripts make, and never shows a bar. The page watcher is
 a session preload that wraps requestMediaKeySystemAccess in a pass-through Proxy in the main world.
 A failed Edge launch says why with Try again. The bar takes itself away when the build has Widevine
-(castlabs ECS, see the Widevine and DRM section of the README). Tests: `node drm-harness.js`, `node drm-e2e.js [--live]`.
+(castlabs ECS, see the [Widevine and DRM](../README.md#widevine-and-drm) section of the README). Tests: `node drm-harness.js`, `node drm-e2e.js [--live]`.
 
 **Idle music.** Settings → Idle music, between New tab and Privacy: Enabled, Source (Built-in
 ambient, or My tracks with its count, Choose files… and Clear), Where it plays, Volume, and the hint
@@ -1387,6 +1387,9 @@ one run before and one after.
 | `newtab-bg.js` | The circuit board — canvas painted once per layout, packets as DOM on Web Animations. Owns `window.__boardPaused` / `__boardState`, the freeze the chrome drives while an overlay is open. |
 | `smoketest.js` / `cdp-eval.js` / `cdp-profile.js` | Launch the app on the CDP port from `SMOKE_PORT`, 9222 by default, and assert the chrome ids and a spawning Claude PTY; evaluate one expression in the running instance; CPU-profile it and print the hottest functions by self time. |
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
+| `README.md` | What Quartz is, requirements, install, configuration, Lumen and DRM notes, how it works, licence. |
+| `docs/engineering-notes.md` | This file: the design log, part by part (it was the README until the public README replaced it). |
+| `LICENSE` / `CREDITS.md` | GPL-3.0-only plus the draft section 7 permission; what in the repo is not GPL, and third-party notices. |
 | `CHANGELOG.md` | What changed and why, by area, written to be read instead of the diffs. |
 | `docs/phone-optimize-plan.md` | The ranked optimization plan for the phone mirror — what was measured live, what is already done, and what is worth doing next with its expected gain, effort, risk and the way to verify it. Read it before touching the stream. |
 

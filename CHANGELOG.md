@@ -399,7 +399,7 @@ or use Restart browser in Settings → About — to pick any of this up.
   refresh had been reported as a failure. And a 33rd pin was answered ok with no tile drawn; the
   stored list is used and the dock says "Full".
 
-Verified with harnesses only. the machine was in use while this round was written, so none of it has had a
+Verified with harnesses only. The machine was in use while this round was written, so none of it has had a
 live pass in the running browser: the evidence is pure-node harnesses (112/112 on the app index,
 78/78 on the pins, push and palette rows, 61/61 on the icon slot through a DOM shim, 33/33 plus 7/7
 against the real filesystem on the resolver, 108/108 on the chrome wiring), the engine on disk for
