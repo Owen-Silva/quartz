@@ -102,7 +102,9 @@ services it already had.
   passwords, copies no cookies and calls no service API with keys of its own.
 - **Automated reading may breach a service's terms of use.** Whether you use it is your call.
   Background reading ("Keep Lumen up to date in the background") is off by default.
-- It **hides no in-stream ads and saves no video**: nothing is downloaded, recorded or captured.
+- It **skips no in-stream ads and saves no video**: nothing is downloaded, recorded or captured.
+  While the browser-wide ad blocker (the shield button in the toolbar) is on, the trimmed YouTube page also
+  hides YouTube's display-ad slots, as the blocker would on any page; with it off, they stay.
 - The ESPN and NHL scores come from public but undocumented feeds, used unofficially.
 
 ## Widevine and DRM
