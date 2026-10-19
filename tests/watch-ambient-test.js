@@ -32,6 +32,10 @@ check(A.keyOf('youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s') ==
 check(A.keyOf('youtube', 'https://www.youtube.com/shorts/Xk3pQ9vLm2A') !== A.keyOf('youtube', 'https://www.youtube.com/shorts/Rt7nB2wQe5Z'), 'the next Short: a new key');
 check(A.keyOf('disney', 'https://www.disneyplus.com/play/abc#x') === 'disney:https://www.disneyplus.com/play/abc', 'another service: its page address');
 
+/* ---- the avatar's fallback ------------------------------------------------------------------- */
+check(A.placeholder(1, 1) && A.placeholder(0, 0) && A.placeholder(2, 88) && !A.placeholder(88, 88), 'a 1 x 1 (or 0 x 0) avatar is YouTube’s lazy placeholder; a real one is kept');
+check(A.initialOf('@guitarcoachryan') === 'G' && A.initialOf('  ') === '' && A.initialOf('ärzte') === 'Ä', 'the fallback initial: the first letter, no @');
+
 /* ---- the sample's signature ---------------------------------------------------------------------- */
 function solid(w, h, rgb, stride) { const st = stride || 3, px = new Uint8Array(w * h * st); for (let i = 0; i < w * h; i++) { px[i * st] = rgb[0]; px[i * st + 1] = rgb[1]; px[i * st + 2] = rgb[2]; if (st === 4) px[i * st + 3] = 255; } return px; }
 const s1 = A.signature(solid(48, 27, [200, 100, 50]), 48, 27);

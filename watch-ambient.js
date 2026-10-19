@@ -407,10 +407,32 @@
     };
   }
 
+  /* ------------------------------------------------- the channel's avatar */
+  // YouTube's lazy images carry a 1 x 1 placeholder (a transparent GIF) until they scroll in, and the reader
+  // can catch one: the view then showed an empty ring. Any avatar that loads as a placeholder (or fails) gets
+  // the channel's initial on the neutral disc instead. One capture listener on 'load'; no polling.
+  function placeholder(w, h) { return !(w > 2 && h > 2); }
+  function initialOf(name) { var t = String(name || '').replace(/^@/, '').trim(); return t ? t.charAt(0).toUpperCase() : ''; }
+  function avatarFix(img) {
+    var av = img && img.parentNode;
+    if (!av || !av.classList || !av.classList.contains('pv-avatar')) return;
+    var chan = av.closest ? av.closest('.pv-chan') : null;
+    var nm = chan ? chan.querySelector('.pv-chan-name') : null;
+    img.remove();
+    av.textContent = initialOf(nm && !nm.classList.contains('pv-skel') ? nm.textContent : '');
+  }
+  if (hasDom() && typeof document.addEventListener === 'function') {
+    document.addEventListener('load', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'IMG' && t.parentNode && t.parentNode.classList && t.parentNode.classList.contains('pv-avatar') && placeholder(t.naturalWidth, t.naturalHeight)) avatarFix(t);
+    }, true);
+  }
+
   return {
     // watch-playview.js hooks
     attach: attach, destroy: destroy,
     // pure parts (tests/watch-ambient-test.js)
+    placeholder: placeholder, initialOf: initialOf,
     ytId: ytId, stillUrl: stillUrl, keyOf: keyOf, signature: signature, diff: diff, refreshOff: refreshOff, pick: pick,
     EVERY: EVERY, EVERY_IDLE: EVERY_IDLE, DELTA: DELTA,
     _state: state

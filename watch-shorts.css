@@ -62,8 +62,10 @@
 .sh-cover.is-empty .pv-cover-bar { display: none; }
 .sh-cover.is-empty .sh-cover-txt { color: var(--warn, #d6b46a); }
 
-/* Previous / Next: YouTube's own navigation, pressed by Lumen's buttons; one split capsule,
-   centred on the reel's height. */
+/* Previous / Next: YouTube's own navigation, pressed by Lumen's buttons; one split capsule.
+   Beside the reel it rests on the reel's baseline, between the reel and the info island, so
+   reel, capsule and island read as one group (16px apart, watch-shorts.js LAY.GAP); below
+   the reel (a narrow layer) it is centred on the reel's height. */
 .sh-nav {
   position: absolute;
   z-index: 3;
@@ -74,6 +76,7 @@
   gap: 2px;
 }
 .sh-nav[hidden] { display: none; }
+.wp-tile[data-sh="beside"] .sh-nav { justify-content: flex-end; }
 .sh-navbtn {
   width: 44px;
   height: 50px;
@@ -87,11 +90,12 @@
 .sh-navbtn:last-child { border-radius: 6px 6px 22px 22px; }
 .sh-navbtn:hover:not(:disabled) { background: rgb(44 45 47 / .88); color: #ffffff; }
 .sh-navbtn:active:not(:disabled) { background: rgb(60 61 64 / .9); }
-.sh-navbtn:disabled { opacity: .5; }
+/* No previous (or next) Short: the half stays solid and its glyph dims, still readable (about 5:1). */
+.sh-navbtn:disabled { opacity: 1; color: #8f9399; cursor: default; }
 .sh-navbtn .pv-ico, .sh-navbtn .pv-ico svg { width: 22px; height: 22px; }
-.sh-navbtn .pv-ico svg { stroke-width: 2; }
+.sh-navbtn .pv-ico svg { stroke-width: 2.25; }
 
-/* The info: an island beside the reel, resting on its baseline (or a short block under it). */
+/* The info: an island just right of the capsule, resting on the reel's baseline (or a short block under it). */
 .sh-info {
   position: absolute;
   z-index: 3;

@@ -442,6 +442,18 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
         check(c.length >= 3 && bad.length === 0, 'Shorts: the info’s words are WCAG AA on its island (min ' + Math.min(...c.map((y) => y.ratio)) + ':1)', bad.length ? bad : c);
       }
       try { fs.unlinkSync(path.join(SHOTS, PREFIX + '-white-shorts-check-1919x942.png')); } catch (e) { /* kept */ }
+      // the group: reel | capsule | island, 16px apart, all on the reel's baseline; both halves' glyphs readable; an initial for a placeholder avatar
+      const g = await chrome.ev(`(() => { const t = document.querySelector('.wp-layer .wp-tile.sh'); if (!t) return null; const R = (n) => { const r = n.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+        const btns = [...t.querySelectorAll('.sh-nav button')]; const av = t.querySelector('.sh-info .pv-avatar'); const img = av && av.querySelector('img');
+        return { view: R(t.querySelector('.wp-view')), nav: R(t.querySelector('.sh-nav')), info: R(t.querySelector('.sh-info')), cap: btns.length ? { t: R(btns[0]).t, b: R(btns[btns.length - 1]).b } : null,
+          glyph: btns.map((b) => ({ c: getComputedStyle(b).color, o: getComputedStyle(b).opacity, bg: getComputedStyle(b).backgroundColor, dis: b.disabled })),
+          av: av ? { txt: av.textContent.trim(), img: img ? { w: img.naturalWidth, h: img.naturalHeight } : null } : null }; })()`);
+      const gapA = g && g.nav.l - g.view.r, gapB = g && g.info.l - g.nav.r;
+      check(!!g && Math.abs(gapA - gapB) <= 1 && gapA >= 12 && gapA <= 20 && Math.abs(g.info.b - g.view.b) <= 1 && g.cap && Math.abs(g.cap.b - g.view.b) <= 1,
+        'Shorts: reel, capsule and island sit together on the reel’s baseline (equal gaps)', g && { gapA, gapB, info: g.info, view: g.view, cap: g.cap });
+      const cOk = (y) => { const m = /(\d+),\s*(\d+),\s*(\d+)/.exec(y.c), n = /(\d+),\s*(\d+),\s*(\d+)/.exec(y.bg); return m && n && +y.o >= 0.99 && ratio(lum(+m[1], +m[2], +m[3]), lum(+n[1], +n[2], +n[3])) >= 4.5; };
+      check(!!g && g.glyph.length === 2 && g.glyph.every(cOk), 'Shorts: both halves of the capsule have readable glyphs (a disabled one dims, still 4.5:1)', g && g.glyph);
+      check(!!g && !!g.av && (g.av.img ? g.av.img.w > 2 && g.av.img.h > 2 : /^[A-Z0-9À-ɏ]$/i.test(g.av.txt)), 'Shorts: a placeholder avatar shows the channel’s initial, never an empty ring', g && g.av);
     }
     // the next Short: the field follows it
     const nextBtn = await chrome.ev('(() => { const b = document.querySelectorAll(".wp-layer .sh-nav button")[1]; if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()');
