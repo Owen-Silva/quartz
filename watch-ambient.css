@@ -9,9 +9,12 @@
    accent is Quartz's (--accent: Settings' palette / Look Sync), used
    for focus and state only. No backdrop-filter, no glow, nothing
    that moves at rest: the canvases cross-fade by opacity when the
-   colours change (every few seconds at most), and the field sinks as
-   the playback view scrolls down to the info and the comments, on a
-   scroll-driven animation the compositor runs (no script per frame).
+   colours change (every few seconds at most), and the field sinks to
+   a tint once the playback view is scrolled down to the info and the
+   comments (one class, .amb-sunk, set by an IntersectionObserver in
+   watch-ambient.js; the compositor runs the fade). The field is its
+   own composited layer and nothing in it is linked to scrolling, so a
+   scroll never repaints it (watch-look-e2e counts the paints).
 
    Legibility (WCAG AA on a WHITE video, watch-look-e2e.js): the
    field shows at --amb-a over the base, a static wash darkens the
@@ -31,12 +34,13 @@
   overflow: hidden;
   pointer-events: none;
   contain: strict;
+  will-change: transform;           /* its own layer: what scrolls over it never repaints it */
 }
 .wp-layer.amb-on > .amb { display: block; }
 .wp-layer.amb-on { --amb-a: .9; --lumen-view-bg: transparent; }
 .wp-layer.amb-on.amb-sh { --amb-a: .8; }
 
-.amb-f { position: absolute; inset: 0; opacity: var(--amb-a); }
+.amb-f { position: absolute; inset: 0; opacity: var(--amb-a); transition: opacity .5s cubic-bezier(.4, 0, .2, 1); will-change: opacity; }
 .amb-c {
   position: absolute;
   left: -5%;
@@ -66,16 +70,13 @@
     linear-gradient(180deg, rgb(9 10 11 / .50) 0px, rgb(9 10 11 / .24) 44px, rgb(9 10 11 / .08) 24%, rgb(9 10 11 / .10) 76%, rgb(9 10 11 / .42) 100%);
 }
 
-/* The playback view: as it scrolls to the info and the comments, the field sinks to a tint, so the
-   words that rise into the light never meet it at full strength. Compositor-driven (scroll timeline). */
-.wp-layer.amb-on:not(.amb-sh) { timeline-scope: --lumen-pv; }
-.wp-layer.amb-on:not(.amb-sh) .wp-tile.pv { scroll-timeline: --lumen-pv block; }
-.wp-layer.amb-on:not(.amb-sh) .amb-f {
-  animation: amb-sink linear both;
-  animation-timeline: --lumen-pv;
-  animation-range: 0px 240px;
-}
-@keyframes amb-sink { from { opacity: var(--amb-a); } to { opacity: .2; } }
+/* The playback view: scrolled down to the info and the comments, the field sinks to a tint, so the
+   words that rise into the light never meet it at full strength. NOT a scroll-driven animation: that
+   one repainted the whole window on every scroll step (watch-look-e2e: 32 window-sized paints over
+   one wheel). watch-ambient.js flips .amb-sunk where the view crosses 120 px, the compositor fades. */
+.wp-layer.amb-on.amb-sunk:not(.amb-sh) .amb-f { opacity: .2; }
+/* the 1 px mark at the top of the scroller that the IntersectionObserver watches (watch-ambient.js) */
+.amb-mark { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
 
 /* --- the layer over the field --------------------------------------------------------- */
 /* The bar: Quartz's toolbar over its backdrop, a tint, not a slab. */
@@ -90,5 +91,5 @@
 .wp-layer.amb-on .wp-tile.pv { will-change: scroll-position; }
 
 @media (prefers-reduced-motion: reduce) {
-  .amb-c { transition: none; }
+  .amb-c, .amb-f { transition: none; }
 }

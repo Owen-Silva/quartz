@@ -89,9 +89,13 @@ for (const [f, t] of css) {
 }
 const amb = read('watch-ambient.css').replace(/\/\*[\s\S]*?\*\//g, '');
 check(/\.amb\s*\{[^}]*z-index:\s*-1/.test(amb) && /pointer-events:\s*none/.test(amb), 'the field is under the view and never takes a click');
-check(!/infinite/.test(amb), 'no endless animation in the field (only a cross-fade and the scroll-driven sink)');
-check(/animation-timeline:\s*--lumen-pv/.test(amb) && /timeline-scope:\s*--lumen-pv/.test(amb), 'the sink is scroll-driven (the compositor runs it, no script per frame)');
-check(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.amb-c\s*\{\s*transition:\s*none/.test(amb), 'reduced motion: the colours change without a fade');
+check(!/infinite/.test(amb), 'no endless animation in the field (only a cross-fade and the sink)');
+// lumen-n-perf2: the scroll-driven sink repainted the whole window on every scroll step (watch-look-e2e)
+check(!/animation-timeline|scroll-timeline|view-timeline|timeline-scope/.test(amb), 'nothing in the field is linked to scrolling (no scroll- or view-driven animation)');
+check(/\.amb\s*\{[^}]*will-change:\s*transform/.test(amb) && /\.amb-f\s*\{[^}]*will-change:\s*opacity/.test(amb), 'the field is its own composited layer, and its sink fades on the compositor');
+check(/\.amb-sunk[^{]*\.amb-f\s*\{\s*opacity:\s*\.2/.test(amb) && /new IntersectionObserver\(/.test(read('watch-ambient.js')) && /classList\.toggle\('amb-sunk'/.test(read('watch-ambient.js')),
+  'the sink is one class (.amb-sunk) that an IntersectionObserver flips: no script while scrolling');
+check(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.amb-c(?:,\s*\.amb-f)?\s*\{\s*transition:\s*none/.test(amb), 'reduced motion: the colours change without a fade');
 const idx = read('index.html');
 check(/<link rel="stylesheet" href="watch-ambient.css">/.test(idx) && /<script src="watch-ambient.js"><\/script>/.test(idx), 'index.html loads the field');
 check(/LumenAmbient\.attach\(ctx, s, v\)/.test(read('watch-playview.js')) && /LumenAmbient\.destroy\(ctx, s\)/.test(read('watch-playview.js')), 'the playback view hands the field each slot (attach / destroy)');

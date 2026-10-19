@@ -338,7 +338,11 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
       const top = await toComments();
       if (top < 0) say('no comments to scroll to at ' + w + 'x' + h);
       await shot('video-comments', w, h, 1200);
+      // the field sinks to a tint down at the comments (an IntersectionObserver's class, no scroll-linked paint), and rises at the top
+      const sunk = AMB && top > 200 ? await ambWait('a.sunk === true', 3000) : null;
       await scrollTo(0);
+      const risen = sunk ? await ambWait('a.sunk === false', 3000) : null;
+      if (AMB && top > 200 && !SHOTS_ONLY && w === SIZES[0][0]) check(!!sunk && !!risen, 'the field sinks at the comments and rises again at the top (' + w + 'x' + h + ')', { sunk: !!sunk, risen: !!risen });
     }
 
     /* ---- the field while it plays, while it is paused ---- */
@@ -347,7 +351,7 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
       await sleep(9000);
       const s1 = await amb();
       check(s1.samples >= s0.samples + 2 && s1.on, 'while it plays the field refreshes from the frame every few seconds (' + (s1.samples - s0.samples) + ' samples in 9 s)', { s0: s0.samples, s1: s1.samples, every: s1.every });
-      check(s1.maxSampleMs < 50 && s1.maxPaintMs < 50, 'a refresh is no long task: sample ' + s1.maxSampleMs + ' ms, paint ' + s1.maxPaintMs + ' ms at most', s1);
+      check(s1.maxSampleMs < 50 && s1.maxPaintMs < 50, 'a refresh is no long task: sample ' + s1.maxSampleMs + ' ms on the page’s main thread (' + s1.maxSampleWallMs + ' ms to the answer, the shrink off-thread), paint ' + s1.maxPaintMs + ' ms at most', s1);
       if (vg) await vg.ev('(() => { const v = document.querySelector("video"); v.pause(); return v.paused; })()').catch(() => 0);
       await sleep(5000);
       const p0 = await amb();

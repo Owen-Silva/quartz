@@ -112,11 +112,16 @@
 
   /* The hosted page's half: ONE small sample of its largest playing <video>, as RGB bytes. Runs in the
      page (executeJavaScript); never touches the stream, only the frame on screen, at 48 x 27. A
-     protected (DRM) or cross-origin video can't be read: the reason comes back and the still stays. */
+     protected (DRM) or cross-origin video can't be read: the reason comes back and the still stays.
+     The frame is shrunk by createImageBitmap, off the page's main thread; the page's own thread only
+     asks for it and then reads 48 x 27 pixels. "main" is that thread's time (the page's long-task
+     budget), "ms" the wall time to the answer (it includes the off-thread wait). */
   function sampler() {
-    var t0 = performance.now();
+    var t0 = performance.now(), main = -1;
+    function r1(x) { return Math.round(x * 10) / 10; }
     function still() { var m = document.querySelector('meta[property="og:image"]'); return m ? String(m.getAttribute('content') || '').slice(0, 500) : ''; }
-    function fail(why) { return { ok: false, reason: why, still: still(), ms: Math.round((performance.now() - t0) * 10) / 10 }; }
+    function done(o) { o.ms = r1(performance.now() - t0); o.main = r1(main >= 0 ? main : performance.now() - t0); return o; }
+    function fail(why) { return done({ ok: false, reason: why, still: still() }); }
     try {
       if (document.hidden) return fail('hidden');
       var vs = document.querySelectorAll('video'), best = null, area = 0, W = innerWidth, H = innerHeight;
@@ -144,14 +149,19 @@
           if (d[k + 2] > m) m = d[k + 2];
           if (m > max) max = m;
         }
-        return { ok: true, w: w, h: h, px: btoa(s), max: max, paused: paused, t: t, ms: Math.round((performance.now() - t0) * 10) / 10 };
+        return { ok: true, w: w, h: h, px: btoa(s), max: max, paused: paused, t: t };
       };
       if (typeof createImageBitmap === 'function') {
-        return createImageBitmap(best, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' }).then(function (bm) {
-          try { return read(bm); } finally { try { bm.close(); } catch (e) { /* gone */ } }
-        }, function (e) { return fail(String((e && e.name) || e)); }).catch(function (e) { return fail(String((e && e.name) || e)); });
+        var asked = createImageBitmap(best, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' });
+        main = performance.now() - t0;
+        return asked.then(function (bm) {
+          var t1 = performance.now();
+          try { var o = read(bm); main += performance.now() - t1; return done(o); }
+          catch (e) { main += performance.now() - t1; return fail(String((e && e.name) || e)); }
+          finally { try { bm.close(); } catch (e) { /* gone */ } }
+        }, function (e) { return fail(String((e && e.name) || e)); });
       }
-      return read(best);
+      return done(read(best));
     } catch (e) { return fail(String((e && e.name) || e)); }
   }
   var SAMPLE = '(' + String(sampler) + ')()';
@@ -162,8 +172,9 @@
     ctx: null, L: null, el: null, field: null, cvs: [], on: 0, src: null,
     slot: null, mode: '', key: '', from: 'none', why: '', off: '',
     timer: 0, busy: false, sig: null, lastT: -1, seq: 0,
-    paints: 0, samples: 0, skipped: 0, stills: 0, maxSampleMs: 0, maxPaintMs: 0, lastSampleMs: 0,
-    saver: null, saverAt: 0, saverAsking: false, mq: null, bound: false, obs: null
+    paints: 0, samples: 0, skipped: 0, stills: 0, maxSampleMs: 0, maxSampleWallMs: 0, maxPaintMs: 0, lastSampleMs: 0,
+    saver: null, saverAt: 0, saverAsking: false, mq: null, bound: false, obs: null,
+    sinkTile: null, sinkMark: null, sinkObs: null, sunk: false
   };
 
   function hasDom() { return typeof document !== 'undefined' && !!document.createElement; }
@@ -224,6 +235,36 @@
     evaluate();
   }
 
+  /* The playback view's sink: scrolled down to the info and the comments, the field sinks to a tint
+     (watch-ambient.css .amb-sunk), so the words that rise into the light never meet it at full strength.
+     ONE IntersectionObserver on a 1 px mark at the top of the scroller: no script and no paint while it
+     scrolls (the scroll-driven animation it replaces repainted the whole window on every scroll step:
+     watch-look-e2e, 32 window-sized paints over one wheel), one class flip where SINK_PX is crossed, and
+     the compositor runs the fade. */
+  var SINK_PX = 120;
+  function sinkOn(tile) {
+    if (A.sinkTile === tile && A.sinkMark && A.sinkMark.isConnected) return;
+    sinkOff();
+    if (!tile || typeof IntersectionObserver !== 'function') return;
+    var mark = document.createElement('i');
+    mark.className = 'amb-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    tile.appendChild(mark);
+    A.sinkTile = tile; A.sinkMark = mark;
+    A.sinkObs = new IntersectionObserver(function (es) {
+      if (!A.sinkMark || !A.sinkMark.isConnected || !es.length) return;
+      A.sunk = !es[es.length - 1].isIntersecting;
+      if (A.L && A.L.el) A.L.el.classList.toggle('amb-sunk', A.sunk);
+    }, { root: tile, rootMargin: SINK_PX + 'px 0px 0px 0px', threshold: 0 });
+    A.sinkObs.observe(mark);
+  }
+  function sinkOff() {
+    if (A.sinkObs) { try { A.sinkObs.disconnect(); } catch (e) { /* gone */ } A.sinkObs = null; }
+    if (A.sinkMark && A.sinkMark.parentNode) A.sinkMark.parentNode.removeChild(A.sinkMark);
+    A.sinkMark = null; A.sinkTile = null; A.sunk = false;
+    if (A.L && A.L.el) A.L.el.classList.remove('amb-sunk');
+  }
+
   function destroy(ctx, s) {
     A.gone = s;   // its view is going: never sampled again, even while the layer still lists it
     if (A.slot === s) { stop(); A.slot = null; }
@@ -244,10 +285,12 @@
     if (!on) {
       A.why = p.why; A.off = p.why;
       if (A.slot) { stop(); A.slot = null; }
+      sinkOff();
       return;
     }
     A.why = '';
     var s = p.s, url = s.ambUrl || s.url;   // never s.view.getURL() here: see attach()
+    if (p.mode === 'pv' && s.tile) sinkOn(s.tile); else sinkOff();
     var key = keyOf(s.service, url);
     if (A.slot !== s || A.mode !== p.mode || key !== A.key) {
       var fresh = key !== A.key;
@@ -298,7 +341,9 @@
       A.busy = false;
       A.lastSampleMs = Math.round(now() - t0);
       if (seq !== A.seq || A.slot !== s || A.key !== key) return;
-      if (r && typeof r.ms === 'number') A.maxSampleMs = Math.max(A.maxSampleMs, r.ms);
+      // the page's main-thread time (its long-task budget); the wall time includes the off-thread shrink
+      if (r && typeof r.main === 'number') A.maxSampleMs = Math.max(A.maxSampleMs, r.main);
+      if (r && typeof r.ms === 'number') A.maxSampleWallMs = Math.max(A.maxSampleWallMs, r.ms);
       if (!r || !r.ok) {
         A.why = 'no frame sample: ' + ((r && r.reason) || 'no answer');
         if (r && r.still && A.from === 'none') paintImageUrl(r.still, key);
@@ -405,7 +450,7 @@
       on: !!(A.L && A.L.el && A.L.el.classList.contains('amb-on')), mode: A.slot ? A.mode : '', key: A.key, src: A.from,
       refreshing: !!(A.timer || A.busy), off: A.off, why: A.why, every: EVERY,
       paints: A.paints, samples: A.samples, skipped: A.skipped, stills: A.stills,
-      maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, saver: A.saver
+      maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, maxSampleWallMs: A.maxSampleWallMs, saver: A.saver, sunk: A.sunk
     };
   }
 

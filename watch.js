@@ -96,6 +96,7 @@
     sentSeq: -1,
     answer: null,
     searchTimer: 0,
+    resultsRaf: 0,
     gridPos: null,          // { r, c } of the grid's tab stop
     popFor: '',
     popFrom: null,
@@ -2228,7 +2229,7 @@
     if (S.answer && S.answer.q !== q) S.answer = null;
     S.sentSeq = -1;
     enterSearch();
-    renderResults();
+    scheduleResults();
     // One letter matches his own rows here, but never goes out as a YouTube search.
     if (q.length < SEARCH_MIN_CHARS) return;
     S.searchTimer = setTimeout(function () {
@@ -2254,7 +2255,22 @@
     }
   }
 
+  /* Typing renders the results at most once a frame (lumen-n-perf2): keys that land in one frame share one
+     render, run in that frame (requestAnimationFrame, before its paint), so the letter and its results still
+     paint together. A key that acts on the results (Enter, Down) flushes a pending render first. */
+  function scheduleResults() {
+    if (S.resultsRaf) return;
+    S.resultsRaf = requestAnimationFrame(function () { S.resultsRaf = 0; renderResults(); });
+  }
+  function flushResults() {
+    if (!S.resultsRaf) return;
+    cancelAnimationFrame(S.resultsRaf);
+    S.resultsRaf = 0;
+    renderResults();
+  }
+
   function exitSearch() {
+    if (S.resultsRaf) { cancelAnimationFrame(S.resultsRaf); S.resultsRaf = 0; }
     if (window.WatchFindPage) window.WatchFindPage.close();
     S.q = '';
     S.answer = null;
@@ -2625,6 +2641,7 @@
       return;
     }
     // Enter: every service's own search (watch/find-page.js); recent searches; Down into its tiles.
+    if (t === $.q) flushResults();
     if (t === $.q && !mod && window.WatchFindPage && window.WatchFindPage.key(e, S.q)) { if (e.key === 'Enter') clearTimeout(S.searchTimer); return; }
     if (t === $.q && S.q && (e.key === 'ArrowDown' || e.key === 'Enter') && !mod) {
       var stop = $.results.querySelector('.cell[tabindex="0"]') || $.results.querySelector('.cell');

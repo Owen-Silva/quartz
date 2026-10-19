@@ -131,30 +131,73 @@ async function targetWhere(q, pred, ms) {
   }
   return null;
 }
-/** The Lumen page, attached as soon as it exists: every https request it makes is answered here. */
-async function guest(q) {
-  const t = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 20000);
-  if (!t) throw new Error('the Lumen page never appeared as a CDP target');
-  const g = await new Cdp(t.webSocketDebuggerUrl).open();
-  g.errors = [];
-  g.fetched = { drawn: 0, refused: [] };
-  g.ws.on('message', (raw) => {
+/*
+ * Every https request of the Lumen page is answered here, from its FIRST one. The page used to be attached
+ * once it showed up in /json/list and Fetch enabled then: a page that drew its rows before that (a fast boot,
+ * a busy test machine) had already asked for its pictures, they failed (nothing resolves here), and the art's
+ * miss list kept them from ever being asked again, so the run saw "0 pictures" (lumen-n-perf2, 10-19: 0, 86
+ * and 104 in three runs of the same code). Now the browser target discovers each new <webview> as it is
+ * created, attaches before it has loaded anything, and turns interception on for it; a webview that turns
+ * out not to be the Lumen page is let go untouched. Call before openWatchTab().
+ */
+const isLumenUrl = (u) => /\/watch\.html(\?|#|$)/.test(String(u || ''));
+async function earlyFetch(port) {
+  const v = await new Promise((resolve, reject) => http.get('http://127.0.0.1:' + port + '/json/version', (res) => {
+    let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => { try { resolve(JSON.parse(b)); } catch (e) { reject(e); } });
+  }).on('error', reject));
+  const b = await new Cdp(v.webSocketDebuggerUrl).open();
+  const send = (method, params, sessionId) => { const id = ++b.id; return new Promise((resolve) => {
+    b.pending.set(id, resolve);
+    try { b.ws.send(JSON.stringify(Object.assign({ id, method, params: params || {} }, sessionId ? { sessionId } : {}))); } catch (e) { b.pending.delete(id); resolve({ error: { message: String(e.message || e) } }); }
+  }); };
+  const E = { fetched: { drawn: 0, refused: [] }, sessions: new Map(), urls: new Map(), lumenSeen: false, log: [] };
+  const blank = (u) => !u || u === 'about:blank';
+  const attach = (i) => { if (i.type === 'webview' && !E.urls.has(i.targetId)) { E.urls.set(i.targetId, i.url); send('Target.attachToTarget', { targetId: i.targetId, flatten: true }); } };
+  b.ws.on('message', (raw) => {
     let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
-    if (m.method === 'Runtime.exceptionThrown') g.errors.push('exception: ' + String((m.params.exceptionDetails.exception || {}).description || m.params.exceptionDetails.text).slice(0, 300));
-    else if (m.method === 'Fetch.requestPaused') {
-      const u = m.params.request.url;
-      if (m.params.resourceType === 'Image') {
-        g.fetched.drawn++;
-        g.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/svg+xml' }], body: Buffer.from(still(u)).toString('base64') });
+    if (/^Target./.test(m.method || '') || (m.id && m.error)) E.log.push(JSON.stringify(m).slice(0, 220));
+    if (m.method === 'Target.targetCreated') attach(m.params.targetInfo);
+    else if (m.method === 'Target.targetInfoChanged') {
+      const i = m.params.targetInfo;
+      if (!E.urls.has(i.targetId)) return;
+      E.urls.set(i.targetId, i.url);
+      for (const [sid, tid] of E.sessions) if (tid === i.targetId && !blank(i.url) && !isLumenUrl(i.url)) { E.sessions.delete(sid); send('Target.detachFromTarget', { sessionId: sid }); }
+    } else if (m.method === 'Target.attachedToTarget') {
+      const sid = m.params.sessionId, i = m.params.targetInfo;
+      if (!blank(i.url) && !isLumenUrl(i.url)) { send('Target.detachFromTarget', { sessionId: sid }); return; }
+      E.sessions.set(sid, i.targetId);
+      send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', requestStage: 'Request' }] }, sid);
+    } else if (m.method === 'Fetch.requestPaused' && m.sessionId) {
+      const p = m.params, u = p.request.url, sid = m.sessionId;
+      if (!isLumenUrl(E.urls.get(E.sessions.get(sid)))) { send('Fetch.continueRequest', { requestId: p.requestId }, sid); return; }
+      E.lumenSeen = true;
+      if (p.resourceType === 'Image') {
+        E.fetched.drawn++;
+        send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/svg+xml' }], body: Buffer.from(still(u)).toString('base64') }, sid);
       } else {
-        g.fetched.refused.push(m.params.resourceType + ' ' + u.slice(0, 120));
-        g.send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'BlockedByClient' });
+        E.fetched.refused.push(p.resourceType + ' ' + u.slice(0, 120));
+        send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }, sid);
       }
     }
   });
+  const d = await send('Target.setDiscoverTargets', { discover: true });
+  if (d && d.error) throw new Error('Target.setDiscoverTargets failed: ' + JSON.stringify(d.error));
+  return E;
+}
+/** The Lumen page, for the test's own reads (its https requests are earlyFetch's). */
+async function guest(q, E) {
+  const t = await targetWhere(q, (x) => isLumenUrl(x.url), 20000);
+  if (!t) throw new Error('the Lumen page never appeared as a CDP target');
+  const g = await new Cdp(t.webSocketDebuggerUrl).open();
+  g.errors = [];
+  g.fetched = E.fetched;
+  g.ws.on('message', (raw) => {
+    let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
+    if (m.method === 'Runtime.exceptionThrown') g.errors.push('exception: ' + String((m.params.exceptionDetails.exception || {}).description || m.params.exceptionDetails.text).slice(0, 300));
+  });
   await g.send('Runtime.enable');
-  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', requestStage: 'Request' }] });
-  if (fe && fe.error) throw new Error('Fetch.enable failed: ' + JSON.stringify(fe.error));
+  for (let i = 0; i < 50 && ![...E.sessions.values()].includes(t.id); i++) await sleep(60);
+  if (![...E.sessions.values()].includes(t.id)) throw new Error('the Lumen page was not intercepted from its first request (target ' + t.id + ' ' + t.type + '): ' + (E.log.filter((l) => l.includes(t.id)).slice(0, 6).join(' | ') || 'no event for it; ' + E.log.length + ' events'));
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
@@ -225,8 +268,9 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
   try {
     const q = await launch({ cdp: CDP_PORT, env });
     const chrome = q.chrome;
+    const early = await earlyFetch(CDP_PORT);
     await chrome.ev('openWatchTab(), 1');
-    const g = await guest(q);
+    const g = await guest(q, early);
     const wait = (expr, ms) => g.waitFor(expr, ms || 20000).catch(() => null);
     const click = (expr) => g.ev(`(() => { const b = ${expr}; if (!b) return false; b.click(); return true; })()`);
     // A tile on the rows opens on click only in the current row: focus it first (that makes its row current).

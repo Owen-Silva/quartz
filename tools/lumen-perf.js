@@ -451,6 +451,14 @@ run('lumen-perf', async ({ check, launch, say }) => {
             // the guest's own first contentful paint, on node's clock
             const fcp = await g.waitFor('(() => { const e = performance.getEntriesByName("first-contentful-paint")[0]; return e ? performance.timeOrigin + e.startTime : 0; })()', 15000).catch(() => 0);
             const skel = await g.ev('document.querySelectorAll("#stack .lrow").length').catch(() => 0);
+            // where the cold open goes: the guest's process and navigation, its HTML, its scripts (parsed = DOM
+            // interactive, after every blocking script ran), DOMContentLoaded, and the first paint
+            const nav = await g.ev('(() => { const n = performance.getEntriesByType("navigation")[0]; return n ? { o: performance.timeOrigin, rs: n.responseStart, di: n.domInteractive, dcl: n.domContentLoadedEventEnd } : null; })()').catch(() => null);
+            if (nav && fcp) {
+              const ns = Math.round(toNode(g, nav.o) - t0);
+              say('  cold open: ' + ns + ' ms to the guest\'s navigation start, then HTML +' + Math.round(nav.rs) + ', parsed (DOM interactive) +' + Math.round(nav.di) +
+                ', DOMContentLoaded done +' + Math.round(nav.dcl) + ', first contentful paint +' + Math.round(fcp - nav.o) + ' ms');
+            }
             return { openMs: fcp ? Math.round(toNode(g, fcp) - t0) : NaN, what: 'first contentful paint of the Lumen page (' + skel + ' rows or skeleton rows drawn by then or soon after)' };
           }
           const shown = await chrome.ev('__lp.when(() => { const t = getActiveTab(); return t && isWatchUrl(t.url) && t.viewEl && t.viewEl.offsetParent !== null; }, 5000)');
