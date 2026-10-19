@@ -558,6 +558,7 @@
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
       expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null };
     st.root.addEventListener('focusin', function (e) { st.focus = e.target; });
+    st.root.addEventListener('pointerdown', function (e) { if (e.button === 0) st.pressing = true; }, true);
     // Typing in a comment box is his: never the player's keys (K, J, L, F, M, Space, the arrows).
     st.root.addEventListener('keydown', function (e) {
       var t = e.target;
@@ -790,6 +791,7 @@
   /* ---------------------------------------------------------------- drawing */
 
   function draw(st) {
+    if (st.pressing) { st.pendingDraw = true; return; }
     var r = st.root;
     var keep = r.querySelector('.cm-compose textarea');
     var keepReply = r.querySelector('.cm-replybox textarea');
@@ -893,7 +895,7 @@
     ta.placeholder = 'Add a comment…';
     ta.setAttribute('aria-label', 'Add a comment');
     ta.maxLength = 10000;
-    if (!keep) ta.value = c.text;
+    if (ta.value !== c.text) ta.value = c.text;
     ta.disabled = !!c.busy;
     if (!ta.__cm) {
       ta.__cm = true;
@@ -923,8 +925,7 @@
     if (c.avatar) {
       var img = new Image();
       img.alt = '';
-      img.decoding = 'async';
-      img.loading = 'lazy';
+      img.decoding = 'async';   // not loading=lazy: it joins the document only once loaded, and a detached lazy image never loads
       img.referrerPolicy = 'no-referrer';
       // Drawn before: straight in (the cache has it), so a redraw never flashes the initial.
       if (SEEN[c.avatar]) { a.textContent = ''; a.appendChild(img); }
@@ -1015,7 +1016,7 @@
     ta.rows = 1;
     ta.placeholder = 'Add a reply…';
     ta.setAttribute('aria-label', 'Reply to ' + (c.author || 'this comment'));
-    if (!keep) ta.value = st.replyText;
+    if (ta.value !== st.replyText) ta.value = st.replyText;
     ta.disabled = !!st.replyBusy;
     if (!ta.__cm) {
       ta.__cm = true;
@@ -1034,6 +1035,18 @@
   }
 
   // Offline: a load in flight is dropped (it says so); back online, it starts again by itself.
+  // The release (anywhere: he may drag off): the click is dispatched first, then any held redraw runs.
+  function released() {
+    STATES.forEach(function (st) {
+      if (!st.pressing) return;
+      st.pressing = false;
+      if (st.pendingDraw) { st.pendingDraw = false; setTimeout(function () { draw(st); }, 0); }
+    });
+  }
+  window.addEventListener('pointerup', released, true);
+  window.addEventListener('pointercancel', released, true);
+  window.addEventListener('blur', released);
+
   window.addEventListener('offline', function () {
     STATES.forEach(function (st) {
       if (st.phase === 'loading' || st.loading) {
@@ -1070,6 +1083,8 @@
 
   return Object.assign({}, PURE, {
     _state: function () { return { states: STATES.map(summary), presses: LOG.slice() }; },
+    /** For the e2e: redraw every live section now (as a page answer would), counting the draws actually done. */
+    _redraw: function () { var n = 0; STATES.forEach(function (st) { if (st.root.isConnected) { draw(st); if (!st.pendingDraw) n++; } }); return n; },
     _current: function () { var s = STATES.filter(function (x) { return x.root.isConnected; }); return s.length ? summary(s[s.length - 1]) : null; }
   });
 });

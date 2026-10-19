@@ -100,12 +100,13 @@ async function targetWhere(q, pred, ms) {
   return null;
 }
 async function cdpTo(t) { const c = await new Cdp(t.webSocketDebuggerUrl).open(); await c.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0); return c; }
-const KEY = { k: ['KeyK', 75], j: ['KeyJ', 74], l: ['KeyL', 76], f: ['KeyF', 70], m: ['KeyM', 77], ' ': ['Space', 32] };
+const KEY = { k: ['KeyK', 75], j: ['KeyJ', 74], l: ['KeyL', 76], f: ['KeyF', 70], m: ['KeyM', 77], ' ': ['Space', 32],
+  ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ArrowUp: ['ArrowUp', 38], ArrowDown: ['ArrowDown', 40] };
 async function keyIn(c, key) {
   const [code, vk] = KEY[key] || ['Key' + key.toUpperCase(), key.toUpperCase().charCodeAt(0)];
   const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0 };
   await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, base));
-  await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'char', text: key }, base));
+  if (key.length === 1) await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'char', text: key }, base));
   await c.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
 }
 const PS = 'LumenPlayview._state()';
@@ -132,7 +133,7 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     const csWait = (cond, ms) => chrome.waitFor(`(() => { const x = ${CS}; return x && (${cond}) ? x : null; })()`, ms || 15000).catch(() => null);
     const pvWait = (cond, ms) => chrome.waitFor(`(() => { const s = ${PS}; const x = s.slots.find((y) => y.boxed) || s.slots[s.slots.length - 1]; return x && (${cond}) ? x : null; })()`, ms || 15000).catch(() => null);
     const guestFor = async (prefix) => { const t = await targetWhere(q, (x) => String(x.url).indexOf(prefix) === 0, 15000); return t ? cdpTo(t) : null; };
-    const clickAt = async (sel, label) => {
+    const clickAt = async (sel, label, mid) => {
       const r = await chrome.ev(`(async () => { const q = () => document.querySelector(${JSON.stringify(sel)}); if (!q()) return null; q().scrollIntoView({ block: 'center' });
         await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
         const n = q(); if (!n) return null; const b = n.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2; const h = document.elementFromPoint(x, y);
@@ -140,6 +141,7 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
       if (!r) { say('click: no ' + (label || sel)); return false; }
       if (!r.hit) say('click: ' + (label || sel) + ' is not under its own centre: ' + JSON.stringify(r));
       await chrome.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      if (mid) await mid();
       await chrome.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
       return true;
     };
@@ -184,6 +186,7 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     const first = c && c.items[0];
     check(!!first && first.id === 'UgxTop001' && first.author === '@quietglyph' && first.text === X.C1_TEXT && first.likes === '2.4K' && first.replies === 3 && first.pinned && first.hearted,
       'comment 1: author, text, likes, 3 replies, pinned, hearted', first);
+    await chrome.waitFor('document.querySelector(\'#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-av img\') ? 1 : 0', 4000).catch(() => 0);
     const dom = await chrome.ev(`(() => { const r = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop001"]'); if (!r) return null;
       return { author: r.querySelector('.cm-author').textContent, time: r.querySelector('.cm-time').textContent, text: r.querySelector('.cm-text').textContent,
         links: [...r.querySelector('.cm-text').querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href'), a.className]), tags: r.querySelector('.cm-text').querySelectorAll('img, script').length,
@@ -226,10 +229,13 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     check(!!c && c.items[0].id === 'UgxTop001', 'and back to Top');
 
     /* ============================ 4. replies ============================ */
+    const repMark = reqs.length;
     await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-replies', '3 replies');
     c = await csWait('x.replies.UgxTop001 && x.replies.UgxTop001.n === 2 && !x.replies.UgxTop001.loading', 8000);
     const repDom = await chrome.ev('document.querySelectorAll("#lumen-pv-comments .cm-item[data-id=\\"UgxTop001\\"] .cm-replylist > .cm-item").length');
-    check(!!c && repDom === 2 && reqs[reqs.length - 1].token === 'CM-REP-UgxTop001', '“3 replies” expands: two replies, from the page’s own replies request', { repDom, last: reqs[reqs.length - 1] });
+    // (Scrolling may also ask for the next page of comments meanwhile: the replies request is looked for, not assumed last.)
+    const repReqs = reqs.slice(repMark).map((r) => r.token);
+    check(!!c && repDom === 2 && repReqs.filter((t) => t === 'CM-REP-UgxTop001').length === 1, '“3 replies” expands: two replies, from the page’s own replies request (once)', { repDom, repReqs });
     await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-morereplies', 'Show more replies');
     c = await csWait('x.replies.UgxTop001 && x.replies.UgxTop001.n === 3 && !x.replies.UgxTop001.next', 8000);
     check(!!c, '“Show more replies” loads the third, and no more');
@@ -256,7 +262,16 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
       const h = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return { vis: cs.visibility, pe: cs.pointerEvents, onlyPlayer: !!mp && !!h && mp.contains(h) }; })()`);
     check(hidden.vis === 'hidden' && hidden.pe === 'none' && hidden.onlyPlayer, 'YouTube’s own section stays invisible and unclickable; only the player shows', hidden);
     await sleep(600);
-    await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-like', 'Unlike');
+    // While his button is held, a redraw comes (a page answer, the layer's class, as in use): the click must
+    // still land, once (a rebuild between press and release would swallow it).
+    let midDraws = -1;
+    await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-like', 'Unlike', async () => {
+      midDraws = await chrome.ev('(() => { const l = document.querySelector(".wp-layer"); l.classList.add("cm-e2e-poke"); const n = LumenComments._redraw(); return n; })()');
+      await sleep(60);
+      await chrome.ev('(() => { document.querySelector(".wp-layer").classList.remove("cm-e2e-poke"); return 1; })()');
+      await sleep(60);
+    });
+    check(midDraws === 0, 'a redraw while his button is down waits for the release', midDraws);
     c = await csWait('x.items[0].liked === false', 8000);
     o1 = await own();
     check(!!c && o1.like.UgxTop001 === 2, 'a second click = a second press (unliked), never more', o1.like);
@@ -278,12 +293,13 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     const before = await vs();
     const typed = 'kjlfm k';
     for (const ch of typed) await keyIn(chrome, ch);
+    for (const a of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) await keyIn(chrome, a);
     await sleep(700);
     const after = await vs();
     const val = await chrome.ev('document.activeElement.value');
     check(val === typed, 'what he types is in the box', val);
     check(after.paused === before.paused && after.muted === before.muted && after.fs === before.fs && after.keys === before.keys && after.t - before.t > -1 && after.t - before.t < 5,
-      'K, J, L, F, M and Space typed in the box never reach the player (no pause, seek, mute or fullscreen)', { before, after });
+      'K, J, L, F, M, Space and the arrows typed in the box never reach the player (no pause, seek, mute or fullscreen)', { before, after });
     check(await chrome.ev('window.__fsCalls') === 0 && (await win()).fullScreen === false, 'and the window didn’t go fullscreen');
 
     /* ============================ 7. Comment and Reply: YouTube's own, once each ============================ */
@@ -292,6 +308,7 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     let o2 = await own();
     check(!!c && o2.post === 1, 'Comment = one press of YouTube’s own Comment; Lumen shows it at the top, read back from the page', { own: o2, top: c && c.items[0] });
     check(await p.ev(`[...document.querySelectorAll('ytd-comments #content-text')].some((n) => n.textContent === ${JSON.stringify(typed)})`), 'YouTube’s page has the new comment');
+    check(await chrome.ev('(document.querySelector("#lumen-pv-comments .cm-compose:not(.cm-replybox) .cm-input") || {}).value') === '', 'and Lumen’s comment box is empty again');
     await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop002"] .cm-replybtn', 'Reply');
     await chrome.waitFor('document.activeElement && document.activeElement.closest && !!document.activeElement.closest(".cm-replybox")', 4000).catch(() => 0);
     await chrome.send('Input.insertText', { text: 'Thanks, gjpqy' });
