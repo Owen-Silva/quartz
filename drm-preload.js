@@ -17,8 +17,10 @@
  *                contextBridge.executeInMainWorld before any page script runs.
  *                The Proxy passes every call straight through and hands back
  *                the page's own promise untouched; it only adds a listener.
- *                A callable Proxy still prints as native code, so a page that
- *                checks for tampering sees nothing different.
+ *                The wrapper only OBSERVES EME status: which key system was
+ *                asked for, granted or refused, whether a licence was accepted,
+ *                and key status names. It never reads licence bytes, keys or
+ *                media, and never changes what the page sends or receives.
  *   'encrypted'  a <video>/<audio> in this document received encrypted media
  *                (the trusted 'encrypted' event, heard in the capture phase).
  *   'licence'    a build WITH Widevine, and the service still refused: its
