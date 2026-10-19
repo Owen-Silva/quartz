@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-shorts-e2e.js -- Lumen's Shorts view (watch-shorts.js + watch-shorts-main.js), end to end, in a REAL hidden
 // Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen, watched by testwatch.js), on LOCAL FIXTURES ONLY
 // (tests/shorts-fixtures.js: a fake youtube.com/shorts page with 4 Shorts, YouTube's own up/down buttons, wheel and

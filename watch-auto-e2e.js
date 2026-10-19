@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
 // watch-auto-e2e.js -- Watch keeps itself up to date, end to end: a REAL hidden Quartz test instance
 // (--test-profile, off-screen, watched by testwatch.js: the run FAILS if a window touches the screen)
 // reading a LOCAL mock of every service (tests/watch-mock.js). Never a real account, never the user's

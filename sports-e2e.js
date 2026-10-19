@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // sports-e2e.js -- Lumen's sports pages end to end: a REAL hidden Quartz test instance whose ESPN and NHL
 // feeds point at a LOCAL mock (tests/sports-fixtures/ + the score pins' NHL fixtures; never the real feeds,
 // never an account). Edge is a stub file and every open is recorded (QUARTZ_EDGE_STUB, QUARTZ_WATCH_OPEN_STUB).

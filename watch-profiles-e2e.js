@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-profiles-e2e.js -- one click from a Lumen tile to the video playing, as the right profile, end to end in a
 // REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen). LOCAL FIXTURES ONLY: the rows come
 // from tests/watch-mock.js; every service origin is rebased to a local "front" here that serves Hulu's who's-watching

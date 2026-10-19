@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-find-e2e.js -- Lumen's one search box end to end, in a REAL hidden Quartz test instance
 // (tests/e2e-kit.js: --test-profile, off-screen, watched by testwatch.js). Every service origin and
 // TMDB are rebased to LOCAL fixture servers here (tests/watch-find-fixtures.js): Disney+'s search page

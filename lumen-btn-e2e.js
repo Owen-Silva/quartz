@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
 // lumen-btn-e2e.js -- the toolbar's Lumen button (#lumen, index.html + app.js updateLumenBtn) end to
 // end, against a REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen,
 // watched from before launch). Lumen reads a LOCAL mock of every service (tests/watch-mock.js) and

@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-thumbs-e2e.js -- YouTube art asks for the still its box needs and steps down to the sharpest
 // one that exists, end to end: a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js)
 // reading the local mock of every service, then drawing tests/watch-snapshot.js dense() in place of what

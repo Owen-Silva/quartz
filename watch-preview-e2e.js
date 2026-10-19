@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-preview-e2e.js -- the stage's hover preview, end to end, against a MOCK player and a MOCK TMDB:
 // a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js) with
 // QUARTZ_WATCH_PREVIEW_MOCK=1, so the page's frame loads watch/preview.js MOCK_ORIGIN

@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // search-page-e2e.js — the redesigned results page and its Claude answer panel, end to end, on a REAL
 // Quartz test instance against a MOCK Brave API. Never the real Brave or Claude APIs, never the user's
 // profile or keys: the Brave key is a fixture written into a temp test profile. Claude's side runs

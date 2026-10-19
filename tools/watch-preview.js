@@ -1,4 +1,4 @@
-require('C:/Users/you/tools/lowcpu.js');
+require('./lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 'use strict';
 /*
  * tools/watch-preview.js -- headless shots of watch.html with the fixtures in

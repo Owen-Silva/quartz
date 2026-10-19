@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // score-pins-e2e.js -- Lumen's pinned scores end to end: a REAL hidden Quartz test instance whose score
 // feeds point at a LOCAL mock (fixtures from tests/scores-fixtures/, never the real feeds, never an account).
 //

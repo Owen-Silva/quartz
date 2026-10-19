@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-playview-e2e.js -- Lumen's playback view (watch-playview.js + watch-playview-main.js), end to end, in a REAL
 // hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen, watched by testwatch.js), on LOCAL
 // FIXTURES ONLY (tests/playview-fixtures.js): a fake youtube.com/watch page with the real ids and a fake player page

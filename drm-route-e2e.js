@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* a cloud runner: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // drm-route-e2e.js -- Watch's click routing for protected titles, both ways, in a REAL Quartz
 // (castlabs build, off-screen, temp profile). The Watch page asks main to open a title on its own
 // channel (the "quartz-watch:open" console line, exactly what a tile click prints), and:

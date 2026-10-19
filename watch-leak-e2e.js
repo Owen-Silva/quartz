@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-leak-e2e.js -- Lumen's leak-proof layer, end to end, in a REAL hidden Quartz test instance
 // (tests/e2e-kit.js: --test-profile, off-screen). LOCAL FIXTURES ONLY: Lumen's rows come from the
 // service mock (tests/watch-mock.js); every service origin (and www.espn.com) is rebased to a local

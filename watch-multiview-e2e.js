@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-multiview-e2e.js -- Lumen multiview and the mini-player (watch-player-multi.js), end to end, in a
 // REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen). Rows come from the local
 // service mock; every service origin is rebased to a local "front" serving fixture pages: an HTML5 video

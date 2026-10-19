@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
+require('./lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
 // tools/run-suite.js -- every Quartz harness, one after another, and ONE summary line.
 //
 //   node tools/run-suite.js [--unit] [--only=a,b] [--skip=a,b] [--out=<dir>] [--timeout=<s>]

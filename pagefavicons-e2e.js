@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // pagefavicons-e2e.js — site logos OUTSIDE the tab strip (bookmarks bar, new tab page, history
 // page), end to end, against a REAL test instance of Quartz, off-screen.
 //
