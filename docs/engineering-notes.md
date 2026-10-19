@@ -1,4 +1,7 @@
-# Quartz
+# Quartz: engineering notes
+
+The running design log, kept as each part was built. For what Quartz is and how to install it, see
+the [README](../README.md).
 
 The app id is Quartz (2026-09-26). `package.json` `productName` is `Quartz`, so `app.getName()`
 and the profile folder are `Quartz` (`%APPDATA%\Quartz`); the AppUserModelID is fixed at
@@ -234,9 +237,9 @@ window must never sit empty. A chip's menu has "Move to workspace…". Ctrl+Alt+
 with wrapping, switching raises that workspace's own last active tab, and a split whose halves
 land in different workspaces is broken up.
 
-Five of them are seeded once, behind Home: **School** (forest, `Documents\notes`, and it owns the
-notes pane), **Project** (ion, `Downloads\Project`), **Club** (ocean, no folder until you set one),
-**Trading** (ember, `trading-bot`) and **Phone** (midnight, no folder, and it opens into the
+Five of them are seeded once, behind Home: a **notes** workspace (forest, your notes folder, and it
+owns the notes pane), three project workspaces (each with its own colour and, optionally, a project
+folder) and **Phone** (midnight, no folder, and it opens into the
 phone rather than a new tab page). A workspace's folder is where a new Claude tab opens while
 it is current — the popover's Folder row picks or clears it, and a folder that has gone missing is
 named there and over the chamber rather than the terminal silently opening at home. Delete a
@@ -268,20 +271,20 @@ and one video decoding instead of five.
 workspace's pane kind and tells the tenant with a `sidepane` event; hosted apps and split view
 re-lay out when the well narrows.
 
-**School pane.** The pane School owns: a chip per notebook in `Documents\notes` plus Auto, a
+**Notes pane.** The pane the notes workspace owns: a chip per notebook in your notes folder plus Auto, a
 status strip that prints the reader's mode and reason, the helper's state and reason and the
 matched section, and the notebook itself, which scrolls to the matched section with a short
 highlight — once per question, never while you are scrolling, never at all while pinned. The reader
-takes the current question from LessonPlayer: "Install LessonPlayer policy" writes a per-app WebView2 policy
-that opens a local remote-debugging port on LessonPlayer's next start; if LessonPlayer ignores it the pane
+takes the current question from a configured reader app: "Install reader policy" writes a per-app WebView2 policy
+that opens a local remote-debugging port on that app's next start; if the app ignores it the pane
 says so and falls back to UI Automation, then to Windows OCR of the window. The matcher is a
-headless Claude Code session per class (Sonnet, no tools, `--safe-mode`, resumed between
+headless Claude Code session per notebook (Sonnet, no tools, `--safe-mode`, resumed between
 questions) that answers a section id only — never the answer — in 3 to 6 seconds for about a cent
 a question, and pauses itself at 90% of the 5-hour limit or 95% of the week. "Paste a question"
 runs it by hand. Every failure in the chain is a line in the strip with its reason.
 
-**Phone workspace.** the user's phone on the screen, in a tab: an Android phone (2025) on Android 16, reached
-over Tailscale at `100.64.0.1` — never a cable, never the open internet, so the phone's
+**Phone workspace.** Your Android phone on the screen, in a tab, reached over Tailscale at
+the address set in Settings → Phone — never a cable, never the open internet, so the phone's
 Tailscale has to be on before anything below can work and every failure without it is a timeout.
 The Phone workspace opens into `phone.html` when it holds no tabs, its chip carries a phone glyph
 instead of a planet, and Ctrl+T in it still opens a new tab page, because that is what Ctrl+T
@@ -335,7 +338,7 @@ prints its reason under the button that sent it. A still screen is not a stall: 
 when the picture changes, so a phone resting on its home screen sends nothing for minutes and that
 is the stream working; once a frame has painted the picture is never covered again, silence reads
 as "still N s" beside a counting frame age, and "stalled" needs the server alive, 15 s of silence
-*and* a dead control socket. Two things are in hand rather than done: on Android 16 the screen
+*and* a dead control socket. Two things are in hand rather than done: on recent Android the screen
 off / on buttons looked like they did nothing, and a locked phone mirrors black. Both are being
 fixed in a lane of their own.
 
@@ -664,8 +667,7 @@ carries a repeating keepalive trigger and one that is only ended restarts itself
 Where the task is missing altogether, the switch launches the bridge directly and remembers the
 choice. The second prong, behind its own switch ("Also pause for videos in this browser"), is this
 browser's own tabs: a guest that is audible on a watched site (YouTube, Twitch, Kick, Vimeo,
-Dailymotion, TikTok, Netflix, Hulu, Disney+, Prime Video, Max, Peacock, Crunchyroll and the
-LessonPlayer sites out of the box, editable a host per line, or any tab at all behind "Any tab that
+Dailymotion, TikTok, Netflix, Hulu, Disney+, Prime Video, Max, Peacock and Crunchyroll out of the box, editable a host per line, or any tab at all behind "Any tab that
 makes sound") registers
 a hold with the bridge under `src=owen-browser`, an id of its own, because the bridge resumes only
 when the last hold is released and a tab closing here must not hand back Opera's. The hold is taken
@@ -704,7 +706,7 @@ page asked for a protected key system, was refused, AND its video got encrypted 
 alone is a probe that YouTube, Twitch and ad scripts make, and never shows a bar. The page watcher is
 a session preload that wraps requestMediaKeySystemAccess in a pass-through Proxy in the main world.
 A failed Edge launch says why with Try again. The bar takes itself away when the build has Widevine
-(castlabs ECS, see ~/next-week/quartz-drm.md). Tests: `node drm-harness.js`, `node drm-e2e.js [--live]`.
+(castlabs ECS, see the Widevine and DRM section of the README). Tests: `node drm-harness.js`, `node drm-e2e.js [--live]`.
 
 **Idle music.** Settings → Idle music, between New tab and Privacy: Enabled, Source (Built-in
 ambient, or My tracks with its count, Choose files… and Clear), Where it plays, Volume, and the hint
@@ -899,7 +901,7 @@ per-second timer, and a session readout: tabs open, Claude sessions, and Spotify
 Off, On or Holding. The chrome feeds the readout the same way it feeds everything else on this
 page, through `window.__applyReadout({tabs, claude, autopause})`, pushed on tab, chamber and
 auto-pause changes. "Holding" means something is holding Spotify through the bridge, and that can
-be another source — the LessonPlayer desktop app, say — not only this browser.
+be another source — another desktop app, say — not only this browser.
 
 **Apps dock.** In the same capsule, above the web chips, the apps you have pinned are drawn as 56px
 tiles: a 32px icon, the name under it, and a dot at the icon's corner while the app is running. One
@@ -998,7 +1000,7 @@ utility), CPU, memory and I/O — kept by pid between samples so nothing thrashe
 are open remembered like the list's own fold. A renderer row also names what it holds: a bundled
 page by its file name, the chrome document as Browser UI, a renderer holding nothing as idle
 renderer, and for a tab the tab and the workspace it lives in — "New tab · Home (this page)",
-"Example Domain · School", a Claude tab as "Claude · <workspace>", up to three names and then +N for
+"Example Domain · Notes", a Claude tab as "Claude · <workspace>", up to three names and then +N for
 a process several tabs share. Main sends each renderer row the webContents ids living in it and the
 chrome, which alone knows workspaces, rewrites the labels before the sample reaches the page; every
 label is worked out before any of them is written, so a throw relays the sample untouched with a
@@ -1341,8 +1343,8 @@ one run before and one after.
 | `app.js` | The chrome: tab strip, webview lifecycle, omnibox, navigation, theme, Claude tabs, split view (pages and chambers alike), the "Claude needs you" mark and its notification, `askClaude()` and the three prompts it composes (link, screenshot, article), the history-page push and its `console-message` bridge, the new-tab background push and the re-push of theme, settings, background and recents on every `dom-ready`, the Files tab and its `files:` console channel, `openAppTab()` and `openTerminalTab()` with the app flag they persist and the DRM note bar, the idle-music presence signals and the now-playing poll behind music.js, the watch that freezes the board under panes and off window focus, `claudeStartArgs()` and the resume entry points, session save/restore, tab menu, crash cards. |
 | `shortcuts.js` | The one binding table: every rebindable action with its group and default, the combo grammar, the `localStorage['shortcuts']` overrides, and `bindings()` / `actionFor()` / `set()` / `conflict()` / `resetAll()`. Loaded before app.js, which pushes its map to main; main.js keeps a hand copy of the grammar that has to move with it. |
 | `workspaces.js` / `workspaces.css` | The workspace instrument: the titlebar pill and the switcher popover (switch, rename, colour, delete, create, and move mode for a tab). Drives app.js's workspace API, which is feature-detected, so a chrome without it renders nothing. |
-| `school-pane.js` / `school-pane.css` | The School workspace's side pane, a tenant of app.js's `#sidepane` host: the class chips, the status strip that prints every reader / helper / match state and reason from school.js, the controls (helper on-off, pin, retry, the LessonPlayer policy install, paste-a-question) and the notebook in a `file://` `<webview>` that navigates on class change and scrolls to the matched section with a stepped highlight — never twice for one question, never while the user is scrolling. Falls back to a sandboxed iframe if the guest fails to load, and says so. |
-| `school.js` / `school-reader.ps1` | The School brain, main-process side: the notebook scan (classes, sections, a capped per-class index), the LessonPlayer reader (CDP over the per-app WebView2 policy, then UI Automation, then Windows OCR through the persistent PowerShell child, each mode carrying its reason), subject detection, and the helper — one headless `claude -p` session per class, section id only, resumed between questions, one in flight, budget-gated. State and commands per the header; `<userData>/school.json` keeps the manual subject, helper switch, model and pin. |
+| `school-pane.js` / `school-pane.css` | The notes pane, a tenant of app.js's `#sidepane` host: the notebook chips, the status strip that prints every reader / helper / match state and reason from school.js, the controls (helper on-off, pin, retry, the reader-app policy install, paste-a-question) and the notebook in a `file://` `<webview>` that navigates on notebook change and scrolls to the matched section with a stepped highlight — never twice for one question, never while the user is scrolling. Falls back to a sandboxed iframe if the guest fails to load, and says so. |
+| `school.js` / `school-reader.ps1` | The notes pane's brain, main-process side: the notebook scan (notebooks, sections, a capped per-notebook index), the question reader for a configured app (CDP over the per-app WebView2 policy, then UI Automation, then Windows OCR through the persistent PowerShell child, each mode carrying its reason), subject detection, and the helper — one headless `claude -p` session per notebook, section id only, resumed between questions, one in flight, budget-gated. State and commands per the header; `<userData>/notes-pane.json` keeps the manual subject, helper switch, model and pin. |
 | `budget.js` | The Claude Code usage reading, main-process side: newest statusline JSON by mtime every 30s, 5-hour and week percentages with their resets, today's spend summed over the sessions touched today, stale after ten minutes and error states with reasons, pushed to the chrome on change and to every new-tab guest over the same console-line channel stocks.js uses. |
 | `pills.js` / `pills.css` | The budget pill in `#budget-slot` and its card (a child of `<body>`, positioned under the slot so no chrome row can paint over it): percentages, tones, the age suffix, the countdowns and today's spend. `window.Pills` exposes its state for harnesses. |
 | `phone.js` | The Phone workspace's brain, main-process side, and the single source of truth for its contract: the tools (adb and the sha-pinned scrcpy v4.1 server, downloaded into `<userData>/tools/` with byte progress as state), a serialised adb wrapper whose stderr is the reason, the device machine (pair, connect, disconnect, pin 5555 and re-pin after a Wi-Fi change, the TCP latency probe and the battery read, backoff reconnect), the stream (jar push, scid, `adb forward`, the v4.1 argv, the handshake, profiles, stall detection) and the relay that hands the three scrcpy sockets to the bundled page over a localhost WebSocket with a per-run token — packet-exact splitting, backpressure that drops only delta frames, and the metas re-fed to a late joiner. `settings.enabled` is the master switch: off stops the stream, disconnects, kills the adb server and refuses every command with its reason, keeping the pairing. `<userData>/phone.json` holds the host, the pairing state and the quality settings. |
