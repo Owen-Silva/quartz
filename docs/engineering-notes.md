@@ -1389,7 +1389,7 @@ one run before and one after.
 | `assets/` | `browser.ico` and `browser.png` (the app/shortcut icon). |
 | `README.md` | What Quartz is, requirements, install, configuration, Lumen and DRM notes, how it works, licence. |
 | `docs/engineering-notes.md` | This file: the design log, part by part (it was the README until the public README replaced it). |
-| `LICENSE` / `CREDITS.md` | GPL-3.0-only plus the draft section 7 permission; what in the repo is not GPL, and third-party notices. |
+| `LICENSE` / `LICENSE-EXCEPTIONS.md` / `CREDITS.md` | GPL-3.0-only (verbatim text), the section 7 permission; what in the repo is not GPL, and third-party notices. |
 | `CHANGELOG.md` | What changed and why, by area, written to be read instead of the diffs. |
 | `docs/phone-optimize-plan.md` | The ranked optimization plan for the phone mirror — what was measured live, what is already done, and what is worth doing next with its expected gain, effort, risk and the way to verify it. Read it before touching the stream. |
 

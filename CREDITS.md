@@ -1,7 +1,7 @@
 # Credits and third-party notices
 
 Quartz's own code is licensed under the GNU General Public License, version 3 only
-(see [LICENSE](LICENSE), including the draft section 7 permission at its end). This
+(see [LICENSE](LICENSE), plus the section 7 permission in [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)). This
 file lists what the repository carries, downloads or names that is **not** Quartz's
 own work, and the terms each comes under.
 

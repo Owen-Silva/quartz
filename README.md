@@ -193,9 +193,9 @@ what changed and why is in [CHANGELOG.md](CHANGELOG.md).
 ## Licence
 
 Quartz is licensed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`); see
-[LICENSE](LICENSE). The end of that file adds a **draft** section 7 permission, still to be
-confirmed by the copyright holder, to combine Quartz with Electron (including castlabs ECS),
-Chromium and the proprietary Widevine CDM and to convey the combination.
+[LICENSE](LICENSE). [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) adds a section 7 permission to
+combine Quartz with Electron (including castlabs ECS), Chromium and the proprietary Widevine CDM
+and to convey the combination.
 
 Not everything in the repo is under the GPL: the background photos (Unsplash License) and the
 Brave logo (a Brave Software trademark) are carved out, and third-party notices are collected in
