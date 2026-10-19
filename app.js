@@ -43,7 +43,6 @@ const SEARCH_URL = 'https://www.google.com/search?q=';
 // The new-tab page's own default shortcut chips (mirror of LINKS in newtab.js).
 // settings.js seeds the editable list from here the first time it is changed.
 window.DEFAULT_CHIPS = [
-  { label: 'Wiki',    url: 'https://www.wikipedia.org' },
   { label: 'GitHub',  url: 'https://github.com' },
   { label: 'YouTube', url: 'https://www.youtube.com' },
   { label: 'Gmail',   url: 'https://mail.google.com' },

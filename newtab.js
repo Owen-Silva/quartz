@@ -95,7 +95,6 @@
 
 /* The shortcut row, used whenever the browser sends no chips of its own. */
 const LINKS = [
-  { label: 'Wiki',      url: 'https://www.wikipedia.org' },
   { label: 'GitHub',    url: 'https://github.com' },
   { label: 'YouTube',   url: 'https://www.youtube.com' },
   { label: 'Gmail',     url: 'https://mail.google.com' },

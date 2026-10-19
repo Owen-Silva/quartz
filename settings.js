@@ -5654,14 +5654,14 @@
      the same handler.
      ------------------------------------------------------------ */
 
-  /* The hosts a fresh install watches. They are here only so the editor has
-     something honest to show before the first status() answers — the list in
-     force is always the one status() reports. */
+  /* The hosts a fresh install watches: a copy of DEFAULT_SITES in autopause.js
+     (sites a person adds live in their own autopause.json, not here). They are
+     here only so the editor has something honest to show before the first
+     status() answers; the list in force is always the one status() reports. */
   var AUTOPAUSE_SITES = [
     'youtube.com', 'youtube-nocookie.com', 'twitch.tv', 'kick.com', 'vimeo.com',
     'dailymotion.com', 'tiktok.com', 'netflix.com', 'hulu.com', 'disneyplus.com',
-    'primevideo.com', 'max.com', 'peacocktv.com', 'crunchyroll.com',
-    'lessonplayer.example', 'lessonplayer-academy.example', 'lessons.example'
+    'primevideo.com', 'max.com', 'peacocktv.com', 'crunchyroll.com'
   ];
 
   /* 4s: live enough that the readout follows a video starting, slow enough
@@ -6926,8 +6926,9 @@
     if (trouble) field.appendChild(el('p', 'set-note', trouble));
 
     field.appendChild(el('p', 'set-hint',
-      'On means the helper runs for the whole computer, not just this browser: ' +
-      'Spotify pauses while a video plays anywhere, and starts again after.'));
+      'On lets Quartz pause Spotify while a video plays, and start it again after. ' +
+      'On its own, Quartz covers its own tabs; with Mantle running, the two cooperate: ' +
+      'one of them pauses Spotify, and a video in either one counts.'));
   }
 
   /** This browser's own tabs, and how many of them are playing. */
@@ -6955,7 +6956,7 @@
     }
 
     field.appendChild(el('p', 'set-hint',
-      'Tabs in this browser hold Spotify the same way the extension does in your other one. ' +
+      'A tab in this browser that is playing a video holds Spotify paused (which tabs count is set below). ' +
       'A muted tab does not count, so muting the video hands the music back.'));
   }
 
