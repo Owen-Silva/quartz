@@ -3,7 +3,7 @@
 This is the record of what changed in the browser, written so you can catch up without reading
 diffs. Everything below landed overnight, commit by commit, on the local `master` branch (the table
 at the end lists them; `git log --oneline` is always current) — there is no
-remote, so the repo in `C:\Users\you\browser` is the only copy. Run it with `npm start` or the
+remote, so the local repo was the only copy. Run it with `npm start` or the
 taskbar pin; a copy that is already open keeps running the old code, so close it and launch again —
 or use Restart browser in Settings → About — to pick any of this up.
 
@@ -222,7 +222,7 @@ or use Restart browser in Settings → About — to pick any of this up.
   rather than on a per-second timer, and a session readout of tabs open, Claude sessions and
   Spotify auto-pause (Off, On or Holding). The chrome feeds it through
   `window.__applyReadout({tabs, claude, autopause})`. "Holding" means something is holding Spotify
-  through the bridge, which can be another source — the LessonPlayer desktop app, say — and not only
+  through the bridge, which can be another source — another desktop app, say — and not only
   this browser.
 - The board pauses only when the real window loses focus. It used to freeze whenever a page inside
   a tab took focus, because the chrome document's own blur was being read as the window's; main
@@ -399,7 +399,7 @@ or use Restart browser in Settings → About — to pick any of this up.
   refresh had been reported as a failure. And a 33rd pin was answered ok with no tile drawn; the
   stored list is used and the dock says "Full".
 
-Verified with harnesses only. The user was gaming while this round was written, so none of it has had a
+Verified with harnesses only. the machine was in use while this round was written, so none of it has had a
 live pass in the running browser: the evidence is pure-node harnesses (112/112 on the app index,
 78/78 on the pins, push and palette rows, 61/61 on the icon slot through a DOM shim, 33/33 plus 7/7
 against the real filesystem on the resolver, 108/108 on the chrome wiring), the engine on disk for
@@ -760,7 +760,7 @@ it displaces the other action, and the displaced one is left unbound and named.
 - This browser's own tabs hold Spotify paused too, behind a second switch, "Also pause for videos
   in this browser", with a line under it counting the tabs playing right now. A tab making sound
   on a watched site (YouTube, Twitch, Kick, Vimeo, Dailymotion, TikTok, Netflix, Hulu, Disney+,
-  Prime Video, Max, Peacock, Crunchyroll and the LessonPlayer sites out of the box; Twitch was the
+  Prime Video, Max, Peacock and Crunchyroll out of the box; Twitch was the
   first miss the user hit, so the list grew past the extension's), or any tab at all with "Any tab
   that makes sound" on, registers a hold at the bridge on
   127.0.0.1 (the first free of ports 8787 to 8790) under its own `src=owen-browser`, so the two
@@ -879,26 +879,26 @@ Found, and not ours to fix:
 - The README is current through the last commit: shortcuts, features, security notes, performance
   numbers and a file-by-file map.
 
-### Workspaces, the School pane and the titlebar readouts (2026-09-12, evening)
+### Workspaces, the notes pane and the titlebar readouts (2026-09-12, evening)
 
-- Four workspaces are seeded once behind Home: School, Project, Club and Trading, each with a colour
-  and (except Club, which is left for you to point somewhere) a folder. The folder is where a new
+- Four workspaces are seeded once behind Home: a notes workspace and three project workspaces,
+  each with a colour and (except one, which is left for you to point somewhere) a folder. The folder is where a new
   Claude tab opens while that workspace is current; the popover has a Folder row (click to pick,
   a clear control) and a Pane toggle. A folder that no longer exists is named in the popover and
   over the chamber, instead of the terminal quietly starting in your home folder. Delete a preset
   and it stays deleted. The current workspace's colour washes the tab strip at 7%.
 - Ctrl+Alt+1 to 9 jumps to the nth workspace in list order, also while a page has the keyboard.
 - A workspace can own a side pane: a resizable column beside the tab well (380px by default,
-  280 to 60% of the window, drag the 6px handle, width remembered). School owns the notes pane.
-- The School pane shows a chip per class notebook in Documents\notes (plus Auto), a status strip
+  280 to 60% of the window, drag the 6px handle, width remembered). The notes workspace owns the notes pane.
+- The notes pane shows a chip per notebook in your notes folder (plus Auto), a status strip
   that prints the reader's mode and reason, the helper's state and reason, and the section that
   matched, and the notebook itself, which scrolls to the matched section with a short highlight.
   Nothing in it is quiet: a refused command shows its reason beside the control.
-- The reader looks at LessonPlayer. "Install LessonPlayer policy" writes a per-app WebView2 policy that opens
-  a local remote-debugging port on LessonPlayer's next start; from then on the pane reads the question
-  straight off the page. If LessonPlayer ignores the policy the pane says so and falls back to UI
+- The reader looks at a configured desktop app. "Install reader policy" writes a per-app WebView2
+  policy that opens a local remote-debugging port on that app's next start; from then on the pane reads the question
+  straight off the page. If the app ignores the policy the pane says so and falls back to UI
   Automation, then to Windows OCR of the window, each fallback announced.
-- The matcher is a headless Claude Code session per class (Sonnet, no tools, --safe-mode, resumed
+- The matcher is a headless Claude Code session per notebook (Sonnet, no tools, --safe-mode, resumed
   between questions): it answers a section id only, never the answer, in 3 to 6 seconds for about
   a cent a question after the first. It reads the budget pill and pauses itself at 90% of the
   5-hour limit or 95% of the week, saying so in the pane. "Paste a question" runs it by hand.
@@ -913,7 +913,7 @@ Found, and not ours to fix:
 ### Phone workspace (2026-09-13)
 
 - A fifth workspace, Phone (midnight), that opens into the phone itself instead of a new tab page:
-  The user's Android phone (2025) on Android 16, mirrored in a tab over Tailscale at 100.64.0.1. There is
+  your Android phone, mirrored in a tab over Tailscale at the address set in Settings. There is
   no cable path and nothing goes over the open internet, so the phone's Tailscale has to be on —
   without it every failure below is a timeout, which is the one thing no readout can work out for
   itself, so the Settings section says it in the first line. Ctrl+T in that workspace still opens a
@@ -977,7 +977,7 @@ Found, and not ours to fix:
   nothing thrashes between samples, and remembers which groups you left open.
 - A renderer row says what it holds — a bundled page by its file name, the chrome document as
   Browser UI, a renderer holding nothing as idle renderer — and for a tab, the tab and the workspace
-  it lives in: "New tab · Home (this page)", "Example Domain · School", a Claude tab as
+  it lives in: "New tab · Home (this page)", "Example Domain · Notes", a Claude tab as
   "Claude · <workspace>", three names at most and then +N for a process several tabs share. main
   hands each renderer row the webContents ids living in it and the chrome, which alone knows
   workspaces, rewrites the labels on the way past.
@@ -1128,20 +1128,20 @@ Found, and not ours to fix:
   one of the five from the catalogue gives you a note bar saying so, with a link that launches the
   desktop app when it is installed.
 - Ctrl+Alt+E opens the Files tab. Ctrl+Shift+E is still Workspaces.
-- The School pane's reader needs the LessonPlayer policy installed once (the button in the pane) and
-  then a restart of LessonPlayer. Whether LessonPlayer honours it has not been seen yet: the pane will say
+- The notes pane's reader needs the reader policy installed once (the button in the pane) and
+  then a restart of the reader app. Whether the app honours it has not been seen yet: the pane will say
   "policy ignored" and fall back to UI Automation if it does not.
 - The helper is a real Claude session and spends real budget: about a cent per question on Sonnet
-  once the class index is loaded. It pauses itself at 90% of the 5-hour limit or 95% of the week.
-- The budget pill reads the JSON that Claude Code's statusline hook writes under
-  mission-control; with no active Claude Code session the reading goes stale after ten minutes
+  once the notebook index is loaded. It pauses itself at 90% of the 5-hour limit or 95% of the week.
+- The budget pill reads the JSON that a Claude Code statusline hook writes to a
+  local folder; with no active Claude Code session the reading goes stale after ten minutes
   and the pill says so, rather than showing an old number as current.
 - The Phone workspace needs Tailscale running on the phone. There is no cable path, so with it off
   every step times out; the tab and the Settings section both say so rather than guessing.
 - The 5555 pin does not survive a Wi-Fi change or a phone reboot. Usually the reconnect finds the
   new port on its own; when it cannot, the tab names the port to read off the phone under Wireless
   debugging, and one connect re-pins it.
-- "Turn the phone screen off while mirroring" and the Screen off key are honest now: on this phone (Android 16) the mirror goes BLACK with the panel — Android draws nothing for a powered-off display — so they only save the panel; and on battery the panel goes off at every stream
+- "Turn the phone screen off while mirroring" and the Screen off key are honest now: on the test phone (recent Android) the mirror goes BLACK with the panel — Android draws nothing for a powered-off display — so they only save the panel; and on battery the panel goes off at every stream
   start, the phone then falls asleep at its own screen timeout, and a sleeping phone mirrors black
   until Wake. Only a charging phone stays awake with the panel off; the setting's row and the black
   note both say so now. A quality change the page asks for on its own (a shed while the decoder
@@ -1151,7 +1151,7 @@ Found, and not ours to fix:
   own "display turned off" line so you know it landed. The old Screen on key could never wake a
   dozing phone (that call sits under Android's power manager), so it is now **Wake**, which sends
   a real wake key first. A black picture is a sleeping phone or the hidden sign-in screen — the
-  sign-in screen does NOT mirror on this phone (Android 16 hides it from capture, the phone itself is lit) but keys still land, so the note says to type the password blind or unlock on the phone — and after a second of black the canvas
+  sign-in screen does NOT mirror on the test phone (recent Android hides it from capture, the phone itself is lit) but keys still land, so the note says to type the password blind or unlock on the phone — and after a second of black the canvas
   says so and points at Wake. Proven on the phone over adb; the buttons themselves still await a
   live press in the browser.
 - Only adb and the scrcpy server are downloaded, on first use, into the profile's tools folder. A
@@ -1285,9 +1285,9 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 53dca7a | 11:50 | Tooling: toback.ps1 sends a test instance's windows to the back without activating them |
 | 6a872d6 | 11:59 | New tab: a live Markets tile bottom-right, fed by Finnhub with a key from Settings |
 | cb8cde0 | 12:00 | Tooling: toback.ps1 keeps its pid set whole and skips titleless and IME windows |
-| 655bafd | 18:39 | Scaffold: budget, school and pill modules with their IPC and slots |
-| 9a78e68 | 18:58 | School pane: class chips, live reader/helper status, and notes that jump to the matching section |
-| 0a771ab | 18:59 | School: reads the on-screen question and finds the matching notes section |
+| 655bafd | 18:39 | Scaffold: budget, notes-pane and pill modules with their IPC and slots |
+| 9a78e68 | 18:58 | Notes pane: notebook chips, live reader/helper status, and notes that jump to the matching section |
+| 0a771ab | 18:59 | Notes pane: reads the on-screen question and finds the matching notes section |
 | bbff8fa | 19:03 | Workspaces: four presets, per-workspace folder and side pane, strip tint, Ctrl+Alt+1-9 |
 | 0d12828 | 19:07 | Titlebar readouts: Claude usage pill with limits and today's spend, plus now playing |
 | 0eaf9eb | 19:11 | Now playing: the pill says "ad · quiet" while the bridge has Spotify turned down |
@@ -1305,4 +1305,4 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 252359e | 20:14 | Processes: a renderer's row names its tab and its workspace |
 | 1660003 | 20:34 | Workspaces sleep: only the workspace you are looking at keeps its pages running |
 | 54d6a57 | 20:46 | Phone: Wake sends display-on before the wake key (the server otherwise forces the display off again), a server child flushing after a restart no longer crashes main, page sheds stay temporary and never reach phone.json, and the black note names the screen-off-while-mirroring setting |
-| 1402fb9 | 20:52 | Phone: Screen off says what this phone does — on Android 16 the mirror goes black with the panel, Wake brings both back; the rail, the black note and the setting row all say so |
+| 1402fb9 | 20:52 | Phone: Screen off says what this phone does — on recent Android the mirror goes black with the panel, Wake brings both back; the rail, the black note and the setting row all say so |
