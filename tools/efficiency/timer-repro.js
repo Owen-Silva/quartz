@@ -6,7 +6,7 @@
 //     none            no timers (= bare-main.js)
 //     unref3s         setInterval(noop, 3000).unref()
 //     ref3s           setInterval(noop, 3000)
-//     unref3s-push    every 3 s an unref'd setTimeout(100) (school.js's readTimer + schedulePush)
+//     unref3s-push    every 3 s an unref'd setTimeout(100) (notes-pane-main.js's readTimer + schedulePush)
 //     ref3s-push      the same, both ref'd
 //     unref3s-async   unref3s-push, the push made after an await (readOnce is async)
 'use strict';

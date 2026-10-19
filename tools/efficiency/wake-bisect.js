@@ -1,6 +1,6 @@
 // tools/efficiency/wake-bisect.js -- which part of Quartz's main process keeps waking it at idle.
 //
-//   node tools/efficiency/wake-bisect.js --conds="base;bare:BARE;all:off=ALL;school:off=school+procfind;d:diag"
+//   node tools/efficiency/wake-bisect.js --conds="base;bare:BARE;all:off=ALL;notes:off=notes-pane-main+procfind;d:diag"
 //        [--settle=45] [--window=60] [--stagger=3] [--out=wake-out] [--bridge]
 //
 // RUNNER ONLY (CI=true or QUARTZ_BENCH_OK=1): it starts several Quartz instances at once and kills
@@ -72,7 +72,7 @@ function parseConds(s) {
       else if (o === 'nohook') c.nohook = true;
       else if (o.startsWith('off=')) c.off = o.slice(4).split('+').join(',');
       else if (o.startsWith('no=')) c.no = o.slice(3).split('+').join(',');
-      else if (o.startsWith('sch=')) c.sch = o.slice(4).split('+').join(',');
+      else if (o.startsWith('notes=')) c.sch = o.slice(6).split('+').join(',');
       else if (o.startsWith('repro=')) { c.bare = true; c.repro = o.slice(6); }
       else if (o.startsWith('aff=')) c.aff = Number(o.slice(4));
       else if (o.startsWith('boost=')) console.log('wake-bisect: ' + name + ': boost= was removed in round 4 (uvboost.js has no main-thread variants now); running without it');
@@ -84,7 +84,7 @@ function parseConds(s) {
 }
 
 function launch(c) {
-  const env = Object.assign({}, process.env, { QWAKE_OFF: c.off, QWAKE_NO: c.no, QWAKE_SCHOOL: c.sch, QWAKE_AB: c.ab }, c.env);
+  const env = Object.assign({}, process.env, { QWAKE_OFF: c.off, QWAKE_NO: c.no, QWAKE_NOTES: c.sch, QWAKE_AB: c.ab }, c.env);
   const at = SETTLE + 5;
   if (c.diag) Object.assign(env, { QWAKE_DIAG: path.join(OUT, 'diag-' + c.name + '.json'), QWAKE_DIAG_AT: String(at), QWAKE_DIAG_FOR: '20' });
   if (c.snap) Object.assign(env, { QWAKE_SNAP: path.join(OUT, 'snap-' + c.name + '.json'), QWAKE_DIAG_AT: String(at) });
@@ -288,7 +288,7 @@ function embedRate(c, s0, s2) {
   console.log('name                 boot  main ctx/s [half1 half2]  top threads        main CPU s/10min  tree: procs ctx/s CPU s/10min  off / no');
   for (const r of rows) {
     console.log(String(r.name).padEnd(20) + ' ' + String(r.boot).slice(0, 5).padEnd(5) + ' ' + String(r.mainCtxPerS).padStart(6) + ' [' + r.halves.join(' ') + ']'.padEnd(4) +
-      '  ' + JSON.stringify(r.topThreads).padEnd(18) + ' ' + String(r.mainCpuSper10min).padStart(8) + '  ' + (r.tree ? String(r.tree.procs).padStart(3) + ' ' + String(r.tree.ctxPerS).padStart(6) + ' ' + String(r.tree.cpuSper10min).padStart(7) : '      -') + '  ' + (r.off || '-') + ' / ' + (r.no || '-') + (r.sch ? ' / school ' + r.sch : '') + (r.diag ? ' (diag)' : '') +
+      '  ' + JSON.stringify(r.topThreads).padEnd(18) + ' ' + String(r.mainCpuSper10min).padStart(8) + '  ' + (r.tree ? String(r.tree.procs).padStart(3) + ' ' + String(r.tree.ctxPerS).padStart(6) + ' ' + String(r.tree.cpuSper10min).padStart(7) : '      -') + '  ' + (r.off || '-') + ' / ' + (r.no || '-') + (r.sch ? ' / notes ' + r.sch : '') + (r.diag ? ' (diag)' : '') +
       (r.uvm ? '  uv ' + r.uvm.loopPerS + ' loops/s ' + r.uvm.eventsPerS + ' ev/s' : '') +
       (r.embed ? '  emb t' + r.embed.tid + ' ' + r.embed.level + ' ' + r.embed.ctxPerS + ' ctx/s ' + r.embed.cpuPct + '% core ' + r.embed.mcycPerS + ' Mcyc/s' : '  emb ?') + (r.tweak ? '  [' + String(r.tweak).slice(0, 90) + ']' : ''));
   }

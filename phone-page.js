@@ -1913,7 +1913,7 @@
     railNote('', 'asked the phone to turn its screen off — on this phone the picture goes black too until you press Wake');
     setTimeout(function () {
       if (displayPowerSaid(false, pressedAt)) {
-        railNote('ok', 'the phone said its display is off. On this phone (Android 16) the picture stays black while the panel is off — press Wake to bring both back');
+        railNote('ok', 'the phone said its display is off. On Android 16 phones the picture stays black while the panel is off — press Wake to bring both back');
         return;
       }
       railNote('error', 'asked the phone to turn its screen off, but it never said it did: scrcpy 4.1 reports this only in its own log, and nothing came back within 2 s — look at the phone');
@@ -2361,7 +2361,7 @@
       var d = (phone && phone.device) || {};
       var text;
       if (video.screenOffByUs) {
-        text = 'the picture is black because you turned the phone\'s screen off from the rail. On this phone (Android 16) '
+        text = 'the picture is black because you turned the phone\'s screen off from the rail. On Android 16 phones '
           + 'the mirror goes black with the panel — press Wake to bring both back.';
       } else if (d.awake === true && d.keyguard === true) {
         text = BLACK_NOTE_KEYGUARD;

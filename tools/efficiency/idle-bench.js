@@ -44,7 +44,7 @@
 //
 // The 2026-10-15 run: cloudtest --recipe quartz-core --timeout 32 --artifacts "eff-out/**" --
 //   "node tools/efficiency/idle-bench.js --plan=full --make-a=.ab-a --reps=2 --idle=600 --settle=30
-//    --load=60 --every=30 --out=eff-out --max-min=27"   (.ab-a = git show master:school.js)
+//    --load=60 --every=30 --out=eff-out --max-min=27"   (.ab-a = git show master:notes-pane-main.js)
 //   job 18:33 on a 2-vCPU / 8 GB windows-latest runner.
 'use strict';
 const fs = require('fs');
