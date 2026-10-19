@@ -50,7 +50,7 @@
 //   directly: no code-execution sandbox to spin up, which keeps the quick answer quick), with a
 //   small max_uses. Its citations (web_search_result_location: url, title, cited_text) become the
 //   [n] markers and the citations list. Brave's results are NOT sent to Claude: Brave's API terms
-//   do not grant AI/LLM use of Search Results (see README).
+//   do not grant AI/LLM use of Search Results (see docs/engineering-notes.md).
 //   GET /v1/models is "Check key": it costs nothing.
 //
 // COST. Every answer is priced from the usage Anthropic returns times the published prices

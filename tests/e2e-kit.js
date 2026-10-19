@@ -132,6 +132,16 @@ function run(name, body) {
     const watcher = startWatcher((l) => say(l));
     await watcher.ready;
     const env = Object.assign({}, process.env, o.env || {});
+    // Lumen is opt-in: a profile with NO watch.json reads every service as off (watch-main.js cleanPrefs).
+    // These runs exercise Lumen the way an existing install has it, so a profile without one starts from
+    // a pre-opt-in "{}" (every service on, migrated to v2 on first boot) unless the harness asks for a
+    // fresh install with opts.freshLumen. A seed that cannot be written is said, never skipped quietly.
+    if (!o.freshLumen) {
+      const wj = path.join(profileDir, 'watch.json');
+      try {
+        if (!fs.existsSync(wj)) { fs.mkdirSync(profileDir, { recursive: true }); fs.writeFileSync(wj, '{}'); }
+      } catch (e) { say('could not seed watch.json (Lumen will start all-off): ' + e.message); }
+    }
     const child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + port, '--test-profile', '--profile-name=' + profile, ...OFFSCREEN_ARGS, ...(o.args || [])], { cwd: APP, stdio: 'ignore', env });
     let gone = false;
     const exitP = new Promise((r) => child.on('exit', () => { gone = true; r(); }));
