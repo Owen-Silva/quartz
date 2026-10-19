@@ -2,7 +2,8 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const HOME_DIR = 'C:\\Users\\you';
+// This user's home folder (the chrome's preload runs unsandboxed, so it may require 'os').
+const HOME_DIR = require('os').homedir();
 
 // Claude chambers start with --dangerously-skip-permissions unless the
 // renderer has said otherwise (api.pty.setPrefs). It is kept HERE rather than

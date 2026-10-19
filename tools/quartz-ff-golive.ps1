@@ -5,6 +5,9 @@ Electron already in node_modules (EVS-signed at release 1) stays as it is: no np
 
     powershell -NoProfile -ExecutionPolicy Bypass -File <this> -Ref origin/wk/lumen-release3 -Expect <sha> [-DryRun]
 
+  -Repo defaults to the checkout this script is in (the live one); -Lnk to the Start Menu Quartz.lnk
+  under %APPDATA%. A dry run's "live checkout" probe also looks at the checkout this script is in.
+
   0. Preflight, with Quartz still open: git fetch; the checkout is clean and on master; HEAD -> Ref is a
      fast-forward; Ref is exactly -Expect; package.json and package-lock.json are unchanged HEAD..Ref
      (else STOP: that needs the swap script); node_modules electron is +wvcus and Quartz.exe.sig exists.
@@ -19,15 +22,17 @@ Electron already in node_modules (EVS-signed at release 1) stays as it is: no np
   Every check prints a PASS / FAIL line; the last line is the verdict. Secrets are never printed.
 #>
 param(
-  [string]$Repo = 'C:\Users\you\browser',
+  [string]$Repo = (Split-Path -Parent $PSScriptRoot),
   [string]$Ref = 'origin/wk/lumen-release3',
   [string]$Expect = '',
-  [string]$Lnk = 'C:\Users\you\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Quartz.lnk',
+  [string]$Lnk = (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Quartz.lnk'),
   [int]$CloseTimeoutSec = 90,
   [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
 $Repo = (Resolve-Path $Repo).Path
+# The live Quartz.exe a dry run probes: the one in the checkout this script lives in.
+$LiveExe = (Join-Path (Split-Path -Parent $PSScriptRoot) 'node_modules\electron\dist\quartz.exe').ToLower()
 $Dist = Join-Path $Repo 'node_modules\electron\dist'
 $PtyDir = Join-Path $Repo 'node_modules\@homebridge\node-pty-prebuilt-multiarch\build\Release'
 $StateDir = Join-Path $env:LOCALAPPDATA 'Quartz-drm\ff-golive'
@@ -161,7 +166,7 @@ $main = @(Main-Procs)
 if ($DryRun) {
   if ($main.Count) { Info ('2. would close main Quartz PID ' + (($main | ForEach-Object { $_.ProcessId }) -join ', ') + ' (CloseMainWindow, then wait); dry run: not closed') }
   else { Info ('2. no Quartz runs from ' + $Dist + '; nothing to close') }
-  $live = @(Get-CimInstance Win32_Process -Filter "Name='Quartz.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower() -eq 'c:\users\you\browser\node_modules\electron\dist\quartz.exe' -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--test-profile' })
+  $live = @(Get-CimInstance Win32_Process -Filter "Name='Quartz.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower() -eq $LiveExe -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--test-profile' })
   Info ('2. probe of the live checkout (read only): main Quartz PID ' + $(if ($live.Count) { ($live | ForEach-Object { $_.ProcessId }) -join ', ' } else { 'none' }) + ' is what the real run closes')
 } else {
   if (-not $main.Count) { Pass '2. Quartz is not running from this checkout; nothing to close' }

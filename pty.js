@@ -14,11 +14,11 @@ const crypto = require('crypto');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
 // Absolute path to the Claude CLI: where its native installer puts it, under THIS user's home
-// (it was pinned to C:\Users\you, which broke the pane on any other account or machine).
+// (it was pinned to one account's home folder, which broke the pane on any other account or machine).
 const CLAUDE_BIN = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
 
-// Fallback cwd when the caller does not supply one (or supplies garbage).
-const DEFAULT_CWD = 'C:\\Users\\you';
+// Fallback cwd when the caller does not supply one (or supplies garbage): this user's home.
+const DEFAULT_CWD = os.homedir();
 
 // The ONLY flags a renderer may put on claude.exe's command line. Everything
 // else is dropped silently (logged, never spawned): the renderer is the least
