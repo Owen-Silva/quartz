@@ -1,0 +1,418 @@
+/* ============================================================
+   watch-ambient.js -- Lumen's ambient field (chrome side).
+
+   Behind Lumen's playback view and its Shorts view, the page is not
+   flat black: it is the playing video's own colours, blurred into a
+   soft field that fills the layer (YouTube's ambient mode, Apple TV's
+   backdrop). The same idea as Quartz's chrome over its pre-blurred
+   wallpaper and Lumen home's far layer (watch.js paintWash): ONE
+   small picture, blurred ONCE into a 96 x 54 canvas, scaled up by the
+   compositor, cross-faded by opacity. Nothing moves per frame.
+
+     - First colours: the video's own still (YouTube: i.ytimg.com's
+       mqdefault for the id in the address; other services: the
+       page's og:image), decoded off the main thread, then drawn.
+     - Then, while the video PLAYS, the colours follow it: every few
+       seconds (EVERY) one small sample of the current frame, taken
+       by the hosted page itself (createImageBitmap at 48 x 27, its own
+       same-origin video; a protected or cross-origin video says so
+       and the still stays), is drawn into the other canvas and the
+       two cross-fade. A sample that barely changed paints nothing.
+     - The refresh stops when the video is paused, the window is
+       hidden or in the background, the layer is closed, in multiview
+       or the corner or fullscreen, Windows asks to reduce motion, or
+       battery saver is on (watch-ambient-main.js). Reduced motion and
+       battery saver keep the still field; multiview, the corner and
+       fullscreen have no field at all.
+     - Legibility is the CSS's (watch-ambient.css): the field is dimmed
+       and washed so every word over it keeps WCAG AA on a white video.
+
+   Hooks: watch-playview.js attach / destroy (two lines). Everything
+   else is read from the layer (watch-player.js L) and the slot's own
+   <webview>. Also a CommonJS module for the unit harness (the pure
+   parts).
+   ============================================================ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.LumenAmbient = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* ================================================================ pure */
+
+  var EVERY = 4000;          // ms between frame samples while the video plays
+  var EVERY_IDLE = 9000;     // ms between samples while it is paused, buffering or has no frame yet
+  var FIRST = 1400;          // ms after the view opens (or the video changes) to the first sample
+  var CW = 96, CH = 54;      // the field's canvas: scaled up it is a soft field and never re-blurs
+  var DELTA = 9;             // mean colour change (0..255) under which a new sample paints nothing
+  var FILTER = 'blur(4px) saturate(1.5)';
+  var GATE_MS = 30000;       // battery saver is asked at most this often
+  var ID_RE = /^[A-Za-z0-9_-]{6,20}$/;
+
+  function parse(url) { try { return new URL(String(url || '')); } catch (e) { return null; } }
+
+  /** The YouTube id in a watch, Shorts, embed or youtu.be address ('' when there is none). */
+  function ytId(url) {
+    var u = parse(url);
+    if (!u) return '';
+    var m;
+    if (/(^|\.)youtu\.be$/i.test(u.hostname)) { m = u.pathname.split('/')[1] || ''; return ID_RE.test(m) ? m : ''; }
+    var v = u.searchParams.get('v');
+    if (v && ID_RE.test(v)) return v;
+    m = /^\/(?:shorts|embed|live)\/([A-Za-z0-9_-]{6,20})/.exec(u.pathname);
+    return m ? m[1] : '';
+  }
+  function stillUrl(id) { return ID_RE.test(String(id || '')) ? 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' : ''; }
+  /** What the field is drawn for: one key per video (a Short that moves is a new key). */
+  function keyOf(service, url) { var id = ytId(url); return String(service || '') + ':' + (id || String(url || '').split('#')[0]); }
+
+  /** A sample's signature: the mean colour of a 4 x 3 grid of cells (36 numbers). */
+  function signature(px, w, h, stride) {
+    var st = stride || 3, out = [];
+    for (var cy = 0; cy < 3; cy++) {
+      for (var cx = 0; cx < 4; cx++) {
+        var x0 = Math.floor(cx * w / 4), x1 = Math.floor((cx + 1) * w / 4), y0 = Math.floor(cy * h / 3), y1 = Math.floor((cy + 1) * h / 3);
+        var r = 0, g = 0, b = 0, n = 0;
+        for (var y = y0; y < y1; y++) for (var x = x0; x < x1; x++) { var i = (y * w + x) * st; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; }
+        out.push(n ? r / n : 0, n ? g / n : 0, n ? b / n : 0);
+      }
+    }
+    return out;
+  }
+  /** Mean absolute difference of two signatures (0..255); Infinity when either is missing. */
+  function diff(a, b) {
+    if (!a || !b || a.length !== b.length) return Infinity;
+    var t = 0;
+    for (var i = 0; i < a.length; i++) t += Math.abs(a[i] - b[i]);
+    return t / a.length;
+  }
+  /** Why the field may NOT refresh now ('' = it may). o: { reduced, saver, hidden, focused, playing }. */
+  function refreshOff(o) {
+    if (o.reduced) return 'Windows is set to reduce motion';
+    if (o.saver === true) return 'battery saver is on';
+    if (o.hidden) return 'the window is hidden';
+    if (o.focused === false) return 'the window is in the background';
+    return '';
+  }
+  /** Which slot the field dresses, from the layer's state; { s, mode } or { why }. */
+  function pick(L) {
+    if (!L || !L.el || !L.open || L.el.hidden) return { why: 'the player is closed' };
+    var cl = L.el.classList;
+    if (cl.contains('mv-mini')) return { why: 'the player is in the corner' };
+    if (cl.contains('wp-fs')) return { why: 'the video is fullscreen' };
+    if (!L.slots || L.slots.length !== 1) return { why: 'multiview' };
+    var s = L.slots[0];
+    if (!s || !s.tile || !s.view) return { why: 'no player yet' };
+    var tc = s.tile.classList;
+    var mode = tc.contains('sh') ? 'sh' : tc.contains('pv') ? 'pv' : '';
+    if (!mode) return { why: 'the service’s full page' };
+    if (s.tile.classList.contains('has-state')) return { why: 'the player shows a state' };
+    return { s: s, mode: mode };
+  }
+
+  /* The hosted page's half: ONE small sample of its largest playing <video>, as RGB bytes. Runs in the
+     page (executeJavaScript); never touches the stream, only the frame on screen, at 48 x 27. A
+     protected (DRM) or cross-origin video can't be read: the reason comes back and the still stays. */
+  function sampler() {
+    var t0 = performance.now();
+    function still() { var m = document.querySelector('meta[property="og:image"]'); return m ? String(m.getAttribute('content') || '').slice(0, 500) : ''; }
+    function fail(why) { return { ok: false, reason: why, still: still(), ms: Math.round((performance.now() - t0) * 10) / 10 }; }
+    try {
+      if (document.hidden) return fail('hidden');
+      var vs = document.querySelectorAll('video'), best = null, area = 0, W = innerWidth, H = innerHeight;
+      for (var i = 0; i < vs.length; i++) {
+        var v = vs[i];
+        if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) continue;
+        var r = v.getBoundingClientRect();
+        var a = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
+        if (a > area) { area = a; best = v; }
+      }
+      if (!best) return fail('no frame yet');
+      var land = best.videoWidth >= best.videoHeight, w = land ? 48 : 27, h = land ? 27 : 48;
+      var paused = !!(best.paused || best.ended), t = Math.round(best.currentTime * 10) / 10;
+      var read = function (src) {
+        var c = window.__lumenAmbC || (window.__lumenAmbC = document.createElement('canvas'));
+        if (c.width !== w) c.width = w;
+        if (c.height !== h) c.height = h;
+        var x = c.getContext('2d', { willReadFrequently: true });
+        x.clearRect(0, 0, w, h);
+        x.drawImage(src, 0, 0, w, h);
+        var d = x.getImageData(0, 0, w, h).data, s = '', max = 0;
+        for (var k = 0; k < d.length; k += 4) {
+          s += String.fromCharCode(d[k], d[k + 1], d[k + 2]);
+          var m = d[k] > d[k + 1] ? d[k] : d[k + 1];
+          if (d[k + 2] > m) m = d[k + 2];
+          if (m > max) max = m;
+        }
+        return { ok: true, w: w, h: h, px: btoa(s), max: max, paused: paused, t: t, ms: Math.round((performance.now() - t0) * 10) / 10 };
+      };
+      if (typeof createImageBitmap === 'function') {
+        return createImageBitmap(best, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' }).then(function (bm) {
+          try { return read(bm); } finally { try { bm.close(); } catch (e) { /* gone */ } }
+        }, function (e) { return fail(String((e && e.name) || e)); }).catch(function (e) { return fail(String((e && e.name) || e)); });
+      }
+      return read(best);
+    } catch (e) { return fail(String((e && e.name) || e)); }
+  }
+  var SAMPLE = '(' + String(sampler) + ')()';
+
+  /* ================================================================ chrome */
+
+  var A = {
+    ctx: null, L: null, el: null, field: null, cvs: [], on: 0, src: null,
+    slot: null, mode: '', key: '', from: 'none', why: '', off: '',
+    timer: 0, busy: false, sig: null, lastT: -1, seq: 0,
+    paints: 0, samples: 0, skipped: 0, stills: 0, maxSampleMs: 0, maxPaintMs: 0, lastSampleMs: 0,
+    saver: null, saverAt: 0, saverAsking: false, mq: null, bound: false, obs: null
+  };
+
+  function hasDom() { return typeof document !== 'undefined' && !!document.createElement; }
+  function reduced() { try { return !!(A.mq && A.mq.matches); } catch (e) { return false; } }
+  function focused() { try { return document.hasFocus(); } catch (e) { return true; } }
+  function now() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+
+  function build(L) {
+    if (A.el || !L || !L.el || !hasDom()) return;
+    var amb = A.el = document.createElement('div');
+    amb.className = 'amb';
+    amb.setAttribute('aria-hidden', 'true');
+    var field = A.field = document.createElement('div');
+    field.className = 'amb-f';
+    for (var i = 0; i < 2; i++) {
+      var c = document.createElement('canvas');
+      c.className = 'amb-c';
+      c.width = CW; c.height = CH;
+      field.appendChild(c);
+      A.cvs.push(c);
+    }
+    amb.appendChild(field);
+    amb.appendChild(Object.assign(document.createElement('div'), { className: 'amb-wash' }));
+    L.el.insertBefore(amb, L.el.firstChild);
+    A.src = document.createElement('canvas');
+  }
+
+  function bind(L) {
+    if (A.bound || !hasDom()) return;
+    A.bound = true;
+    try { A.mq = window.matchMedia('(prefers-reduced-motion: reduce)'); A.mq.addEventListener('change', function () { evaluate(); }); } catch (e) { A.mq = null; }
+    document.addEventListener('visibilitychange', function () { evaluate(); });
+    window.addEventListener('focus', function () { evaluate(); });
+    window.addEventListener('blur', function () { evaluate(); });
+    if (window.MutationObserver && L && L.el) {
+      // The layer's own classes (pv-on, sh-on, mv-mini, wp-fs, hidden) and the grid's tile count say
+      // when the field applies; the tile's classes (pv / sh / has-state) say which view it is.
+      A.obs = new MutationObserver(function () { evaluate(); });
+      A.obs.observe(L.el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+      if (L.grid) A.obs.observe(L.grid, { attributes: true, attributeFilter: ['data-n'], childList: true });
+    }
+  }
+
+  function attach(ctx, s, v) {
+    if (!ctx || !ctx.L || !s) return;
+    A.ctx = ctx; A.L = ctx.L;
+    build(ctx.L);
+    bind(ctx.L);
+    if (window.MutationObserver && s.tile && A.obs) A.obs.observe(s.tile, { attributes: true, attributeFilter: ['class'] });
+    if (v && v.addEventListener) {
+      var moved = function () { if (A.slot === s) evaluate(); };
+      v.addEventListener('did-navigate', moved);
+      v.addEventListener('did-navigate-in-page', moved);
+    }
+    evaluate();
+  }
+
+  function destroy(ctx, s) {
+    A.gone = s;   // its view is going: never sampled again, even while the layer still lists it
+    if (A.slot === s) { stop(); A.slot = null; }
+    evaluate();
+  }
+
+  function stop() { clearTimeout(A.timer); A.timer = 0; A.seq++; A.busy = false; }
+
+  /** Where the field stands now: on or off, which slot, which video; the refresh started or stopped. */
+  function evaluate() {
+    var L = A.L;
+    if (!L || !L.el || !A.el) return;
+    var p = pick(L);
+    if (p.s && p.s === A.gone) p = { why: 'the player is closing' };
+    var on = !!p.s;
+    L.el.classList.toggle('amb-on', on);
+    L.el.classList.toggle('amb-sh', on && p.mode === 'sh');
+    if (!on) {
+      A.why = p.why; A.off = p.why;
+      if (A.slot) { stop(); A.slot = null; }
+      return;
+    }
+    A.why = '';
+    var s = p.s, url = s.url;
+    try { url = s.view.getURL() || s.url; } catch (e) { url = s.url; }
+    var key = keyOf(s.service, url);
+    if (A.slot !== s || A.mode !== p.mode || key !== A.key) {
+      var fresh = key !== A.key;
+      A.slot = s; A.mode = p.mode;
+      if (fresh) {
+        A.key = key; A.sig = null; A.lastT = -1; A.from = 'none';
+        stop();
+        paintStill(s.service, url, key);
+      }
+    }
+    schedule();
+  }
+
+  function gateNow() {
+    var t = Date.now();
+    var api = window.api && window.api.lumenAmbient;
+    if (api && typeof api.gate === 'function' && !A.saverAsking && t - A.saverAt > GATE_MS) {
+      A.saverAsking = true;
+      api.gate().then(function (r) {
+        A.saverAsking = false; A.saverAt = Date.now();
+        var was = A.saver;
+        A.saver = r && r.ok ? r.saver : null;
+        if (was !== A.saver) evaluate();
+      }, function () { A.saverAsking = false; A.saverAt = Date.now(); });
+    }
+    return refreshOff({ reduced: reduced(), saver: A.saver, hidden: document.hidden, focused: focused() });
+  }
+
+  /** The next sample, ms from now (default: the first one or the playing cadence), if the refresh may run. */
+  function schedule(ms) {
+    if (!A.slot) { A.off = A.why; return; }
+    A.off = gateNow();
+    if (A.off) { stop(); return; }
+    if (A.timer || A.busy) { if (ms === undefined) return; clearTimeout(A.timer); A.timer = 0; }
+    var seq = A.seq;
+    A.timer = setTimeout(function () { A.timer = 0; if (seq === A.seq) sample(seq); }, ms === undefined ? (A.from === 'frame' ? EVERY : FIRST) : ms);
+  }
+
+  function sample(seq) {
+    var s = A.slot;
+    if (!s || !s.view || A.busy) return;
+    if (gateNow()) { A.off = gateNow(); return; }
+    var key = A.key, v = s.view, t0 = now();
+    A.busy = true;
+    var p;
+    try { p = v.executeJavaScript(SAMPLE, false); } catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function (r) {
+      A.busy = false;
+      A.lastSampleMs = Math.round(now() - t0);
+      if (seq !== A.seq || A.slot !== s || A.key !== key) return;
+      if (r && typeof r.ms === 'number') A.maxSampleMs = Math.max(A.maxSampleMs, r.ms);
+      if (!r || !r.ok) {
+        A.why = 'no frame sample: ' + ((r && r.reason) || 'no answer');
+        if (r && r.still && A.from === 'none') paintImageUrl(r.still, key);
+        schedule(EVERY_IDLE);
+        return;
+      }
+      A.samples++;
+      A.why = '';
+      // Nothing moved since the last one (paused on the same frame): nothing to paint.
+      if (r.paused && r.t === A.lastT && A.from === 'frame') { schedule(EVERY_IDLE); return; }
+      A.lastT = r.t;
+      // A black frame (a fade, a protected video): keep what is there.
+      if (r.max < 14 && A.from !== 'none') { A.skipped++; schedule(r.paused ? EVERY_IDLE : EVERY); return; }
+      var bin = atob(r.px), px = new Uint8ClampedArray(r.w * r.h * 4);
+      for (var i = 0, j = 0; i < bin.length; i += 3, j += 4) { px[j] = bin.charCodeAt(i); px[j + 1] = bin.charCodeAt(i + 1); px[j + 2] = bin.charCodeAt(i + 2); px[j + 3] = 255; }
+      var sig = signature(px, r.w, r.h, 4);
+      if (A.from === 'frame' && diff(sig, A.sig) < DELTA) { A.skipped++; schedule(r.paused ? EVERY_IDLE : EVERY); return; }
+      A.sig = sig;
+      var sc = A.src;
+      if (sc.width !== r.w) sc.width = r.w;
+      if (sc.height !== r.h) sc.height = r.h;
+      sc.getContext('2d').putImageData(new ImageData(px, r.w, r.h), 0, 0);
+      paint(sc, r.w, r.h);
+      A.from = 'frame';
+      schedule(r.paused ? EVERY_IDLE : EVERY);
+    }, function (e) {
+      A.busy = false;
+      if (seq !== A.seq) return;
+      A.why = 'no frame sample: ' + ((e && e.message) || e);
+      schedule(EVERY_IDLE);
+    });
+  }
+
+  function paintStill(service, url, key) {
+    var u = service === 'youtube' ? stillUrl(ytId(url)) : '';
+    if (u) paintImageUrl(u, key);
+    else if (A.from === 'none') neutral();
+  }
+
+  function paintImageUrl(u, key) {
+    if (!/^https?:\/\//i.test(String(u || ''))) { if (A.from === 'none') neutral(); return; }
+    var im = new Image();
+    im.decoding = 'async';
+    im.referrerPolicy = 'no-referrer';
+    im.onload = function () {
+      // Decoded off the main thread BEFORE the canvas draws it, so the draw never decodes in a frame.
+      var go = function () {
+        if (A.key !== key || A.from === 'frame') return;
+        A.stills++;
+        paint(im, im.naturalWidth, im.naturalHeight);
+        A.from = 'still';
+      };
+      if (typeof im.decode === 'function') im.decode().then(go, go); else go();
+    };
+    im.onerror = function () { if (A.key === key && A.from === 'none') { A.why = 'the video’s still didn’t load'; neutral(); } };
+    im.src = u;
+  }
+
+  /** No picture to draw from: a quiet neutral lift around the player, never flat black. */
+  function neutral() {
+    var c = A.cvs[1 - A.on];
+    if (!c) return;
+    var x = c.getContext('2d');
+    x.save();
+    x.filter = 'none';
+    var g = x.createRadialGradient(CW / 2, CH * 0.42, 2, CW / 2, CH * 0.42, CW * 0.62);
+    g.addColorStop(0, '#3a3c40');
+    g.addColorStop(0.55, '#1c1d20');
+    g.addColorStop(1, '#0b0c0d');
+    x.fillStyle = g;
+    x.fillRect(0, 0, CW, CH);
+    x.restore();
+    swap();
+    A.from = 'neutral';
+  }
+
+  /** Draw a picture (cover-fit, with overscan so the blurred edge never greys) into the hidden canvas and cross-fade. */
+  function paint(img, w, h) {
+    var c = A.cvs[1 - A.on];
+    if (!c || !w || !h) return;
+    var t0 = now();
+    var x = c.getContext('2d');
+    var o = 6, bw = CW + 2 * o, bh = CH + 2 * o;
+    var k = Math.max(bw / w, bh / h), dw = w * k, dh = h * k;
+    x.save();
+    x.fillStyle = '#0b0c0d';
+    x.fillRect(0, 0, CW, CH);
+    x.filter = FILTER;
+    x.drawImage(img, (CW - dw) / 2, (CH - dh) / 2, dw, dh);
+    x.restore();
+    A.maxPaintMs = Math.max(A.maxPaintMs, Math.round((now() - t0) * 10) / 10);
+    swap();
+  }
+  function swap() {
+    var next = A.cvs[1 - A.on], cur = A.cvs[A.on];
+    next.classList.add('on');
+    cur.classList.remove('on');
+    A.on = 1 - A.on;
+    A.paints++;
+  }
+
+  function state() {
+    return {
+      on: !!(A.L && A.L.el && A.L.el.classList.contains('amb-on')), mode: A.slot ? A.mode : '', key: A.key, src: A.from,
+      refreshing: !!(A.timer || A.busy), off: A.off, why: A.why, every: EVERY,
+      paints: A.paints, samples: A.samples, skipped: A.skipped, stills: A.stills,
+      maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, saver: A.saver
+    };
+  }
+
+  return {
+    // watch-playview.js hooks
+    attach: attach, destroy: destroy,
+    // pure parts (tests/watch-ambient-test.js)
+    ytId: ytId, stillUrl: stillUrl, keyOf: keyOf, signature: signature, diff: diff, refreshOff: refreshOff, pick: pick,
+    EVERY: EVERY, EVERY_IDLE: EVERY_IDLE, DELTA: DELTA,
+    _state: state
+  };
+});

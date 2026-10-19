@@ -6,12 +6,20 @@
    Previous / Next beside it, and Lumen's info BESIDE it on a wide
    layer or BELOW it on a narrow one (watch-shorts.js box() places
    them in px; this file only draws them). The info's parts reuse
-   watch-playview.css's pv-* look. Neutral greys; the accent only on
-   focus. No backdrop-filter, no glow.
+   watch-playview.css's pv-* look.
+
+   The look (lane lumen-n-look): the reel floats centred over the
+   Short's own ambient field (watch-ambient.css), so the sides are its
+   colours, never an empty black half; Previous / Next are one split
+   capsule beside it; the info is a Quartz island (the view's panel
+   tint, hairline, lip and drop) resting on the reel's baseline. Words
+   only ever sit on the island, so they keep WCAG AA over any Short.
+   Neutral greys; Quartz's accent on focus and a pressed Like only.
+   No backdrop-filter, no glow.
    ============================================================ */
 .wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.sh {
   overflow: hidden;
-  background: #0b0c0d;
+  background: var(--lumen-view-bg, #0b0c0d);
 }
 .wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.sh > .wp-view {
   position: absolute;
@@ -20,9 +28,10 @@
   top: var(--sh-y, 16px) !important;
   width: var(--sh-w, 405px) !important;
   height: var(--sh-h, 720px) !important;
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
   background: #000;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / .07), 0 3px 10px rgb(0 0 0 / .34), 0 24px 64px rgb(0 0 0 / .46);
 }
 /* Outside the view (a grid, the corner, fullscreen, the whole page when no player was found): nothing of Lumen's. */
 .wp-tile:not(.sh) > .sh-cover,
@@ -35,15 +44,16 @@
 .sh-cover {
   position: absolute;
   z-index: 2;
-  border-radius: 14px;
-  background: #111214;
+  border-radius: 16px;
+  background: #121315;
+  box-shadow: var(--lv-panel-edge, none);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
   padding: 0 18px;
-  color: #a9adb3;
+  color: var(--lv-text-2, #a9adb3);
   font-size: 13px;
   line-height: 1.45;
   text-align: center;
@@ -52,7 +62,8 @@
 .sh-cover.is-empty .pv-cover-bar { display: none; }
 .sh-cover.is-empty .sh-cover-txt { color: var(--warn, #d6b46a); }
 
-/* Previous / Next: YouTube's own navigation, pressed by Lumen's buttons. */
+/* Previous / Next: YouTube's own navigation, pressed by Lumen's buttons; one split capsule,
+   centred on the reel's height. */
 .sh-nav {
   position: absolute;
   z-index: 3;
@@ -60,47 +71,69 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 12px;
+  gap: 2px;
 }
 .sh-nav[hidden] { display: none; }
 .sh-navbtn {
   width: 44px;
-  height: 44px;
+  height: 50px;
   padding: 0;
-  border-radius: 50%;
   justify-content: center;
+  background: rgb(36 37 39 / .84);
+  box-shadow: var(--lv-panel-edge, none), 0 6px 18px rgb(0 0 0 / .28);
+  color: #f2f2f0;
 }
+.sh-navbtn:first-child { border-radius: 22px 22px 6px 6px; }
+.sh-navbtn:last-child { border-radius: 6px 6px 22px 22px; }
+.sh-navbtn:hover:not(:disabled) { background: rgb(44 45 47 / .88); color: #ffffff; }
+.sh-navbtn:active:not(:disabled) { background: rgb(60 61 64 / .9); }
+.sh-navbtn:disabled { opacity: .5; }
 .sh-navbtn .pv-ico, .sh-navbtn .pv-ico svg { width: 22px; height: 22px; }
 .sh-navbtn .pv-ico svg { stroke-width: 2; }
 
-/* The info: beside (a column the player's height) or below (a short block under it). */
+/* The info: an island beside the reel, resting on its baseline (or a short block under it). */
 .sh-info {
   position: absolute;
   z-index: 3;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
   overflow: hidden;
-  color: #e9eaec;
+  padding: 18px 20px 16px;
+  border-radius: 18px;
+  background: var(--lv-panel, rgb(21 22 23 / .8));
+  box-shadow: var(--lv-panel-edge, none), 0 1px 2px rgb(0 0 0 / .22), 0 18px 44px rgb(0 0 0 / .32);
+  color: var(--lv-text, #e9eaec);
   font: 13px/1.4 var(--font);
 }
 .sh-info[hidden] { display: none; }
-.wp-tile[data-sh="beside"] .sh-info { justify-content: flex-end; padding-bottom: 6px; }
-.wp-tile[data-sh="below"] .sh-info { gap: 10px; }
+.sh-info:empty { display: none; }
+.wp-tile[data-sh="beside"] .sh-info {
+  top: auto !important;
+  bottom: calc(100% - var(--sh-y, 16px) - var(--sh-h, 720px));
+  height: auto;
+}
+.wp-tile[data-sh="below"] .sh-info { gap: 10px; padding: 14px 16px; height: auto; }
 .sh-head { display: flex; align-items: center; gap: 8px; }
 .sh-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 11.5px;
   font-weight: 650;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: #8d9197;
+  color: var(--lv-text-2, #a9adb3);
   padding-bottom: 1px;
 }
+.sh-kicker::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--lv-on, #c5d2e0); }
 .sh-info .sh-title {
   margin: 0;
   font: 650 clamp(17px, 1.25vw, 21px)/1.32 var(--font-display);
-  color: #f1f2f3;
+  letter-spacing: -0.012em;
+  color: #f5f5f3;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -112,9 +145,16 @@
 .sh-chan { flex-wrap: wrap; row-gap: 10px; }
 .sh-info .pv-chan-name { max-width: 220px; }
 .sh-acts { flex-wrap: wrap; row-gap: 8px; }
-.sh-info .pv-confirm, .sh-info .pv-savelist { margin: 0; }
+.sh-info .pv-confirm, .sh-info .pv-savelist { margin: 0; background: rgb(255 255 255 / .05); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .06); }
 .sh-info .pv-savelist { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
 .sh-info .pv-why { margin: 0; }
-.sh-hint { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: #75767a; padding-bottom: 1px; }
+.sh-hint {
+  margin: 0;
+  padding: 12px 0 1px;
+  border-top: 1px solid rgb(255 255 255 / .07);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--lv-text-3, #9a9ea4);
+}
 .wp-tile[data-sh="below"] .sh-hint, .wp-tile[data-sh="below"] .sh-head { display: none; }
 @media (prefers-reduced-motion: reduce) { .sh-cover .pv-cover-bar::after { animation: none; } }
