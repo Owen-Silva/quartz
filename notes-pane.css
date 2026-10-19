@@ -1,0 +1,413 @@
+/* school-pane.css — everything inside #sidepane-body while the pane kind is
+   'school' (every .school-* class). The pane sits BESIDE the tab well, not over
+   it, as a Helm docked panel: the host (#sidepane, chrome.css) is the panel
+   tint over the one pre-blurred background layer; inside it this file lays out
+   Helm cards, chips, buttons and fields. Every rule is written against
+   tokens.css names (chrome.css @imports it), so html[data-theme="light"]
+   relights the pane with no block of its own. No glow at rest, no
+   backdrop-filter anywhere in here (the pane is tall and the notes scroll).
+
+   States use tokens.css's semantic colours: --ok for working, --warn for
+   waiting or not ready, --danger for broken. The old local --school-bad pair
+   is gone now that tokens.css carries a --danger for both themes. */
+
+.school-pane {
+  --school-row-h:    18px;
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;                 /* or the notes view cannot shrink */
+  height: 100%;
+  /* Tight on purpose: every pixel the chrome above the notes gives up is a
+     pixel of notebook (The user, 2026-09-14: "i cant really see them"). */
+  gap: 6px;
+  padding: 6px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+}
+
+/* Several blocks below set display:flex (or contents), and a class selector
+   outranks the UA sheet's [hidden]{display:none} — same specificity, author
+   sheet wins. Without this rule a "hidden" empty state still takes its share of
+   a flex column, which is exactly how the notes view lost 200px of height. One
+   rule keeps `hidden` meaning hidden everywhere in the pane. */
+.school-pane [hidden] { display: none !important; }
+
+/* The host owns #sidepane; all this does is let our column reach its full
+   height inside it, and only while the School pane is the one up. */
+#sidepane[data-kind="school"] > #sidepane-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* The narrowest the School pane may be, because the notebooks cannot reflow
+   below it. They carry fixed-width cards (course-a's .model boxes are 280px,
+   course-b' 255px, course-c' 230px), so under ~305px of layout width
+   the page scrolls sideways instead of wrapping. Measured 2026-09-14 in
+   Chromium across all five files: not one overflows at 320px or wider. The
+   page gets the pane's width minus 36px (1px rim + 6px handle, 6px padding a
+   side, the view's 1px border a side, the guest's own 15px scrollbar), so
+   360px leaves it 324px. app.js's clamp still allows 280 for every kind; this
+   holds only while School's pane is up, and yields to the host's 60%-of-window
+   ceiling on a small window. A drag past it simply stops at the floor. */
+#sidepane[data-kind="school"] { min-width: min(360px, 60vw); }
+
+/* --- the unready banner ------------------------------------------ */
+/* ready:false is a STATE, not a crash: Helm's warn chip colours (the soft
+   warn wash, a hairline), and it says the whole reason main gave rather than
+   truncating it. The text stays --text so a long reason is easy to read. */
+.school-alert {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent);
+  border-radius: var(--radius-s);
+  background: var(--warn-soft);
+  color: var(--text);
+  line-height: 1.42;
+}
+
+/* --- chips -------------------------------------------------------- */
+.school-head { flex: 0 0 auto; }
+
+.school-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Helm's .chip at Quartz's 22px class-picker size: --surface-2 with a
+   hairline; the chosen class is .chip.on (accent wash, accent line). */
+.school-chip {
+  appearance: none;
+  min-height: 22px;
+  padding: 2px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  cursor: default;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.school-chip:hover { background: var(--surface-3); color: var(--text); border-color: var(--hairline-strong); }
+.school-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.school-chip.is-on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* the class LessonPlayer itself picked: a small accent dot, no glow */
+.school-chip.is-detected::after {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+}
+
+.school-chip-auto { font-variant-caps: all-small-caps; letter-spacing: .06em; }
+
+/* Helm's .hint */
+.school-why {
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+}
+
+/* --- the status strip --------------------------------------------- */
+/* Always visible, never collapsed: it is the one place that answers "is this
+   thing working?" and every line of it comes from main. Compact, though: one
+   row per status (see the clamp below), 1px between rows, and the "paste a
+   question" disclosure folded into the controls row. A Helm card: --surface-2,
+   a hairline, the medium radius, the inner top edge. Flat (no drop shadow):
+   it sits inside a panel that already carries the depth. */
+.school-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+}
+
+.school-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: var(--school-row-h);
+  color: var(--text-2);
+  line-height: 1.35;
+}
+
+.school-line .school-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* One row per status while the strip is compact. The row still opens with its
+   state and the start of its reason, the whole line is the row's tooltip, and
+   school-pane.js shows "Show all" whenever a row is actually cut short, so
+   nothing is clipped without a way to read it. A FAILURE (data-level="bad") is
+   never clamped: an error's reason always prints in full. */
+.school-strip:not(.is-full) .school-line:not([data-level="bad"]) .school-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* status as Helm's .dot: a painted dot, never a lit one */
+.school-line .school-pip {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--st-idle);
+}
+
+.school-line[data-level="ok"]   .school-pip { background: var(--ok); }
+.school-line[data-level="wait"] .school-pip { background: var(--warn); }
+.school-line[data-level="bad"]  .school-pip { background: var(--danger); }
+.school-line[data-level="off"]  .school-pip { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
+
+.school-line[data-level="wait"] { color: var(--warn); }
+.school-line[data-level="bad"]  { color: var(--danger); }
+.school-line[data-level="ok"]   { color: var(--text); }
+
+/* --- controls ------------------------------------------------------ */
+.school-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+/* display:contents lets the button and its reason be direct flex children of
+   the row, so a long reason can take a line of its own. (The [hidden] rule at
+   the top of this file is what keeps hiding the wrapper working.) */
+.school-ctl { display: contents; }
+
+/* Helm's .btn at Quartz's 22px size */
+.school-btn {
+  appearance: none;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  cursor: default;
+  box-shadow: inset 0 1px 0 var(--hairline-inner);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.school-btn:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+.school-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.school-btn.is-on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--text); }
+/* "off" means the app cannot do it yet — still pressable, so it can say why. */
+.school-btn.is-off { color: var(--text-3); border-style: dashed; box-shadow: none; }
+
+/* a refused command's own words, beside the control that was pressed */
+.school-inline {
+  flex: 1 1 100%;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-2xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.school-note {
+  color: var(--warn);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+}
+
+/* the strip's memory of the last refusal, after the inline note times out */
+.school-refusal {
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--hairline);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* --- the strip's two disclosures ------------------------------------- */
+/* "Show all" / "Show less" and "Paste a question" ride at the end of the
+   controls row instead of taking rows of their own. Quiet text (Helm's ghost
+   button, without the fill), not bordered buttons: they change what the strip
+   shows, not what the School brain does. The wrapper carries the
+   margin-left:auto, so a hidden "Show all" never leaves the other one
+   stranded on the left. */
+.school-toggles {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.school-toggle {
+  appearance: none;
+  min-height: 22px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  cursor: default;
+  transition: color var(--dur) var(--ease);
+}
+
+.school-toggle:hover { color: var(--text); }
+/* the toggles pack edge to edge: the ring is drawn inside, never over the neighbour */
+.school-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
+.school-toggle[data-toggle="ask"]::before { content: '\203A\00a0'; }
+.school-toggle[data-toggle="ask"][aria-expanded="true"]::before { content: '\2039\00a0'; }
+
+/* --- paste a question ---------------------------------------------- */
+.school-ask { margin-top: 4px; }
+
+/* Helm's .textarea: a recessed --code-bg field, the accent line and the
+   focus ring while it holds the caret. */
+.school-ask-text {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  resize: vertical;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.school-ask-text::placeholder { color: var(--text-3); }
+.school-ask-text:hover { border-color: var(--hairline-strong); }
+.school-ask-text:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--focus-ring); }
+
+.school-ask-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+/* --- the notes ------------------------------------------------------ */
+.school-notes {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;                 /* the whole point: the guest takes the rest */
+  gap: 4px;
+}
+
+.school-notes-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.school-notes-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.school-notes-note {
+  flex: 0 0 auto;
+  color: var(--warn);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* The guest's own frame. A <webview> does not clip, so the rounding lives on
+   this wrapper and the guest fills it square. The ground is opaque
+   --surface-solid: the notes are a page, and a page is never a tint. */
+.school-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-m);
+  background: var(--surface-solid);
+  overflow: hidden;
+}
+
+/* The guest fills the frame edge to edge, at whatever height the column gives
+   it, and follows every pane or window resize. Absolute + inset, so the fill
+   never waits on the flex column resolving a definite height; width and height
+   too, because the iframe fallback is a replaced element and inset alone would
+   leave it at its intrinsic 300x150.
+
+   DISPLAY IS THE BUG THIS FIXES. A <webview> lays its page out through its own
+   shadow tree: `:host { display: flex }` around an inner iframe set to
+   `flex: 1 1 auto; width: 100%`. This rule used to say display:block, which
+   outranks that :host rule, and outside a flex row the inner iframe has no
+   height of its own, so it fell back to the replaced-element default: 150px.
+   Measured live 2026-09-14: the <webview> element 502x546, the notes page
+   inside it 502x150, the other 396px this frame's empty ink. So a <webview>
+   stays display:flex, and only the iframe fallback (inline by default) is
+   display:block. */
+.school-view .school-guest {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface-solid);
+}
+
+.school-view webview.school-guest { display: flex; }
+.school-view iframe.school-guest  { display: block; }
+
+/* Helm's .empty-note in a dashed hairline frame */
+.school-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--radius-m);
+  color: var(--text-3);
+  font-size: var(--fs-s);
+  line-height: 1.5;
+  text-align: center;
+}
