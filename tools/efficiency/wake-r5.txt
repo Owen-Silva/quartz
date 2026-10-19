@@ -3,10 +3,10 @@
 q-fix-1:nohook
 q-fix-2:nohook
 q-fix-3:nohook
-q-q3-1:sch=ab-q3
-q-q3-2:sch=ab-q3
-q-master:sch=ab-master
-q-noschool:off=school+procfind
+q-q3-1:notes=ab-q3
+q-q3-2:notes=ab-q3
+q-master:notes=ab-master
+q-nonotes:off=notes-pane-main+procfind
 bare:BARE
 r-push100:repro=unref3s-push
 r-pushpromise:repro=unref3s-pushpromise

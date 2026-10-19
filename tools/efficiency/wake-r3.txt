@@ -1,9 +1,9 @@
-# wake-bisect.js round 3: is it an unref'd-timer effect? Quartz with only school live, plus a
+# wake-bisect.js round 3: is it an unref'd-timer effect? Quartz with only the notes pane live, plus a
 # plain-Electron repro with only timers.
-s-full:off=ALL+-school+@ghostery/adblocker-electron
-s-kill3000:off=ALL+-school+@ghostery/adblocker-electron,sch=kill3000
-s-allref:off=ALL+-school+@ghostery/adblocker-electron,no=unref
-s-noop3000:off=ALL+-school+@ghostery/adblocker-electron,sch=noop3000
+s-full:off=ALL+-notes-pane-main+@ghostery/adblocker-electron
+s-kill3000:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=kill3000
+s-allref:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,no=unref
+s-noop3000:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=noop3000
 q-allref:no=unref
 r-none:repro=none
 r-unref3s:repro=unref3s

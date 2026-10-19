@@ -1,9 +1,9 @@
 # wake-bisect.js round 4: the fix, A/B on the FULL app (Home, no tabs), plus repro variants.
-q-master:sch=ab-master
-q-q3:sch=ab-q3
+q-master:notes=ab-master
+q-q3:notes=ab-q3
 q-fix-a:snap
 q-fix-b:nohook
-q-noschool:off=school+procfind
+q-nonotes:off=notes-pane-main+procfind
 bare:BARE
 r-push100:repro=unref3s-push
 r-push1000:repro=unref3s-push1000

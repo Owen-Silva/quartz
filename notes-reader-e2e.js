@@ -1,12 +1,13 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }   // first: one capped browser at a time (The user, 2026-09-17)
-// school-reader-e2e.js -- school-reader.ps1 against a Chromium stand-in for LessonPlayer
-// (tests/school-standin.js). The user's LessonPlayer is never touched: the reader is pointed at the
-// stand-in's process name, schoolstandin (a hardlink of electron.exe).
+try { require('./tools/lowcpu-optional.js'); } catch (e) { /* no CPU cap configured (QUARTZ_LOWCPU / ~/.config/quartz/lowcpu.js), or the module is missing: run uncapped */ }   // first: one capped browser at a time (The user, 2026-09-17)
+// notes-reader-e2e.js -- notes-reader.ps1 against a Chromium stand-in for the reader app
+// (tests/notes-reader-standin.js). No real reader app is ever touched: the reader is pointed
+// at the stand-in's own process name, notesstandin (a hardlink of electron.exe), and is
+// handed that name in every command, exactly as notes-pane-main.js hands it reader.exe.
 //
-//   node school-reader-e2e.js                         the checks below
-//   node school-reader-e2e.js --bench [--script <ps1>|none] [--secs 90] [--every 20]
+//   node notes-reader-e2e.js                         the checks below
+//   node notes-reader-e2e.js --bench [--script <ps1>|none] [--secs 90] [--every 20]
 //                                                     CPU of the reader and of the stand-in
-//                                                     while school.js's 3 s reads run; the
+//                                                     while notes-pane-main.js's 3 s reads run; the
 //                                                     question changes every --every seconds
 //
 // Checks, doc mode (Chromium's TextPattern): a first read walks and returns the question; with
@@ -16,10 +17,10 @@ try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this mach
 // hidden by a test hook): reads are gated by UIA change events, a new question walks (events);
 // a provider that raises no events is caught by the max-age safety read, which turns the gate
 // off and says so, after which every read walks.
-// STANDIN_MSAA=1 / STANDIN_EXTRA=N shape the stand-in (see tests/school-standin.js). Not launched under 2.5 GB free RAM (exit 3).
+// STANDIN_MSAA=1 / STANDIN_EXTRA=N shape the stand-in (see tests/notes-reader-standin.js). Not launched under 2.5 GB free RAM (exit 3).
 // testwatch.js fails the run if the stand-in ever touches the visible desktop (not in --bench:
 // its 25 ms poll would pollute the measurement; the window is still created at -20000,-20000).
-// Kills ONLY the processes it started. One summary line: "school-reader-e2e: N passed, M failed".
+// Kills ONLY the processes it started. One summary line: "notes-reader-e2e: N passed, M failed".
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -29,12 +30,12 @@ const { MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const BENCH = argv.includes('--bench');
-const SCRIPT = opt('script', path.join(__dirname, 'school-reader.ps1'));
+const SCRIPT = opt('script', path.join(__dirname, 'notes-reader.ps1'));
 const SECS = Number(opt('secs', '90'));
 const EVERY = Number(opt('every', '20'));
 const DIST = path.join(__dirname, 'node_modules', 'electron', 'dist');
-const STANDIN_EXE = path.join(DIST, 'schoolstandin.exe');
-const PROC = 'schoolstandin';
+const STANDIN_EXE = path.join(DIST, 'notesstandin.exe');
+const PROC = 'notesstandin';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0, fail = 0;
@@ -107,14 +108,14 @@ const has = (m, s) => !!(m && m.ok && String(m.text || '').indexOf(s) !== -1);
 async function main() {
   const free = freeRamGb();
   if (!(free >= MIN_FREE_GB)) {
-    console.log('school-reader-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB');
+    console.log('notes-reader-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB');
     process.exit(3);
   }
   if (!fs.existsSync(STANDIN_EXE)) fs.linkSync(path.join(DIST, 'electron.exe'), STANDIN_EXE);
 
   const watcher = BENCH ? null : startWatcher();
   if (watcher) await watcher.ready;
-  const standin = lineChild(STANDIN_EXE, [path.join(__dirname, 'tests', 'school-standin.js')], { STANDIN_PARENT_PID: String(process.pid) });
+  const standin = lineChild(STANDIN_EXE, [path.join(__dirname, 'tests', 'notes-reader-standin.js')], { STANDIN_PARENT_PID: String(process.pid) });
   const up = await standin.next(60000);
   standin.cmd = async (c) => { try { return await (await fetch('http://127.0.0.1:' + up.port + '/' + c)).json(); } catch (e) { return { ok: false, reason: String(e.message || e) }; } };
   if (!up.ready) { console.log('the stand-in never came up: ' + JSON.stringify(up) + ' ' + standin.err); killPid(standin.child.pid); process.exit(1); }
@@ -125,7 +126,7 @@ async function main() {
   try {
     if (BENCH) await bench(standin);
     else {
-      reader = lineChild('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT], { SCHOOL_READER_TEST: '1' });
+      reader = lineChild('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT], { NOTES_READER_TEST: '1' });
       await checks(standin, reader);
     }
   } finally {
@@ -135,7 +136,7 @@ async function main() {
     killPid(standin.child.pid);
     if (watcher) { const v = watcher.verdict(); watcher.stop(); check(v.ok, v.line); }
   }
-  if (!BENCH) console.log('school-reader-e2e: ' + pass + ' passed, ' + fail + ' failed');
+  if (!BENCH) console.log('notes-reader-e2e: ' + pass + ' passed, ' + fail + ' failed');
 }
 
 async function settle(r, extra) {
@@ -151,7 +152,7 @@ async function checks(standin, r) {
   /* ---- doc mode: the page has a TextPattern, so a read re-asks for its text and compares ---- */
   const first = await read(r);
   check(first.ok && !first.cached && first.walked === 'first', 'first read walks the tree', { walked: first.walked, cached: first.cached, via: first.via, nodes: first.nodes, reason: first.reason });
-  check(has(first, 'Question 1:') && has(first, 'Sample Lesson') && has(first, 'Problem 1 of 20'), 'first read has the question, the lesson and the problem number', first.text);
+  check(has(first, 'Question 1:') && has(first, 'Sample Topic') && has(first, 'Problem 1 of 20'), 'first read has the question, the lesson and the problem number', first.text);
   check(first.watch === 'doc', 'a page with a TextPattern is watched by its text (no event subscription)', first.watch);
   let s = await settle(r);
   check(s.m && s.m.cached, 'with nothing changing, reads come from the gate', 'cached after ' + s.n + ' reads; last walked=' + (s.m && s.m.walked));
@@ -253,8 +254,8 @@ async function bench(standin) {
     latenciesMs: latencies,
   };
   console.log('BENCH ' + JSON.stringify(out));
-  fs.writeFileSync(path.join(require('os').tmpdir(), 'school-bench-' + out.script + '.json'), JSON.stringify({ out, texts }, null, 1));
+  fs.writeFileSync(path.join(require('os').tmpdir(), 'notes-reader-bench-' + out.script + '.json'), JSON.stringify({ out, texts }, null, 1));
   if (r) { try { r.child.stdin.write('{"id":0,"cmd":"quit"}\n'); } catch (e) { /* gone */ } await sleep(400); killPid(r.child.pid); }
 }
 
-main().catch((e) => { console.log('school-reader-e2e crashed: ' + (e && e.stack || e)); console.log('school-reader-e2e: ' + pass + ' passed, ' + (fail + 1) + ' failed'); process.exit(1); });
+main().catch((e) => { console.log('notes-reader-e2e crashed: ' + (e && e.stack || e)); console.log('notes-reader-e2e: ' + pass + ' passed, ' + (fail + 1) + ' failed'); process.exit(1); });

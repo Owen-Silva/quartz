@@ -1,12 +1,12 @@
-# wake-bisect.js round 2: inside school.js. Everything but school is stubbed (light instances).
+# wake-bisect.js round 2: inside notes-pane-main.js (the notes pane). Everything but it is stubbed (light instances).
 bare:BARE
 s-none:off=ALL+@ghostery/adblocker-electron
-s-full:off=ALL+-school+@ghostery/adblocker-electron
-s-noauto:off=ALL+-school+@ghostery/adblocker-electron,sch=noauto
-s-runfalse:off=ALL+-school+@ghostery/adblocker-electron,sch=run-false
-s-runnull:off=ALL+-school+@ghostery/adblocker-electron,sch=run-null
-s-noreg:off=ALL+-school+@ghostery/adblocker-electron,sch=noreg
-s-kill3000:off=ALL+-school+@ghostery/adblocker-electron,sch=kill3000
-s-kill5000:off=ALL+-school+@ghostery/adblocker-electron,sch=kill5000
-s-kill30000:off=ALL+-school+@ghostery/adblocker-electron,sch=kill30000
-s-tmpdir:off=ALL+-school+@ghostery/adblocker-electron,sch=tmpdir
+s-full:off=ALL+-notes-pane-main+@ghostery/adblocker-electron
+s-noauto:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=noauto
+s-runfalse:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=run-false
+s-runnull:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=run-null
+s-noreg:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=noreg
+s-kill3000:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=kill3000
+s-kill5000:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=kill5000
+s-kill30000:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=kill30000
+s-tmpdir:off=ALL+-notes-pane-main+@ghostery/adblocker-electron,notes=tmpdir

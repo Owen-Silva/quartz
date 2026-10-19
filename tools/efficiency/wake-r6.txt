@@ -1,5 +1,5 @@
 # wake-bisect.js round 6 (lane idle2): the main-process timer audit. f- = this branch; m- = master
-# 5959017's school/budget/stats/stocks/autopause through ab=master (tools/efficiency/ab/*-master.js).
+# 5959017's notes-pane/budget/stats/stocks/autopause through ab=master (tools/efficiency/ab/*-master.js).
 # Home with no tabs unless url= is given; focus = Home's stats card subscribed (1 s sampler).
 f-home-1:
 f-home-2:

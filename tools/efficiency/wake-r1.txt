@@ -4,7 +4,7 @@ base:snap
 bare:BARE
 all:off=ALL+@ghostery/adblocker-electron
 diag:diag
-school:off=school+procfind
+notes:off=notes-pane-main+procfind
 phone:off=phone
 looksync:off=looksync-main
 statsap:off=stats+autopause

@@ -10,13 +10,15 @@
 //                     setInterval) -- a coarser cut than a module. typeperf: no typeperf child.
 //   QWAKE_DIAG=<file> at QWAKE_DIAG_AT s after start, count async_hooks inits by type and by stack
 //                     for QWAKE_DIAG_FOR s; snapshot the live handles / requests; write <file>.
-//   QWAKE_SCHOOL=...  change school.create()'s options, or load an older school.js (see below).
-//                     ab-<name> needs tools/efficiency/ab/school-<name>.js, made with e.g.
-//                     `git show 58be603:school.js > tools/efficiency/ab/school-master.js` (not
-//                     committed: a copy of a 1,400-line file per A/B).
+//   QWAKE_NOTES=...   change notes-pane-main.create()'s options, or load an older
+//                     notes-pane-main.js (see below). ab-<name> needs
+//                     tools/efficiency/ab/notes-pane-main-<name>.js, made with e.g.
+//                     `git show <commit>:notes-pane-main.js > tools/efficiency/ab/notes-pane-main-master.js`
+//                     (not committed: a copy of a 1,400-line file per A/B; a commit from before
+//                     the rename keeps the module under its old file name, so name that path).
 //
 // What it found (2026-10-15, rounds wake-r1..r5.txt, results in next-week/quartz-efficiency.md):
-// school.js's 3 s reader armed a 100 ms push timer on every read; each setTimeout in Electron's
+// the notes pane's 3 s reader (notes-pane-main.js) armed a 100 ms push timer on every read; each setTimeout in Electron's
 // main process calls process.activateUvLoop(), and that, from a timer callback every few seconds,
 // locks the main thread and Electron's libuv poll thread into waking each other for long spells.
 'use strict';
@@ -48,21 +50,22 @@ function makeStub(name) {
   return p;
 }
 
-// QWAKE_SCHOOL=a,b: change what main.js passes to school.create() (a bisect INSIDE school.js):
+// QWAKE_NOTES=a,b: change what main.js passes to notes-pane-main.create() (a bisect INSIDE
+// notes-pane-main.js):
 //   noauto      autoStart: false (no watch, no policy read, no presence/read timers)
 //   run-false   isRunning: () => false (no koffi, no tasklist)
 //   run-null    isRunning: () => null (the tasklist path, as master did)
 //   tmpdir      notesDir: a fresh temp dir that exists (so fs.watch succeeds, as on the user's box)
 //   kill<ms>    a setInterval of exactly <ms> made inside create() is never started
 //   noreg       spawn: refuses `reg` (the policy read), passes everything else to the real spawn
-const SCHOOL = new Set(list(process.env.QWAKE_SCHOOL));
+const NOTES = new Set(list(process.env.QWAKE_NOTES));
 const KEEP = new Set([...OFF].filter((x) => x.startsWith('-')).map((x) => x.slice(1)));
 // QWAKE_AB=<name>: every './x' main.js requires is tools/efficiency/ab/x-<name>.js when that file
 // exists (a whole older build's changed modules, e.g. made with
 // `git show 5959017:stats.js > tools/efficiency/ab/stats-master.js`; not committed).
 const AB = String(process.env.QWAKE_AB || '').trim();
 
-if (OFF.size || SCHOOL.size || AB) {
+if (OFF.size || NOTES.size || AB) {
   const load = Module._load;
   Module._load = function qwakeLoad(request, parent, isMain) {
     const rel = /^\.\.?[\\/]/.test(request);
@@ -72,40 +75,41 @@ if (OFF.size || SCHOOL.size || AB) {
       stubbed.push(base);
       return makeStub(base);
     }
-    // ab-<name>: main.js's './school' is tools/efficiency/ab/school-<name>.js (an older school.js
-    // for an A/B in one run); that copy's own './x' requires resolve against the app dir.
+    // ab-<name>: main.js's './notes-pane-main' is tools/efficiency/ab/notes-pane-main-<name>.js (an
+    // older notes-pane-main.js for an A/B in one run); that copy's own './x' requires resolve
+    // against the app dir.
     if (AB && rel && fromMain) {
       const alt = path.join(__dirname, 'ab', base + '-' + AB + '.js');
       if (fs.existsSync(alt)) { stubbed.push(base + '@' + AB); return load.call(this, alt, parent, isMain); }
     }
-    const ab = [...SCHOOL].find((x) => x.startsWith('ab-'));
-    if (ab && base === 'school' && fromMain) {
-      return load.call(this, path.join(__dirname, 'ab', 'school-' + ab.slice(3) + '.js'), parent, isMain);
+    const ab = [...NOTES].find((x) => x.startsWith('ab-'));
+    if (ab && base === 'notes-pane-main' && fromMain) {
+      return load.call(this, path.join(__dirname, 'ab', 'notes-pane-main-' + ab.slice(3) + '.js'), parent, isMain);
     }
     if (rel && parent && /[\\/]efficiency[\\/]ab[\\/]/.test(parent.filename || '')) {
       return load.call(this, path.join(__dirname, '..', '..', request), parent, isMain);
     }
     const mod = load.apply(this, arguments);
-    if (base === 'school' && SCHOOL.size && mod && typeof mod.create === 'function' && !mod.__qwake) {
+    if (base === 'notes-pane-main' && NOTES.size && mod && typeof mod.create === 'function' && !mod.__qwake) {
       const create = mod.create;
       const wrapped = Object.assign({}, mod, { __qwake: true });
-      wrapped.create = function qwakeSchool(options) {
+      wrapped.create = function qwakeNotes(options) {
         const o = Object.assign({}, options);
-        if (SCHOOL.has('noauto')) o.autoStart = false;
-        if (SCHOOL.has('run-false')) o.isRunning = () => false;
-        if (SCHOOL.has('run-null')) o.isRunning = () => null;
-        if (SCHOOL.has('tmpdir')) o.notesDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'qwake-notes-'));
-        if (SCHOOL.has('noreg')) {
+        if (NOTES.has('noauto')) o.autoStart = false;
+        if (NOTES.has('run-false')) o.isRunning = () => false;
+        if (NOTES.has('run-null')) o.isRunning = () => null;
+        if (NOTES.has('tmpdir')) o.notesDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'qwake-notes-'));
+        if (NOTES.has('noreg')) {
           const cp = require('child_process');
           if (!o.isRunning) o.isRunning = (n) => require(path.join(path.dirname(parent.filename), 'procfind')).running(n);
           o.spawn = (file, args, opt) => { if (file === 'reg') throw new Error('qwake: reg blocked'); return cp.spawn(file, args, opt); };
         }
-        const kills = [...SCHOOL].filter((x) => /^kill\d+$/.test(x)).map((x) => Number(x.slice(4)));
+        const kills = [...NOTES].filter((x) => /^kill\d+$/.test(x)).map((x) => Number(x.slice(4)));
         const realSI = global.setInterval;
-        if (kills.length || [...SCHOOL].some((x) => /^noop\d+$/.test(x))) {
+        if (kills.length || [...NOTES].some((x) => /^noop\d+$/.test(x))) {
           global.setInterval = function qwakeSI(fn, ms, ...rest) {
             if (kills.includes(ms)) return { unref() { return this; }, ref() { return this; }, hasRef() { return false; } };
-            if (SCHOOL.has('noop' + ms)) return realSI.call(this, () => {}, ms, ...rest);
+            if (NOTES.has('noop' + ms)) return realSI.call(this, () => {}, ms, ...rest);
             return realSI.call(this, fn, ms, ...rest);
           };
         }

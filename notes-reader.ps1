@@ -1,12 +1,19 @@
-# school-reader.ps1 — the School workspace's fallback reader (see school.js).
+# notes-reader.ps1 — the notes pane's fallback reader (see notes-pane-main.js).
 #
-# A PERSISTENT child process: school.js spawns it once and then talks to it in
+# It reads the visible text of ONE desktop app ("the reader app": the program
+# the question on screen lives in), so the notes pane can find the matching
+# topic in the notes. Which app is never decided here: the caller names it
+# in every command ("process", from reader.exe in notes-pane.json), and a
+# command with no process is refused with a reason rather than guessed at.
+#
+# A PERSISTENT child process: notes-pane-main.js spawns it once and then talks to it in
 # JSON lines over stdin/stdout, because paying PowerShell's ~700 ms startup on
 # every three-second poll would be absurd.
 #
-#   in  : {"id":7,"cmd":"read","process":"LessonPlayerApp"}
+#   in  : {"id":7,"cmd":"read","process":"ReaderApp"}
 #   out : {"id":7,"ok":true,"cmd":"read","title":"...","text":"...","chars":812,"via":"uia-text-pattern"}
-#   out : {"id":7,"ok":false,"cmd":"read","reason":"LessonPlayerApp has no visible top-level window"}
+#   out : {"id":7,"ok":false,"cmd":"read","reason":"ReaderApp has no visible top-level window"}
+#   out : {"id":8,"ok":false,"cmd":"read","reason":"no reader app configured (reader.exe in notes-pane.json)"}
 #
 # Commands
 #   ping  — is the reader alive (used after a restart)
@@ -20,8 +27,8 @@
 #
 # What a read costs, and why most reads cost almost nothing (2026-10-16)
 #   A full "read" is Get-Process + a UI Automation walk of the window (up to
-#   4000 nodes, each a cross-process call into LessonPlayer's WebView2) + JSON, every
-#   3 s while LessonPlayer is open: ~2-3% of the whole CPU on battery (The user, 10-15).
+#   4000 nodes, each a cross-process call into the reader app's WebView2) + JSON,
+#   every 3 s while the reader app is open: ~2-3% of the whole CPU on battery (The user, 10-15).
 #   Now a read only walks when something can have changed since the last walk;
 #   otherwise it answers from that walk ("cached": true), after checking the
 #   window still exists (a few Win32 calls). What "changed" means depends on
@@ -35,8 +42,8 @@
 #   Guards: a full walk at least every MaxAgeMs (24 s) regardless; in events
 #   mode, if that walk finds different text and no event fired, the events are
 #   not trustworthy: the gate turns off ("gate" says why) and every read walks,
-#   as before, until the reader restarts (school.js restarts it each time
-#   LessonPlayer opens). {"force":true} always walks (the pane's "probe").
+#   as before, until the reader restarts (notes-pane-main.js restarts it each time
+#   the reader app opens). {"force":true} always walks (the pane's "probe").
 #   "ocr" hashes the captured pixels and only runs the OCR engine when they
 #   differ from the last capture it recognised.
 
@@ -47,7 +54,7 @@ $script:TextCap  = 4096
 $script:MaxNodes = 4000
 $script:WalkSeconds = 6
 $script:MaxAgeMs = 24000      # a full walk at least this often, events or not
-$script:TestHooks = ($env:SCHOOL_READER_TEST -eq '1')
+$script:TestHooks = ($env:NOTES_READER_TEST -eq '1')
 
 # ---------------------------------------------------------------- assemblies
 
@@ -61,12 +68,12 @@ try {
   $script:LoadError = "could not load the automation assemblies: $($_.Exception.Message)"
 }
 
-if (-not ('SchoolWin32' -as [type])) {
+if (-not ('NotesWin32' -as [type])) {
   try {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public class SchoolWin32 {
+public class NotesWin32 {
   [StructLayout(LayoutKind.Sequential)]
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
@@ -95,7 +102,7 @@ $script:GateOff = ''   # non-empty: the change gate is off, and this says why
 
 # The change gate. UIA delivers events on its own thread; the handlers only
 # bump a counter (no PowerShell runs there), and the JSON loop compares it.
-if ($script:LoadError -eq '' -and -not ('SchoolWatch' -as [type])) {
+if ($script:LoadError -eq '' -and -not ('NotesWatch' -as [type])) {
   try {
     $refs = @(
       [System.Windows.Automation.AutomationElement].Assembly.Location,
@@ -109,7 +116,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
-public static class SchoolWatch {
+public static class NotesWatch {
   static long _events;
   static AutomationElement _root;
   static StructureChangedEventHandler _sc;
@@ -199,9 +206,9 @@ function Get-TargetWindow([string]$procName) {
   $best = $null
   $bestArea = -1
   foreach ($p in $procs) {
-    $r = New-Object SchoolWin32+RECT
-    if (-not [SchoolWin32]::GetWindowRect($p.MainWindowHandle, [ref]$r)) { continue }
-    if (-not [SchoolWin32]::IsWindowVisible($p.MainWindowHandle)) { continue }
+    $r = New-Object NotesWin32+RECT
+    if (-not [NotesWin32]::GetWindowRect($p.MainWindowHandle, [ref]$r)) { continue }
+    if (-not [NotesWin32]::IsWindowVisible($p.MainWindowHandle)) { continue }
     $area = [Math]::Max(0, $r.Right - $r.Left) * [Math]::Max(0, $r.Bottom - $r.Top)
     if ($area -gt $bestArea) { $bestArea = $area; $best = $p }
   }
@@ -307,8 +314,8 @@ function Read-WindowText($root) {
 # --------------------------------------------------------------- OCR capture
 
 function Capture-Window([IntPtr]$hwnd) {
-  $rect = New-Object SchoolWin32+RECT
-  if (-not [SchoolWin32]::GetWindowRect($hwnd, [ref]$rect)) { throw 'GetWindowRect failed' }
+  $rect = New-Object NotesWin32+RECT
+  if (-not [NotesWin32]::GetWindowRect($hwnd, [ref]$rect)) { throw 'GetWindowRect failed' }
   $w = $rect.Right - $rect.Left
   $h = $rect.Bottom - $rect.Top
   if ($w -le 0 -or $h -le 0) { throw "the window has no size ($w x $h)" }
@@ -318,8 +325,8 @@ function Capture-Window([IntPtr]$hwnd) {
   $hdc = $g.GetHdc()
   # 2 = PW_RENDERFULLCONTENT: required for DirectComposition windows (WebView2),
   # and the reason this works while the window is covered by another one.
-  $ok = [SchoolWin32]::PrintWindow($hwnd, $hdc, 2)
-  if (-not $ok) { $ok = [SchoolWin32]::PrintWindow($hwnd, $hdc, 0) }
+  $ok = [NotesWin32]::PrintWindow($hwnd, $hdc, 2)
+  if (-not $ok) { $ok = [NotesWin32]::PrintWindow($hwnd, $hdc, 0) }
   $g.ReleaseHdc($hdc)
   $g.Dispose()
   if (-not $ok) { $bmp.Dispose(); throw 'PrintWindow refused to draw the window' }
@@ -348,8 +355,8 @@ $script:OcrLast = $null   # @{ Hwnd; Hash; Text } of the last capture the engine
 function Ocr-Window([IntPtr]$hwnd) {
   $bmp = Capture-Window $hwnd
   $hash = ''
-  if ('SchoolWatch' -as [type]) {
-    try { $hash = [SchoolWatch]::HashBitmap($bmp) } catch { $hash = '' }
+  if ('NotesWatch' -as [type]) {
+    try { $hash = [NotesWatch]::HashBitmap($bmp) } catch { $hash = '' }
   }
   if ($hash -ne '' -and $null -ne $script:OcrLast -and $script:OcrLast.Hwnd -eq $hwnd -and $script:OcrLast.Hash -eq $hash) {
     $bmp.Dispose()
@@ -361,7 +368,7 @@ function Ocr-Window([IntPtr]$hwnd) {
 }
 
 function Ocr-Bitmap($bmp) {
-  $png = Join-Path $env:TEMP ("school-ocr-" + [Guid]::NewGuid().ToString('N') + ".png")
+  $png = Join-Path $env:TEMP ("notes-ocr-" + [Guid]::NewGuid().ToString('N') + ".png")
   try {
     $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
   } finally {
@@ -392,14 +399,14 @@ $script:GateHwnd = [IntPtr]::Zero    # the window the events are subscribed on
 $script:WalkWhy = 'first'            # why the current read walks the tree
 
 function Get-GateEvents {
-  if ('SchoolWatch' -as [type]) { return [SchoolWatch]::Events }
+  if ('NotesWatch' -as [type]) { return [NotesWatch]::Events }
   0
 }
 
 $script:TestNoDoc = $false
 
 function Reset-Events {
-  if ($script:GateHwnd -ne [IntPtr]::Zero) { try { [SchoolWatch]::Detach() } catch { } }
+  if ($script:GateHwnd -ne [IntPtr]::Zero) { try { [NotesWatch]::Detach() } catch { } }
   $script:GateHwnd = [IntPtr]::Zero
 }
 
@@ -418,7 +425,7 @@ function Read-FromGate([string]$procName, $msg, [int]$id) {
   if ($msg.force -eq $true) { $script:WalkWhy = 'forced'; return $null }
   if ($c.Proc -ne $procName) { $script:WalkWhy = 'first'; return $null }
   $h = $c.Hwnd
-  if (-not [SchoolWin32]::IsWindow($h) -or -not [SchoolWin32]::IsWindowVisible($h) -or [SchoolWin32]::PidOf($h) -ne $c.Pid) {
+  if (-not [NotesWin32]::IsWindow($h) -or -not [NotesWin32]::IsWindowVisible($h) -or [NotesWin32]::PidOf($h) -ne $c.Pid) {
     $script:WalkWhy = 'window-changed'; return $null
   }
   $maxAge = $script:MaxAgeMs
@@ -432,21 +439,21 @@ function Read-FromGate([string]$procName, $msg, [int]$id) {
     if (-not [string]::Equals([string]$now, [string]$c.DocText, [StringComparison]::Ordinal)) { $script:WalkWhy = 'doc-changed'; return $null }
   } else {
     if ($script:GateOff -ne '') { $script:WalkWhy = 'gate-off'; return $null }
-    if (-not [SchoolWatch]::Attached) { $script:WalkWhy = 'first'; return $null }
-    if ([SchoolWatch]::Events -ne $c.Events) { $script:WalkWhy = 'events'; return $null }
+    if (-not [NotesWatch]::Attached) { $script:WalkWhy = 'first'; return $null }
+    if ([NotesWatch]::Events -ne $c.Events) { $script:WalkWhy = 'events'; return $null }
   }
   '{"id":' + $id + ',"age":' + [int]$age + ',' + $c.Tail
 }
 
-# Events mode: subscribe on this window if not yet (first read, or LessonPlayer
-# swapped windows). Returns the event count the cache should remember: the
+# Events mode: subscribe on this window if not yet (first read, or the reader
+# app swapped windows). Returns the event count the cache should remember: the
 # count from before the walk when the handlers were already listening, or -1
 # when they were only attached now (so the next read walks once more, this
 # time with the handlers in place).
 function Ensure-Events($root, $win, $eventsBefore) {
   if ($script:GateOff -ne '' -or $null -eq $root) { return $eventsBefore }
-  if ($script:GateHwnd -eq $win.Handle -and [SchoolWatch]::Attached) { return $eventsBefore }
-  $err = [SchoolWatch]::Attach($root)
+  if ($script:GateHwnd -eq $win.Handle -and [NotesWatch]::Attached) { return $eventsBefore }
+  $err = [NotesWatch]::Attach($root)
   if ($err -ne '') {
     $script:GateOff = "could not subscribe to the window's change events ($err); every read walks the tree"
     $script:GateHwnd = [IntPtr]::Zero
@@ -466,7 +473,7 @@ function Check-GateMissed([string]$why, $win, [string]$text, $eventsBefore) {
   if ((Get-GateEvents) -ne $c.Events) { return }   # an event did arrive, just late: not a miss
   $script:GateOff = 'the change events missed a new page (caught by the safety read at ' +
     (Get-Date -Format 'HH:mm:ss') + '); every read walks the tree now'
-  try { [SchoolWatch]::Detach() } catch { }
+  try { [NotesWatch]::Detach() } catch { }
   $script:GateHwnd = [IntPtr]::Zero
 }
 
@@ -482,22 +489,31 @@ function Invoke-Command-Line($msg) {
   $id = 0
   if ($null -ne $msg.id) { $id = [int]$msg.id }
   $cmd = [string]$msg.cmd
-  $procName = if ([string]::IsNullOrWhiteSpace([string]$msg.process)) { 'LessonPlayerApp' } else { [string]$msg.process }
+  # The reader app's process name always comes from the caller (reader.exe in
+  # notes-pane.json, passed through by notes-pane-main.js). There is no built-in
+  # default: an empty one is answered below with a reason, never guessed at.
+  $procName = ([string]$msg.process).Trim()
 
   if ($cmd -eq 'ping') {
-    return [pscustomobject]@{ id = $id; ok = ($script:LoadError -eq ''); cmd = 'ping'; reason = $script:LoadError; pid = $PID; gate = $script:GateOff; events = $(if ('SchoolWatch' -as [type]) { [SchoolWatch]::Kinds } else { '' }) }
+    return [pscustomobject]@{ id = $id; ok = ($script:LoadError -eq ''); cmd = 'ping'; reason = $script:LoadError; pid = $PID; gate = $script:GateOff; events = $(if ('NotesWatch' -as [type]) { [NotesWatch]::Kinds } else { '' }) }
   }
   if ($script:LoadError -ne '') {
     return [pscustomobject]@{ id = $id; ok = $false; cmd = $cmd; reason = $script:LoadError }
   }
   if ($cmd -eq 'test-mute' -and $script:TestHooks) {
-    [SchoolWatch]::MuteForTest()
+    [NotesWatch]::MuteForTest()
     return [pscustomobject]@{ id = $id; ok = $true; cmd = $cmd; reason = '' }
   }
   if ($cmd -eq 'test-nodoc' -and $script:TestHooks) {
     # Treat the page as if it had no TextPattern, so the events mode runs.
     $script:TestNoDoc = $true
     return [pscustomobject]@{ id = $id; ok = $true; cmd = $cmd; reason = '' }
+  }
+
+  # Every command from here on reads a window, so it needs to know whose.
+  # ping and the test hooks above do not, so they still answer without one.
+  if ($procName -eq '') {
+    return [pscustomobject]@{ id = $id; ok = $false; cmd = $cmd; reason = 'no reader app configured (reader.exe in notes-pane.json)' }
   }
 
   # The cheap answer: nothing changed since the last walk of this same window.
@@ -582,7 +598,7 @@ while ($true) {
   $line = $line.Trim()
   if ($line.Length -eq 0) { continue }
 
-  # school.js's every-3-s read is always this exact line (JSON.stringify keeps
+  # notes-pane-main.js's every-3-s read is always this exact line (JSON.stringify keeps
   # the key order): answer it from the gate without ConvertFrom-Json at all.
   if ($line -match '^\{"id":(\d+),"cmd":"read","process":"([A-Za-z0-9_.\-]+)"\}$' -and $script:LoadError -eq '') {
     $fast = $null
@@ -606,5 +622,5 @@ while ($true) {
   }
 }
 
-# Leave no UIA subscription behind when school.js says quit or closes stdin.
+# Leave no UIA subscription behind when notes-pane-main.js says quit or closes stdin.
 Reset-Gate

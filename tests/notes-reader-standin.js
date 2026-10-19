@@ -1,10 +1,13 @@
-// tests/school-standin.js -- an LessonPlayer stand-in for school-reader-e2e.js. Electron main script.
+// tests/notes-reader-standin.js -- a stand-in for the reader app, for notes-reader-e2e.js.
+// Electron main script.
 //
-// LessonPlayer is a WinUI 3 app around a WebView2: Chromium's accessibility tree under a native
-// window. This is the closest shape that runs without the user's LessonPlayer: a Chromium window
+// The reader app this was shaped on is a WinUI 3 app around a WebView2: Chromium's
+// accessibility tree under a native window. This is the closest shape that runs without any
+// real reader app: a Chromium window
 // holding a question page (course header, lesson title, question, four radio answers, Submit),
 // changed in place like a single-page app. It runs as a hardlinked copy of electron.exe named
-// schoolstandin.exe, so the reader finds it by process name exactly as it finds LessonPlayerApp.
+// notesstandin.exe, so the reader finds it by process name exactly as it finds the real reader
+// app (whatever reader.exe in notes-pane.json names).
 //
 // The window is created at -20000,-20000 and shown INACTIVE: never on the visible desktop and
 // never focused. It prints {"ready":true,"pid":N,"port":P} on stdout, then takes commands as
@@ -18,13 +21,13 @@ const http = require('http');
 const { app, BrowserWindow } = require('electron');
 
 // Its own throwaway profile: never the default %APPDATA%/Electron another app may hold.
-app.setPath('userData', require('path').join(require('os').tmpdir(), 'school-standin-' + process.pid));
+app.setPath('userData', require('path').join(require('os').tmpdir(), 'notes-reader-standin-' + process.pid));
 app.disableHardwareAcceleration();   // no GPU process churn in a CPU measurement
 // STANDIN_MSAA=1: Chromium's older MSAA/IAccessible2 tree instead of native UIA, as a WebView2
 // without the UIA provider exposes it. No TextPattern: the reader has to walk every node's Name.
 if (process.env.STANDIN_MSAA === '1') app.commandLine.appendSwitch('disable-features', 'UiaProvider');
 
-const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>LessonPlayer</title>
+const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Reader app</title>
 <style>
   body { font: 16px Segoe UI, sans-serif; margin: 0; background: #f4f5f7; color: #1d1f23; }
   header { display: flex; gap: 24px; align-items: center; padding: 12px 20px; background: #0f4c81; color: #fff; }
@@ -36,11 +39,11 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>LessonPlay
           animation: r 1s linear infinite; }
   @keyframes r { to { transform: rotate(360deg); } }
 </style></head><body>
-<header><strong>LessonPlayer Academy</strong><nav><a href="#">Courses</a><a href="#">Grades</a><a href="#">Help</a></nav>
+<header><strong>Sample Reader</strong><nav><a href="#">Courses</a><a href="#">Grades</a><a href="#">Help</a></nav>
   <div class="spin" aria-hidden="true"></div></header>
 <main>
   <h1 id="course">Sample Course</h1>
-  <h2 id="lesson">Lesson 12 - Sample Lesson</h2>
+  <h2 id="lesson">Lesson 12 - Sample Topic</h2>
   <p class="q" id="question"></p>
   <form id="answers"></form>
   <button type="button">Submit</button>
@@ -92,7 +95,7 @@ const server = http.createServer(async (req, res) => {
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({
-    x: -20000, y: -20000, width: 1280, height: 800, show: false, title: 'LessonPlayer stand-in',
+    x: -20000, y: -20000, width: 1280, height: 800, show: false, title: 'Reader app stand-in',
     skipTaskbar: true, focusable: false,
     webPreferences: { backgroundThrottling: false, sandbox: true, contextIsolation: true },
   });
