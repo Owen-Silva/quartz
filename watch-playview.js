@@ -541,6 +541,8 @@
       update(s);
     });
     update(s);
+    // Lumen's ambient field (watch-ambient.js): the video's colours behind the view.
+    if (window.LumenAmbient) { try { window.LumenAmbient.attach(ctx, s, v); } catch (e) { /* the view stays as it was */ } }
   }
 
   function reuse(ctx, s) {
@@ -554,6 +556,7 @@
   }
 
   function destroy(ctx, s) {
+    if (window.LumenAmbient) { try { window.LumenAmbient.destroy(ctx, s); } catch (e) { /* gone */ } }
     var p = pvOf(s);
     if (!p) return;
     stopReads(s);
