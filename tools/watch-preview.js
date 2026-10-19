@@ -7,7 +7,7 @@ require('./lowcpu-optional.js');   // first: the CPU cap, when one is configured
  *
  *   NODE_PATH=<a node_modules with playwright-core> node tools/watch-preview.js [outDir] [only]
  *
- * One headless Chromium (lowcpu.js caps it and holds the machine-wide browser lock),
+ * One headless Chromium (the optional CPU cap, tools/lowcpu-optional.js, caps it when configured),
  * Below Normal. The page is the real watch.html over file://; the services' https
  * images are answered by page.route: YouTube thumbnails and ESPN logos pass through
  * to their public CDNs, the Disney+/Prime/TMDB stills (fixture URLs) are drawn here
