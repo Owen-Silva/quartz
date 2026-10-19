@@ -2653,6 +2653,20 @@
       if (next) next.focus({ preventScroll: true });
       return;
     }
+    // A row's own control keeps the focus after its click (the row's scroll arrows; Subscriptions' See
+    // all, Library and Shorts get it back when the page they opened closes): Up/Down still step the lens
+    // from that row, into the next row's tile (ignored here, they left the lens stuck on the row).
+    var rowOf = t && t.closest && $.stack.contains(t) ? t.closest('.lrow') : null;
+    if (rowOf && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      var ri = rowIndexOf(rowOf);
+      if (ri === -1) return;
+      e.preventDefault();
+      if (ri !== S.cur) activate(ri, {});
+      var was = S.cur;
+      stepRow(e.key === 'ArrowDown' ? 1 : -1, null);
+      if (S.cur !== was && document.activeElement === t) t.blur();   // a row with no tile to take it: the page has the keys
+      return;
+    }
     var free = !t || t === document.body || t === document.documentElement || (t.closest && (t.closest('.stage') || t.closest('.lens-ctl')));
     if (!free) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

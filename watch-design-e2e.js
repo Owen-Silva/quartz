@@ -107,7 +107,13 @@ const STATE = `(() => {
     stageOp: +cs(stage).opacity, stageVis: cs(stage).visibility, stageBox: r(stage), h1: (stage.querySelector('h1') || {}).textContent || '',
     txt: r(stage.querySelector('.txt')), strip: r(document.getElementById('strip')), find: r(document.querySelector('.find')), settings: r(document.getElementById('settings')),
     brand: r(document.querySelector('.brand')), lensCtl: [...document.querySelectorAll('#lens-ctl .icon-btn')].filter((b) => cs(b).visibility !== 'hidden').map(r),
-    rows, seenRows: seen.length, rowPx: Math.round(px), cur: rows.findIndex((x) => x.d === '0') };
+    rows, seenRows: seen.length, rowPx: Math.round(px), cur: rows.findIndex((x) => x.d === '0'),
+    // what of the services strip its box cuts (px past each part's own width: the pills scroll, the read status shrinks)
+    // the search field's placeholder against its text box (px short; > 0 is cut)
+    findCut: (() => { const i = document.querySelector('.find input'); if (!i) return -1; const c = getComputedStyle(i); const x = document.createElement('canvas').getContext('2d'); x.font = c.fontWeight + ' ' + c.fontSize + ' ' + c.fontFamily;
+      return Math.ceil(x.measureText(i.placeholder).width - (i.clientWidth - parseFloat(c.paddingLeft) - parseFloat(c.paddingRight))); })(),
+    stripCut: (() => { const p = document.getElementById('pills'), e = document.querySelector('.strip-end'), f = e && e.querySelector('.fresh');
+      return { pills: p ? p.scrollWidth - p.clientWidth : -1, end: e ? e.scrollWidth - e.clientWidth : -1, fresh: f && f.getClientRects().length ? f.scrollWidth - f.clientWidth : 0 }; })() };
 })()`;
 
 /* Clipped text keeps its descenders: for every element in view with its own text inside a box that
@@ -249,6 +255,8 @@ if (require.main === module) {
             for (const c of s.lensCtl) if (c.t < s.bar.b) under.push('lens control at ' + c.t);
             check(!under.length, where + ': nothing in view sits under the bar', under);
             check(s.strip.l >= s.find.r + 8 && s.strip.r <= s.settings.l && s.find.l >= s.brand.r, where + ': brand, search, services and Settings do not overlap', { brand: s.brand, find: s.find, strip: s.strip, settings: s.settings });
+            check(s.stripCut.pills <= 0 && s.stripCut.end <= 0 && s.stripCut.fresh <= 0, where + ': the services strip cuts nothing (no pill scrolled away, the read status whole)', s.stripCut);
+            check(s.findCut <= 0, where + ': the search field shows its whole placeholder (' + s.findCut + ' px)');
             if (!s.compact && s.txt) {
               const r0 = s.rows.find((x) => x.d === '0');
               check(r0 && r0.head && s.txt.b <= r0.head.t, where + ': the hero ends above the first row title', { txt: s.txt, head: r0 && r0.head });
@@ -261,6 +269,18 @@ if (require.main === module) {
         }
         await g.send('Emulation.clearDeviceMetricsOverride');
         if (grown) { await ungrow(); await sleep(400); }
+      }
+      // 720 wide (the narrow media query's search field): the bar alone, both states, no shot
+      if (!SHOTS_ONLY) {
+        const grown = await grow(720, 800); await size(720, 800);
+        for (const i of [0, 2]) {
+          await go(i); await blurAll(); await sleep(600);
+          const s = await st();
+          check(s.strip.l >= s.find.r + 8 && s.strip.r <= s.settings.l && s.find.l >= s.brand.r, '720x800' + (s.compact ? ' scrolled' : ' top') + ': brand, search, services and Settings do not overlap', { brand: s.brand, find: s.find, strip: s.strip, settings: s.settings });
+          check(s.findCut <= 0, '720x800' + (s.compact ? ' scrolled' : ' top') + ': the search field shows its whole placeholder (' + s.findCut + ' px)');
+          say('720x800' + (s.compact ? ' scrolled' : ' top') + ': what the services strip cuts (known: the dots and the read status need about 387 px; 720 has 194) ' + JSON.stringify(s.stripCut));
+        }
+        await g.send('Emulation.clearDeviceMetricsOverride'); if (grown) { await ungrow(); await sleep(400); }
       }
 
       // light, 1280: the same two states

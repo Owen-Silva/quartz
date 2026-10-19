@@ -27,8 +27,13 @@
   /* ONE bar: the services sit in it as a quiet status cluster (no second strip under it) */
   --top-h: 56px;
   --head-h: var(--top-h);
-  --find-w: min(340px, 28vw);
-  --lead-w: calc(150px + var(--find-w));   /* the brand + the search field, for the cluster's room */
+  /* 24.5vw: 340 px from 1388 px up; at 1280 the cluster's natural width (five names and the read
+     status) ends 8 px clear of the field instead of 12 px over it */
+  --find-w: min(340px, 24.5vw);
+  /* the brand (133 px: mark, "Lumen", "Quartz"), the bar's 18 px gap and the field's 14 px margin,
+     the field, and 8 px of air: the cluster's max-width, so it never runs under the search field
+     (it was 150 px, 23 px short of the brand's real width: the strip's left edge sat 12 px over it) */
+  --lead-w: calc(176px + var(--find-w));
   /* tiles sized to the window: --per across the content column (5 wide, 4 mid, 3 narrow) */
   --per: 5;
   --card-gap: 16px;
@@ -634,13 +639,18 @@ body.one-row .lens-ctl .icon-btn { visibility: hidden; }
 /* the cluster's names step aside before anything crowds: a dot per service (its name is its label) */
 @media (max-width: 1279px) {
   .sp-name { display: none; }
-  .sp > .sp-main { padding: 0 8px; }
+  .sp > .sp-main { padding: 0 6px; }
+  /* the dots (6 px padding, not 8) and the read status fit beside the field, 8 px clear, and the field keeps
+     its whole placeholder (it was 28vw: the cluster ran 15 px under the field and cut its read status at 900) */
+  :root { --find-w: min(340px, calc(23.5vw + 20px)); }
 }
 /* narrow windows: the stage keeps its words, the picture steps aside */
 @media (max-width: 760px) {
   .stage .pic { display: none; }
   .stage .txt { width: auto; right: var(--gutter); }
-  :root { --find-w: min(260px, 36vw); }
+  /* 230 px: the cluster now stops 8 px short of the field (it ran 15 px under it); the field gives
+     up the 29 px so the cluster keeps the room it had */
+  :root { --find-w: min(230px, 32vw); }
 }
 /* short windows: a one-line title, the lens a little higher */
 @media (max-height: 720px) {
