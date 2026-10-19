@@ -5196,8 +5196,8 @@ const WORKSPACE_FOLDER_MAX = 400;
 /**
  * A workspace's `folder` is where a Claude tab opened while it is on screen
  * starts (defaultClaudeCwd()), `pane` is the side pane it wants, and `preset`
- * is the stable key of a seeded workspace ('project' | 'club' | 'trading' |
- * 'phone') so code can find "the Phone workspace" however it is renamed.
+ * is the stable key of a seeded workspace (today only 'phone') so code can
+ * find "the Phone workspace" however it is renamed.
  * All three are null on a workspace the user made themselves.
  *
  * @type {Array<{id:string, name:string, colour:string|null,
@@ -6600,17 +6600,18 @@ function cleanWorkspacePreset(key) {
 }
 
 /* --- the seeded presets ---------------------------------------------
- * The user works in the same few places, so the browser ships them rather than
- * making him build them: Project, Club, Trading and now Phone, each
- * seeded once after the session is restored and never again - a preset he
- * deletes stays deleted (the list of keys already seeded rides in the session
- * snapshot, with a localStorage backstop for the sessions sanitiseSession()
- * cannot return: see seedWorkspacePresets).
+ * A workspace the browser ships rather than making the user build it. Today
+ * that is only Phone, seeded once after the session is restored and never
+ * again - a preset the user deletes stays deleted (the list of keys already
+ * seeded rides in the session snapshot, with a localStorage backstop for the
+ * sessions sanitiseSession() cannot return: see seedWorkspacePresets).
+ * Personal project workspaces are not presets: the user makes them from the
+ * workspace menu, and a profile that was given some by an older build keeps
+ * them as ordinary workspaces (name, colour and folder are stored per row).
  *
- * `folder` is written under the user's own home folder wherever the path is in
- * it, so the seed is right on another machine too; Club has none on purpose -
- * The user sets it from the popover, and until he does a Claude tab there opens
- * wherever it would have anyway.
+ * `folder` (from `home`) is written under the user's own home folder wherever
+ * the path is in it, so a seed is right on any machine; null means no folder,
+ * and a Claude tab there opens wherever it would have anyway.
  *
  * `opens` is the page the workspace puts up when it has no tabs at all, and is
  * null everywhere the answer is the ordinary home page. Phone is the one that
@@ -6618,9 +6619,6 @@ function cleanWorkspacePreset(key) {
  * Ctrl+T in it still opens a new tab page, because that is what Ctrl+T means.
  */
 const WORKSPACE_PRESETS = [
-  { preset: 'project',   name: 'Project',   colour: 'ion',      home: 'Downloads\\Project',  pane: null,     opens: null },
-  { preset: 'club',    name: 'Club',    colour: 'ocean',    home: null,                pane: null,     opens: null },
-  { preset: 'trading', name: 'Trading', colour: 'ember',    home: 'trading-bot',   pane: null,     opens: null },
   { preset: 'phone',   name: 'Phone',   colour: 'midnight', home: null,                pane: null,     opens: PHONE_URL }
 ];
 
@@ -6653,19 +6651,21 @@ function workspaceOpensUrl(ws) {
  * already carried that flag, so what is recorded now is the LIST of keys a
  * profile has been given. The old flag still reads as "the original four",
  * which is exactly what it meant, and it is still WRITTEN beside the list so
- * that a build without this change reads a profile of the user's correctly.
+ * that a build without this change reads such a profile correctly.
  */
 const PRESETS_SEEDED_KEY = 'workspacePresetsSeeded';           // '1' = the original four
 const PRESETS_SEEDED_KEYS_KEY = 'workspacePresetsSeededKeys';  // JSON array of preset keys
-// What the old boolean stood for. Never reordered and never added to: a key
-// that ships later belongs in WORKSPACE_PRESETS, and only there. The first of
-// the original keys belonged to a preset that no longer ships (its side pane
-// is the notes pane now, which has no preset: it is turned on per workspace
-// from the workspace menu once Settings > Notes pane has a folder), so it is
-// left out. A stored seeded list that still names that key keeps it as data
+// What the old boolean stood for: the original four presets, none of which
+// ships any more (one side pane became the notes pane, turned on per workspace
+// from the workspace menu once Settings > Notes pane has a folder; the others
+// were one user's own project workspaces, which users now make themselves).
+// So the old flag stands for no key this build seeds, and the list is empty.
+// A stored seeded list that still names those keys keeps them as data
 // (cleanSeededPresets keeps unknown keys), which is harmless: no row in
-// WORKSPACE_PRESETS carries it, so it is never seeded or looked up.
-const ORIGINAL_PRESET_KEYS = ['project', 'club', 'trading'];
+// WORKSPACE_PRESETS carries them, so they are never seeded or looked up, and
+// the workspaces an older build made from them stay as ordinary workspaces.
+// A key that ships later belongs in WORKSPACE_PRESETS, and only there.
+const ORIGINAL_PRESET_KEYS = [];
 // Keys this profile has already been offered, whether or not the workspace is
 // still there. Empty means "this profile has never been seeded at all".
 let seededPresets = [];
