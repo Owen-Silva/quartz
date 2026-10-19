@@ -2369,6 +2369,8 @@
   }
 
   function renderResults() {
+    // a render now (an answer came, the rows changed) is the one a pending typed-key render would repeat
+    if (S.resultsRaf) { cancelAnimationFrame(S.resultsRaf); S.resultsRaf = 0; }
     if (!S.q) return;
     if (window.WatchFindPage && window.WatchFindPage.owns(S.q)) { window.WatchFindPage.render(); return; }
     var keepPos = gridFocusPos();

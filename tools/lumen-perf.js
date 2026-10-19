@@ -580,6 +580,8 @@ run('lumen-perf', async ({ check, launch, say }) => {
       return off ? Math.round(toNode(chrome, off) - t0) : NaN;
     };
     const state = async () => ({ quartz: await metrics(chrome, true), lumen: await metrics(g, true), webviews: await chrome.ev('document.querySelectorAll("webview").length'), targets: (await q.targets()).length });
+    // the player layer's idle font warm-up (watch-warm.js): done before the first video / Short open?
+    say('warm-up before the first open: ' + JSON.stringify(await chrome.ev('window.LumenWarm ? LumenWarm._state() : "not loaded (old code)"').catch(() => null)));
     if (want('video')) {
       const at = await bringYtRow();
       if (!at) check(false, 'a YouTube tile to open in the video view');

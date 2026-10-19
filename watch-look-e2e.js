@@ -374,6 +374,9 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
       await scrollTo(0);
       await sleep(600);
       perf.scrollPaint = await paintsDuring('scrolling the video view', async () => { await wheel(info.x, info.y, 10, 100, 110); await sleep(300); await wheel(info.x, info.y, 10, -100, 110); await sleep(400); });
+      // the same span with no input: what paints anyway while the video plays (the control for the line above)
+      await sleep(600);
+      perf.idlePaint = await paintsDuring('the same 2.9 s with no scrolling (control)', async () => { await sleep(2900); });
     }
     if (!has('no-cpu')) {
       await scrollTo(0);
