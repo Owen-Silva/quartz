@@ -4678,8 +4678,8 @@ function updateLumenBtn() {
   if (lumenBtnEl.classList.contains('is-active') === on) return;
   lumenBtnEl.classList.toggle('is-active', on);
   if (on) lumenBtnEl.setAttribute('aria-current', 'true');  // 'true', not 'page': Settings' nav owns the page item
-  if (on && window.LumenWarm) window.LumenWarm.soon();   // the player layer's fonts, at idle (watch-warm.js)
   else lumenBtnEl.removeAttribute('aria-current');
+  if (on && window.LumenWarm) window.LumenWarm.soon();   // the player layer's fonts, at idle (watch-warm.js)
 }
 
 /** The Files tab already open, or null. There is only ever one. */

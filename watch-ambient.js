@@ -262,7 +262,10 @@
     if (A.sinkObs) { try { A.sinkObs.disconnect(); } catch (e) { /* gone */ } A.sinkObs = null; }
     if (A.sinkMark && A.sinkMark.parentNode) A.sinkMark.parentNode.removeChild(A.sinkMark);
     A.sinkMark = null; A.sinkTile = null; A.sunk = false;
-    if (A.L && A.L.el) A.L.el.classList.remove('amb-sunk');
+    // toggle(x, false), never remove(x): remove() rewrites the class attribute even when x is absent, the
+    // layer's MutationObserver calls evaluate(), evaluate() calls sinkOff() again: an endless microtask loop
+    // that hung the Quartz window when the layer closed (watch-ytlib-e2e, lumen-n-perf3, 10-19).
+    if (A.L && A.L.el) A.L.el.classList.toggle('amb-sunk', false);
   }
 
   function destroy(ctx, s) {

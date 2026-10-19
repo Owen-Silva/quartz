@@ -95,6 +95,9 @@ check(!/animation-timeline|scroll-timeline|view-timeline|timeline-scope/.test(am
 check(/\.amb\s*\{[^}]*will-change:\s*transform/.test(amb) && /\.amb-f\s*\{[^}]*will-change:\s*opacity/.test(amb), 'the field is its own composited layer, and its sink fades on the compositor');
 check(/\.amb-sunk[^{]*\.amb-f\s*\{\s*opacity:\s*\.2/.test(amb) && /new IntersectionObserver\(/.test(read('watch-ambient.js')) && /classList\.toggle\('amb-sunk'/.test(read('watch-ambient.js')),
   'the sink is one class (.amb-sunk) that an IntersectionObserver flips: no script while scrolling');
+// classList.remove()/add() rewrite the class attribute even when nothing changes; the layer's MutationObserver
+// runs evaluate() on every class write, so evaluate()'s path must use toggle(x, force) (a no-op when settled).
+check(!/L\.el\.classList\.(remove|add)\(/.test(read('watch-ambient.js')), 'the field never writes the layer\'s class unless it changes (no remove()/add() on L.el: its MutationObserver would loop)');
 check(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.amb-c(?:,\s*\.amb-f)?\s*\{\s*transition:\s*none/.test(amb), 'reduced motion: the colours change without a fade');
 const idx = read('index.html');
 check(/<link rel="stylesheet" href="watch-ambient.css">/.test(idx) && /<script src="watch-ambient.js"><\/script>/.test(idx), 'index.html loads the field');
