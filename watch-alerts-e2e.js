@@ -29,7 +29,7 @@ const Espn = require('./watch/adapters/espn');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9561'));
-const SHOTS = opt('shots', 'C:/Users/you/next-week/morning-shots');
+const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-alerts-shots'));
 const PREFIX = opt('prefix', 'lumen-n-alerts');
 const SIZES = [[1536, 800], [1920, 1000]];
 const FIX = path.join(__dirname, 'tests', 'watch-fixtures');

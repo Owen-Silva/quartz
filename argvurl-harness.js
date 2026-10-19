@@ -11,8 +11,8 @@ function eq(name, got, want) {
   if (g === w) { pass++; } else { fail++; console.log('FAIL ' + name + '\n  got  ' + g + '\n  want ' + w); }
 }
 
-const EXE = 'C:\\Users\\you\\browser\\node_modules\\electron\\dist\\Quartz.exe';
-const ROOT = 'C:\\Users\\you\\browser';
+const EXE = path.join(__dirname, 'node_modules', 'electron', 'dist', 'Quartz.exe');   // this checkout's launcher
+const ROOT = __dirname;
 const run = (...rest) => urlFromArgv([EXE, ROOT, ...rest]);
 
 // http / https

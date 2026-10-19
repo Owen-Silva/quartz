@@ -74,12 +74,12 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
   check(L.loadErrorWords(-999, 'ERR_SOMETHING\nNEW') === 'Chromium error ERR_SOMETHING NEW (-999)', 'loadErrorWords: unknown code keeps its name, one line');
   check(L.placeOf('https://www.youtube.com/watch?v=secret') === 'youtube.com', 'placeOf: host only, never the path or query');
   check(L.placeOf('http://127.0.0.1:8080/a') === '127.0.0.1:8080', 'placeOf: a port is kept');
-  check(L.placeOf('file:///C:/Users/you/browser/newtab.html?theme=dark', 'C:\\Users\\you\\browser') === "Quartz's newtab page", 'placeOf: Quartz\'s own page by name');
-  check(L.placeOf('file:///C:/Users/you/Documents/tax.pdf', 'C:\\Users\\you\\browser') === 'a local file', 'placeOf: a local file is never named');
+  check(L.placeOf('file:///C:/Users/you/quartz/newtab.html?theme=dark', 'C:\\Users\\you\\quartz') === "Quartz's newtab page", 'placeOf: Quartz\'s own page by name');
+  check(L.placeOf('file:///C:/Users/you/Documents/tax.pdf', 'C:\\Users\\you\\quartz') === 'a local file', 'placeOf: a local file is never named');
   check(L.placeOf('chrome://crash') === 'chrome://crash', 'placeOf: chrome:// pages');
   check(L.placeOf('') === 'a page with no address yet' && L.placeOf('about:blank') === 'a blank page', 'placeOf: empty and blank');
   check(L.durationWords(18000) === '18 s' && L.durationWords(4 * 60000) === '4 min' && L.durationWords(125 * 60000) === '2 h 05 min', 'durationWords', [L.durationWords(18000), L.durationWords(240000), L.durationWords(7500000)]);
-  const scrub = L.makeScrubber('C:\\Users\\you', 'owens');
+  const scrub = L.makeScrubber('C:\\Users\\you', 'you');
   check(scrub('could not read C:\\Users\\you\\AppData\\x and C:/Users/you/y') === 'could not read %USERPROFILE%\\AppData\\x and %USERPROFILE%/y', 'scrubber: the home folder in both slash styles', scrub('could not read C:\\Users\\you\\AppData\\x and C:/Users/you/y'));
   const mem = L.memoryWords([
     { pid: 1, type: 'Browser', memory: { privateBytes: 120 * 1024 } },
@@ -95,7 +95,7 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
   {
     const file = path.join(DIR, 'q.log');
     let t = 1000000;
-    const mk = () => L.createQuartzLog({ file, clock: () => t, appDir: 'C:\\app', home: 'C:\\Users\\you', user: 'owens', say: () => {} });
+    const mk = () => L.createQuartzLog({ file, clock: () => t, appDir: 'C:\\app', home: 'C:\\Users\\you', user: 'you', say: () => {} });
     const a = mk();
     a.start({ version: '0.1.0', electron: '44.3.0', chrome: '140', os: '10.0.26300', pid: 42 });
     check(/ Quartz 0\.1\.0 started \(Electron 44\.3\.0, Chromium 140, Windows 10\.0\.26300, process 42\)\. This is the first run with a log file\.$/.test(lines(file)[0]), 'first start: says it is the first run', lines(file)[0]);

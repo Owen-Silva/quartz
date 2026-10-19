@@ -33,7 +33,7 @@ const L = require('./watch/ytlib');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9491'));
-const SHOTS = opt('shots', 'C:/Users/you/next-week/morning-shots');
+const SHOTS = opt('shots', path.join(require('os').tmpdir(), 'quartz-ytlib-shots'));
 const PREFIX = opt('prefix', 'lumen-n-subs');
 const SIZES = [[1280, 800], [1536, 800], [1920, 1000]];
 const FIX = path.join(__dirname, 'tests', 'watch-fixtures');

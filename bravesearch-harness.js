@@ -264,7 +264,7 @@ const mod = B.create({
     vm.runInContext(src, vm.createContext({ window: win, URL, encodeURIComponent }));
     return win.Keywords;
   }
-  const OWN = 'file:///C:/Users/you/browser/search.html?q=';
+  const OWN = 'file:///C:/Users/you/quartz/search.html?q=';
   let K = loadKw({ get: () => undefined, ownResultsUrl: (q) => OWN + encodeURIComponent(q) });
   eq('b -> own page when Brave is the engine', K.match('b lunar eclipse').url, OWN + 'lunar%20eclipse');
   eq('g unaffected', K.match('g lunar').url, 'https://www.google.com/search?q=lunar');

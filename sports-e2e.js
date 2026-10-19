@@ -8,7 +8,7 @@ require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is conf
 // Widevine CDM and is not signed: QUARTZ_TEST_CDM=ready + QUARTZ_TEST_VMP=signed say DRM is ready
 // (TEST ONLY: drm-main.js testOverrides, inert without --test-profile).
 //
-//   node sports-e2e.js [--cdp 9243] [--shots C:\Users\you\next-week\morning-shots]
+//   node sports-e2e.js [--cdp 9243] [--shots C:\Users\you\shots]
 //
 // Checks: a game card's tap opens the game page (box score, scoring by period, penalties, goalies, shots,
 // period scores); it polls only while open and live, and a new goal arrives; Final brings the three stars

@@ -352,7 +352,7 @@ run('welcome-e2e', async (k) => {
   if (process.platform === 'win32') {
     const regAfter = realRegistration();
     check(regAfter === REG_BEFORE, 'the real default-browser registration is exactly as before the run', regAfter === REG_BEFORE ? 'unchanged' : { before: REG_BEFORE, after: regAfter });
-    const LIVE = 'C:\\Users\\you\\browser';
+    const LIVE = process.env.QUARTZ_LIVE_DIR || path.join(os.homedir(), 'browser');   // the installed checkout, if this machine has one there
     if (fs.existsSync(path.join(LIVE, 'register-default-browser.ps1')) && /QuartzURL\\shell\\open\\command/.test(regAfter)) {
       const cmd = (regAfter.match(/QuartzURL\\shell\\open\\command\s+\(Default\)\s+REG_SZ\s+(.*)/) || [])[1] || '';
       check(cmd.toLowerCase().indexOf(LIVE.toLowerCase() + '\\node_modules\\electron\\dist\\quartz.exe') !== -1, 'the user\'s QuartzURL link handler still runs the live checkout (' + LIVE + ')', cmd);

@@ -1,5 +1,5 @@
 'use strict';
-// Pure-node harness for C:\Users\you\browser\profilemove.js. Temp folders only;
+// Pure-node harness for profilemove.js. Temp folders only;
 // never touches %APPDATA%. Run: node profilemove-harness.js
 const fs = require('fs');
 const os = require('os');

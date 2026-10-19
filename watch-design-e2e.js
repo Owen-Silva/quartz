@@ -31,7 +31,7 @@ const Stills = require('./tests/watch-yt-stills');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9466'));
-const SHOTS = opt('shots', 'C:/Users/you/next-week/morning-shots');
+const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-design-shots'));
 const PREFIX = opt('prefix', 'watch-design-after');
 const SHOTS_ONLY = argv.includes('--shots-only');
 const ALSO = opt('also-prefix', '');   // a second name for the same files (watch-compact-*)

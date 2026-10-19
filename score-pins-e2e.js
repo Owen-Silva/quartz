@@ -2,7 +2,7 @@ require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is conf
 // score-pins-e2e.js -- Lumen's pinned scores end to end: a REAL hidden Quartz test instance whose score
 // feeds point at a LOCAL mock (fixtures from tests/scores-fixtures/, never the real feeds, never an account).
 //
-//   node score-pins-e2e.js [--cdp 9241] [--shots C:\Users\you\morning-shots] [--measure]
+//   node score-pins-e2e.js [--cdp 9241] [--shots C:\Users\you\shots] [--measure]
 //
 // The cards are the windows the user would see, so this run proves they never are: main.js puts every
 // --test-profile card at -20000,-20000 and mutes its audio before the page exists, and e2e-kit's
