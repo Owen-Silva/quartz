@@ -571,6 +571,18 @@
     return st;
   }
   function teardown(st) { if (st && st.io) { st.io.disconnect(); st.io = null; } }
+  /* The slot closed (watch-playview.js destroy): its section goes with it. Kept, a closed slot's state held its
+     whole comments DOM, its listeners and the detached <webview> (lumen-perf: +650 nodes and +150 listeners per
+     closed video view, up to four of them). */
+  function forget(slot) {
+    for (var i = STATES.length - 1; i >= 0; i--) {
+      var st = STATES[i];
+      if (st.slot !== slot) continue;
+      teardown(st);
+      st.view = null; st.tile = null; st.focus = null;
+      STATES.splice(i, 1);
+    }
+  }
 
   /** The view drew its info: put this slot's comments in the mount (the same node, so nothing reloads). */
   function onInfo(ev) {
@@ -1082,6 +1094,7 @@
   }
 
   return Object.assign({}, PURE, {
+    forget: forget,
     _state: function () { return { states: STATES.map(summary), presses: LOG.slice() }; },
     /** For the e2e: redraw every live section now (as a page answer would), counting the draws actually done. */
     _redraw: function () { var n = 0; STATES.forEach(function (st) { if (st.root.isConnected) { draw(st); if (!st.pendingDraw) n++; } }); return n; },

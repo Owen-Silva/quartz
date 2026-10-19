@@ -557,6 +557,7 @@
 
   function destroy(ctx, s) {
     if (window.LumenAmbient) { try { window.LumenAmbient.destroy(ctx, s); } catch (e) { /* gone */ } }
+    if (window.LumenComments && window.LumenComments.forget) { try { window.LumenComments.forget(s.id); } catch (e) { /* gone */ } }   // its comments go too
     var p = pvOf(s);
     if (!p) return;
     stopReads(s);

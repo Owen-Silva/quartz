@@ -214,7 +214,10 @@
     bind(ctx.L);
     if (window.MutationObserver && s.tile && A.obs) A.obs.observe(s.tile, { attributes: true, attributeFilter: ['class'] });
     if (v && v.addEventListener) {
-      var moved = function () { if (A.slot === s) evaluate(); };
+      // The page's address, from its own navigation events: <webview>.getURL() is a SYNCHRONOUS IPC to main,
+      // and evaluate() runs on every class change of the layer; while main is busy opening the view each call
+      // blocked the Quartz window 20-30 ms (lumen-perf trace, video view open).
+      var moved = function (e) { if (e && e.url) s.ambUrl = String(e.url); if (A.slot === s) evaluate(); };
       v.addEventListener('did-navigate', moved);
       v.addEventListener('did-navigate-in-page', moved);
     }
@@ -244,8 +247,7 @@
       return;
     }
     A.why = '';
-    var s = p.s, url = s.url;
-    try { url = s.view.getURL() || s.url; } catch (e) { url = s.url; }
+    var s = p.s, url = s.ambUrl || s.url;   // never s.view.getURL() here: see attach()
     var key = keyOf(s.service, url);
     if (A.slot !== s || A.mode !== p.mode || key !== A.key) {
       var fresh = key !== A.key;
