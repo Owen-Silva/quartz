@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine (a cloud runner): no cap needed */ }
+require('./lowcpu-optional.js');   // first: the CPU cap, when one is configured (lowcpu-optional.js; none on a cloud runner)
 // tools/lumen-perf.js -- Lumen's responsiveness budget, measured, in one table. Re-run before every release.
 //
 //   node tools/lumen-perf.js [--cdp 9620] [--reps 1] [--trace <dir>] [--json <file>] [--only a,b] [--idle 20]

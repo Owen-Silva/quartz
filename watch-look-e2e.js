@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-look-e2e.js -- the look of Lumen's playback and Shorts views (watch-ambient.js + watch-ambient.css, and the
 // view's own watch-playview.css / watch-shorts.css / watch-comments.css), end to end, in a REAL hidden Quartz test
 // instance (tests/e2e-kit.js: --test-profile, off-screen, --measure-visible so it renders as if in front), on LOCAL

@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-rowkeys-e2e.js -- the arrow keys walk Lumen's home rows, the YouTube Subscriptions row
 // included, with REAL key input (CDP Input.dispatchKeyEvent into the Lumen page; no synthetic DOM
 // events). The user (10-18): ArrowDown stopped at the Subscriptions row; only the lens's Next button

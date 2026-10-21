@@ -1,4 +1,4 @@
-try { require('C:/Users/you/tools/lowcpu.js'); } catch (e) { /* not on this machine: no cap needed */ }
+require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-comments-e2e.js -- Lumen's own YouTube comments (watch-comments.js) under the video in Lumen's playback view,
 // end to end, in a REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen), on LOCAL FIXTURES
 // ONLY (tests/comments-fixtures.js): a fake youtube.com/watch page with ytInitialData's comments section, YouTube's own
