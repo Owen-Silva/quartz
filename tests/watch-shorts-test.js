@@ -153,7 +153,7 @@ const nb = SH.box(760, 740, 3 / 4);
 check(nb.mode === 'below' && nb.vh === 520 && nb.vw === 390 && nb.infoY >= nb.y + nb.vh + 16, 'below: a 3:4 Short as tall as 9:16’s (520), wider (390), the info under it', nb);
 check(SH.ASP.EASE <= 150 && SH.ASP.EVERY > 0 && SH.ASP.POLL > 0, 'a new shape eases in at most 150 ms', SH.ASP);
 const css2 = fs.readFileSync(path.join(ROOT, 'watch-shorts.css'), 'utf8');
-check(/\[data-sh-ease\] > \.wp-view[\s\S]*?transition: left 140ms/.test(css2) && /prefers-reduced-motion: reduce\)[\s\S]*?\[data-sh-ease\][\s\S]*?transition: none !important/.test(css2), 'the ease is 140 ms in the CSS, none with reduced motion');
+check(/\[data-sh-ease\] > \.wp-view[\s\S]*?transition: left 120ms/.test(css2) && /prefers-reduced-motion: reduce\)[\s\S]*?\[data-sh-ease\][\s\S]*?transition: none !important/.test(css2), 'the ease is 120 ms in the CSS (under the 150 ms limit), none with reduced motion');
 
 /* ---- the trim ----------------------------------------------------------------------------------- */
 const css = SH.trimCss();

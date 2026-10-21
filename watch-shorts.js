@@ -73,7 +73,7 @@
   var LAY = { PAD: 16, GAP: 16, NAV: 44, INFO_W: 340, INFO_MAX: 420, INFO_H: 172, BELOW_MAX: 560 };
   // The Short's own shape (box(), shape()): clamped to 9:16 ... 1:1. Read from the page until it is the current
   // Short's (every EVERY ms, for POLL ms at most); a new shape eases the box over EASE ms (watch-shorts.css .sh-ease).
-  var ASP = { TALL: 9 / 16, WIDE: 1, EVERY: 120, POLL: 4000, EASE: 140 };
+  var ASP = { TALL: 9 / 16, WIDE: 1, EVERY: 120, POLL: 4000, EASE: 120 };
 
   function parse(url) { try { return new URL(String(url || '')); } catch (e) { return null; } }
 

@@ -34,12 +34,12 @@
   box-shadow: 0 0 0 1px rgb(255 255 255 / .07), 0 3px 10px rgb(0 0 0 / .34), 0 24px 64px rgb(0 0 0 / .46);
 }
 /* The Short's own shape arriving (watch-shorts.js setAspect(): data-sh-ease for ASP.EASE ms): the box eases to it
-   in 140 ms instead of jumping. Never on a resize or the first box. */
+   in 120 ms instead of jumping. Never on a resize or the first box. */
 .wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.sh[data-sh-ease] > .wp-view,
 .wp-tile.sh[data-sh-ease] > .sh-cover,
 .wp-tile.sh[data-sh-ease] > .sh-nav,
 .wp-tile.sh[data-sh-ease] > .sh-info {
-  transition: left 140ms ease-out, top 140ms ease-out, width 140ms ease-out, height 140ms ease-out, max-height 140ms ease-out;
+  transition: left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, max-height 120ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
   .wp-layer .wp-tile.sh[data-sh-ease] > .wp-view, .wp-tile.sh[data-sh-ease] > .sh-cover,

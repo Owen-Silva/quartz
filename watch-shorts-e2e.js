@@ -470,7 +470,8 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       if (lastShape !== '1x3') say('6a: no 1x3 clip (QUARTZ_SHORTS_SHAPES/short-1x3.mp4), so the 4th Short is 3x4: the 1:3 clamp is not checked here');
       const boxed = async (label, shape, id) => {
         const a = want[shape];
-        const y = await shWait(`x.cur === ${JSON.stringify(id)} && x.on && x.applied && x.view && Math.abs(x.view.w / x.view.h - ${a}) < 0.01`, 8000);
+        // Settled: no ease running, and the box is exactly box() for the tile and the shape (never a frame mid-ease).
+        const y = await shWait(`x.cur === ${JSON.stringify(id)} && x.on && x.applied && !x.ease && x.view && x.tile && (() => { const e = LumenShorts.box(x.tile.w, x.tile.h, ${a}); return Math.abs(x.view.w - e.vw) <= 1 && Math.abs(x.view.h - e.vh) <= 1; })()`, 8000);
         const z = y || await sh();
         const exp = z && z.tile ? SHM.box(z.tile.w, z.tile.h, a) : null;
         say('6a ' + label + ' (' + shape + '): view ' + (z && z.view ? z.view.w + 'x' + z.view.h : '?') + ' in tile ' + (z && z.tile ? z.tile.w + 'x' + z.tile.h : '?') + ', mode ' + (z && z.mode) + ', aspect ' + (z && z.aspect));
@@ -479,21 +480,25 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
           z && { cur: z.cur, view: z.view, tile: z.tile, mode: z.mode, exp: exp && { vw: exp.vw, vh: exp.vh, mode: exp.mode }, aspect: z.aspect });
         return y;
       };
-      // Every frame's box while a Short moves (the chrome's rAF): a new shape eases in, never moving for over 150 ms.
-      const PROBE = `(() => { const v = document.querySelector('.wp-layer .wp-tile.sh > .wp-view'); window.__shm = []; if (!v) return 0; const t0 = performance.now();
-        const f = () => { const r = v.getBoundingClientRect(); window.__shm.push([Math.round(performance.now() - t0), Math.round(r.width), Math.round(r.height), Math.round(r.left)]); if (performance.now() - t0 < 4000) requestAnimationFrame(f); };
+      // Every frame's box while a Short moves (the chrome's rAF; one probe at a time: a new one ends the last): a new
+      // shape eases in, moving for at most 150 ms, then never moves again.
+      const PROBE = `(() => { const v = document.querySelector('.wp-layer .wp-tile.sh > .wp-view'); const id = (window.__shmId || 0) + 1; window.__shmId = id;
+        const out = window.__shm = []; if (!v) return 0; const t0 = performance.now();
+        const f = () => { if (window.__shmId !== id) return; const r = v.getBoundingClientRect(); out.push([Math.round(performance.now() - t0), Math.round(r.width), Math.round(r.height), Math.round(r.left)]); if (performance.now() - t0 < 2500) requestAnimationFrame(f); };
         requestAnimationFrame(f); return 1; })()`;
       const motion = async () => {
-        await sleep(300);
+        await chrome.waitFor('(() => { const f = window.__shm || []; return f.length && f[f.length - 1][0] >= 2400 ? 1 : 0; })()', 6000).catch(() => 0);
         const fr = await chrome.ev('window.__shm || []');
         const k = (q) => q[1] + 'x' + q[2] + '@' + q[3];
-        if (fr.length < 2) return { frames: fr.length, span: -1, between: 0 };
+        if (fr.length < 2) return { frames: fr.length, move: -1 };
         const first = k(fr[0]), last = k(fr[fr.length - 1]);
         const i0 = fr.findIndex((q) => k(q) !== first);
-        if (i0 < 0) return { frames: fr.length, span: 0, between: 0, from: first, to: last };
+        if (i0 < 0) return { frames: fr.length, move: 0, from: first, to: last };
         const i1 = fr.findIndex((q, i) => i >= i0 && k(q) === last);
-        const between = fr.slice(i0, i1).filter((q) => k(q) !== last).length;
-        return { frames: fr.length, span: fr[i1][0] - fr[i0 - 1][0], between, from: first, to: last, fps: Math.round(1000 * fr.length / Math.max(1, fr[fr.length - 1][0])) };
+        let gap = 0;
+        for (let i = i0; i <= i1; i++) gap = Math.max(gap, fr[i][0] - fr[i - 1][0]);
+        return { frames: fr.length, move: fr[i1][0] - fr[i0][0], bound: fr[i1][0] - fr[i0 - 1][0], maxGap: gap, steps: fr.slice(i0, i1 + 1).map((q) => q[0] + ':' + q[1] + 'x' + q[2]).join(' '),
+          after: fr.slice(i1).filter((q) => k(q) !== last).length, from: first, to: last };
       };
       const mode0 = (await sh()).mode;
       await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[0].id + '?shapes=' + shapes.join(','))}, { service: 'youtube', title: 'Shorts' }), 1`);
@@ -505,13 +510,13 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       await boxed('Next', '9x16', S[1].id);
       let mo = await motion();
       say('6a motion 3x4 -> 9x16: ' + JSON.stringify(mo));
-      check(mo.span >= 0 && mo.span <= 190 && mo.from !== mo.to, 'Next to a 9:16 Short: the box re-boxes, moving for at most 150 ms (+ a frame of sampling)', mo);
+      check(mo.move >= 0 && mo.move <= 150 && mo.after === 0 && mo.from !== mo.to, 'Next to a 9:16 Short: the box re-boxes, moving for at most 150 ms (first moved frame to the final one), then still', mo);
       await chrome.ev(PROBE);
       await clickAt('.wp-layer .sh-next', 'Next');
       await boxed('Next', '16x9', S[2].id);
       mo = await motion();
       say('6a motion 9x16 -> 16x9 (1:1): ' + JSON.stringify(mo));
-      check(mo.span >= 0 && mo.span <= 190 && mo.from !== mo.to, 'Next to a 16:9 one: the box re-boxes to 1:1, moving for at most 150 ms (+ a frame)', mo);
+      check(mo.move >= 0 && mo.move <= 150 && mo.after === 0 && mo.from !== mo.to, 'Next to a 16:9 one: the box re-boxes to 1:1, moving for at most 150 ms (first moved frame to the final one), then still', mo);
       await resize(1920, 1000);
       await boxed('resized to 1920x1000', '16x9', S[2].id);
       await resize(1280, 800);
