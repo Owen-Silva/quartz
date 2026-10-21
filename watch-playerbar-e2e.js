@@ -374,6 +374,26 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     const wy = await g.ev('(() => { const r = document.getElementById("whyad").getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, h: r.height, iw: innerWidth, lift: getComputedStyle(document.documentElement).getPropertyValue("--lumen-pb-lift") }; })()');
     const wyHost = await chrome.ev(`(() => { const w = ${JSON.stringify(wy)}; const vr = document.querySelector(".wp-layer webview").getBoundingClientRect(); const k = vr.width / w.iw; const x = vr.left + (w.l + w.w / 2) * k, y = vr.top + (w.t + w.h / 2) * k, bottom = vr.top + (w.t + w.h) * k; const pb = document.querySelector(".pb").getBoundingClientRect(); const e = document.elementFromPoint(x, y); return { bottom: Math.round(bottom), barTop: Math.round(pb.top), at: e ? e.tagName : null }; })()`);
     check(wyHost.bottom <= wyHost.barTop + 2 && wyHost.at === 'WEBVIEW', '"Why this ad" is lifted above Lumen\'s bar during the ad, and nothing of Lumen\'s covers it', Object.assign({ lift: wy.lift }, wyHost));
+    // Today's ad overlay (read 10-18 from a real pre-roll): "Sponsored", the advertiser's link and its card sit in
+    // YouTube's own whole-player layer, anchored to its bottom, where Lumen's bar is. Each is wholly above the bar,
+    // nothing of Lumen's is over it, and a real click on it lands (one click, one press).
+    await wake();
+    await sleep(300);
+    for (const [id, what, counter] of [['adsponsored', '"Sponsored"', ''], ['adlink', 'the advertiser\'s link', '__adLinks'], ['adcard', 'the advertiser\'s card', ''], ['adplay', 'the card\'s "Play now"', '__adClicks']]) {
+      const pr = await g.ev(`(() => { const n = document.getElementById(${JSON.stringify(id)}); const r = n.getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2; const top = document.elementFromPoint(cx, cy);
+        return { l: r.left, t: r.top, w: r.width, h: r.height, iw: innerWidth, hit: !!top && (top === n || n.contains(top)), vis: getComputedStyle(n).visibility, pe: getComputedStyle(n).pointerEvents }; })()`);
+      const host = await chrome.ev(`(() => { const w = ${JSON.stringify(pr)}; const vr = document.querySelector(".wp-layer webview").getBoundingClientRect(); const k = vr.width / w.iw;
+        const x = vr.left + (w.l + w.w / 2) * k, y = vr.top + (w.t + w.h / 2) * k, top = vr.top + w.t * k, bottom = vr.top + (w.t + w.h) * k;
+        const pb = document.querySelector(".pb").getBoundingClientRect(); const e = document.elementFromPoint(x, y);
+        return { x: Math.round(x), y: Math.round(y), top: Math.round(top), bottom: Math.round(bottom), barTop: Math.round(pb.top), barBottom: Math.round(pb.bottom), at: e ? e.tagName : null }; })()`);
+      check(host.bottom <= host.barTop + 1 && host.at === 'WEBVIEW' && pr.hit && pr.vis === 'visible' && pr.pe !== 'none', 'during the ad, YouTube\'s ' + what + ' is wholly above Lumen\'s bar, nothing of Lumen\'s over it, and its own', Object.assign({ hit: pr.hit, vis: pr.vis }, host));
+      if (counter) {
+        const before = await g.ev('window.' + counter + ' || 0');
+        await click(chrome, host.x, host.y);
+        await sleep(300);
+        check((await g.ev('window.' + counter + ' || 0')) === before + 1, 'one click on YouTube\'s ' + what + ' through Lumen: one press of it', { before });
+      }
+    }
     await shoot('youtube-ad', wake);
     // The Skip button: where it is on screen, nothing of Lumen's is over it, and a real click lands.
     await wake();

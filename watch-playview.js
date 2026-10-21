@@ -576,6 +576,8 @@
       update(s);
     });
     update(s);
+    // Lumen's ambient field (watch-ambient.js): the video's colours behind the view.
+    if (window.LumenAmbient) { try { window.LumenAmbient.attach(ctx, s, v); } catch (e) { /* the view stays as it was */ } }
   }
 
   function reuse(ctx, s) {
@@ -589,6 +591,8 @@
   }
 
   function destroy(ctx, s) {
+    if (window.LumenAmbient) { try { window.LumenAmbient.destroy(ctx, s); } catch (e) { /* gone */ } }
+    if (window.LumenComments && window.LumenComments.forget) { try { window.LumenComments.forget(s.id); } catch (e) { /* gone */ } }   // its comments go too
     var p = pvOf(s);
     if (!p) return;
     stopReads(s);
@@ -945,7 +949,9 @@
     cm.setAttribute('aria-label', 'Comments');
     cm.hidden = true;
     info.appendChild(cm);
-    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, container: cm } })); } catch (e) { /* no listeners */ }
+    // view + toggle: for watch-comments.js (its reads in the page, and "Open comments on YouTube" = Full page).
+    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, container: cm,
+      view: s.view, toggle: function () { return toggle(s); } } })); } catch (e) { /* no listeners */ }
   }
 
   function renderOther(s, p, m, phase, info) {

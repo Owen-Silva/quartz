@@ -178,6 +178,8 @@
 
   /* --------------------------------------------------------------- the page's media events */
 
+  // The height it reports is the picture's SHORTER side, YouTube's own way of naming a size: a 1080x1920 Short is
+  // 1080p, never "1920p" (shortsreal, 10-18).
   // Runs in the service's page: listens (capture phase, so the video's own non-bubbling events reach it)
   // and reports the biggest video's height and whether it ended. No timers, no polling.
   var MEDIA_JS = '(function () {' +
@@ -185,7 +187,7 @@
     ' var log = console.log.bind(console), lastKey = "";' +
     ' function top() { var vs = document.querySelectorAll("video"), b = null; for (var i = 0; i < vs.length; i++) { if (!b || vs[i].videoWidth * vs[i].videoHeight > b.videoWidth * b.videoHeight) b = vs[i]; } return b; }' +
     ' function say(e) { var v = e && e.target; if (!v || v.tagName !== "VIDEO") return; var t = top(); if (t && t !== v && e.type !== "ended") return;' +
-    '   var m = { h: v.videoHeight || 0, w: v.videoWidth || 0, ended: e.type === "ended", playing: e.type === "playing" };' +
+    '   var m = { h: (v.videoWidth && v.videoHeight ? Math.min(v.videoWidth, v.videoHeight) : v.videoHeight) || 0, w: v.videoWidth || 0, ended: e.type === "ended", playing: e.type === "playing" };' +
     '   var k = m.h + "x" + m.ended + m.playing; if (k === lastKey && !m.ended) return; lastKey = k;' +
     '   try { log(' + JSON.stringify(MEDIA_TAG) + ' + JSON.stringify(m)); } catch (err) {} }' +
     ' ["loadedmetadata", "resize", "playing", "ended"].forEach(function (n) { document.addEventListener(n, say, true); });' +

@@ -191,4 +191,177 @@ function channelShorts(path) {
 </body></html>`;
 }
 
-module.exports = { SHORTS, PLAYLISTS, shortsPage, channelShorts, list };
+/** A channel's avatar: a small coloured disc (data: URL), a different colour per channel. */
+function avatarOf(channel) {
+  let h = 0;
+  for (const c of String(channel)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="24" fill="hsl(${h},55%,45%)"/></svg>`);
+}
+
+/**
+ * realShortsPage(id, q): youtube.com/shorts/<id> shaped as the REAL page is today (read 10-18 from public Shorts,
+ * signed out, in a throwaway profile; sanitized snapshot in tests/yt-real/). What the old stand-in got wrong:
+ *   - ONE ytd-reel-video-renderer (no is-active) in #reel-overlay-container, which the page MOVES into the current
+ *     sequence slot (div#N.reel-video-in-sequence-new: YouTube's own 9:16 size, smaller than the page, a 16px gap,
+ *     neighbours' thumbnails above and below) inside #shorts-container's scroll-snap list;
+ *   - its ONE #shorts-player <video> takes each Short in turn; the player sizes it itself (inline width/left from the
+ *     player's box, as YouTube's does), so a box Lumen widened later leaves it offset;
+ *   - a HIDDEN watch page (ytd-watch-flexy #movie_player) with its own paused <video>, ahead of the Shorts app;
+ *   - the channel bar: yt-decorated-avatar-view-model's <img> gets its src only once laid out (an IntersectionObserver,
+ *     as YouTube's lazy image does), Subscribe is .ytReelChannelBarViewModelReelSubscribeButton button-view-model
+ *     button; the action bar: like-button-view-model, dislike-button-view-model (signed in only), comments, share.
+ *   - Up/Down: #navigation-button-up/down ytd-button-renderer button; the wheel is the list's own native scroll-snap
+ *     (no wheel script), the page follows the slot that snaps in.
+ * q.signedout: ytcfg LOGGED_IN false and no Dislike (as signed out today). q.preload: the neighbours' slots carry
+ * their own paused <video> (the per-Short layout some pages still have). Presses in __presses, moves in __moves.
+ */
+function realShortsPage(id, q) {
+  const o = q || {};
+  const L = list(id);
+  const start = Math.max(0, L.findIndex((s) => s.id === id));
+  const slots = L.map((s, i) => `<div id="${i}" class="reel-video-in-sequence-new style-scope ytd-shorts"><div class="reel-video-in-sequence-thumbnail style-scope ytd-shorts"></div>${o.preload && i !== start ? '<video class="fx-preload" src="/__media/short.mp4" preload="auto" muted playsinline></video>' : ''}</div>`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(L[start].title)} #shorts - YouTube</title>
+<script>var ytcfg={data_:{LOGGED_IN:${o.signedout ? 'false' : 'true'}},get:function(k){return this.data_[k];}};</script>
+<style>
+body{margin:0;background:#0f0f0f;color:#f1f1f1;font:14px Roboto,Arial,sans-serif}
+#masthead-container{position:fixed;top:0;left:0;right:0;height:56px;background:#0f0f0f;z-index:5}
+ytd-watch-flexy[hidden]{display:none}
+ytd-shorts{display:flex;position:fixed;top:56px;left:0;right:0;bottom:0}
+#shorts-container{flex:1;display:flex;justify-content:center;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none}
+#shorts-inner-container{width:100%}
+.reel-video-in-sequence-new{--h:calc(100vh - 56px - 96px);position:relative;width:calc(var(--h) * 9 / 16);min-width:180px;height:var(--h);margin:0 auto 16px;border-radius:12px;overflow:hidden;scroll-snap-align:start;background:#222}
+.reel-video-in-sequence-thumbnail{position:absolute;inset:0;background:linear-gradient(#333,#111)}
+.fx-preload{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#reel-overlay-container{position:absolute;inset:0;display:flex;justify-content:center}
+ytd-reel-video-renderer{position:relative;display:flex;justify-content:center;width:100%;height:100%}
+#short-video-container,.player-wrapper{width:100%;height:100%}
+#player-container{position:relative;width:100%;height:100%}
+ytd-player,#container{display:block;width:100%;height:100%}
+#shorts-player{position:relative;width:100%;height:100%;overflow:hidden;background:#000}
+.html5-video-container{position:relative;height:0}
+#shorts-player video{position:absolute;object-fit:cover}
+yt-reel-player-overlay-view-model{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;padding:12px;gap:8px}
+yt-reel-metapanel-view-model{flex:1}
+yt-reel-channel-bar-view-model{display:flex;align-items:center;gap:8px}
+yt-avatar-shape img{width:32px;height:32px;border-radius:50%;display:block}
+reel-action-bar-view-model{display:flex;flex-direction:column;gap:12px}
+reel-action-bar-view-model button{width:48px;height:48px;border-radius:50%;border:0;background:#272727;color:#fff}
+.navigation-container{position:fixed;right:24px;top:40%;display:flex;flex-direction:column;gap:12px}
+.navigation-container button{width:56px;height:56px;border-radius:50%;border:0;background:#272727;color:#fff}
+</style></head><body>
+<ytd-app>
+<div id="masthead-container"><ytd-masthead><a id="logo">YouTube</a>${o.signedout ? '<a href="https://accounts.google.com/ServiceLogin">Sign in</a>' : '<button id="avatar-btn">O</button>'}</ytd-masthead></div>
+<div id="content"><ytd-page-manager id="page-manager">
+<ytd-watch-flexy class="watch-root-element" hidden><div id="player-container"><ytd-player id="ytd-player"><div id="container"><div id="movie_player" class="html5-video-player ytp-transparent"><div class="html5-video-container"><video class="video-stream html5-main-video" src="/__media/short.mp4" preload="auto" muted playsinline></video></div><div class="ytp-chrome-bottom"></div></div></div></ytd-player></div></ytd-watch-flexy>
+<ytd-shorts>
+  <div id="shorts-container"><div id="shorts-inner-container">${slots}</div></div>
+  <div class="navigation-container">
+    <div id="navigation-button-up" class="navigation-button"><ytd-button-renderer><yt-button-shape><button aria-label="Previous video">&#9650;</button></yt-button-shape></ytd-button-renderer></div>
+    <div id="navigation-button-down" class="navigation-button"><ytd-button-renderer><yt-button-shape><button aria-label="Next video">&#9660;</button></yt-button-shape></ytd-button-renderer></div>
+  </div>
+</ytd-shorts>
+</ytd-page-manager></div>
+</ytd-app>
+<template id="ov"><div id="reel-overlay-container" class="style-scope ytd-shorts">
+  <ytd-reel-video-renderer id="reel-video-renderer" class="style-scope ytd-shorts" data-i="${start}">
+    <div id="short-video-container" class="short-video-container"><div class="player-wrapper"><div id="player-container" class="player-container">
+      <ytd-player id="player"><div id="container"><div id="shorts-player" class="html5-video-player ytp-hide-controls"><div class="html5-video-container"><video class="video-stream html5-main-video" src="/__media/short.mp4" muted loop playsinline preload="auto"></video></div></div></div></ytd-player>
+    </div></div>
+    <div class="player-controls"><ytd-shorts-player-controls><div id="menu-button"><button-view-model><button class="menu" aria-label="More actions">&#8942;</button></button-view-model></div></ytd-shorts-player-controls></div>
+    <yt-reel-player-overlay-view-model>
+      <yt-reel-metapanel-view-model>
+        <yt-reel-channel-bar-view-model class="ytReelChannelBarViewModelHost">
+          <yt-decorated-avatar-view-model><yt-avatar-shape><div class="ytSpecAvatarShapeHost" role="button"><img class="ytCoreImageHost ytSpecAvatarShapeImage" alt=""></div></yt-avatar-shape></yt-decorated-avatar-view-model>
+          <span class="ytReelChannelBarViewModelChannelName"><a class="ytAttributedStringLink fx-chan" href="/"></a></span>
+          <div class="ytReelChannelBarViewModelReelSubscribeButton"><button-view-model><button class="sub ytSpecButtonShapeNextHost" aria-label="Subscribe">Subscribe</button></button-view-model></div>
+        </yt-reel-channel-bar-view-model>
+        <yt-shorts-video-title-view-model><h2 class="fx-title"></h2></yt-shorts-video-title-view-model>
+      </yt-reel-metapanel-view-model>
+      <reel-action-bar-view-model class="ytwReelActionBarViewModelHost">
+        <like-button-view-model><toggle-button-view-model><button-view-model><label><button class="like" aria-pressed="false" aria-label=""></button><div class="ytSpecButtonShapeWithLabelLabel"><span class="fx-likes"></span></div></label></button-view-model></toggle-button-view-model></like-button-view-model>${o.signedout ? '' : `
+        <dislike-button-view-model><toggle-button-view-model><button-view-model><label><button class="dislike" aria-pressed="false" aria-label="Dislike this video"></button><div class="ytSpecButtonShapeWithLabelLabel"><span>Dislike</span></div></label></button-view-model></toggle-button-view-model></dislike-button-view-model>`}
+        <button-view-model><label><button aria-label="View 12 comments">C</button></label></button-view-model>
+        <button-view-model><label><button aria-label="Share">S</button></label></button-view-model>
+      </reel-action-bar-view-model>
+    </yt-reel-player-overlay-view-model>
+    </div>
+  </ytd-reel-video-renderer>
+  <div id="ads-overlay"></div>
+</div></template>
+<script>
+(function () {
+  var L = ${JSON.stringify(L.map((s) => Object.assign({ avatar: avatarOf(s.channel) }, s)))};
+  var cur = ${start};
+  var subs = {}, liked = {}, disliked = {};
+  window.__presses = { like: 0, dislike: 0, sub: 0, menu: 0, next: 0, prev: 0 };
+  window.__moves = [];
+  window.__born = Date.now();
+  var box = document.getElementById('shorts-container');
+  var ov = document.getElementById('ov').content.firstElementChild;
+  var reel = ov.querySelector('ytd-reel-video-renderer'), sp = ov.querySelector('#shorts-player'), v = sp.querySelector('video');
+  var img = ov.querySelector('yt-avatar-shape img');
+  var up = document.querySelector('#navigation-button-up button'), dn = document.querySelector('#navigation-button-down button');
+  // YouTube's lazy image: the src only once the <img> is laid out on screen.
+  var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting && !img.getAttribute('src') && img.dataset.src) img.setAttribute('src', img.dataset.src); }); });
+  // YouTube's player sizes its <video> itself, from its own box (9:16 by height, centred).
+  function size() { var pw = sp.clientWidth, ph = sp.clientHeight; if (!pw || !ph) return; var w = Math.round(ph * 9 / 16); v.style.cssText = 'width: ' + w + 'px; height: ' + ph + 'px; left: ' + Math.round((pw - w) / 2) + 'px; top: 0px;'; }
+  new ResizeObserver(size).observe(sp);
+  function fill(i) {
+    var s = L[i];
+    reel.setAttribute('data-i', i);
+    ov.querySelector('.fx-title').textContent = s.title;
+    var a = ov.querySelector('.fx-chan'); a.textContent = s.channel; a.setAttribute('href', '/' + s.channel + '/shorts');
+    ov.querySelector('.fx-likes').textContent = s.likes;
+    img.removeAttribute('src'); img.dataset.src = s.avatar; io.unobserve(img); io.observe(img);
+    paint();
+  }
+  function paint() {
+    var s = L[cur];
+    var lb = ov.querySelector('button.like'), db = ov.querySelector('button.dislike'), sb = ov.querySelector('button.sub');
+    lb.setAttribute('aria-pressed', liked[s.id] ? 'true' : 'false');
+    lb.setAttribute('aria-label', 'like this video along with ' + s.likes + ' other people');
+    if (db) db.setAttribute('aria-pressed', disliked[s.id] ? 'true' : 'false');
+    var on = !!subs[s.channel];
+    sb.textContent = on ? 'Subscribed' : 'Subscribe';
+    sb.setAttribute('aria-label', on ? 'Unsubscribe from ' + s.name : 'Subscribe');
+    up.setAttribute('aria-disabled', cur === 0 ? 'true' : 'false');
+    dn.setAttribute('aria-disabled', cur === L.length - 1 ? 'true' : 'false');
+  }
+  function place(i, how) {
+    document.getElementById(String(i)).appendChild(ov);
+    fill(i);
+    try { v.currentTime = 0; } catch (e) {}
+    try { var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {}
+    if (how !== 'scroll') document.getElementById(String(i)).scrollIntoView({ behavior: 'instant', block: 'start' });
+  }
+  function go(i, how) {
+    if (i < 0 || i >= L.length || i === cur) return false;
+    cur = i;
+    place(i, how);
+    history.pushState({}, '', '/shorts/' + L[i].id + location.search);
+    document.title = L[i].title + ' #shorts - YouTube';
+    window.__moves.push({ to: L[i].id, how: how, at: Date.now() });
+    return true;
+  }
+  place(cur, 'load');
+  up.addEventListener('click', function () { window.__presses.prev++; go(cur - 1, 'button'); });
+  dn.addEventListener('click', function () { window.__presses.next++; go(cur + 1, 'button'); });
+  // The list's own scroll-snap: the slot that snaps in becomes current (a wheel over the list, a trackpad).
+  box.addEventListener('scrollend', function () { var i = Math.round(box.scrollTop / (document.getElementById('0').offsetHeight + 16)); if (i !== cur) go(i, 'scroll'); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); go(cur + 1, 'key'); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); go(cur - 1, 'key'); }
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !ov.contains(b)) return;
+    var s = L[cur];
+    if (b.classList.contains('like')) { window.__presses.like++; liked[s.id] = !liked[s.id]; if (liked[s.id]) disliked[s.id] = false; paint(); }
+    else if (b.classList.contains('dislike')) { window.__presses.dislike++; disliked[s.id] = !disliked[s.id]; if (disliked[s.id]) liked[s.id] = false; paint(); }
+    else if (b.classList.contains('sub')) { window.__presses.sub++; if (!subs[s.channel]) { subs[s.channel] = true; paint(); } }
+    else if (b.classList.contains('menu')) window.__presses.menu++;
+  });
+})();
+</script></body></html>`;
+}
+
+module.exports = { SHORTS, PLAYLISTS, shortsPage, realShortsPage, channelShorts, list, avatarOf };

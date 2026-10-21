@@ -1,0 +1,95 @@
+/* ============================================================
+   watch-ambient.css -- Lumen's ambient field (watch-ambient.js) and
+   the layer it dresses: the playback view and the Shorts view.
+
+   Quartz's own language, with the video as the wallpaper: ONE
+   pre-blurred picture behind everything (the video's colours, never
+   re-blurred, no filter on any layer), and over it the view's
+   translucent tints, hairlines and real shadows (tokens.css). The
+   accent is Quartz's (--accent: Settings' palette / Look Sync), used
+   for focus and state only. No backdrop-filter, no glow, nothing
+   that moves at rest: the canvases cross-fade by opacity when the
+   colours change (every few seconds at most), and the field sinks to
+   a tint once the playback view is scrolled down to the info and the
+   comments (one class, .amb-sunk, set by an IntersectionObserver in
+   watch-ambient.js; the compositor runs the fade). The field is its
+   own composited layer and nothing in it is linked to scrolling, so a
+   scroll never repaints it (watch-look-e2e counts the paints).
+
+   Legibility (WCAG AA on a WHITE video, watch-look-e2e.js): the
+   field shows at --amb-a over the base, a static wash darkens the
+   bar's band and the info's band, and every word below the fold
+   sits on a panel (watch-playview.css / watch-comments.css /
+   watch-shorts.css) whose fill holds 4.5:1 on its own.
+
+   Off: multiview, the corner, fullscreen, the service's full page
+   (watch-ambient.js drops .amb-on), and the light theme changes
+   nothing (the player layer is dark in both themes).
+   ============================================================ */
+.amb {
+  position: absolute;
+  inset: 0;
+  z-index: -1;                      /* under the bar and the views, over the layer's own base */
+  display: none;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  will-change: transform;           /* its own layer: what scrolls over it never repaints it */
+}
+.wp-layer.amb-on > .amb { display: block; }
+.wp-layer.amb-on { --amb-a: .9; --lumen-view-bg: transparent; }
+.wp-layer.amb-on.amb-sh { --amb-a: .8; }
+
+.amb-f { position: absolute; inset: 0; opacity: var(--amb-a); transition: opacity .5s cubic-bezier(.4, 0, .2, 1); will-change: opacity; }
+.amb-c {
+  position: absolute;
+  left: -5%;
+  top: -5%;
+  width: 110%;
+  height: 110%;
+  opacity: 0;
+  transition: opacity 1.6s cubic-bezier(.4, 0, .2, 1);
+  will-change: opacity;
+}
+.amb-c.on { opacity: 1; }
+
+/* The wash: a vignette that keeps the light round the player, the bar's band, and the info's band
+   at the foot (the playback view's info peeks there: PEEK = 128 px). Static: painted once. */
+.amb-wash {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 100% at 50% 40%, rgb(9 10 11 / 0) 0%, rgb(9 10 11 / .08) 55%, rgb(9 10 11 / .45) 100%),
+    linear-gradient(180deg, rgb(9 10 11 / .50) 0px, rgb(9 10 11 / .26) 44px, rgb(9 10 11 / .04) 22%,
+      rgb(9 10 11 / .10) calc(100% - 250px), rgb(9 10 11 / .62) calc(100% - 140px), rgb(9 10 11 / .86) calc(100% - 70px), rgb(9 10 11 / .9) 100%);
+}
+/* Shorts: no info band at the foot (the info is an island beside the reel). */
+.wp-layer.amb-sh .amb-wash {
+  background:
+    radial-gradient(70% 110% at 50% 46%, rgb(9 10 11 / 0) 0%, rgb(9 10 11 / .12) 50%, rgb(9 10 11 / .55) 100%),
+    linear-gradient(180deg, rgb(9 10 11 / .50) 0px, rgb(9 10 11 / .24) 44px, rgb(9 10 11 / .08) 24%, rgb(9 10 11 / .10) 76%, rgb(9 10 11 / .42) 100%);
+}
+
+/* The playback view: scrolled down to the info and the comments, the field sinks to a tint, so the
+   words that rise into the light never meet it at full strength. NOT a scroll-driven animation: that
+   one repainted the whole window on every scroll step (watch-look-e2e: 32 window-sized paints over
+   one wheel). watch-ambient.js flips .amb-sunk where the view crosses 120 px, the compositor fades. */
+.wp-layer.amb-on.amb-sunk:not(.amb-sh) .amb-f { opacity: .2; }
+/* the 1 px mark at the top of the scroller that the IntersectionObserver watches (watch-ambient.js) */
+.amb-mark { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
+
+/* --- the layer over the field --------------------------------------------------------- */
+/* The bar: Quartz's toolbar over its backdrop, a tint, not a slab. */
+.wp-layer.amb-on > .wp-bar {
+  background: rgb(12 13 14 / .56);
+  border-bottom-color: rgb(255 255 255 / .06);
+}
+.wp-layer.amb-on > .wp-bar .wp-note { color: #b4b7bc; }
+.wp-layer.amb-on > .wp-grid,
+.wp-layer.amb-on > .wp-grid > .wp-tile { background: transparent; }
+/* Scrolling stays on the compositor over a see-through view (an opaque view used to buy it). */
+.wp-layer.amb-on .wp-tile.pv { will-change: scroll-position; }
+
+@media (prefers-reduced-motion: reduce) {
+  .amb-c, .amb-f { transition: none; }
+}

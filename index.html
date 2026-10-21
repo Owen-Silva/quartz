@@ -30,7 +30,10 @@
   <link rel="stylesheet" href="watch-playerbar.css">
   <link rel="stylesheet" href="watch-leakproof.css">
   <link rel="stylesheet" href="watch-playview.css">
+  <link rel="stylesheet" href="watch-comments.css">
   <link rel="stylesheet" href="watch-shorts.css">
+  <!-- Lumen's ambient field behind the playback and Shorts views (watch-ambient.js) -->
+  <link rel="stylesheet" href="watch-ambient.css">
   <link rel="stylesheet" href="watch-alerts.css">
 </head>
 <body>
@@ -174,7 +177,9 @@
   <script src="watch-player-multi.js"></script>
   <script src="watch-player-yt.js"></script>
   <script src="watch-playview.js"></script>
+  <script src="watch-comments.js"></script>
   <script src="watch-shorts.js"></script>
+  <script src="watch-ambient.js"></script>
   <!-- Lumen play bar: the per-service adapters, the page bridge, the bar (hooks into watch-player.js X()). -->
   <script src="watch/playerbar/youtube.js"></script>
   <script src="watch/playerbar/disney.js"></script>
@@ -184,6 +189,8 @@
   <script src="watch-playerbar-page.js"></script>
   <script src="watch-playerbar.js"></script>
   <script src="watch-player.js"></script>
+  <!-- Lumen's first video / Short open: the player layer's fonts, laid out once at idle (watch-warm.js). -->
+  <script src="watch-warm.js"></script>
   <!-- The new tab Home's layout rules (which pieces show, in which column).
        The page loads the same file, so both sides apply one set of rules;
        settings.js stores the layout through it and app.js answers the page's

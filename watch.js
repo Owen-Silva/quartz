@@ -96,6 +96,7 @@
     sentSeq: -1,
     answer: null,
     searchTimer: 0,
+    resultsRaf: 0,
     gridPos: null,          // { r, c } of the grid's tab stop
     popFor: '',
     popFrom: null,
@@ -2230,7 +2231,7 @@
     if (S.answer && S.answer.q !== q) S.answer = null;
     S.sentSeq = -1;
     enterSearch();
-    renderResults();
+    scheduleResults();
     // One letter matches his own rows here, but never goes out as a YouTube search.
     if (q.length < SEARCH_MIN_CHARS) return;
     S.searchTimer = setTimeout(function () {
@@ -2256,7 +2257,22 @@
     }
   }
 
+  /* Typing renders the results at most once a frame (lumen-n-perf2): keys that land in one frame share one
+     render, run in that frame (requestAnimationFrame, before its paint), so the letter and its results still
+     paint together. A key that acts on the results (Enter, Down) flushes a pending render first. */
+  function scheduleResults() {
+    if (S.resultsRaf) return;
+    S.resultsRaf = requestAnimationFrame(function () { S.resultsRaf = 0; renderResults(); });
+  }
+  function flushResults() {
+    if (!S.resultsRaf) return;
+    cancelAnimationFrame(S.resultsRaf);
+    S.resultsRaf = 0;
+    renderResults();
+  }
+
   function exitSearch() {
+    if (S.resultsRaf) { cancelAnimationFrame(S.resultsRaf); S.resultsRaf = 0; }
     if (window.WatchFindPage) window.WatchFindPage.close();
     S.q = '';
     S.answer = null;
@@ -2355,6 +2371,8 @@
   }
 
   function renderResults() {
+    // a render now (an answer came, the rows changed) is the one a pending typed-key render would repeat
+    if (S.resultsRaf) { cancelAnimationFrame(S.resultsRaf); S.resultsRaf = 0; }
     if (!S.q) return;
     if (window.WatchFindPage && window.WatchFindPage.owns(S.q)) { window.WatchFindPage.render(); return; }
     var keepPos = gridFocusPos();
@@ -2627,6 +2645,7 @@
       return;
     }
     // Enter: every service's own search (watch/find-page.js); recent searches; Down into its tiles.
+    if (t === $.q) flushResults();
     if (t === $.q && !mod && window.WatchFindPage && window.WatchFindPage.key(e, S.q)) { if (e.key === 'Enter') clearTimeout(S.searchTimer); return; }
     if (t === $.q && S.q && (e.key === 'ArrowDown' || e.key === 'Enter') && !mod) {
       var stop = $.results.querySelector('.cell[tabindex="0"]') || $.results.querySelector('.cell');
@@ -2653,6 +2672,20 @@
       } else return;
       e.preventDefault();
       if (next) next.focus({ preventScroll: true });
+      return;
+    }
+    // A row's own control keeps the focus after its click (the row's scroll arrows; Subscriptions' See
+    // all, Library and Shorts get it back when the page they opened closes): Up/Down still step the lens
+    // from that row, into the next row's tile (ignored here, they left the lens stuck on the row).
+    var rowOf = t && t.closest && $.stack.contains(t) ? t.closest('.lrow') : null;
+    if (rowOf && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      var ri = rowIndexOf(rowOf);
+      if (ri === -1) return;
+      e.preventDefault();
+      if (ri !== S.cur) activate(ri, {});
+      var was = S.cur;
+      stepRow(e.key === 'ArrowDown' ? 1 : -1, null);
+      if (S.cur !== was && document.activeElement === t) t.blur();   // a row with no tile to take it: the page has the keys
       return;
     }
     var free = !t || t === document.body || t === document.documentElement || (t.closest && (t.closest('.stage') || t.closest('.lens-ctl')));

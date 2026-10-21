@@ -155,6 +155,11 @@ async function guest(q) {
   await g.send('Runtime.enable');
   const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', requestStage: 'Request' }] });
   if (fe && fe.error) throw new Error('Fetch.enable failed: ' + JSON.stringify(fe.error));
+  // Interception starts once the page shows up in /json/list. A page that asked for pictures before that (a busy
+  // machine) gets none of them filled, so a low picture count below names that race instead of reading as a bug.
+  // (An earlier-attach harness via the browser target's setDiscoverTargets never saw the <webview>: Electron does
+  // not report webview targets there, lumen-n-perf2/3, 10-19.)
+  g.askedBeforeIntercept = await g.ev('performance.getEntriesByType("resource").filter((r) => /^https:/.test(r.name)).length').catch(() => -1);
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
@@ -455,7 +460,7 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
     await keyIn(g, 'Escape', 'Escape', 27);
 
     /* ============================ nothing left the machine ============================ */
-    check(g.fetched.drawn > 10 && g.fetched.refused.length === 0, `every https request of the Lumen page was a picture, filled locally (${g.fetched.drawn}); nothing else asked`, g.fetched.refused.slice(0, 6));
+    check(g.fetched.drawn > 10 && g.fetched.refused.length === 0, `every https request of the Lumen page was a picture, filled locally (${g.fetched.drawn}); nothing else asked`, { refused: g.fetched.refused.slice(0, 6), askedBeforeIntercept: g.askedBeforeIntercept });
     check(g.errors.length === 0, 'no exception on the Lumen page', g.errors.slice(0, 4));
     g.close();
     await q.quit();

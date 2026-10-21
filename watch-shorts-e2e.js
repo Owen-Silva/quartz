@@ -29,6 +29,7 @@ const CDP_PORT = Number(opt('cdp', '9851'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-shorts-shots'));
 const CLIP = process.env.QUARTZ_SHORTS_CLIP || require('./tests/fixture-clip').CLIP;   // tests/media/lumen-test-clip.mp4 (testsrc2)
 const SHOT_PREFIX = opt('shot-prefix', 'playview-shorts-');
+const SHOT_REAL = argv.indexOf('--no-real-shots') < 0;
 const FIX = path.join(__dirname, 'tests', 'watch-fixtures');
 const fx = (name) => JSON.parse(fs.readFileSync(path.join(FIX, 'youtube-' + name + '.json'), 'utf8'));
 const CHANNEL = '/@guitarcoachryan';
@@ -66,6 +67,7 @@ async function startServers(mock) {
     hits.push(p);
     if (p === '/__media/short.mp4') return sendClip(req, res);
     let m = /^\/shorts\/([A-Za-z0-9_-]{6,20})$/.exec(p);
+    if (m && u.searchParams.has('real')) return sendHtml(res, F.realShortsPage(m[1], { signedout: u.searchParams.has('signedout'), preload: u.searchParams.has('preload') }));
     if (m) return sendHtml(res, F.shortsPage(m[1], { signedout: u.searchParams.has('signedout'), ad: u.searchParams.get('ad') }));
     if (p === '/shorts') return sendHtml(res, F.shortsPage('', {}));
     if (p === CHANNEL + '/shorts') return sendHtml(res, F.channelShorts(CHANNEL));
@@ -524,6 +526,115 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     x = await shWait(`x.cur === ${JSON.stringify(S[0].id)} && x.phase === 'ready' && x.on`, 20000);
     check(!!x && x.title === S[0].title, 'the row’s Shorts entry opens youtube.com/shorts in the Shorts view (YouTube picks the first)', x && { url: x.url, phase: x.phase });
     check(await tabsN() === tabs1, 'no tab opened for the Shorts entry');
+
+    /* ============ 10. today's REAL page shape (read 10-18 from public Shorts; tests/yt-real/): frame, bar, buttons, perf ============ */
+    {
+      const R0 = S[0].id;
+      await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + R0 + '?real=1&preload=1')}, { service: 'youtube', title: 'Shorts' }), 1`);
+      x = await shWait(`x.cur === ${JSON.stringify(R0)} && x.phase === 'ready' && x.on && x.applied`, 20000);
+      check(!!x, 'real page: it opens in the Shorts view, trimmed', x && { phase: x.phase, why: x.why, applied: x.applied });
+      await guestNow();
+      await sleep(1200);
+      const frame = () => guest.ev(`(() => { const v = document.querySelector('#shorts-player video'); const r = v.getBoundingClientRect(); const o = document.getElementById('reel-overlay-container').getBoundingClientRect();
+        return { v: [r.left, r.top, r.width, r.height].map(Math.round), ov: [o.left, o.top, o.width, o.height].map(Math.round), iw: innerWidth, ih: innerHeight, style: v.getAttribute('style') }; })()`);
+      let fr = await frame();
+      const edge = (f) => !!f && f.v[0] === 0 && f.v[1] === 0 && Math.abs(f.v[2] - f.iw) <= 1 && Math.abs(f.v[3] - f.ih) <= 1 && f.ov[0] === 0 && f.ov[1] === 0 && f.ov[2] === f.iw && f.ov[3] === f.ih;
+      check(edge(fr), 'real page: the Short fills the frame edge to edge, centred (no black strip at the left, nothing cut at the right), over YouTube\'s own pillarbox offset', fr);
+      x = await sh();
+      check(!!x && x.view && Math.abs(x.view.w / x.view.h - 9 / 16) < 0.02, 'real page: the frame is 9:16', x && x.view);
+      x = (await shWait('x.phase === \'ready\' && x.sub && !x.sub.disabled && x.dislike && !x.dislike.disabled', 8000)) || await sh();
+      check(!!x && !x.sub.disabled && !x.dislike.disabled && !x.like.disabled && !/on this Short/.test(x.note), 'real page: YouTube\'s Subscribe and Dislike are found (no "aren\'t on this Short")', x && { note: x.note, sub: x.sub, dislike: x.dislike });
+      const avatar = () => chrome.waitFor(`(() => { const i = document.querySelector('.wp-layer .sh-info .pv-avatar img'); return i && i.complete && i.naturalWidth > 0 ? { src: String(i.getAttribute('src')).slice(0, 24), text: i.parentNode.textContent.trim() } : null; })()`, 8000).catch(() => null);
+      let av = await avatar();
+      check(!!av && /^data:image\//.test(av.src) && av.text === '', 'real page: the channel\'s avatar is its picture (YouTube\'s lazy image loads under Lumen\'s veil), never an initial', av);
+      const pr0 = await presses();
+      await clickAt('.wp-layer .sh-info .pv-sub', 'Subscribe');
+      x = await shWait('x.sub && /Subscribed/.test(x.sub.text)', 5000);
+      check((await presses()).sub === pr0.sub + 1 && !!x, 'real page: one click on Lumen\'s Subscribe, one press of YouTube\'s own, read back as Subscribed', { before: pr0.sub, after: (await presses()).sub, sub: x && x.sub });
+
+      // The bar follows the Short that plays: never the hidden watch page's paused video, never a preloaded neighbour.
+      const live = () => guest.ev('(() => { const v = document.querySelector("#shorts-player video"); return { t: v.currentTime, p: v.paused, d: v.duration }; })()');
+      let b = await pbWait('b.st && b.st.p === false && b.st.c > 0.3', 8000);
+      let lv = await live();
+      check(!!b && !b.st.p && Math.abs(b.st.c - lv.t) < 1.2 && !lv.p, 'real page: Lumen\'s bar shows the Short that plays (its time, playing), not the hidden watch page\'s paused 0:00', b && { bar: { c: b.st.c, p: b.st.p, d: b.st.d }, live: lv });
+      const LT = '(() => { window.__lt = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__lt.push(Math.round(e.duration)))).observe({ type: "longtask" }); } catch (e) { window.__lt = ["n/a"]; } return 1; })()';
+      await guest.ev(LT); await chrome.ev(LT);
+      const BAR = '(() => { window.__barT = 0; const el = document.querySelector(".wp-layer .pb .pb-time"); if (!el) return 0; if (window.__barMo) window.__barMo.disconnect(); window.__barMo = new MutationObserver(() => { if (!window.__barT && /^0:0[0-1]/.test(el.textContent.trim())) window.__barT = Date.now(); }); window.__barMo.observe(el, { childList: true, subtree: true, characterData: true }); return 1; })()';
+      const perf = {};
+      const moveBy = async (how, fn, wantId) => {
+        const m0 = await moves();
+        await chrome.ev(BAR);
+        const t0 = Date.now();
+        await fn();
+        const mv = await guest.waitFor(`window.__moves.length > ${m0} ? window.__moves[window.__moves.length - 1] : null`, 3000).catch(() => null);
+        x = await settled('real page, ' + how, wantId);
+        const bt = await chrome.waitFor('window.__barT || 0', 3000).catch(() => 0);
+        b = await pbWait('b.st && b.st.p === false', 3000);
+        lv = await live();
+        perf[how] = { shownMs: mv ? mv.at - t0 : -1, barMs: bt ? bt - t0 : -1, moves: (await moves()) - m0 };
+        perf[how].hows = await guest.ev(`window.__moves.slice(${m0}).map((m) => m.how + '@' + (m.at - ${t0}))`).catch(() => null); perf[how].lumen = await sh().then((z) => z && { steps: z.steps.slice(-3), wheels: z.wheels }).catch(() => null);
+        check(!!mv && perf[how].moves === 1 && mv.to === wantId, 'real page, ' + how + ': exactly ONE Short moved', perf[how]);
+        check(perf[how].shownMs >= 0 && perf[how].shownMs <= 300, 'real page, ' + how + ': the next Short shows within 300 ms', perf[how]);
+        check(perf[how].barMs >= 0 && perf[how].barMs <= 400 && !!b && Math.abs(b.st.c - lv.t) < 1.2 && b.st.p === lv.p, 'real page, ' + how + ': Lumen\'s bar re-binds at once (new time, play state)', { barMs: perf[how].barMs, bar: b && { c: b.st.c, p: b.st.p }, live: lv });
+        fr = await frame();
+        check(edge(fr), 'real page, ' + how + ': still edge to edge', fr);
+      };
+      await focusInfo();
+      await moveBy('ArrowDown', () => keyIn(chrome, 'ArrowDown', 'ArrowDown', 40), S[1].id);
+      x = await sh();
+      const wc = { x: Math.round(x.view.x + x.view.w / 2), y: Math.round(x.view.y + x.view.h / 2) };
+      await chrome.ev('(() => { window.__wt = []; document.addEventListener("wheel", (e) => window.__wt.push(String(e.target.tagName) + "." + String(e.target.className).slice(0, 30)), true); return 1; })()');
+      say('wheel point: ' + await chrome.ev(`(() => { const n = document.elementFromPoint(${wc.x}, ${wc.y}); return n ? n.tagName + '.' + String(n.className).slice(0, 40) : ''; })()`));
+      await moveBy('a wheel burst over the player', () => Promise.all([0, 1, 2, 3, 4, 5].map((i) => sleep(i * 16).then(() => wheelAt(wc.x, wc.y, 60)))), S[2].id);
+      say('wheel targets in Lumen: ' + JSON.stringify(await chrome.ev('window.__wt')));
+      await moveBy('Lumen\'s Next', () => clickAt('.wp-layer .sh-next', 'Next'), S[3].id);
+      av = await avatar();
+      check(!!av && av.text === '', 'real page: after three moves the avatar is still a picture', av);
+      const lts = { guest: await guest.ev('window.__lt'), chrome: await chrome.ev('window.__lt') };
+      check([].concat(lts.guest, lts.chrome).every((d) => typeof d === 'number' ? d <= 50 : true), 'real page: no long task over 50 ms in the page or in Lumen during the moves', lts);
+      say('perf: moves ' + JSON.stringify(perf) + ' long tasks ' + JSON.stringify(lts));
+      await chrome.ev('(() => { if (window.__barMo) window.__barMo.disconnect(); return 1; })()');
+
+      // A click gives visible feedback within 100 ms: the bar's play button flips at once.
+      const pp0 = await chrome.ev('document.querySelector(".wp-layer .pb .pb-play").getAttribute("aria-label")');
+      await wake();
+      await sleep(200);
+      const tc = Date.now();
+      await clickAt('.wp-layer .pb .pb-play', 'play/pause');
+      const flip = await chrome.waitFor(`(() => { const a = document.querySelector(".wp-layer .pb .pb-play").getAttribute("aria-label"); return a !== ${JSON.stringify(pp0)} ? Date.now() : 0; })()`, 2000).catch(() => 0);
+      perf.click = flip ? flip - tc : -1;
+      check(perf.click >= 0 && perf.click <= 150, 'real page: a click on the bar\'s play/pause shows within 100 ms (+ the 100 ms poll here)', { ms: perf.click, from: pp0 });
+      // Idle (paused): no polling, no per-frame work, in the page or in Lumen.
+      await sleep(600);
+      await guest.send('Performance.enable').catch(() => 0); await chrome.send('Performance.enable').catch(() => 0);
+      const met = async (c) => { const r = await c.send('Performance.getMetrics').catch(() => null); const m = {}; (r && r.metrics || []).forEach((x2) => { m[x2.name] = x2.value; }); return m; };
+      const g0 = await met(guest), c0 = await met(chrome);
+      await sleep(3000);
+      const g1 = await met(guest), c1 = await met(chrome);
+      perf.idle = { pageScriptMs: Math.round(((g1.ScriptDuration || 0) - (g0.ScriptDuration || 0)) * 1000), pageTaskMs: Math.round(((g1.TaskDuration || 0) - (g0.TaskDuration || 0)) * 1000),
+        lumenScriptMs: Math.round(((c1.ScriptDuration || 0) - (c0.ScriptDuration || 0)) * 1000), lumenTaskMs: Math.round(((c1.TaskDuration || 0) - (c0.TaskDuration || 0)) * 1000) };
+      check(perf.idle.pageScriptMs <= 30 && perf.idle.lumenScriptMs <= 60, 'real page, paused, 3 s idle: next to no script work in the page or in Lumen (no polling)', perf.idle);
+      say('perf: click ' + perf.click + ' ms; idle ' + JSON.stringify(perf.idle));
+
+      // 5. The quality chip names a 1080x1920 picture 1080p (its shorter side), never "1920p".
+      await guest.ev('(() => { const c = document.createElement("canvas"); c.width = 1080; c.height = 1920; const g2 = c.getContext("2d"); g2.fillStyle = "#345"; g2.fillRect(0, 0, 1080, 1920); const v = document.createElement("video"); v.muted = true; v.srcObject = c.captureStream(1); v.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0"; document.body.appendChild(v); v.play().catch(() => 0); window.__tall = v; return 1; })()');
+      const qn = await chrome.waitFor('(() => { const e = WatchPlayer._state().extras; return e && /^\\d+p/.test(e.quality || "") && e.height >= 1000 ? { q: e.quality, h: e.height } : null; })()', 6000).catch(() => null);
+      check(!!qn && /^1080p/.test(qn.q) && qn.h === 1080, 'real page: a 1080x1920 picture is named 1080p (its shorter side), not 1920p', qn || (await chrome.ev('WatchPlayer._state().extras')));
+      await guest.ev('(() => { if (window.__tall) { window.__tall.srcObject = null; window.__tall.remove(); } return 1; })()');
+
+      // Shots of the real-shaped Short.
+      if (SHOT_REAL) {
+        await clickAt('.wp-layer .pb .pb-play', 'play');
+        for (const [w, h] of [[1280, 800], [1920, 1000]]) { await resize(w, h); await sleep(800); fr = await frame(); check(edge(fr), 'real page at ' + w + 'x' + h + ': edge to edge', fr); await shot(w, h, 'real'); }
+        await resize(1280, 800);
+      }
+      // Signed out (as today): no Dislike on YouTube's page, and Lumen says it's a signed-out thing, not "missing".
+      await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[2].id + '?real=1&signedout=1')}, { service: 'youtube', title: 'Shorts' }), 1`);
+      x = await shWait(`x.cur === ${JSON.stringify(S[2].id)} && /signed out/.test(x.note) && x.read && x.read.signedIn === false`, 15000);
+      check(!!x && x.dislike.disabled && /Sign in/.test(x.dislike.why) && !/on this Short/.test(x.note), 'real page signed out: Dislike is off with "Sign in", never "isn\'t on this Short"', x && { note: x.note, dislike: x.dislike });
+      await chrome.ev('WatchPlayer.close("Close"), 1');
+      await sleep(500);
+    }
 
     /* ============================ 9. never OS fullscreen ============================ */
     const w1 = await win();

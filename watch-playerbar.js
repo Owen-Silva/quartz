@@ -244,8 +244,8 @@
   var ICONS = {
     play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>',
     pause: '<path d="M8 5.5v13M16 5.5v13" stroke-width="3"/>',
-    back: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v3h3"/><text x="12" y="15.2" text-anchor="middle" font-size="7.4" font-weight="700" fill="currentColor" stroke="none">10</text>',
-    fwd: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3h-3"/><text x="12" y="15.2" text-anchor="middle" font-size="7.4" font-weight="700" fill="currentColor" stroke="none">10</text>',
+    back: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v3h3"/><path d="M9.2 11.1l1.4-1v5.1M14.2 10.2c-1.05 0-1.7 1.05-1.7 2.55s.65 2.55 1.7 2.55 1.7-1.05 1.7-2.55-.65-2.55-1.7-2.55z" stroke-width="1.35"/>',
+    fwd: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v3h-3"/><path d="M9.2 11.1l1.4-1v5.1M14.2 10.2c-1.05 0-1.7 1.05-1.7 2.55s.65 2.55 1.7 2.55 1.7-1.05 1.7-2.55-.65-2.55-1.7-2.55z" stroke-width="1.35"/>',
     vol: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
     mute: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
     cc: '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M10.5 10.2a2.2 2.2 0 1 0 0 3.6M16.5 10.2a2.2 2.2 0 1 0 0 3.6"/>',

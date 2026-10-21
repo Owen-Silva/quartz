@@ -526,6 +526,10 @@ const watchPlayview = (() => {
   }
 })();
 void watchPlayview;
+// Lumen's ambient field (watch-ambient-main.js + watch-ambient.js): may it refresh (battery saver)?
+try { require('./watch-ambient-main').create({ ipcMain, isChromeSender: (event) => isChromeSender(event) }).registerIpc(); } catch (err) {
+  console.error('[lumen ambient] could not start: ' + String((err && err.message) || err).slice(0, 200));
+}
 // Lumen's Shorts view (watch-shorts-main.js + watch-shorts.js): its quartz.log lines.
 const watchShorts = (() => {
   try {

@@ -5,9 +5,31 @@
    video's own fullscreen): the service's player in a 16:9 box as wide
    as the layer allows, capped so Lumen's info always peeks under it
    (PEEK = 128px), and the info below in Lumen's own look. The tile
-   scrolls from the video down to the info. Neutral greys; the accent
-   only on focus. No backdrop-filter, no glow.
+   scrolls from the video down to the info.
+
+   The look (lane lumen-n-look): the video floats over its own
+   ambient field (watch-ambient.css) on a real shadow; the title and
+   the channel row sit on the field's dark foot; the description and
+   the comments are Quartz panels (a tint, a 1px hairline, a top lip,
+   a soft drop), so every word keeps WCAG AA whatever the video's
+   colours are. Neutral greys; Quartz's accent (--accent) on focus and
+   on a pressed Like / Dislike only. No backdrop-filter, no glow.
    ============================================================ */
+.wp-layer {
+  /* the view's shared surfaces (the Shorts view and the comments use them too) */
+  --lv-panel: rgb(21 22 23 / .8);
+  --lv-panel-edge: inset 0 1px 0 rgb(255 255 255 / .055), inset 0 0 0 1px rgb(255 255 255 / .065);
+  --lv-panel-drop: 0 1px 2px rgb(0 0 0 / .22), 0 12px 32px rgb(0 0 0 / .26);
+  --lv-ctl: rgb(255 255 255 / .085);
+  --lv-ctl-hover: rgb(255 255 255 / .14);
+  --lv-ctl-press: rgb(255 255 255 / .19);
+  --lv-ctl-edge: inset 0 1px 0 rgb(255 255 255 / .05), inset 0 0 0 1px rgb(255 255 255 / .055);
+  --lv-text: #eeeeec;
+  --lv-text-2: #b1b4b9;              /* 4.5:1 on the panel over a white field */
+  --lv-text-3: #9a9ea4;
+  --lv-on: color-mix(in srgb, var(--accent, #9fb4cc) 82%, #ffffff);
+  --lv-radius: 14px;
+}
 .wp-layer.pv-on:not(.mv-mini):not(.wp-fs) .wp-grid { container-type: size; }
 
 .wp-layer:not(.mv-mini):not(.wp-fs) .wp-tile.pv {
@@ -17,8 +39,8 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--pv-top) 0 56px;
-  background: #0b0c0d;
+  padding: var(--pv-top) 0 64px;
+  background: var(--lumen-view-bg, #0b0c0d);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
@@ -28,8 +50,10 @@
   width: var(--pv-w);
   height: var(--pv-h);
   margin: 0 auto;
-  border-radius: 12px;
+  border-radius: var(--lv-radius);
   overflow: hidden;
+  /* the video floats over its field: a contact line and a long soft fall (tokens.css --shadow-3's shape) */
+  box-shadow: 0 0 0 1px rgb(255 255 255 / .06), 0 3px 10px rgb(0 0 0 / .32), 0 22px 56px rgb(0 0 0 / .42);
 }
 /* Outside the view (a grid, the corner, fullscreen, Full page): none of Lumen's furniture. */
 .wp-tile:not(.pv) > .pv-cover,
@@ -47,14 +71,15 @@
   width: var(--pv-w);
   height: var(--pv-h);
   transform: translateX(-50%);
-  border-radius: 12px;
-  background: #111214;
+  border-radius: var(--lv-radius);
+  background: #121315;
+  box-shadow: var(--lv-panel-edge);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #a9adb3;
+  color: var(--lv-text-2);
   font-size: 13px;
 }
 .pv-cover[hidden] { display: none; }
@@ -68,73 +93,82 @@
 .pv-barmount > * { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: auto; }
 
 /* --- the info ------------------------------------------------------ */
-.pv-info { width: var(--pv-w); margin: 14px auto 0; color: #e9eaec; font: 13px/1.4 var(--font); }
+.pv-info { width: var(--pv-w); margin: 18px auto 0; color: var(--lv-text); font: 13px/1.4 var(--font); }
 .pv-info[hidden] { display: none; }
 .pv-title {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   padding-bottom: 0.1em;
-  font: 650 clamp(18px, 1.35vw, 23px)/1.3 var(--font-display);
-  letter-spacing: -0.012em;
-  color: #f1f2f3;
+  font: 650 clamp(19px, 1.4vw, 24px)/1.28 var(--font-display);
+  letter-spacing: -0.016em;
+  color: #f5f5f3;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.pv-skel { color: #75767a !important; }
+.pv-skel { color: #7d7f84 !important; }
 .pv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; min-width: 0; }
 .pv-chan { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 1 auto; }
 .pv-avatar {
   flex: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
   display: inline-flex; align-items: center; justify-content: center;
-  background: #24262a; color: #c9ccd1; font: 600 16px/1 var(--font);
+  background: #2a2c30; color: #d3d6da; font: 600 16px/1 var(--font);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .08);
 }
-.pv-avatar.pv-skel { background: #1b1d20; }
+.pv-avatar.pv-skel { background: #1d1f22; }
 .pv-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pv-chan-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.pv-chan-name { font-size: 15px; font-weight: 600; line-height: 1.35; color: #eef0f2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; padding-bottom: 1px; }
-.pv-subs { font-size: 12.5px; line-height: 1.35; color: #a9adb3; white-space: nowrap; }
+.pv-chan-name { font-size: 15px; font-weight: 600; line-height: 1.35; color: #f0f0ee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; padding-bottom: 1px; }
+.pv-subs { font-size: 12.5px; line-height: 1.35; color: var(--lv-text-2); white-space: nowrap; }
 .pv-subs:empty { display: none; }
 
 .pv-btn {
   appearance: none; border: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   height: 36px; padding: 0 16px; border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08); color: #e9eaec; font-size: 13.5px; font-weight: 600; line-height: 1.2;
+  background: var(--lv-ctl); box-shadow: var(--lv-ctl-edge);
+  color: var(--lv-text); font-size: 13.5px; font-weight: 600; line-height: 1.2;
   white-space: nowrap;
+  transition: background-color var(--dur, 120ms) var(--ease, ease), color var(--dur, 120ms) var(--ease, ease);
 }
-.pv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.pv-btn:hover:not(:disabled) { background: var(--lv-ctl-hover); }
+.pv-btn:active:not(:disabled) { background: var(--lv-ctl-press); }
 .pv-btn:focus-visible { outline: 2px solid var(--accent, #8ab4d8); outline-offset: 2px; }
 .pv-btn:disabled { opacity: 0.45; cursor: default; }
 .pv-btn-txt { padding-bottom: 1px; }
-.pv-sub { margin-left: 8px; background: #e9eaec; color: #0d0e10; }
+.pv-sub { margin-left: 8px; background: #ececea; color: #111213; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
 .pv-sub:hover:not(:disabled) { background: #ffffff; }
-.pv-sub.is-on { background: rgba(255, 255, 255, 0.10); color: #e9eaec; }
-.pv-sub.is-on:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.pv-sub:active:not(:disabled) { background: #dcdcda; }
+.pv-sub.is-on { background: var(--lv-ctl); color: var(--lv-text); box-shadow: var(--lv-ctl-edge); }
+.pv-sub.is-on:hover:not(:disabled) { background: var(--lv-ctl-hover); }
 .pv-acts { display: flex; align-items: center; gap: 8px; flex: none; }
-.pv-pair { display: inline-flex; align-items: center; height: 36px; border-radius: 18px; background: rgba(255, 255, 255, 0.08); }
-.pv-pair .pv-btn { background: transparent; }
-.pv-pair .pv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.pv-pair { display: inline-flex; align-items: center; height: 36px; border-radius: 18px; background: var(--lv-ctl); box-shadow: var(--lv-ctl-edge); }
+.pv-pair .pv-btn { background: transparent; box-shadow: none; }
+.pv-pair .pv-btn:hover:not(:disabled) { background: rgb(255 255 255 / .07); }
+.pv-pair .pv-btn:active:not(:disabled) { background: rgb(255 255 255 / .12); }
 .pv-pair .pv-like { border-radius: 18px 0 0 18px; padding: 0 14px 0 13px; }
 .pv-pair .pv-dislike { border-radius: 0 18px 18px 0; padding: 0 14px 0 12px; }
 .pv-pair-sep { width: 1px; height: 22px; background: rgba(255, 255, 255, 0.16); }
 .pv-ico { display: inline-flex; width: 20px; height: 20px; }
 .pv-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .pv-btn.is-on .pv-ico svg { fill: currentColor; }
+/* a pressed Like / Dislike: Quartz's accent (Settings' palette), the one coloured thing in the view */
+.pv-like.is-on .pv-ico, .pv-dislike.is-on .pv-ico { color: var(--lv-on); }
 .pv-dislike .pv-ico { transform: rotate(180deg); }
-.pv-save.is-open { background: rgba(255, 255, 255, 0.16); }
+.pv-save.is-open { background: var(--lv-ctl-press); }
 
-.pv-why { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; font-size: 12.5px; line-height: 1.45; color: #a9adb3; }
+.pv-why { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--lv-text-2); }
 .pv-why-warn .pv-why-txt { color: var(--warn, #d6b46a); }
 .pv-why-err .pv-why-txt { color: var(--danger, #e58e8e); }
 .pv-why .pv-btn { height: 28px; padding: 0 12px; font-size: 12.5px; }
-.pv-ghost { background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
-.pv-danger { background: #e9eaec; color: #0d0e10; }
+.pv-ghost { background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.pv-danger { background: #ececea; color: #111213; box-shadow: none; }
 
+/* --- panels: the confirm, the Save list, the description, the comments ------------------- */
 .pv-confirm, .pv-savelist {
   margin-top: 12px; padding: 12px; border-radius: 12px;
-  background: #16171a; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  background: var(--lv-panel); box-shadow: var(--lv-panel-edge), var(--lv-panel-drop);
 }
 .pv-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pv-confirm-txt { flex: 1 1 auto; font-size: 13.5px; padding-bottom: 1px; }
@@ -142,27 +176,33 @@
 .pv-savelist { display: flex; flex-direction: column; gap: 2px; max-width: 360px; }
 .pv-savelist-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .pv-savelist-title { font-weight: 600; font-size: 13.5px; }
-.pv-saveopt { justify-content: flex-start; background: transparent; border-radius: 8px; font-weight: 500; padding: 0 10px; }
+.pv-saveopt { justify-content: flex-start; background: transparent; box-shadow: none; border-radius: 8px; font-weight: 500; padding: 0 10px; }
 .pv-check { flex: none; width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.4); }
-.pv-saveopt.is-on .pv-check { background: #e9eaec; box-shadow: none; position: relative; }
-.pv-saveopt.is-on .pv-check::after { content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px; border: solid #0d0e10; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.pv-saveopt.is-on .pv-check { background: #ececea; box-shadow: none; position: relative; }
+.pv-saveopt.is-on .pv-check::after { content: ""; position: absolute; left: 5px; top: 2px; width: 4px; height: 8px; border: solid #111213; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 
-.pv-desc { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
-.pv-desc-meta { font-size: 13px; font-weight: 600; color: #e9eaec; margin-bottom: 4px; }
-.pv-desc-text { font-size: 13.5px; line-height: 1.5; color: #c9ccd1; white-space: pre-wrap; overflow-wrap: anywhere;
+.pv-desc {
+  margin-top: 18px; padding: 14px 18px 15px; border-radius: var(--lv-radius);
+  background: var(--lv-panel); box-shadow: var(--lv-panel-edge), var(--lv-panel-drop);
+}
+.pv-desc-meta { font-size: 13px; font-weight: 600; color: var(--lv-text); margin-bottom: 6px; }
+.pv-desc-text { font-size: 13.5px; line-height: 1.55; color: #d2d4d7; white-space: pre-wrap; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pv-desc.is-more .pv-desc-text { display: block; -webkit-line-clamp: unset; }
-.pv-more { margin-top: 8px; height: 28px; padding: 0 12px; font-size: 12.5px; }
-.pv-comments { margin-top: 18px; }
+.pv-more { margin-top: 10px; height: 28px; padding: 0 12px; font-size: 12.5px; }
+.pv-comments {
+  margin-top: 16px; padding: 18px 20px 12px; border-radius: var(--lv-radius);
+  background: var(--lv-panel); box-shadow: var(--lv-panel-edge), var(--lv-panel-drop);
+}
 .pv-comments[hidden] { display: none; }
 
 /* Disney+, Hulu, Prime Video, ESPN */
-.pv-svc { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #a9adb3; font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em; }
+.pv-svc { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--lv-text-2); font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em; }
 .pv-mark { font-size: 10.5px; }
 .pv-info:not([data-svc="youtube"]) .pv-title { font-size: clamp(20px, 1.6vw, 27px); margin-bottom: 6px; }
-.pv-ep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; line-height: 1.4; color: #c9ccd1; }
-.pv-ep-num { font-weight: 600; color: #e9eaec; }
-.pv-dot { width: 3px; height: 3px; border-radius: 50%; background: #75767a; flex: none; }
+.pv-ep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; line-height: 1.4; color: #d2d4d7; }
+.pv-ep-num { font-weight: 600; color: var(--lv-text); }
+.pv-dot { width: 3px; height: 3px; border-radius: 50%; background: #85878c; flex: none; }
 .pv-row-other { justify-content: flex-start; }
 
-@media (prefers-reduced-motion: reduce) { .pv-cover-bar::after { animation: none; width: 100%; opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .pv-cover-bar::after { animation: none; width: 100%; opacity: 0.4; } .pv-btn { transition: none; } }

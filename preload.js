@@ -826,6 +826,10 @@ contextBridge.exposeInMainWorld('api', {
     setView: (view) => ipcRenderer.invoke('watch-playview:set-view', { view: String(view || '') }),
     testWin: () => ipcRenderer.invoke('watch-playview:test-win')
   },
+  // Lumen's ambient field (watch-ambient.js -> watch-ambient-main.js): { saver } before a colour refresh.
+  lumenAmbient: {
+    gate: () => ipcRenderer.invoke('lumen-ambient:gate')
+  },
   // Lumen's Shorts view (watch-shorts.js -> watch-shorts-main.js): one quartz.log line.
   lumenShorts: {
     log: (line) => ipcRenderer.invoke('watch-shorts:log', { line: String(line || '').slice(0, 200) })
