@@ -90,7 +90,7 @@ function landing(opts) {
   const pm = S.parseEspn(mlb, S.cleanPin({ id: mlb.id, league: 'mlb', away: { abbr: 'TB' }, home: { abbr: 'CLE' } }));
   check(!pm.error && pm.state === 'pre' && pm.away.score === null, 'baseball pre-game: no score yet', pm);
   const nba = fx('espn-nba-event');
-  const pn = S.parseEspn(nba, S.cleanPin({ id: nba.id, league: 'nba', away: { abbr: 'BOS' }, home: { abbr: 'DET' } }));
+  const pn = S.parseEspn(nba, S.cleanPin({ id: nba.id, league: 'nba', away: { abbr: 'BOS' }, home: { abbr: 'NY' } }));
   check(!pn.error && pn.sport === 'basketball' && pn.phase === 'pre', 'basketball parses', pn);
   check(S.parseEspn({ nope: 1 }, NHL_PIN).error && S.parseNhl('<html>', NHL_PIN).error && S.parseNhl(null, NHL_PIN).error, 'garbage gives { error }, never a throw');
   check(/changed shape/.test(S.parseNhl({ awayTeam: {}, homeTeam: {}, gameState: 'WAT' }, NHL_PIN).error), 'an unknown game state is named');
@@ -192,7 +192,7 @@ check(S.diff(base, base).length === 0, 'the same reading twice: no events');
 }
 {
   const nba = fx('espn-nba-event');
-  const pin = S.cleanPin({ id: nba.id, league: 'nba', away: { abbr: 'BOS' }, home: { abbr: 'DET' } });
+  const pin = S.cleanPin({ id: nba.id, league: 'nba', away: { abbr: 'BOS' }, home: { abbr: 'NY' } });
   const live = clone(nba);
   live.status.type = { name: 'STATUS_IN_PROGRESS', state: 'in', shortDetail: '5:12 - 2nd' };
   live.competitions[0].competitors.forEach((c) => { c.score = '40'; });

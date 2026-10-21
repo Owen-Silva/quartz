@@ -2,7 +2,7 @@
  "id": "401909088",
  "date": "2026-10-20T19:00Z",
  "name": "Boston Celtics at New York Knicks",
- "shortName": "BOS @ DET",
+ "shortName": "BOS @ NY",
  "status": {
   "clock": 0,
   "displayClock": "0.0",
@@ -23,12 +23,12 @@
    "date": "2026-10-20T19:00Z",
    "competitors": [
     {
-     "id": "8",
+     "id": "18",
      "homeAway": "home",
      "score": "0",
      "team": {
-      "id": "8",
-      "abbreviation": "DET",
+      "id": "18",
+      "abbreviation": "NY",
       "displayName": "New York Knicks",
       "shortDisplayName": "Knicks",
       "name": "Knicks",
