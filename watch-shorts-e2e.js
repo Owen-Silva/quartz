@@ -27,7 +27,18 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const CDP_PORT = Number(opt('cdp', '9851'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-shorts-shots'));
-const CLIP = process.env.QUARTZ_SHORTS_CLIP || require('./tests/fixture-clip').CLIP;   // tests/media/lumen-test-clip.mp4 (testsrc2)
+const CLIP = process.env.QUARTZ_SHORTS_CLIP || path.join(__dirname, 'tests', 'media', 'lumen-short-9x16.mp4');   // testsrc2, 270x480 (9:16), 30 s
+// Made like tests/fixture-clip.js's, smaller: testsrc2=size=270x480:rate=12:duration=30 (3x4: 240x320, 10 s), -crf 45 -g 24,
+// AAC 24k. // The Short's own shape (6a): a clip per shape, /__media/short.mp4?shape=<w>x<h>. 9x16 and 3x4 are in tests/media, 16x9 is
+// the players' clip (640x360); any other (1x1, 1x3, ...) is <QUARTZ_SHORTS_SHAPES>/short-<shape>.mp4 when that dir has it.
+const SHAPE_CLIPS = { '9x16': CLIP, '3x4': path.join(__dirname, 'tests', 'media', 'lumen-short-3x4.mp4'), '16x9': require('./tests/fixture-clip').CLIP };
+function shapeClip(shape) {
+  const k = String(shape || '');
+  if (!k) return CLIP;
+  if (SHAPE_CLIPS[k]) return SHAPE_CLIPS[k];
+  const f = /^d{1,2}xd{1,2}$/.test(k) && process.env.QUARTZ_SHORTS_SHAPES ? path.join(process.env.QUARTZ_SHORTS_SHAPES, 'short-' + k + '.mp4') : '';
+  return f && fs.existsSync(f) ? f : '';
+}
 const SHOT_PREFIX = opt('shot-prefix', 'playview-shorts-');
 const SHOT_REAL = argv.indexOf('--no-real-shots') < 0;
 const FIX = path.join(__dirname, 'tests', 'watch-fixtures');
@@ -43,14 +54,15 @@ function listen(handler) {
   });
 }
 function sendHtml(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
-function sendClip(req, res) {
+function sendClip(req, res, clip) {
+  const file = clip || CLIP;
   let st;
-  try { st = fs.statSync(CLIP); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
+  try { st = fs.statSync(file); } catch (e) { res.writeHead(404); res.end('no clip'); return; }
   const m = /bytes=(\d+)-(\d*)/.exec(String(req.headers.range || ''));
   const start = m ? Number(m[1]) : 0;
   const end = m && m[2] ? Math.min(Number(m[2]), st.size - 1) : st.size - 1;
   res.writeHead(m ? 206 : 200, Object.assign({ 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1 }, m ? { 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size } : {}));
-  fs.createReadStream(CLIP, { start, end }).pipe(res);
+  fs.createReadStream(file, { start, end }).pipe(res);
 }
 const BS = String.fromCharCode(92);
 const inScript = (v) => JSON.stringify(v).split('<').join(BS + 'u003c');
@@ -65,10 +77,10 @@ async function startServers(mock) {
     const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
     const p = u.pathname.replace(/\/+$/, '') || '/';
     hits.push(p);
-    if (p === '/__media/short.mp4') return sendClip(req, res);
+    if (p === '/__media/short.mp4') return sendClip(req, res, u.searchParams.has('shape') ? shapeClip(u.searchParams.get('shape')) || '-' : CLIP);
     let m = /^\/shorts\/([A-Za-z0-9_-]{6,20})$/.exec(p);
     if (m && u.searchParams.has('real')) return sendHtml(res, F.realShortsPage(m[1], { signedout: u.searchParams.has('signedout'), preload: u.searchParams.has('preload') }));
-    if (m) return sendHtml(res, F.shortsPage(m[1], { signedout: u.searchParams.has('signedout'), ad: u.searchParams.get('ad') }));
+    if (m) return sendHtml(res, F.shortsPage(m[1], { signedout: u.searchParams.has('signedout'), ad: u.searchParams.get('ad'), shapes: u.searchParams.get('shapes') ? u.searchParams.get('shapes').split(',') : null }));
     if (p === '/shorts') return sendHtml(res, F.shortsPage('', {}));
     if (p === CHANNEL + '/shorts') return sendHtml(res, F.channelShorts(CHANNEL));
     if (p === CHANNEL + '/videos') return sendHtml(res, ytPage(fx('channel'), 'channel'));
@@ -446,6 +458,74 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
     await layoutOk('900x800', 'below');
     await resize(1280, 800);
     await layoutOk('1280x800 again', 'beside');
+
+    /* ============================ 6a. the Short's own shape ============================ */
+    // YouTube sizes a Short's player to the Short's own shape (a 3:4 Short is wider than a 9:16 one); Lumen does too,
+    // clamped to 9:16 ... 1:1. Four Shorts, four shapes (?shapes=: tests/shorts-fixtures.js, served by shapeClip()).
+    {
+      const SHM = require('./watch-shorts.js');
+      const lastShape = shapeClip('1x3') ? '1x3' : '3x4';
+      const shapes = ['3x4', '9x16', '16x9', lastShape];
+      const want = { '3x4': 3 / 4, '9x16': 9 / 16, '16x9': 1, '1x3': 9 / 16 };   // the shape the box takes (clamped)
+      if (lastShape !== '1x3') say('6a: no 1x3 clip (QUARTZ_SHORTS_SHAPES/short-1x3.mp4), so the 4th Short is 3x4: the 1:3 clamp is not checked here');
+      const boxed = async (label, shape, id) => {
+        const a = want[shape];
+        // Settled: no ease running, and the box is exactly box() for the tile and the shape (never a frame mid-ease).
+        const y = await shWait(`x.cur === ${JSON.stringify(id)} && x.on && x.applied && !x.ease && x.view && x.tile && (() => { const e = LumenShorts.box(x.tile.w, x.tile.h, ${a}); return Math.abs(x.view.w - e.vw) <= 1 && Math.abs(x.view.h - e.vh) <= 1; })()`, 8000);
+        const z = y || await sh();
+        const exp = z && z.tile ? SHM.box(z.tile.w, z.tile.h, a) : null;
+        say('6a ' + label + ' (' + shape + '): view ' + (z && z.view ? z.view.w + 'x' + z.view.h : '?') + ' in tile ' + (z && z.tile ? z.tile.w + 'x' + z.tile.h : '?') + ', mode ' + (z && z.mode) + ', aspect ' + (z && z.aspect));
+        check(!!y && !!exp && Math.abs(y.view.w - exp.vw) <= 2 && Math.abs(y.view.h - exp.vh) <= 2 && y.mode === exp.mode && y.mode === mode0,
+          label + ': a ' + shape + ' Short’s box is its own shape' + (a !== Number(shape.split('x')[0]) / Number(shape.split('x')[1]) ? ' clamped to ' + (a === 1 ? '1:1' : '9:16') : '') + ', the info still ' + mode0 + ' it',
+          z && { cur: z.cur, view: z.view, tile: z.tile, mode: z.mode, exp: exp && { vw: exp.vw, vh: exp.vh, mode: exp.mode }, aspect: z.aspect });
+        return y;
+      };
+      // Every frame's box while a Short moves (the chrome's rAF; one probe at a time: a new one ends the last): a new
+      // shape eases in, moving for at most 150 ms, then never moves again.
+      const PROBE = `(() => { const v = document.querySelector('.wp-layer .wp-tile.sh > .wp-view'); const id = (window.__shmId || 0) + 1; window.__shmId = id;
+        const out = window.__shm = []; if (!v) return 0; const t0 = performance.now();
+        const f = () => { if (window.__shmId !== id) return; const r = v.getBoundingClientRect(); out.push([Math.round(performance.now() - t0), Math.round(r.width), Math.round(r.height), Math.round(r.left)]); if (performance.now() - t0 < 2500) requestAnimationFrame(f); };
+        requestAnimationFrame(f); return 1; })()`;
+      const motion = async () => {
+        await chrome.waitFor('(() => { const f = window.__shm || []; return f.length && f[f.length - 1][0] >= 2400 ? 1 : 0; })()', 6000).catch(() => 0);
+        const fr = await chrome.ev('window.__shm || []');
+        const k = (q) => q[1] + 'x' + q[2] + '@' + q[3];
+        if (fr.length < 2) return { frames: fr.length, move: -1 };
+        const first = k(fr[0]), last = k(fr[fr.length - 1]);
+        const i0 = fr.findIndex((q) => k(q) !== first);
+        if (i0 < 0) return { frames: fr.length, move: 0, from: first, to: last };
+        const i1 = fr.findIndex((q, i) => i >= i0 && k(q) === last);
+        let gap = 0;
+        for (let i = i0; i <= i1; i++) gap = Math.max(gap, fr[i][0] - fr[i - 1][0]);
+        return { frames: fr.length, move: fr[i1][0] - fr[i0][0], bound: fr[i1][0] - fr[i0 - 1][0], maxGap: gap, steps: fr.slice(i0, i1 + 1).map((q) => q[0] + ':' + q[1] + 'x' + q[2]).join(' '),
+          after: fr.slice(i1).filter((q) => k(q) !== last).length, from: first, to: last };
+      };
+      const mode0 = (await sh()).mode;
+      await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[0].id + '?shapes=' + shapes.join(','))}, { service: 'youtube', title: 'Shorts' }), 1`);
+      x = await shWait(`x.cur === ${JSON.stringify(S[0].id)} && x.on && x.applied && x.phase === 'ready' && /shapes=/.test(x.url)`, 15000);
+      check(!!x, 'the shapes page opens in the Shorts view', x && { phase: x.phase, why: x.why });
+      await boxed('open at 1280x800', '3x4', S[0].id);
+      await chrome.ev(PROBE);
+      await clickAt('.wp-layer .sh-next', 'Next');
+      await boxed('Next', '9x16', S[1].id);
+      let mo = await motion();
+      say('6a motion 3x4 -> 9x16: ' + JSON.stringify(mo));
+      check(mo.move >= 0 && mo.move <= 150 && mo.after === 0 && mo.from !== mo.to, 'Next to a 9:16 Short: the box re-boxes, moving for at most 150 ms (first moved frame to the final one), then still', mo);
+      await chrome.ev(PROBE);
+      await clickAt('.wp-layer .sh-next', 'Next');
+      await boxed('Next', '16x9', S[2].id);
+      mo = await motion();
+      say('6a motion 9x16 -> 16x9 (1:1): ' + JSON.stringify(mo));
+      check(mo.move >= 0 && mo.move <= 150 && mo.after === 0 && mo.from !== mo.to, 'Next to a 16:9 one: the box re-boxes to 1:1, moving for at most 150 ms (first moved frame to the final one), then still', mo);
+      await resize(1920, 1000);
+      await boxed('resized to 1920x1000', '16x9', S[2].id);
+      await resize(1280, 800);
+      await boxed('back at 1280x800', '16x9', S[2].id);
+      await clickAt('.wp-layer .sh-next', 'Next');
+      await boxed('Next', lastShape, S[3].id);
+      await clickAt('.wp-layer .sh-prev', 'Previous');
+      await boxed('Previous', '16x9', S[2].id);
+    }
 
     /* ============================ 6b. an ad Short: the bar's ad rules ============================ */
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[0].id + '?ad=1')}, { service: 'youtube', title: 'Shorts' }), 1`);

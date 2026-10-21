@@ -71,6 +71,9 @@
 
   // The layout (box()).
   var LAY = { PAD: 16, GAP: 16, NAV: 44, INFO_W: 340, INFO_MAX: 420, INFO_H: 172, BELOW_MAX: 560 };
+  // The Short's own shape (box(), shape()): clamped to 9:16 ... 1:1. Read from the page until it is the current
+  // Short's (every EVERY ms, for POLL ms at most); a new shape eases the box over EASE ms (watch-shorts.css .sh-ease).
+  var ASP = { TALL: 9 / 16, WIDE: 1, EVERY: 120, POLL: 4000, EASE: 120 };
 
   function parse(url) { try { return new URL(String(url || '')); } catch (e) { return null; } }
 
@@ -162,26 +165,40 @@
     return !!(r && r.videoId && r.title && r.channel && r.channel.name && r.like && r.like.found && r.sub && r.sub.found);
   }
 
+  /** A Short's shape (width / height) as the box uses it: its own, clamped to 9:16 ... 1:1; 9:16 while unknown. */
+  function shape(aspect) {
+    var a = Number(aspect);
+    if (!(a > 0) || !isFinite(a)) return ASP.TALL;
+    return Math.min(ASP.WIDE, Math.max(ASP.TALL, a));
+  }
+
   /**
-   * Where everything goes in the tile (gw x gh, the layer's grid): the player 9:16 as tall as the
-   * tile allows, centred; Lumen's Next/Previous beside it; the info BESIDE when there is room for
-   * it on both sides (so the player stays centred), else BELOW (the player shorter, so it fits).
+   * Where everything goes in the tile (gw x gh, the layer's grid): the player as tall as the tile
+   * allows, centred, as wide as the Short's own shape (aspect: width / height, clamped to 9:16 ...
+   * 1:1; 9:16 while unknown); Lumen's Next/Previous beside it; the info BESIDE when a 9:16 player
+   * leaves room for it on both sides (so the player stays centred), else BELOW (the player shorter,
+   * so it fits). The mode never depends on the shape (a Short's shape arriving never moves the info
+   * from beside to below): a wider Short that doesn't fit beside at full height gets shorter instead.
    */
-  function box(gw, gh) {
+  function box(gw, gh, aspect) {
     var W = Math.max(0, Math.floor(gw)), Hh = Math.max(0, Math.floor(gh));
+    var a = shape(aspect);
     var vh = Math.max(160, Hh - 2 * LAY.PAD);
-    var vw = Math.round(vh * 9 / 16);
+    var vw = Math.round(vh * ASP.TALL);
     var side = LAY.GAP + LAY.NAV + LAY.GAP + LAY.INFO_W;
     if (W >= vw + 2 * side) {
+      vw = Math.round(vh * a);
+      var room = W - 2 * side;
+      if (vw > room) { vw = room; vh = Math.round(vw / a); }
       var x = Math.round((W - vw) / 2);
       var infoX = x + vw + LAY.GAP + LAY.NAV + LAY.GAP;
       return { mode: 'beside', vw: vw, vh: vh, x: x, y: LAY.PAD, navX: x + vw + LAY.GAP, navY: LAY.PAD,
         infoX: infoX, infoY: LAY.PAD, infoW: Math.max(LAY.INFO_W, Math.min(LAY.INFO_MAX, W - infoX - 24)), infoH: vh };
     }
     vh = Math.max(160, Hh - 2 * LAY.PAD - LAY.GAP - LAY.INFO_H);
-    vw = Math.round(vh * 9 / 16);
+    vw = Math.round(vh * a);
     var maxW = W - 2 * (LAY.GAP + LAY.NAV + LAY.GAP);
-    if (vw > maxW && maxW > 90) { vw = maxW; vh = Math.round(vw * 16 / 9); }
+    if (vw > maxW && maxW > 90) { vw = maxW; vh = Math.round(vw / a); }
     var bx = Math.round((W - vw) / 2);
     var iw = Math.min(LAY.BELOW_MAX, Math.max(200, W - 48));
     return { mode: 'below', vw: vw, vh: vh, x: bx, y: LAY.PAD, navX: bx + vw + LAY.GAP, navY: LAY.PAD,
@@ -354,6 +371,7 @@
         title: '', channel: null, like: { found: false }, dislike: { found: false }, sub: { found: false }, save: { found: false },
         canPrev: null, canNext: null, root: !!Q('[data-lumen-sh-root]'), on: document.documentElement.hasAttribute('data-lumen-sh'),
         reels: reels().length, links: k === 'grid' || k === 'feed' ? QA('a[href*="/shorts/"]').length : 0, ad: false };
+      out.asp = aspect();
       if (!r) return out;
       out.ad = !!Q(AD_SEL, r);
       var t = Q('yt-shorts-video-title-view-model h2', r) || Q('.ytShortsVideoTitleViewModelShortsVideoTitle', r) || Q('h2.title', r) || Q('#overlay .title', r);
@@ -376,6 +394,37 @@
       out.canPrev = up ? !up.disabled && up.getAttribute('aria-disabled') !== 'true' : i > 0;
       out.canNext = dn ? !dn.disabled && dn.getAttribute('aria-disabled') !== 'true' : (i >= 0 && i < list.length - 1) || null;
       return out;
+    }
+    // The current Short's own shape. Its <video>'s once its metadata is in (the picture itself); before that,
+    // YouTube's player data for THIS Short (#shorts-player's own getVideoData()/getPlayerResponse()), when the page
+    // has it. fresh: it is this Short's, not the one before (YouTube's one player still holds the last Short's
+    // video for a moment after a move); the chrome keeps asking until it is.
+    var asp = { url: '', id: '' };
+    function videoOf(r) { return Q('#shorts-player video', r) || Q('video.html5-main-video', r) || Q('video', r); }
+    function marked() { asp.url = String(this.currentSrc || ''); asp.id = idOf(location.pathname); }
+    function playerShape(r, id) {
+      try {
+        var pl = Q('#shorts-player', r) || Q('.html5-video-player', r);
+        if (!id || !pl || typeof pl.getVideoData !== 'function' || typeof pl.getPlayerResponse !== 'function') return null;
+        var vd = pl.getVideoData();
+        if (!vd || vd.video_id !== id) return null;
+        var sd = (pl.getPlayerResponse() || {}).streamingData || {};
+        var f = (sd.adaptiveFormats || []).concat(sd.formats || []).filter(function (x) { return x && x.width > 0 && x.height > 0; })[0];
+        return f ? { w: f.width, h: f.height } : null;
+      } catch (e) { return null; }
+    }
+    function aspect() {
+      var id = kind() === 'short' ? idOf(location.pathname) : '';
+      var r = active();
+      var v = r ? videoOf(r) : null;
+      if (v && !v.__lumenAsp) { v.__lumenAsp = 1; v.addEventListener('loadedmetadata', marked); v.addEventListener('resize', marked); }
+      var has = !!(v && v.readyState >= 1 && v.videoWidth > 0 && v.videoHeight > 0);
+      if (has && String(v.currentSrc || '') !== asp.url) { asp.url = String(v.currentSrc || ''); asp.id = id; }
+      if (has && asp.id === id) return { w: v.videoWidth, h: v.videoHeight, from: 'video', fresh: true };
+      var pd = playerShape(r, id);
+      if (pd) return { w: pd.w, h: pd.h, from: 'player', fresh: true };
+      if (has) return { w: v.videoWidth, h: v.videoHeight, from: 'video', fresh: false };
+      return { w: 0, h: 0, from: '', fresh: false };
     }
     var AD_SEL = 'ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ytd-reel-ad-metadata-renderer';
 
@@ -506,7 +555,7 @@
       }
     }
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    window.__lumenSh = { v: V, apply: apply, read: read, step: step, openFirst: openFirst, press: press,
+    window.__lumenSh = { v: V, apply: apply, read: read, aspect: aspect, step: step, openFirst: openFirst, press: press,
       tick: function (on) { var a = apply(on); if (a.on) watchActive(); var x = read(); x.applied = a.on; x.how = a.how || ''; return x; } };
   }
   var GUEST = '(' + String(guest) + ')();';
@@ -514,7 +563,7 @@
     return GUEST + 'window.__lumenSh.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
 
-  var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
+  var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, ASP: ASP, shape: shape, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
     entryUrl: entryUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -575,7 +624,8 @@
     CTX = ctx;
     keys();
     var p = s._sh = { phase: 'loading', read: null, shown: null, shownId: '', applied: false, noRoot: false, why: '', busy: '', seq: 0, timers: [],
-      presses: [], steps: [], wheel: null, wheels: 0, confirm: false, save: null, opened: '', logged: '', lastUrl: '', layout: null };
+      presses: [], steps: [], wheel: null, wheels: 0, confirm: false, save: null, opened: '', logged: '', lastUrl: '', layout: null,
+      aspect: 0, aspT: 0, aspSeq: 0, easeT: 0 };
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'sh-cover');
@@ -643,12 +693,14 @@
     if (!p) return;
     CTX = ctx;
     p.read = null; p.shown = null; p.shownId = ''; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.noRoot = false; p.opened = '';
+    p.aspect = 0;
     update(s);
   }
   function destroy(ctx, s) {
     var p = shOf(s);
     if (!p) return;
     stopReads(s);
+    clearTimeout(p.aspT); clearTimeout(p.easeT); p.aspT = p.easeT = 0;
     var i = all.indexOf(s);
     if (i >= 0) all.splice(i, 1);
   }
@@ -696,6 +748,8 @@
       if (!r || !r.ok) throw new Error('no answer from the page');
       p.read = r;
       p.applied = !!r.applied;
+      if (r.asp) setAspect(s, r.asp);
+      if (r.kind === 'short' && !(r.asp && r.asp.fresh)) pollAspect(s, seq);
       var cur = idOf(s.url, s.service);
       // A grid (a channel's Shorts, Subscriptions' Shorts, the feed before YouTube picks): its first Short.
       if ((r.kind === 'grid' || (r.kind === 'feed' && !r.reels)) && on) {
@@ -746,14 +800,45 @@
     render(s);
   }
 
+  /** The current Short's shape from the page (a guest aspect() answer): a new one re-boxes, easing. */
+  function setAspect(s, a) {
+    var p = shOf(s);
+    if (!p || !a || !(a.w > 0) || !(a.h > 0)) return;
+    var r = a.w / a.h;
+    if (Math.abs(shape(r) - shape(p.aspect)) < 0.004) { p.aspect = r; return; }
+    p.aspect = r;
+    layoutBox(s, true);
+  }
+  /** Asks the page for the Short's shape every ASP.EVERY ms until it is this Short's (fresh), ASP.POLL ms at most. */
+  function pollAspect(s, seq) {
+    var p = shOf(s);
+    if (!p || p.aspSeq === seq || !s.view) return;
+    p.aspSeq = seq;
+    var v = s.view, t0 = Date.now();
+    (function next() {
+      clearTimeout(p.aspT);
+      p.aspT = setTimeout(function () {
+        p.aspT = 0;
+        if (p.seq !== seq || s.view !== v || Date.now() - t0 > ASP.POLL) return;
+        js(v, call('aspect', [])).then(function (a) {
+          if (p.seq !== seq || s.view !== v) return;
+          setAspect(s, a);
+          if (!(a && a.fresh)) next();
+        }, function () { /* the page went away: its next load reads again */ });
+      }, ASP.EVERY);
+    })();
+  }
+
   var ro = null;
-  function layoutBox(s) {
+  /** The box from the tile's size and the Short's shape. ease: a new shape, eased (never a resize or the first box). */
+  function layoutBox(s, ease) {
     var L = layerOf();
     if (!L || !s || !s.view) return;
     var p = shOf(s);
     if (!shOn(s) || !L.grid) {
       if (p && p.layout) {
         ['--sh-x', '--sh-y', '--sh-w', '--sh-h'].forEach(function (k) { s.tile.style.removeProperty(k); });
+        clearTimeout(p.easeT); p.easeT = 0; s.tile.removeAttribute('data-sh-ease');
         s.tile.removeAttribute('data-sh');
         p.layout = null;
       }
@@ -762,7 +847,13 @@
     if (!ro && window.ResizeObserver) { ro = new ResizeObserver(function () { all.forEach(function (x) { if (shOn(x)) layoutBox(x); }); }); ro.observe(L.grid); }
     var r = s.tile.getBoundingClientRect();
     if (r.width < 50 || r.height < 50) return;
-    var b = box(r.width, r.height);
+    var b = box(r.width, r.height, p.aspect);
+    var was = p.layout;
+    if (ease && was && b.mode === was.mode && (b.vw !== was.vw || b.vh !== was.vh)) {
+      s.tile.setAttribute('data-sh-ease', '');
+      clearTimeout(p.easeT);
+      p.easeT = setTimeout(function () { p.easeT = 0; s.tile.removeAttribute('data-sh-ease'); }, ASP.EASE + 60);
+    } else if (!ease && p.easeT && was && (b.vw !== was.vw || b.vh !== was.vh || b.x !== was.x || b.mode !== was.mode)) { clearTimeout(p.easeT); p.easeT = 0; s.tile.removeAttribute('data-sh-ease'); }
     p.layout = b;
     // The webview's box as px variables on the tile (watch-shorts.css places it with them): the playback
     // view clears the webview's own inline size on any tile that is not its own, so Lumen never sets it.
@@ -1058,7 +1149,7 @@
       shownId: p.shownId, infoShort: m ? m.getAttribute('data-short') : '', view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, nav: p.nav.hidden ? null : rect(p.nav),
       cover: !p.cover.hidden, title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '',
       note: q('.pv-why') ? q('.pv-why').textContent : '', like: b(q('.pv-like')), dislike: b(q('.pv-dislike')), sub: b(q('.pv-sub')), savebtn: b(q('.pv-save')),
-      prev: b(p.prev), next: b(p.next), read: p.read
+      prev: b(p.prev), next: b(p.next), read: p.read, aspect: p.aspect, ease: s.tile.hasAttribute('data-sh-ease')
     };
   }
 
