@@ -1,6 +1,6 @@
 // testwatch.js — shared by the test launchers (looksync-e2e.js, toprow-e2e.js, smoketest.js).
 //
-// The user works at this machine while tests run: a Quartz test window must never be on his screen,
+// The user works at this machine while tests run: a Quartz test window must never be on their screen,
 // not even for one frame. Two halves:
 //   OFFSCREEN_ARGS  the launch flags. main.js creates a --test-profile --offscreen window at
 //                   -20000,-20000 with no taskbar button; --show-inactive never takes focus;

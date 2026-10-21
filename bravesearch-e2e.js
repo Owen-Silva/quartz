@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (2026-09-17)
 // bravesearch-e2e.js — Quartz's own results page end to end, against a REAL test instance and a
 // MOCK Brave Search API. Never the real API, never the user's profile.
 //

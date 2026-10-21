@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (2026-09-17)
 // toprow-e2e.js — top-row hints end to end, against a REAL test instance of Quartz.
 //
 //   node toprow-e2e.js [--port 9417] [--keep]
@@ -188,7 +188,7 @@ async function pixels(name, limit) {
   let pred;
   if (top.kind === 'wash') {
     // A wash is the still LINED UP with the monitor at the window's place. The --offscreen test
-    // window is off every monitor (The user's screen stays clear), so there is no screen place to
+    // window is off every monitor (the user's screen stays clear), so there is no screen place to
     // compare against: the prediction would sample outside the still. Said, never passed quietly.
     const off = await ev("(() => { const p = LookSync.place(); if (!p) return 'no place'; const c = p.content, d = p.display; return c.x + c.width <= d.x || c.x >= d.x + d.width || c.y + c.height <= d.y || c.y >= d.y + d.height ? 'window at ' + c.x + ',' + c.y + ', monitor ' + d.x + ',' + d.y + ' ' + d.width + 'x' + d.height : ''; })()");
     if (off) { skip++; console.log('SKIP pixels ' + name + ': wash ' + top.alpha + ' is lined up with the monitor, and the off-screen test window is on none (' + off + ')'); return null; }
@@ -219,7 +219,7 @@ async function pixels(name, limit) {
 /*
  * Windows' "Animation effects" off reaches the chrome as prefers-reduced-motion: reduce, and then
  * Home switches with no fade at all (backdrop.css): one hint, at the end value, is right. A GitHub
- * runner has animations off; the user's laptop has them on, where the fade is followed frame by frame.
+ * runner has animations off; a typical laptop has them on, where the fade is followed frame by frame.
  */
 const REDUCED = "matchMedia('(prefers-reduced-motion: reduce)').matches";
 async function step(name, src, expectKind, settleMs) {

@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (requested 2026-09-17)
 // watch-e2e.js -- Watch, Quartz's streaming hub, end to end: a REAL hidden Quartz test instance reading
 // a LOCAL mock of every service (tests/watch-mock.js, built from tests/watch-fixtures/). Never a real
 // service account, never the user's profile, cookies or live Quartz.

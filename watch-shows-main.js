@@ -12,7 +12,7 @@
  * watch-main's hidden reader (runStep: an off-screen, muted, never-shown view on Quartz's session,
  * destroyed the moment the step ends), read-only, as the service's page would; TMDB's season and
  * episode data is fetched beside it (cookie-less, only with the user's saved key) and fills what the
- * service did not say. A reader that fails, a service he is signed out of or turned off, or a game
+ * service did not say. A reader that fails, a service they are signed out of or turned off, or a game
  * or low memory (the same gates as every Lumen read) answers with TMDB's data and the reason, so
  * the page is never blank and never silent. A title on none of his services (service '') is
  * TMDB-only: where it streams, from JustWatch via TMDB.

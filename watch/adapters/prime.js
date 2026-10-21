@@ -3,7 +3,7 @@
  * watch/adapters/prime.js -- Prime Video rows for Watch.
  *
  * One hidden reader view loads https://www.primevideo.com/ on Quartz's default
- * session (The user's own sign-in) and reads the page state Prime Video embeds in
+ * session (the user's own sign-in) and reads the page state Prime Video embeds in
  * the HTML. No extra request is made: the page makes the same calls it always
  * does, and the reader only looks at what the page already shipped.
  *

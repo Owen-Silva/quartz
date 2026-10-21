@@ -3,7 +3,7 @@
 // watch-find-e2e.js). Shapes follow the public sources each reader names (watch/search/*.js): Disney+'s
 // explore search (data.page.containers[].items[]), hulu.com's discover search (groups[].results[]),
 // Prime Video's search-page hydration (containers[].entities[]), TMDB's search/multi + watch/providers.
-// None of them was checked against a signed-in account. Never a real title id of the user's.
+// None of them was checked against a signed-in account. Never a real title id from a real account.
 
 const UUID = (n) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 

@@ -9,7 +9,7 @@ require('./lowcpu-optional.js');   // first: the CPU cap, when one is configured
 // locally (tests/watch-yt-stills.js), the hover preview's player is a local mock page (QUARTZ_WATCH_PREVIEW_MOCK=1),
 // and every other host name resolves nowhere. Never a real account, cookie or service.
 //
-// What it measures (The user 10-18: "make sure nothing is laggy and everything is super responsive"), at the machine's
+// What it measures (requested 10-18: "make sure nothing is laggy and everything is super responsive"), at the machine's
 // own scale factor, the window kept in front of the z-order (not occluded) the way watch-e2e's --measure does:
 //   feedback   input -> next paint (the Event Timing API) for every key and click: budget 100 ms
 //   open       click -> the view shows (content or its skeleton), measured in the page that draws it: budget 300 ms

@@ -1,5 +1,5 @@
 # wake-bisect.js round 13 (lane homestorm3, 2026-10-15): which embed-thread priority is the lowest
-# that stops the storm? Run on the user's laptop ONE condition per call (back to back, lowrun.js:
+# that stops the storm? Run on the test laptop ONE condition per call (back to back, lowrun.js:
 # BelowNormal, browser lock), settle 40, window 40; on a runner all of them can run at once.
 #   none = no change; an = AboveNormal (the main thread's own base); hi = Highest; tc = TimeCritical
 # Plain Electron (timer-repro con2s) pinned to one CPU, raised from outside with uvboost's finder:

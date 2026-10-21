@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (2026-09-17)
 // claudeanswer-e2e.js — the Claude answer end to end, against a REAL Quartz test instance and the
 // MOCK Anthropic API (tests/anthropic-mock.js). Never the real API, never the user's profile.
 //

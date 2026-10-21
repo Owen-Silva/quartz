@@ -2,7 +2,7 @@
 /*
  * watch-tilepreview.js -- YouTube-style hover previews INSIDE a tile on Lumen's rows.
  *
- * The user (10-18): "if i hover my mouse over videos after you scroll down can it show a preview just
+ * Requested 10-18: "if i hover my mouse over videos after you scroll down can it show a preview just
  * like youtube does if you hover over videos?" At the first row the hero (the stage) already plays
  * the hovered title (watch.js "the hover preview"). Past it the hero is gone, so the tile itself
  * plays, the way YouTube's feed does:

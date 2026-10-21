@@ -1,4 +1,4 @@
-try { require('./tools/lowcpu-optional.js'); } catch (e) { /* no CPU cap configured (QUARTZ_LOWCPU / ~/.config/quartz/lowcpu.js), or the module is missing: run uncapped */ }   // first: one capped browser at a time (The user, 2026-09-17)
+try { require('./tools/lowcpu-optional.js'); } catch (e) { /* no CPU cap configured (QUARTZ_LOWCPU / ~/.config/quartz/lowcpu.js), or the module is missing: run uncapped */ }   // first: one capped browser at a time (requested 2026-09-17)
 // notes-reader-e2e.js -- notes-reader.ps1 against a Chromium stand-in for the reader app
 // (tests/notes-reader-standin.js). No real reader app is ever touched: the reader is pointed
 // at the stand-in's own process name, notesstandin (a hardlink of electron.exe), and is

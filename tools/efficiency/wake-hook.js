@@ -55,7 +55,7 @@ function makeStub(name) {
 //   noauto      autoStart: false (no watch, no policy read, no presence/read timers)
 //   run-false   isRunning: () => false (no koffi, no tasklist)
 //   run-null    isRunning: () => null (the tasklist path, as master did)
-//   tmpdir      notesDir: a fresh temp dir that exists (so fs.watch succeeds, as on the user's box)
+//   tmpdir      notesDir: a fresh temp dir that exists (so fs.watch succeeds, as on the development machine)
 //   kill<ms>    a setInterval of exactly <ms> made inside create() is never started
 //   noreg       spawn: refuses `reg` (the policy read), passes everything else to the real spawn
 const NOTES = new Set(list(process.env.QWAKE_NOTES));

@@ -2,7 +2,7 @@
 /*
  * drm.js -- the chrome half of "this video needs DRM Quartz does not have".
  *
- * The user, 2026-10-14: Prime Video would not play in Quartz and played fine in
+ * 2026-10-14: Prime Video would not play in Quartz and played fine in
  * Edge. Stock Electron has no Widevine, so that is true of every big streaming
  * service. Until Quartz has its own Widevine (see next-week/quartz-drm.md),
  * the honest thing is to say so the moment it matters and offer the browser

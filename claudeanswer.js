@@ -27,7 +27,7 @@
 //   'stopped', each with a plain-English title and a detail that quotes what Anthropic (or the
 //   network) actually answered. Nothing here falls back on its own.
 //
-//   ONE MODEL (The user, 10-17: "only haiku"). Every answer, quick and deep, is Claude Haiku 5.5
+//   ONE MODEL (requested 10-17: "only haiku"). Every answer, quick and deep, is Claude Haiku 5.5
 //   (ANSWER_MODEL) at high effort. No server-side fallback is ever requested, so there is exactly
 //   one 'start' per seq and its model is always Haiku. If a stream reports another model in
 //   message_start, or carries a fallback block anyway, the answer fails 'bad-answer' and none of
@@ -76,7 +76,7 @@ const BILLING_URL = 'https://platform.claude.com/settings/billing';
 const CAPABILITIES_URL = 'https://platform.claude.com/settings/capabilities';
 const PRICES_CHECKED = '2026-10-17';
 
-/** The ONLY model that ever answers (The user, 10-17: "only haiku"). Quick and "Deeper answer" both. */
+/** The ONLY model that ever answers (requested 10-17: "only haiku"). Quick and "Deeper answer" both. */
 const ANSWER_MODEL = 'claude-haiku-5-5';
 const ANSWER_MODEL_LABEL = 'Claude Haiku 5.5';
 /** What message_start may report: the id itself, or a dated snapshot of it. Anything else is
@@ -114,7 +114,7 @@ const CAP_MAX = 10000;
 
 /** What one request may spend. Thinking is adaptive (the default on Haiku 5.5) and counts toward
  *  max_tokens, so the ceiling leaves it room while still keeping a runaway answer short. Both are
- *  Haiku at HIGH effort (The user, 10-17); "Deeper" means more searching and a longer answer, not
+ *  Haiku at HIGH effort (requested 10-17); "Deeper" means more searching and a longer answer, not
  *  another model. */
 const PLAN = {
   quick: { model: ANSWER_MODEL, maxTokens: 4096, maxUses: 2, effort: 'high' },
@@ -292,7 +292,7 @@ function estimateCost(model, usage) {
 
 function roundUsd(v) { return Math.round(num(v) * 1e6) / 1e6; }
 
-/** 'YYYY-MM' in local time: the month the user's credit renews in is his own calendar month. */
+/** 'YYYY-MM' in local time: the month the user's credit renews in is their own calendar month. */
 function monthId(ms) {
   const d = new Date(ms);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -1013,7 +1013,7 @@ function create(deps) {
       return;
     }
 
-    const model = ANSWER_MODEL;   // quick and deep alike (The user, 10-17: "only haiku")
+    const model = ANSWER_MODEL;   // quick and deep alike (requested 10-17: "only haiku")
     const answerMode = req.mode === 'deep' ? 'deep' : 'quick';
     prune();
     const ck = cacheKey(model, answerMode, req.q, req.history);

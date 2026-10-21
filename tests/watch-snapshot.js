@@ -389,9 +389,9 @@ function okEntry(now, agoMin, profile, items, extra) {
 function fullCache(now) {
   const events = espnEvents(now);
   return {
-    youtube: okEntry(now, 3, 'the user', youtubeItems()),
-    disney: okEntry(now, 12, 'the user', disneyItems()),
-    prime: okEntry(now, 41, 'the user', primeItems()),
+    youtube: okEntry(now, 3, 'Alex', youtubeItems()),
+    disney: okEntry(now, 12, 'Alex', disneyItems()),
+    prime: okEntry(now, 41, 'Alex', primeItems()),
     espn: okEntry(now, 1, '', espnItems(events, now), { events })
   };
 }
@@ -438,9 +438,9 @@ function allPaused(now) {
 function empty(now) {
   const t = typeof now === 'number' ? now : Date.now();
   return build(t, {
-    youtube: okEntry(t, 3, 'the user', []),
-    disney: okEntry(t, 12, 'the user', []),
-    prime: okEntry(t, 41, 'the user', []),
+    youtube: okEntry(t, 3, 'Alex', []),
+    disney: okEntry(t, 12, 'Alex', []),
+    prime: okEntry(t, 41, 'Alex', []),
     espn: okEntry(t, 1, '', [], { events: [] })
   }, null);
 }
@@ -530,7 +530,7 @@ function searchAnswerTmdb(q, seq) {
   return a;
 }
 
-/* --- dense: as much as the user's real accounts carry (2026-10-17) --------------------------------
+/* --- dense: as much as real accounts carry (2026-10-17) --------------------------------
  * YouTube 3 resume + 40 picks + 17 watch later; Disney+ 15 resume + 15 picks; Prime 11 resume +
  * 77 picks; ESPN 2 live, 11 upcoming, 12 finals. Made-up titles where the counts outrun the real
  * fixture lists. One title is on BOTH Disney+ and Prime with the same year ("The Martian", 2015:
@@ -592,9 +592,9 @@ function dense(now) {
   const t = typeof now === 'number' ? now : Date.now();
   const events = denseEvents(t);
   return build(t, {
-    youtube: okEntry(t, 3, 'the user', denseYouTube()),
-    disney: okEntry(t, 12, 'the user', denseDisney()),
-    prime: okEntry(t, 41, 'the user', densePrime()),
+    youtube: okEntry(t, 3, 'Alex', denseYouTube()),
+    disney: okEntry(t, 12, 'Alex', denseDisney()),
+    prime: okEntry(t, 41, 'Alex', densePrime()),
     espn: okEntry(t, 1, '', espnItems(events, t), { events })
   }, null);
 }

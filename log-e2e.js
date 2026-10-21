@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (2026-09-17)
 // log-e2e.js -- quartz.log end to end, against a REAL Quartz test instance and LOCAL pages.
 //
 //   node log-e2e.js [--cdp 9427] [--no-gate] [--keep]

@@ -28,7 +28,7 @@
 # What a read costs, and why most reads cost almost nothing (2026-10-16)
 #   A full "read" is Get-Process + a UI Automation walk of the window (up to
 #   4000 nodes, each a cross-process call into the reader app's WebView2) + JSON,
-#   every 3 s while the reader app is open: ~2-3% of the whole CPU on battery (The user, 10-15).
+#   every 3 s while the reader app is open: ~2-3% of the whole CPU on battery (measured 10-15).
 #   Now a read only walks when something can have changed since the last walk;
 #   otherwise it answers from that walk ("cached": true), after checking the
 #   window still exists (a few Win32 calls). What "changed" means depends on

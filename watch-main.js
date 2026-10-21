@@ -28,7 +28,7 @@
  *     - the moment it comes on screen (hello, its tab brought forward, the window shown or
  *       focused again), every service last read over FRESH_ON_OPEN_MS (10 min) ago reads,
  *       one at a time, oldest first -- and a service whose title the user opened from Watch reads
- *       FIRST when he comes back (its Continue watching moved), whatever its age;
+ *       FIRST when they come back (its Continue watching moved), whatever its age;
  *     - then the one timer keeps each service to its floor: every 15 min (ESPN every 2 while
  *       one of his games is live).
  *   OFF SCREEN (no Watch page visible, or none open): the light background refresh, when
@@ -48,7 +48,7 @@
  *
  * SEARCH is a cookie-less fetch (credentials 'omit') of YouTube's public results page, so
  * it never lands in the user's YouTube history; a newer search from the same page aborts the
- * one in flight. Only the home/feed VIEW reads use his signed-in session.
+ * one in flight. Only the home/feed VIEW reads use their signed-in session.
  *
  * THE PAGE (watch.html) asks over console lines, like search.html; only a guest whose URL
  * is OUR watch.html is heard, and every line is validated here:
@@ -155,7 +155,7 @@ const QUERY_MAX = 200;
 const TRAILER_TTL_MS = 24 * 60 * 60 * 1000;   // a title's trailer barely changes; a failure is not kept
 const TRAILER_CACHE_MAX = 200;
 
-/* Games whose process means "do not start a hidden page now" (The user plays VALORANT). */
+/* Games whose process means "do not start a hidden page now" (VALORANT, for example). */
 const GAME_PROCESSES = ['valorant-win64-shipping.exe', 'league of legends.exe', 'fortniteclient-win64-shipping.exe',
   'cs2.exe', 'rocketleague.exe', 'overwatch.exe', 'r5apex.exe', 'cod.exe'];
 
@@ -748,8 +748,8 @@ function create(deps) {
     const unlink = linkAbort(step.signal, ctrl);
     try {
       // Every fetch step is public (ESPN's JSON, YouTube's results page for search):
-      // credentials 'omit', so no cookie of the user's is sent and a search never lands in his
-      // YouTube history. The home/feed reads are VIEW steps and keep his cookies.
+      // credentials 'omit', so no cookie of the user's is sent and a search never lands in their
+      // YouTube history. The home/feed reads are VIEW steps and keep their cookies.
       const res = await fetchImpl(url, { signal: ctrl ? ctrl.signal : undefined, credentials: 'omit', headers: { accept: step.as === 'text' ? 'text/html,*/*' : 'application/json' } });
       out.status = res.status || 0;
       out.finalUrl = res.url || url;

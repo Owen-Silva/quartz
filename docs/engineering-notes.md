@@ -1434,7 +1434,7 @@ classic script so it leaves a global `Readability`. `ws` is a devDependency, for
   `.navrow::after`; the two-layer version survives only in the `@supports not (anchor-name)`
   fallback, where the interior is painted opaque first.
 - The chrome and the panes are the pass-one look: design pass two restyled both and was reverted at
-  The user's request, and only the new tab page kept it. The chrome is layered glass rather than a ruled
+  the user's request, and only the new tab page kept it. The chrome is layered glass rather than a ruled
   panel. The titlebar is the thinnest, lightest pane in it, an edge hairline separates it from the
   nav row, and the lit seam runs under the nav row — it rides `.navrow::before` so that
   `::after` stays free to anchor the omnibox's rim ring. Hairlines are 1px and spacing sits on a

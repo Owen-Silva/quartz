@@ -4,7 +4,7 @@
  * embed URL, what the embedded player says back, and the Referer main adds for the embed.
  * Nothing here touches the DOM, Electron or the network.
  *
- * The user (10-17): "can we make this preview the video too if you hover over it". Hovering (or
+ * Requested 10-17: "can we make this preview the video too if you hover over it". Hovering (or
  * keyboard-focusing) the stage, or resting on the stage's tile, plays a MUTED preview over
  * the still after PREVIEW_DELAY_MS; leaving stops it and the iframe is removed (no decode
  * while not hovered). One preview at a time; prefers-reduced-motion = never autoplays.

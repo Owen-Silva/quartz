@@ -102,7 +102,7 @@
   function speedLabel(r) { return r === 1 ? 'Normal' : String(r).replace(/^0\./, '0.') + '×'; }
 
   /**
-   * The keys, the same on every service (The user's list): Space/K play-pause, J/L 10 s, the arrows
+   * The keys, the same on every service (the requested list): Space/K play-pause, J/L 10 s, the arrows
    * 5 s and the volume, M mute, F Lumen's fullscreen (Shift+F the whole screen), C captions,
    * Shift+< and Shift+> the speed. Ctrl/Alt/Meta combinations are never the bar's.
    */

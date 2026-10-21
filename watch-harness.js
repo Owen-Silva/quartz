@@ -177,7 +177,7 @@ function fakeWorld(opts) {
       if (s.extracted && s.extracted.signedOut) return { state: 'signed-out', reason: 'sign in' };
       const n = (s.extracted && s.extracted.n) || 3;
       const items = mk(id === 'espn' ? 'espn' : id, id === 'espn' ? 'live' : 'resume', n);
-      const out = { state: 'ok', items, profile: id === 'disney' ? 'the user' : '' };
+      const out = { state: 'ok', items, profile: id === 'disney' ? 'Alex' : '' };
       if (id === 'espn') out.events = (s.extracted && s.extracted.events) || [];
       return out;
     },
@@ -343,7 +343,7 @@ function scrollingDisney(readyAfter) {
       parse: (read) => {
         const s = read.steps.home;
         if (s.error) return { state: 'error', reason: s.error.detail };
-        return { state: 'ok', items: mk('disney', 'resume', 2), profile: 'the user' };
+        return { state: 'ok', items: mk('disney', 'resume', 2), profile: 'Alex' };
       },
     },
   };
@@ -378,7 +378,7 @@ async function reviewFixTests() {
     const espn = calls.filter((c) => /espn/.test(c.url));
     const tmdb = calls.filter((c) => /themoviedb\.org/.test(c.url));
     check(yt.length === 1 && espn.length >= 1 && tmdb.length >= 1, 'fix1: search, ESPN and TMDB all went through fetch', calls.map((c) => c.url));
-    check(calls.length > 0 && calls.every((c) => c.opts.credentials === 'omit'), 'fix1: every fetch is credentials:omit (no cookie of the user\'s, nothing in his YouTube history)', calls.map((c) => c.opts.credentials));
+    check(calls.length > 0 && calls.every((c) => c.opts.credentials === 'omit'), 'fix1: every fetch is credentials:omit (no cookie of the user\'s, nothing in their YouTube history)', calls.map((c) => c.opts.credentials));
     const a = g.last('__applyWatchSearch');
     check(a && a.seq === 1 && a.youtube.ok, 'fix1: the cookie-less search still answers', a && a.youtube);
   } finally { w.cleanup(); }
@@ -659,7 +659,7 @@ async function reviewFixTests() {
     w.wm.flush();
     const file = path.join(w.dir, 'watch-cache.json');
     let disk = JSON.parse(fs.readFileSync(file, 'utf8'));
-    check(disk.services.disney.items.length === 3 && disk.services.disney.profile === 'the user', '(setup) Disney+ rows and profile on disk');
+    check(disk.services.disney.items.length === 3 && disk.services.disney.profile === 'Alex', '(setup) Disney+ rows and profile on disk');
     w.wm.setEnabled('disney', false);
     disk = JSON.parse(fs.readFileSync(file, 'utf8'));
     check(disk.services.disney.items.length === 0 && disk.services.disney.profile === '' && disk.services.disney.state === 'never', 'fix7: off -> its rows and profile leave watch-cache.json at once', disk.services.disney);
@@ -772,7 +772,7 @@ async function mainTests() {
     check(w.maxConcurrent === 1, 'main: one read at a time', w.maxConcurrent);
     check(w.calls.length === Shape.SERVICE_IDS.length, 'main: one step per service', w.calls);
     check(snap.rows.find((r) => r.id === 'continue').items.length === 3 * (Shape.SERVICE_IDS.length - 1), 'main: rows built from every service', snap.rows.map((r) => r.id + ':' + r.items.length));
-    check(w.svc(snap, 'disney').profile === 'the user', 'main: the profile name travels');
+    check(w.svc(snap, 'disney').profile === 'Alex', 'main: the profile name travels');
     check(g.pushed.some((p) => p.fn === '__applyWatch' && p.payload.services.some((s) => s.reading)), 'main: the page is told what is reading');
     check(w.timers.length >= 1, 'main: a timer is armed while the page is open');
     w.wm.flush();

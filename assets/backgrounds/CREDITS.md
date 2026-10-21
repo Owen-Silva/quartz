@@ -2,13 +2,13 @@
 
 Quartz's built-in backgrounds are copied as-is from Helm (~/helm/ui/assets/
 backgrounds/, 2026-10-08): the same 23 photos, thumbs and catalog.json, so
-both apps offer the same gallery. Helm's `wallpaper.png` (The user's own dev copy
-of his wallpaper, not one of the defaults) was NOT copied; Quartz makes its
+both apps offer the same gallery. Helm's `wallpaper.png` (the user's own dev copy
+of their wallpaper, not one of the defaults) was NOT copied; Quartz makes its
 own wallpaper copy at runtime (bgfiles.js). The rest of this file is Helm's,
 unchanged.
 
 These are Helm's bundled default backgrounds. `wallpaper.png` in this folder is
-The user's own dev copy (gitignored) and is not one of the defaults.
+the user's own dev copy (gitignored) and is not one of the defaults.
 
 Every photo is from Unsplash under the Unsplash License (free photos only, no
 Unsplash+). Full images are 2560px wide JPEGs (<= 600 KB), re-encoded by the

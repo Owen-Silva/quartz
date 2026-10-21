@@ -3,7 +3,7 @@
 /**
  * embed.js — native app tabs.
  *
- * The user: "for apps is there a way where I can start the apps in a tab but it's
+ * The user asked: "for apps is there a way where I can start the apps in a tab but it's
  * running the app so that literally everything is just in a tab?"
  *
  * This is the engine for that. A real program's real top-level window is taken
@@ -110,7 +110,7 @@ const HWND_TOP = 0n;
 
 const SW_HIDE = 0;
 /** Restore/show WITHOUT activating. SW_RESTORE DOES activate a window, and the user
- *  is at the machine: hosting a minimised app must never take his keyboard. */
+ *  is at the machine: hosting a minimised app must never take their keyboard. */
 const SW_SHOWNOACTIVATE = 4;
 
 const WM_CLOSE = 0x0010;
@@ -237,7 +237,7 @@ function ownsRootVia(root, mine, ownerLookup, hops) {
  * Bound LAZILY, on the first call that needs it, and never at require() time:
  * The user restarts the browser from this folder while it is being worked on, and a
  * native module that is missing, half-installed or built for another ABI must
- * cost him a dead `api.embed`, not a browser that will not start.
+ * cost them a dead `api.embed`, not a browser that will not start.
  */
 let w32 = null;
 let w32Tried = false;
@@ -1322,7 +1322,7 @@ function create(opts) {
          *    (SWP_NOMOVE | SWP_NOSIZE).
          *
          * SWP_NOACTIVATE throughout: the user is at the machine, and a tab opening
-         * must never take his keyboard.
+         * must never take their keyboard.
          */
         w32.ShowWindow(handle, SW_HIDE);
         w32.SetParent(handle, parent);
@@ -1458,7 +1458,7 @@ function create(opts) {
        * THE Z-ORDER, and a plain HWND_TOP here was wrong (R8, 2026-09-12).
        *
        * HWND_TOP puts the window at the top of the whole non-topmost band --
-       * above the window the user just switched TO, if he switched away from the
+       * above the window the user just switched TO, if they switched away from the
        * browser. Measured: with Paint activated in front of the test browser, one
        * SetWindowPos(HWND_TOP) on the hosted window put the app above Paint, over
        * a window the user was using. A layout can land in exactly that state: the
@@ -1536,7 +1536,7 @@ function create(opts) {
     /* ONLY WHILE THE FOREGROUND IS OURS. main.js calls this from the window's
        'focus', where it is true by definition -- but the call is exported, and
        raising a hosted app to the top of the z-order while the user is working in
-       ANOTHER app would throw our tab's window over his. (R8, 2026-09-12.) */
+       ANOTHER app would throw our tab's window over theirs. (R8, 2026-09-12.) */
     if (!foregroundIsOurs()) return { ok: true, raised: 0, reason: 'not-foreground' };
     let raised = 0;
     for (const record of Array.from(attached.values())) {
@@ -1555,7 +1555,7 @@ function create(opts) {
   /**
    * Put the window back: top-level again, its own styles, its own old rect.
    * NEVER activated — the user is at the machine, and a tab closing must not throw
-   * a window in his face.
+   * a window in their face.
    *
    * `restore: false` still un-parents and still restores the styles (a WS_CHILD
    * window with no parent is an invisible zombie), it only skips showing the
@@ -1960,7 +1960,7 @@ function create(opts) {
    * input queue, so the browser is untouched: measured 2026-09-12 with the guest
    * app wedged for 12 s, embed:list answered in 1 ms and Ctrl+T opened a tab in
    * 27 ms. The tab says "(not responding)", the rectangle is frozen, and the user
-   * can pop it out or close it whenever he likes.
+   * can pop it out or close it whenever they like.
    *
    * IN CHILD MODE it is the serious case, because SetParent joined the app's
    * input queue to OURS: while it is a child of this window, its wedged message

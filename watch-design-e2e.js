@@ -1,7 +1,7 @@
 require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-design-e2e.js -- Watch's top (the hero and the slim bar) and the design pass, end to end:
 // a REAL hidden Quartz test instance (e2e-kit: --test-profile, off-screen, watched by testwatch.js)
-// reading the local mock of every service, then drawing tests/watch-snapshot.js dense() (The user's real
+// reading the local mock of every service, then drawing tests/watch-snapshot.js dense() (realistic
 // counts) in place of what main pushes. Never a real account, cookie or profile. The services'
 // stills are answered here (Fetch) as plain title cards; YouTube's at YouTube's own sizes and formats
 // (tests/watch-yt-stills.js) and ESPN's logos as drawn badges: nothing is asked of a real CDN.
@@ -163,7 +163,7 @@ if (require.main === module) {
       // the mock's reads first (so nothing main pushes later replaces the dense page), then dense, frozen
       await g.waitFor('document.querySelectorAll("#stack .lrow .rt > .card").length > 3 || null', 120000).catch(() => 0);
       await g.waitFor('(() => { const p = document.querySelectorAll("#pills .sp.st-busy"); return p.length === 0 || null; })()', 90000).catch(() => 0);
-      // Titles with descenders (g, y, p, j) where text is clamped: the hero (The user's live "Judgment Day"
+      // Titles with descenders (g, y, p, j) where text is clamped: the hero (a live "Judgment Day"
       // had its g and y cut) and a title-card tile, so the shots and the descender check see them.
       const snap = JSON.parse(JSON.stringify(F.dense(Date.now())).split('"Tears of Steel - Blender VFX Open Movie"').join('"Terminator 2: Judgment Day"')
         .split('"title":"Rust"').join('"title":"Gypsy Jump: a pygmy\'s journey"'));

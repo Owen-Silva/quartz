@@ -3,7 +3,7 @@
 'use strict';
 /*
  * look-sync.js - one shared look file for Helm, Quartz and Mantle.
- * Spec: CONTRACT.md (sections 2, 3, 5) plus the user's answers of 2026-10-10.
+ * Spec: CONTRACT.md (sections 2, 3, 5) plus the answers of 2026-10-10.
  * Zero dependencies (Node built-ins only), CommonJS. Each app VENDORS (copies)
  * this file; do not edit a vendored copy, change it here and re-copy.
  *
@@ -36,7 +36,7 @@ const FILE = 'look.json';
 const FIELDS = ['theme', 'accent', 'glass'];
 const APP_NAMES = { helm: 'Helm', quartz: 'Quartz', mantle: 'Mantle' };
 
-// The first seed: Match Windows (2026-10-14, when the user un-held the light look;
+// The first seed: Match Windows (2026-10-14, when the light look was un-held;
 // the 2026-10-10 seed was Dark). Glass from the 10-10 matched dark values; light
 // values = Mantle's island light (CONTRACT "Light look").
 const SEED = Object.freeze({
@@ -101,7 +101,7 @@ function checkDesktop(d) {
   return null;
 }
 
-// Older-shape fixes. v1 drafts carried wallpaperRequest; the user dropped it
+// Older-shape fixes. v1 drafts carried wallpaperRequest; it was dropped
 // (pictures are chosen only on the desktop, in Mantle), so it is stripped.
 function migrate(doc) {
   if (doc && doc.schema === SCHEMA && 'wallpaperRequest' in doc) {

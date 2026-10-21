@@ -24,7 +24,7 @@
 //      library, group policy). Those fields go null, the page draws a dash,
 //      and a child that never manages a single row is retried slowly.
 //
-//      But a dash must be RARE. On the user's machine disk, network and GPU read
+//      But a dash must be RARE. On the development machine disk, network and GPU read
 //      "-" while their graphs still had data, because the old code treated
 //      every unexpected stdout line as a fatal failure: typeperf prints a
 //      warning when one of the `(*)` instances it latched onto at startup
@@ -82,7 +82,7 @@ const { spawn } = require('child_process');
 // ---------------------------------------------------------------------------
 
 /** Cadence of the pushed sample, and of typeperf's own -si. Keep them equal. */
-const SAMPLE_MS = 1000;   // Task Manager's own cadence; the user wanted it faster than 2 s
+const SAMPLE_MS = 1000;   // Task Manager's own cadence; requested faster than 2 s
 
 /**
  * The first sample must not make the page sit on dashes for two seconds, so

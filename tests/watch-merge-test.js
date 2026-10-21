@@ -1,6 +1,6 @@
 'use strict';
 // tests/watch-merge-test.js -- watch/merge.js: one tile per title across services (mergeSame), the
-// rows by intent, and the dense fixture (tests/watch-snapshot.js dense) at the user's real counts.
+// rows by intent, and the dense fixture (tests/watch-snapshot.js dense) at real-account counts.
 // Run by watch-harness.js (section 4) with its check(); alone: node tests/watch-merge-test.js
 const Shape = require('../watch/shape');
 const Merge = require('../watch/merge');
@@ -65,7 +65,7 @@ module.exports = async function (check) {
   const wl = rows.find((r) => r.id === 'watchlist');
   check(wl && wl.title === 'Your list' && wl.items.length === 2, 'your list: YouTube Watch later and the watchlists in one row', wl);
 
-  // 6. The dense fixture: the user's real counts, and the one deliberate cross-service title
+  // 6. The dense fixture: real-account counts, and the one deliberate cross-service title
   const d = F.dense(Date.now());
   const n = {};
   for (const it of d.items) n[it.service + ':' + it.kind] = (n[it.service + ':' + it.kind] || 0) + 1;

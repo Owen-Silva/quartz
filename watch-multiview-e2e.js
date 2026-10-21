@@ -57,7 +57,7 @@ const REFUSE_EXTRA = '<div class="ytp-error" style="position:absolute;inset:0;di
 const LIMIT_EXTRA = '<script>setTimeout(function () { var d = document.createElement("div"); d.id = "lim"; d.textContent = ' + JSON.stringify(LIMIT_TEXT) + '; document.body.appendChild(d); document.getElementById("v").pause(); }, 1200);</script>';
 const PLAYER_PATH = /^\/(?:watch$|watch\/player|video\/|play\/|detail\/|movies\/|series\/|__p\/)/;
 // YouTube Subscriptions (watch/ytlib.js reads /feed/subscriptions in a hidden view): the ytlib e2e's own
-// fixture, so the rows show the Subscriptions row as the user does, not "couldn't read" (the mock has none).
+// fixture, so the rows show the Subscriptions row as a real account does, not "couldn't read" (the mock has none).
 const SUBS_FIX = path.join(__dirname, 'tests', 'watch-fixtures', 'youtube-subs.json');
 function subsPage() {
   let f = null;

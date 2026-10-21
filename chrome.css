@@ -516,9 +516,9 @@ button:focus-visible,
    over each other: the monogram, the site's icon, and the state badge.
    data-state: pending (held empty for the few ms the disk cache takes, so a
    restored chip never flashes its letter first), icon, mono. */
-/* 14px since 2026-10-14 (The user: the 16px logos looked oversized next to the
+/* 14px since 2026-10-14 (the 16px logos looked oversized next to the
    tab titles). 14 CSS px is a whole number of device px at 100/150/200%
-   (14/21/28); at 125% (his laptop) it would be 17.5, so that scale uses
+   (14/21/28); at 125% (a typical laptop) it would be 17.5, so that scale uses
    14.4px = 18 device px and the logo stays crisp. */
 :root { --tab-fav: 14px; }
 @media (min-resolution: 1.2dppx) and (max-resolution: 1.3dppx) {
@@ -585,7 +585,7 @@ button:focus-visible,
    with a hairline ring and a soft drop shadow, so it reads on any logo and
    any wallpaper in either look. 10px (10.4px = 13 device px at 125%).
    2026-10-14: the asleep mark is a vector crescent drawn with a mask, not
-   a 7px icon-font glyph (The user: "it looks kinda lazy"). The glyph rendered
+   a 7px icon-font glyph (user feedback: "it looks kinda lazy"). The glyph rendered
    at under 9 device px and blurred; a mask stays crisp at every scale. */
 :root { --tab-badge: 10px; }
 @media (min-resolution: 1.2dppx) and (max-resolution: 1.3dppx) {

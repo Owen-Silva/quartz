@@ -175,7 +175,7 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     near('answer: cost from usage x published prices + $0.01/search', done.costUsd, (5200 * 0.10 + 600 * 0.125 + 120 * 0.50) / 1e6 + 0.01);
     ok('request: model, stream, modest max_tokens', r1.body.model === 'claude-haiku-5-5' && r1.body.stream === true && r1.body.max_tokens === 4096, r1.body);
     eq('request: Anthropic web search, small max_uses', r1.body.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]);
-    eq('request: high effort for the quick answer (The user, 10-17)', r1.body.output_config, { effort: 'high' });
+    eq('request: high effort for the quick answer (requested 10-17)', r1.body.output_config, { effort: 'high' });
     ok('request: cached system prompt first, date after the breakpoint', r1.body.system[0].text === C.SYSTEM_PROMPT && r1.body.system[0].cache_control.type === 'ephemeral' && !r1.body.system[1].cache_control && /^Today is /.test(r1.body.system[1].text), r1.body.system);
     eq('request: just the query', r1.body.messages, [{ role: 'user', content: 'what is quartz' }]);
     ok('request: no fallbacks, no beta header', !('fallbacks' in r1.body) && r1.beta === '' && r1.key === KEY && r1.version === '2023-06-01', r1);
@@ -192,7 +192,7 @@ near('cost unknown model errs high', C.estimateCost('claude-mystery', { input: 1
     got = await ask(ca, { q: 'mock:nosearch capital of france', seq: 7, mode: 'deep' });
     const rd = reqs()[reqs().length - 1];
     eq('deep: text', last(got).text, 'Paris is the capital of France.');
-    ok('deep uses Haiku, 8192, 4 searches, high (The user, 10-17: "only haiku")', rd.body.model === 'claude-haiku-5-5' && rd.body.max_tokens === 8192 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'high', rd.body);
+    ok('deep uses Haiku, 8192, 4 searches, high (requested 10-17: "only haiku")', rd.body.model === 'claude-haiku-5-5' && rd.body.max_tokens === 8192 && rd.body.tools[0].max_uses === 4 && rd.body.output_config.effort === 'high', rd.body);
     ok('deep: no fallbacks, no beta header', !('fallbacks' in rd.body) && rd.beta === '', rd.beta);
     ok('deep: start and done both say Haiku', got[0].model === 'claude-haiku-5-5' && got[0].modelLabel === 'Claude Haiku 5.5' && last(got).model === 'claude-haiku-5-5' && last(got).modelLabel === 'Claude Haiku 5.5', [got[0], last(got).model]);
     ok('deep: context says deeper', /deeper answer/.test(rd.body.system[1].text));

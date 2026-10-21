@@ -42,7 +42,7 @@ module.exports = async function (check) {
   var xm = res.items.filter(function (i) { return i.title === 'X' && i.kind === 'resume'; })[0];
   check(xm && xm.playUrl === 'https://www.hulu.com/watch/' + X_MOVIE, 'hulu adapter: a film in Keep Watching plays /watch/<film>', xm && xm.playUrl);
   check(res.items.filter(function (i) { return i.kind !== 'resume' && i.playUrl; }).length === 0, 'hulu adapter: only Continue tiles go straight to the player');
-  check(res.profile === 'the user' && !res.avatar, 'hulu adapter: the profile name, and no picture when Hulu names none', { profile: res.profile, avatar: res.avatar });
+  check(res.profile === 'Alex' && !res.avatar, 'hulu adapter: the profile name, and no picture when Hulu names none', { profile: res.profile, avatar: res.avatar });
   var picked = shape.cleanResult(hulu.parse(huluRead(fx('hulu-home'), { finalUrl: 'https://secure.hulu.com/profiles/select' })));
   check(picked.state === 'error' && picked.picker === true && /who's watching/.test(picked.reason), 'hulu adapter: the picker is flagged picker (Pick profile)', picked);
 
@@ -106,7 +106,7 @@ module.exports = async function (check) {
   check(/top right/.test(P.profilePage('prime').where), 'profiles: Prime says where its menu is');
   check(P.avatarOf('hulu', { avatar: { url: 'https://img.hulu.com/user/v3/avatar/1.png' } }) === 'https://img.hulu.com/user/v3/avatar/1.png', 'profiles: a picture on the service\'s own host');
   check(P.avatarOf('hulu', { avatarUrl: 'https://evil.example/a.png' }) === '' && P.avatarOf('hulu', { avatarUrl: 'http://img.hulu.com/a.png' }) === '', 'profiles: never another host, never http');
-  check(P.initial('owen') === 'O' && P.initial('') === '', 'profiles: the initial');
+  check(P.initial('alex') === 'A' && P.initial('') === '', 'profiles: the initial');
 
   /* ---- main: the page's lines ---- */
   var L = WatchMain.LINE_PREFIX;

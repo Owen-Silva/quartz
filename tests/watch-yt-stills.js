@@ -1,6 +1,6 @@
 // tests/watch-yt-stills.js -- YouTube's stills, drawn here: what i.ytimg.com would send, at its real
-// sizes and formats, so an e2e never asks the real CDN (The user: tests use fixtures and local mocks only)
-// and still decodes what the user's Watch decodes (a 1280x720 webp costs what a 1280x720 webp costs; an SVG
+// sizes and formats, so an e2e never asks the real CDN (the rule: tests use fixtures and local mocks only)
+// and still decodes what the real Watch decodes (a 1280x720 webp costs what a 1280x720 webp costs; an SVG
 // title card is rasterized at the tile's size and hides that cost).
 //
 //   const Stills = require('./tests/watch-yt-stills');

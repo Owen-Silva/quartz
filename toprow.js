@@ -2,9 +2,9 @@
    toprow.js — tells Mantle what this window's TOP PIXEL ROW looks like,
    before it changes (look-sync PROTOCOL v1, "top-row hints").
 
-   Mantle's top bar (The user's Win11 shell) takes the colour of the window
+   Mantle's top bar (a Win11 shell) takes the colour of the window
    right under it. It reads the screen for that, which is always a frame
-   or more late. The user, 2026-10-11, wants "literally no delay", so Quartz
+   or more late. The user (2026-10-11) wants "literally no delay", so Quartz
    says what its top row is IN THE SAME TASK that changes it, before the
    frame that shows the change is produced, and Mantle can paint its bar
    on the same frame (on a window switch it already knows the new

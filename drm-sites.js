@@ -4,7 +4,7 @@
  * over such a page says. Pure functions and one table; nothing here talks to
  * Electron, the DOM or the network.
  *
- * The user, 2026-10-14: "i tried to watch an amazon prime movie on quartz the other
+ * Reported 2026-10-14: "i tried to watch an amazon prime movie on quartz the other
  * day and i couldnt but then i went to edge and it worked fine". Stock Electron
  * ships no Widevine CDM, so a streaming service's player waits for a licence
  * that can never come and the page just sits there. Quartz must say so, and

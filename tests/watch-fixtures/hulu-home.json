@@ -160,7 +160,7 @@
     },
     {
       "path": "/v2/users/self/profiles",
-      "json": { "profiles": [ { "id": "1", "name": "Family", "is_current": false }, { "id": "2", "name": "the user", "is_current": true } ] }
+      "json": { "profiles": [ { "id": "1", "name": "Family", "is_current": false }, { "id": "2", "name": "Alex", "is_current": true } ] }
     }
   ]
 }

@@ -3,7 +3,7 @@
 /*
  * Autocorrect and spelling -- the MAIN-process half.
  *
- * The user: "quartz needs to have auto correct", both kinds, "preferably literally
+ * The user asked: "quartz needs to have auto correct", both kinds, "preferably literally
  * everywhere". The typing engine is spell-preload.js. This module:
  *
  *   - registers it as a SESSION preload (session.registerPreloadScript, type

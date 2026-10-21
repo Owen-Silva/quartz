@@ -2430,7 +2430,7 @@ function create(deps) {
   /**
    * settings.enabled just changed. Off: tear the whole link down and leave no
    * timer, no socket and no adb process behind — but keep the pairing, which is
-   * The user's to throw away with 'forget'. On: pick up exactly where a fresh start
+   * the user's to throw away with 'forget'. On: pick up exactly where a fresh start
    * would, with every step visible.
    */
   async function applyEnabled() {

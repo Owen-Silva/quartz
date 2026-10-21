@@ -1,7 +1,7 @@
 /* ============================================================
    tokens.css — the one palette every Quartz document wears.
 
-   Quartz now dresses like Helm (The user's Claude Code app): neutral
+   Quartz now dresses like Helm (a Claude Code app): neutral
    greys with almost no colour cast, exact 1px hairlines, depth from
    real shadow, ONE desaturated accent used for state only, and glow
    only as a focus ring. Panels are translucent tints over one fixed,
@@ -42,7 +42,7 @@
   /* canvas + surfaces (alpha over the blurred background layer) */
   --bg: #141516;                         /* the neutral base under the photo, and the whole fallback */
   /* Helm's two values, composed the way Helm composes them (shell.css):
-     in dark the chrome's .bg-wash, rgb(9 10 11 / .50) = the user's Helm
+     in dark the chrome's .bg-wash, rgb(9 10 11 / .50) = Helm's
      "Dim 50%", lies over the whole blurred picture (backdrop.css); the
      strip and toolbar paint nothing more (Helm's .strip and .rail have no
      fill: chrome.css), so they read the wash alone, ~(9,10,11,.50); a
@@ -127,7 +127,7 @@
 }
 
 /* --- light --------------------------------------------------- */
-/* CONTRACT "Light look" (The user, 2026-10-14): one island light in Quartz,
+/* CONTRACT "Light look" (2026-10-14): one island light in Quartz,
    Helm and Mantle. Ground, bars, ink and lines = Mantle's island light
    (mantle ui/shared/glass-light.css :root); panels and pop-ups = Helm's
    light alphas re-tinted pure white. The bars are the white wash itself
@@ -422,6 +422,6 @@ html[data-theme="light"] [data-palette="mono"] {
   --m-fade-k: .4;                              /* the fade-in takes this share of the IN duration */
 
   /* the background layer (backdrop.js may override per the user's setting) */
-  --bg-blur: 5px;                        /* the user's Helm setting (Helm settings.json background.blur) */
+  --bg-blur: 5px;                        /* the Helm setting (Helm settings.json background.blur) */
   --bg-dim: 0.45;
 }

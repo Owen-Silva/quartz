@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (requested 2026-09-17)
 // drm-e2e.js -- the "needs DRM, open in Edge" bar end to end, against a REAL Quartz test instance
 // and LOCAL pages. Edge is never started: QUARTZ_EDGE_STUB makes main append each URL to a file.
 //

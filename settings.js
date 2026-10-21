@@ -451,7 +451,7 @@
 
   /* Sections are still built as folds (About is a plain heading), but the
      sheet holds every fold open: its nav picks the one section on show, which
-     is what the folds were for in the old single-column popover (The user: "make
+     is what the folds were for in the old single-column popover (the user asked: "make
      it so that all the different sections in settings are auto collapsed").
      The filter still forces folds by its hits and hands them back after. */
   var foldSeq = 0;                 // ids that pair a header with its body
@@ -2070,7 +2070,7 @@
 
   /**
    * A section with no fold at all: a plain <h2> and the content under it,
-   * always there. About is the only one (The user) — it is three lines and a
+   * always there. About is the only one (the user's call) — it is three lines and a
    * button, so a fold would hide less than the control costs. Nothing here
    * carries .set-foldable, so unfoldAll() and the filter's
    * unfold-the-hits pass both walk straight past it.
@@ -3631,7 +3631,7 @@
         ckFocus = '#set-claude-mode';
         claudeCall('setConfig', { mode: v }, 'That could not be saved');
       })));
-    /* One model only (The user, 10-17: "only haiku"): a quiet read-only line, no picker. */
+    /* One model only (requested 10-17: "only haiku"): a quiet read-only line, no picker. */
     var modelName = (st.answerModelLabel && String(st.answerModelLabel)) || 'Claude Haiku 5.5';
     field.appendChild(el('p', 'set-hint set-claude-model',
       'Answers by ' + modelName + ' (high effort), about a tenth of a cent an answer plus $0.01 a search. ' +
@@ -4815,7 +4815,7 @@
 
     if (mode === 'desktop') {
       /* No picker: the desktop wallpaper is the one place a picture is
-         chosen (The user, 2026-10-10). One line, and the way to change it. */
+         chosen (requested 2026-10-10). One line, and the way to change it. */
       var desk = el('div', 'set-bg-desktop');
       desk.setAttribute('data-bg-desktop', '');
       field.appendChild(desk);
@@ -6000,7 +6000,7 @@
      cacheBytes, reading). The key goes one way only: describe() answers
      `hasKey` and a mask, so the field is never pre-filled.
 
-     Nothing fails quietly (The user's rule): each service's line says what its
+     Nothing fails quietly (a standing rule): each service's line says what its
      last read did, in words, and every button's answer is printed under it.
      While a read is in flight the section asks again every few seconds, and
      stops the moment nothing is reading or the sheet closes.
@@ -7688,7 +7688,7 @@
       !!s.screenOffWhileMirroring, function (next) {
         phoneSetSetting({ screenOffWhileMirroring: next }, 'set-screenoff');
       }));
-    /* The trap, named (The user hit it 2026-09-13): with the panel off, a phone on
+    /* The trap, named (hit for real 2026-09-13): with the panel off, a phone on
        battery still falls asleep at its own screen timeout, and a sleeping
        phone mirrors black until Wake. Only a charging phone stays awake. */
     field.appendChild(el('p', 'set-hint',
@@ -8273,7 +8273,7 @@
   }
 
   function buildAbout() {
-    /* The one section with no fold: plain heading, always open (The user). */
+    /* The one section with no fold: plain heading, always open (the user's call). */
     var s = plainSection('About');
     var line = 'Quartz';
     var app = window.api && window.api.app;

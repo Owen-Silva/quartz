@@ -1,7 +1,7 @@
 'use strict';
 /*
  * watch/adapters/youtube.js -- the user's own YouTube rows, read out of the pages
- * he is already signed in to in Quartz.
+ * they are already signed in to in Quartz.
  *
  * Three hidden-view reads (FEASIBILITY.md section 1):
  *   home       https://www.youtube.com/               -> kind 'rec'

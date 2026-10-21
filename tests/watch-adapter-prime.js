@@ -226,9 +226,9 @@ module.exports = async function (check) {
 
   /* ------------------------------------------------------------ profile */
   const prof = clone(home.store);
-  prof.Profile.name = 'the user';
+  prof.Profile.name = 'Alex';
   const rp = run(readFrom(home, null, { store: JSON.stringify(prof) }));
-  check(rp.state === 'ok' && rp.profile === 'the user', 'profile: set only when the store names it', rp.profile);
+  check(rp.state === 'ok' && rp.profile === 'Alex', 'profile: set only when the store names it', rp.profile);
 
   /* --------------------------------------------------------- signed out */
   const so = run(readFrom(signedout));

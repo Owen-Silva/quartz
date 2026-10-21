@@ -2,7 +2,7 @@
  * tabicons.js — where a tab's logo comes from (chrome renderer; also loads in
  * node for tabicons-harness.js).
  *
- * The user, 2026-10-14: "logos need to always be there and be more reliable half
+ * Requested 2026-10-14: "logos need to always be there and be more reliable half
  * the time they arent even there". The chip used to show whatever icon URL the
  * live page last reported, and wiped it at the start of every load. So a tab
  * that slept, was restored after a restart (born asleep, no page at all), or

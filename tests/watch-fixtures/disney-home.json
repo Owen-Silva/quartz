@@ -342,7 +342,7 @@
             "account": {
               "activeProfile": { "id": "prof-1" },
               "profiles": [
-                { "id": "prof-1", "name": "the user", "attributes": { "isDefault": true, "kidsModeEnabled": false } },
+                { "id": "prof-1", "name": "Alex", "attributes": { "isDefault": true, "kidsModeEnabled": false } },
                 { "id": "prof-2", "name": "Kids", "attributes": { "isDefault": false, "kidsModeEnabled": true } }
               ]
             }

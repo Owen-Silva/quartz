@@ -85,7 +85,7 @@
 }
 
 /* Dark: Helm's own stack (Helm shell.css). The wash is rgb(9 10 11 / .50),
-   The user's Helm "Dim 50%", over the whole window and always on, as Helm's
+   Helm's "Dim 50%" setting, over the whole window and always on, as Helm's
    is; the strip and toolbar paint no fill of their own (chrome.css), so
    they read the wash alone, and a side pane's --surface-1 (.66) on top of
    it nets ~rgba(19,20,21,.83), the way a Helm panel does. Helm's look is

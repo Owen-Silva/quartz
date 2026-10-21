@@ -117,7 +117,7 @@
   var SHED_GAP_MS = 5000;         // and never ask main to turn the load down faster than this
   var HEAL_CLEAN_MS = 30000;      // keeping up this long = ask for the shed quality back (once)
   /* A decoder's FIRST frames include its own start-up: opening the GPU video
-     device, allocating textures. MEASURED 2026-09-13 on the user's laptop: the
+     device, allocating textures. MEASURED 2026-09-13 on a typical laptop: the
      first output after configure() took 30-200 ms where the steady state is
      0.6 ms, and while that was happening the chunks behind it piled up — which
      is enough to trip the drop/shed logic below and pin the stream at 30 fps
@@ -140,7 +140,7 @@
   /* Which H.264 decoder to ask WebCodecs for. ?decoder=software|hardware|auto
      on the page URL wins (an experiment), then localStorage 'phoneDecoder'
      (a choice that sticks), else the default below.
-     MEASURED 2026-09-13 on the user's laptop against the real phone — 560×1280
+     MEASURED 2026-09-13 on a typical laptop against the real phone — 560×1280
      h264 at 8 Mb/s, 60 fps cap, a 4 s drag on the launcher, the browser window
      on screen, two runs each, numbers from the middle 2.5 s of each drag:
          prefer-hardware   decode 0.6-0.9 ms   queue 0    dropped 0
@@ -579,7 +579,7 @@
     if (video.err) sub += ' · ' + video.err;
     setStatus('ok', 'mirroring ' + video.w + '×' + video.h, sub, null);
     /* The black-picture note is the one overlay that belongs OVER a running
-       stream: a black picture with no words was exactly what the user saw at his
+       stream: a black picture with no words was exactly what the user saw at their
        sign-in screen on 2026-09-13, because this line wiped the note a
        second after checkBlackPicture() had set it. */
     if (!video.blackNoteOn) setFrameNote('');
@@ -1386,7 +1386,7 @@
       }
     }
     /* Paint it NOW, not at the next requestAnimationFrame. MEASURED against
-       The user's phone on 2026-09-13, 560×1280 at a 60 fps cap, window on screen:
+       the user's phone on 2026-09-13, 560×1280 at a 60 fps cap, window on screen:
        parking the frame for the next rAF callback painted only 43-48 of the
        56-60 frames a second the relay delivered, and threw 16 a second away —
        and not because the screen was slow (the rAF clock measured a steady
@@ -1926,7 +1926,7 @@
        server remembers it (Controller.keepDisplayPowerOff) and answers any
        later POWER or WAKEUP key-up by forcing the display off again 200 ms
        later ("Forcing display off" in its log) — that is exactly what turned
-       The user's phone back off on 2026-09-13 when the wake key went first. Only
+       the user's phone back off on 2026-09-13 when the wake key went first. Only
        SET_DISPLAY_POWER(on) clears that memory (Controller.setDisplayPower
        sets keepDisplayPowerOff = !on), so it goes FIRST; then the wake key is
        what actually wakes a dozing phone (the display-power call alone sits
@@ -2043,7 +2043,7 @@
   }
 
   /* --- where the phone's sound plays: Sound: Computer | Phone | Both ------ */
-  /* The user, 2026-09-15: sound from the phone played on the laptop and never on
+  /* 2026-09-15: sound from the phone played on the laptop and never on
      the phone. scrcpy's default audio source (REMOTE_SUBMIX) silences the
      phone's own speaker while it captures, so the choice has to be offered.
      The setting is settings.audioOutput in phone.json and it is phone.js's to
@@ -2410,7 +2410,7 @@
     /* A black picture that has STOPPED changing is still a black picture: a
        sleeping phone and a still lock screen both send no frames at all, so
        any "fresh frame" gate here was false exactly when the note mattered
-       most (The user's pure-black sign-in screenshot, 2026-09-13). */
+       most (the user's pure-black sign-in screenshot, 2026-09-13). */
     checkBlackPicture();
     syncRailEnabled();
     renderReadouts();

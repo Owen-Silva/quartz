@@ -54,7 +54,7 @@ module.exports = async function (check) {
   /* ---------- the signed-in home ---------- */
   var res = run(readFrom(home));
   check(res.state === 'ok' && res.reason === '', 'home: state ok, no reason', res.state + ' ' + res.reason);
-  check(res.profile === 'the user', 'home: active profile name from the graph capture (id -> profiles list)', res.profile);
+  check(res.profile === 'Alex', 'home: active profile name from the graph capture (id -> profiles list)', res.profile);
   var expectTitles = ['Bluey', 'The Bear', 'Moana 2', 'Percy Jackson and the Olympians',
     'Inside Out 2', 'Only Murders in the Building', 'Mickey Mouse Clubhouse',
     'Bruins at Maple Leafs', 'SportsCenter', 'Shōgun', 'Andor', 'The Simpsons'];
@@ -136,9 +136,9 @@ module.exports = async function (check) {
   var named = readFrom(home);
   named.steps.home.captures = named.steps.home.captures.map(function (c) {
     if (!/graphql/.test(c.url)) return c;
-    return { url: API_HOST + '/v1/public/graphql', status: 200, json: { data: { me: { account: { activeProfile: { id: 'p9', name: 'the user S' } } } } } };
+    return { url: API_HOST + '/v1/public/graphql', status: 200, json: { data: { me: { account: { activeProfile: { id: 'p9', name: 'Alex S' } } } } } };
   });
-  check(run(named).profile === 'the user S', 'profile: activeProfile.name read directly (/v1/public/graphql)', run(named).profile);
+  check(run(named).profile === 'Alex S', 'profile: activeProfile.name read directly (/v1/public/graphql)', run(named).profile);
   var noGraph = readFrom(home);
   noGraph.steps.home.captures = noGraph.steps.home.captures.filter(function (c) { return !/graphql/.test(c.url); });
   check(run(noGraph).profile === '' && run(noGraph).state === 'ok', 'profile: no graph capture -> empty profile, still ok', run(noGraph).profile);

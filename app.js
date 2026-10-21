@@ -1385,7 +1385,7 @@ function mediaApi() {
 
 /**
  * Some tab is making a sound the user can hear. A MUTED tab is not one of them —
- * muting the video is how he hands the music back, exactly as it works for
+ * muting the video is how they hand the music back, exactly as it works for
  * the Spotify auto-pause hold.
  */
 function anyTabAudible() {
@@ -1425,7 +1425,7 @@ function idlePlayer() {
  * Two of the four facts cannot be produced from outside the app: the real
  * window's focus arrives from main (api.win.onFocus), not from a document
  * event, and what the machine is playing is the user's own Spotify. Focusing a
- * window while he is at the machine is not allowed, and neither is pausing his
+ * window while they are at the machine is not allowed, and neither is pausing their
  * music, so a test pins them here instead. Both default to null — "ask the
  * window", "ask the bridge" — which is what every real session runs as, and
  * nothing in the app itself ever writes to this.
@@ -4956,7 +4956,7 @@ let windowBlurred = false;
  * Electron reports this window as BLURRED the moment focus moves into a hosted
  * app's window: Chromium's HWND really did lose it. Windows disagrees -- the
  * foreground window never changed -- and Windows is the one that matches what
- * The user is doing, which is working inside this browser.
+ * the user is doing, which is working inside this browser.
  *
  * So main polls Win32 while anything is hosted (embed.focusInfo) and pushes
  * `embed:focus` { ours, hostedTabId } on every change. `ours` true means the
@@ -5763,7 +5763,7 @@ function omniboxHasFocus() {
 
 /*
  * The caret on a new tab. The new-tab page gave up its own search field
- * (b9f5ca2, the user: "i can just search up above"), so the address bar IS the
+ * (b9f5ca2, as requested: "i can just search up above"), so the address bar IS the
  * search box there: a new tab puts the caret in it, and Ctrl+T, typing and
  * Enter runs a search with no click in between. Before this, the chrome still
  * focused the guest page as if it had a field to type into, so the first
@@ -6317,7 +6317,7 @@ function syncTabMutedFromView(tab) {
  * flashing its letter and then its logo), 'icon' (the img has decoded) or
  * 'mono' (no icon: the letter, with the reason on hover).
  *
- * What USED to go wrong (The user, 2026-10-14: "half the time they arent even
+ * What USED to go wrong (reported 2026-10-14: "half the time they arent even
  * there"): the img pointed at the page's remote icon URL and was wiped at
  * did-start-loading — which fires for sub-frame loads too, after which the
  * page has no reason to report the same icon again — and a tab born asleep
@@ -6624,7 +6624,7 @@ const WORKSPACE_PRESETS = [
 
 /**
  * The page a workspace opens into when nothing is in it. A preset says so
- * through `opens`; everything else - Home, a workspace the user made himself, a
+ * through `opens`; everything else - Home, a workspace the user made themselves, a
  * preset row with no page of its own - gets the home page, exactly as before.
  *
  * @param {object|null} ws a workspace record (not one of workspaceList()'s copies).
@@ -7763,7 +7763,7 @@ function setTabPinned(tab, on) {
  * never moves the tab, so the collapsed chip keeps whatever seat in the strip
  * it had, through a reorder or a drag.
  *
- * The user: "when i press the collapsed tab i want the tab to be as big as it was
+ * The request: "when i press the collapsed tab i want the tab to be as big as it was
  * before, and then when i click off it, back to another tab, it goes back."
  * So the flag is sticky and chrome.css reads it against .active: a collapsed
  * chip is 40px of icon while another tab is on screen, and a full chip with
@@ -9138,7 +9138,7 @@ function onGuestFocused(payload) {
  * A session that has gone quiet has almost always stopped to ask something.
  * terminal.js turns that silence into 'idle' (and Claude Code's own BEL into
  * 'bell'); the only judgement here is WHERE the user was looking when it landed.
- * A chamber he is watching needs no mark — he can already see it.
+ * A chamber they are watching needs no mark — they can already see it.
  */
 
 /** Has this tab ever put up a notification for the run of attention it is in? */
@@ -9535,7 +9535,7 @@ function wireTermEvents(tab) {
 
   // The session stopped talking, or rang the bell. Either only counts as a
   // call for help if the user was not already looking at it: a chamber in front of
-  // him on a focused window says everything a mark could.
+  // them on a focused window says everything a mark could.
   const attention = () => {
     if (isTabOnScreen(tab) && document.hasFocus()) return;
     markClaudeNeedsYou(tab);
@@ -9578,7 +9578,7 @@ function activateTab(id) {
 
   // Where the keyboard was in the tab being left, read before anything moves
   // it: Chrome's rule. A new-tab page the user had clicked into gets its page back
-  // when it returns (focusForNewTab); one he never touched gets the address bar.
+  // when it returns (focusForNewTab); one they never touched gets the address bar.
   const outgoing = getActiveTab();
   if (outgoing && outgoing !== target) {
     outgoing.pageFocused = !!outgoing.viewEl && document.activeElement === outgoing.viewEl;

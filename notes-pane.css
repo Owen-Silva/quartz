@@ -20,7 +20,7 @@
   min-height: 0;                 /* or the notes view cannot shrink */
   height: 100%;
   /* Tight on purpose: every pixel the chrome above the notes gives up is a
-     pixel of note (The user, 2026-09-14: "i cant really see them"). */
+     pixel of note (reported 2026-09-14: "i cant really see them"). */
   gap: 6px;
   padding: 6px;
   color: var(--text);

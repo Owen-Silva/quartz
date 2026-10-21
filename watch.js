@@ -1342,14 +1342,14 @@
   }
   /*
    * Which of YouTube's stills to ask for first. The DECODE is what costs, not the bytes
-   * (watch-design-e2e --trace, 10-17, the user's 125%, on this laptop): a tile's 1280x720 maxres webp
+   * (watch-design-e2e --trace, 10-17, 125% scaling, on this laptop): a tile's 1280x720 maxres webp
    * took 78 ms a decode on the raster workers, 137 ms at worst (Chromium decodes webp to RGB at full
    * size, then scales it), an sd JPEG 2-6 ms (decoded straight to YUV); a row of webp tiles starved
    * the frames (frames over 20 ms 13 -> 21, max 50 -> 150 ms). img.decode() of one 1280x720 picture,
    * median of 12: webp 50 ms, JPEG 12 ms. So:
    *   - JPEG before webp, always: the same picture for a quarter of the decode;
    *   - a tile starts at sd when sd covers it in DEVICE pixels (sd's 16:9 picture is 640 wide: 4:3
-   *     with bars, which artCrop crops; the user's 125% tiles are 360-450 px, and watch.css keeps every
+   *     with bars, which artCrop crops; at 125% the tiles are 360-450 px, and watch.css keeps every
    *     tile under ~370 CSS px, so that is every tile up to ~175% scaling), a wider one at maxres;
    *     hq (480 wide) is never first;
    *   - the hero (needPx Infinity) starts at maxres.
@@ -1853,7 +1853,7 @@
 
   /* ------------------------------------------------------- the hover preview */
   /*
-   * The user: "can we make this preview the video too if you hover over it". Resting on the stage
+   * The user asked: "can we make this preview the video too if you hover over it". Resting on the stage
    * (pointer or keyboard focus), or on the tile the stage shows, for PREVIEW_DELAY_MS plays a
    * MUTED preview over the still (watch/preview.js says what: the YouTube video itself, or the
    * title's official trailer found on TMDB). Rules:

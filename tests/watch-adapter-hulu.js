@@ -66,7 +66,7 @@ module.exports = async function (check) {
   /* ---------- the signed-in home hub + My Stuff ---------- */
   var res = run(readFrom(home, stuff));
   check(res.state === 'ok' && res.reason === '' && res.warnings.length === 0, 'home: state ok, no reason, no warning', res.state + ' ' + res.reason + ' ' + js(res.warnings));
-  check(res.profile === 'the user', 'home: the current profile from the profiles capture', res.profile);
+  check(res.profile === 'Alex', 'home: the current profile from the profiles capture', res.profile);
   var expect = ['The Bear', 'X', 'Abbott Elementary', 'Only Murders in the Building', 'Shōgun', 'Reservation Dogs', 'Paradise', 'Anora'];
   check(js(titles(res)) === js(expect), 'home: rows and order (hub order, lazy collection in place, My Stuff last)', js(titles(res)));
   check(js(res.items.map(function (i) { return i.kind; })) === js(['resume', 'resume', 'resume', 'rec', 'rec', 'rec', 'watchlist', 'watchlist']), 'home: kinds per row', js(res.items.map(function (i) { return i.kind; })));

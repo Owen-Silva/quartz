@@ -107,9 +107,9 @@ function Ms([IO.FileInfo]$f) { return [DateTimeOffset]::new($f.LastWriteTimeUtc)
 
 function Evs-Check {
   $v = Run 'py' @('-3', '-m', 'castlabs_evs.vmp', '--version')
-  if ($v.code -ne 0) { Stop-Swap 'castlabs-evs is not installed. The user: py -3 -m pip install --upgrade castlabs-evs' }
+  if ($v.code -ne 0) { Stop-Swap 'castlabs-evs is not installed. To fix: py -3 -m pip install --upgrade castlabs-evs' }
   $a = Run 'py' @('-3', '-m', 'castlabs_evs.account', '-n', 'refresh')
-  if ($a.code -ne 0) { Stop-Swap ("EVS isn't signed in (" + (Tail $a.text 1) + '). The user: py -3 -m castlabs_evs.account reauth, then run this again.') }
+  if ($a.code -ne 0) { Stop-Swap ("EVS isn't signed in (" + (Tail $a.text 1) + '). To fix: py -3 -m castlabs_evs.account reauth, then run this again.') }
   Say ('castlabs-evs ' + (Tail $v.text 1) + ', EVS signed in.')
 }
 
@@ -127,7 +127,7 @@ function Sign-And-Mark {
   if ($s.code -ne 0) {
     & $restore
     if ($s.text -match 'NonInteractive|[Aa]uth|Unauthori|[Tt]oken|[Cc]redential|[Pp]asswd|[Pp]assword|Forbidden|[Aa]ccount') {
-      Stop-Swap ("EVS refused: not signed in (" + (Tail $s.text 1) + '). The user: py -3 -m castlabs_evs.account reauth, then tools\drm-swap.ps1 -ResignOnly.')
+      Stop-Swap ("EVS refused: not signed in (" + (Tail $s.text 1) + '). To fix: py -3 -m castlabs_evs.account reauth, then tools\drm-swap.ps1 -ResignOnly.')
     }
     Stop-Swap ('sign-pkg failed: ' + (Tail $s.text 3))
   }

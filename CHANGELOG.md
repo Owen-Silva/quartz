@@ -170,7 +170,7 @@ or use Restart browser in Settings → About — to pick any of this up.
   chevron and `aria-expanded`; click or Enter/Space opens it, and the choice is remembered in
   `settings.shortcuts.open`. Typing in Find a setting opens the fold so hits are visible, and
   collapsing it stops a recording row. Nothing inside the section changed.
-- Every Settings section starts collapsed, not just Shortcuts (The user: "make it so that all the
+- Every Settings section starts collapsed, not just Shortcuts (as requested: "make it so that all the
   different sections in settings are auto collapsed"). The pane opens as a list of headings, each a
   button with a chevron and `aria-expanded`; click or Enter/Space opens one, several can be open at
   once, and nothing is remembered — every open starts folded, so `settings.shortcuts.open` is gone.
@@ -229,7 +229,7 @@ or use Restart browser in Settings → About — to pick any of this up.
   sends `win:focus` from the BrowserWindow's focus and blur now. The board also resumes on
   `visibilitychange`, `pageshow` and `focus`, and a 2-second watchdog restarts the frame loop if it
   has stalled.
-- The dark theme is a neutral charcoal now. The user asked for less neon and less glow — "less ai
+- The dark theme is a neutral charcoal now. The request was for less neon and less glow — "less ai
   slop", and for the browser to feel premium. The dark ground moves from blue-black ink (`#05060a`)
   to charcoal (`#1a1c20` / `#212429`) in every palette; the lit gradient rims end on the plain edge
   colour, so a container is drawn with hairlines at 11% and 14% instead of a lit edge; the sheen
@@ -247,8 +247,8 @@ or use Restart browser in Settings → About — to pick any of this up.
   the neon back. Light keeps its own values, and newtab-theme.js matches.
 - The aurora holds still. It used to step 120 times a minute under every `backdrop-filter` surface;
   the pool and rim gradients are static in both the chrome and the new tab now. It costs less (see
-  Performance) and it is the calmer look he asked for.
-- Live system stats on the new tab. The search field is gone at the user's request — he searches from
+  Performance) and it is the calmer look that was asked for.
+- Live system stats on the new tab. The search field is gone at the user's request — they search from
   the address bar — and in its place, inside the same capsule, is an instrument strip: CPU, memory,
   disk, network in bits per second (down and up) and GPU, each a tabular value with a sentence-case
   label and a 60-sample history graph. The numbers are real, not a demo: CPU from `os.cpus()`
@@ -273,9 +273,9 @@ or use Restart browser in Settings → About — to pick any of this up.
   winlogon, services, lsass, svchost, dwm, fontdrvhost, Memory Compression, Secure System, MsMpEng,
   SecurityHealthService, audiodg, sihost, ctfmon — is refused too. While the list is collapsed no
   table work happens at all: the samples are kept and not drawn. It was first built as a floating
-  pop-out over the strip (bed0643) and replaced with the expander at the user's request, because he
+  pop-out over the strip (bed0643) and replaced with the expander at the user's request, because they
   wanted it to open downwards rather than sit on top of the page.
-- Fixed: the dashes for disk, network and GPU on the user's machine while the graphs still had data.
+- Fixed: the dashes for disk, network and GPU on the development machine while the graphs still had data.
   `typeperf` prints a warning line whenever a counter instance disappears — a process with a GPU
   engine exiting is enough — and the sampler treated any non-CSV line as a failure and nulled those
   fields for a minute. Warning lines and repeated headers are skipped now, blanks count as 0 inside
@@ -503,7 +503,7 @@ machine.
   event, memoised pushes to the new tab on dom-ready, activation and every state change, and a 2s
   now-playing poll while a new tab is in front (or anywhere while the window is focused). Harness
   108/108, and 42/43 live on a test profile at volume 0 — the one miss a stale-profile artifact.
-- The player stopped vetoing its own sound (e135f54). The user: "it keeps pausing and playing and then
+- The player stopped vetoing its own sound (e135f54). The report: "it keeps pausing and playing and then
   pausing and playing even though there is nothing else like spotify or anything playing". The
   cause, confirmed over 59 live samples: Chromium registers the chrome's own `<audio>` element with
   the Windows media session, so the now-playing route reported the idle music itself as playing, the
@@ -628,7 +628,7 @@ machine.
 
 ### Native app tabs
 
-- The engine for running a real desktop app inside the browser (769b1d9). The user: "is there a way
+- The engine for running a real desktop app inside the browser (769b1d9). The request: "is there a way
   where I can start the apps in a tab but it's running the app so that literally everything is just
   in a tab?" embed.js reaches Win32 through koffi — Node-API, so it loads in Electron 44 with no
   rebuild — required lazily inside a try/catch. It finds windows by pid or exe, and `attach`

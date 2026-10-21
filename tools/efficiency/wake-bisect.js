@@ -32,7 +32,7 @@
 // middle and the end of a --window s window. ctx/s of the main process is the wakeup rate. Every
 // row also reports the embed thread (found read-only the same way): its ctx/s, its CPU as % of
 // one core, its megacycles/s and its priority at the end, so a raised thread that spins shows.
-// On the user's laptop (round 4): ONE condition per call, through %TEMP%/thnames/lowrun.js (browser
+// On the development laptop (round 4): ONE condition per call, through %TEMP%/thnames/lowrun.js (browser
 // lock, RAM and game checks, BelowNormal), with QUARTZ_BENCH_OK=1.
 'use strict';
 const fs = require('fs');
@@ -241,7 +241,7 @@ function embedRate(c, s0, s2) {
   const conds = parseConds(spec);
   console.log('wake-bisect: ' + conds.length + ' conditions, settle ' + SETTLE + ' s, window ' + WINDOW + ' s');
   // --bridge: tools/efficiency/fake-bridge.js on 8787 for the whole run (every condition sees a
-  // live Spotify bridge, as on the user's machine); killed with the instances.
+  // live Spotify bridge, as on the development machine); killed with the instances.
   let bridge = null;
   let winT = [0, 0];
   if (argv.bridge) {

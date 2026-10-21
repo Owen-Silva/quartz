@@ -73,7 +73,7 @@ const fs = require('fs');
 
 /* --- what the tile starts with ------------------------------------------ */
 
-/** The user trades tech and growth; the two index ETFs are the frame around it. */
+/** Picked for a tech and growth trader; the two index ETFs are the frame around it. */
 const DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AAPL'];
 
 /** A watchlist, not a screener. Also the ceiling on a polling round. */

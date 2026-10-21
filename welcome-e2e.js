@@ -355,7 +355,7 @@ run('welcome-e2e', async (k) => {
     const LIVE = process.env.QUARTZ_LIVE_DIR || path.join(os.homedir(), 'browser');   // the installed checkout, if this machine has one there
     if (fs.existsSync(path.join(LIVE, 'register-default-browser.ps1')) && /QuartzURL\\shell\\open\\command/.test(regAfter)) {
       const cmd = (regAfter.match(/QuartzURL\\shell\\open\\command\s+\(Default\)\s+REG_SZ\s+(.*)/) || [])[1] || '';
-      check(cmd.toLowerCase().indexOf(LIVE.toLowerCase() + '\\node_modules\\electron\\dist\\quartz.exe') !== -1, 'the user\'s QuartzURL link handler still runs the live checkout (' + LIVE + ')', cmd);
+      check(cmd.toLowerCase().indexOf(LIVE.toLowerCase() + '\\node_modules\\electron\\dist\\quartz.exe') !== -1, 'The user\'s QuartzURL link handler still runs the live checkout (' + LIVE + ')', cmd);
     }
   }
   for (const f of Object.values(STANDIN)) { try { fs.rmSync(f, { force: true }); } catch (err) { /* tmp */ } }

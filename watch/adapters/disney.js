@@ -1,7 +1,7 @@
 'use strict';
 /*
  * watch/adapters/disney.js -- the user's own Disney+ rows (and, through Disney+,
- * Hulu once his profile is linked, plus the ESPN hub) for Watch.
+ * Hulu once their profile is linked, plus the ESPN hub) for Watch.
  *
  * How: one hidden reader view loads https://www.disneyplus.com/home on
  * Quartz's default session, and the reader captures the JSON the page fetches

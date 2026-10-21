@@ -24,7 +24,7 @@ const may = (target, from, by) => nav.pageMayOpen(target, from, by, APP);
 check(may('https://example.com/', 'https://evil.test/', '') === true, 'an http target is not judged here');
 check(may('data:text/html,hi', LOCAL_A, '') === true, 'a data: target is not judged here (its own gates)');
 
-// ---- file -> file: the user's logo page -------------------------------------------------------------
+// ---- file -> file: a logo page -------------------------------------------------------------
 check(may(LOCAL_B, LOCAL_A, LOCAL_A) === true, 'a local page\'s relative link to a sibling file goes through');
 check(may(LOCAL_B, LOCAL_A, '') === true, 'file -> file with no initiator known (the page itself) goes through');
 check(may(LOCAL_B, LOCAL_A, null) === true, 'file -> file with a null initiator goes through');

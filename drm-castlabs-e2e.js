@@ -1,7 +1,7 @@
 require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // drm-castlabs-e2e.js -- Quartz ITSELF on castlabs ECS, in the state a test copy really is in:
 // the Widevine CDM loads before the window, but Quartz carries only castlabs' DEVELOPMENT signature
-// (no EVS production signature: that needs the user's account). Checks:
+// (no EVS production signature: that needs the developer's account). Checks:
 //   - a real Quartz <webview> tab (hardening intact, plugins=false) plays a public Widevine test stream
 //     (Shaka's Angel One + Google's test licence proxy, which accepts the development signature), and
 //     no bar goes up on it;

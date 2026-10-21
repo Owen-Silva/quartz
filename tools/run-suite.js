@@ -1,4 +1,4 @@
-require('./lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./lowcpu-optional.js');   // first: one capped browser at a time (2026-09-17)
 // tools/run-suite.js -- every Quartz harness, one after another, and ONE summary line.
 //
 //   node tools/run-suite.js [--unit] [--only=a,b] [--skip=a,b] [--out=<dir>] [--timeout=<s>]
@@ -9,7 +9,7 @@ require('./lowcpu-optional.js');   // first: one capped browser at a time (The u
 //
 // The Electron ones (e2e) launch a REAL off-screen test instance each (--test-profile --offscreen,
 // watched by testwatch.js), one at a time. Each refuses to launch under 2.5 GB free RAM (exit 3),
-// which shows here as SKIP with that reason, never as a pass. On the user's laptop that is the usual
+// which shows here as SKIP with that reason, never as a pass. On a typical development laptop that is the usual
 // case, so run them in the cloud: `cloudtest --recipe quartz-core`.
 //
 // A test passes when it exits 0 AND its own summary line ("<name>: N passed, M failed" or

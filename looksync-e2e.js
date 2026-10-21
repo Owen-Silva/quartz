@@ -1,4 +1,4 @@
-require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (The user, 2026-09-17)
+require('./tools/lowcpu-optional.js');   // first: one capped browser at a time (requested 2026-09-17)
 // looksync-e2e.js — Look Sync (and the light look) end to end, against a REAL test instance of Quartz.
 //
 //   node looksync-e2e.js [--port 9418] [--only <regex>] [--keep]

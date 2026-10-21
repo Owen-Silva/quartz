@@ -1,7 +1,7 @@
 require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is configured (tools/lowcpu-optional.js; none on a cloud runner)
 // watch-rowkeys-e2e.js -- the arrow keys walk Lumen's home rows, the YouTube Subscriptions row
 // included, with REAL key input (CDP Input.dispatchKeyEvent into the Lumen page; no synthetic DOM
-// events). The user (10-18): ArrowDown stopped at the Subscriptions row; only the lens's Next button
+// events). Reported 10-18: ArrowDown stopped at the Subscriptions row; only the lens's Next button
 // went on. A REAL hidden Quartz test instance (tests/e2e-kit.js: --test-profile, off-screen), the
 // same local fronts as watch-ytlib-e2e.js (tests/watch-fixtures/youtube-*.json + tests/watch-mock.js);
 // every https request of the page is answered locally (pictures) or refused and counted.
@@ -252,7 +252,7 @@ run('watch-rowkeys-e2e', async ({ check, launch, say, profileDir }) => {
     for (let k = 0; k < 20 && (await g.ev(LENS)).i > 0; k++) await step('ArrowUp', 400);
     await walk('after the YouTube page', 'ArrowDown', false);
 
-    /* ---- 6. a click on the row's own controls leaves the focus on them (The user's stuck row) ---- */
+    /* ---- 6. a click on the row's own controls leaves the focus on them (the reported stuck row) ---- */
     const toSubs = async () => { let s = await g.ev(LENS); const at = s.keys.indexOf(SUBS); for (let k = 0; k < 20 && s.i !== at; k++) s = await step(s.i < at ? 'ArrowDown' : 'ArrowUp', 500); return s; };
     const click = async (p) => {
       await g.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); await sleep(250);

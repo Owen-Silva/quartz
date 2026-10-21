@@ -457,7 +457,7 @@ function create(d) {
   /**
    * A card was clicked: open that game inside Lumen. TODAY that is what Lumen does for an
    * ESPN game -- the gamecast in a Quartz tab, never Edge and never a new browser window --
-   * and Quartz's window comes forward (The user clicked a card on his desktop). The in-Lumen
+   * and Quartz's window comes forward (the user clicked a card on their desktop). The in-Lumen
    * player lane's openInLumen(url) replaces this body at merge.
    */
   function openGame(url) {

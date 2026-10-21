@@ -20,7 +20,7 @@
 # What it does NOT do, ever: make itself the default, open Settings, or show a
 # window. Windows 11 protects the UserChoice hash, and every tool that forges
 # it is malware-shaped. This only puts "Quartz" in the list; the last step is
-# The user pressing Set default in Settings > Apps > Default apps > Quartz.
+# the user pressing Set default in Settings > Apps > Default apps > Quartz.
 #
 # Re-running it is safe: every value is written to the same place with the same
 # contents. -Unregister removes the Quartz four, leaving the profile alone.
@@ -51,7 +51,7 @@ $AppUserModelId = 'com.owensilva.quartz'
 $OldProgIdUrl  = 'OwenBrowserURL'
 $OldProgIdHtml = 'OwenBrowserHTML'
 $OldAppKeyName = 'OwenBrowser'
-$AppDesc    = "the user's browser - tabs, workspaces, terminal and Claude in one window."
+$AppDesc    = "Quartz - a browser with tabs, workspaces, terminal and Claude in one window."
 
 $ClientKey = "HKCU:\Software\Clients\StartMenuInternet\$AppKeyName"
 $CapKey    = "$ClientKey\Capabilities"

@@ -10,7 +10,7 @@
  *   - YouTube: the public results page, cookie-less (watch-main.js searchYouTube, its cache);
  *   - TMDB's where-to-watch, when the user has saved a key (watch-main.js searchTmdb, its cache).
  * Every answer is pushed on its own (window.__applyWatchFind), so the fastest shows at once
- * and the others fill in; nothing waits on the slowest. A service he is signed out of is not
+ * and the others fill in; nothing waits on the slowest. A service they are signed out of is not
  * read at all: the page says "Sign in to search <service>". A game, or too little memory,
  * pauses the hidden readers (said, with the reason); YouTube and TMDB still answer.
  *

@@ -16,7 +16,7 @@
  *      anything this run): session.json, window-state.json, permissions.json
  *      or a Local Storage folder (where bookmarks, history and settings live)
  *      means someone has used this profile, so it is marked done as
- *      'existing-profile' and the welcome never appears. The user's profile has
+ *      'existing-profile' and the welcome never appears. A long-used profile has
  *      all four. A profile with none of them gets 'pending' and the welcome;
  *      'pending' survives a quit halfway, so the welcome comes back until it
  *      is finished or skipped.

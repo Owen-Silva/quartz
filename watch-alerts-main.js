@@ -24,7 +24,7 @@
  *
  * HOW AN ALERT IS SHOWN. Main sends 'lumen-alerts:show' to the chrome, which uses Quartz's own
  * notification path (app.js's window.Notification, the "Claude is waiting" toast that the user's
- * shell redraws) when Quartz is in the background, and an in-Quartz card when he is looking at it.
+ * shell redraws) when Quartz is in the background, and an in-Quartz card when they are looking at it.
  * The chrome answers 'lumen-alerts:shown' with where it went, or why it could not.
  *
  * TESTS ARE SILENT. A --test-profile run sets test.silent: the chrome never constructs a real

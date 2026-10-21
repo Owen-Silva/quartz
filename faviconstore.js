@@ -1,7 +1,7 @@
 'use strict';
 // faviconstore.js — the tab strip's per-origin favicon cache, in main.
 //
-// Why it exists (The user, 2026-10-14: "logos need to always be there and be more
+// Why it exists (requested 2026-10-14: "logos need to always be there and be more
 // reliable half the time they arent even there"). A chip used to point its
 // <img> at whatever URL the page last reported, and that URL was forgotten the
 // moment the page went away: a tab restored after a restart, or born asleep in

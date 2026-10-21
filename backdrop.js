@@ -40,7 +40,7 @@
    How it stays cheap, which is the whole point of the design:
 
    - The blur happens once per source, into a small canvas (about a
-     third of the screen), with ctx.filter set to the user's Helm 5px scaled
+     third of the screen), with ctx.filter set to the Helm 5px scaled
      down by the same factor, and a few sigmas of overscan so the
      edges blur into real pixels instead of fading to grey. The
      result is a JPEG blob set as .bg-photo's background-image, with
@@ -90,7 +90,7 @@
 (function () {
   'use strict';
 
-  /* The user's Helm blur (Helm settings.json background.blur = 5; Helm's
+  /* The Helm blur (Helm settings.json background.blur = 5; Helm's
      default is 28) at full size, and how far down the bitmap is rendered.
      The blur radius shrinks with the bitmap so the result matches Helm's
      5px once cover scales it back up; at 5px that is 1.5 bitmap px, still
@@ -103,7 +103,7 @@
     dark: { blurPx: 5, dim: 0.5, panel: 0 },
     light: { blurPx: 12, dim: 0.45, panel: 0 }
   };
-  /* Light (CONTRACT "Light look", the user 2026-10-14, un-held): glass.light is
+  /* Light (CONTRACT "Light look", 2026-10-14, un-held): glass.light is
      applied in light exactly as glass.dark is in dark. The ground is the
      picture at blur(glass.light.blurPx) saturate(150%), Mantle's island
      light; dark keeps its plain blur. LIGHT_WASH_DIM = backdrop.css's
@@ -771,13 +771,13 @@
    * --lg-guard-bar 4.2): Helm's secondary ink (#a9aaa7) must keep 4.2:1 over
    * the 48 brightest pixels of the blurred band under the strip and toolbar,
    * stepping .02 up from .50. Helm's own strip gives that ink 4.3:1 over
-   * snow-peak, so Helm's .50 holds there, as in Mantle's top bar; the user,
+   * snow-peak, so Helm's .50 holds there, as in Mantle's top bar; on
    * 2026-10-10: the old rule (a luminance cap that also read the side-pane
    * column) set .52 on snow-peak, a visible step under Mantle's bar. The
    * side pane no longer decides: it sits at ~83% net anyway. Never below
    * 50%, never above Mantle's guard ceiling .88 (the alpha of dark
    * --lg-fill-pop, rgba(19,20,21,.88), mantle ui/shared/glass-light.css;
-   * guardTokens uses it for bars and windows alike). The user, 2026-10-10: over
+   * guardTokens uses it for bars and windows alike). Since 2026-10-10, over
    * very bright photos the strip darkens as far as Mantle's bars do (the old
    * .66 cap left cloud-peaks / sand-ripples at ~3:1 where Mantle hit .76).
    * Light does not read the variable.
@@ -829,7 +829,7 @@
    * Mantle's bar rule from floor (the shared dark dim, Helm's .50 by
    * default): step .02 up until the ink keeps GLASS_NEED over every
    * candidate, never past GLASS_CEIL. A floor above the ceiling wins as is
-   * (The user asked for that much dim). No pixels: the floor.
+   * (that much dim was requested). No pixels: the floor.
    */
   function guardAlpha(cand, floor) {
     if (typeof floor !== 'number' || !isFinite(floor)) floor = GLASS_FLOOR;
@@ -1378,7 +1378,7 @@
    * the moment the frame is drawn or the attempt ends.
    *
    * WHY IT WAITS ON EVENTS, NOT A CLOCK (fixed 2026-10-08). The first build
-   * gave the clip a flat 15 s. On a cold boot with the user's 80 MB 4K clip that
+   * gave the clip a flat 15 s. On a cold boot with an 80 MB 4K clip that
    * was not enough: the Home opens the same file at the same moment, and the
    * read came back "did not give up a frame within 15 s", leaving the window
    * plain until the clip was picked again (which then took 512 ms). Now:

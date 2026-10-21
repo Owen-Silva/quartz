@@ -9,7 +9,7 @@ require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is conf
 //   node watch-profiles-e2e.js [--cdp 9483] [--shots <dir>]
 //
 // Checks: the profile chip (avatar + name); Hulu's who's-watching state with Pick profile (chip, card, freshness line);
-// Pick profile opens Hulu's own picker in the layer and the layer closing re-reads Hulu (now on the user); Disney+'s
+// Pick profile opens Hulu's own picker in the layer and the layer closing re-reads Hulu (now on Alex); Disney+'s
 // Switch profile opens /select-profile in the layer and re-reads Disney+ on close; a Continue tile says "Resume S4 E3 ·
 // 15 min left" and goes straight to /watch/<episode>; the quality note "720p, browser limit"; the More menu's Open in
 // Edge reasons; Up next after the episode ends (main re-reads Hulu, the next episode, a 10 s countdown, it plays);
@@ -70,7 +70,7 @@ async function startServers(mock, st) {
       if (svc === 'hulu') {
         if (st.huluPicker && (p === '/hub/home' || p === '/my-stuff')) { res.writeHead(302, { Location: '/profiles' }); res.end(); return; }
         if (p === '/profiles') {
-          return sendHtml(res, PAGE("Who's watching? | Hulu", `<main><h1>Who's watching?</h1><button id="p-owen" onclick="fetch('/__pick?p=the user').then(() => { location.href = '/hub/home'; })">the user</button><button id="p-family">Family</button></main>`));
+          return sendHtml(res, PAGE("Who's watching? | Hulu", `<main><h1>Who's watching?</h1><button id="p-alex" onclick="fetch('/__pick?p=Alex').then(() => { location.href = '/hub/home'; })">Alex</button><button id="p-family">Family</button></main>`));
         }
         if (p === '/__pick') { st.huluPicker = false; st.picked = u.searchParams.get('p'); return sendJson(res, { ok: true }); }
         const m = /^\/watch\/([0-9a-f-]{36})$/.exec(p);
@@ -90,7 +90,7 @@ async function startServers(mock, st) {
         }
       }
       if (svc === 'disney' && p === '/select-profile') {
-        return sendHtml(res, PAGE("Who's Watching? | Disney+", '<main><h1>Who’s watching?</h1><button id="d-owen">the user</button></main>'));
+        return sendHtml(res, PAGE("Who's Watching? | Disney+", '<main><h1>Who’s watching?</h1><button id="d-alex">Alex</button></main>'));
       }
       const up = http.request({ host: '127.0.0.1', port: mock.ports[svc], path: req.url, method: req.method, headers: Object.assign({}, req.headers, { host: '127.0.0.1:' + mock.ports[svc] }) }, (r) => {
         res.writeHead(r.statusCode || 502, r.headers);
@@ -153,7 +153,7 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
 
     /* ---- 1. the chip: the active profile, and the who's-watching state ---- */
     const dChip = await g.waitFor(`(() => { const p = ${pill('disney')}; const a = p && p.querySelector('.lp-av'); const n = p && p.querySelector('.sp-prof'); return a && n ? { av: a.textContent, name: n.textContent } : null; })()`, 90000).catch(() => null);
-    check(dChip && dChip.av === 'O' && dChip.name === 'the user', 'the Disney+ chip shows its active profile: the avatar and the name', dChip);
+    check(dChip && dChip.av === 'A' && dChip.name === 'Alex', 'the Disney+ chip shows its active profile: the avatar and the name', dChip);
     const hPick = await g.waitFor(`(() => { const p = ${pill('hulu')}; const a = p && p.querySelector('.sp-act'); return p && p.classList.contains('st-picker') && a ? a.textContent : null; })()`, 120000).catch(() => null);
     check(hPick === 'Pick profile', 'Hulu on its who’s-watching page: the chip says so, with Pick profile', hPick || await g.ev(`(() => { const p = ${pill('hulu')}; return p ? p.className + ' | ' + (p.querySelector('.sp-main') || {}).title : 'no hulu pill'; })()`));
     await g.ev(`((${pill('hulu')} || document).querySelector('.sp-main') || { click: () => 0 }).click(), 1`);
@@ -170,14 +170,14 @@ run('watch-profiles-e2e', async ({ check, launch, say }) => {
     await shoot('picker-layer', 1536, 800);
     const pt = await targetWhere(q, (x) => String(x.url).indexOf(FH + '/profiles') === 0, 10000);
     const pg = pt && await cdpTo(pt);
-    if (pg) { await pg.waitFor('!!document.getElementById("p-owen")', 10000).catch(() => 0); await pg.ev('(document.getElementById("p-owen") || { click: () => 0 }).click(), 1').catch(() => 0); pg.close(); }
+    if (pg) { await pg.waitFor('!!document.getElementById("p-alex")', 10000).catch(() => 0); await pg.ev('(document.getElementById("p-alex") || { click: () => 0 }).click(), 1').catch(() => 0); pg.close(); }
     await chrome.waitFor(`(() => { const s = ${ST}; return s.slots[0] && /\\/hub\\/home/.test(s.slots[0].url); })()`, 10000).catch(() => 0);
-    check(st.picked === 'the user', 'the pick is Hulu’s own page answering (fixture), in the layer', st.picked);
+    check(st.picked === 'Alex', 'the pick is Hulu’s own page answering (fixture), in the layer', st.picked);
     await chrome.ev('WatchPlayer.close("Close"), 1');
     const asked = await chrome.waitFor(`(() => { const c = ${ST}.lastClosed; return c && c.asked ? c.asked : null; })()`, 5000).catch(() => null);
     check(Array.isArray(asked) && asked.indexOf('hulu') !== -1, 'closing the picker re-reads Hulu', asked);
     const hOk = await g.waitFor(`(() => { const p = ${pill('hulu')}; const n = p && p.querySelector('.sp-prof'); return p && !p.classList.contains('st-picker') && n ? n.textContent : null; })()`, 60000).catch(() => null);
-    check(hOk === 'the user', 'Hulu reads again, now as the user: the chip shows the profile', hOk);
+    check(hOk === 'Alex', 'Hulu reads again, now as Alex: the chip shows the profile', hOk);
 
     /* ---- 3. Switch profile (Disney+): the picker in the layer, re-read on close ---- */
     await g.ev(`((${pill('disney')} || document).querySelector('.sp-main') || { click: () => 0 }).click(), 1`);

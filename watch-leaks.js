@@ -3,7 +3,7 @@
  * watch-leaks.js -- Lumen's leak log (main process).
  *
  * Lumen is a full replacement for the services' own apps, so every time it has to send
- * The user somewhere else is a bug to find: a normal Quartz tab, Microsoft Edge, an app link
+ * the user somewhere else is a bug to find: a normal Quartz tab, Microsoft Edge, an app link
  * (disneyplus://, intent:) a hosted page tried, or a window. Each one is recorded here:
  *
  *   - ONE quartz.log line (the caller's own wording, so the existing lines stay as they are);

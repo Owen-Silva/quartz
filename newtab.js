@@ -1246,7 +1246,7 @@ window.__music = function () {
 /* Now playing                                                         */
 /*                                                                     */
 /* What the MACHINE is playing, and its transport. Nothing plays in     */
-/* this page: the chrome polls the user's Spotify auto-pause bridge, which  */
+/* this page: the chrome polls the Spotify auto-pause bridge, which     */
 /* already holds a Windows media session, and pushes the state in       */
 /* while a new tab is in front.                                        */
 /*                                                                     */

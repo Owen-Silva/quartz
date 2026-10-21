@@ -1,6 +1,6 @@
 // tools/efficiency/fake-bridge.js -- a stand-in for the Spotify auto-pause bridge (~/spotify-autopause,
 // a PowerShell TcpListener on 127.0.0.1:8787-8790) for the efficiency bench on a runner, where the
-// real one does not exist. Quartz's now-playing card then does what it does on the user's machine: one
+// real one does not exist. Quartz's now-playing card then does what it does on a real machine: one
 // GET /now per poll on a port that answers, instead of probing four dead ones.
 //
 //   node tools/efficiency/fake-bridge.js [--port=8787]

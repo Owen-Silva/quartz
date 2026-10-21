@@ -4,7 +4,7 @@
  * 1. SHOWING AN ALERT. Main (watch-alerts-main.js) sends one alert per check. Where it goes:
  *    - Quartz in the background (the window is not focused): Quartz's own notification path, the
  *      same window.Notification the "Claude is waiting" toast uses (app.js notifyClaudeWaiting:
- *      silent, its permission asked at most once through claudeNotifyPermission). The user's shell
+ *      silent, its permission asked at most once through claudeNotifyPermission). the user's shell
  *      redraws those toasts itself, so Lumen adds no notification mechanism of its own. A click
  *      brings Quartz forward and does the alert's action.
  *    - Quartz in front: a small card in the corner of the chrome (watch-alerts.css), with the

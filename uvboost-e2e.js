@@ -8,7 +8,7 @@
 //   - a guard limit it is over (UVB_GUARD_MAX=-1) puts the thread back to Normal, said in words;
 //   - QUARTZ_UVBOOST=0 changes nothing.
 //   node uvboost-e2e.js            -> "uvboost-e2e: N passed, M failed"
-// Launches one hidden Electron window at a time (no Quartz, no profile of the user's); RAM-gated.
+// Launches one hidden Electron window at a time (no Quartz, no real user profile); RAM-gated.
 'use strict';
 const fs = require('fs');
 const os = require('os');
