@@ -28,7 +28,8 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[
 const CDP_PORT = Number(opt('cdp', '9851'));
 const SHOTS = opt('shots', path.join(os.tmpdir(), 'quartz-shorts-shots'));
 const CLIP = process.env.QUARTZ_SHORTS_CLIP || path.join(__dirname, 'tests', 'media', 'lumen-short-9x16.mp4');   // testsrc2, 270x480 (9:16), 30 s
-// The Short's own shape (6a): a clip per shape, /__media/short.mp4?shape=<w>x<h>. 9x16 and 3x4 are in tests/media, 16x9 is
+// Made like tests/fixture-clip.js's, smaller: testsrc2=size=270x480:rate=12:duration=30 (3x4: 240x320, 10 s), -crf 45 -g 24,
+// AAC 24k. // The Short's own shape (6a): a clip per shape, /__media/short.mp4?shape=<w>x<h>. 9x16 and 3x4 are in tests/media, 16x9 is
 // the players' clip (640x360); any other (1x1, 1x3, ...) is <QUARTZ_SHORTS_SHAPES>/short-<shape>.mp4 when that dir has it.
 const SHAPE_CLIPS = { '9x16': CLIP, '3x4': path.join(__dirname, 'tests', 'media', 'lumen-short-3x4.mp4'), '16x9': require('./tests/fixture-clip').CLIP };
 function shapeClip(shape) {
