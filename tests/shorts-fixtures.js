@@ -11,6 +11,8 @@
 //                       q.signedout: ytcfg LOGGED_IN false. q.ad (a Short's index): that Short is an ad
 //                       Short (YouTube's ad slot in its player, "Sponsored", a "Visit advertiser" button at
 //                       its bottom; presses counted in __presses.adCta).
+//                       q.shapes (a shape per Short: ['3x4', '9x16', ...]): that Short's video is
+//                       /__media/short.mp4?shape=<shape> (a clip that shape; the e2e serves it), so Shorts differ in shape.
 //   channelShorts(path) a channel's Shorts tab: a grid of /shorts/<id> links.
 const SHORTS = [
   { id: 'Xk3pQ9vLm2A', title: 'Open chord swap drill in 30 seconds', channel: '@guitarcoachryan', name: 'Guitar Coach Ryan', likes: '12K' },
@@ -34,7 +36,7 @@ function shortsPage(id, q) {
   const reels = L.map((s, i) => `
   <ytd-reel-video-renderer id="r${i}" data-i="${i}"${i === start ? ' is-active' : ''}>
     <div id="player-container">
-      <video class="html5-main-video" src="/__media/short.mp4" muted loop playsinline preload="${i === start ? 'auto' : 'none'}"></video>
+      <video class="html5-main-video" src="/__media/short.mp4${o.shapes && o.shapes[i] ? '?shape=' + esc(o.shapes[i]) : ''}" muted loop playsinline preload="${i === start ? 'auto' : 'none'}"></video>
       <div class="ytp-chrome-top"><button class="ytp-play-button" aria-label="Pause (k)">II</button></div>${String(i) === String(o.ad) ? `
       <ytd-ad-slot-renderer class="fx-ad"><span class="fx-ad-badge">Sponsored</span><button class="fx-ad-cta" aria-label="Visit advertiser">Visit advertiser</button></ytd-ad-slot-renderer>` : ''}
       <yt-reel-metapanel-view-model id="metapanel">
