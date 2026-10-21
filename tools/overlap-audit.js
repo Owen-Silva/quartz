@@ -10,7 +10,7 @@
 // 720 px minimum. On each, every visible control is forced into :hover and then :focus-visible
 // (CDP CSS.forcePseudoState) and shot; the pixels that changed are compared with a still shot of
 // the same window. A changed pixel outside the control's own box AND inside another control or a
-// run of text it does not own is the bug the user saw: a highlight that paints over its neighbour.
+// run of text it does not own is the bug this audit exists for: a highlight that paints over its neighbour.
 // A hit is confirmed by shooting the same spot with the state released (what still differs there
 // is something moving on its own, not the highlight) before it counts.
 // Static checks on the same screens: text cut off with no ellipsis, a control cut by its own
@@ -112,7 +112,7 @@ run('overlap-audit', async (k) => {
         if (had && had.ws && had.ws.readyState === 1) return had;
         const c = await new Cdp(t.webSocketDebuggerUrl).open();
         await c.send('Page.enable');
-        // A guest draws at the DISPLAY's scale (125 % on the user's laptop), not the 1x the chrome page is
+        // A guest draws at the DISPLAY's scale (125 % on a typical laptop), not the 1x the chrome page is
         // pinned to, so its shots came back 1.25x the CSS boxes the judge maps them onto, and every
         // highlight seemed to run into the neighbour to its right or below (reader, phone, Home,
         // history: all 'into' the next control). Pin it to 1x too; if that does not take, shoot at
@@ -283,8 +283,10 @@ run('overlap-audit', async (k) => {
       // The notes pane only opens while it is configured (app.js notesPaneOn); a test profile
       // usually has no notes folder, so the setup tells the host it is on. The pane body then
       // shows whatever main reports, which on such a profile is the "notes pane is off" banner.
+      // createWorkspace() returns the new id, not the workspace, and a fresh profile has no
+      // workspace with the pane, so the setup makes one and gives it the pane through the host.
       name: 'notes', roots: ['#sidepane'],
-      setup: async () => { await ev(`(() => { if (typeof adoptNotesPaneState === 'function') adoptNotesPaneState({ configured: true }); let ws = workspaces.find((w) => w.pane === 'notes'); if (!ws) { ws = createWorkspace('Notes', 'forest'); ws.pane = 'notes'; } switchWorkspace(ws.id); syncSidePane(true); return 1; })()`); await sleep(1200); },
+      setup: async () => { await ev(`(() => { if (typeof adoptNotesPaneState === 'function') adoptNotesPaneState({ configured: true }); let ws = workspaces.find((w) => w.pane === 'notes'); if (!ws) { ws = findWorkspace(createWorkspace('Notes', 'forest')); setWorkspacePane(ws.id, 'notes'); } switchWorkspace(ws.id); syncSidePane(true); return document.querySelector('#sidepane') && !document.querySelector('#sidepane').hidden ? 1 : 0; })()`); await sleep(1200); },
       teardown: async () => { await ev('(switchWorkspace(DEFAULT_WORKSPACE_ID), syncSidePane(true), 1)'); await sleep(600); },
     },
     {
