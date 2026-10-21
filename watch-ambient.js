@@ -21,7 +21,8 @@
      - The refresh stops when the video is paused, the window is
        hidden or in the background, the layer is closed, in multiview
        or the corner or fullscreen, Windows asks to reduce motion, or
-       battery saver is on (watch-ambient-main.js). Reduced motion and
+       battery saver is on (watch-ambient-main.js), and it slows to
+       EVERY_IDLE while the field is sunk at the comments. Reduced motion and
        battery saver keep the still field; multiview, the corner and
        fullscreen have no field at all.
      - Legibility is the CSS's (watch-ambient.css): the field is dimmed
@@ -41,7 +42,7 @@
   /* ================================================================ pure */
 
   var EVERY = 4000;          // ms between frame samples while the video plays
-  var EVERY_IDLE = 9000;     // ms between samples while it is paused, buffering or has no frame yet
+  var EVERY_IDLE = 9000;     // ms between samples while it is paused, buffering or has no frame yet, or the field is sunk
   var FIRST = 1400;          // ms after the view opens (or the video changes) to the first sample
   var CW = 96, CH = 54;      // the field's canvas: scaled up it is a soft field and never re-blurs
   var DELTA = 9;             // mean colour change (0..255) under which a new sample paints nothing
@@ -332,6 +333,10 @@
     A.timer = setTimeout(function () { A.timer = 0; if (seq === A.seq) sample(seq); }, ms === undefined ? (A.from === 'frame' ? EVERY : FIRST) : ms);
   }
 
+  /** The wait to the next sample: the playing cadence, and the idle one while paused or while the field is sunk to
+      its tint (scrolled to the comments: a change there shows at 20% and far from the eye). Reads state only. */
+  function cadence(paused) { return paused || A.sunk ? EVERY_IDLE : EVERY; }
+
   function sample(seq) {
     var s = A.slot;
     if (!s || !s.view || A.busy) return;
@@ -359,11 +364,11 @@
       if (r.paused && r.t === A.lastT && A.from === 'frame') { schedule(EVERY_IDLE); return; }
       A.lastT = r.t;
       // A black frame (a fade, a protected video): keep what is there.
-      if (r.max < 14 && A.from !== 'none') { A.skipped++; schedule(r.paused ? EVERY_IDLE : EVERY); return; }
+      if (r.max < 14 && A.from !== 'none') { A.skipped++; schedule(cadence(r.paused)); return; }
       var bin = atob(r.px), px = new Uint8ClampedArray(r.w * r.h * 4);
       for (var i = 0, j = 0; i < bin.length; i += 3, j += 4) { px[j] = bin.charCodeAt(i); px[j + 1] = bin.charCodeAt(i + 1); px[j + 2] = bin.charCodeAt(i + 2); px[j + 3] = 255; }
       var sig = signature(px, r.w, r.h, 4);
-      if (A.from === 'frame' && diff(sig, A.sig) < DELTA) { A.skipped++; schedule(r.paused ? EVERY_IDLE : EVERY); return; }
+      if (A.from === 'frame' && diff(sig, A.sig) < DELTA) { A.skipped++; schedule(cadence(r.paused)); return; }
       A.sig = sig;
       var sc = A.src;
       if (sc.width !== r.w) sc.width = r.w;
@@ -371,7 +376,7 @@
       sc.getContext('2d').putImageData(new ImageData(px, r.w, r.h), 0, 0);
       paint(sc, r.w, r.h);
       A.from = 'frame';
-      schedule(r.paused ? EVERY_IDLE : EVERY);
+      schedule(cadence(r.paused));
     }, function (e) {
       A.busy = false;
       if (seq !== A.seq) return;
