@@ -49,6 +49,15 @@ const JSON_OUT = opt('json', '');
 const ONLY = opt('only', '') ? opt('only', '').split(',') : null;
 const IDLE_S = Math.max(5, Number(opt('idle', '20')) || 20);
 const want = (k) => !ONLY || ONLY.includes(k);
+// --cold-only: measure the cold Lumen open (toolbar click -> the guest's first contentful paint) and stop there.
+// --coldtrace <dir>: a browser-wide trace (every process) of that cold open, for tools' breakdown of where it goes.
+const COLD_ONLY = argv.includes('--cold-only');
+const COLD_TRACE = opt('coldtrace', '');
+const COLD_TAG = opt('tag', String(process.pid));
+// --exp <js>: an expression run in the Quartz window just before the cold click (an A/B experiment, e.g. a suspect turned off).
+const COLD_EXP = opt('exp', '');
+const COLD_CATS = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'blink.user_timing', 'loading',
+  'navigation', 'browser', 'content', 'renderer_host', 'blink', 'rail', 'electron', 'startup', '__metadata'];
 const MOCK_ORIGIN = (PV && PV.MOCK_ORIGIN) || 'https://quartz-preview.invalid';
 const BUDGET = { feedback: 100, open: 300, frame: 20, longtask: 50 };
 const TRACE_CATS = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame',
@@ -206,7 +215,8 @@ async function traceStart(c) {
   await sleep(250);
   return true;
 }
-async function traceStop(c, name) {
+async function traceStop(c, name) { return traceStopTo(c, TRACE_DIR, name); }
+async function traceStopTo(c, dir, name) {
   let resolve; const done = new Promise((r) => { resolve = r; });
   const h = (m) => { if (m.method === 'Tracing.tracingComplete') resolve(m.params || {}); };
   c.handlers.push(h);
@@ -214,7 +224,7 @@ async function traceStop(c, name) {
   const p = await Promise.race([done, sleep(60000).then(() => null)]);
   c.handlers.splice(c.handlers.indexOf(h), 1);
   if (!p || !p.stream) return '';
-  const file = path.join(TRACE_DIR, name + '.trace.json');
+  const file = path.join(dir, name + '.trace.json');
   const fd = fs.openSync(file, 'w');
   try {
     for (;;) {
@@ -224,6 +234,22 @@ async function traceStop(c, name) {
     }
   } finally { fs.closeSync(fd); await c.send('IO.close', { handle: p.stream }).catch(() => 0); }
   return file;
+}
+/** The cold open's trace: on the BROWSER target, so every process (browser, the Quartz window, the new guest, GPU) is in it. */
+async function coldTraceStart(noWait) {
+  let ver = null; try { ver = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json/version')).json(); } catch (e) { ver = null; }
+  if (!ver || !ver.webSocketDebuggerUrl) return null;
+  const c = await new Cdp(ver.webSocketDebuggerUrl).open();
+  c.handlers = [];
+  c.ws.on('message', (raw) => { let m; try { m = JSON.parse(String(raw)); } catch (e) { return; } for (const h of c.handlers) { try { h(m); } catch (e) { /* a handler */ } } });
+  fs.mkdirSync(COLD_TRACE, { recursive: true });
+  const r = await c.send('Tracing.start', { transferMode: 'ReturnAsStream', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: COLD_CATS } });
+  if (r.error) { try { c.ws.close(); } catch (e) { /* gone */ } return null; }
+  if (!noWait) await sleep(250);
+  return c;
+}
+async function coldTraceStop(c, name) {
+  try { return await traceStopTo(c, COLD_TRACE, name); } finally { try { c.ws.close(); } catch (e) { /* gone */ } }
 }
 /**
  * For each long frame (node-clock window [a, b]): per thread of the renderer that drew it, the GPU process and the
@@ -370,7 +396,25 @@ run('lumen-perf', async ({ check, launch, say }) => {
   };
   const args = ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'];
   const R = { reps: [], meta: { node: process.version, at: new Date().toISOString(), load: fs.existsSync(path.join(os.tmpdir(), 'claude-heavytest.mutex2')) ? 'UNDER LOAD (mutex2 held)' : 'clean (mutex2 absent)' } };
+  // --boottrace <file>: Chromium's own startup trace (--trace-startup), from the first instant of the process for
+  // BOOT_S seconds, so the cold click lands exactly when it does untraced (nothing waits for a trace to start).
+  const BOOT_TRACE = opt('boottrace', '');
+  // --boot-prof: the V8 sampling profiler in the same trace (JS stacks per process; it slows every process a little)
+  if (BOOT_TRACE) args.push('--trace-startup=' + COLD_CATS.concat(argv.includes('--boot-prof') ? ['disabled-by-default-v8.cpu_profiler'] : []).join(','), '--trace-startup-format=json', '--trace-startup-file=' + BOOT_TRACE, '--trace-startup-duration=' + opt('boot-s', '14'));
+  // --adblock-cache <engine.bin>: start the profile with a built ad-blocker engine, as an installed profile has. A fresh
+  // test profile has none, so main fetches the lists and builds the engine (a 1.0-1.6 s main-thread block, r61-coldopen)
+  // at a random moment of the startup, and a cold open that it lands on waits for it.
+  const ABC = opt('adblock-cache', '');
+  if (ABC) {
+    const pd = path.join(os.tmpdir(), 'browser-test-profile-lumenperf' + process.pid);
+    fs.mkdirSync(pd, { recursive: true });
+    fs.copyFileSync(ABC, path.join(pd, 'adblock-engine.bin'));
+    say('ad-blocker engine cache seeded from ' + path.basename(ABC));
+  }
   const q = await launch({ cdp: CDP_PORT, env, args });
+  // the cold open's trace starts here, as soon as the window is up, so the click still lands when it does untraced
+  // (the tail of Quartz's own startup is in the trace too, and nothing waits for the trace before the click)
+  let coldTrace = COLD_TRACE ? await coldTraceStart(true) : null;
   const chrome = await attach({ webSocketDebuggerUrl: q.chrome.wsUrl }, null).catch(() => null) || q.chrome;
   if (!chrome.handlers) chrome.handlers = [];
   await probe(chrome);
@@ -436,11 +480,13 @@ run('lumen-perf', async ({ check, launch, say }) => {
     say('==== rep ' + rep);
     /* ---- 1. the toolbar's Lumen button: cold (no Lumen tab yet) and warm (back from another tab) ---- */
     const findBtn = '(() => { const b = document.getElementById("lumen"); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()';
-    for (const cold of rep === 1 ? [true, false] : [false]) {
+    for (const cold of rep === 1 ? (COLD_ONLY ? [true] : [true, false]) : [false]) {
       if (!cold) { await chrome.ev('createTab(), 1'); await sleep(2500); }
       const b = await chrome.ev(findBtn);
       if (!b) { check(false, 'the toolbar has its Lumen button (#lumen)'); }
       else {
+        if (cold && COLD_EXP) say('  cold open experiment: ' + JSON.stringify(await chrome.ev(COLD_EXP).catch((e) => 'threw ' + e.message)));
+        const ct = cold ? coldTrace : null; coldTrace = null;
         const m = await measure('lumen-button-' + (cold ? 'cold' : 'warm'), [chrome], async () => {
           const t0 = Date.now();
           await click(chrome, b.x, b.y);
@@ -458,6 +504,7 @@ run('lumen-perf', async ({ check, launch, say }) => {
               const ns = Math.round(toNode(g, nav.o) - t0);
               say('  cold open: ' + ns + ' ms to the guest\'s navigation start, then HTML +' + Math.round(nav.rs) + ', parsed (DOM interactive) +' + Math.round(nav.di) +
                 ', DOMContentLoaded done +' + Math.round(nav.dcl) + ', first contentful paint +' + Math.round(fcp - nav.o) + ' ms');
+              R.cold = { navStart: ns, html: Math.round(nav.rs), interactive: Math.round(nav.di), dcl: Math.round(nav.dcl), fcp: Math.round(fcp - nav.o), clickNode: t0, navOriginNode: Math.round(toNode(g, nav.o)) };
             }
             return { openMs: fcp ? Math.round(toNode(g, fcp) - t0) : NaN, what: 'first contentful paint of the Lumen page (' + skel + ' rows or skeleton rows drawn by then or soon after)' };
           }
@@ -465,10 +512,13 @@ run('lumen-perf', async ({ check, launch, say }) => {
           const seen = await g.ev('new Promise((r) => requestAnimationFrame((t) => r(performance.timeOrigin + t)))').catch(() => 0);
           return { openMs: Math.round(Math.max(toNode(chrome, shown), seen ? toNode(g, seen) : 0) - t0), what: 'the Lumen view on screen and its page painting' };
         }, { tracePage: chrome });
+        if (ct) { await sleep(300); const f = await coldTraceStop(ct, 'cold-' + COLD_TAG); if (R.cold) R.cold.trace = f; say('  cold open trace: ' + (f || 'none')); }
+        if (cold && R.cold) R.cold.openMs = m.extra.openMs;
         add('open', m.extra.openMs, m.name + ': ' + m.extra.openMs + ' ms to ' + m.extra.what);
         record(m, null, 'longtasks');
       }
     }
+    if (COLD_ONLY) break;
     if (!g) { const gt = await targetWhere(q, (x) => /\/watch\.html(\?|#|$)/.test(String(x.url)), 15000); g = await attach(gt, null); g.label = 'lumen'; await probe(g); }
     // real rows, and nothing reading or queued (each snapshot redraws rows), before anything is measured
     await g.waitFor('(' + ROWS_REAL + ') >= 20 || null', 90000).catch(() => 0);
@@ -731,6 +781,15 @@ run('lumen-perf', async ({ check, launch, say }) => {
     check(pass, 'budget: ' + label + ' (worst ' + worst + ', limit ' + lim + ')');
   }
   R.results = results;
+  if (BOOT_TRACE) {   // the startup trace is written when its duration ends: wait for it (and for it to stop growing)
+    let last = -1;
+    for (let i = 0; i < 60; i++) {
+      const n = fs.existsSync(BOOT_TRACE) ? fs.statSync(BOOT_TRACE).size : -1;
+      if (n > 0 && n === last) break;
+      last = n; await sleep(1000);
+    }
+    say('boot trace: ' + (fs.existsSync(BOOT_TRACE) ? BOOT_TRACE + ' (' + Math.round(fs.statSync(BOOT_TRACE).size / 1e6) + ' MB)' : 'none written'));
+  }
   if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify(R, null, 1));
   await q.quit();
   srv.close();

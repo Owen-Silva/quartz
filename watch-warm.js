@@ -10,7 +10,15 @@
    video-open) had one forced layout of 40 objects take 77 ms, most of
    it that first-use font work, and text shaping on top.
 
-   So once Lumen is in front, when the window is IDLE
+   It must not run while Lumen itself is opening (r61-coldopen, 10-20):
+   started the moment Lumen came to the front, its first-use font loads
+   were 60-175 ms long tasks in the Quartz window in 5 of 6 cold opens,
+   right while the Lumen page was being created and parsed. So it waits
+   QUIET_MS after Lumen comes to the front (the page's first paint and
+   its first rows go first), and only lays out a line while the idle
+   period has time left for it.
+
+   So once Lumen is in front and that wait is over, when the window is IDLE
    (requestIdleCallback, no timeout), this lays out one line of text
    in each font the player layer's own stylesheets name, off screen
    and hidden, one at a time while each idle period lasts, then
@@ -26,7 +34,11 @@
   var SHEETS = /\/watch-(player|player-extras|player-multi|playerbar|playview|comments|shorts|ambient)\.css(\?|$)/;
   var TEXT = 'Lumen 0123456789 1:23:45 / 10 Aa Bb Gg Jj Qq Watch later Subscribe Comments Shorts · — …';
   var ICON = /fluent icons|mdl2/i;
-  var W = { asked: false, done: false, read: 0, faces: 0, laidOut: 0, ms: 0, why: '' };
+  var W = { asked: false, done: false, read: 0, faces: 0, laidOut: 0, ms: 0, why: '', waited: 0 };
+  // After Lumen comes to the front, how long the warm-up waits before it asks for idle time: a cold Lumen
+  // open (the page's process, its scripts, its first paint and first rows) takes about 0.4-2.5 s here.
+  var QUIET_MS = 3000;
+  var SLICE_MS = 12;   // a line is laid out only while the idle period has at least this long left
 
   function specs() {
     var seen = Object.create(null), out = [];
@@ -89,14 +101,18 @@
     host.className = 'lumen-warm';
     host.style.cssText = 'position:fixed;left:-20000px;top:0;width:4000px;visibility:hidden;pointer-events:none;contain:layout style paint;';
     document.body.appendChild(host);
-    var i = 0;
+    var i = 0, short = 0;
     var step = function (deadline) {
       var t0 = performance.now();
-      do {
+      // A line only while this idle period has room for it; after 20 periods too short for even one line (a
+      // window that is never quite idle) one line goes anyway, so the warm-up still finishes.
+      while (i < list.length && (!deadline || deadline.timeRemaining() > SLICE_MS || short >= 20)) {
         host.appendChild(line(list[i++]));
         void host.offsetHeight;     // lay it out now: the face loads, the line shapes
         W.laidOut = i;
-      } while (i < list.length && deadline && deadline.timeRemaining() > 10);
+        short = 0;
+      }
+      if (performance.now() - t0 < 0.5) short++;
       W.ms += performance.now() - t0;
       if (i < list.length) root.requestIdleCallback(step);
       else { host.remove(); W.ms = Math.round(W.ms); }
@@ -104,12 +120,16 @@
     root.requestIdleCallback(step);
   }
 
-  /** Lumen is in front: warm the player layer's fonts when the window is next idle (once per window). */
+  /** Lumen is in front: warm the player layer's fonts once Lumen's own open is over and the window is idle (once per window). */
   function soon() {
     if (W.asked || typeof root.requestIdleCallback !== 'function' || !root.document) return;
     W.asked = true;
-    root.requestIdleCallback(function () { try { run(); } catch (e) { W.why = String((e && e.message) || e); } });
+    var t0 = Date.now();
+    setTimeout(function () {
+      W.waited = Date.now() - t0;
+      root.requestIdleCallback(function () { try { run(); } catch (e) { W.why = String((e && e.message) || e); } });
+    }, QUIET_MS);
   }
 
-  root.LumenWarm = { soon: soon, _state: function () { return { asked: W.asked, done: W.done, read: W.read, faces: W.faces, laidOut: W.laidOut, ms: W.ms, why: W.why }; } };
+  root.LumenWarm = { soon: soon, QUIET_MS: QUIET_MS, _state: function () { return { asked: W.asked, done: W.done, read: W.read, faces: W.faces, laidOut: W.laidOut, ms: W.ms, why: W.why, waited: W.waited }; } };
 })(typeof window !== 'undefined' ? window : this);
