@@ -178,6 +178,9 @@ the tool installed, Settings says so and nothing else changes.
   titles is cached (`watch-cache.json`); the window is closed when the read ends.
 - **Ghostery's engine** owns the default session's request hooks for blocking, so everything
   else that watches requests goes through CDP or its own session instead.
+- **It presents itself as Chrome.** Quartz sends a plain Chrome user agent and a "Google Chrome"
+  brand in its client hints (`installClientHintFix` in `main.js`), so sites that turn away
+  unknown browsers, such as X's login, accept it.
 - **castlabs ECS for Widevine**, because stock Electron ships no CDM and ECS is the supported way
   to get one, with signing (EVS) that replaces a direct licence agreement with Google.
 - **No silent failures.** Anything off, missing or refused says so, with its reason, in the
