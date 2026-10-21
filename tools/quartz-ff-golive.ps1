@@ -1,6 +1,6 @@
 <#
 quartz-ff-golive.ps1 -- a CODE-ONLY Quartz release live (main 10-18, from tools/lumen-golive.ps1).
-For a release whose package.json/package-lock.json are unchanged since the live HEAD, so the castlabs
+For a release whose package-lock.json and install-relevant package.json fields are unchanged since the live HEAD, so the castlabs
 Electron already in node_modules (EVS-signed at release 1) stays as it is: no npm, no swap, no re-sign.
 
     powershell -NoProfile -ExecutionPolicy Bypass -File <this> -Ref origin/wk/lumen-release3 -Expect <sha> [-DryRun]
@@ -9,8 +9,10 @@ Electron already in node_modules (EVS-signed at release 1) stays as it is: no np
   under %APPDATA%. A dry run's "live checkout" probe also looks at the checkout this script is in.
 
   0. Preflight, with Quartz still open: git fetch; the checkout is clean and on master; HEAD -> Ref is a
-     fast-forward; Ref is exactly -Expect; package.json and package-lock.json are unchanged HEAD..Ref
-     (else STOP: that needs the swap script); node_modules electron is +wvcus and Quartz.exe.sig exists.
+     fast-forward; Ref is exactly -Expect; package-lock.json is byte-identical HEAD..Ref, and package.json
+     is either unchanged or differs only in fields npm/Electron never read at install or start (license,
+     description, scripts, ...; compared as parsed JSON, the PASS line names them) (else STOP: that
+     needs the swap script); node_modules electron is +wvcus and Quartz.exe.sig exists.
   1. Snapshot the default-browser registry and node-pty's native files and Quartz.exe(.sig) hashes.
   2. Close Quartz cleanly (CloseMainWindow on the MAIN Quartz.exe of this checkout; never kills).
   3. git merge --ff-only Ref.  (DRY RUN: skipped; the live checkout is never touched.)
@@ -54,6 +56,30 @@ function Tail([string]$t, [int]$n) { if (-not $t) { return '' }; $l = @($t -spli
 function Pass([string]$what) { Write-Output ('PASS ' + $what) }
 function Fail([string]$what) { Write-Output ('FAIL ' + $what); $script:fails++ }
 function Info([string]$what) { Write-Output ('INFO ' + $what) }
+
+# One top-level package.json field as canonical JSON text: object keys sorted (ordinal), arrays kept
+# in order, scalars through ConvertTo-Json, so two parses compare by value and not by layout. An
+# absent field is '<absent>', which never equals a present one (even a present null).
+function Json-Canon($obj, [string]$field) {
+  $p = $obj.PSObject.Properties[$field]
+  if ($null -eq $p) { return '<absent>' }
+  return (Json-Value $p.Value)
+}
+function Json-Value($v) {
+  if ($null -eq $v) { return 'null' }
+  if ($v -is [System.Management.Automation.PSCustomObject]) {
+    $keys = @($v.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object -CaseSensitive)
+    $parts = @()
+    foreach ($k in $keys) { $parts += ((ConvertTo-Json -InputObject $k -Compress) + ':' + (Json-Value $v.PSObject.Properties[$k].Value)) }
+    return ('{' + ($parts -join ',') + '}')
+  }
+  if ($v -is [array]) {
+    $parts = @()
+    foreach ($e in $v) { $parts += (Json-Value $e) }
+    return ('[' + ($parts -join ',') + ']')
+  }
+  return (ConvertTo-Json -InputObject $v -Compress)
+}
 
 function Rollback-Text {
   $old = $(if ($script:oldHead) { $script:oldHead } else { '<HEAD before go-live>' })
@@ -138,10 +164,68 @@ else { Info ('preflight: origin/master is ' + $(if ($om) { $om.Substring(0, 7) }
 if ($Expect) {
   if ($target.StartsWith($Expect)) { Pass ('preflight: ' + $Ref + ' is the expected ' + $target.Substring(0, 7)) } else { Stop-Golive ($Ref + ' is ' + $target.Substring(0, 7) + ', not the expected ' + $Expect) }
 } else { Stop-Golive 'no -Expect SHA given; refusing to ship whatever the branch points at' }
-$pkgAt = (Run 'git' @('show', ($target + ':package.json'))).text
+$pkgShow = Run 'git' @('show', ($target + ':package.json'))
+if ($pkgShow.code -ne 0) { Stop-Golive ('git show ' + $target.Substring(0, 7) + ':package.json failed: ' + (Tail $pkgShow.text 2)) }
+$pkgAt = $pkgShow.text
 if ($pkgAt -match '"electron":\s*"[^"]*#v[0-9.]+\+wvcus"') { Pass 'preflight: the target package.json pins castlabs Electron (+wvcus)' } else { Stop-Golive 'the target package.json does not pin a castlabs +wvcus Electron' }
-$dep = Run 'git' @('diff', '--quiet', $script:oldHead, $target, '--', 'package.json', 'package-lock.json')
-if ($dep.code -eq 0) { Pass 'preflight: package.json and package-lock.json are unchanged HEAD..target (code-only release)' } else { Stop-Golive 'package.json or package-lock.json changed HEAD..target: this needs tools/lumen-golive.ps1 (npm + swap), not this script' }
+# The lockfile must be byte-identical HEAD..target: any change to it means npm would resolve a
+# different tree, and that is the swap script's job (npm + swap + re-sign), never this one's.
+$lock = Run 'git' @('diff', '--quiet', $script:oldHead, $target, '--', 'package-lock.json')
+if ($lock.code -ne 0) { Stop-Golive 'package-lock.json changed HEAD..target: this needs tools/lumen-golive.ps1 (npm + swap), not this script' }
+# package.json may change in fields npm and Electron never read at install or start time (license,
+# description, author, scripts, ...): node_modules stays valid, so the release is still code-only.
+# Every field that feeds the install, the swap or the start path must be identical, compared as
+# parsed JSON (key order and whitespace do not count; values do). Anything unparseable refuses.
+$pkg = Run 'git' @('diff', '--quiet', $script:oldHead, $target, '--', 'package.json')
+if ($pkg.code -eq 0) { Pass 'preflight: package.json and package-lock.json are unchanged HEAD..target (code-only release)' }
+else {
+  $pkgOldShow = Run 'git' @('show', ($script:oldHead + ':package.json'))
+  if ($pkgOldShow.code -ne 0) { Stop-Golive ('git show ' + $script:oldHead.Substring(0, 7) + ':package.json failed: ' + (Tail $pkgOldShow.text 2)) }
+  $pjOld = $null; $pjNew = $null; $why = ''
+  # Strict parse first: PowerShell 5.1's ConvertFrom-Json is lenient (it takes unquoted keys, which
+  # npm rejects), so node's JSON.parse, the parser npm itself uses, must accept both blobs. It reads
+  # them straight from git (no console code page in between); a BOM is dropped, as npm does.
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) { $why = 'node is not on PATH, so it cannot be strictly parsed' }
+  foreach ($rev in @($script:oldHead, $target)) {
+    if ($why) { break }
+    $sp = Run 'node' @('-e', "try { JSON.parse(require('child_process').execFileSync('git', ['show', process.argv[1] + ':package.json'], { encoding: 'utf8' }).replace(/^﻿/, '')) } catch (e) { console.log(String(e.message).split('\n')[0]); process.exit(1) }", $rev)
+    if ($sp.code -ne 0) { $why = 'package.json at ' + $rev.Substring(0, 7) + ' is not valid JSON (node JSON.parse: ' + (Tail $sp.text 1) + ')' }
+  }
+  if (-not $why) { try { $pjOld = ConvertFrom-Json -InputObject $pkgOldShow.text } catch { $why = 'HEAD package.json does not parse: ' + (Clean $_.Exception.Message) } }
+  if (-not $why) { try { $pjNew = ConvertFrom-Json -InputObject $pkgAt } catch { $why = 'target package.json does not parse: ' + (Clean $_.Exception.Message) } }
+  if (-not $why -and -not ($pjOld -is [System.Management.Automation.PSCustomObject])) { $why = 'HEAD package.json is not a JSON object' }
+  if (-not $why -and -not ($pjNew -is [System.Management.Automation.PSCustomObject])) { $why = 'target package.json is not a JSON object' }
+  if ($why) { Stop-Golive ('package.json changed HEAD..target and ' + $why + '; cannot prove it is code-only, so this needs tools/lumen-golive.ps1') }
+  # Install: what npm resolves, fetches, builds or refuses on. Start: Electron runs Quartz.exe on
+  # this folder and reads main (the entry), type (how main loads), and name/productName (app.getName(),
+  # which names the profile folder under %APPDATA% and the userData path).
+  $installFields = @('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'peerDependenciesMeta',
+    'bundleDependencies', 'bundledDependencies', 'overrides', 'resolutions', 'engines', 'os', 'cpu', 'libc',
+    'workspaces', 'packageManager', 'main', 'type', 'name', 'productName')
+  $names = @(@($pjOld.PSObject.Properties | ForEach-Object { $_.Name }) + @($pjNew.PSObject.Properties | ForEach-Object { $_.Name }) | Sort-Object -Unique -CaseSensitive)
+  $changed = @(); $blocked = @()
+  try {
+    foreach ($n in $names) {
+      if ((Json-Canon $pjOld $n) -cne (Json-Canon $pjNew $n)) {
+        $changed += $n
+        if ($installFields -ccontains $n) { $blocked += $n }
+      }
+    }
+  } catch { Stop-Golive ('package.json changed HEAD..target and comparing it failed: ' + (Clean $_.Exception.Message) + '; this needs tools/lumen-golive.ps1') }
+  if ($blocked.Count) { Stop-Golive ('package.json changed install/start fields HEAD..target (' + ($blocked -join ', ') + '): this needs tools/lumen-golive.ps1 (npm + swap), not this script') }
+  if ($changed.Count) {
+    Pass ('preflight: package.json differs only in non-install fields (' + ($changed -join ', ') + '); lockfile unchanged; code-only release')
+    # Lifecycle scripts are not run here (no npm), but the next npm install runs them: say so.
+    if ($changed -ccontains 'scripts') {
+      foreach ($s in @('preinstall', 'install', 'postinstall', 'prepare')) {
+        $a = ''; $b = ''
+        if ($pjOld.scripts) { $a = [string]$pjOld.scripts.$s }
+        if ($pjNew.scripts) { $b = [string]$pjNew.scripts.$s }
+        if ($a -cne $b) { Info ('preflight: scripts.' + $s + ' changed; not run by this script, the next npm install (lumen-golive.ps1) runs it') }
+      }
+    }
+  } else { Pass 'preflight: package.json text differs but no top-level field changed when parsed (formatting only); lockfile unchanged; code-only release' }
+}
 $ev = ''
 try { $ev = [string](Get-Content (Join-Path $Repo 'node_modules\electron\package.json') -Raw | ConvertFrom-Json).version } catch { $ev = '' }
 if ($ev -match '\+wvcus$') { Pass ('preflight: electron here is ' + $ev) } else { Stop-Golive ('electron here is ' + $(if ($ev) { $ev } else { 'none' }) + ', not castlabs +wvcus') }
