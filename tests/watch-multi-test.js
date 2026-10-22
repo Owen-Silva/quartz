@@ -105,6 +105,23 @@ try { fs.unlinkSync(freeFile); } catch (e) { /* none */ }
   check(JSON.stringify(f.sent.map((s) => s[1].key)) === JSON.stringify(['1', '4', 'f', 'f', 'x', 'x', 'm']) && f.sent.every((s) => s[0] === 'watch-player:key' && s[1].wcId === 7), 'and handed to the chrome, lower-cased, with the tile', f.sent);
   f.sent.length = 0;
   check(!key('5') && !key('k') && !key('x', { control: true }) && !key('m', { shift: true }) && f.sent.length === 0, 'multiview: 5, K, Ctrl+X, Shift+M stay the page’s own');
+  // A tile's text field (a sign-in, a PIN, the search box) keeps 1-4/F/X/M: they were swallowed while he typed.
+  let typing = true, asked = 0;
+  c.focusedFrame = { executeJavaScript: (code) => { asked++; return { then: (ok) => ok(/activeElement/.test(code) ? typing : null) }; } };
+  c.emit('before-input-event', { preventDefault() {} }, { type: 'keyUp', key: 'Tab' });
+  const inField = ['1', '4', 'f', 'x', 'm'].map((k) => key(k));
+  check(asked === 1 && inField.every((x) => !x) && f.sent.length === 0, 'multiview: typing in a tile’s text field, 1-4/F/X/M stay the page’s own', { asked, inField, sent: f.sent });
+  typing = false;
+  c.emit('input-event', {}, { type: 'mouseUp' });
+  check(asked === 2 && key('1') === true && f.sent.length === 1 && f.sent[0][1].key === '1', 'and once a click takes the focus out of the field, 1 picks the tile again', { asked, sent: f.sent });
+  f.sent.length = 0;
+  typing = true;
+  f.call('watch-player:mode', { mode: 'single' });
+  f.call('watch-player:mode', { mode: 'grid' });
+  check(asked === 3 && key('x') === false && f.sent.length === 0, 'the switch to multiview asks too (a field already focused keeps X)', { asked, sent: f.sent });
+  typing = false;
+  c.emit('before-input-event', { preventDefault() {} }, { type: 'keyUp', key: 'Escape' });
+  f.sent.length = 0;
   c.emit('focus');
   check(f.sent.length === 1 && f.sent[0][1].key === 'focus' && f.sent[0][1].wcId === 7, 'multiview: a click into a tile (its focus) is told to the chrome', f.sent);
   f.sent.length = 0;

@@ -49,6 +49,7 @@
   var PEEK = 128;          // px of the info that always shows under the video (1280x800 included)
   var READS = [250, 900, 2000, 4000, 8000];   // ms after a page loads: read until it is all there
   var PRESS_HOLD_MAX_MS = 2000;   // a held rebuild waits for his release at most this long
+  var SHOW_PAGE_ANSWER_MS = 8000; // the Lumen tab opens a show page at once; past this the press is given up, with the reason
   var PRESS_ANSWER_MS = 15000;    // a press's longest own wait is 7.5 s (Unsubscribe: menu, confirm, state); past this it is said
 
   // The page's own furniture, hidden outright (display:none) while the view is on. Everything
@@ -908,7 +909,7 @@
     var it = p.item || {};
     try {
       return JSON.stringify([s.service, s.id, s.wcId, s.title, phase, moved, p.why, p.busy, p.confirm, p.more, p.save, p.spKnown,
-        p.lastShowPage || 0, it.id, it.title, it.subtitle, p.read]);
+        p.lastShowPage || 0, !!p.spOpening, it.id, it.title, it.subtitle, p.read]);
     } catch (e) { return ''; }
   }
   function stripT(u) { return String(u || '').replace(/[?&]t=\d+s?/, ''); }
@@ -1076,10 +1077,11 @@
       info.appendChild(ep);
     }
     var row = el('div', 'pv-row pv-row-other');
-    var sp = button('pv-showpage', 'Show page', function (b) { showPage(s, b); }, 'Open ' + (m.title || 'this title') + '’s show page in Lumen');
+    var sp = button('pv-showpage', p.spOpening ? 'Opening…' : 'Show page', function (b) { showPage(s, b); }, 'Open ' + (m.title || 'this title') + '’s show page in Lumen');
     row.appendChild(sp);
     info.appendChild(row);
     showPageCheck(s, sp, m);
+    if (p.spOpening) disable(sp, 'Opening…');
     if (phase === 'offline') note(info, 'You’re offline. ' + m.name + '’s player needs the connection back.', 'warn');
     else if (phase === 'failed') note(info, p.why || m.name + '’s page didn’t load.', 'err');
     else if (p.why) note(info, p.why, 'warn');
@@ -1119,17 +1121,33 @@
     }, function (e) { p.spKnown = { id: askedId, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
   }
   /** The show page in the Lumen tab; the player keeps playing in the mini-player (or closes, without it). */
+  // A press never does nothing: it says "Opening…" (p.spOpening, in the render key, so a rebuild keeps it), and
+  // every way it can end without the show page puts the reason under the title.
   function showPage(s, b) {
     var p = pvOf(s), ov = ownerView();
-    if (!ov || !p.item) return;
-    disable(b, 'Opening…');
+    if (!p) return;
+    if (!p.item) { p.why = 'Lumen has no show page for this title'; render(s); return; }
+    if (!ov) { p.why = 'The show page didn’t open: the Lumen tab isn’t there'; render(s); return; }
+    if (p.spOpening) return;   // already on its way (the button says "Opening…")
+    p.why = '';
+    p.spOpening = true;
+    var done = false, t = 0;
+    var settle = function () { if (done) return false; done = true; clearTimeout(t); p.spOpening = false; return true; };
+    t = setTimeout(function () {
+      if (!settle()) return;
+      p.why = 'The show page didn’t open: the Lumen tab didn’t answer in ' + Math.round(SHOW_PAGE_ANSWER_MS / 1000) + ' s';
+      render(s);
+    }, SHOW_PAGE_ANSWER_MS);
+    render(s);
     js(ov, showPageJs(p.item, true)).then(function (r) {
+      if (!settle()) return;
       if (!r || !r.ok) { p.why = (r && r.reason) || 'The show page didn’t open'; render(s); return; }
       p.lastShowPage = Date.now();
+      render(s);
       var mini = CTX && CTX.L && CTX.L.el ? CTX.L.el.querySelector('.mv-minibtn') : null;
       if (mini && !mini.disabled && !mini.hidden) mini.click();
       else if (CTX && CTX.close) CTX.close('Show page');
-    }, function (e) { p.why = 'The show page didn’t open: ' + ((e && e.message) || e); render(s); });
+    }, function (e) { if (!settle()) return; p.why = 'The show page didn’t open: ' + ((e && e.message) || e); render(s); });
   }
 
   /* ---------------------------------------------------------------- settings, offline */
@@ -1154,7 +1172,16 @@
   function released() { all.forEach(releasedOne); }
   window.addEventListener('pointerup', released, true);
   window.addEventListener('pointercancel', released, true);
-  window.addEventListener('blur', released);
+  // A <webview> taking the focus (a player page's first dom-ready, the window's focus coming back to a page)
+  // blurs this window while his button is still down here: that is not a release. Taking it for one ran the
+  // held rebuild mid-press, and the release then landed on a new button: no click, nothing said ("Show page"
+  // did nothing, r62-showpage). The pointerup still comes here (the press captured the mouse); a release this
+  // window never hears (he switched windows) is PRESS_HOLD_MAX_MS's job.
+  window.addEventListener('blur', function () {
+    var a = document.activeElement;
+    if (a && a.tagName === 'WEBVIEW') return;
+    released();
+  });
 
   window.addEventListener('offline', function () { all.forEach(function (s) { render(s); }); });
   window.addEventListener('online', function () { all.forEach(function (s) { var p = pvOf(s); if (p && p.phase !== 'ready') startReads(s, true); else render(s); }); });
@@ -1170,7 +1197,7 @@
     var b = function (sel) { var n = q(sel); return n ? { text: n.textContent.trim(), disabled: n.disabled, pressed: n.getAttribute('aria-pressed'), why: n.getAttribute('data-why') || '' } : null; };
     return {
       id: s.id, wcId: s.wcId, service: s.service, url: s.url, kind: kindOf(s), mode: p.mode, userMode: p.userMode, boxed: s.tile.classList.contains('pv'),
-      phase: p.phase, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save,
+      phase: p.phase, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
       view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, cover: p.cover && !p.cover.hidden,
       title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '', subs: q('.pv-subs') ? q('.pv-subs').textContent : '',
       ep: q('.pv-ep') ? q('.pv-ep').textContent : '', svc: q('.pv-svc-name') ? q('.pv-svc-name').textContent : '',

@@ -286,16 +286,16 @@
   function destroySlot(s) {
     X('destroy', s);
     MV('destroy', s);
-    if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
     // The layer's own fullscreen state goes with the slot. Its leave-html-full-screen never comes once the view
     // is gone (that listener checks s.view === v), so a close from fullscreen (the mouse's Back on the first
     // page, the Watch tab closing) used to leave L.fsSlot and .wp-fs behind: the NEXT title opened as a black,
-    // bar-less window-filling layer (its tile isn't .is-fs) and Esc did nothing (r62-playview).
-    s.fs = false;
+    // bar-less window-filling layer (its tile isn't .is-fs) and Esc did nothing (r62-playview). leaveFs is the
+    // one way out of it (the page's fullscreen, the tile, the layer, Esc's grace, the layout); the inline copy
+    // here missed the window's fullscreen when s.fs was already false, and a multiview X kept the old layout.
     if (L.fsSlot === s) {
-      L.fsSlot = null;
-      if (L.el) L.el.classList.remove('wp-fs');
-    }
+      try { leaveFs(s); } catch (e) { L.fsSlot = null; if (L.el) L.el.classList.remove('wp-fs'); }
+    } else if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
+    s.fs = false;
     if (s.view) {
       var v = s.view;
       s.view = null;
@@ -730,7 +730,7 @@
         hidden: L.el ? L.el.hidden : true,
         n: L.slots.length,
         focus: L.focus,
-        fs: !!L.fsSlot,
+        fs: !!L.fsSlot, fsLeftAt: L.fsLeftAt,
         sheet: L.sheet ? { id: L.sheet.id, host: L.sheet.host, kind: L.sheet.kind, error: L.sheet.error, shown: !L.sheetEl.hidden } : null,
         title: L.titleEl ? L.titleEl.textContent : '',
         mark: L.markEl ? L.markEl.textContent : '',

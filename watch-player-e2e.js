@@ -400,9 +400,13 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     await p.waitFor('!!document.getElementById("v")', 8000).catch(() => 0);
     const fsIn2 = await gesture(p, 'document.getElementById("v").requestFullscreen().then(() => 1, (e) => String(e))');
     const fz = await chrome.waitFor(`(() => { const s = ${ST}; return s.fs ? s : null; })()`, 6000).catch(() => null);
+    const tBack = await chrome.ev('Date.now()');
     await chrome.ev('WatchPlayer.back("mouse"), 1');
     await chrome.waitFor(`!${ST}.open`, 6000).catch(() => 0);
     check(!!fz && !(await chrome.ev(ST)).open, 'in the video\'s fullscreen, the mouse\'s Back at the first page closes the layer', { fsIn: fsIn2, fs: !!fz, closed: (await chrome.ev(ST)).lastClosed });
+    // ...and the slot's fullscreen went the one way out (leaveFs: the page's fullscreen, the tile, the layer, Esc's grace).
+    const leftAt = (await chrome.ev(ST)).fsLeftAt;
+    check(leftAt >= tBack, 'the close from fullscreen leaves it the one way (leaveFs ran with the slot\'s destroy)', { leftAt, tBack });
     await sleep(800);
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/fsafter')}, { service: 'youtube', title: 'After fullscreen' }), 1`);
     await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);

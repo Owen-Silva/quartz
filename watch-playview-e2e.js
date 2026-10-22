@@ -521,12 +521,19 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       check(!!st, 'a Hulu title from Lumen’s rows: “Show page” is on', st && st.showPage);
       // While the button is held down, the layer's class changes (as the page's reads and the bar do): the
       // view updates, and the click must still land (a redraw between press and release would swallow it).
+      // r62-showpage regression: a <webview> taking the focus mid-press (the player page's first dom-ready does
+      // v.focus()) blurs the chrome window; that was taken for a release, the held rebuild ran, and the release
+      // landed on a new button: Show page did nothing, with nothing said. The press must stay held.
+      let heldFocus = null;
       await clickAt('.wp-layer .pv-showpage', 'Show page', async () => {
+        heldFocus = await chrome.ev(`(() => { const w = document.querySelector('.wp-layer .wp-view'); if (w) w.focus(); const a = document.activeElement;
+          const s = ${PS}.slots.find((y) => y.service === 'hulu'); return { active: a ? a.tagName : null, pressing: !!(s && s.pressing) }; })()`).catch((e) => ({ err: e.message }));
         await chrome.ev('(() => { const l = document.querySelector(".wp-layer"); l.classList.add("pv-e2e-poke"); return 1; })()');
         await sleep(60);
         await chrome.ev('(() => { document.querySelector(".wp-layer").classList.remove("pv-e2e-poke"); return 1; })()');
         await sleep(60);
       });
+      check(!!heldFocus && heldFocus.active === 'WEBVIEW' && heldFocus.pressing === true, 'Show page held down while the player page takes the focus: still held (no rebuild under his press)', heldFocus);
       const shown = await g.waitFor('window.LumenShows && LumenShows.isOpen() ? 1 : 0', 6000).catch(() => 0);
       // The show page opens in the Lumen tab first; the chrome hears back from it, then sends the player to the corner.
       const AFTER = `(() => { const s = ${ST}; return { open: s.open, mini: !!(s.multi && s.multi.mini) }; })()`;
