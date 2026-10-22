@@ -42,6 +42,13 @@ check(K('x') === null && K('k', false, true) === null && K('Escape') === null &&
 check(['k', 'K', 'j', 'J', 'l', 'L', ' ', 'm', 'M', 'f', 'F', 'c', 'C', '<', '>', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].every((k) => PB.PAGE_KEYS.includes(k)) && !PB.PAGE_KEYS.includes('Escape'),
   'the page bridge catches every key of the map, both cases, and never Esc (the layer\'s)');
 check(PB.stepSpeed(1, 1) === 1.25 && PB.stepSpeed(2, 1) === 2 && PB.stepSpeed(0.25, -1) === 0.25 && PB.stepSpeed(1.1, -1) === 0.75, 'speed steps through 0.25-2, from the nearest step');
+{
+  /* r62: muted Up/Down step from the level he had, not from 0 */
+  const up = PB.volKey({ vol: 0.8, m: true }, 0.05), dn = PB.volKey({ vol: 0.8, m: true }, -0.05), pl = PB.volKey({ vol: 0.5, m: false }, 0.05);
+  check(up.v === 0.85 && up.unmute !== false, 'Up while muted at 80%: unmutes at 85% (not 5%)', up);
+  check(dn.v === 0.75 && dn.unmute === false, 'Down while muted at 80%: 75% and still muted (never 0 over his level)', dn);
+  check(pl.v === 0.55 && pl.unmute !== false, 'Up unmuted: one step up', pl);
+}
 check(PB.stepVol(0.98, 0.05) === 1 && PB.stepVol(0.02, -0.05) === 0 && PB.stepVol(0.5, 0.05) === 0.55, 'volume steps clamp to 0..1');
 
 /* ---- YouTube's menus on a fake movie_player ---- */
@@ -119,6 +126,12 @@ check(!/display\s*:\s*none/.test(css) && !/opacity/.test(css), 'hiding is visibi
 check(/html\.lumen-pb-on\.lumen-pb-own \.ytp-chrome-bottom/.test(css), 'the own-menu class brings the service\'s bar back for that moment');
 check(Page.css([], ['x']) === '', 'nothing to hide: no style');
 const src = Page.source({ find: 8000, keys: PB.PAGE_KEYS }, AD.youtube);
+check(/err\.name === 'AbortError'\) return;/.test(src), 'an interrupted play() (AbortError: his own quick pause) is not reported as a failure');
+{
+  const pbsrc = fs.readFileSync(path.join(__dirname, '..', 'watch-playerbar.js'), 'utf8');
+  const n = (pbsrc.match(/s\._pb !== P/g) || []).length;
+  check(n >= 6, 'late answers (after close or a new bar) are dropped, never run on a null bar (' + n + ' guards)');
+}
 let parsed = true;
 try { new Function(src); } catch (e) { parsed = false; }
 check(parsed && src.includes('"menus": function') && src.includes('"ad": function') && src.includes('"find":8000'), 'the injected source parses and carries YouTube\'s page functions and the 8 s find');

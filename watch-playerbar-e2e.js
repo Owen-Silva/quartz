@@ -276,6 +276,23 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     await key(g, ' '); await sleep(400);
     check((await vid(g, 'v.paused')) === kp, 'Space plays/pauses');
     if (!(await vid(g, 'v.paused'))) { await key(g, 'k'); await sleep(400); }
+    {
+      // r62: play then pause at once (a quick double Space): the interrupted play() rejects with AbortError,
+      // which is him changing his mind -- no "couldn't play" note, no failure counted towards the fallback
+      const f0 = ((await chrome.ev('LumenPlayerBar._state()')).slots[0] || {}).fails;
+      // both commands leave the chrome in one turn, so the pause reaches the page before the play() settles
+      await chrome.ev('(LumenPlayerBar._key(" "), LumenPlayerBar._key(" "), 1)'); await sleep(600);
+      const sx = await chrome.ev('LumenPlayerBar._state()');
+      check((sx.slots[0] || {}).fails === f0 && !/couldn.t play/.test(sx.note || ''), 'a quick double Space: no "couldn’t play", no failure counted', { fails: [f0, (sx.slots[0] || {}).fails], note: sx.note });
+      if (!(await vid(g, 'v.paused'))) { await key(g, 'k'); await sleep(400); }
+    }
+    {
+      // r62: a seek drag whose pointer capture is lost (alt-tab mid-drag) ends; the bar may hide again
+      const dr = await chrome.ev('(() => { const e = document.querySelector(".pb-seek"); const r = e.getBoundingClientRect(); const o = { bubbles: true, button: 0, pointerId: 7, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };'
+        + ' e.dispatchEvent(new PointerEvent("pointerdown", o)); const a = LumenPlayerBar._state().slots[0].drag;'
+        + ' e.dispatchEvent(new PointerEvent("lostpointercapture", o)); const b = LumenPlayerBar._state().slots[0].drag; return [a, b, e.classList.contains("is-drag")]; })()');
+      check(dr[0] === true && dr[1] === false && dr[2] === false, 'a seek drag that loses its pointer capture ends (never a bar stuck up with a frozen knob)', dr);
+    }
     const kt = await vid(g, 'v.currentTime');
     await key(g, 'l'); await sleep(400);
     check(Math.abs((await vid(g, 'v.currentTime')) - (kt + 10)) < 1.2, 'L +10 s');
@@ -288,6 +305,15 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(Math.abs((await vid(g, 'v.volume')) - Math.min(1, kv + 0.05)) < 0.011, 'Up arrow: volume +5%', { from: kv, to: await vid(g, 'v.volume') });
     await key(g, 'm'); await sleep(400);
     check((await vid(g, 'v.muted')) === true, 'M mutes');
+    {
+      // r62: Up while muted steps from his level (it used to come back at 5%)
+      const mv = await vid(g, 'v.volume');
+      await key(g, 'ArrowUp'); await sleep(400);
+      const mv2 = await vid(g, 'v.volume');
+      check((await vid(g, 'v.muted')) === false && Math.abs(mv2 - Math.min(1, mv + 0.05)) < 0.011, 'Up while muted: unmutes one step above his level', { from: mv, to: mv2 });
+      await key(g, 'ArrowDown'); await sleep(300);
+      await key(g, 'm'); await sleep(300);
+    }
     await key(g, 'm'); await sleep(300);
     const kr = await vid(g, 'v.playbackRate');
     await key(g, '>', true); await sleep(400);
@@ -360,6 +386,9 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     check(adT2 - adT < 6 && adT2 >= adT - 0.05, 'seeking is blocked during the ad (L, Right)', { from: adT, to: adT2 });
     await wake();
     const sk2 = await chrome.ev('(() => { const r = document.querySelector(".pb-seek").getBoundingClientRect(); return [r.left + r.width * 0.2, r.top + r.height / 2]; })()');
+    // r62: the click lands on Lumen's seek bar (its handler says why), never through it on the ad under it
+    check(await chrome.ev('(() => { const e = document.elementFromPoint(' + sk2[0] + ', ' + sk2[1] + '); return !!(e && e.closest(".pb-seek")) && getComputedStyle(document.querySelector(".pb-seek")).pointerEvents !== "none"; })()'),
+      'during the ad the seek bar still takes the pointer (a click never falls through to the ad)');
     await click(chrome, sk2[0], sk2[1]);
     await sleep(400);
     const adT3 = await vid(g, 'v.currentTime');
@@ -491,6 +520,15 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
     st = await chrome.ev(S);
     check(/found no video on Disney\+\u2019s page in 8 s, so Disney\+\u2019s own bar is back/.test(st.fell) && st.reason === st.fell && /found no video/.test((await chrome.ev('LumenPlayerBar._state()')).note), 'no video in 8 s: the fallback and its one-line reason, shown', { fell: st.fell, reason: st.reason });
     await shoot('fallback-reason');
+    if (n) {
+      // r62: the page then moves to a video in-page (YouTube's way, from a channel page onto a video): the
+      // "no video" fallback was about the old URL, so the bar looks again and comes on (it used to stay off for good)
+      await n.ev('(() => { history.pushState({}, "", "/video/pbtest-2"); const v = document.createElement("video"); v.src = "/__media/clip.mp4"; v.muted = true;'
+        + ' v.style.cssText = "position:absolute;left:0;top:0;width:640px;height:360px"; document.body.appendChild(v); v.play().catch(() => 0); return 1; })()');
+      await chrome.waitFor(S + ' && ' + S + '.on === true && !' + S + '.fell', 12000).catch(() => 0);
+      st = await chrome.ev(S);
+      check(st && st.on === true && !st.fell && st.reason === '', 'after the fallback, a video in-page at a new URL: the bar comes back on, the old reason gone', { on: st && st.on, fell: st && st.fell, reason: st && st.reason });
+    }
     if (n) n.close();
 
     check((await chrome.ev('window.__fsCalls')) === 1, 'the only screen fullscreen all run was the one Shift+F asked for');

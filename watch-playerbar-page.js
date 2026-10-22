@@ -326,6 +326,11 @@
       if (c.c === 'status') return status();
       if (c.c === 'rescan') {
         var now = v ? current() : null;
+        // Off a Shorts page onto a watch page (YouTube's in-page move): current() says null, and YouTube
+        // keeps ytd-shorts -- with the Shorts player's <video>, now hidden -- in the page, so the bar stayed
+        // on that invisible video (time, play and volume all drove it). An attached video with no box
+        // while another one is on screen: follow the one on screen.
+        if (v && now === null && area(v) === 0) { var vis = pick(); if (vis && vis !== v && area(vis) > 0) now = vis; }
         if (!v) { B.video = null; find(true); } else if (now && now !== v) attach(now); else post({ t: 'ready', st: state(true) });
         return status();
       }
@@ -339,7 +344,9 @@
         case 'lift': R.style.setProperty('--lumen-pb-lift', Math.max(0, Math.min(400, num(c.px, 0))) + 'px'); break;
         case 'play': case 'pause': case 'toggle': {
           var go = c.c === 'play' || (c.c === 'toggle' && v.paused);
-          if (go) { var pr = v.play(); if (pr && pr.catch) pr.catch(function (err) { post({ t: 'err', c: 'play', why: String((err && err.name) || err).slice(0, 80) }); }); }
+          // AbortError: a pause (his next Space, or the page's own) interrupted this play() -- that is
+          // him changing his mind, not a failure, so it is not reported (it counted towards the fallback)
+          if (go) { var pr = v.play(); if (pr && pr.catch) pr.catch(function (err) { if (err && err.name === 'AbortError') return; post({ t: 'err', c: 'play', why: String((err && err.name) || err).slice(0, 80) }); }); }
           else v.pause();
           break;
         }
