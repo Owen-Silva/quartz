@@ -111,6 +111,26 @@
     return '';
   }
 
+  /** A YouTube address's video id ('' for a channel, the home page, anything that isn't one video). */
+  function ytId(url) {
+    var u = parse(url);
+    if (!u) return '';
+    if (/(^|\.)youtu\.be$/i.test(u.hostname)) return u.pathname.slice(1).split('/')[0] || '';
+    if (u.pathname === '/watch') return u.searchParams.get('v') || '';
+    var m = /^\/(?:live|embed|shorts)\/([^/?#]+)/.exec(u.pathname);
+    return m ? m[1] : '';
+  }
+  /**
+   * Whether a YouTube page has moved on from the video it was opened for (autoplay, an end-screen card,
+   * a link in the description: all moves in the page, no reload). Then the row's title is not this
+   * video's and must not stand in for it while the page is read (r62-playview: the last video's title
+   * showed under the next one, and stayed when the read failed). An item with no video id never moves.
+   */
+  function ytMoved(fromUrl, nowUrl) {
+    var a = ytId(fromUrl);
+    return !!a && ytId(nowUrl) !== a;
+  }
+
   /** The kinds of page the view shows boxed (Shorts: the full page until the Shorts view). */
   function viewable(kind) { return kind === 'watch' || kind === 'player'; }
 
@@ -446,7 +466,8 @@
   }
 
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
-    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call };
+    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call,
+    ytId: ytId, ytMoved: ytMoved };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -790,7 +811,10 @@
     if (!boxed) { info.hidden = true; return; }
     info.hidden = false;
     var phase = !online() ? 'offline' : p.phase;
-    var moved = !!(p.read && p.read.url && p.itemUrl && stripT(p.read.url) !== stripT(p.itemUrl) && s.service !== 'youtube');
+    // Moved on from the opened title: YouTube by video id, from the slot's own address (known the moment the page
+    // moves, before any read lands); the others by the read's address, as before.
+    var moved = s.service === 'youtube' ? ytMoved(p.itemUrl, s.url) :
+      !!(p.read && p.read.url && p.itemUrl && stripT(p.read.url) !== stripT(p.itemUrl));
     // Rebuild only when what it shows changed: the layer's own class changes and the page reads call
     // update() often, and a rebuild between his mouse press and release would swallow that click.
     var key = renderKey(s, p, phase, moved);

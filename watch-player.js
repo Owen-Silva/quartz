@@ -219,7 +219,7 @@
 
   function makeSlot(url, o) {
     var s = {
-      id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '',
+      id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '', titleFor: url,
       view: null, wcId: null, tile: el('div', 'wp-tile'), state: el('div', 'wp-state'),
       blocked: o.blocked || '', refused: '', fs: false,
       fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || '', multi: !!o.multi
@@ -259,9 +259,12 @@
       }
       if (first && L.open && s === focused()) { try { v.focus(); } catch (e) { /* not focusable yet */ } }
     });
-    v.addEventListener('did-navigate', function (e) { if (s.view === v) { s.url = e.url || s.url; syncBar(); } });
-    v.addEventListener('did-navigate-in-page', function (e) { if (s.view === v && e.isMainFrame) { s.url = e.url || s.url; syncBar(); } });
-    v.addEventListener('page-title-updated', function (e) { if (s.view === v && !s.title) syncBar(e.title); });
+    // s.pageTitle: the page's latest own title (a new document starts without one). The bar falls back to it
+    // when the slot has no title of its own, so a move in the page that keeps its title (a &t= jump sends no
+    // page-title-updated) no longer drops the bar to the bare "YouTube".
+    v.addEventListener('did-navigate', function (e) { if (s.view === v) { s.url = e.url || s.url; s.pageTitle = ''; dropMovedTitle(s); syncBar(); } });
+    v.addEventListener('did-navigate-in-page', function (e) { if (s.view === v && e.isMainFrame) { s.url = e.url || s.url; dropMovedTitle(s); syncBar(); } });
+    v.addEventListener('page-title-updated', function (e) { if (s.view === v) { s.pageTitle = String((e && e.title) || ''); if (!s.title) syncBar(); } });
     v.addEventListener('did-fail-load', function (e) {
       if (s.view !== v || !e.isMainFrame || e.errorCode === -3) return;   // -3: aborted (a redirect, a stop)
       showState(s, 'failed', svcName(s.service) + '’s page didn’t load: ' + (e.errorDescription || ('error ' + e.errorCode)));
@@ -329,6 +332,21 @@
 
   /* --------------------------------------------------------------- the bar */
 
+  /**
+   * The title the slot was opened with names ONE YouTube video. When the page moves on to another
+   * one by itself (autoplay, an end-screen card, a link in the description), that title goes, so the
+   * bar shows the page's own title from then on instead of the last video's (r62-playview: it kept the
+   * first title for every video after it). Other services and pages without a video id keep it as before.
+   */
+  function dropMovedTitle(s) {
+    if (!s.title || s.service !== 'youtube') return;
+    var YT = window.WatchPlayerYT;
+    if (!YT || typeof YT.videoOf !== 'function') return;
+    var was = YT.videoOf(s.titleFor || '', 'youtube');
+    if (!was) return;
+    var now = YT.videoOf(s.url, 'youtube');
+    if (!now || now.id !== was.id) s.title = '';
+  }
   function syncBar(pageTitle) {
     var s = focused();
     if (!L.el || !s) return;
@@ -336,8 +354,11 @@
     L.markEl.textContent = info ? info.mark : '';
     L.markEl.setAttribute('data-svc', s.service || '');
     L.markEl.title = info ? info.name : '';
-    var t = s.title || pageTitle || (info ? info.name : hostOf(s.url));
+    // Without a title of its own, the page's title (not the service's bare name: a move in the page that keeps
+    // its title, say a &t= jump, sends no page-title-updated, and the bar used to stay on "YouTube").
+    var t = s.title || pageTitle || s.pageTitle || (info ? info.name : hostOf(s.url));
     L.titleEl.textContent = t;
+    L.titleEl.title = t;   // a long title ends in an ellipsis: the whole of it on hover
     L.el.setAttribute('aria-label', t + (info ? ' on ' + info.name : '') + ', in ' + NAME);
     L.edgeBtn.hidden = !(info && info.drm);
     X('sync', s);
@@ -393,6 +414,9 @@
       one.url = u;
       one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
       one.multi = !!o.multi;
+      one.refused = '';   // the last title's licence refusal isn't this one's (Open in Edge's log line says it)
+      one.titleFor = u;
+      one.pageTitle = '';
       u = X('slotUrl', one, u) || u;
       one.url = u;
       X('reuse', one);
