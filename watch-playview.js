@@ -49,6 +49,7 @@
   var PEEK = 128;          // px of the info that always shows under the video (1280x800 included)
   var READS = [250, 900, 2000, 4000, 8000];   // ms after a page loads: read until it is all there
   var PRESS_HOLD_MAX_MS = 2000;   // a held rebuild waits for his release at most this long
+  var PRESS_ANSWER_MS = 15000;    // a press's longest own wait is 7.5 s (Unsubscribe: menu, confirm, state); past this it is said
 
   // The page's own furniture, hidden outright (display:none) while the view is on. Everything
   // else outside the player is only invisible (body visibility), so the page's own buttons and
@@ -109,6 +110,26 @@
     if (service === 'prime') return /\/(detail|watch)\//i.test(p) || /^\/gp\/video\/detail\//i.test(p) ? 'player' : 'other';
     if (service === 'espn') return /^\/(?:espnplus\/)?watch\//i.test(p) || /^\/watch\/player/i.test(p) ? 'player' : 'other';
     return '';
+  }
+
+  /** A YouTube address's video id ('' for a channel, the home page, anything that isn't one video). */
+  function ytId(url) {
+    var u = parse(url);
+    if (!u) return '';
+    if (/(^|\.)youtu\.be$/i.test(u.hostname)) return u.pathname.slice(1).split('/')[0] || '';
+    if (u.pathname === '/watch') return u.searchParams.get('v') || '';
+    var m = /^\/(?:live|embed|shorts)\/([^/?#]+)/.exec(u.pathname);
+    return m ? m[1] : '';
+  }
+  /**
+   * Whether a YouTube page has moved on from the video it was opened for (autoplay, an end-screen card,
+   * a link in the description: all moves in the page, no reload). Then the row's title is not this
+   * video's and must not stand in for it while the page is read (r62-playview: the last video's title
+   * showed under the next one, and stayed when the read failed). An item with no video id never moves.
+   */
+  function ytMoved(fromUrl, nowUrl) {
+    var a = ytId(fromUrl);
+    return !!a && ytId(nowUrl) !== a;
   }
 
   /** The kinds of page the view shows boxed (Shorts: the full page until the Shorts view). */
@@ -446,7 +467,8 @@
   }
 
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
-    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call };
+    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call,
+    ytId: ytId, ytMoved: ytMoved };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -522,13 +544,15 @@
   function wantTrim(s) {
     var p = pvOf(s), L = layerOf();
     if (!p || !L) return false;
-    return p.mode === 'lumen' && viewable(kindOf(s)) && !s.multi && L.slots.length === 1 && !s.blocked;
+    // Never once the player wasn't found (noRoot): the bar has said "the whole page shows", and a later
+    // update() trimming the page anyway left a bare player with no info and no way back (r62-playview).
+    return p.mode === 'lumen' && viewable(kindOf(s)) && !s.multi && L.slots.length === 1 && !s.blocked && !p.noRoot;
   }
 
   function attach(ctx, s, v) {
     CTX = ctx;
     observeLayer();
-    var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0,
+    var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0, page: 0, navUrl: '',
       timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '' };
     all.push(s);
     if (all.length > 8) all.shift();
@@ -536,7 +560,10 @@
     p.cover.appendChild(el('span', 'pv-cover-bar'));
     p.cover.appendChild(el('span', 'pv-cover-txt', 'Loading the player…'));
     p.info = el('div', 'pv-info');
-    p.info.setAttribute('aria-live', 'polite');
+    // No aria-live on the panel: it is rebuilt whole on each read or press, so a screen reader read the title,
+    // channel and description out again every time. The one-line notes (.pv-why, role=status) say what changed.
+    p.info.setAttribute('role', 'region');
+    p.info.setAttribute('aria-label', 'About this video');
     p.info.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return;
       p.pressing = true;
@@ -559,12 +586,28 @@
     });
     v.addEventListener('did-start-navigation', function (e) {
       if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
-      p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
+      // A new document: the last one's reads, notes, press and "Show more" are not this page's. The
+      // seq bump drops a read still out on the old page (it landed after this reset and set "ready").
+      newPage(s);
+      p.navUrl = String(e.url || '');
+      p.applied = false; p.noRoot = false;
       update(s);
     });
     v.addEventListener('did-navigate-in-page', function (e) {
       if (s.view !== v || !e.isMainFrame) return;
-      if (String(e.url || '') === p.lastUrl) return;
+      var url = String(e.url || '');
+      // YouTube moving to ANOTHER video in the page (autoplay, an end-screen card): everything about the
+      // last video goes, the player-not-found verdict too (the new one is looked for again). The lastUrl
+      // check below must not swallow it: a read can land on the new address before this event does.
+      if (s.service === 'youtube' && ytId(url) && ytId(url) !== ytId(p.navUrl || p.itemUrl)) {
+        p.navUrl = url;
+        newPage(s);
+        p.noRoot = false;
+        startReads(s, true);
+        return;
+      }
+      p.navUrl = url;
+      if (url === p.lastUrl) return;
       p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
       startReads(s, true);
     });
@@ -585,9 +628,27 @@
     if (!p) return;
     p.item = s.item || null;
     p.itemUrl = s.url;
+    p.navUrl = '';
     if (!p.userMode) p.mode = PREF;
-    p.read = null; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.more = false;
+    newPage(s);
     update(s);
+  }
+
+  /**
+   * The slot shows another page (a new document, a reuse, YouTube's move to another video): what Lumen
+   * knew about the last one goes. stopReads + the seq bump: a read or a press still out on the old page
+   * (p.page) is dropped when it lands, never written over the new one (it used to set "ready" with the old info,
+   * or reopen the old Save list); busy goes too, so a press the old page never answered can't leave every
+   * button "Waiting for YouTube…" on the new one.
+   */
+  function newPage(s) {
+    var p = pvOf(s);
+    if (!p) return;
+    stopReads(s);
+    p.seq++;
+    p.page = (p.page || 0) + 1;
+    clearTimeout(p.pressTimer);
+    p.read = null; p.phase = 'loading'; p.why = ''; p.busy = ''; p.save = null; p.confirm = false; p.more = false;
   }
 
   function destroy(ctx, s) {
@@ -752,9 +813,27 @@
     p.why = '';
     var rec = { kind: kind, arg: arg === undefined ? null : arg, at: Date.now(), ok: null, reason: '' };
     p.presses.push(rec);
+    // The press belongs to this page (p.page, bumped by newPage): an answer that lands after the page moved on is dropped. And it
+    // gets PRESS_ANSWER_MS to answer: a page that never does (its frame replaced mid-press) used to keep
+    // every button "Waiting for YouTube…" for the rest of the video, with nothing saying why.
+    var page = p.page;
+    var settled = false;
+    var mine = function () { return s.view === v && p.page === page && !settled; };
+    clearTimeout(p.pressTimer);
+    p.pressTimer = setTimeout(function () {
+      if (!mine()) return;
+      settled = true;
+      p.busy = '';
+      rec.ok = false;
+      rec.reason = 'no answer in ' + Math.round(PRESS_ANSWER_MS / 1000) + ' s';
+      p.why = 'YouTube’s page didn’t answer in ' + Math.round(PRESS_ANSWER_MS / 1000) + ' s: the state shown is what its page last said';
+      render(s);
+    }, PRESS_ANSWER_MS);
     render(s);
     js(v, call('press', [s.service, kind, arg === undefined ? null : arg])).then(function (r) {
-      if (s.view !== v) return;
+      if (!mine()) return;
+      settled = true;
+      clearTimeout(p.pressTimer);
       p.busy = '';
       rec.ok = !!(r && r.ok);
       rec.reason = (r && r.reason) || '';
@@ -763,9 +842,12 @@
       if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
-      return js(v, call('read', [s.service])).then(function (rr) { if (s.view === v && rr && rr.ok) p.read = rr; render(s); });
+      return js(v, call('read', [s.service])).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
     }).catch(function (e) {
-      if (s.view !== v) return;
+      if (s.view !== v || p.page !== page) return;
+      // The press itself, or the read after it: either way the reason is shown (as before this guard).
+      settled = true;
+      clearTimeout(p.pressTimer);
       p.busy = '';
       rec.ok = false;
       rec.reason = (e && e.message) || String(e);
@@ -773,6 +855,18 @@
       render(s);
     });
     return true;
+  }
+
+  /**
+   * Esc (watch-player.js takeShortcut, after the play bar, fullscreen and a sheet): the Unsubscribe confirm
+   * closes (nothing pressed), then YouTube's Save list (its own close, like Done). true = Esc was used here.
+   */
+  function escape(ctx, s) {
+    var p = pvOf(s);
+    if (!p || !s.tile.classList.contains('pv')) return false;
+    if (p.confirm) { p.confirm = false; render(s); backToPlayer(s); return true; }
+    if (p.save) { if (!p.busy) press(s, 'save-close'); backToPlayer(s); return true; }
+    return false;
   }
 
   function backToPlayer(s) { if (s && s.view && !(pvOf(s) && pvOf(s).save)) { try { s.view.focus(); } catch (e) { /* gone */ } } }
@@ -790,7 +884,10 @@
     if (!boxed) { info.hidden = true; return; }
     info.hidden = false;
     var phase = !online() ? 'offline' : p.phase;
-    var moved = !!(p.read && p.read.url && p.itemUrl && stripT(p.read.url) !== stripT(p.itemUrl) && s.service !== 'youtube');
+    // Moved on from the opened title: YouTube by video id, from the slot's own address (known the moment the page
+    // moves, before any read lands); the others by the read's address, as before.
+    var moved = s.service === 'youtube' ? ytMoved(p.itemUrl, s.url) :
+      !!(p.read && p.read.url && p.itemUrl && stripT(p.read.url) !== stripT(p.itemUrl));
     // Rebuild only when what it shows changed: the layer's own class changes and the page reads call
     // update() often, and a rebuild between his mouse press and release would swallow that click.
     var key = renderKey(s, p, phase, moved);
@@ -818,7 +915,10 @@
 
   function titleEl(text, phase) {
     var h = el('h1', 'pv-title');
-    if (text) h.textContent = text;
+    // dir=auto: an Arabic or Hebrew title reads in its own direction. title: the clamp cuts a long one at two
+    // lines, so the whole of it is on hover.
+    h.dir = 'auto';
+    if (text) { h.textContent = text; h.title = text; }
     else { h.classList.add('pv-skel'); h.textContent = phase === 'loading' ? 'Loading the title…' : 'Untitled'; }
     return h;
   }
@@ -936,8 +1036,14 @@
       var d = el('div', 'pv-desc' + (p.more ? ' is-more' : ''));
       if (m.desc.meta) d.appendChild(el('div', 'pv-desc-meta', m.desc.meta));
       if (m.desc.text) {
-        d.appendChild(el('div', 'pv-desc-text', m.desc.text));
-        if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) d.appendChild(button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); }));
+        var dt = el('div', 'pv-desc-text', m.desc.text);
+        dt.dir = 'auto';   // a right-to-left description reads in its own direction
+        d.appendChild(dt);
+        if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) {
+          var more = button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); });
+          more.setAttribute('aria-expanded', p.more ? 'true' : 'false');
+          d.appendChild(more);
+        }
       }
       info.appendChild(d);
     }
@@ -1005,10 +1111,12 @@
     if (p.spKnown && p.spKnown.id === p.item.id) { disable(b, p.spKnown.ok ? '' : p.spKnown.reason); return; }
     disable(b, 'Checking for a show page…');
     if (!ov) { disable(b, 'The Lumen tab isn’t there'); return; }
+    // The answer is filed under the title it was asked for: a reuse can swap p.item while the check is out.
+    var askedId = p.item.id;
     js(ov, showPageJs(p.item, false)).then(function (r) {
-      p.spKnown = { id: p.item && p.item.id, ok: !!(r && r.ok), reason: (r && r.reason) || 'Lumen has no show page for this title' };
+      p.spKnown = { id: askedId, ok: !!(r && r.ok), reason: (r && r.reason) || 'Lumen has no show page for this title' };
       if (b.isConnected) disable(b, p.spKnown.ok ? '' : p.spKnown.reason);
-    }, function (e) { p.spKnown = { id: p.item && p.item.id, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
+    }, function (e) { p.spKnown = { id: askedId, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
   }
   /** The show page in the Lumen tab; the player keeps playing in the mini-player (or closes, without it). */
   function showPage(s, b) {
@@ -1073,7 +1181,7 @@
 
   return Object.assign({}, PURE, {
     // watch-player.js X() hooks
-    attach: attach, reuse: reuse, destroy: destroy, sync: sync, stateActs: stateActs,
+    attach: attach, reuse: reuse, destroy: destroy, sync: sync, stateActs: stateActs, escape: escape,
     // watch-player-yt.js's "Full page" button
     toggleFor: toggleFor, toggle: toggle,
     // Settings > Lumen

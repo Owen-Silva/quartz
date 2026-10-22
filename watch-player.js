@@ -120,6 +120,7 @@
     L.markEl = el('span', 'wp-mark');
     bar.appendChild(L.markEl);
     L.titleEl = el('span', 'wp-title');
+    L.titleEl.dir = 'auto';   // an Arabic or Hebrew title reads in its own direction, punctuation where it belongs
     bar.appendChild(L.titleEl);
     L.noteEl = el('span', 'wp-note');
     L.noteEl.setAttribute('role', 'status');
@@ -219,7 +220,7 @@
 
   function makeSlot(url, o) {
     var s = {
-      id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '',
+      id: ++L.seq, url: url, service: o.service || (H ? H.serviceFor(url) : '') || '', title: o.title || '', titleFor: url,
       view: null, wcId: null, tile: el('div', 'wp-tile'), state: el('div', 'wp-state'),
       blocked: o.blocked || '', refused: '', fs: false,
       fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', pnote: o.note || '', multi: !!o.multi
@@ -259,9 +260,12 @@
       }
       if (first && L.open && s === focused()) { try { v.focus(); } catch (e) { /* not focusable yet */ } }
     });
-    v.addEventListener('did-navigate', function (e) { if (s.view === v) { s.url = e.url || s.url; syncBar(); } });
-    v.addEventListener('did-navigate-in-page', function (e) { if (s.view === v && e.isMainFrame) { s.url = e.url || s.url; syncBar(); } });
-    v.addEventListener('page-title-updated', function (e) { if (s.view === v && !s.title) syncBar(e.title); });
+    // s.pageTitle: the page's latest own title (a new document starts without one). The bar falls back to it
+    // when the slot has no title of its own, so a move in the page that keeps its title (a &t= jump sends no
+    // page-title-updated) no longer drops the bar to the bare "YouTube".
+    v.addEventListener('did-navigate', function (e) { if (s.view === v) { s.url = e.url || s.url; s.pageTitle = ''; dropMovedTitle(s); syncBar(); } });
+    v.addEventListener('did-navigate-in-page', function (e) { if (s.view === v && e.isMainFrame) { s.url = e.url || s.url; dropMovedTitle(s); syncBar(); } });
+    v.addEventListener('page-title-updated', function (e) { if (s.view === v) { s.pageTitle = String((e && e.title) || ''); if (!s.title) syncBar(); } });
     v.addEventListener('did-fail-load', function (e) {
       if (s.view !== v || !e.isMainFrame || e.errorCode === -3) return;   // -3: aborted (a redirect, a stop)
       showState(s, 'failed', svcName(s.service) + '’s page didn’t load: ' + (e.errorDescription || ('error ' + e.errorCode)));
@@ -283,6 +287,15 @@
     X('destroy', s);
     MV('destroy', s);
     if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
+    // The layer's own fullscreen state goes with the slot. Its leave-html-full-screen never comes once the view
+    // is gone (that listener checks s.view === v), so a close from fullscreen (the mouse's Back on the first
+    // page, the Watch tab closing) used to leave L.fsSlot and .wp-fs behind: the NEXT title opened as a black,
+    // bar-less window-filling layer (its tile isn't .is-fs) and Esc did nothing (r62-playview).
+    s.fs = false;
+    if (L.fsSlot === s) {
+      L.fsSlot = null;
+      if (L.el) L.el.classList.remove('wp-fs');
+    }
     if (s.view) {
       var v = s.view;
       s.view = null;
@@ -301,7 +314,14 @@
     var acts = el('div', 'wp-state-acts');
     var drmSvc = !!(svcInfo(s.service) && svcInfo(s.service).drm);
     if (kind === 'blocked' || kind === 'refused' || drmSvc) acts.appendChild(btn('wp-primary', 'Open in Edge', function (b) { toEdge(s, b); }));
-    if (kind === 'failed' && s.view) acts.appendChild(btn('', 'Try again', function () { st.hidden = true; try { s.view.reload(); } catch (e) { /* gone */ } }));
+    // Try again: the state AND its has-state class go (that class hides the view: leaving it on showed a blank tile
+    // over a page that had reloaded fine). A view that can't reload any more says so instead of going quiet.
+    if (kind === 'failed' && s.view) acts.appendChild(btn('', 'Try again', function () {
+      if (!s.view) { showState(s, 'failed', 'The player’s page is gone: open the title again, or open it in a tab.'); return; }
+      st.hidden = true;
+      s.tile.classList.remove('has-state');
+      try { s.view.reload(); } catch (e) { showState(s, 'failed', 'The page couldn’t reload: ' + ((e && e.message) || e) + '. Open the title again, or open it in a tab.'); }
+    }));
     X('stateActs', s, kind, acts);
     acts.appendChild(btn('', 'Open in a tab', function () { toTab(s); }));
     box.appendChild(acts);
@@ -313,6 +333,21 @@
 
   /* --------------------------------------------------------------- the bar */
 
+  /**
+   * The title the slot was opened with names ONE YouTube video. When the page moves on to another
+   * one by itself (autoplay, an end-screen card, a link in the description), that title goes, so the
+   * bar shows the page's own title from then on instead of the last video's (r62-playview: it kept the
+   * first title for every video after it). Other services and pages without a video id keep it as before.
+   */
+  function dropMovedTitle(s) {
+    if (!s.title || s.service !== 'youtube') return;
+    var YT = window.WatchPlayerYT;
+    if (!YT || typeof YT.videoOf !== 'function') return;
+    var was = YT.videoOf(s.titleFor || '', 'youtube');
+    if (!was) return;
+    var now = YT.videoOf(s.url, 'youtube');
+    if (!now || now.id !== was.id) s.title = '';
+  }
   function syncBar(pageTitle) {
     var s = focused();
     if (!L.el || !s) return;
@@ -320,8 +355,11 @@
     L.markEl.textContent = info ? info.mark : '';
     L.markEl.setAttribute('data-svc', s.service || '');
     L.markEl.title = info ? info.name : '';
-    var t = s.title || pageTitle || (info ? info.name : hostOf(s.url));
+    // Without a title of its own, the page's title (not the service's bare name: a move in the page that keeps
+    // its title, say a &t= jump, sends no page-title-updated, and the bar used to stay on "YouTube").
+    var t = s.title || pageTitle || s.pageTitle || (info ? info.name : hostOf(s.url));
     L.titleEl.textContent = t;
+    L.titleEl.title = t;   // a long title ends in an ellipsis: the whole of it on hover
     L.el.setAttribute('aria-label', t + (info ? ' on ' + info.name : '') + ', in ' + NAME);
     L.edgeBtn.hidden = !(info && info.drm);
     X('sync', s);
@@ -377,6 +415,9 @@
       one.url = u;
       one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
       one.multi = !!o.multi;
+      one.refused = '';   // the last title's licence refusal isn't this one's (Open in Edge's log line says it)
+      one.titleFor = u;
+      one.pageTitle = '';
       u = X('slotUrl', one, u) || u;
       one.url = u;
       X('reuse', one);
@@ -430,6 +471,7 @@
   function close(why) {
     if (!L.open) return false;
     L.open = false;
+    note('');   // a note is about this title ("could not be guarded", an app link stopped): never the next one's
     MV('close', why);
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'the player closed'); }
     hideSheet();
@@ -510,7 +552,8 @@
       if (b) b.disabled = false;
       if (r && r.ok) {
         toast('Opened in Microsoft Edge' + (slot.blocked ? ': ' + slot.blocked : ''));
-        if (L.slots.length === 1) close('Open in Edge');
+        // Only if the layer still shows THIS title: Edge's answer can come after he closed it and opened another.
+        if (L.open && L.slots.length === 1 && L.slots[0] === slot) close('Open in Edge');
       } else toast('Couldn’t open Microsoft Edge' + (r && r.reason ? ': ' + r.reason : ''), true);
     }, function (err) { if (b) b.disabled = false; toast('Couldn’t open Microsoft Edge: ' + ((err && err.message) || err), true); });
   }
@@ -536,7 +579,18 @@
   }
   function exitFs() {
     var s = L.fsSlot;
-    if (!s || !s.view) return false;
+    if (!s) return false;
+    if (!s.view) {
+      // A fullscreen slot without a page (it can't send its leave event): drop the state here, so Esc
+      // goes on to its next job instead of being swallowed by a fullscreen that isn't there.
+      L.fsSlot = null;
+      s.fs = false;
+      if (s.tile) s.tile.classList.remove('is-fs');
+      if (L.el) L.el.classList.remove('wp-fs');
+      try { setPageFullscreen(false); } catch (e) { /* app.js gone */ }
+      place();
+      return false;
+    }
     try { s.view.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(function () { return 1; }, function () { return 0; }) : 0', true).catch(function () { /* the leave event will tell */ }); } catch (e) { /* the leave event will tell */ }
     return true;
   }
@@ -601,9 +655,12 @@
     if (id === 'escape') {
       // Lumen play bar hook: Esc closes its menu, then the service's own menu, then Lumen's full window.
       if (window.LumenPlayerBar && typeof window.LumenPlayerBar.shortcut === 'function' && window.LumenPlayerBar.shortcut(id) === true) return true;
-      if (L.fsSlot) { exitFs(); return true; }
+      if (L.fsSlot && exitFs()) return true;
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
       if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Esc'); return true; }
+      // The Lumen view's own open things (the Unsubscribe confirm, the Save list) close before the player does:
+      // Esc on "Unsubscribe from X?" used to close the whole video.
+      if (X('escape', focused()) === true) return true;
       close('Esc');
       return true;
     }

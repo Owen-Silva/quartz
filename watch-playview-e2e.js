@@ -258,6 +258,16 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     await sleep(300);
     pr = await presses();
     check(pr.sub === 1 && pr.confirm === 0 && (await pv()).confirm === false, 'Cancel: nothing pressed', pr);
+    // r62-playview regression: Esc on "Unsubscribe from X?" closed the whole video. Esc now closes the confirm
+    // first (watch-player takeShortcut asks the Lumen view), presses nothing, and the layer stays. (Opening the
+    // confirm presses nothing either, so the exact counts below are untouched.)
+    await clickAt('.wp-layer .pv-sub', 'Subscribed');
+    await pvWait('x.confirm === true', 3000);
+    const escTook = await chrome.ev('WatchPlayer.handleShortcut("escape")');
+    await sleep(300);
+    pr = await presses();
+    check(escTook === true && (await pv()).confirm === false && pr.sub === 1 && pr.confirm === 0 && (await chrome.ev(`${ST}.open`)),
+      'Esc on the Unsubscribe confirm closes the confirm only: nothing pressed, the video stays open', { escTook, pr, open: await chrome.ev(`${ST}.open`) });
     await clickAt('.wp-layer .pv-sub', 'Subscribed');
     await pvWait('x.confirm === true', 3000);
     await clickAt('.wp-layer .pv-confirm .pv-danger', 'Unsubscribe');
@@ -397,6 +407,27 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     /* ============================ 8. the states ============================ */
     await resize(1280, 800);
     const playYT = (q2, title) => chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=' + VID + q2)}, { service: 'youtube', title: ${JSON.stringify(title)} }), 1`);
+    // r62-playview regression: YouTube moving IN THE PAGE to another video (history.pushState to another ?v=,
+    // what its autoplay and end-screen cards do) kept the last video's title: the info fell back to the row's
+    // title (YouTube was treated as never "moved") and the bar kept the slot's title for good. Now, the moment
+    // the slot's address has another v=, the info drops the row title (the skeleton '' or the new read) and the
+    // bar falls back to the page's own document.title. The page changes its title and h1 the way the SPA does.
+    const ROW_T = 'Row title before the move';
+    const NEXT_ID = 'pvTest00002', NEXT_T = 'The next video after autoplay';
+    await playYT('&mv=1', ROW_T);
+    await pvWait('x.applied && x.phase === "ready" && /mv=1/.test(x.url)', 15000);
+    p = await guestFor(FY + '/watch?v=' + VID + '&mv=1');
+    await p.ev(`(() => { history.pushState({}, '', '/watch?v=${NEXT_ID}'); const h = document.querySelector('ytd-watch-metadata #title h1 yt-formatted-string'); if (h) h.textContent = ${JSON.stringify(NEXT_T)}; document.title = ${JSON.stringify(NEXT_T + ' - YouTube')}; return 1; })()`);
+    const seen = [];
+    for (let i = 0; i < 8; i++) { const x = await pv(); seen.push(x ? x.title : null); await sleep(120); }
+    check(seen.every((x) => x !== ROW_T), 'a move in the page to another video: the info never shows the last row’s title (the skeleton or the new read)', seen);
+    const barT = await chrome.waitFor(`(() => { const t = ${ST}.title; return t && t.indexOf(${JSON.stringify(NEXT_T)}) >= 0 ? t : null; })()`, 3000).catch(() => null);
+    const movedUrl = (await chrome.ev(ST)).slots[0].url;
+    // ... and the view read the new video afresh (newPage): nothing busy, the player looked for again, ready.
+    const fresh = await pvWait('x.phase === "ready" && x.title === ' + JSON.stringify(NEXT_T), 8000);
+    check(!!fresh && fresh.busy === '' && fresh.noRoot === false && fresh.applied, 'and the view reads the new video afresh: its title, nothing busy, the player trimmed', fresh && { phase: fresh.phase, title: fresh.title, busy: fresh.busy, noRoot: fresh.noRoot, why: fresh.why });
+    check(!!barT && movedUrl.indexOf('v=' + NEXT_ID) >= 0, 'and the bar drops the slot’s title for the page’s own new title (the slot’s address has the new id)', { bar: barT || (await chrome.ev(`${ST}.title`)), url: movedUrl });
+    p.close();
     // Signed out: the buttons are off and say so; nothing is pressed.
     await playYT('&signedout=1', 'Signed out');
     st = await pvWait('x.service === "youtube" && x.applied && x.phase === "ready" && /signedout/.test(x.url)', 15000);
@@ -426,6 +457,19 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     st = await pvWait('x.noRoot && !x.boxed && /noplayer/.test(x.url)', 15000);
     const noteNow = await chrome.ev(`${ST}.note`);
     check(!!st && /couldn’t find YouTube’s player/.test(noteNow) && !(await chrome.ev('WatchPlayerYT._state().fullShown')), 'no player found: the whole page shows, the bar says why, no toggle', { note: noteNow });
+    // r62-playview regression: once the player was not found, a later update() trimmed the page anyway (wantTrim
+    // ignored noRoot), leaving a bare player with no info and no toggle. The player root turns up late here
+    // (the page wraps its video in #movie_player), then the layer's class changes (the MutationObserver's
+    // update): the page stays whole, as the bar said.
+    p = await guestFor(FY + '/watch?v=' + VID + '&noplayer');
+    if (p) await p.ev('(() => { const v = document.getElementById("v"); const mp = document.createElement("div"); mp.id = "movie_player"; mp.className = "html5-video-player"; v.parentNode.insertBefore(mp, v); mp.appendChild(v); return 1; })()').catch(() => 0);
+    await chrome.ev('(() => { const l = document.querySelector(".wp-layer"); l.classList.add("e2e-poke"); setTimeout(() => l.classList.remove("e2e-poke"), 200); return 1; })()');
+    await sleep(1500);
+    const late = await pv();
+    const lateFlag = p ? await p.ev('document.documentElement.hasAttribute("data-lumen-pv")').catch(() => null) : null;
+    check(!!p && lateFlag === false && !!late && late.applied === false && late.boxed === false && late.noRoot === true,
+      'no player found, then one turns up and the layer updates: the page is never trimmed after the bar said the whole page shows', { flag: lateFlag, applied: late && late.applied, boxed: late && late.boxed, noRoot: late && late.noRoot });
+    if (p) p.close();
     // The page failed: the reason, in the layer's state and in the info.
     const dead = await deadPort();
     await chrome.ev(`openInLumen(${JSON.stringify('http://127.0.0.1:' + dead + '/watch?v=' + VID)}, { service: 'youtube', title: 'Dead page' }), 1`);
