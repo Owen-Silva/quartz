@@ -725,8 +725,16 @@
     r.loading = true; r.why = '';
     st.requests++;
     draw(st);
+    // Dropped (the list was asked again: a sort, offline, Try again): the thread must not keep "Loading replies…"
+    // for ever, with its own loads refused while r.loading holds. Still on screen, it says so and offers Try again.
+    var dropped = function () {
+      r.loading = false;
+      if (st.replies[c.id] !== r) return;
+      r.why = 'Replies didn’t finish loading.';
+      if (st.root.isConnected) draw(st);
+    };
     js(st.view, call('load', [r.next])).then(function (x) {
-      if (seq !== st.seq) return;
+      if (seq !== st.seq) { dropped(); return; }
       r.loading = false;
       if (!x || !x.ok) { r.why = 'Replies didn’t load: ' + ((x && x.reason) || 'YouTube’s page didn’t answer') + '.'; draw(st); return; }
       var p = parse(x.json, st.videoId);
@@ -734,7 +742,7 @@
       merge(r.items, p.items);
       r.next = p.next;
       draw(st);
-    }).catch(function (e) { if (seq === st.seq) { r.loading = false; r.why = 'Replies didn’t load: ' + ((e && e.message) || e) + '.'; draw(st); } });
+    }).catch(function (e) { if (seq === st.seq) { r.loading = false; r.why = 'Replies didn’t load: ' + ((e && e.message) || e) + '.'; draw(st); } else dropped(); });
   }
 
   /* ---------------------------------------------------------------- presses */
@@ -1024,6 +1032,9 @@
         if (r.loading) { var ld = el('div', 'cm-end cm-end-sm'); ld.appendChild(el('span', 'cm-spin')); ld.appendChild(el('span', 'cm-end-txt', 'Loading replies…')); rl.appendChild(ld); }
         else if (r.why) rl.appendChild(line(r.why, 'err', btn('cm-ghost cm-retry', 'Try again', function () { r.why = ''; loadReplies(st, c); })));
         else if (r.next && r.items.length) rl.appendChild(btn('cm-ghost-txt cm-morereplies', 'Show more replies', function () { loadReplies(st, c); }));
+        // "N replies" that came back empty (removed, or held for review): said, never an empty fold.
+        else if (!r.items.length && !r.next) rl.appendChild(line('YouTube’s page sent no replies to show (they may have been removed or held for review).', ''));
+        else if (!r.items.length) rl.appendChild(line('Replies didn’t load.', 'err', btn('cm-ghost cm-retry', 'Try again', function () { r.why = ''; loadReplies(st, c); })));
         body.appendChild(rl);
       }
     }
