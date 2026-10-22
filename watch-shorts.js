@@ -20,10 +20,17 @@
        the reason is said.
      - Lumen's info sits BESIDE the player on a wide layer and BELOW it
        on a narrow one: the title, the channel, Subscribe, Like,
-       Dislike and Save. Each is YouTube's OWN button in the page,
-       pressed once per click, only on his click, the state read back.
-       The model and the reasons are watch-playview.js's (model,
-       whyOff), so the two views say the same things.
+       Dislike, Save, Comments and Share. Subscribe, Like, Dislike and
+       Save are YouTube's OWN buttons in the page, pressed once per
+       click, only on his click, the state read back. The model and the
+       reasons are watch-playview.js's (model, whyOff), so the two
+       views say the same things.
+     - Comments opens Lumen's own comments (watch-comments.js, the
+       renderer under a normal video) in the info, for the Short the
+       page's address says: a move in the feed brings the next Short's,
+       never the last one's. Share copies the Short's link
+       (youtube.com/shorts/<id>) for the Short the info names, and says
+       so, or says why it couldn't.
      - Next and Previous press YouTube's OWN Shorts navigation (its
        down/up buttons; else its snap container is scrolled one Short;
        else its own Arrow key). The info follows whichever Short is
@@ -99,6 +106,8 @@
   function isShorts(url, service) { return !!route(url, service); }
   /** The Short a URL is ('' when it is a feed, a grid, or no Short). */
   function idOf(url, service) { var r = route(url, service); return r && r.kind === 'short' ? r.id : ''; }
+  /** The link Share copies: YouTube's own address for the Short (never the page's own host, which a test may rebase); '' for no id. */
+  function shortUrl(id) { return ID_RE.test(String(id || '')) ? ORIGIN + '/shorts/' + id : ''; }
 
   /** The URL each of Lumen's ways in opens. */
   function entryUrl(kind, arg) {
@@ -610,7 +619,7 @@
   }
 
   var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, ASP: ASP, shape: shape, initial: initial, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
-    entryUrl: entryUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call };
+    entryUrl: entryUrl, shortUrl: shortUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -632,6 +641,9 @@
   var ICON = {
     like: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.5V20H4.2a.7.7 0 0 1-.7-.7v-8.1c0-.4.3-.7.7-.7h3.3Zm0 0 3.6-6.2c.3-.5.9-.8 1.5-.6 1 .3 1.5 1.3 1.3 2.3l-.7 3.4h5.1c1.2 0 2.1 1.1 1.8 2.3l-1.6 6.9a2.6 2.6 0 0 1-2.5 2H7.5"/></svg>',
     save: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.8h11c.4 0 .7.3.7.7v15.6l-6.2-4-6.2 4V4.5c0-.4.3-.7.7-.7Z"/></svg>',
+    comments: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 4.5h13.6c.8 0 1.4.6 1.4 1.4v9.4c0 .8-.6 1.4-1.4 1.4H10l-4.6 3.6v-3.6h-.2c-.8 0-1.4-.6-1.4-1.4V5.9c0-.8.6-1.4 1.4-1.4Z"/></svg>',
+    share: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 5.2 20 11.5l-6.5 6.3v-3.6c-4.6 0-7.6 1.3-9.6 4.6.6-4.9 3.3-9 9.6-9.7V5.2Z"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4.2 4.2 8.8-9.4"/></svg>',
     up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14.5 12 8.5l6 6"/></svg>',
     down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6"/></svg>'
   };
@@ -671,7 +683,8 @@
     keys();
     var p = s._sh = { phase: 'loading', read: null, shown: null, shownId: '', applied: false, noRoot: false, why: '', busy: '', seq: 0, timers: [],
       presses: [], steps: [], wheel: null, wheels: 0, confirm: false, save: null, opened: '', logged: '', lastUrl: '', layout: null,
-      aspect: 0, aspT: 0, aspSeq: 0, easeT: 0, navs: 0, whyShort: false, failedLoad: false, sig: '', refocus: '', trimmed: false };
+      aspect: 0, aspT: 0, aspSeq: 0, easeT: 0, navs: 0, whyShort: false, failedLoad: false, sig: '', refocus: '', trimmed: false,
+      cm: false, share: null, shareT: 0 };
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'sh-cover');
@@ -685,6 +698,13 @@
     p.nav.appendChild(p.next);
     p.info = el('div', 'sh-info');
     p.info.setAttribute('aria-live', 'polite');
+    // The comments' mount (Comments open): ONE node for the slot's life, so a rebuild of the info moves it rather
+    // than reloading it (watch-comments.js keeps its section in it). Its own changes are never read out as the info's
+    // (a page of comments arriving is not an announcement); the renderer's own notes are status lines of their own.
+    p.cmBox = el('div', 'sh-comments');
+    p.cmBox.setAttribute('role', 'region');
+    p.cmBox.setAttribute('aria-label', 'Comments on this Short');
+    p.cmBox.setAttribute('aria-live', 'off');
     s.tile.appendChild(p.cover);
     s.tile.appendChild(p.nav);
     s.tile.appendChild(p.info);
@@ -695,7 +715,7 @@
     var touch = null;
     s.tile.addEventListener('touchstart', function (e) {
       // A swipe that scrolls the Save list is the list's, never a Short move (the wheel's rule, onWheel()).
-      var inList = e.target && e.target.closest && (e.target.closest('.pv-savelist') ||
+      var inList = e.target && e.target.closest && (e.target.closest('.pv-savelist') || overflows(e.target.closest('.sh-comments')) ||
         (s.tile.getAttribute('data-sh') === 'below' && p.info.scrollHeight > p.info.clientHeight + 2 && p.info.contains(e.target)));
       touch = shOn(s) && e.touches.length === 1 && !inList ? { y: e.touches[0].clientY, t: Date.now() } : null;
     }, { passive: true });
@@ -716,7 +736,7 @@
     });
     v.addEventListener('did-start-navigation', function (e) {
       if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
-      p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
+      p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false; p.cm = false;
       newDocument(s);
       update(s);
     });
@@ -732,6 +752,11 @@
       // under the trim, the next Save read its ticks for the new Short).
       if (p.save) js(v, call('press', ['save-close', null])).catch(function () { /* the page went: nothing open */ });
       p.save = null; p.confirm = false;
+      // A refused copy already said under the Short just left is that Short's reason (r62: a reason never outlives
+      // its Short). A copy still in flight, or "Link copied: <its link>", stays: each note names its own link, so a
+      // click just before the move still says what it copied (or why it couldn't).
+      // Open comments stay open: render() mounts the new Short's.
+      if (p.share && p.share.ok === false) clearShare(p);
       if (isShorts(u, s.service)) startReads(s, true);
       else update(s);
     });
@@ -753,7 +778,7 @@
     var p = shOf(s);
     if (!p) return;
     CTX = ctx;
-    p.read = null; p.shown = null; p.shownId = ''; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.noRoot = false; p.opened = '';
+    p.read = null; p.shown = null; p.shownId = ''; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.noRoot = false; p.opened = ''; p.cm = false;
     p.aspect = 0;
     newDocument(s);
     update(s);
@@ -782,12 +807,23 @@
     // ...and the old document's reasons go with it ("didn't load" stayed under the Short Try again brought back).
     p.why = ''; p.whyShort = false;
     p.failedLoad = false;
+    clearShare(p);
+    // The comments read from the old document: a request still in flight there never settles (Electron's
+    // executeJavaScript across a new document), and it left "Loading comments…" for good. A new document is a
+    // new section, read from the new page.
+    forgetComments(s, 'short');
+  }
+  // which 'short': only the Shorts view's section (a normal video's, under the playback view, is never touched here).
+  function forgetComments(s, which) {
+    try { if (window.LumenComments && typeof window.LumenComments.forget === 'function') window.LumenComments.forget(s.id, which); } catch (e) { /* nothing kept */ }
   }
   function destroy(ctx, s) {
     var p = shOf(s);
     if (!p) return;
     stopReads(s);
     clearTimeout(p.aspT); clearTimeout(p.easeT); p.aspT = p.easeT = 0;
+    clearShare(p);
+    forgetComments(s);   // the closed slot's comments (their DOM, listeners and webview) go with it
     var i = all.indexOf(s);
     if (i >= 0) all.splice(i, 1);
   }
@@ -972,6 +1008,9 @@
     // The save list scrolls itself while it can, and so does the info below the player (a narrow layer: its fixed
     // band can be shorter than a note or the Save list, watch-shorts.css); everything else is a Short move.
     if (scrolls(e.target && e.target.closest ? e.target.closest('.pv-savelist') : null, e.deltaY)) return;
+    // Open comments that overflow are read with the wheel: ALWAYS theirs, even at either end (a flick that ran
+    // past the last comment skipped to the next Short while he was reading). Comments that fit move a Short.
+    if (overflows(e.target && e.target.closest ? e.target.closest('.sh-comments') : null)) return;
     if (s.tile.getAttribute('data-sh') === 'below' && scrolls(p.info.contains(e.target) ? p.info : null, e.deltaY)) return;
     e.preventDefault();
     p.wheels++;
@@ -980,6 +1019,8 @@
     if (g.step) step(s, g.step, 'wheel');
   }
 
+  /** Whether a scroll box (or null) has more than it shows. */
+  function overflows(box) { return !!box && box.scrollHeight > box.clientHeight + 2; }
   /** Whether a scroll box (or null) overflows and can still go the wheel's way (dy). */
   function scrolls(box, dy) {
     if (!box || box.scrollHeight <= box.clientHeight + 2) return false;
@@ -1018,6 +1059,8 @@
       var t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'WEBVIEW' || t.isContentEditable)) return;
       if (t && t.closest && t.closest('.pv-savelist') && t.closest('.pv-savelist').contains(t)) return;
+      // In the comments, the arrows are the comments' (they scroll the list he is reading), never a Short move.
+      if (t && t.closest && t.closest('.sh-comments')) return;
       if (t && t !== document.body && L.el && !L.el.contains(t)) return;
       var d = keyStep(e);
       if (!d) return;
@@ -1109,7 +1152,9 @@
     // info to a screen reader, scrolled the Save list back to the top and could eat a click between its press
     // and release. When it does change, the focus goes back to the same control and the list keeps its scroll.
     var sig = '';
-    try { sig = JSON.stringify([showPhase, f.fresh ? f.id : '', m, p.busy, p.confirm, p.save, p.why, !!(r && r.ad), !!r]); } catch (e) { sig = ''; }
+    // Open comments are the address's Short's (cur), which moves on before its read comes in: in the signature, so
+    // a quick run of moves (no read in between) still mounts each new Short's comments, never the last one's.
+    try { sig = JSON.stringify([showPhase, f.fresh ? f.id : '', m, p.busy, p.confirm, p.save, p.why, !!(r && r.ad), !!r, p.cm ? cur : '', p.share]); } catch (e) { sig = ''; }
     if (!sig || sig !== p.sig || !info.firstChild) {
       p.sig = sig;
       var fk = focusKey(info) || p.refocus;
@@ -1138,13 +1183,14 @@
     else { h.classList.add('pv-skel'); h.textContent = showPhase === 'loading' || showPhase === 'moving' ?'Loading the Short…' : 'Untitled Short'; }
     info.appendChild(h);
     renderChannel(s, p, m, showPhase, info);
-    renderActs(s, p, m, showPhase, info);
+    renderActs(s, p, m, showPhase, info, r);
     renderLists(s, p, m, info);
     renderNote(s, p, m, showPhase, info, r);
+    renderComments(s, p, info, r);
     info.appendChild(el('p', 'sh-hint', 'Scroll, swipe or press ↑ ↓ for the next Short'));
   }
   // The info's own controls, as keys that find their twins after a rebuild (render()). Done before Cancel: both are pv-ghost.
-  var FOCUS_KEYS = ['pv-like', 'pv-dislike', 'pv-save', 'pv-sub', 'pv-danger', 'pv-savelist-done', 'pv-ghost', 'pv-saveopt'];
+  var FOCUS_KEYS = ['pv-like', 'pv-dislike', 'pv-save', 'sh-comments-btn', 'sh-share', 'pv-sub', 'pv-danger', 'pv-savelist-done', 'pv-ghost', 'pv-saveopt'];
   function focusKey(info) {
     var a = document.activeElement;
     if (!a || !info.contains(a) || !a.classList) return '';
@@ -1211,7 +1257,7 @@
     info.appendChild(chan);
   }
 
-  function renderActs(s, p, m, phase, info) {
+  function renderActs(s, p, m, phase, info, r) {
     var acts = el('div', 'pv-acts sh-acts');
     var pair = el('div', 'pv-pair');
     var lk = m.buttons.like, dk = m.buttons.dislike;
@@ -1233,7 +1279,117 @@
     save.setAttribute('aria-expanded', p.save ? 'true' : 'false');
     disable(save, whyOff(m, 'save', phase) || (p.busy && p.busy.indexOf('save') !== 0 ? 'Waiting for YouTube…' : ''));
     acts.appendChild(save);
+    // Comments: Lumen's own (watch-comments.js) in the info, for the Short the address says. Nothing is pressed in
+    // YouTube's page, so it never waits on a press. A mouse click hands the keys back to the player (Space, the
+    // arrows); from the keyboard the focus stays, so Tab goes on into the comments.
+    var cur = idOf(s.url, s.service);
+    var cmb = iconBtn('sh-comments-btn' + (p.cm ? ' is-open' : ''), 'comments', 'Comments', function (b, e) {
+      p.cm = !p.cm;
+      render(s);
+      if (e && e.detail > 0) backToPlayer(s);
+    }, p.cm ? 'Hide the comments' : 'Show this Short’s comments');
+    cmb.setAttribute('aria-expanded', p.cm ? 'true' : 'false');
+    disable(cmb, cmOff(s, p, phase, cur, r));
+    acts.appendChild(cmb);
+    // Share: the link to the Short the info names (r's own id, never the address's: a click as the feed moves
+    // copies the Short he saw, never the one that came next), onto the clipboard, said on the button and in a note.
+    var forId = r && r.videoId ? String(r.videoId) : '';
+    var done = p.share && p.share.ok && p.share.id === forId;
+    var sha = iconBtn('sh-share' + (done ? ' is-done' : ''), done ? 'check' : 'share', done ? 'Link copied' : 'Share', function (b, e) {
+      share(s, forId, e && e.detail > 0);
+    }, done ? 'Link copied: ' + shortUrl(forId) : 'Share: copy this Short’s link');
+    disable(sha, !forId ? (phase === 'failed' || phase === 'offline' ? 'YouTube’s page isn’t there' : 'Loading the Short…') : r.ad ? 'This is an ad on YouTube, not a Short to share' : '');
+    acts.appendChild(sha);
     info.appendChild(acts);
+  }
+
+  /** Why Comments is off (''= on): no renderer, no Short yet, the page gone, an ad. */
+  function cmOff(s, p, phase, cur, r) {
+    if (!window.LumenComments) return 'Lumen’s comments aren’t loaded in this window';
+    if (phase === 'failed') return 'YouTube’s page isn’t there';
+    if (!cur) return 'Loading the Short…';
+    if (r && r.ad) return 'This is an ad on YouTube: it has no comments here';
+    return '';
+  }
+
+  /** The comments' mount, after the info's other parts (a reason for the buttons stays in sight above it). */
+  function renderComments(s, p, info, r) {
+    var cur = idOf(s.url, s.service);
+    var on = p.cm && !cmOff(s, p, p.phase, cur, r);
+    info.classList.toggle('has-cm', on);
+    if (!on) return;
+    info.appendChild(p.cmBox);
+    p.cmBox.setAttribute('data-short', cur);
+    // watch-comments.js fills it: the same event the playback view fires, as a Short's (short: its id goes to the
+    // page's own /next; the mount is what scrolls). A new id is a new section, so the last Short's never shows.
+    try {
+      document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: cur, comments: null, container: p.cmBox,
+        view: s.view, short: true, scroller: p.cmBox } }));
+    } catch (e) {
+      p.cmBox.replaceChildren(el('p', 'pv-why pv-why-err', 'Lumen couldn’t show the comments: ' + ((e && e.message) || e)));
+    }
+    // The renderer answers in the same turn; a box it left empty would be a silent nothing.
+    if (!p.cmBox.firstChild) p.cmBox.replaceChildren(el('p', 'pv-why pv-why-warn', 'Lumen’s comments didn’t draw here.'));
+  }
+
+  /* ---------------------------------------------------------------- share */
+
+  function clearShare(p) { if (!p) return; clearTimeout(p.shareT); p.shareT = 0; p.share = null; }
+  /**
+   * The Short's link onto the clipboard (the chrome's own: navigator.clipboard on his click, else the copy command),
+   * then "Link copied" on the button and in a note for SHARE_MS. A refusal says why and shows the link to copy by hand.
+   */
+  var SHARE_MS = 3000;
+  function share(s, id, byMouse) {
+    var p = shOf(s);
+    if (!p || !id) return false;
+    var v = s.view;
+    var url = shortUrl(id);
+    clearShare(p);
+    var rec = { id: id, url: url, ok: null, why: '', at: Date.now() };
+    p.share = rec;
+    copyText(url).then(function (how) {
+      if (p.share !== rec || s.view !== v) return;   // another copy, a move or a new page since: that one's answer stands
+      rec.ok = true; rec.how = how;
+      logLine('share: copied the link to a Short (' + how + ')');
+      p.shareT = setTimeout(function () { if (p.share === rec) { p.share = null; p.shareT = 0; render(s); } }, SHARE_MS);
+      render(s);
+      if (byMouse) backToPlayer(s);   // after the copy: the clipboard needs this window's focus while it writes
+    }, function (e) {
+      if (p.share !== rec || s.view !== v) return;
+      rec.ok = false; rec.why = (e && e.message) || String(e);
+      logLine('share: the copy failed: ' + rec.why);
+      render(s);
+    });
+    render(s);
+    return true;
+  }
+  function copyText(text) {
+    return new Promise(function (ok, no) {
+      var byCommand = function (why) {
+        var ta = document.createElement('textarea');
+        var back = document.activeElement;
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position: fixed; left: -9999px; top: 0; opacity: 0;';
+        document.body.appendChild(ta);
+        ta.select();
+        var done = false;
+        try { done = document.execCommand('copy'); } catch (e) { done = false; }
+        ta.remove();
+        try { if (back && back.focus) back.focus({ preventScroll: true }); } catch (e) { /* gone */ }
+        if (done) ok('copy command'); else no(new Error(why || 'the clipboard refused it'));
+      };
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(text).then(function () { ok('clipboard'); }, function (e) {
+            byCommand('the clipboard refused it (' + ((e && e.message) || e) + ')');
+          });
+          return;
+        }
+      } catch (e) { byCommand('the clipboard refused it (' + ((e && e.message) || e) + ')'); return; }
+      byCommand('this window has no clipboard');
+    });
   }
 
   function renderLists(s, p, m, info) {
@@ -1286,6 +1442,10 @@
       note(info, 'YouTube’s ' + m.missing.map(function (k) { return words[k]; }).join(', ') + (m.missing.length > 1 ? ' buttons aren’t' : ' button isn’t') + ' on this Short, so ' + (m.missing.length > 1 ? 'they’re' : 'it’s') + ' off here.', 'warn');
     }
     if (r && r.ad) note(info, 'This is an ad on YouTube: its own Sponsored panel stays on the player.', '');
+    // Share's answer, naming the link it was for (a click just before a move still says what it did there).
+    var sh = p.share;
+    if (sh && sh.ok === true) note(info, 'Link copied: ' + sh.url, 'ok');
+    else if (sh && sh.ok === false) note(info, 'Lumen couldn’t copy the link: ' + sh.why + '. The link is ' + sh.url, 'warn');
   }
 
   window.addEventListener('offline', function () { all.forEach(function (s) { render(s); }); });
@@ -1320,6 +1480,8 @@
       shownId: p.shownId, infoShort: m ? m.getAttribute('data-short') : '', view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, nav: p.nav.hidden ? null : rect(p.nav),
       cover: !p.cover.hidden, title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '',
       note: q('.pv-why') ? q('.pv-why').textContent : '', like: b(q('.pv-like')), dislike: b(q('.pv-dislike')), sub: b(q('.pv-sub')), savebtn: b(q('.pv-save')),
+      cmbtn: b(q('.sh-comments-btn')), sharebtn: b(q('.sh-share')), cm: p.cm, cmShort: m && m.contains(p.cmBox) ? p.cmBox.getAttribute('data-short') : '', cmBox: m && m.contains(p.cmBox) ? rect(p.cmBox) : null,
+      share: p.share ? { id: p.share.id, url: p.share.url, ok: p.share.ok, why: p.share.why } : null, notes: m ? [].map.call(m.querySelectorAll('.pv-why'), function (n) { return n.textContent; }) : [],
       prev: b(p.prev), next: b(p.next), read: p.read, aspect: p.aspect, ease: s.tile.hasAttribute('data-sh-ease')
     };
   }

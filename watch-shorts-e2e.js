@@ -74,6 +74,9 @@ function ytPage(f, label) {
 const hits = [];
 // 11h: the front refuses its Shorts pages while "down" (the connection is cut), as a dead network does.
 let frontDown = false;
+// 12: how the front answers each Short's comments ({ id: 'off' | 'fail' | 'slow' | 'none' }), and what it was asked.
+const CMODE = {};
+const cmHits = [];
 async function startServers(mock) {
   const front = await listen((req, res) => {
     const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
@@ -81,6 +84,19 @@ async function startServers(mock) {
     hits.push(p);
     if (frontDown && /^\/shorts\//.test(p)) { req.socket.destroy(); return undefined; }
     if (p === '/__hang') return undefined;   // 11k: a page that never answers (its navigation is then stopped)
+    // 12 (r63): the page's own POST /youtubei/v1/next, a Short's comments (tests/shorts-fixtures.js shortsNext; CMODE per Short).
+    if (p === '/youtubei/v1/next' && req.method === 'POST') {
+      let raw = '';
+      req.on('data', (d) => { raw += d; });
+      req.on('end', () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch (e) { body = {}; }
+        cmHits.push(body.videoId ? 'id:' + body.videoId : 'tok:' + String(body.continuation || ''));
+        const a = F.shortsNext(body, CMODE);
+        setTimeout(() => { res.writeHead(a.status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(a.json)); }, a.delay || 0);
+      });
+      return undefined;
+    }
     if (p === '/__media/short.mp4') return sendClip(req, res, u.searchParams.has('shape') ? shapeClip(u.searchParams.get('shape')) || '-' : CLIP);
     let m = /^\/shorts\/([A-Za-z0-9_-]{6,20})$/.exec(p);
     if (m && u.searchParams.has('real')) return sendHtml(res, F.realShortsPage(m[1], { signedout: u.searchParams.has('signedout'), preload: u.searchParams.has('preload') }));
@@ -873,6 +889,184 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       const tk = await guest.waitFor('(() => { const f = document.documentElement.hasAttribute("data-lumen-sh"); return !f && window.__r62 === 1 && location.pathname === "/watch" ? { flag: f, body: getComputedStyle(document.body).visibility } : null; })()', 6000).catch(() => null);
       const tk2 = await guest.ev('({ flag: document.documentElement.hasAttribute("data-lumen-sh"), mark: window.__r62 === 1, path: location.pathname, body: getComputedStyle(document.body).visibility })').catch((e) => ({ err: e.message }));
       check(!!tk && tk.body !== 'hidden', 'r62: a stopped navigation, then in place to a video: the trim comes off the same page (not left hidden)', { tk, now: tk2, sh: brief(await sh()) });
+      await chrome.ev('WatchPlayer.close("Close"), 1');
+      await sleep(500);
+    }
+
+    /* ============ 12. r63: Comments and Share on the Shorts rail (Lumen's own comments; the Short's link) ============ */
+    {
+      const open = async (u, cond, ms) => { await chrome.ev(`openInLumen(${JSON.stringify(u)}, { service: 'youtube', title: 'Shorts' }), 1`); return shWait(cond, ms || 15000); };
+      const ready = (id) => `x.cur === ${JSON.stringify(id)} && x.infoShort === x.cur && x.phase === 'ready' && x.on && x.applied`;
+      // The live page at the slot's own address (a closed slot's page can linger in the target list for a moment).
+      const guest12 = async () => {
+        const u = (await sh()).url;
+        for (let i = 0; i < 40; i++) {
+          let list = [];
+          try { list = await q.targets(); } catch (e) { list = []; }
+          for (const t of list.filter((t2) => t2.webSocketDebuggerUrl && String(t2.url) === u).reverse()) {
+            const g2 = await cdpTo(t).catch(() => null);
+            if (!g2) continue;
+            if (await g2.ev('document.visibilityState === "visible" && !!document.querySelector("ytd-shorts")').catch(() => false)) {
+              if (guest) { try { guest.close(); } catch (e) { /* gone */ } }
+              guest = g2;
+              return g2;
+            }
+            try { g2.close(); } catch (e) { /* gone */ }
+          }
+          await sleep(200);
+        }
+        return guestNow();
+      };
+      const pageMove = (dir) => (guest ? Promise.race([guest.ev('(() => { const b = document.querySelector(' + JSON.stringify(dir > 0 ? '#navigation-button-down button' : '#navigation-button-up button') + '); if (!b) return 0; b.click(); return 1; })()').catch(() => 0), sleep(4000).then(() => 0)]) : Promise.resolve(0));
+      const cm = () => chrome.ev('(() => { const c = LumenComments._current(); if (!c) return null; return { videoId: c.videoId, phase: c.phase, why: c.why, n: c.n, count: c.count, sorts: c.sorts, attached: c.attached, shown: c.shown, whyShown: c.whyShown, texts: c.items.map((i) => i.text) }; })()');
+      const cmWait = (cond, ms) => chrome.waitFor(`(() => { const c = LumenComments._current(); return c && (${cond}) ? { videoId: c.videoId, phase: c.phase, n: c.n, attached: c.attached, why: c.why, whyShown: c.whyShown, texts: c.items.map((i) => i.text) } : null; })()`, ms || 8000).catch(() => null);
+      const boxText = () => chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-info .sh-comments"); return b ? b.textContent : null; })()');
+      const attached = () => chrome.ev('LumenComments._state().states.filter((t) => t.attached).map((t) => t.videoId)');
+      const active = () => chrome.ev('(() => { const a = document.activeElement; return a ? (a.tagName === "WEBVIEW" ? "webview" : (a.className || a.tagName)) : ""; })()');
+      // The chrome's clipboard is stubbed: a copy is recorded, the machine's own clipboard is never written.
+      const stubClip = (fail) => chrome.ev(`(() => { window.__copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: function (t) { window.__copied.push(String(t)); return ${fail ? "Promise.reject(new Error('Document is not focused.'))" : 'Promise.resolve()'}; } } });
+        document.execCommand = function (c) { window.__copied.push('command:' + c); return ${fail ? 'false' : 'true'}; }; return 1; })()`);
+      const copied = () => chrome.ev('window.__copied.slice()');
+      const railOrder = () => chrome.ev('[...document.querySelectorAll(".wp-layer .sh-info .sh-acts button")].map((b) => b.classList.contains("sh-share") ? "share" : b.classList.contains("sh-comments-btn") ? "comments" : b.classList.contains("pv-save") ? "save" : b.classList.contains("pv-dislike") ? "dislike" : b.classList.contains("pv-like") ? "like" : "?")');
+      const steps = async () => ((await sh()) || { steps: [] }).steps.length;
+
+      // a. The rail: Like, Dislike, Save, then Comments and Share, in plain words, on.
+      let x = await open(FY + '/shorts/' + S[0].id, ready(S[0].id));
+      await guest12();
+      check(!!x && x.cmbtn && x.cmbtn.text === 'Comments' && !x.cmbtn.disabled && x.sharebtn && x.sharebtn.text === 'Share' && !x.sharebtn.disabled,
+        'r63: the Shorts rail has Comments and Share, labelled in plain words, on', x && { cm: x.cmbtn, share: x.sharebtn });
+      check(JSON.stringify(await railOrder()) === JSON.stringify(['like', 'dislike', 'save', 'comments', 'share']), 'r63: they sit in the rail after Like, Dislike and Save', await railOrder());
+
+      // b. Comments (a real click) opens THIS Short's comments, in the info; the click hands the keys back to the player.
+      cmHits.length = 0;
+      await clickAt('.wp-layer .sh-info .sh-comments-btn', 'Comments');
+      let c = await cmWait(`c.videoId === ${JSON.stringify(S[0].id)} && c.phase === 'ready' && c.attached`);
+      x = await sh();
+      check(!!c && c.n === F.CM_PAGE && c.texts.every((t) => t.indexOf(' on ' + S[0].id + ':') >= 0), 'r63: Comments shows this Short’s comments (Lumen’s own renderer, the first page)', c || await cm());
+      check(!!x && x.cm && x.cmShort === S[0].id && x.cmbtn.pressed === null && !!x.cmBox && x.cmBox.h > 100 && x.cmBox.y >= x.info.y && x.cmBox.y + x.cmBox.h <= x.info.y + x.info.h + 1,
+        'r63: the comments sit in the info, under its buttons, with room to read', x && { cmShort: x.cmShort, box: x.cmBox, info: x.info });
+      check(cmHits[0] === 'id:' + S[0].id, 'r63: they were asked for by the Short’s own id (the page’s own /next)', cmHits.slice(0, 3));
+      check((await chrome.ev('document.querySelector(".wp-layer .sh-comments-btn").getAttribute("aria-expanded")')) === 'true', 'r63: Comments says it is open (aria-expanded)');
+      check((await active()) === 'webview', 'r63: after a click on Comments the focus is back on the player, not stuck on the button', await active());
+      check(!(await chrome.ev('!!document.querySelector(".wp-layer .sh-comments .cm-open")')), 'r63: no “Open comments on YouTube” on a Short (there is no full page behind it)');
+      const ro = await chrome.ev('(() => { const r = document.querySelector(".wp-layer .sh-comments"); const lk = r.querySelector(".cm-like"); const rb = r.querySelector(".cm-replybtn"); return { compose: !!r.querySelector(".cm-compose"), line: [...r.querySelectorAll(".cm-why-txt")].map((n) => n.textContent), like: lk && [lk.disabled, lk.getAttribute("data-why") || lk.title], reply: rb && [rb.disabled, rb.getAttribute("data-why") || rb.title] }; })()');
+      check(!!ro && !ro.compose && ro.line.some((t) => /On a Short, Lumen’s comments are for reading/.test(t)) && ro.like && ro.like[0] === true && /for reading/.test(ro.like[1]) && ro.reply && ro.reply[0] === true && /for reading/.test(ro.reply[1]),
+        'r63: a Short’s comments are for reading: no comment box, and Like / Reply are off with the reason (never an 8-second wait for a press that can’t land)', ro);
+      await shot(1280, 800, 'r63-comments-open');
+
+      // c. Lumen's Next with the comments open: the next Short's comments, never the last one's.
+      await clickAt('.wp-layer .sh-next', 'Next');
+      await settled('r63 Next with comments open', S[1].id);
+      c = await cmWait(`c.videoId === ${JSON.stringify(S[1].id)} && c.phase === 'ready' && c.attached`);
+      const bt = await boxText();
+      check(!!c && c.texts.every((t) => t.indexOf(' on ' + S[1].id + ':') >= 0) && !!bt && bt.indexOf(' on ' + S[0].id) < 0, 'r63: after a move the comments are the NEW Short’s, and none of the last one’s are on screen', { c, stale: bt && bt.indexOf(' on ' + S[0].id) >= 0 });
+      check(JSON.stringify(await attached()) === JSON.stringify([S[1].id]), 'r63: one comments section on screen, the current Short’s', await attached());
+
+      // d. A slow answer for a Short he has already left: the page's own moves (YouTube's buttons) S1 -> S2 (slow) -> S3.
+      CMODE[S[2].id] = 'slow';
+      await pageMove(1);
+      await shWait(`x.cur === ${JSON.stringify(S[2].id)}`, 6000);
+      await sleep(300);
+      await pageMove(1);
+      await settled('r63 the page’s own moves with comments open', S[3].id);
+      c = await cmWait(`c.videoId === ${JSON.stringify(S[3].id)} && c.phase === 'ready' && c.attached`);
+      await sleep(3000);   // S2's answer arrives now
+      const c2 = await cm();
+      const bt2 = await boxText();
+      check(!!c && !!c2 && c2.videoId === S[3].id && c2.phase === 'ready' && !!bt2 && bt2.indexOf(' on ' + S[2].id) < 0 && bt2.indexOf(' on ' + S[3].id) >= 0,
+        'r63: a slow answer for a Short already left never shows: the current Short’s comments stay', { c2: c2 && { id: c2.videoId, phase: c2.phase }, stale: bt2 && bt2.indexOf(' on ' + S[2].id) >= 0 });
+      delete CMODE[S[2].id];
+
+      // e. The wheel over comments that overflow scrolls them, never a Short; the arrows in them are theirs too.
+      x = await sh();
+      const st0 = await steps();
+      const sc0 = await chrome.ev('document.querySelector(".wp-layer .sh-comments").scrollTop');
+      for (let k = 0; k < 3; k++) { await wheelAt(x.cmBox.x + x.cmBox.w / 2, x.cmBox.y + x.cmBox.h / 2, 120); await sleep(120); }
+      await sleep(700);
+      const sc1 = await chrome.ev('document.querySelector(".wp-layer .sh-comments").scrollTop');
+      x = await sh();
+      check(x.cur === S[3].id && (await steps()) === st0 && sc1 > sc0, 'r63: the wheel over the comments scrolls them and moves no Short', { cur: x.cur, steps: (await steps()) - st0, scroll: [sc0, sc1] });
+      const inCm = await chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-comments .cm-sort"); if (b) b.focus(); return !!b && document.activeElement === b; })()');
+      await keyIn(chrome, 'ArrowDown', 'ArrowDown', 40);
+      await sleep(600);
+      check(inCm && (await sh()).cur === S[3].id && (await steps()) === st0, 'r63: ArrowDown with the focus in the comments moves no Short', { cur: (await sh()).cur, steps: (await steps()) - st0 });
+
+      // f. A load that fails says why, and Try again brings them.
+      await clickAt('.wp-layer .sh-prev', 'Previous');
+      await settled('r63 Previous', S[2].id);
+      CMODE[S[1].id] = 'fail';
+      await clickAt('.wp-layer .sh-prev', 'Previous');
+      await settled('r63 Previous to a failing Short', S[1].id);
+      c = await cmWait(`c.videoId === ${JSON.stringify(S[1].id)} && c.phase === 'failed' && c.attached`);
+      check(!!c && c.whyShown.some((t) => /couldn’t load comments: YouTube answered 500/.test(t)), 'r63: comments that fail to load say why (YouTube answered 500)', c || await cm());
+      delete CMODE[S[1].id];
+      const retried = await chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-comments .cm-retry"); if (!b) return false; b.click(); return true; })()');
+      c = await cmWait(`c.videoId === ${JSON.stringify(S[1].id)} && c.phase === 'ready'`);
+      check(retried && !!c && c.n === F.CM_PAGE, 'r63: Try again loads them', { retried, c });
+      // Comments turned off on a Short: YouTube's own words.
+      CMODE[S[0].id] = 'off';
+      await clickAt('.wp-layer .sh-prev', 'Previous');
+      await settled('r63 Previous to a Short with comments off', S[0].id);
+      c = await cmWait(`c.videoId === ${JSON.stringify(S[0].id)} && c.phase === 'off'`);
+      check(!!c && c.shown === 'Comments are turned off' && c.whyShown.some((t) => /Comments are turned off\./.test(t)), 'r63: comments turned off on a Short say so, in YouTube’s words', c || await cm());
+      delete CMODE[S[0].id];
+
+      // g. Comments again (keyboard): closed; the focus stays on the button (Tab goes on from there).
+      await chrome.ev('document.querySelector(".wp-layer .sh-comments-btn").focus(), 1');
+      await keyIn(chrome, 'Enter', 'Enter', 13);
+      await sleep(400);
+      x = await sh();
+      check(!!x && !x.cm && !x.cmBox && x.cmbtn && !x.cmbtn.disabled && (await chrome.ev('document.querySelector(".wp-layer .sh-comments-btn").getAttribute("aria-expanded")')) === 'false',
+        'r63: Comments again closes them', x && { cm: x.cm, box: x.cmBox });
+      check(/sh-comments-btn/.test(await active()), 'r63: from the keyboard the focus stays on Comments', await active());
+
+      // h. Share (a real click): the Short's own YouTube link, confirmed on the button and in a note; then the focus is the player's.
+      await stubClip(false);
+      await clickAt('.wp-layer .sh-info .sh-share', 'Share');
+      x = await shWait(`x.share && x.share.ok === true`, 4000);
+      const want = 'https://www.youtube.com/shorts/' + S[0].id;
+      check(JSON.stringify(await copied()) === JSON.stringify([want]), 'r63: Share copies https://www.youtube.com/shorts/<this Short>', await copied());
+      check(!!x && x.sharebtn.text === 'Link copied' && x.notes.indexOf('Link copied: ' + want) >= 0, 'r63: the copy is confirmed on the button and in a note', x && { btn: x.sharebtn, notes: x.notes });
+      check((await active()) === 'webview', 'r63: after a click on Share the focus is back on the player', await active());
+      x = await shWait(`x.sharebtn && x.sharebtn.text === 'Share' && !x.share`, 5000);
+      check(!!x && x.notes.every((n) => !/Link copied/.test(n)), 'r63: the confirmation goes after a few seconds', x && { btn: x.sharebtn, notes: x.notes });
+
+      // i. A copy the clipboard refuses says why and gives the link to copy by hand; a move takes the reason away.
+      await stubClip(true);
+      await chrome.ev('document.querySelector(".wp-layer .sh-info .sh-share").click(), 1');
+      x = await shWait(`x.share && x.share.ok === false`, 4000);
+      check(!!x && x.sharebtn.text === 'Share' && x.notes.some((n) => n.indexOf('Lumen couldn’t copy the link: the clipboard refused it (Document is not focused.). The link is ' + want) === 0),
+        'r63: a refused copy says why, with the link', x && { btn: x.sharebtn, notes: x.notes, share: x.share });
+      await clickAt('.wp-layer .sh-next', 'Next');
+      x = await settled('r63 Next after a refused copy', S[1].id);
+      check(!!x && x.notes.every((n) => !/copy the link/.test(n)) && !x.share, 'r63: the refusal was that Short’s: the next one doesn’t wear it', x && { notes: x.notes, share: x.share });
+
+      // j. A click on Share as the Short changes copies the Short he saw (the button's own), never the next one.
+      await stubClip(false);
+      await chrome.ev('window.__oldShare = document.querySelector(".wp-layer .sh-info .sh-share"), 1');
+      await pageMove(1);
+      await chrome.ev('window.__oldShare.click(), 1');
+      x = await settled('r63 the page’s own move under a Share click', S[2].id);
+      await sleep(300);
+      x = await sh();
+      check(JSON.stringify(await copied()) === JSON.stringify(['https://www.youtube.com/shorts/' + S[1].id]), 'r63: Share as the feed moves copies the Short on screen at the click, not the next', await copied());
+      check(!!x && x.sharebtn.text === 'Share' && x.notes.indexOf('Link copied: https://www.youtube.com/shorts/' + S[1].id) >= 0, 'r63: ...and says which link it copied (the new Short’s button is not “copied”)', x && { btn: x.sharebtn, notes: x.notes });
+
+      // k. Opened again (a new document): the comments start closed, and nothing of the old section is on screen.
+      await clickAt('.wp-layer .sh-info .sh-comments-btn', 'Comments');
+      await cmWait(`c.videoId === ${JSON.stringify(S[2].id)} && c.phase === 'ready' && c.attached`);
+      x = await open(FY + '/shorts/' + S[3].id, ready(S[3].id));
+      check(!!x && !x.cm && !x.cmBox && (await attached()).length === 0, 'r63: a Short opened again starts with the comments closed (no section from the last page)', x && { cm: x.cm, attached: await attached() });
+
+      // l. A narrow layer (the info below the player): the comments open in the band, in a box of their own.
+      await clickAt('.wp-layer .sh-info .sh-comments-btn', 'Comments');
+      await cmWait(`c.videoId === ${JSON.stringify(S[3].id)} && c.phase === 'ready' && c.attached`);
+      await resize(900, 800);
+      x = await shWait(`x.mode === 'below' && !!x.cmBox`, 6000);
+      check(!!x && x.cmBox.h >= 100 && x.cmBox.x >= x.info.x && x.cmBox.x + x.cmBox.w <= x.info.x + x.info.w + 1 && x.cmbtn && !x.cmbtn.disabled,
+        'r63: below the player the comments open inside the band, in a box of their own', x && { mode: x.mode, box: x.cmBox, info: x.info });
+      await shot(900, 800, 'r63-comments-below');
+      await resize(1280, 800);
       await chrome.ev('WatchPlayer.close("Close"), 1');
       await sleep(500);
     }

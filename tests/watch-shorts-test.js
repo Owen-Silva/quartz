@@ -264,6 +264,13 @@ let threw = false;
 try { handlers['watch-shorts:log']({ chrome: false }, { line: 'x' }); } catch (e) { threw = true; }
 check(threw && handlers['watch-shorts:log']({ chrome: true }, { line: 'opened: feed' }).ok === true, 'the IPC answers the chrome only');
 
+// r63: Share's link is YouTube's own address for the Short; nothing for no Short. The page's own Comments and Share
+// stay under the trim (Lumen draws its own), and its comments panel stays hidden.
+check(SH.shortUrl('Xk3pQ9vLm2A') === 'https://www.youtube.com/shorts/Xk3pQ9vLm2A' && SH.shortUrl('') === '' && SH.shortUrl('a/b?c') === '' && SH.shortUrl(null) === '',
+  'r63: Share’s link is https://www.youtube.com/shorts/<id>, and nothing without a Short');
+check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd-shorts ytd-engagement-panel-section-list-renderer') >= 0,
+  'r63: YouTube’s own action bar (its Comments, Share) and its comments panel stay under the trim');
+
 Promise.all(pending).then(() => {
   console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;

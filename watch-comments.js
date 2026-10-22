@@ -31,7 +31,20 @@
      - Every state says why: loading, comments turned off, no comments
        here, none yet, signed out, offline, and a failed load (the
        reason and Retry).
-     - Shorts: no comments panel (the Shorts view has no mount).
+     - Shorts: the Shorts view (watch-shorts.js) fires the same event
+       with short: true when its Comments button is open, and a mount
+       in its info. The comments are always the Short's the view names
+       (its id goes to the page's own /next: a Shorts page's own data
+       has no watch-page comments section), and a new id is a new
+       section, so a move in the feed never leaves the last Short's
+       comments up. The view's mount scrolls itself (scroller: the
+       next page loads at its end). There is no full watch page behind
+       a Short, so "Open comments on YouTube" isn't drawn there. A
+       Short's section is for reading: YouTube keeps a Short's own
+       comments in its Shorts panel, not the section Lumen presses for
+       a video, so its Like and Reply are off and there is no comment
+       box, each saying why (never an 8-second wait for a press that
+       can't land).
 
    Hooks: the 'lumen-pv-info' event and the mount; with this file
    missing the mount stays hidden. Also a CommonJS module for the unit
@@ -47,6 +60,7 @@
 
   var YT = 'https://www.youtube.com';
   var PAGE_MAX = 400;          // comments kept in the list (older ones stay, the next pages stop)
+  var SHORT_RO = 'Not in Lumen for a Short yet: its comments are for reading';   // a Short's Like / Reply (words 'shortread')
   var CLAMP = 300;             // characters before "Read more"
 
   function runs(x) {
@@ -290,14 +304,18 @@
   /** The words for a state: { title, why } (never empty: no silent states). */
   function words(state, o) {
     var x = o || {};
+    var what = x.short ? 'Short' : 'video';   // a Short's section says "this Short"
     switch (state) {
       case 'loading': return { title: 'Loading comments…', why: 'Reading them from YouTube’s page.' };
-      case 'off': return { title: 'Comments are turned off', why: x.message ? 'YouTube’s page says: “' + x.message.replace(/\s*Learn more\s*$/i, '').trim() + '”' : 'YouTube’s page has no comments for this video.' };
-      case 'none': return { title: 'No comments here', why: 'YouTube’s page doesn’t offer comments for this video (a live stream or a premiere has its chat instead).' };
-      case 'empty': return { title: 'No comments yet', why: x.signedIn === false ? 'Nobody has commented on this video yet.' : 'Nobody has commented on this video yet. Be the first.' };
+      case 'off': return { title: 'Comments are turned off', why: x.message ? 'YouTube’s page says: “' + x.message.replace(/\s*Learn more\s*$/i, '').trim() + '”' : 'YouTube’s page has no comments for this ' + what + '.' };
+      case 'none': return { title: 'No comments here', why: x.short ? 'YouTube’s page doesn’t offer comments for this Short.' : 'YouTube’s page doesn’t offer comments for this video (a live stream or a premiere has its chat instead).' };
+      case 'empty': return { title: 'No comments yet', why: x.signedIn === false ? 'Nobody has commented on this ' + what + ' yet.' : 'Nobody has commented on this ' + what + ' yet. Be the first.' };
       case 'offline': return { title: 'You’re offline', why: 'Comments load when you’re back online.' };
       case 'failed': return { title: 'Comments didn’t load', why: 'Lumen couldn’t load comments: ' + (x.reason || 'YouTube’s page didn’t answer') + '.' };
       case 'signedout': return { title: '', why: 'You’re signed out of YouTube here: liking, replying and commenting need you signed in.' };
+      // A Short's section (SHORT_RO): YouTube keeps a Short's own comments in its Shorts panel, not the watch
+      // page's section Lumen presses for a video, so here they are to read.
+      case 'shortread': return { title: '', why: 'On a Short, Lumen’s comments are for reading: liking, replying and commenting on a Short aren’t in Lumen yet.' };
       default: return { title: '', why: '' };
     }
   }
@@ -322,7 +340,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest() {
-    var V = 1;
+    var V = 2;   // 2: first(want) for a Short, and /shorts/<id> read as the page's video
     if (window.__lumenCm && window.__lumenCm.v === V) return;
     function Q(sel, r) { try { return (r || document).querySelector(sel); } catch (e) { return null; } }
     function QA(sel, r) { try { return Array.prototype.slice.call((r || document).querySelectorAll(sel)); } catch (e) { return []; } }
@@ -336,7 +354,7 @@
     function cfg(k) { try { return window.ytcfg && typeof window.ytcfg.get === 'function' ? window.ytcfg.get(k) : undefined; } catch (e) { return undefined; } }
     function vid() {
       var u = new URL(location.href);
-      return u.searchParams.get('v') || ((/^\/live\/([^/?#]+)/.exec(u.pathname) || [])[1]) || '';
+      return u.searchParams.get('v') || ((/^\/(?:live|shorts)\/([^/?#]+)/.exec(u.pathname) || [])[1]) || '';
     }
     function signed() { var li = cfg('LOGGED_IN'); return typeof li === 'boolean' ? li : null; }
     function cookie(name) {
@@ -376,13 +394,19 @@
           });
       });
     }
-    /** The comments section's first token: the page's own data, or (moved in place) the page's own /next. */
-    function first() {
-      var id = vid();
+    /**
+     * The comments section's first token: the page's own data, or (moved in place) the page's own /next.
+     * want: the video Lumen names (a Short's: the Shorts view's id). A Shorts page's own data has no watch-page
+     * comments section, so a Short's always come from /next for that id: never the Short the page has moved to.
+     */
+    function first(want) {
+      var id = want ? String(want) : vid();
       var yd = window.ytInitialData;
       var dataId = yd && yd.currentVideoEndpoint && yd.currentVideoEndpoint.watchEndpoint && yd.currentVideoEndpoint.watchEndpoint.videoId;
       if (!id) return Promise.resolve({ ok: false, reason: 'this page isn’t a video' });
-      if (yd && dataId === id) return Promise.resolve({ ok: true, from: 'ytInitialData', videoId: id, signedIn: signed(), data: pick(yd) });
+      // The page's own data only when it is a watch page's (a Shorts page's data is shaped otherwise: /next then).
+      var own0 = yd && dataId === id ? pick(yd) : null;
+      if (own0) return Promise.resolve({ ok: true, from: 'ytInitialData', videoId: id, signedIn: signed(), data: own0 });
       return next({ videoId: id }).then(function (r) {
         return r.ok ? { ok: true, from: 'next', videoId: id, signedIn: signed(), data: pick(r.json) } : { ok: false, videoId: id, reason: r.reason };
       });
@@ -503,9 +527,9 @@
     }
     /** A timestamp in this video: YouTube's own player seeks. */
     function seek(t) {
-      var mp = Q('#movie_player');
+      var mp = Q('#movie_player') || Q('#shorts-player');   // a Short's player is #shorts-player
       if (mp && typeof mp.seekTo === 'function') { mp.seekTo(Number(t) || 0, true); return { ok: true, how: 'player' }; }
-      var v = Q('#movie_player video') || Q('video');
+      var v = Q('#movie_player video') || Q('#shorts-player video') || Q('video');
       if (!v) return { ok: false, reason: 'no video on the page' };
       v.currentTime = Number(t) || 0;
       return { ok: true, how: 'video' };
@@ -560,11 +584,12 @@
   function cap(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
   function stateFor(d) {
-    var key = String(d.wcId) + '|' + String(d.videoId);
+    // A Short's section is its own (short: the Shorts view's): the same id as a watch page is never the same section.
+    var key = String(d.wcId) + '|' + String(d.videoId) + (d.short ? '|short' : '');
     var st = STATES.filter(function (x) { return x.slot === d.slot; })[0];
     if (st && st.key === key) return st;
     if (st) { teardown(st); STATES.splice(STATES.indexOf(st), 1); }
-    st = { slot: d.slot, key: key, wcId: d.wcId, videoId: d.videoId, hookToken: d.comments && d.comments.token ? String(d.comments.token) : '',
+    st = { slot: d.slot, key: key, wcId: d.wcId, videoId: d.videoId, short: !!d.short, hookToken: d.comments && d.comments.token ? String(d.comments.token) : '',
       phase: 'loading', why: '', message: '', signedIn: null, header: null, items: [], next: '', sortLabel: '', loading: false, pageWhy: '',
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
       expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null };
@@ -595,11 +620,12 @@
   }
   /* The slot closed (watch-playview.js destroy): its section goes with it. Kept, a closed slot's state held its
      whole comments DOM, its listeners and the detached <webview> (lumen-perf: +650 nodes and +150 listeners per
-     closed video view, up to four of them). */
-  function forget(slot) {
+     closed video view, up to four of them).
+     which 'short': only a Short's section (the Shorts view's, on a new document: watch-shorts.js newDocument()). */
+  function forget(slot, which) {
     for (var i = STATES.length - 1; i >= 0; i--) {
       var st = STATES[i];
-      if (st.slot !== slot) continue;
+      if (st.slot !== slot || (which === 'short' && !st.short)) continue;
       teardown(st);
       st.view = null; st.tile = null; st.focus = null;
       STATES.splice(i, 1);
@@ -614,7 +640,7 @@
     if (!d.videoId) { box.hidden = true; return; }
     var st = stateFor(d);
     var tile = box.closest ? box.closest('.wp-tile') : null;
-    st.tile = tile || st.tile;
+    st.tile = d.scroller || tile || st.tile;   // what scrolls the list (the next page loads at its end): the tile, or the Shorts view's mount
     st.view = d.view || (tile ? tile.querySelector('webview') : null) || st.view;
     st.toggle = typeof d.toggle === 'function' ? d.toggle : st.toggle;
     var hadFocus = st.focus && st.root.contains(st.focus) && (document.activeElement === document.body || !document.activeElement) ? st.focus : null;
@@ -645,7 +671,7 @@
     st.phase = 'loading';
     draw(st);
     if (!st.view) { fail(st, 'the video’s page isn’t there'); return; }
-    js(st.view, call('first')).then(function (r) {
+    js(st.view, call('first', st.short ? [st.videoId] : [])).then(function (r) {
       if (seq !== st.seq) return;
       if (!r || !r.ok) { fail(st, (r && r.reason) || 'YouTube’s page didn’t answer'); return; }
       st.signedIn = r.signedIn;
@@ -919,17 +945,22 @@
       });
       head.appendChild(sorts);
     }
-    var openBtn = btn('cm-ghost cm-open', 'Open comments on YouTube', function () { if (!openOwn(st)) note(st, '_post', 'YouTube’s full page isn’t available here.'); },
-      'YouTube’s own comments, in Lumen (the full page)');
-    if (!st.toggle) off(openBtn, 'YouTube’s full page isn’t available here');
-    head.appendChild(openBtn);
+    // A Short has no full watch page behind it (the Shorts view is its page), so there it isn't drawn at all.
+    if (!st.short) {
+      var openBtn = btn('cm-ghost cm-open', 'Open comments on YouTube', function () { if (!openOwn(st)) note(st, '_post', 'YouTube’s full page isn’t available here.'); },
+        'YouTube’s own comments, in Lumen (the full page)');
+      if (!st.toggle) off(openBtn, 'YouTube’s full page isn’t available here');
+      head.appendChild(openBtn);
+    }
     r.appendChild(head);
 
     if (phase === 'loading' && !st.items.length) { r.appendChild(stateBox('loading', st)); skeleton(r); return; }
     if (phase === 'off' || phase === 'none' || phase === 'offline' || phase === 'failed') { r.appendChild(stateBox(phase, st)); return; }
 
     // Signed out: the list reads, the controls say why.
-    if (st.signedIn === false) r.appendChild(line(words('signedout').why, 'warn'));
+    // A Short's section reads only (SHORT_RO): its own comments are in YouTube's Shorts panel, which Lumen doesn't press.
+    if (st.short) r.appendChild(line(words('shortread').why, ''));
+    else if (st.signedIn === false) r.appendChild(line(words('signedout').why, 'warn'));
     else r.appendChild(composer(st, keep, sel));
     if (st.notes._post) r.appendChild(noteLine(st, st.notes._post));
 
@@ -960,7 +991,7 @@
     return line(n.text, 'warn', n.open && st.toggle ? btn('cm-ghost cm-open-inline', 'Open comments on YouTube', function () { openOwn(st); }) : null);
   }
   function stateBox(phase, st) {
-    var w = words(phase, { message: st.message, reason: st.why, signedIn: st.signedIn });
+    var w = words(phase, { message: st.message, reason: st.why, signedIn: st.signedIn, short: st.short });
     var b = el('div', 'cm-state cm-state-' + phase);
     b.setAttribute('role', 'status');
     if (phase === 'loading') b.appendChild(el('span', 'cm-spin'));
@@ -1077,13 +1108,14 @@
     like.appendChild(ico);
     like.appendChild(el('span', 'cm-like-n', c.likes || ''));
     like.setAttribute('aria-pressed', c.liked ? 'true' : 'false');
-    var outWhy = st.signedIn === false ? 'Sign in to YouTube to like comments' : c.mine ? 'Your own comment: like it on YouTube’s page' : st.busy['like:' + c.id] ? 'Waiting for YouTube…' : '';
+    var outWhy = st.short ? SHORT_RO : st.signedIn === false ? 'Sign in to YouTube to like comments' : c.mine ? 'Your own comment: like it on YouTube’s page' : st.busy['like:' + c.id] ? 'Waiting for YouTube…' : '';
     off(like, outWhy);
     bar.appendChild(like);
     if (c.hearted) { var h = el('span', 'cm-heart', '♥'); h.title = 'Hearted by the creator'; h.setAttribute('aria-label', 'Hearted by the creator'); bar.appendChild(h); }
     if (!isReply && !c.mine) {
       var rb = btn('cm-ghost-txt cm-replybtn', 'Reply', function () { st.replyTo = st.replyTo === c.id ? '' : c.id; st.replyText = ''; draw(st); setTimeout(function () { var t = st.root.querySelector('.cm-replybox textarea'); if (t) t.focus(); }, 0); });
-      if (st.signedIn === false) off(rb, 'Sign in to YouTube to reply');
+      if (st.short) off(rb, SHORT_RO);
+      else if (st.signedIn === false) off(rb, 'Sign in to YouTube to reply');
       bar.appendChild(rb);
     }
     body.appendChild(bar);

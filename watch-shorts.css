@@ -171,6 +171,36 @@
 .sh-info .pv-confirm, .sh-info .pv-savelist { margin: 0; background: rgb(255 255 255 / .05); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .06); }
 .sh-info .pv-savelist { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
 .sh-info .pv-why { margin: 0; }
+/* Comments and Share sit in the same row as Like / Save (it wraps on a narrow island). Open Comments looks like an
+   open Save; a copied link shows a check and "Link copied" for a moment (watch-shorts.js SHARE_MS). */
+.sh-comments-btn.is-open { background: var(--lv-ctl-press); }
+.sh-share.is-done .pv-ico { color: var(--lv-on, #c5d2e0); }
+/* The comments (watch-comments.js draws them; this file only gives them their room): beside the reel the island
+   takes the reel's full height while they are open (it never jumps as a page of them arrives) and they scroll in
+   the space under the buttons; below it they scroll in a box of their own inside the band, as the Save list does. */
+.wp-tile[data-sh="beside"] .sh-info.has-cm { height: var(--sh-h, 720px); }
+.sh-info.has-cm > :not(.sh-comments) { flex-shrink: 0; }
+.sh-comments {
+  flex: 1 1 auto;
+  min-height: 120px;
+  margin: 0 -20px;
+  padding: 14px 20px 4px;
+  border-top: 1px solid rgb(255 255 255 / .07);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.wp-tile[data-sh="below"] .sh-comments { flex: none; max-height: 320px; margin: 0 -16px; padding: 12px 16px 4px; }
+.sh-comments[hidden] { display: none; }
+.sh-comments:focus { outline: none; }
+.sh-comments .cm-root { color: var(--lv-text, #e9eaec); font: 13px/1.4 var(--font); padding-bottom: 8px; }
+/* The island is narrower than the column under a video: smaller avatars and gaps, the count a size down. */
+.sh-comments .cm-head { margin-bottom: 12px; }
+.sh-comments .cm-count { font-size: 15px; }
+.sh-comments .cm-item { gap: 10px; }
+.sh-comments .cm-av, .sh-comments .cm-skel-av { width: 32px; height: 32px; }
+.sh-comments .cm-reply .cm-av { width: 24px; height: 24px; }
 .sh-hint {
   margin: 0;
   padding: 12px 0 1px;

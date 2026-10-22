@@ -121,7 +121,7 @@ const ctx = vm.createContext(win);
 (async () => {
   try {
     vm.runInContext(C.call('state'), ctx);
-    check(!!win.__lumenCm && win.__lumenCm.v === 1, 'the in-page script installs by itself in a bare page');
+    check(!!win.__lumenCm && win.__lumenCm.v === 2, 'the in-page script installs by itself in a bare page');
     const f = await vm.runInContext(C.call('first'), ctx);
     check(f.ok && f.from === 'ytInitialData' && f.signedIn === true && C.section(f.data).token === X.FIRST, 'first(): the token from the page’s own ytInitialData, and signed in', f);
     const l = await vm.runInContext(C.call('load', [X.FIRST]), ctx);
@@ -137,6 +137,23 @@ const ctx = vm.createContext(win);
     win.fetch = () => Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
     const bad = await vm.runInContext(C.call('load', ['x']), ctx);
     check(!bad.ok && bad.reason === 'YouTube answered 503', 'a failed answer comes back with its reason', bad);
+    // r63: a Short (the Shorts view's section). Its page is /shorts/<id>, its own data is a reel's (no watch-page
+    // comments section), and the id Lumen names goes to /next even when the page has already moved to another Short.
+    win.fetch = (url, o) => { fetches.push({ url, o }); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(X.next(JSON.parse(o.body), '', VID).json) }); };
+    win.location = { href: 'https://www.youtube.com/shorts/shortBBB0001', origin: 'https://www.youtube.com', pathname: '/shorts/shortBBB0001' };
+    win.ytInitialData = { currentVideoEndpoint: { reelWatchEndpoint: { videoId: 'shortBBB0001' } }, contents: { reelWatchSequence: {} } };
+    const sst = vm.runInContext(C.call('state'), ctx);
+    check(sst.videoId === 'shortBBB0001', 'r63: on a Shorts page the page’s video is the Short in its address', sst);
+    const n0 = fetches.length;
+    const fs1 = await vm.runInContext(C.call('first', ['shortAAA0001']), ctx);
+    check(fs1.ok && fs1.from === 'next' && fs1.videoId === 'shortAAA0001' && JSON.parse(fetches[n0].o.body).videoId === 'shortAAA0001' && C.section(fs1.data).state === 'token',
+      'r63: first(id) for a Short asks /next for THAT Short (never the one the page moved to), and finds its comments section', { fs1: fs1 && { ok: fs1.ok, from: fs1.from, id: fs1.videoId }, body: fetches[n0] && fetches[n0].o.body });
+    win.ytInitialData = { currentVideoEndpoint: { watchEndpoint: { videoId: 'shortBBB0001' } }, contents: { reelWatchSequence: {} } };
+    const fs2 = await vm.runInContext(C.call('first', ['shortBBB0001']), ctx);
+    check(fs2.ok && fs2.from === 'next' && C.section(fs2.data).state === 'token', 'r63: the page’s own data of another shape is never read as “no comments” (it asks /next)', fs2 && { from: fs2.from });
+    check(/this Short/.test(C.words('none', { short: true }).why) && /this Short/.test(C.words('empty', { short: true }).why) && /this video/.test(C.words('empty', {}).why),
+      'r63: a Short’s section says “this Short”, a video’s “this video”');
+    win.location = { href: 'https://www.youtube.com/watch?v=' + VID, origin: 'https://www.youtube.com', pathname: '/watch' };
     win.ytcfg.d.LOGGED_IN = false;
     const so = await vm.runInContext(C.call('press', ['like', { id: 'UgxTop001' }]), ctx);
     check(!so.ok && /signed out/.test(so.reason), 'signed out: nothing is pressed, and it says why', so);

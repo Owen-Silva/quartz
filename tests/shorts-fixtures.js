@@ -378,4 +378,46 @@ reel-action-bar-view-model button{width:48px;height:48px;border-radius:50%;borde
 </script></body></html>`;
 }
 
-module.exports = { SHORTS, PLAYLISTS, shortsPage, realShortsPage, channelShorts, list, avatarOf };
+
+// r63: a Short's comments, as the page's own POST /youtubei/v1/next answers them (watch-comments.js reads them; the
+// Shorts e2e serves this). Every comment names its Short ("on <id>"), so a test can tell whose comments are up.
+//   shortsNext(body, mode) -> { status, json, delay }   mode: { [shortId]: 'off' | 'fail' | 'slow' | 'none' }
+//   body { videoId }: the watch-next data with its comments section (a token per Short, or YouTube's "turned off").
+//   body { continuation: 'SHCM|<id>|1' | '|2' | '|new' }: a page of that Short's comments (the older renderer shape).
+const CM_PAGE = 12;
+function cmItem(id, n, sort) {
+  return { commentThreadRenderer: { comment: { commentRenderer: { commentId: 'Ugs' + (sort === 'new' ? 'N' : 'T') + n + '-' + id,
+    authorText: { simpleText: '@fixture_viewer' + n }, authorEndpoint: { browseEndpoint: { canonicalBaseUrl: '/@fixture_viewer' + n } },
+    contentText: { runs: [{ text: (sort === 'new' ? 'Newest comment ' : 'Comment ') + n + ' on ' + id + ': a made-up note about the drill.' }] },
+    publishedTimeText: { runs: [{ text: n + ' days ago' }] }, voteCount: { simpleText: String(40 - n) }, isLiked: false, replyCount: 0 } } } };
+}
+function shortsNext(body, mode) {
+  const m = mode || {};
+  const tok = String((body && body.continuation) || '');
+  const c = /^SHCM\|([A-Za-z0-9_-]{6,20})\|(1|2|new)$/.exec(tok);
+  const id = c ? c[1] : String((body && body.videoId) || '');
+  const delay = m[id] === 'slow' ? 2500 : 0;
+  if (m[id] === 'fail') return { status: 500, json: { error: { code: 500, message: 'fixture: failing on purpose' } }, delay };
+  if (!c && body && body.videoId) {
+    const sec = m[id] === 'none' ? [] : [{ itemSectionRenderer: { sectionIdentifier: 'comment-item-section', contents: m[id] === 'off'
+      ? [{ messageRenderer: { text: { runs: [{ text: 'Comments are turned off. ' }, { text: 'Learn more' }] } } }]
+      : [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'SHCM|' + id + '|1' } } } }] } }];
+    return { status: 200, json: { contents: { twoColumnWatchNextResults: { results: { results: { contents: sec } } } } }, delay };
+  }
+  if (!c) return { status: 400, json: { error: { code: 400, message: 'fixture: unknown token' } }, delay };
+  const sort = c[2] === 'new' ? 'new' : 'top';
+  const from = c[2] === '2' ? CM_PAGE + 1 : 1, to = c[2] === '2' ? CM_PAGE + 6 : CM_PAGE;
+  const list = [];
+  for (let n = from; n <= to; n++) list.push(cmItem(id, n, sort));
+  if (c[2] === '1') list.push({ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'SHCM|' + id + '|2' } } } });
+  if (c[2] === '2') return { status: 200, json: { onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: list } }] }, delay };
+  const head = { commentsHeaderRenderer: { countText: { runs: [{ text: String(CM_PAGE + 6) }, { text: ' Comments' }] },
+    sortMenu: { sortFilterSubMenuRenderer: { subMenuItems: [
+      { title: 'Top', selected: sort === 'top', serviceEndpoint: { continuationCommand: { token: 'SHCM|' + id + '|1' } } },
+      { title: 'Newest', selected: sort === 'new', serviceEndpoint: { continuationCommand: { token: 'SHCM|' + id + '|new' } } }] } } } };
+  return { status: 200, json: { onResponseReceivedEndpoints: [
+    { reloadContinuationItemsCommand: { targetId: 'comments-section', continuationItems: [head] } },
+    { reloadContinuationItemsCommand: { targetId: 'engagement-panel-comments-section', continuationItems: list } }] }, delay };
+}
+
+module.exports = { SHORTS, PLAYLISTS, shortsPage, realShortsPage, channelShorts, list, avatarOf, shortsNext, CM_PAGE };
