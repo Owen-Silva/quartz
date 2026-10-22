@@ -89,6 +89,16 @@
     return SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, i + (dir > 0 ? 1 : -1)))];
   }
   function stepVol(v, by) { return Math.round(Math.max(0, Math.min(1, (Number(v) || 0) + by)) * 100) / 100; }
+  /*
+   * Up/Down's volume command from the bar's state { vol, m }. Muted steps from the level he had, the
+   * way YouTube's own keys do: Up unmutes one step above it (it used to count muted as 0, so 80%
+   * muted came back at 5%), Down lowers that level and stays muted (it used to write 0 over it).
+   */
+  function volKey(st, by) {
+    var o = st || {};
+    var v = stepVol(o.vol, by);
+    return o.m && by < 0 ? { c: 'vol', v: v, unmute: false } : { c: 'vol', v: v };
+  }
   function speedLabel(r) { return r === 1 ? 'Normal' : String(r).replace(/^0\./, '0.') + '×'; }
 
   /**
@@ -199,7 +209,7 @@
   var PURE = {
     HIDE_MS: HIDE_MS, FIND_MS: FIND_MS, CMD_MS: CMD_MS, FAILS: FAILS, SPEEDS: SPEEDS, STORE: STORE, PAGE_KEYS: PAGE_KEYS,
     fmtTime: fmtTime, seekRange: seekRange, clampSeek: clampSeek, skipTarget: skipTarget, fracAt: fracAt, timeAt: timeAt, fracOf: fracOf,
-    stepSpeed: stepSpeed, stepVol: stepVol, speedLabel: speedLabel, keyAction: keyAction, buildMenu: buildMenu, captionsToggle: captionsToggle,
+    stepSpeed: stepSpeed, stepVol: stepVol, volKey: volKey, speedLabel: speedLabel, keyAction: keyAction, buildMenu: buildMenu, captionsToggle: captionsToggle,
     hideDelay: hideDelay, Health: Health, modeFrom: modeFrom, tileRule: tileRule
   };
   if (typeof document === 'undefined') return PURE;
@@ -406,7 +416,19 @@
       activity(s);
     }
     E.seek.addEventListener('pointerup', end);
-    E.seek.addEventListener('pointercancel', function () { P.drag = false; E.seek.classList.remove('is-drag'); });
+    // A drag that ends without a pointerup on the bar (the capture lost to an alt-tab, a touch cancel):
+    // drop it and put the knob back on the playing time. A drag left set kept the bar up for good
+    // (hideDelay waits on it) and froze the knob. lostpointercapture also follows every normal
+    // pointerup, when P.drag is already false: then it does nothing.
+    function cancel() {
+      if (!P.drag || s._pb !== P) return;
+      P.drag = false;
+      E.seek.classList.remove('is-drag');
+      paint(s);
+      schedule(s);
+    }
+    E.seek.addEventListener('pointercancel', cancel);
+    E.seek.addEventListener('lostpointercapture', cancel);
     E.seek.addEventListener('keydown', function (e) {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
       e.preventDefault(); e.stopPropagation();
@@ -436,11 +458,14 @@
     if (P.own && c.c !== 'own') ownOff(s);
     P.cmds++;
     activity(s);
+    // An answer can land after the player closed (destroy sets s._pb = null) or after a new bar replaced
+    // this one: it then belongs to nobody and is dropped (it used to throw on the null bar in failed()).
     return js(s, Page.command(c)).then(function (r) {
+      if (s._pb !== P) return null;
       if (r && r.ok) { P.health.ok(); if (r.st) take(s, r.st); return r; }
       if (r && r.blocked === 'ad') { if (c.c === 'rate') blockedRate(s); else blockedSeek(s); return r; }
       return failed(s, c.c, (r && r.why) || 'the page said no');
-    }, function (e) { return failed(s, c.c, (e && e.message) || String(e)); });
+    }, function (e) { if (s._pb !== P) return null; return failed(s, c.c, (e && e.message) || String(e)); });
   }
   function failed(s, c, why) {
     var P = s._pb;
@@ -466,8 +491,9 @@
     // A heavy page busy with its own scripts at dom-ready (a slow machine) can take seconds to run the bridge in:
     // wait as long as the video search itself before calling it broken.
     js(s, code, FIND_MS).then(function (r) {
+      if (s._pb !== P) return;
       if (r && r.found && !P.ready) quiet2(s, { c: 'rescan' });
-    }, function (e) { if (!P.fell) fallback(s, P.health.broken((e && e.message) || e)); });
+    }, function (e) { if (s._pb === P && !P.fell) fallback(s, P.health.broken((e && e.message) || e)); });
   }
 
   function onMsg(s, m) {
@@ -504,11 +530,15 @@
     if (!P.on) { closeMenu(s); P.el.ownPill.hidden = true; if (P.fs) setFs(s, false); }
   }
 
+  /** The page's URL without its #hash ('' when the view is gone): which video a fallback was about. */
+  function pageUrl(v) { try { return String(v && v.getURL ? v.getURL() : '').split('#')[0]; } catch (e) { return ''; } }
+
   function fallback(s, reason, kind) {
     var P = s._pb;
     if (!P) return;
     clearTimeout(P.findT);
     P.fell = reason;
+    P.fellUrl = pageUrl(P.view);
     setOn(s, false);
     quiet2(s, { c: 'off' });
     remember('fallback', reason);
@@ -684,7 +714,7 @@
     switch (a.c) {
       case 'toggle': user(s, { c: 'toggle' }); break;
       case 'skip': skip(s, a.by); break;
-      case 'vol': user(s, { c: 'vol', v: stepVol(st.m ? 0 : st.vol, a.by) }); break;
+      case 'vol': user(s, volKey(st, a.by)); break;
       case 'mute': toggleMute(s); break;
       case 'fs': setFs(s, !P.fs); break;
       case 'whole': setWhole(s, !P.whole); break;
@@ -739,6 +769,7 @@
     // Fresh lists each time (YouTube lists its captions once the module has loaded).
     if (kind !== 'speed') {
       js(s, Page.command({ c: 'menus' })).then(function (r) {
+        if (s._pb !== P) return;
         if (r && r.ok && r.menus) { P.menus = r.menus; if (P.menu && P.menu.kind === kind) { renderMenu(s); placeMenu(s); } paint(s); }
       }, function () { /* the menu shows what it had */ });
     }
@@ -802,9 +833,10 @@
   function pickItem(s, kind, id) {
     var P = s._pb;
     if (id === '__own' || id === '__more') { openOwn(s, id === '__more' ? 'more' : kind); return; }
-    if (kind === 'speed') { user(s, { c: 'rate', r: Number(id) }).then(function () { if (P.menu) renderMenu(s); }); closeMenu(s); return; }
+    if (kind === 'speed') { user(s, { c: 'rate', r: Number(id) }).then(function () { if (s._pb === P && P.menu) renderMenu(s); }); closeMenu(s); return; }
     if (kind === 'captions' && id !== 'off') P.lastCap = id;
     user(s, { c: 'pick', kind: kind, id: id }).then(function (r) {
+      if (s._pb !== P) return;
       if (r && r.menus) P.menus = r.menus;
       paint(s);
       var it = (menuModel(s, kind).items || []).filter(function (x) { return x.id === id; })[0];
@@ -817,7 +849,7 @@
     var P = s._pb;
     closeMenu(s);
     user(s, { c: 'own', kind: kind }).then(function (r) {
-      if (!r || !r.ok) return;
+      if (!r || !r.ok || s._pb !== P) return;
       var what = kind === 'more' ? 'controls' : (KIND[kind] || kind).toLowerCase() + ' menu';
       P.own = kind;
       P.el.ownTx.textContent = r.opened ? P.name + '’s own ' + what + ' is open.' : P.name + '’s own bar is showing; its ' + what + ' is there.';
@@ -870,7 +902,19 @@
       P.fell = ''; P.health.ok(); P.el.reason.hidden = true;
     });
     v.addEventListener('did-navigate-in-page', function (e) {
-      if (s.view !== v || !e.isMainFrame || !P.ready) return;
+      if (s.view !== v || !e.isMainFrame) return;
+      // Another video inside the same page (YouTube moves between videos, and from a channel or the home
+      // page onto one, without loading a page): a fallback was about the old one, as on did-navigate.
+      // It used to stay for good -- after a "no video" on a channel page, every video he then clicked
+      // kept YouTube's own bar until a reload. The bar looks again; no video again says so again.
+      if (P.fell && String(e.url || '').split('#')[0] !== P.fellUrl) {
+        P.fell = ''; P.health.ok(); P.el.reason.hidden = true;
+        clearTimeout(P.findT);
+        P.findT = setTimeout(function () { if (s._pb === P && !P.ready && !P.fell) fallback(s, P.health.novideo(FIND_MS), 'novideo'); }, FIND_MS + 1800);
+        setTimeout(function () { if (s._pb === P && s.view === v) quiet2(s, { c: 'rescan' }); }, 300);
+        return;
+      }
+      if (!P.ready) return;
       setTimeout(function () { quiet(s, { c: 'rescan' }); }, 300);
     });
     v.addEventListener('console-message', function (e) {

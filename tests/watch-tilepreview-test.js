@@ -63,6 +63,7 @@ function world(o) {
     itemOf: (tile) => ({ item: tile.item, event: tile.event || null, team: tile.team || null }),
     hasTmdbKey: () => w.tmdbKey,
     mock: () => true,
+    offline: () => !!w.offline,
     mount: (tile, url, view) => {
       const p = { tile, url, view, posts: [], alive: true, revealed: false, progress: [] };
       players.push(p);
@@ -122,6 +123,8 @@ function world(o) {
   check(s.type === 'none', 'tileSource: no TMDB key: nothing plays (the tile stays still)', s);
   check(TP.tileSource(LIVE, { hasTmdbKey: true }).type === 'none', 'tileSource: a live ESPN card never previews');
   check(TP.tileSource(Object.assign({}, DISNEY, { kind: 'upcoming' }), { hasTmdbKey: true }).type === 'none', 'tileSource: an upcoming event never previews');
+  check(TP.tileSource(Object.assign({}, YT, { live: true }), { hasTmdbKey: true }).type === 'none', 'tileSource: a YouTube live stream (kind rec, live: true) never previews');
+  check(TP.tileSource(Object.assign({}, YT, { upcoming: true }), { hasTmdbKey: true }).type === 'none', 'tileSource: a YouTube premiere (kind rec, upcoming: true) never previews');
   check(TP.tileSource(DISNEY, { hasTmdbKey: true, event: true }).type === 'none' && TP.tileSource(DISNEY, { hasTmdbKey: true, team: true }).type === 'none', 'tileSource: games and My teams never preview');
 
   /* ---- the &t= hand-off ---- */
@@ -308,6 +311,48 @@ function world(o) {
   w.over(w.tile(YT)); w.advance(800); w.gateOk();
   w.advance(TP.LOAD_MS + 1);
   check(w.alive === 0, 'error: a player that never loads is removed after ' + TP.LOAD_MS + ' ms');
+  {
+    /* r62: a failure is never silent: the still again, and the tile's note says why; the note goes with the pointer */
+    const e = world();
+    const ea = e.tile(YT);
+    e.over(ea); e.advance(800); e.gateOk();
+    e.ctl.onMessage(JSON.stringify({ event: 'onError', info: 150 }));
+    check(e.alive === 0 && e.ctl.state().phase === 'blocked' && e.notes.length === 1 && e.notes[0].alive && /only plays on YouTube/.test(e.notes[0].text), 'error 150: the player goes and the tile says why', e.notes.map((n) => n.text));
+    e.out(ea);
+    check(e.notes[0].alive === false && e.ctl.state().phase === 'idle', 'error: the note goes with the pointer');
+    const eb = e.tile(YT);
+    e.over(eb); e.advance(800); e.gateOk();
+    e.ctl.onMessage(JSON.stringify({ event: 'onError', info: 5 }));
+    check(/(error 5)/.test(e.notes[1] && e.notes[1].text), 'error 5: the note names the code', e.notes.map((n) => n.text));
+    const ec = e.tile(YT);
+    e.over(ec); e.advance(800); e.gateOk();
+    e.advance(TP.LOAD_MS + 1);
+    check(e.alive === 0 && /didn.t load/.test(e.notes[e.notes.length - 1].text) && e.notes[e.notes.length - 1].alive, 'load timeout: the tile says the player didn’t load', e.notes.map((n) => n.text));
+    /* main never answers the gate, or the trailer: no endless silent wait */
+    const ed = e.tile(YT);
+    e.over(ed); e.advance(800);
+    check(e.ctl.state().phase === 'gate', 'gate: asked main');
+    e.advance(10000);
+    check(e.ctl.state().phase === 'blocked' && /didn.t answer/.test(e.notes[e.notes.length - 1].text), 'gate: no answer from main: the tile says so', e.ctl.state());
+    const late = e.lastGate();
+    e.ctl.onGate({ seq: late.seq, ok: true, reason: '' });
+    check(e.alive === 0, 'gate: a late answer after the no-answer note plays nothing');
+    const ee = e.tile(DISNEY);
+    e.over(ee); e.advance(800); e.gateOk();
+    check(e.ctl.state().phase === 'trailer', 'trailer: asked main');
+    e.advance(10000);
+    check(e.ctl.state().phase === 'blocked' && /didn.t answer/.test(e.notes[e.notes.length - 1].text), 'trailer: no answer from main: the tile says so', e.ctl.state());
+    /* an answered gate clears the wait: a slow player load is the 9 s load timer's, not "didn't answer" */
+    const ef = e.tile(YT);
+    e.over(ef); e.advance(800); e.advance(3000); e.gateOk(); e.advance(5000);
+    check(e.ctl.state().phase === 'mounted' && e.alive === 1, 'gate: answered at 3 s: the player is still loading at 8 s (no false "didn’t answer")', e.ctl.state());
+    /* offline: no request to main, no player, a note */
+    const g = world();
+    g.offline = true;
+    const ga = g.tile(YT);
+    g.over(ga); g.advance(800);
+    check(g.sent.length === 0 && g.players.length === 0 && /offline/.test(g.notes[0] && g.notes[0].text), 'offline: no player, the tile says why', g.notes.map((n) => n.text));
+  }
   w.over(w.tile(YT)); w.advance(800); w.gateOk(); w.ctl.loaded();
   w.advance(TP.REVEAL_FALLBACK_MS + 1);
   check(w.alive === 1 && w.players[w.players.length - 1].revealed === true, 'fallback: a player whose messages never arrive is shown ' + TP.REVEAL_FALLBACK_MS + ' ms after it loaded (the stage\'s rule)');

@@ -14,7 +14,7 @@
   font: 500 var(--fs-s, 13px)/1.35 var(--font, "Segoe UI Variable Text", "Segoe UI", sans-serif);
   pointer-events: none;
   opacity: 1;
-  transition: opacity 180ms ease;
+  transition: opacity 150ms ease;
   user-select: none;
 }
 .pb::before {
@@ -96,7 +96,10 @@
 .pb-ad[hidden] { display: none; }
 
 /* ---- an ad: no seeking, nothing on the right (the service's Skip button lives there) ---- */
-.pb.is-ad .pb-seek { pointer-events: none; cursor: default; }
+/* the seek bar still takes the pointer during the ad: its handlers say "Seeking is off" and keep the
+   click off the page under the bar (with pointer-events: none it fell through to the ad, which on
+   YouTube opens the advertiser's page, and nothing said why) */
+.pb.is-ad .pb-seek { cursor: not-allowed; }
 .pb.is-ad .pb-done { background: #c9a958; }
 .pb.is-ad .pb-knob { display: none; }
 .pb.is-ad .pb-back, .pb.is-ad .pb-fwd, .pb.is-ad .pb-right, .pb.is-ad .pb-time { display: none; }
@@ -188,9 +191,9 @@
 .pb.is-short.is-idle .pb-row { visibility: hidden; }
 /* The line drops to where the row was: just above the player's bottom edge, inside its rounded corners. */
 .pb.is-short.is-idle .pb-seek { transform: translateY(46px); }
-.pb.is-short .pb-seek { transition: transform 180ms ease; }
-.pb.is-short .pb-row, .pb.is-short::before { transition: opacity 180ms ease, visibility 0s linear 0s; }
-.pb.is-short.is-idle .pb-row { transition: opacity 180ms ease, visibility 0s linear 180ms; }
+.pb.is-short .pb-seek { transition: transform 150ms ease; }
+.pb.is-short .pb-row, .pb.is-short::before { transition: opacity 150ms ease, visibility 0s linear 0s; }
+.pb.is-short.is-idle .pb-row { transition: opacity 150ms ease, visibility 0s linear 150ms; }
 @media (prefers-reduced-motion: reduce) {
   .pb.is-short .pb-seek, .pb.is-short .pb-row, .pb.is-short::before { transition: none; }
 }

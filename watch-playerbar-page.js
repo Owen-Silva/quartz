@@ -133,6 +133,9 @@
       // Another Short's video starts (YouTube moved on, or a neighbour it preloaded took over): the bar follows
       // the current one at once, on the video's own event (no polling).
       if ((e.type === 'playing' || e.type === 'play' || e.type === 'loadedmetadata') && A.current && e.target && e.target.tagName === 'VIDEO' && current() === e.target) attach(e.target);
+      // A page that swaps its <video> element without a URL change (the next episode in the same player): the
+      // old one left the page, so it never fires again and the bar froze on it. The new one starting takes over.
+      else if ((e.type === 'playing' || e.type === 'loadedmetadata') && B.video && !B.video.isConnected && e.target && e.target.tagName === 'VIDEO' && e.target.isConnected) attach(e.target);
     }
     function onTime(e) {
       if (e.target !== B.video) return;
@@ -326,6 +329,11 @@
       if (c.c === 'status') return status();
       if (c.c === 'rescan') {
         var now = v ? current() : null;
+        // Off a Shorts page onto a watch page (YouTube's in-page move): current() says null, and YouTube
+        // keeps ytd-shorts -- with the Shorts player's <video>, now hidden -- in the page, so the bar stayed
+        // on that invisible video (time, play and volume all drove it). An attached video with no box
+        // while another one is on screen: follow the one on screen.
+        if (v && now === null && area(v) === 0) { var vis = pick(); if (vis && vis !== v && area(vis) > 0) now = vis; }
         if (!v) { B.video = null; find(true); } else if (now && now !== v) attach(now); else post({ t: 'ready', st: state(true) });
         return status();
       }
@@ -339,7 +347,9 @@
         case 'lift': R.style.setProperty('--lumen-pb-lift', Math.max(0, Math.min(400, num(c.px, 0))) + 'px'); break;
         case 'play': case 'pause': case 'toggle': {
           var go = c.c === 'play' || (c.c === 'toggle' && v.paused);
-          if (go) { var pr = v.play(); if (pr && pr.catch) pr.catch(function (err) { post({ t: 'err', c: 'play', why: String((err && err.name) || err).slice(0, 80) }); }); }
+          // AbortError: a pause (his next Space, or the page's own) interrupted this play() -- that is
+          // him changing his mind, not a failure, so it is not reported (it counted towards the fallback)
+          if (go) { var pr = v.play(); if (pr && pr.catch) pr.catch(function (err) { if (err && err.name === 'AbortError') return; post({ t: 'err', c: 'play', why: String((err && err.name) || err).slice(0, 80) }); }); }
           else v.pause();
           break;
         }
@@ -351,8 +361,8 @@
           v.currentTime = Math.max(lo, Math.min(hi, to));
           break;
         }
-        case 'vol': v.volume = Math.max(0, Math.min(1, num(c.v, v.volume))); if (v.volume > 0 && v.muted && c.unmute !== false) v.muted = false; break;
-        case 'mute': v.muted = !!c.on; break;
+        case 'vol': v.volume = Math.max(0, Math.min(1, num(c.v, v.volume))); if (v.volume > 0 && v.muted && c.unmute !== false) { v.muted = false; ownMute(v, false); } break;
+        case 'mute': v.muted = !!c.on; ownMute(v, !!c.on); break;
         case 'rate': if (ad && ad.on) return { ok: false, blocked: 'ad' }; v.playbackRate = Math.max(0.0625, Math.min(16, num(c.r, 1))); break;
         case 'menus': return { ok: true, menus: menus() };
         case 'pick': { var r1 = choose(String(c.kind), String(c.id)); if (!r1.ok) return r1; return { ok: true, menus: menus(), st: state(false) }; }
@@ -362,6 +372,25 @@
         default: return { ok: false, why: 'unknown command ' + String(c.c).slice(0, 20) };
       }
       return { ok: true, st: state(false) };
+    }
+    /*
+     * Mute through the page's own player too, where it has one (YouTube's .html5-video-player, on watch pages
+     * and #shorts-player alike). The <video>'s muted flag alone is not YouTube's state: its player un-mutes the
+     * next Short (one <video> takes each Short in turn, and YouTube re-applies what IT thinks). Its own
+     * mute() / unMute() also carry to the next video the way its own M key does. Never throws.
+     */
+    function ownMute(v, on) {
+      var p = safe(function () { return v.closest ? v.closest('.html5-video-player') : null; });
+      if (!p) return;
+      // the level stays the bar's: YouTube's unMute() would bring back ITS stored volume, which the bar's
+      // own volume changes (set on the <video>) never told it
+      var keep = v.volume;
+      safe(function () {
+        if (on && typeof p.mute === 'function') p.mute();
+        else if (!on && typeof p.unMute === 'function') p.unMute();
+      });
+      safe(function () { if (v.volume !== keep) v.volume = keep; });
+      safe(function () { if (v.muted !== on) v.muted = on; });
     }
     function status() { return { ok: true, v: B.v, found: !!B.video, on: B.on }; }
     function teardown() {

@@ -278,6 +278,18 @@ run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
     const lp = limT && await cdpTo(limT);
     const born = lp && await lp.ev('window.__born');
     check(!!lp && (await lp.ev('!!document.getElementById("lim") && getComputedStyle(document.getElementById("lim")).display !== "none"')) && (await chrome.ev(`WatchPlayer._state().slots[3].state`)) === '', 'and the service’s page stays visible in the tile (Lumen draws nothing over it)');
+    if (lp) {
+      // r62: the tile moves to another page (he freed a device; the service moved on): the old refusal goes from
+      // its header; back on the limit page, the fresh watch reports it again
+      await lp.ev('location.href = ' + JSON.stringify(FP + '/__p/limit-gone') + ', 1').catch(() => 0);
+      const gone = await chrome.waitFor(`(() => { const t = ${MS}.tiles[3]; return t && t.url.indexOf('limit-gone') >= 0 && !t.limit ? t : null; })()`, 10000).catch(() => null);
+      check(!!gone && gone.head.indexOf(LIMIT_TEXT) < 0, 'a new page in the tile: the old stream-limit sentence leaves its header', gone && { limit: gone.limit, head: gone.head });
+      const limT2 = await targetWhere(q, (x) => String(x.url).indexOf(FP + '/__p/limit-gone') === 0, 5000);
+      const lp2 = limT2 && await cdpTo(limT2);
+      if (lp2) { await lp2.ev('location.href = ' + JSON.stringify(FP + '/__p/limit') + ', 1').catch(() => 0); try { lp2.close(); } catch (e) { /* gone */ } }
+      const back = await chrome.waitFor(`(() => { const t = ${MS}.tiles[3]; return t && t.limit ? t : null; })()`, 15000).catch(() => null);
+      check(!!back && back.limit === LIMIT_TEXT, 'and back on the limit page, the sentence is reported again', back && { limit: back.limit });
+    }
 
     // Shots: 2-up, 3-up, 4-up were built in that order; 4-up now (2 and 3 again after removes below).
     await shoot('4up');
@@ -407,6 +419,30 @@ run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
     const sb = await chrome.ev(ST);
     check(sb.open && sb.n === 4, 'Alt+Left in multiview never closes the tiles (Back is the selected tile’s own history)', { open: sb.open, n: sb.n, note: sb.note });
 
+    /* ===== 7c. r62: a tile in its own fullscreen: X waits, F leaves it (X used to remove the tile and wedge the layer) ===== */
+    {
+      const fsT = await targetWhere(q, (x) => String(x.url) === FD + '/__p/gameB', 3000);
+      const fp = fsT && await cdpTo(fsT);
+      if (fp) {
+        const n0 = (await chrome.ev(MS)).n;
+        await fp.send('Runtime.evaluate', { expression: 'document.documentElement.requestFullscreen().then(() => 1, (e) => String(e))', awaitPromise: true, userGesture: true }).catch(() => 0);
+        const inFs = await chrome.waitFor(`${ST}.fs ? ${ST} : null`, 4000).catch(() => null);
+        check(!!inFs, 'a tile page asks for fullscreen: the layer goes full-window (the setup for the next two)', inFs && inFs.fs);
+        if (inFs) {
+          await keyIn(fp, 'x', 'KeyX', 88); await sleep(600);
+          const afterX = await chrome.ev(MS);
+          check(afterX.n === n0 && (await chrome.ev(ST)).fs === true, 'X in a fullscreen tile removes nothing (the tile and the fullscreen stay)', { before: n0, after: afterX.n });
+          await keyIn(fp, 'f', 'KeyF', 70);
+          const outFs = await chrome.waitFor(`!${ST}.fs ? ${ST} : null`, 4000).catch(() => null);
+          check(!!outFs && (await fp.ev('!document.fullscreenElement')) && (await chrome.ev(MS)).n === n0, 'F in a fullscreen tile leaves the fullscreen (the page’s own key), not Expand', outFs && { fs: outFs.fs });
+          if (!outFs) await fp.ev('document.fullscreenElement ? document.exitFullscreen().then(() => 1) : 0').catch(() => 0);
+        }
+        fp.close();
+        // an Esc within 500 ms of leaving fullscreen is the fullscreen's, never multiview's (watch-player-multi onBack)
+        await sleep(800);
+      }
+    }
+
     /* ===== 8. Esc leaves multiview ===== */
     const keepWc = (await chrome.ev(ST)).slots[(await chrome.ev(ST)).focus].wcId;
     const anyT = await targetWhere(q, (x) => String(x.url) === FD + '/__p/gameB', 3000);
@@ -418,10 +454,35 @@ run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
     check((await mstate()).layout === '1' && !(await chrome.ev('document.querySelector(".wp-layer").classList.contains("mv-multi")')), 'the single player has the whole layer again', await mstate().then((x) => x.layout));
 
     /* ===== 9. the single mini-player: shots, drag, X ===== */
+    const PBON = '(window.LumenPlayerBar && LumenPlayerBar._state().slots[0] ? LumenPlayerBar._state().slots[0].on : null)';
+    await sleep(1500);
+    const pbBefore = await chrome.ev(PBON);
     await chrome.ev('document.querySelector(".mv-minibtn").click(), 1');
     mm = await chrome.waitFor(`${MS}.mini ? ${MS} : null`, 3000).catch(() => null);
     check(!!mm && mm.n === 1, 'the single player shrinks into a corner too');
+    await sleep(300);
+    // r62: the play bar syncs on the way in and out (it stayed on inside the corner box until the next navigation)
+    check((await chrome.ev(PBON)) !== true, 'in the corner the play bar is off (synced on the way in)', { before: pbBefore, now: await chrome.ev(PBON) });
     await shoot('mini');
+    {
+      // r62: a restore while a drag is under way: the drag's full-window shield and listeners go with it
+      // (they stayed for good, and nothing in the window took a click)
+      const b9 = mm.box;
+      await mouse(chrome, 'mouseMoved', b9[0] + b9[2] / 2, b9[1] + 15);
+      await mouse(chrome, 'mousePressed', b9[0] + b9[2] / 2, b9[1] + 15, 'left', 1);
+      for (let i = 1; i <= 3; i++) await chrome.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(b9[0] + b9[2] / 2 - 20 * i), y: Math.round(b9[1] + 15 - 10 * i), button: 'left', buttons: 1 });
+      const mid = await chrome.ev('!!document.querySelector(".mv-drag-shield")');
+      await chrome.ev('document.querySelector(".mv-mini-restore").click(), 1');
+      await sleep(200);
+      const left = await chrome.ev('document.querySelectorAll(".mv-drag-shield").length');
+      await mouse(chrome, 'mouseReleased', b9[0] + b9[2] / 2 - 60, b9[1] - 15, 'left', 1);
+      const rs = await chrome.waitFor(`!${MS}.mini ? ${MS} : null`, 3000).catch(() => null);
+      check(mid === true && left === 0 && !!rs, 'a restore mid-drag: the drag shield goes with it', { shieldMidDrag: mid, shieldsAfter: left, restored: !!rs });
+      await sleep(300);
+      check((await chrome.ev(PBON)) === pbBefore, 'restored full size: the play bar is as it was before the corner', { before: pbBefore, now: await chrome.ev(PBON) });
+      await chrome.ev('document.querySelector(".mv-minibtn").click(), 1');
+      mm = await chrome.waitFor(`${MS}.mini ? ${MS} : null`, 3000).catch(() => null);
+    }
     check((await chrome.ev('(() => { const r = document.querySelector(".mv-mini-title").getBoundingClientRect(); const h = document.querySelector(".mv-mini-head").getBoundingClientRect(); return r.bottom <= h.bottom + 0.5 && r.top >= h.top - 0.5; })()')), 'the mini header’s title fits its header (nothing clipped)');
     await chrome.ev('document.querySelector(".mv-mini-close").click(), 1');
     const closed = await chrome.waitFor(`!${ST}.open ? ${ST} : null`, 3000).catch(() => null);

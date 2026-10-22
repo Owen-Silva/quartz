@@ -162,7 +162,7 @@
 .wp-layer.mv-mini .mv-mini-hit:hover .mv-mini-hint { opacity: 0.9; }
 .wp-layer.mv-mini.mv-dragging { transition: none; cursor: grabbing; }
 .wp-layer.mv-mini.mv-dragging .mv-mini-hit, .wp-layer.mv-mini.mv-dragging .mv-mini-head { cursor: grabbing; }
-.wp-layer.mv-mini.mv-snap { transition: left 220ms var(--m-spring, ease-out), top 220ms var(--m-spring, ease-out); }
+.wp-layer.mv-mini.mv-snap { transition: left 150ms var(--m-spring, ease-out), top 150ms var(--m-spring, ease-out); }
 
 @media (prefers-reduced-motion: reduce) {
   .wp-layer.mv-mini.mv-snap { transition: none; }
