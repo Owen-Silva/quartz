@@ -162,7 +162,9 @@
     return Math.round(n * (k === 'K' ? 1e3 : k === 'M' ? 1e6 : k === 'B' ? 1e9 : 1));
   }
   function repliesToken(rr) {
-    var c = rr && Array.isArray(rr.contents) ? rr.contents : [];
+    // YouTube's web client now puts a thread's replies token under subThreads (contents is the older place): read
+    // only from contents, every thread on real YouTube came back with no replies at all (r62, real-YouTube probe).
+    var c = rr ? [].concat(Array.isArray(rr.contents) ? rr.contents : [], Array.isArray(rr.subThreads) ? rr.subThreads : []) : [];
     for (var i = 0; i < c.length; i++) { var t = contToken(c[i].continuationItemRenderer); if (t) return t; }
     return '';
   }

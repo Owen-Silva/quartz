@@ -89,6 +89,15 @@ check(C.linkOf('https://youtu.be/abc?t=30', 'abc').kind === 'time', 'youtu.be ti
   const n = C.linkOf(C.cmdUrl({ innertubeCommand: { watchEndpoint: { videoId: 'abc' } } }), 'abc');
   check(!!z && z.kind === 'time' && z.t === 0 && !!n && n.kind === 'yt', 'a “0:00” timestamp seeks to the start; a link to the video with no time stays a link', { z, n });
 }
+// r62: real YouTube's web client (10-22) puts a thread's replies token under commentRepliesRenderer.subThreads.
+{
+  const thread = (rr) => ({ onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: [{ commentThreadRenderer: {
+    comment: { commentRenderer: { commentId: 'UgxSub1', contentText: { simpleText: 'hi' }, authorText: { simpleText: '@a' }, replyCount: 986 } }, replies: { commentRepliesRenderer: rr } } }] } }] });
+  const tok = { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'REP-SUB' } } } };
+  const sub = C.parse(thread({ subThreads: [tok], viewReplies: { buttonRenderer: { text: { runs: [{ text: '986 replies' }] } } } }), 'v').items[0];
+  const old = C.parse(thread({ contents: [tok] }), 'v').items[0];
+  check(!!sub && sub.repliesToken === 'REP-SUB' && sub.replies === 986 && !!old && old.repliesToken === 'REP-SUB', 'replies are found under subThreads (YouTube’s current shape) and under contents', { sub, old });
+}
 check(C.safeImg('javascript:x') === '' && C.safeImg('http://x/a.jpg') === '' && C.safeImg('//yt3.ggpht.com/a') === 'https://yt3.ggpht.com/a', 'avatars: https or data:image only');
 check(C.num('1.2K') === 1200 && C.num('3') === 3 && C.num('1,234') === 1234 && C.num('') === 0, 'counts read');
 check(C.countLabel('1') === '1 Comment' && C.countLabel('12') === '12 Comments' && C.countLabel('') === 'Comments', 'the count has its word');
