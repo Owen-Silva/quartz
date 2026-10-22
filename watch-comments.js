@@ -113,7 +113,11 @@
     if (!x || typeof x !== 'object') return '';
     if (x.urlEndpoint && x.urlEndpoint.url) return String(x.urlEndpoint.url);
     if (x.watchEndpoint && x.watchEndpoint.videoId) {
-      return YT + '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (x.watchEndpoint.startTimeSeconds ? '&t=' + Number(x.watchEndpoint.startTimeSeconds) + 's' : '');
+      // startTimeSeconds 0 is a real time ("0:00" in a chapter list): it seeks to the start, it never opens the video
+      // again (a truthiness test dropped it, so "0:00" reloaded the video he was watching).
+      var sts = x.watchEndpoint.startTimeSeconds;
+      var hasT = sts !== undefined && sts !== null && sts !== '' && isFinite(Number(sts)) && Number(sts) >= 0;
+      return YT + '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (hasT ? '&t=' + Math.floor(Number(sts)) + 's' : '');
     }
     if (x.browseEndpoint) {
       if (x.browseEndpoint.canonicalBaseUrl) return YT + x.browseEndpoint.canonicalBaseUrl;

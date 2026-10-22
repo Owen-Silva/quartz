@@ -83,6 +83,12 @@ check(C.linkOf('javascript:alert(1)') === null && C.linkOf('data:text/html,x') =
 check(C.linkOf('https://www.youtube.com/redirect?q=javascript%3Aalert(1)') === null, 'a redirect to javascript: is text too');
 check(C.linkOf('/watch?v=abc&t=1m5s', 'abc').kind === 'time' && C.linkOf('/watch?v=abc&t=1m5s', 'abc').t === 65 && C.linkOf('/watch?v=other&t=5', 'abc').kind === 'yt', 'a timestamp only seeks in this video');
 check(C.linkOf('https://youtu.be/abc?t=30', 'abc').kind === 'time', 'youtu.be timestamps too');
+// r62: "0:00" in a chapter list is YouTube's watchEndpoint with startTimeSeconds 0; it used to lose its time and reload the video.
+{
+  const z = C.linkOf(C.cmdUrl({ innertubeCommand: { watchEndpoint: { videoId: 'abc', startTimeSeconds: 0 } } }), 'abc');
+  const n = C.linkOf(C.cmdUrl({ innertubeCommand: { watchEndpoint: { videoId: 'abc' } } }), 'abc');
+  check(!!z && z.kind === 'time' && z.t === 0 && !!n && n.kind === 'yt', 'a “0:00” timestamp seeks to the start; a link to the video with no time stays a link', { z, n });
+}
 check(C.safeImg('javascript:x') === '' && C.safeImg('http://x/a.jpg') === '' && C.safeImg('//yt3.ggpht.com/a') === 'https://yt3.ggpht.com/a', 'avatars: https or data:image only');
 check(C.num('1.2K') === 1200 && C.num('3') === 3 && C.num('1,234') === 1234 && C.num('') === 0, 'counts read');
 check(C.countLabel('1') === '1 Comment' && C.countLabel('12') === '12 Comments' && C.countLabel('') === 'Comments', 'the count has its word');
