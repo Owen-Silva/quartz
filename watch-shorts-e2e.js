@@ -747,30 +747,37 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
         say('guestCur: no live page at ' + u + ', falling back');
         return guestNow();
       };
+      // A page call that can't hang the run (a page that went away never answers): d after 4 s.
+      const gev = (code, d) => (guest ? Promise.race([guest.ev(code).catch(() => d), sleep(4000).then(() => d)]) : Promise.resolve(d));
+      const moves11 = () => gev('window.__moves.length', -1);
+      const presses11 = () => gev('JSON.stringify(window.__presses)', 'null').then((j) => { try { return JSON.parse(j) || {}; } catch (e) { return {}; } });
+      // A move made by the page itself (YouTube's own down/up button, pressed in the page): no Lumen step involved.
+      const pageMove = (dir) => gev('(() => { const b = document.querySelector(' + JSON.stringify(dir > 0 ? '#navigation-button-down button' : '#navigation-button-up button') + '); if (!b) return 0; b.click(); return 1; })()', 0);
+      const openG = async (u, cond, ms) => { const z = await open(u, cond, ms); await guestCur(); return z; };
       const brief = (z) => z && { cur: z.cur, phase: z.phase, info: z.infoShort, title: z.title, note: z.note, why: z.why, busy: z.busy, save: !!z.save, cover: z.cover };
       // a. Reopened at a Short (a new document in the same view), the page's own move to the Short it last moved to
       // is still read: did-navigate-in-page skipped a repeat of the last in-page address, never forgotten.
-      x = await open(FY + '/shorts/' + S[0].id, ready(S[0].id));
+      x = await openG(FY + '/shorts/' + S[0].id, ready(S[0].id));
       await guestCur();
-      await keyIn(guest, 'ArrowDown', 'ArrowDown', 40);
+      await pageMove(1);
       await settled('r62 the page’s own key', S[1].id);
-      x = await open(FY + '/shorts/' + S[0].id, ready(S[0].id));
+      x = await openG(FY + '/shorts/' + S[0].id, ready(S[0].id));
       check(!!x, 'r62: the same Short opened again in place is read', brief(x || await sh()));
       await guestCur();
-      await keyIn(guest, 'ArrowDown', 'ArrowDown', 40);
+      await pageMove(1);
       x = await shWait(ready(S[1].id), 8000);
       check(!!x && x.title === S[1].title, 'r62: reopened, the page’s own move to the Short it last moved to is read (the info follows)', brief(x || await sh()));
       // b. A reason about one Short ("This is the first Short") is that Short's, never the next one's.
-      await keyIn(guest, 'ArrowUp', 'ArrowUp', 38);
+      await pageMove(-1);
       await settled('r62 back to the first', S[0].id);
       await chrome.ev('LumenShorts._step(-1), 1');
       x = await shWait('/first Short/.test(x.note)', 4000);
       check(!!x, 'r62: Previous at the first Short says why', brief(x || await sh()));
-      await keyIn(guest, 'ArrowDown', 'ArrowDown', 40);
+      await pageMove(1);
       x = await shWait(ready(S[1].id), 8000);
       check(!!x && !/first Short/.test(x.note) && !x.why, 'r62: on the next Short the first Short’s reason is gone', brief(x || await sh()));
       // c. A held ArrowDown in the chrome is ONE Short (its auto-repeats are not more).
-      let m1 = await moves();
+      let m1 = await moves11();
       await focusInfo();
       const kd = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, nativeVirtualKeyCode: 40 };
       await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'rawKeyDown' }, kd));
@@ -778,7 +785,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, kd));
       await settled('r62 a held ArrowDown', S[2].id);
       await sleep(600);
-      check((await moves()) === m1 + 1 && (await sh()).cur === S[2].id, 'r62: a held ArrowDown (1 press + 5 auto-repeats) moves exactly one Short', { moves: (await moves()) - m1, cur: (await sh()).cur });
+      check((await moves11()) === m1 + 1 && (await sh()).cur === S[2].id, 'r62: a held ArrowDown (1 press + 5 auto-repeats) moves exactly one Short', { moves: (await moves11()) - m1, cur: (await sh()).cur });
       // d. The info is rebuilt only when it changes: the keyboard focus stays on its button, through a no-op update
       // and through a real one (Save's list opening).
       await chrome.ev('(() => { const i = document.querySelector(".wp-layer .sh-info"); i.firstChild.__r62 = 1; document.querySelector(".wp-layer .sh-info .pv-like").focus(); window.dispatchEvent(new Event("online")); return 1; })()');
@@ -790,31 +797,31 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       fz = await chrome.ev('(() => { const a = document.activeElement; return { focus: a ? a.className : "", inInfo: !!(a && a.closest && a.closest(".sh-info")) }; })()');
       check(!!x && fz.inInfo && /pv-save\b/.test(fz.focus), 'r62: Save opened by keyboard: the list shows and the focus is still on Save', { fz, save: x && x.save });
       // e. YouTube's Save list is closed in the page when he moves on (it was left open, invisible, for the next Save).
-      const pz0 = await presses();
-      await keyIn(guest, 'ArrowDown', 'ArrowDown', 40);
+      const pz0 = await presses11();
+      await pageMove(1);
       await settled('r62 moved with the Save list open', S[3].id);
       await sleep(500);
-      const pz1 = await presses();
-      const left = await guest.ev('!!document.querySelector("ytd-add-to-playlist-renderer")');
+      const pz1 = await presses11();
+      const left = await gev('!!document.querySelector("ytd-add-to-playlist-renderer")', null);
       check(pz1.saveClose === pz0.saveClose + 1 && !left && !(await sh()).save, 'r62: moving on closes YouTube’s Save list in the page too', { closes: pz1.saveClose - pz0.saveClose, left });
       // f. A press still in flight when the page becomes a new document: its answer never lands on the new Short,
       // and the buttons never stay "Waiting for YouTube…".
-      x = await open(FY + '/shorts/' + S[0].id + '?slowsave=1', ready(S[0].id));
+      x = await openG(FY + '/shorts/' + S[0].id + '?slowsave=1', ready(S[0].id));
       await clickAt('.wp-layer .pv-save', 'Save (slow)');
       await shWait('x.busy === "save-open"', 2000);
-      x = await open(FY + '/shorts/' + S[1].id, ready(S[1].id));
+      x = await openG(FY + '/shorts/' + S[1].id, ready(S[1].id));
       await sleep(3500);
       x = await sh();
       check(!!x && x.cur === S[1].id && !x.busy && !x.save && !x.why && !!x.like && !x.like.disabled, 'r62: a press in flight across a new page: no stale answer, nothing left "Waiting for YouTube…"', brief(x) && Object.assign(brief(x), { like: x.like }));
       // g. A channel grid whose first Short never opens says so instead of "Opening the channel's Shorts…" for good.
       await chrome.ev('WatchPlayer.close("Close"), 1');
       await sleep(400);
-      x = await open(FY + CHANNEL + '/shorts?dead=1', `x.phase === 'empty'`, 16000);
+      x = await openG(FY + CHANNEL + '/shorts?dead=1', `x.phase === 'empty'`, 16000);
       check(!!x && x.cover && /didn’t open the first Short/.test(x.why), 'r62: a grid whose first Short never opens: the cover says why', brief(x || await sh()));
       await chrome.ev('WatchPlayer.close("Close"), 1');
       await sleep(400);
       // h. Offline, the page failed: back online, it loads again by itself, and the old reason goes.
-      x = await open(FY + '/shorts/' + S[3].id, ready(S[3].id));
+      x = await openG(FY + '/shorts/' + S[3].id, ready(S[3].id));
       const net = (off) => chrome.send('Network.emulateNetworkConditions', { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).catch((e) => say('emulate: ' + e.message));
       await chrome.send('Network.enable').catch(() => 0);
       frontDown = true;
@@ -828,7 +835,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       x = await shWait(ready(S[3].id) + ' && !x.note && !x.why', 15000);
       check(!!x, 'r62: back online, the Shorts page loads again by itself and its old reason is gone', Object.assign(brief(x || await sh()) || {}, { onLine: await chrome.ev('navigator.onLine'), state: (await chrome.ev(`${ST}.slots[0]`)) }));
       // i. A very long right-to-left title, an emoji-first very long channel name, no avatar picture.
-      x = await open(FY + '/shorts/' + S[0].id + '?long=1', ready(S[0].id), 15000);
+      x = await openG(FY + '/shorts/' + S[0].id + '?long=1', ready(S[0].id), 15000);
       const lg = await chrome.ev(`(() => { const i = document.querySelector('.wp-layer .sh-info'); const t = i.querySelector('.sh-title'); const n = i.querySelector('.pv-chan-name'); const av = i.querySelector('.pv-avatar');
         const r = (e) => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom) }; };
         return { dir: t.dir, cdir: getComputedStyle(t).direction, clamped: t.scrollHeight > t.clientHeight + 2, ndir: getComputedStyle(n).direction, av: av.textContent, img: !!av.querySelector('img'),
@@ -841,7 +848,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       await shot(1920, 1000, 'r62-long');
       // j. The narrow layer (the info below the player): a note and the Save list are shown whole, never clipped.
       await resize(900, 800);
-      x = await open(FY + '/shorts/' + S[2].id + '?signedout=1', `x.cur === ${JSON.stringify(S[2].id)} && /signed out/.test(x.note)`, 15000);
+      x = await openG(FY + '/shorts/' + S[2].id + '?signedout=1', `x.cur === ${JSON.stringify(S[2].id)} && /signed out/.test(x.note)`, 15000);
       await sleep(500);
       const clip = await chrome.ev(`(() => { const i = document.querySelector('.wp-layer .sh-info'); const n = i.querySelector('.pv-why'); const b = i.getBoundingClientRect(), c = n ? n.getBoundingClientRect() : null;
         return { mode: i.closest('.wp-tile').getAttribute('data-sh'), info: [Math.round(b.top), Math.round(b.bottom)], note: c ? [Math.round(c.top), Math.round(c.bottom)] : null, scroll: i.scrollHeight - i.clientHeight, oy: getComputedStyle(i).overflowY }; })()`);
@@ -850,17 +857,17 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       // The wheel over that band scrolls it while it can (and then moves a Short again, as before).
       if (clip.scroll > 0) {
         const ib = await chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-info").getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + 30 }; })()');
-        const mv0 = await moves();
+        const mv0 = await moves11();
         await wheelAt(ib.x, ib.y, 120);
         await sleep(700);
         const st = await chrome.ev('document.querySelector(".wp-layer .sh-info").scrollTop');
-        check(st > 0 && (await moves()) === mv0, 'r62: the wheel over the band scrolls it first (no Short moved)', { scrollTop: st, moves: (await moves()) - mv0 });
+        check(st > 0 && (await moves11()) === mv0, 'r62: the wheel over the band scrolls it first (no Short moved)', { scrollTop: st, moves: (await moves11()) - mv0 });
       }
       await shot(900, 800, 'r62-below-note');
       await resize(1280, 800);
       // k. A navigation that starts and is stopped, then a move in place to a normal video (real YouTube, Short ->
       // video): the page's trim comes off, so the video page is never left hidden under it.
-      x = await open(FY + '/shorts/' + S[1].id, ready(S[1].id));
+      x = await openG(FY + '/shorts/' + S[1].id, ready(S[1].id));
       await guestCur();
       await guest.ev('(() => { window.__r62 = 1; location.assign("/__hang"); setTimeout(() => { window.stop(); setTimeout(() => { history.pushState({}, "", "/watch?v=aqz-KE-bpKQ"); }, 300); }, 700); return 1; })()');
       const tk = await guest.waitFor('(() => { const f = document.documentElement.hasAttribute("data-lumen-sh"); return !f && window.__r62 === 1 && location.pathname === "/watch" ? { flag: f, body: getComputedStyle(document.body).visibility } : null; })()', 6000).catch(() => null);
