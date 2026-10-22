@@ -213,6 +213,41 @@ check(/navigation-button-down button/.test(gsrc) && /scrollBy\(\{ top: dir \* bo
   check(typeof ev.resize === 'function' && a5.w === 1080 && a5.fresh, 'its loadedmetadata (same source) marks the size as this Short’s', a5);
 }
 
+const pending = [];   // async checks, all settled before the summary line
+/* ---- r62: a press is for the Short Lumen names (guest press(kind, arg, forId)) ---------------------- */
+{
+  const vm = require('vm');
+  let pdata = { id: 'aaaaaaaaaaa' };
+  const like = { clicks: 0, getAttribute: (k) => (k === 'aria-pressed' ? 'false' : ''), click() { this.clicks++; } };
+  const player = { getVideoData: () => (pdata ? { video_id: pdata.id } : {}), getPlayerResponse: () => ({}) };
+  const reel = { getBoundingClientRect: () => ({ top: 0, bottom: 800, height: 800 }), querySelector: (sel) => (sel === '#shorts-player' ? player : sel === 'like-button-view-model button' ? like : null) };
+  const doc = { documentElement: { hasAttribute: () => false, setAttribute() {}, removeAttribute() {} },
+    querySelector: (sel) => (sel === 'ytd-reel-video-renderer[is-active]' ? reel : null), querySelectorAll: (sel) => (sel === 'ytd-reel-video-renderer' ? [reel] : []) };
+  const win = { addEventListener() {}, innerHeight: 800 };
+  const loc = { pathname: '/shorts/aaaaaaaaaaa', href: 'https://www.youtube.com/shorts/aaaaaaaaaaa' };
+  const ctx = vm.createContext({ window: win, document: doc, location: loc, innerHeight: 800, setTimeout, clearTimeout, Event: function () {}, Promise, Date });
+  vm.runInContext('(' + String(SH.guest) + ')();', ctx);
+  const P = (forId) => win.__lumenSh.press('like', null, forId);
+  pending.push((async () => {
+    pdata = { id: 'bbbbbbbbbbb' };   // the address still says a, YouTube's one player already plays b
+    const r1 = await P('aaaaaaaaaaa');
+    check(!r1.ok && /Short changed/.test(r1.reason) && like.clicks === 0, 'r62: the player already holds the next Short: the press is refused, nothing clicked', r1);
+    pdata = { id: 'aaaaaaaaaaa' }; loc.pathname = '/shorts/ccccccccccc';
+    const r2 = await P('aaaaaaaaaaa');
+    check(!r2.ok && /Short changed/.test(r2.reason) && like.clicks === 0, 'r62: the address moved on: the press is refused, nothing clicked', r2);
+    loc.pathname = '/shorts/aaaaaaaaaaa';
+    const r3 = P('aaaaaaaaaaa');
+    check(like.clicks === 1, 'r62: the Short Lumen names is the page\'s: YouTube\'s Like is clicked once', like.clicks);
+    pdata = null;   // no player data (an older page): the address alone decides
+    P('aaaaaaaaaaa');
+    check(like.clicks === 2, 'r62: no player data: the address decides, the press goes through', like.clicks);
+    void r3;
+  })().catch((e) => check(false, 'r62 press harness', String(e && e.stack || e))));
+}
+check(SH.initial('🎮 Gamer') === '🎮' && SH.initial('@élan') === 'É' && SH.initial('👨‍👩‍👧 fam') === '👨‍👩‍👧' && SH.initial('@') === '' && SH.initial('@abc') === 'A',
+  'r62: a channel\'s initial is its first whole character (an emoji, never half of one), upper-cased', [SH.initial('🎮 Gamer'), SH.initial('👨‍👩‍👧 fam')]);
+check(/e\.repeat\) return;/.test(fs.readFileSync(path.join(ROOT, 'watch-shorts.js'), 'utf8')), 'r62: a held arrow in the chrome is one Short (auto-repeat is ignored)');
+
 /* ---- watch-shorts-main.js ----------------------------------------------------------------------- */
 const lines = []; let clock = 1000;
 const mm = Main.create({ log: (l) => lines.push(l), now: () => clock });
@@ -229,5 +264,7 @@ let threw = false;
 try { handlers['watch-shorts:log']({ chrome: false }, { line: 'x' }); } catch (e) { threw = true; }
 check(threw && handlers['watch-shorts:log']({ chrome: true }, { line: 'opened: feed' }).ok === true, 'the IPC answers the chrome only');
 
-console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
-process.exitCode = fail ? 1 : 0;
+Promise.all(pending).then(() => {
+  console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
+  process.exitCode = fail ? 1 : 0;
+});
