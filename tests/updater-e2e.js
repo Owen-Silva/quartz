@@ -143,6 +143,19 @@ async function main() {
       } catch (e) { say('screenshot failed: ' + e.message); }
     }
 
+    // ---- Settings > About > Updates ---------------------------------------------------------------
+    await c.ev("Settings.open('About'), 1");
+    const about = await c.waitFor("(() => { const f = document.querySelector('[data-field=updates]'); if (!f) return null; const l = f.querySelector('.qup-about-line'); return l && /is out/.test(l.textContent) ? { line: l.textContent, buttons: [...f.querySelectorAll('button')].map((b) => b.textContent) } : null; })()", 15000).catch((e) => ({ error: e.message }));
+    check(about && /Quartz v99\.0\.0 is out/.test(about.line || '') && about.buttons.includes('Check for updates') && about.buttons.includes('Update to ' + TAG) && about.buttons.includes('Check now'),
+      'Settings > About shows the release, the switch, Update and Check now', about);
+    if (SHOTS) {
+      try {
+        const full = await c.send('Page.captureScreenshot', { format: 'png' });
+        if (full.result && full.result.data) fs.writeFileSync(path.join(SHOTS, 'settings-about-updates.png'), Buffer.from(full.result.data, 'base64'));
+      } catch (e) { say('screenshot failed: ' + e.message); }
+    }
+    await c.ev("(typeof Settings.close === 'function' && Settings.close()), 1").catch(() => 0);
+
     // ---- Update ---------------------------------------------------------------------------------
     await c.ev("window.__qupSeen = []; window.api.updates.onState((s) => window.__qupSeen.push(s.status + ':' + (s.progress ? s.progress.stage : ''))); document.querySelector('.qup-card [data-act=update]').click(); 1");
     let seen = [];
