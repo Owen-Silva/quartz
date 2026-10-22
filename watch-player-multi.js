@@ -237,6 +237,14 @@
       if (isMulti()) { armPage(s); if (!s._mv.converted) toEmbed(s); }
     });
     v.addEventListener('did-start-loading', function () { if (s.view === v) s._mv.limitIn = false; });
+    // A new page in the tile (he freed a device and it reloaded, or it moved on): the old refusal was
+    // about the old page and goes from the header. If the limit still holds, the new page says so
+    // again and the fresh watch reports it. (It used to stay in the header for good.)
+    v.addEventListener('did-navigate', function () {
+      if (s.view !== v || !s._mv || !s._mv.limit) return;
+      s._mv.limit = '';
+      paintHead(s);
+    });
     v.addEventListener('did-finish-load', function () {
       if (s.view !== v || !isMulti()) return;
       if (s._mv.embed) for (var i = 0; i < EMBED_CHECKS.length; i++) timer(s, function () { checkEmbed(s); }, EMBED_CHECKS[i]);
@@ -263,6 +271,10 @@
   /** The page's own script: the stream-limit watch (multiview only). */
   function armPage(s) {
     if (!s.view || s._mv.limitIn || s.wcId === null) return;   // before dom-ready: the dom-ready handler arms it
+    // Not on YouTube: it has no stream limit to report, and its watch page (a tile's fallback from the
+    // embed) is full of other people's text -- a title or comment saying "too many people" showed in the
+    // header as YouTube refusing a stream.
+    if (s.service === 'youtube') return;
     s._mv.limitIn = true;
     js(s.view, LIMIT_JS);
   }
@@ -332,13 +344,17 @@
 
   /** The single player's YouTube watch page, once it is a tile, becomes the embed where it was. */
   function toEmbed(s) {
+    var wasMulti = s.multi;
     s._mv.converted = true;
     s.multi = true;   // a tile now: watch-player-yt.js keeps it the embed on a reuse too
     var vid = videoOfSlot(s);
     if (!vid || vid.embed || !s.view || s.blocked) return;
     var v = s.view;
     js(v, TIME_JS).then(function (sec) {
-      if (s.view !== v || !isMulti()) return;
+      if (s.view !== v) return;
+      // He left multiview before the time came back: nothing was converted, so the marks go too. They
+      // used to stay, and the next Add to multiview skipped this tile (it kept the full watch page).
+      if (!isMulti()) { s._mv.converted = false; s.multi = wasMulti; return; }
       var to = embedFor(s.url, sec);
       if (!to) return;
       s._mv.watchUrl = s.url;
@@ -606,17 +622,25 @@
     l.el.classList.add('mv-mini');
     paintBar();
     CTX.place();
+    CTX.syncBar();   // the play bar reads mv-mini only when it syncs: off inside the corner box
     focusRows();
+  }
+  /** A drag in progress ends at once (its shield and window listeners go with it). */
+  function dropDrag() {
+    var d = M.drag;
+    M.drag = null;
+    if (d && d.release) { try { d.release(); } catch (e) { /* gone */ } }
   }
   function exitMini(quiet) {
     var l = L();
     M.mini = false;
     M.pick = false;
-    M.drag = null;
+    dropDrag();
     if (!l || !l.el) return;
     l.el.classList.remove('mv-mini', 'mv-dragging', 'mv-snap');
     paintBar();
     CTX.place();
+    CTX.syncBar();   // and back on at full size
     var f = CTX.focused();
     if (!quiet && f && f.view) { try { f.view.focus(); } catch (e) { /* not focusable */ } }
   }
@@ -680,12 +704,18 @@
       };
       var up = function (ev) { if (M.drag === d && ev.pointerId === d.id) finish(ev, ev.type === 'pointercancel'); };
       var blur = function () { if (M.drag === d) finish(null, true); };
-      var finish = function (ev, cancelled) {
+      // The listeners and the shield, whoever ends the drag: finish below, or exitMini / onClose, which
+      // drop M.drag mid-drag (a restore from the memory check, the tab closed). Those used to leave the
+      // full-window shield and three window listeners up for good: nothing in the window took a click.
+      var release = d.release = function () {
         window.removeEventListener('pointermove', move, true);
         window.removeEventListener('pointerup', up, true);
         window.removeEventListener('pointercancel', up, true);
         window.removeEventListener('blur', blur);
         if (shield.parentNode) shield.parentNode.removeChild(shield);
+      };
+      var finish = function (ev, cancelled) {
+        release();
         M.drag = null;
         var ll = L();
         if (!ll || !ll.el) return;
@@ -700,7 +730,7 @@
         M.corner = (cy < midY ? 't' : 'b') + (cx < midX ? 'l' : 'r');
         ll.el.classList.add('mv-snap');
         CTX.place();
-        setTimeout(function () { if (L() && L().el) L().el.classList.remove('mv-snap'); }, 260);
+        setTimeout(function () { if (L() && L().el) L().el.classList.remove('mv-snap'); }, 190);
       };
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', up, true);
@@ -715,6 +745,18 @@
   function doKey(k, wcId) {
     var l = L();
     if (!l || !l.open || !isMulti() || M.mini) return;
+    // A tile in its own (the page's) fullscreen covers the window. X there removed the tile under it and
+    // left the layer wedged full-window (destroySlot never cleared fsSlot, so the leave event had no
+    // view to come from), and F -- the page's own "leave fullscreen" key, which main hands here --
+    // ran Expand instead. F now leaves fullscreen; the rest wait for it.
+    if (l.fsSlot) {
+      if (k === 'f') {
+        var fv = l.fsSlot.view;
+        try { if (fv) fv.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(function () { return 1; }, function () { return 0; }) : 0', true).catch(function () { /* the leave event tells */ }); } catch (e) { /* the leave event tells */ }
+      } else if (k === 'm') toggleMuteAll();
+      else CTX.note('Leave full screen first (Esc or F)');
+      return;
+    }
     if (/^[1-4]$/.test(k)) {
       var s = l.slots[Number(k) - 1];
       if (s) select(s, true); else CTX.note('There is no tile ' + k);
@@ -764,7 +806,7 @@
   }
 
   function onClose(ctx) {
-    M.mini = false; M.pick = false; M.drag = null; M.spot = false; M.muteAll = false;
+    M.mini = false; M.pick = false; dropDrag(); M.spot = false; M.muteAll = false;
     endSwap();
     var l = ctx.L;
     if (l.el) { l.el.classList.remove('mv-mini', 'mv-multi', 'mv-dragging', 'mv-snap'); }
