@@ -319,6 +319,24 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     check(!!c && o2.reply === 1 && c.replies.UgxTop002.items[0].text === 'Thanks, gjpqy', 'Reply = one press of YouTube’s own Comment in that thread; the reply shows under it', { own: o2, r: c && c.replies.UgxTop002 });
     check(o2.post === 1 && Object.values(o2.like).reduce((a, b) => a + b, 0) === 2, 'nothing else was pressed in the whole run', o2);
 
+    /* ---- 7b (r62). his reply is read back only as his: YouTube shows his text differently ---- */
+    // Before r62 a reply whose text YouTube's page showed differently came back as the page's FIRST comment (the
+    // pinned one, by someone else). Here the page shows every new comment's text with a suffix.
+    await p.ev(`(() => { const o = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) {
+        const t = n.id === 'content-text' ? n : (n.querySelector ? n.querySelector('#content-text') : null);
+        if (t && !t.__m) { t.__m = 1; t.textContent += ' (as YouTube shows it)'; } } });
+      o.observe(document.querySelector('ytd-comments'), { childList: true, subtree: true }); window.__mangle = o; return 1; })()`);
+    await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop002"] .cm-replybtn', 'Reply (2)');
+    await chrome.waitFor('document.activeElement && document.activeElement.closest && !!document.activeElement.closest(".cm-replybox")', 4000).catch(() => 0);
+    await chrome.send('Input.insertText', { text: 'A second reply' });
+    await sleep(300);
+    await clickAt('#lumen-pv-comments .cm-replysend', 'Reply send (2)');
+    c = await csWait('x.replies.UgxTop002 && x.replies.UgxTop002.items.length >= 2 && x.replies.UgxTop002.items[0].mine', 15000);
+    await p.ev('window.__mangle && window.__mangle.disconnect(), 1');
+    const r2 = c && c.replies.UgxTop002.items[0];
+    check(!!r2 && r2.text === 'A second reply' && r2.author === 'You' && r2.id !== 'UgxTop001' && Object.values(c.notes).some((n) => /didn’t show it back/.test(n.text)),
+      'a reply YouTube shows differently: Lumen shows his own words and says the page didn’t show them back (never another comment)', { r2, notes: c && c.notes });
+
     /* ============================ 8. a timestamp seeks the video ============================ */
     await p.ev('document.getElementById("movie_player").seekTo = function (t) { window.__seek = t; }; 1');
     await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-link-time', '1:05');

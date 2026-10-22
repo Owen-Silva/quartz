@@ -431,14 +431,19 @@
       var ed = editOf(box);
       if (!ed) return Promise.resolve({ ok: false, reason: 'YouTube’s comment box didn’t open' });
       fill(ed, text);
-      var before = comments().length;
+      // His comment, read back: a comment with his text that didn't have it before the press (in this thread for a
+      // reply). By text alone, someone else's identical comment ("First!") was taken for his; and when YouTube showed
+      // his text differently, "the page's first comment" was: a reply came back as the pinned comment, by someone
+      // else. No match: Lumen shows his own words and says the page didn't show them back yet (never a stranger's).
+      var want = String(text).replace(/\s+/g, ' ').trim();
+      var where = function () { return scope ? QA('ytd-comment-view-model, ytd-comment-renderer', scope) : comments(); };
+      var his = function (n) { return txt(Q('#content-text', n)) === want; };
+      var had = where().filter(his);
       return wait(function () { return submitOf(box); }, 2500).then(function (b) {
         if (!b) return { ok: false, reason: 'YouTube’s Comment button stayed off' };
         b.click();   // the one press
-        var want = String(text).replace(/\s+/g, ' ').trim();
         return wait(function () {
-          var mine = comments().filter(function (n) { return txt(Q('#content-text', n)) === want; })[0];
-          return mine || (comments().length > before ? comments()[0] : null);
+          return where().filter(function (n) { return his(n) && had.indexOf(n) < 0; })[0] || null;
         }, 6000).then(function (n) {
           if (!n) return { ok: true, confirmed: false };
           return { ok: true, confirmed: true, comment: { id: idOf(n), author: txt(Q('#author-text', n)), text: txt(Q('#content-text', n)), time: txt(Q('#published-time-text', n)) } };
