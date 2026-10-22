@@ -922,6 +922,7 @@
     ta.className = 'cm-input';
     ta.rows = 1;
     ta.placeholder = 'Add a comment…';
+    ta.dir = 'auto';
     ta.setAttribute('aria-label', 'Add a comment');
     ta.maxLength = 10000;
     if (ta.value !== c.text) ta.value = c.text;
@@ -966,6 +967,9 @@
   }
   function textEl(st, c) {
     var t = el('div', 'cm-text' + (long(c) && !st.expanded['t:' + c.id] ? ' is-clamped' : ''));
+    // Each comment's own direction (Arabic, Hebrew, Persian): without it an RTL comment read left to right, its
+    // punctuation and any Latin words at the wrong end.
+    t.dir = 'auto';
     (c.segs || []).forEach(function (s) {
       if (!s.link) { t.appendChild(document.createTextNode(s.text)); return; }
       var a = el('a', 'cm-link cm-link-' + s.link.kind, s.text);
@@ -987,6 +991,7 @@
     if (c.pinned) body.appendChild(el('div', 'cm-pin', c.pinnedText || 'Pinned'));
     var meta = el('div', 'cm-meta');
     var au = el('span', 'cm-author' + (c.creator ? ' is-creator' : ''), c.author || 'A viewer');
+    au.dir = 'auto';
     meta.appendChild(au);
     if (c.verified) { var vf = el('span', 'cm-verified', '✓'); vf.title = 'Verified'; vf.setAttribute('aria-label', 'Verified'); meta.appendChild(vf); }
     if (c.time) meta.appendChild(el('span', 'cm-time', c.time));
@@ -1047,6 +1052,7 @@
     ta.className = 'cm-input';
     ta.rows = 1;
     ta.placeholder = 'Add a reply…';
+    ta.dir = 'auto';
     ta.setAttribute('aria-label', 'Reply to ' + (c.author || 'this comment'));
     if (ta.value !== st.replyText) ta.value = st.replyText;
     ta.disabled = !!st.replyBusy;
