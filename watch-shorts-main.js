@@ -8,6 +8,8 @@
  *   "[lumen shorts] the Shorts page failed: <reason>"
  *   "[lumen shorts] no Shorts player found on the page"
  *   "[lumen shorts] no Shorts to open: grid | feed"
+ *   "[lumen shorts] the first Short never opened: grid | feed"
+ *   "[lumen shorts] back online: the Shorts page loads again"
  * Only the chrome may write; a line is one short, printable string, and a repeat of the last
  * line within a few seconds is dropped. Nothing here reads, plays or touches a stream.
  */

@@ -165,6 +165,24 @@
     return !!(r && r.videoId && r.title && r.channel && r.channel.name && r.like && r.like.found && r.sub && r.sub.found);
   }
 
+  /**
+   * A channel's initial, for its avatar while it has no picture: its first character as he sees it (a whole emoji,
+   * flag or accented letter, never half of a surrogate pair, which drew as a broken glyph), upper-cased.
+   */
+  function initial(name) {
+    var t = String(name || '').replace(/^@/, '').trim();
+    if (!t) return '';
+    var first = '';
+    try {
+      if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+        var it = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t)[Symbol.iterator]().next();
+        first = it.value ? it.value.segment : '';
+      }
+    } catch (e) { first = ''; }
+    if (!first) first = Array.from(t)[0] || '';
+    return first.toUpperCase();
+  }
+
   /** A Short's shape (width / height) as the box uses it: its own, clamped to 9:16 ... 1:1; 9:16 while unknown. */
   function shape(aspect) {
     var a = Number(aspect);
@@ -267,7 +285,7 @@
    * opens a grid's first Short, and presses YouTube's own buttons. Serialised with String().
    */
   function guest() {
-    var V = 2;
+    var V = 3;
     if (window.__lumenSh && window.__lumenSh.v === V) return;
     function Q(sel, r) { try { return (r || document).querySelector(sel); } catch (e) { return null; } }
     function QA(sel, r) { try { return Array.prototype.slice.call((r || document).querySelectorAll(sel)); } catch (e) { return []; } }
@@ -402,6 +420,13 @@
     var asp = { url: '', id: '' };
     function videoOf(r) { return Q('#shorts-player video', r) || Q('video.html5-main-video', r) || Q('video', r); }
     function marked() { asp.url = String(this.currentSrc || ''); asp.id = idOf(location.pathname); }
+    function playerId(r) {
+      try {
+        var pl = Q('#shorts-player', r) || Q('.html5-video-player', r);
+        var vd = pl && typeof pl.getVideoData === 'function' ? pl.getVideoData() : null;
+        return vd && vd.video_id ? String(vd.video_id) : '';
+      } catch (e) { return ''; }
+    }
     function playerShape(r, id) {
       try {
         var pl = Q('#shorts-player', r) || Q('.html5-video-player', r);
@@ -454,10 +479,33 @@
       return { ok: true, id: idOf(a.getAttribute('href')) };
     }
 
-    /** One press of YouTube's own button (kind) in the current Short, on his click. */
-    function press(kind, arg) {
+    /** YouTube's own Save list for the current Short: its Save button, else its menu's Save. */
+    function openSave() {
       var r = active();
       if (!r) return Promise.resolve({ ok: false, reason: 'no Short is on YouTube’s page' });
+      var list = function () { var l = saveOpts(); return l.length ? l : null; };
+      var shown = function (l) { return l ? { ok: true, list: l.map(function (o) { return { name: o.name, on: o.on }; }) } : { ok: false, reason: 'YouTube’s Save list didn’t open' }; };
+      var b = saveBtn(r);
+      if (b) { b.click(); return wait(list, 3000).then(shown); }
+      var mb = menuBtn(r);
+      if (!mb) return Promise.resolve({ ok: false, reason: 'YouTube’s Save button isn’t on this Short' });
+      mb.click();
+      return wait(function () { return QA('ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model').filter(function (n) { return /^save/i.test(txt(n)); })[0] || null; }, 2500).then(function (item) {
+        if (!item) return { ok: false, reason: 'YouTube’s menu has no Save for this Short' };
+        item.click();
+        return wait(list, 3000).then(shown);
+      });
+    }
+    /** One press of YouTube's own button (kind) in the current Short, on his click. */
+    function press(kind, arg, forId) {
+      var r = active();
+      if (!r) return Promise.resolve({ ok: false, reason: 'no Short is on YouTube’s page' });
+      // The Short Lumen's info names (forId) must still be the page's own: its address and, when YouTube's player
+      // says, the video in its one player (today's page reuses one renderer for every Short).
+      if (forId) {
+        var at = idOf(location.pathname), pid = playerId(r);
+        if ((at && at !== forId) || (pid && pid !== forId)) return Promise.resolve({ ok: false, reason: 'the Short changed as you clicked, so nothing was pressed: press again' });
+      }
       var b;
       if (kind === 'like' || kind === 'dislike') {
         b = kind === 'like' ? likeBtn(r) : dislikeBtn(r);
@@ -492,17 +540,15 @@
           .then(done, function (e) { done(null); return { ok: false, reason: String((e && e.message) || e) }; });
       }
       if (kind === 'save-open') {
-        var list = function () { var l = saveOpts(); return l.length ? l : null; };
-        var shown = function (l) { return l ? { ok: true, list: l.map(function (o) { return { name: o.name, on: o.on }; }) } : { ok: false, reason: 'YouTube’s Save list didn’t open' }; };
-        b = saveBtn(r);
-        if (b) { b.click(); return wait(list, 3000).then(shown); }
-        var mb = menuBtn(r);
-        if (!mb) return Promise.resolve({ ok: false, reason: 'YouTube’s Save button isn’t on this Short' });
-        mb.click();
-        return wait(function () { return QA('ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model').filter(function (n) { return /^save/i.test(txt(n)); })[0] || null; }, 2500).then(function (item) {
-          if (!item) return { ok: false, reason: 'YouTube’s menu has no Save for this Short' };
-          item.click();
-          return wait(list, 3000).then(shown);
+        // A list still open from before (another Short's, left open by a move) is closed first, so the list read
+        // back is the one YouTube opens for THIS Short, never the last one's ticks.
+        var stale = Q('ytd-add-to-playlist-renderer #close-button button') || Q('ytd-add-to-playlist-renderer #close-button');
+        if (saveOpts().length) {
+          if (stale) stale.click(); else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        }
+        return wait(function () { return saveOpts().length ? 0 : 1; }, 1500).then(function (closed) {
+          if (!closed) return { ok: false, reason: 'YouTube’s Save list from before didn’t close' };
+          return openSave();
         });
       }
       if (kind === 'save-toggle') {
@@ -563,7 +609,7 @@
     return GUEST + 'window.__lumenSh.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
 
-  var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, ASP: ASP, shape: shape, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
+  var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, ASP: ASP, shape: shape, initial: initial, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
     entryUrl: entryUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -609,7 +655,7 @@
     if (why) { b.title = why; b.setAttribute('aria-disabled', 'true'); b.setAttribute('data-why', why); }
     else { b.removeAttribute('title'); b.removeAttribute('aria-disabled'); b.removeAttribute('data-why'); }
   }
-  function initial(name) { var t = String(name || '').replace(/^@/, '').trim(); return t ? t.charAt(0).toUpperCase() : ''; }
+
 
   /* ---------------------------------------------------------------- slot state */
 
@@ -625,7 +671,7 @@
     keys();
     var p = s._sh = { phase: 'loading', read: null, shown: null, shownId: '', applied: false, noRoot: false, why: '', busy: '', seq: 0, timers: [],
       presses: [], steps: [], wheel: null, wheels: 0, confirm: false, save: null, opened: '', logged: '', lastUrl: '', layout: null,
-      aspect: 0, aspT: 0, aspSeq: 0, easeT: 0 };
+      aspect: 0, aspT: 0, aspSeq: 0, easeT: 0, navs: 0, whyShort: false, failedLoad: false, sig: '', refocus: '', trimmed: false };
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'sh-cover');
@@ -647,7 +693,12 @@
     s.tile.addEventListener('wheel', function (e) { onWheel(s, e); }, { passive: false });
     // A touch swipe on Lumen's parts: one Short per swipe (on the player, YouTube's own).
     var touch = null;
-    s.tile.addEventListener('touchstart', function (e) { if (shOn(s) && e.touches.length === 1) touch = { y: e.touches[0].clientY, t: Date.now() }; }, { passive: true });
+    s.tile.addEventListener('touchstart', function (e) {
+      // A swipe that scrolls the Save list is the list's, never a Short move (the wheel's rule, onWheel()).
+      var inList = e.target && e.target.closest && (e.target.closest('.pv-savelist') ||
+        (s.tile.getAttribute('data-sh') === 'below' && p.info.scrollHeight > p.info.clientHeight + 2 && p.info.contains(e.target)));
+      touch = shOn(s) && e.touches.length === 1 && !inList ? { y: e.touches[0].clientY, t: Date.now() } : null;
+    }, { passive: true });
     s.tile.addEventListener('touchend', function (e) {
       if (!touch || !shOn(s)) { touch = null; return; }
       var t = e.changedTouches && e.changedTouches[0];
@@ -666,6 +717,7 @@
     v.addEventListener('did-start-navigation', function (e) {
       if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
       p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
+      newDocument(s);
       update(s);
     });
     v.addEventListener('did-navigate-in-page', function (e) {
@@ -673,13 +725,22 @@
       var u = String(e.url || '');
       if (u === p.lastUrl) return;
       p.lastUrl = u;
+      // A reason about the Short just left (a press YouTube didn't confirm, "the first Short", a page that
+      // didn't answer a move) is that Short's, never the next one's.
+      if (p.whyShort) { p.why = ''; p.whyShort = false; }
+      // YouTube's Save list was for the Short just left: it is closed in the page too (left open, invisible
+      // under the trim, the next Save read its ticks for the new Short).
+      if (p.save) js(v, call('press', ['save-close', null])).catch(function () { /* the page went: nothing open */ });
       p.save = null; p.confirm = false;
       if (isShorts(u, s.service)) startReads(s, true);
       else update(s);
     });
+    // A new document committed: whatever the old one wore is gone with it.
+    v.addEventListener('did-navigate', function () { if (s.view === v) p.trimmed = false; });
     v.addEventListener('did-fail-load', function (e) {
       if (s.view !== v || !e.isMainFrame || e.errorCode === -3) return;
       p.phase = online() ? 'failed' : 'offline';
+      p.failedLoad = true;   // the page itself is Chromium's error page: back online, it is loaded again (the 'online' handler)
       p.why = 'YouTube’s Shorts page didn’t load: ' + (e.errorDescription || ('error ' + e.errorCode));
       stopReads(s);
       if (isShorts(s.url, s.service)) logLine('the Shorts page failed: ' + (e.errorDescription || ('error ' + e.errorCode)));
@@ -694,7 +755,33 @@
     CTX = ctx;
     p.read = null; p.shown = null; p.shownId = ''; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.noRoot = false; p.opened = '';
     p.aspect = 0;
+    newDocument(s);
     update(s);
+  }
+  /**
+   * The page is about to be a new document (a full load: reuse()'s loadURL, a reload, a link out of YouTube's
+   * app): nothing the old one started may land on the new one.
+   *   - The reads and the shape poll stop, and seq moves on, so an answer from the old page (its
+   *     executeJavaScript still in flight) is dropped instead of marking the new page trimmed (p.applied) and
+   *     hiding the cover while YouTube's untrimmed page loads.
+   *   - A press in flight is let go (navs moves on; press() drops its answer): Electron never settles an
+   *     executeJavaScript whose page went away, and its p.busy left every button "Waiting for YouTube…" for good.
+   *   - The last in-page address is forgotten: did-navigate-in-page skips a repeat of it, and on the new document
+   *     the first in-page move can be to that same Short (A, B; reopened at A; the wheel to B), which then never
+   *     got read and the info stayed "Loading the Short…".
+   */
+  function newDocument(s) {
+    var p = shOf(s);
+    if (!p) return;
+    stopReads(s);
+    p.seq++;
+    clearTimeout(p.aspT); p.aspT = 0;
+    p.navs++;
+    p.busy = '';
+    p.lastUrl = '';
+    // ...and the old document's reasons go with it ("didn't load" stayed under the Short Try again brought back).
+    p.why = ''; p.whyShort = false;
+    p.failedLoad = false;
   }
   function destroy(ctx, s) {
     var p = shOf(s);
@@ -748,6 +835,7 @@
       if (!r || !r.ok) throw new Error('no answer from the page');
       p.read = r;
       p.applied = !!r.applied;
+      if (r.on || r.applied) p.trimmed = true;
       if (r.asp) setAspect(s, r.asp);
       if (r.kind === 'short' && !(r.asp && r.asp.fresh)) pollAspect(s, seq);
       var cur = idOf(s.url, s.service);
@@ -756,10 +844,12 @@
         if (r.links && p.opened !== r.url) {
           p.opened = r.url;
           js(v, call('openFirst', [])).then(function (o) { if (o && !o.ok && s.view === v) { p.why = 'YouTube’s page has ' + o.reason; render(s); } }, function () { /* the next tick says */ });
-        } else if (last && !r.links) {
+        } else if (last) {
+          // No Shorts on the grid, or its first Short was clicked and YouTube never opened it: either way the
+          // cover says why instead of "Opening the channel's Shorts…" for good.
           p.phase = 'empty';
-          p.why = r.kind === 'grid' ? 'YouTube’s page has no Shorts here.' : 'YouTube didn’t pick a Short to start with.';
-          logLine('no Shorts to open: ' + r.kind);
+          p.why = r.links ? 'YouTube didn’t open the first Short here.' : r.kind === 'grid' ? 'YouTube’s page has no Shorts here.' : 'YouTube didn’t pick a Short to start with.';
+          logLine((r.links ? 'the first Short never opened: ' : 'no Shorts to open: ') + r.kind);
         }
         update(s);
         return;
@@ -793,9 +883,13 @@
     s.tile.classList.toggle('sh-wait', boxed && !p.applied && p.phase !== 'failed' && p.phase !== 'offline');
     if (L.el && (L.slots[L.focus] === s || L.slots.length === 1)) L.el.classList.toggle('sh-on', boxed);
     layoutBox(s);
-    if (s.view && p.applied && !on) {
+    // The view is off (a normal video, a tile, the corner) while the page may still wear the trim: it comes off.
+    // p.trimmed, not p.applied: a navigation that STARTED (did-start-navigation clears p.applied) can still be
+    // aborted or end in-page (real YouTube, Short -> video), and the old document then kept its flag: the video
+    // page under it stayed hidden (body visibility: hidden).
+    if (s.view && (p.applied || p.trimmed) && !on) {
       var v = s.view;
-      js(v, call('apply', [false])).then(function () { if (s.view === v) { p.applied = false; render(s); } }, function () { /* the next load says */ });
+      js(v, call('apply', [false])).then(function () { if (s.view === v) { p.applied = false; p.trimmed = false; render(s); } }, function () { /* the next load says */ });
     }
     render(s);
   }
@@ -875,17 +969,22 @@
     // inertia) landed there and moved a second Short.
     var p = shOf(s);
     if (e.target === s.view || (p && p.cover && e.target && p.cover.contains(e.target))) { e.preventDefault(); return; }
-    // The save list scrolls itself while it can; everything else is a Short move.
-    var list = e.target && e.target.closest ? e.target.closest('.pv-savelist') : null;
-    if (list && list.scrollHeight > list.clientHeight + 2) {
-      var atTop = list.scrollTop <= 0, atEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
-      if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atEnd)) return;
-    }
+    // The save list scrolls itself while it can, and so does the info below the player (a narrow layer: its fixed
+    // band can be shorter than a note or the Save list, watch-shorts.css); everything else is a Short move.
+    if (scrolls(e.target && e.target.closest ? e.target.closest('.pv-savelist') : null, e.deltaY)) return;
+    if (s.tile.getAttribute('data-sh') === 'below' && scrolls(p.info.contains(e.target) ? p.info : null, e.deltaY)) return;
     e.preventDefault();
     p.wheels++;
     var g = gesture(p.wheel, { dy: e.deltaY, dx: e.deltaX, mode: e.deltaMode, t: e.timeStamp || Date.now() });
     p.wheel = g.st;
     if (g.step) step(s, g.step, 'wheel');
+  }
+
+  /** Whether a scroll box (or null) overflows and can still go the wheel's way (dy). */
+  function scrolls(box, dy) {
+    if (!box || box.scrollHeight <= box.clientHeight + 2) return false;
+    var atTop = box.scrollTop <= 0, atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 1;
+    return (dy < 0 && !atTop) || (dy > 0 && !atEnd);
   }
 
   /** One move with YouTube's own navigation in the page. */
@@ -899,11 +998,11 @@
     js(v, call('step', [dir])).then(function (r) {
       if (s.view !== v) return;
       rec.ok = !!(r && r.ok); rec.via = (r && r.how) || ''; rec.reason = (r && r.reason) || '';
-      if (!rec.ok) { p.why = rec.reason || 'YouTube’s page didn’t move'; render(s); return; }
+      if (!rec.ok) { p.why = rec.reason || 'YouTube’s page didn’t move'; p.whyShort = true; render(s); return; }
       if (p.why && /first Short|last Short|didn’t move/.test(p.why)) p.why = '';
       // The address changes with YouTube's own move (did-navigate-in-page reads the new Short); read anyway.
       startReads(s, true);
-    }, function (e) { if (s.view === v) { rec.ok = false; rec.reason = (e && e.message) || String(e); p.why = 'YouTube’s page didn’t answer: ' + rec.reason; render(s); } });
+    }, function (e) { if (s.view === v) { rec.ok = false; rec.reason = (e && e.message) || String(e); p.why = 'YouTube’s page didn’t answer: ' + rec.reason; p.whyShort = true; render(s); } });
     return true;
   }
 
@@ -923,6 +1022,8 @@
       var d = keyStep(e);
       if (!d) return;
       e.preventDefault();
+      // A held arrow is one Short, not one per auto-repeat (about 30 a second ran through the feed).
+      if (e.repeat) return;
       step(s, d, 'key');
     });
   }
@@ -937,34 +1038,44 @@
     if (!p || !s.view || p.busy) return false;
     var v = s.view;
     var forId = p.shownId;
+    var nav = p.navs;
     p.busy = kind;
-    p.why = '';
+    p.why = ''; p.whyShort = false;
     var rec = { kind: kind, arg: arg === undefined ? null : arg, at: Date.now(), ok: null, reason: '', id: forId };
     p.presses.push(rec);
     render(s);
-    js(v, call('press', [kind, arg === undefined ? null : arg])).then(function (r) {
-      if (s.view !== v) return;
+    // forId: the Short Lumen's info names. The page refuses a press when its own Short is another one (the address
+    // or YouTube's one player already moved on), so a click never likes or subscribes the Short that came next.
+    var target = kind === 'save-toggle' || kind === 'save-close' ? '' : forId;
+    js(v, call('press', [kind, arg === undefined ? null : arg, target])).then(function (r) {
+      if (s.view !== v || p.navs !== nav) return;   // a new document since (newDocument()): not this press's page
       p.busy = '';
       rec.ok = !!(r && r.ok);
       rec.reason = (r && r.reason) || '';
       if (!r || !r.ok) p.why = (r && r.reason) ? r.reason.charAt(0).toUpperCase() + r.reason.slice(1) : 'YouTube’s page didn’t answer';
       else if (r.changed === false && kind !== 'save-open' && kind !== 'save-close') p.why = 'YouTube didn’t confirm it yet: the state shown is what its page says';
-      if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
+      p.whyShort = !!p.why;
+      // YouTube's Save list opened for a Short he has since moved on from: closed in the page, never shown as this one's.
+      var gone = !!forId && idOf(s.url, s.service) !== forId;
+      if ((kind === 'save-open' || kind === 'save-toggle') && gone && r && r.ok) { js(v, call('press', ['save-close', null])).catch(function () { /* the page went */ }); p.save = null; }
+      else if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
       return js(v, call('read', [])).then(function (rr) {
-        if (s.view !== v || !rr || !rr.ok) { render(s); return; }
+        if (s.view !== v || p.navs !== nav) return;
+        if (!rr || !rr.ok) { render(s); return; }
         p.read = rr;
         var f = follow(idOf(s.url, s.service), rr, p.shownId);
         if (f.fresh) { p.shown = rr; p.shownId = f.id; }
         render(s);
       });
     }).catch(function (e) {
-      if (s.view !== v) return;
+      if (s.view !== v || p.navs !== nav) return;
       p.busy = '';
       rec.ok = false;
       rec.reason = (e && e.message) || String(e);
       p.why = 'YouTube’s page didn’t answer: ' + rec.reason;
+      p.whyShort = true;
       render(s);
     });
     return true;
@@ -993,11 +1104,36 @@
     var info = p.info;
     info.setAttribute('data-phase', showPhase);
     info.setAttribute('data-short', f.fresh ? f.id : '');
+    // Rebuilt only when what it shows changed (a tick, a sync or a resize that changes nothing leaves it alone):
+    // a rebuild on every update dropped the keyboard focus from the button he was on, re-announced the whole
+    // info to a screen reader, scrolled the Save list back to the top and could eat a click between its press
+    // and release. When it does change, the focus goes back to the same control and the list keeps its scroll.
+    var sig = '';
+    try { sig = JSON.stringify([showPhase, f.fresh ? f.id : '', m, p.busy, p.confirm, p.save, p.why, !!(r && r.ad), !!r]); } catch (e) { sig = ''; }
+    if (!sig || sig !== p.sig || !info.firstChild) {
+      p.sig = sig;
+      var fk = focusKey(info) || p.refocus;
+      var sl0 = info.querySelector('.pv-savelist');
+      var top = sl0 ? sl0.scrollTop : 0;
+      build(s, p, m, showPhase, info, r);
+      var sl1 = info.querySelector('.pv-savelist');
+      if (sl1 && top) sl1.scrollTop = top;
+      p.refocus = refocus(info, fk) ? '' : fk;
+    }
+    // Lumen's Previous / Next: off only where YouTube says there is nowhere to go.
+    var rd = p.read && follow(cur, p.read, '').fresh ? p.read : r;
+    var dead = phase === 'failed' || phase === 'offline';
+    disable(p.prev, dead ? 'YouTube’s page isn’t there' : rd && rd.canPrev === false ? 'This is the first Short' : '');
+    disable(p.next, dead ? 'YouTube’s page isn’t there' : rd && rd.canNext === false ? 'This is the last Short YouTube has here' : '');
+  }
+  /** The info's contents, from the model (render() decides when). */
+  function build(s, p, m, showPhase, info, r) {
     info.replaceChildren();
     var head = el('div', 'sh-head');
     head.appendChild(el('span', 'sh-kicker', 'Shorts'));
     info.appendChild(head);
     var h = el('h1', 'pv-title sh-title');
+    h.dir = 'auto';   // a right-to-left title reads right to left (its own first strong character decides)
     if (m.title) h.textContent = m.title;
     else { h.classList.add('pv-skel'); h.textContent = showPhase === 'loading' || showPhase === 'moving' ?'Loading the Short…' : 'Untitled Short'; }
     info.appendChild(h);
@@ -1006,11 +1142,30 @@
     renderLists(s, p, m, info);
     renderNote(s, p, m, showPhase, info, r);
     info.appendChild(el('p', 'sh-hint', 'Scroll, swipe or press ↑ ↓ for the next Short'));
-    // Lumen's Previous / Next: off only where YouTube says there is nowhere to go.
-    var rd = p.read && follow(cur, p.read, '').fresh ? p.read : r;
-    var dead = phase === 'failed' || phase === 'offline';
-    disable(p.prev, dead ? 'YouTube’s page isn’t there' : rd && rd.canPrev === false ? 'This is the first Short' : '');
-    disable(p.next, dead ? 'YouTube’s page isn’t there' : rd && rd.canNext === false ? 'This is the last Short YouTube has here' : '');
+  }
+  // The info's own controls, as keys that find their twins after a rebuild (render()). Done before Cancel: both are pv-ghost.
+  var FOCUS_KEYS = ['pv-like', 'pv-dislike', 'pv-save', 'pv-sub', 'pv-danger', 'pv-savelist-done', 'pv-ghost', 'pv-saveopt'];
+  function focusKey(info) {
+    var a = document.activeElement;
+    if (!a || !info.contains(a) || !a.classList) return '';
+    for (var i = 0; i < FOCUS_KEYS.length; i++) {
+      if (!a.classList.contains(FOCUS_KEYS[i])) continue;
+      if (FOCUS_KEYS[i] === 'pv-saveopt') return 'pv-saveopt:' + Array.prototype.indexOf.call(info.querySelectorAll('.pv-saveopt'), a);
+      return FOCUS_KEYS[i];
+    }
+    return '';
+  }
+  /** The focus back on the control (key) it was on; false while that control is off (busy): the next rebuild tries again. */
+  function refocus(info, key) {
+    if (!key) return true;
+    var a = document.activeElement;
+    if (a && a !== document.body && !info.contains(a)) return true;   // he has moved on: the focus is never pulled back
+    var k = key.split(':');
+    var n = k.length > 1 ? info.querySelectorAll('.' + k[0])[Number(k[1])] : info.querySelector('.' + k[0]);
+    if (!n) return true;
+    if (n.disabled) return false;
+    try { n.focus({ preventScroll: true }); } catch (e) { /* not focusable: nothing to keep */ }
+    return true;
   }
   function fallbackModel(r) {
     var out = { title: (r && r.title) || '', channel: r && r.channel || null, signedIn: r ? r.signedIn : null, buttons: {}, missing: [] };
@@ -1038,7 +1193,9 @@
     if (!m.channel) av.classList.add('pv-skel');
     chan.appendChild(av);
     var ct = el('div', 'pv-chan-txt');
-    ct.appendChild(el('span', 'pv-chan-name' + (m.channel ? '' : ' pv-skel'), m.channel ? m.channel.name : (phase === 'loading' ? 'Reading the channel…' : 'Channel unknown')));
+    var cn = el('span', 'pv-chan-name' + (m.channel ? '' : ' pv-skel'), m.channel ? m.channel.name : (phase === 'loading' ? 'Reading the channel…' : 'Channel unknown'));
+    cn.dir = 'auto';
+    ct.appendChild(cn);
     chan.appendChild(ct);
     var sb = m.buttons.sub;
     var subOn = !!(sb && sb.found && sb.on);
@@ -1132,7 +1289,21 @@
   }
 
   window.addEventListener('offline', function () { all.forEach(function (s) { render(s); }); });
-  window.addEventListener('online', function () { all.forEach(function (s) { var p = shOf(s); if (p && p.phase !== 'ready' && isShorts(s.url, s.service)) startReads(s, false); else render(s); }); });
+  // Back online. A Shorts page that failed to load is only Chromium's error page, so reading it again said "Lumen
+  // couldn't read this Short" over it for good: it is loaded again, as the offline note promises ("Shorts load again
+  // when you're back online"), and the player's own failed card goes the way its Try again takes it.
+  window.addEventListener('online', function () {
+    all.forEach(function (s) {
+      var p = shOf(s);
+      if (p && p.failedLoad && s.view && isShorts(s.url, s.service)) {
+        logLine('back online: the Shorts page loads again');
+        if (s.state) s.state.hidden = true;
+        try { s.view.reload(); } catch (e) { p.why = 'Lumen couldn’t load YouTube’s Shorts page again: ' + ((e && e.message) || e); render(s); }
+        return;
+      }
+      if (p && p.phase !== 'ready' && isShorts(s.url, s.service)) startReads(s, false); else render(s);
+    });
+  });
 
   /* ---------------------------------------------------------------- e2e seam */
 
