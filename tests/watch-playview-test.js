@@ -209,6 +209,27 @@ check(sk && sk.ok === false && /ad is playing/.test(sk.reason), 'during an ad: r
 let sk3 = null;
 try { sk3 = vm.runInContext(PV.call('seek', [5]), sb); } catch (e) { sk3 = { err: e.message }; }
 check(sk3 && sk3.ok === false && /no video/.test(sk3.reason), 'a page with no video: refused, with the reason', sk3);
+// ytInitialData's commandRuns when the DOM drew no links: a hashtag goes to /hashtag/<tag> (never /channel/FEhashtag),
+// a chapter time keeps t=0s, another site keeps its /redirect (unwrapped later by descLink).
+const CONTENT = 'Intro 0:00 #music site';
+const ytd3 = { currentVideoEndpoint: { watchEndpoint: { videoId: VIDX } }, contents: { twoColumnWatchNextResults: { results: { results: { contents: [
+  { videoSecondaryInfoRenderer: { owner: { videoOwnerRenderer: { title: { runs: [{ text: 'C' }] } } }, attributedDescription: { content: CONTENT, commandRuns: [
+    { startIndex: 18, length: 4, onTap: { innertubeCommand: { urlEndpoint: { url: 'https://www.youtube.com/redirect?q=https%3A%2F%2Fexample.com%2F' } } } },
+    { startIndex: 6, length: 4, onTap: { innertubeCommand: { watchEndpoint: { videoId: VIDX, startTimeSeconds: 0 } } } },
+    { startIndex: 11, length: 6, onTap: { innertubeCommand: { commandMetadata: { webCommandMetadata: { url: '/hashtag/music' } }, browseEndpoint: { browseId: 'FEhashtag', params: 'x' } } } },
+  ] } } },
+] } } } } };
+const descNode3 = { innerText: CONTENT, querySelectorAll: () => [] };
+const doc3 = { documentElement: { hasAttribute: () => false, setAttribute() {}, removeAttribute() {} }, title: 'T - YouTube',
+  querySelector: (sel) => (/yt-attributed-string/.test(sel) ? descNode3 : null), querySelectorAll: () => [] };
+const win3 = { location: { href: 'https://www.youtube.com/watch?v=' + VIDX }, dispatchEvent: () => true, ytInitialData: ytd3 };
+const sb3 = vm.createContext({ window: win3, document: doc3, location: win3.location, URL, setTimeout, clearTimeout, Promise, Event: function () {}, KeyboardEvent: function () {}, JSON, Math, Date, Number, String, Array, Object });
+let rd3 = null;
+try { rd3 = vm.runInContext(PV.call('read', ['youtube']), sb3); } catch (e) { rd3 = { err: e.message }; }
+const l3 = rd3 && rd3.desc ? rd3.desc.links : [];
+check(JSON.stringify(l3.map((l) => [l.t, l.h])) === JSON.stringify([['0:00', '/watch?v=' + VIDX + '&t=0s'], ['#music', '/hashtag/music'], ['site', 'https://www.youtube.com/redirect?q=https%3A%2F%2Fexample.com%2F']]),
+  'no links in the DOM: ytInitialData’s runs, in order; 0:00 keeps t=0s; a hashtag is /hashtag/<tag>, not /channel/FEhashtag', l3);
+check(PV.descSegs(CONTENT, l3, VIDX).filter((x) => x.link).map((x) => x.link.kind).join() === 'time,yt,web', 'and they draw as a time, a YouTube page and another site');
 
 /* ---- watch-playview-main.js -------------------------------------------------------------------------------- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pv-test-'));

@@ -490,9 +490,12 @@
         return '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (hasT ? '&t=' + Math.floor(Number(sts)) + 's' : '');
       }
       if (x.browseEndpoint && x.browseEndpoint.canonicalBaseUrl) return String(x.browseEndpoint.canonicalBaseUrl);
-      if (x.browseEndpoint && x.browseEndpoint.browseId) return '/channel/' + encodeURIComponent(x.browseEndpoint.browseId);
+      // the page's own address next (a hashtag is browseId "FEhashtag" + params: its address is /hashtag/<tag>,
+      // never /channel/FEhashtag, which a real-YouTube probe showed); a bare browseId is a channel last
       var w = x.commandMetadata && x.commandMetadata.webCommandMetadata && x.commandMetadata.webCommandMetadata.url;
-      return w ? String(w) : '';
+      if (w) return String(w);
+      if (x.browseEndpoint && x.browseEndpoint.browseId && /^UC/.test(x.browseEndpoint.browseId)) return '/channel/' + encodeURIComponent(x.browseEndpoint.browseId);
+      return '';
     }
     /** ytInitialData's description links (commandRuns over its content) as [{ t: words, h: address }]. */
     function runLinks(ad) {
@@ -1124,19 +1127,27 @@
   }
   /**
    * While the description is clamped to three lines, a link in the hidden lines must not take Tab: focus on it
-   * scrolled the clamped box under its own "Show more" and the focus ring sat out of sight. Measured after
-   * layout; Show more draws them all reachable again.
+   * scrolled the clamped box under its own "Show more" and the focus ring sat out of sight. Measured once the
+   * description is in the panel (render calls this after appending it; a frame callback never ran in a hidden
+   * window, and ran on a zero-size box in a hidden panel). A box with no size yet goes by the text: a link after
+   * the third line break is hidden. Show more draws them all reachable again.
    */
   function clampLinks(dt) {
-    var go = function () {
-      if (!dt.isConnected) return;
-      var box = dt.getBoundingClientRect();
-      [].forEach.call(dt.querySelectorAll('a.pv-link'), function (a) {
+    var links = dt.querySelectorAll('a.pv-link');
+    if (!links.length || !dt.isConnected) return;
+    var box = dt.getBoundingClientRect();
+    if (box.height > 0) {
+      [].forEach.call(links, function (a) {
         var r = a.getBoundingClientRect();
         if (r.top >= box.bottom - 1) a.tabIndex = -1; else a.removeAttribute('tabindex');
       });
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go); else go();
+      return;
+    }
+    var breaks = 0;
+    [].forEach.call(dt.childNodes, function (n) {
+      if (n.nodeType === 3) { breaks += (n.nodeValue.match(/\n/g) || []).length; return; }
+      if (n.classList && n.classList.contains('pv-link')) { if (breaks >= 3) n.tabIndex = -1; else n.removeAttribute('tabindex'); }
+    });
   }
 
   /* ---------------------------------------------------------------- the info */
@@ -1309,7 +1320,6 @@
         // its links, chapter times and addresses work in Lumen (descText: DOM nodes only, never the page's markup)
         descText(s, dt, m.desc.text, m.desc.links, m.videoId);
         d.appendChild(dt);
-        if (!p.more) clampLinks(dt);
         if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) {
           var more = button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); });
           more.setAttribute('aria-expanded', p.more ? 'true' : 'false');
@@ -1317,6 +1327,7 @@
         }
       }
       info.appendChild(d);
+      if (dt && !p.more) clampLinks(dt);   // in the panel now: measured
     }
     // A spot for Lumen-drawn comments (a later module fills it; see LumenPlayview.commentsSpot).
     var cm = el('section', 'pv-comments');

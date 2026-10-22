@@ -460,7 +460,13 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     check(await chrome.ev('window.__pwned === undefined') && (!p || await p.ev('window.__pwned === undefined')), 'and nothing in it ran');
     await sleep(8600);   // the page's reads are done (READS): no redraw under the keyboard test below
     const lkNow = ((await pv()) || {}).links || [];
-    check(lkNow.length === 7 && lkNow[6].tab === -1 && lkNow[0].tab !== -1 && lkNow[1].tab !== -1, 'clamped to three lines: a link in the hidden lines takes no Tab (0:05); the first lines’ do', lkNow.map((x) => x.text + ':' + x.tab));
+    // each link: under the clamped box's bottom (hidden) or not, and its tabIndex
+    const geo = await chrome.ev(`(() => { const dt = document.querySelector('.wp-layer .pv-desc-text'); if (!dt) return null; const b = dt.getBoundingClientRect();
+      return { h: Math.round(b.height), lines: Math.round(b.height / parseFloat(getComputedStyle(dt).lineHeight)), nl: (dt.textContent.match(/\\n/g) || []).length,
+        links: [...dt.querySelectorAll('a.pv-link')].map((a) => ({ t: a.textContent, hidden: a.getBoundingClientRect().top >= b.bottom - 1, tab: a.tabIndex })) }; })()`);
+    say('clamp: ' + JSON.stringify(geo));
+    check(lkNow.length === 7 && !!geo && geo.links.every((x) => (x.tab === -1) === x.hidden) && geo.links[6].hidden && !geo.links[0].hidden && !geo.links[1].hidden,
+      'clamped to three lines: a link in the hidden lines takes no Tab (0:05); the shown lines’ links do', geo);
     await clickAt('.wp-layer .pv-more', 'Show more');
     await sleep(300);
     const lkMore = ((await pv()) || {}).links || [];

@@ -26,7 +26,8 @@ function descLinksHtml(vid) {
     `Site: <a class="yt-core-attributed-string__link" href="${other}">example.com/docs</a> by <span class="yt-core-attributed-string--link-inherit-color"><a class="yt-core-attributed-string__link" href="/@lumentest">@lumentest</a></span> <a class="yt-core-attributed-string__link" href="/hashtag/lumentest">#lumentest</a>\n` +
     `Next: <a class="yt-core-attributed-string__link" href="/watch?v=pvOther0001">Another video</a>. Bad: <a href="javascript:window.__pwned=3">not a link</a>\n` +
     `${esc(HOSTILE)}\n` +
-    `Later: <a class="yt-core-attributed-string__link" href="/watch?v=${v}&amp;t=5s">0:05</a> after the fold`;
+    `${'More words that fill the lines under the fold. '.repeat(10)}\n` +
+    `Later:<a class="yt-core-attributed-string__link" href="/watch?v=${v}&amp;t=5s">0:05</a> after the fold`;
 }
 const META = '48,213 views · 3 days ago';
 const TOKEN = 'FAKE-COMMENTS-CONTINUATION-TOKEN-0001';
@@ -69,7 +70,7 @@ function youtubeWatch(q) {
         <dislike-button-view-model><button id="dislike" aria-pressed="false" aria-label="Dislike this video"></button></dislike-button-view-model></segmented-like-dislike-button-view-model>
         <button id="save" aria-label="Save to playlist">Save</button></div></div></div>
     <div id="description"><div id="info-container"><span id="info">${META}</span></div>
-      <ytd-text-inline-expander id="description-inline-expander"><yt-attributed-string>${o.links ? descLinksHtml(o.vid) : DESC}</yt-attributed-string><button id="expand">...more</button></ytd-text-inline-expander></div>
+      <ytd-text-inline-expander id="description-inline-expander"><yt-attributed-string${o.links ? ' style="white-space:pre-wrap"' : ''}>${o.links ? descLinksHtml(o.vid) : DESC}</yt-attributed-string><button id="expand">...more</button></ytd-text-inline-expander></div>
     </ytd-watch-metadata>
     <div id="comments"><ytd-comments><h2>Comments</h2><p class="comment">Comment one, from a viewer.</p></ytd-comments></div></div>`;
   const secondary = `<div id="secondary"><div id="player-ads"><ytd-ad-slot-renderer class="sponsored">Sponsored: a card that must not show</ytd-ad-slot-renderer></div>
