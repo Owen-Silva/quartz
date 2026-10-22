@@ -712,7 +712,12 @@
     activity(s);
     var st = P.st || {};
     switch (a.c) {
-      case 'toggle': user(s, { c: 'toggle' }); break;
+      case 'toggle':
+        // Space with Lumen's Up next card counting stops the countdown (and pauses a playing video) instead of
+        // playing or pausing here: watch-player-extras.js upSpace (Space used to start the next episode).
+        if (k === ' ' && root.WatchPlayerExtras && typeof root.WatchPlayerExtras.space === 'function' && root.WatchPlayerExtras.space(s) === true) break;
+        user(s, { c: 'toggle' });
+        break;
       case 'skip': skip(s, a.by); break;
       case 'vol': user(s, volKey(st, a.by)); break;
       case 'mute': toggleMute(s); break;
@@ -1043,6 +1048,9 @@
 
   return Object.assign({}, PURE, {
     attach: attach, destroy: destroy, sync: sync, shortcut: shortcut, renderSetting: renderSetting, applyMode: applyMode,
+    // A key as if pressed on the bar (watch-player-extras.js: the second Space on the Up next card plays or pauses
+    // the video through the bar). false when the bar is off.
+    press: function (k, shift) { var s = CTX && CTX.focused && CTX.focused(); return s ? key(s, k, !!shift) : false; },
     _state: _state, _key: function (k, shift) { var s = CTX && CTX.focused(); return s ? key(s, k, shift) : false; }
   });
 });
