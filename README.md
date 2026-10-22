@@ -11,6 +11,19 @@ Quartz is a personal project, published so others can read it, run it and learn 
 It is unofficial and not affiliated with any of the services it works with (see
 [CREDITS.md](CREDITS.md)). **Issues welcome; pull requests are not accepted right now.**
 
+## Download
+
+```
+git clone https://github.com/Owen-Silva/quartz.git
+cd quartz
+npm ci
+npm start
+```
+
+There is no installer: Quartz runs from the folder you cloned. You need Windows 11 (x64),
+Node.js 22.12 or newer but below 27, and git; see [Requirements](#requirements) and
+[Install](#install) for the details.
+
 ## Features
 
 - **Tabs for everything.** A tab is a web page, a real `claude.exe` (Claude Code) or shell
