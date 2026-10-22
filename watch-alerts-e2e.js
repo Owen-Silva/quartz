@@ -243,7 +243,7 @@ run('watch-alerts-e2e', async ({ check, launch, say }) => {
     check(off === 'Off.' && d.subs.on === false, 'the subscriptions switch turns it off, saved in main', { off, on: d.subs.on });
     const offNote = await c.ev(`(${field}.querySelector('.lumen-alerts-bgnote') || {}).textContent || ''`);
     check(offNote === 'Off: your Subscriptions are read only while Lumen is on screen.', 'Settings, off: the background check is gone, said plainly', offNote);
-    r = await T({ op: 'subs', answer: extra(four, [['lumenAlrt09', 'NHL', 'Off means off']]) });
+    r = await T({ op: 'subs', answer: extra(four, [['lumenAlrt09', 'ESA', 'Off means off']]) });
     check(r.alert === '', 'off: a new upload makes no alert');
     await c.ev(`${field}.querySelector('.lumen-alerts-subs').click(), 1`);
     await c.waitFor(`${field}.querySelector('.lumen-alerts-subs').getAttribute('aria-checked') === 'true'`, 8000).catch(() => null);

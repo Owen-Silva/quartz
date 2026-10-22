@@ -378,7 +378,7 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
     t = Date.now();
     await click(`document.querySelector('#ytp .yt-play.yt-pl[data-fk="p:${PL_ID}"]')`);
     const pl = await wait(`(() => { const y = ${YTP}; return ${YS}.views.join() === 'library,playlist:${PL_ID}' && y.querySelectorAll('.yt-sec .yt-cell').length === 3 ? { h2: y.querySelector('.ytp-t1 h2').textContent, sub: (y.querySelector('.ytp-ttl > .sub') || {}).textContent } : null; })()`, 30000);
-    check(!!pl && pl.h2 === 'Recipes to try out' && /by the user/.test(pl.sub) && /3 videos/.test(pl.sub), 'a playlist tile opens the playlist in Lumen: title, owner, count, 3 videos', pl);
+    check(!!pl && pl.h2 === 'Recipes to try out' && /by Alex/.test(pl.sub) && /3 videos/.test(pl.sub), 'a playlist tile opens the playlist in Lumen: title, owner, count, 3 videos', pl);
     check(hits(new RegExp('^/playlist\\?list=' + PL_ID + '$'), t) === 1, 'the reader read that playlist once', frontLog.filter((l) => l.t >= t).map((l) => l.path));
     await shots('playlist', blur);
     const firstPl = await g.ev(`(() => { const b = document.querySelector('#ytp .yt-sec .yt-play'); return b && b._item ? b._item.vid : null; })()`);

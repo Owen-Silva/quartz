@@ -68,7 +68,7 @@ if (!(process.env.CI === 'true' || process.env.QUARTZ_BENCH_OK === '1')) {
 }
 
 const SITES = [
-  'https://en.wikipedia.org/wiki/Ice_baking',
+  'https://en.wikipedia.org/wiki/Astronomy',
   'https://github.com/electron/electron',
   'https://news.ycombinator.com/',
   'https://developer.mozilla.org/en-US/docs/Web/JavaScript',

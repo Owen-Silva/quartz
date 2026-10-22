@@ -5,7 +5,7 @@
  * functions and tables; nothing here talks to Electron, the DOM or the network.
  *
  * Watch is Quartz's streaming hub (watch.html). It merges the user's OWN rows from
- * the services he is signed in to in Quartz (Continue watching, For You,
+ * the services they are signed in to in Quartz (Continue watching, For You,
  * Watchlist), ESPN's public scoreboard, and per-service rows, and a click opens
  * the title on the service's own page. Read-only: no playback, no downloads,
  * no DRM work. The data never leaves the PC.
@@ -111,7 +111,7 @@
   var STATES = ['ok', 'signed-out', 'error', 'off', 'never'];
   var EVENT_STATES = ['pre', 'in', 'post'];
 
-  /* The leagues the sports strip can show, NHL first (The user plays). `path` is ESPN's own. */
+  /* The leagues the sports strip can show, NHL first. `path` is ESPN's own. */
   var LEAGUES = [
     { id: 'nhl', name: 'NHL', path: 'hockey/nhl' },
     { id: 'nfl', name: 'NFL', path: 'football/nfl' },

@@ -548,7 +548,7 @@ void watchShorts;
 
 /**
  * Watch, the streaming hub (watch-main.js + watch.html). It reads the user's own
- * rows from the services he is signed in to here, in one hidden reader at a
+ * rows from the services they are signed in to here, in one hidden reader at a
  * time on the default session, and opens a title on the service's own page:
  * a Quartz tab, or Edge through drm.openInEdge for the services whose players
  * need Widevine. A TEST profile may point every service at a local mock
@@ -773,8 +773,8 @@ const phone = phoneModule.create({
  *
  * REQUIRED AND BUILT INSIDE A try/catch, with a stub for the failure: this is
  * the only part of the browser that depends on a native binary (koffi), and
- * The user starts the browser from this folder while it is being worked on. A
- * missing, half-installed or wrong-ABI koffi must cost him `api.embed`, not a
+ * The developer starts the browser from this folder while it is being worked on. A
+ * missing, half-installed or wrong-ABI koffi must cost them `api.embed`, not a
  * window. (embed.js loads koffi lazily on first use for the same reason, so
  * this catch is the second line of defence, not the first.)
  */
@@ -1817,7 +1817,7 @@ ipcMain.handle('background:builtins', (event) => {
 // Idle music: the user's own tracks
 //
 // Unlike the moving background, NOTHING is copied. The user's library can be tens
-// of gigabytes and lives where he keeps it; settings stores the descriptors and
+// of gigabytes and lives where they keep it; settings stores the descriptors and
 // the chrome plays each file where it lies.
 //
 // How the chrome reaches the bytes: index.html is loaded with loadFile(), so
@@ -2677,7 +2677,7 @@ function attachSessionHandlers() {
 
   sess.setPermissionRequestHandler((contents, permission, callback, details) => {
     // Watch's hidden readers never prompt and never get anything: a dialog for a page the user
-    // cannot see would make his answer stick for his real tabs of that site.
+    // cannot see would make their answer stick for their real tabs of that site.
     if (isWatchReader(contents)) return callback(false);
     // An app link from Lumen's player layer (a page or a sheet): stopped, said and counted there.
     if (permission === 'openExternal' && watchPlayer && typeof watchPlayer.refuseExternal === 'function' && watchPlayer.refuseExternal(contents, details)) return callback(false);
@@ -3805,7 +3805,7 @@ ipcMain.handle('autopause:doctor', () => autoPause.doctor());
 //
 // Rules the whole section keeps:
 //   - the CHROME only. A <webview> guest that guessed the channel name would
-//     otherwise be able to drive the user's music and read his listening.
+//     otherwise be able to drive the user's music and read their listening.
 //   - every answer is a value. A bridge that is not installed, not running, or
 //     simply slow comes back as { ok: false, reason } in plain English, exactly
 //     like the auto-pause calls above, because the new tab polls these.
@@ -4626,8 +4626,8 @@ ipcMain.handle('embed:list', (event) => {
 //
 //   1. Electron calls the BrowserWindow BLURRED -- Chromium's HWND really did
 //      lose focus -- so everything in the chrome that follows window focus (the
-//      idle music's gate above all) behaves as if the user had left the browser. He
-//      has not: the window he is typing into is INSIDE it.
+//      idle music's gate above all) behaves as if the user had left the browser. They
+//      have not: the window they are typing into is INSIDE it.
 //   2. Keystrokes go to the app, not to Chromium, so the browser's own
 //      shortcuts are dead until the tab strip is clicked.
 //

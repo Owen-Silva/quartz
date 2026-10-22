@@ -108,7 +108,7 @@ module.exports = async function (check) {
   var libAll = L.parseLibrary({ steps: { wl: errStep('x', 'offline'), ll: errStep('y', 'offline'), playlists: errStep('z', 'offline') } });
   check(libAll.state === 'error' && /offline/.test(libAll.reason), 'library: everything failing is an error with the reason', libAll.reason);
   var pl = L.parsePlaylist({ steps: { playlist: step(fx('youtube-playlist.json'), L.playlistUrl('PLbakingSourdough0000000001')) } }, 'PLbakingSourdough0000000001');
-  check(pl.state === 'ok' && pl.items.length === 3 && pl.playlist.title === 'Recipes to try out' && pl.playlist.owner === 'the user' && pl.playlist.count === '3 videos', 'playlist: its videos in order, title, owner, count', { st: pl.state, h: pl.playlist });
+  check(pl.state === 'ok' && pl.items.length === 3 && pl.playlist.title === 'Recipes to try out' && pl.playlist.owner === 'Alex' && pl.playlist.count === '3 videos', 'playlist: its videos in order, title, owner, count', { st: pl.state, h: pl.playlist });
   check(pl.items.map(function (i) { return i.vid; }).join(',') === 'plVideo0001,plVideo0002,plVideo0003' && /&t=421s$/.test(pl.items[1].url), 'playlist: the playlist order kept, part 2 resumes at &t=', pl.items.map(function (i) { return i.url.slice(24); }));
   var plGone = L.parsePlaylist({ steps: { playlist: step({ loggedIn: true, ytInitialData: { alerts: [{ alertWithButtonRenderer: { type: 'INFO', text: { simpleText: 'The playlist does not exist.' } } }] } }, 'x') } }, 'PLnope000000');
   check(plGone.state === 'error' && /does not exist/.test(plGone.reason), "playlist: YouTube's alert is the reason", plGone.reason);

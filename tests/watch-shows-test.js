@@ -185,7 +185,7 @@ async function main() {
     const yf = JSON.parse(fs.readFileSync(path.join(__dirname, 'watch-fixtures', 'youtube-playlist.json'), 'utf8'));
     const r = YouTube.parse({ steps: { playlist: ytStep(yf, 'https://www.youtube.com/playlist?list=' + id) } }, { service: 'youtube', type: 'show', id, title: '' });
     const s = M.cleanShow(r.show);
-    check(r.state === 'ok' && s.title === 'Recipes to try out' && s.seasons.length === 1 && s.seasons[0].episodes.length === 3 && /the user/.test(s.synopsis), 'YouTube: the playlist is one season of its videos, in order', s);
+    check(r.state === 'ok' && s.title === 'Recipes to try out' && s.seasons.length === 1 && s.seasons[0].episodes.length === 3 && /Alex/.test(s.synopsis), 'YouTube: the playlist is one season of its videos, in order', s);
     const e2 = s.seasons[0].episodes[1];
     check(/[?&]list=PLbakingSourdough/.test(e2.url) && /&t=421s/.test(e2.url) && e2.progress > 0, "YouTube: a part-watched video resumes at YouTube's own &t= inside the playlist", e2);
     check(M.resumePlan(s).label === 'Resume E2' || M.resumePlan(s).label === 'Resume S1 E2', 'YouTube: the big button resumes the part-watched video', M.resumePlan(s));

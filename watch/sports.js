@@ -663,8 +663,8 @@ function parseStandings(json, league) {
 /*
  * The broadcast names ESPN lists -> where it streams on the user's services, opened in Lumen's
  * player layer. Never a workaround: a blacked-out game shows the service's own "not
- * available in your area". Channels none of his services carry are named, with what
- * streams them, so he knows where it is.
+ * available in your area". Channels none of their services carry are named, with what
+ * streams them, so the user knows where it is.
  */
 var ESPN_NETS = /^(ESPN|ESPN2|ESPNU|ESPNEWS|ESPN Deportes|ABC|SECN|SEC Network|ACCN|ACC Network|ACCNX|SECN\+|Longhorn Network|ESPN Unlimited)$/i;
 var HULU_LIVE = /^(ABC|ESPN|ESPN2|ESPNU|SECN|SEC Network|ACCN|ACC Network|FOX|FS1|FS2|NBC|USA Net|USA|CBS|CBSSN|TNT|TBS|truTV|NFL Net|NFL Network|BTN|Big Ten Network|Golf)$/i;
@@ -680,7 +680,7 @@ var ELSEWHERE = [
 var ESPN_WATCH = 'https://www.espn.com/watch/';
 
 /**
- * -> { options: [{ service, label, url, note }], airsOn: [names no service of his carries], words }.
+ * -> { options: [{ service, label, url, note }], airsOn: [names no service of theirs carries], words }.
  * ev: { league, broadcasts, url (a WatchESPN player URL when ESPN listed an airing), state }.
  */
 function watchOptions(ev) {

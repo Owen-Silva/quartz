@@ -5,7 +5,7 @@
 //        [--reps=2] [--every=30] [--out=eff-out] [--app-b=<dir>] [--max-min=22]
 //
 // RUNNER ONLY. It starts a dozen browsers at once and kills each one it started by PID tree at the
-// end, so it must never run on the user's laptop (his live Quartz runs from ~/browser). It refuses to
+// end, so it must never run on the user's own machine (the live Quartz runs from ~/browser). It refuses to
 // start unless CI=true or QUARTZ_BENCH_OK=1.
 //
 // Every condition runs as its own browser instance, all of them AT THE SAME TIME, so every
@@ -91,7 +91,7 @@ if (!(process.env.CI === 'true' || process.env.QUARTZ_BENCH_OK === '1')) {
 }
 
 const SITES = [
-  'https://en.wikipedia.org/wiki/Ice_baking',
+  'https://en.wikipedia.org/wiki/Astronomy',
   'https://github.com/electron/electron',
   'https://news.ycombinator.com/',
   'https://developer.mozilla.org/en-US/docs/Web/JavaScript',

@@ -79,7 +79,7 @@
                       { "videoRenderer": {
                         "videoId": "hiVideoD005",
                         "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/hiVideoD005/hqdefault.jpg?sqp=h5", "width": 480, "height": 270 }] },
-                        "title": { "runs": [{ "text": "1980 Miracle on Ice: Full Broadcast" }] },
+                        "title": { "runs": [{ "text": "1969 Apollo Landing: Full Broadcast" }] },
                         "ownerText": { "runs": [{ "text": "Classic Travel Archive" }] },
                         "lengthText": { "simpleText": "1:00:00" },
                         "thumbnailOverlays": [
