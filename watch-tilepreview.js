@@ -92,7 +92,10 @@
     var o = opts && typeof opts === 'object' ? opts : {};
     if (!item || typeof item !== 'object') return { type: 'none', reason: 'not a title' };
     if (o.event || o.team) return { type: 'none', reason: 'games and teams don’t preview' };
-    if (item.kind === 'live' || item.kind === 'upcoming') return { type: 'none', reason: 'live and upcoming events don’t preview' };
+    // A YouTube feed item is kind 'rec' with live / upcoming as separate flags (watch/ytlib.js), so
+    // check those too: a live stream would otherwise play in the tile and hand off a meaningless
+    // &t=, and a premiere's waiting room never reports "playing", so the 2.5 s fallback would show it.
+    if (item.kind === 'live' || item.kind === 'upcoming' || item.live === true || item.upcoming === true) return { type: 'none', reason: 'live and upcoming events don’t preview' };
     if (item.service === 'espn') return { type: 'none', reason: 'ESPN doesn’t preview' };
     if (!PV) return { type: 'none', reason: 'this build is missing watch/preview.js' };
     var s = PV.sourceFor(item, { hasTmdbKey: !!o.hasTmdbKey });

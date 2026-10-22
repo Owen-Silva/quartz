@@ -122,6 +122,8 @@ function world(o) {
   check(s.type === 'none', 'tileSource: no TMDB key: nothing plays (the tile stays still)', s);
   check(TP.tileSource(LIVE, { hasTmdbKey: true }).type === 'none', 'tileSource: a live ESPN card never previews');
   check(TP.tileSource(Object.assign({}, DISNEY, { kind: 'upcoming' }), { hasTmdbKey: true }).type === 'none', 'tileSource: an upcoming event never previews');
+  check(TP.tileSource(Object.assign({}, YT, { live: true }), { hasTmdbKey: true }).type === 'none', 'tileSource: a YouTube live stream (kind rec, live: true) never previews');
+  check(TP.tileSource(Object.assign({}, YT, { upcoming: true }), { hasTmdbKey: true }).type === 'none', 'tileSource: a YouTube premiere (kind rec, upcoming: true) never previews');
   check(TP.tileSource(DISNEY, { hasTmdbKey: true, event: true }).type === 'none' && TP.tileSource(DISNEY, { hasTmdbKey: true, team: true }).type === 'none', 'tileSource: games and My teams never preview');
 
   /* ---- the &t= hand-off ---- */
