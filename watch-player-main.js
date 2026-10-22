@@ -44,6 +44,12 @@ const Hosts = require('./watch-player-hosts');
 const PREFS_FILE = 'watch-player.json';
 const FLOOR_GB = 1.5;          // multiview: under this much free RAM a 3rd or 4th tile is refused
 const MAX_TILES = 4;
+// In a tile's page (its focused frame): is the focus somewhere he types (a sign-in, a PIN, a search box)?
+const TYPING_JS = '(() => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;' +
+  ' if (!a) return false; if (a.isContentEditable) return true; const t = a.tagName;' +
+  ' if (t === "TEXTAREA" || t === "SELECT") return true;' +
+  ' if (t === "INPUT") return !/^(button|checkbox|radio|range|submit|reset|image|file|color|hidden)$/i.test(a.type || "");' +
+  ' return false; })()';
 
 function create(deps) {
   const d = deps || {};
@@ -296,7 +302,24 @@ function create(deps) {
     contents.on('will-frame-navigate', (e) => { const to = String((e && e.url) || ''); if (e && !e.isMainFrame && to && !isLocal(to) && !isWeb(to)) { e.preventDefault(); blockApp(p, to); } });
     contents.on('enter-html-full-screen', () => { p.fullscreen = true; });
     contents.on('leave-html-full-screen', () => { p.fullscreen = false; });
+    // A tile's text field keeps its keys: 1-4/F/X/M are taken only while the page's focus is not somewhere he
+    // types (they were swallowed in a sign-in, a PIN or the search box). before-input-event can't wait on the
+    // page, so the answer is kept (p.typing) and asked again whenever the focus can have moved: a key or the
+    // mouse let go, the page's focus, a load, the switch to multiview.
+    p.typing = false;
+    p.askTyping = () => {
+      if (mode !== 'grid') return;
+      let f = null;
+      try { if (contents.isDestroyed()) return; f = contents.focusedFrame || contents.mainFrame || null; } catch (e) { f = null; }
+      if (!f || typeof f.executeJavaScript !== 'function') return;
+      try {
+        const r = f.executeJavaScript(TYPING_JS);
+        if (r && typeof r.then === 'function') r.then((v) => { p.typing = v === true; }, () => { /* a frame going away: the next ask says */ });
+      } catch (e) { /* frame gone */ }
+    };
+    contents.on('did-finish-load', () => { setTimeout(() => p.askTyping(), 300); });   // a field the page focuses itself
     contents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyUp') { p.askTyping(); return; }
       if (input.type !== 'keyDown' || input.control || input.alt || input.meta) return;
       const key = String(input.key);
       if (/^Media(PlayPause|Play|Pause|Stop|TrackNext|TrackPrevious)$/.test(key)) {
@@ -304,7 +327,7 @@ function create(deps) {
         send('watch-player:command', { cmd: 'key-' + key, wcId });
         return;
       }
-      if (mode !== 'grid' || input.shift) return;
+      if (mode !== 'grid' || input.shift || p.typing) return;
       // Multiview (watch-player-multi.js): 1-4 pick the tile with the sound, F expands it, X removes
       // it, M mutes them all. A tile's page never sees these while there is more than one tile.
       if (/^[1-4]$/.test(key) || /^[fxm]$/i.test(key)) {
@@ -313,9 +336,12 @@ function create(deps) {
       }
     });
     // A click into a tile's page (it takes focus) moves the sound there, in multiview only.
-    contents.on('focus', () => { if (mode === 'grid') send('watch-player:key', { key: 'focus', wcId }); });
+    contents.on('focus', () => { if (mode === 'grid') { send('watch-player:key', { key: 'focus', wcId }); p.askTyping(); } });
     // ...and its mouse-down too: focus never arrives while the window itself is unfocused.
-    contents.on('input-event', (_e, input) => { if (mode === 'grid' && input && input.type === 'mouseDown') send('watch-player:key', { key: 'focus', wcId }); });
+    contents.on('input-event', (_e, input) => {
+      if (mode === 'grid' && input && input.type === 'mouseDown') send('watch-player:key', { key: 'focus', wcId });
+      if (input && input.type === 'mouseUp') p.askTyping();   // a click into (or out of) a text field
+    });
     contents.once('destroyed', () => {
       players.delete(wcId);
       for (const id of Array.from(p.sheets)) closeSheet(id, 'its player closed');
@@ -514,7 +540,11 @@ function create(deps) {
     on('watch-player:get', () => ({ inside: inside(), name: Hosts.HUB_NAME, floorGb, maxTiles: MAX_TILES, leaks: leaks ? leaks.state() : null }));
     on('watch-player:set-inside', (p) => ({ inside: setInside(p.on === true) }));
     on('watch-player:adopt', (p) => adopt(Number(p.wcId), p));
-    on('watch-player:mode', (p) => { mode = p.mode === 'grid' ? 'grid' : 'single'; return { mode }; });
+    on('watch-player:mode', (p) => {
+      mode = p.mode === 'grid' ? 'grid' : 'single';
+      if (mode === 'grid') for (const pl of players.values()) { if (pl.askTyping) pl.askTyping(); }   // a field already focused
+      return { mode };
+    });
     on('watch-player:free', () => ({ freeGb: Math.round(freeGb() * 100) / 100, floorGb }));
     on('watch-player:alive', (p) => ({ alive: !!(webContentsApi && Number.isInteger(p.wcId) && (() => { try { const c = webContentsApi.fromId(p.wcId); return !!c && !c.isDestroyed(); } catch { return false; } })()) }));
     on('watch-player:memory', () => memory());
