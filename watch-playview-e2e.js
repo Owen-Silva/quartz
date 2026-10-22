@@ -55,7 +55,8 @@ async function startServers(mock) {
       if (p === '/__media/clip.mp4') return sendClip(req, res);
       if (svc === 'youtube' && p === '/watch') {
         hits.youtube++;
-        const q = { signedout: u.searchParams.has('signedout'), bare: u.searchParams.has('bare'), noplayer: u.searchParams.has('noplayer'), still: u.searchParams.has('still') };
+        const q = { signedout: u.searchParams.has('signedout'), bare: u.searchParams.has('bare'), noplayer: u.searchParams.has('noplayer'), still: u.searchParams.has('still'),
+          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '' };
         return sendHtml(res, F.youtubeWatch(q));
       }
       if (svc === 'youtube' && /^\/embed\//.test(p)) return sendHtml(res, EMBED);
@@ -446,6 +447,75 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     const still = await p.ev('(() => { const d = document.getElementById("still"); if (!d) return null; const b = d.getBoundingClientRect(); const n = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { vis: getComputedStyle(d).visibility, top: !!n && d.contains(n) }; })()');
     check(!!still && still.vis === 'visible' && still.top, '“Continue watching?” shows over the player (YouTube’s own, never hidden)', still);
     p.close();
+    // Links in the description (r63): chapter times seek in place, YouTube links open in Lumen, other sites in a
+    // Quartz tab; hostile markup stays words; Tab reaches a link and Enter presses it.
+    await playYT('&links=1', 'Links');
+    st = await pvWait('x.applied && x.phase === "ready" && /links=1/.test(x.url) && x.links && x.links.length >= 5', 15000);
+    p = await guestFor(FY + '/watch?v=' + VID + '&links');
+    const lk = st ? st.links : [];
+    const kinds = lk.map((x) => x.text + '=' + x.kind).join('|');
+    check(kinds === '0:00=time|0:20=time|example.com/docs=web|@lumentest=yt|#lumentest=yt|Another video=yt|0:05=time', 'the description’s links are links, each the kind Lumen opens it as', kinds);
+    check(!!st && st.desc.indexOf(F.HOSTILE) >= 0 && st.desc.indexOf('not a link') >= 0 && !/<img|<script/i.test(st.descHtml) && /&lt;script&gt;/.test(st.descHtml) && !/javascript:/i.test(st.descHtml),
+      'a hostile description: its <img> and <script> are words on screen, never elements; a javascript: link is plain text', st && st.descHtml.slice(0, 400));
+    check(await chrome.ev('window.__pwned === undefined') && (!p || await p.ev('window.__pwned === undefined')), 'and nothing in it ran');
+    await sleep(8600);   // the page's reads are done (READS): no redraw under the keyboard test below
+    const lkNow = ((await pv()) || {}).links || [];
+    check(lkNow.length === 7 && lkNow[6].tab === -1 && lkNow[0].tab !== -1 && lkNow[1].tab !== -1, 'clamped to three lines: a link in the hidden lines takes no Tab (0:05); the first lines’ do', lkNow.map((x) => x.text + ':' + x.tab));
+    await clickAt('.wp-layer .pv-more', 'Show more');
+    await sleep(300);
+    const lkMore = ((await pv()) || {}).links || [];
+    check(lkMore.length === 7 && lkMore.every((x) => x.tab !== -1), 'Show more: every link takes Tab again', lkMore.map((x) => x.text + ':' + x.tab));
+    await clickAt('.wp-layer .pv-more', 'Show less');
+    await sleep(300);
+    const born2 = p ? await p.ev('window.__born') : null;
+    // 0:20 by the mouse: YouTube's own player seeks there and plays; the page is not loaded again.
+    if (p) await p.ev('(() => { const v = document.getElementById("v"); v.pause(); v.currentTime = 3; return 1; })()');
+    await clickAt('.wp-layer .pv-desc-text a.pv-link-time:nth-of-type(2)', '0:20');
+    const sk20 = p ? await p.waitFor('(() => { const v = document.getElementById("v"); return window.__seeks.length && !v.paused && v.currentTime >= 19.5 ? { seeks: window.__seeks.slice(), t: v.currentTime, plays: window.__plays, born: window.__born, href: location.href } : null; })()', 5000).catch(() => null) : null;
+    check(!!sk20 && sk20.seeks.join() === '20' && sk20.plays >= 1 && sk20.born === born2 && /links=1/.test(sk20.href), 'a click on 0:20: the page’s own player seeks to 0:20 and plays, in place (no reload)', sk20);
+    // 0:00 by the keyboard: Tab from the Save button reaches the first link; Enter seeks to the start, never reloads.
+    await chrome.ev('(() => { const b = document.querySelector(".wp-layer .pv-save"); if (b) b.focus(); return 1; })()');
+    let onLink = null;
+    for (let i = 0; i < 8 && !onLink; i++) {
+      await keyIn(chrome, 'Tab', 'Tab', 9);
+      onLink = await chrome.ev('(() => { const a = document.activeElement; return a && a.classList && a.classList.contains("pv-link") ? a.textContent : null; })()');
+    }
+    check(onLink === '0:00', 'Tab reaches the description’s first link (0:00)', onLink);
+    const ring = await chrome.ev('(() => { const a = document.activeElement; const cs = a ? getComputedStyle(a) : null; return cs ? { style: cs.outlineStyle, w: cs.outlineWidth, color: cs.color } : null; })()');
+    check(!!ring && ring.style === 'solid' && parseFloat(ring.w) >= 2, 'a focused link shows the focus ring', ring);
+    await keyIn(chrome, 'Enter', 'Enter', 13);
+    const sk0 = p ? await p.waitFor('(() => { const v = document.getElementById("v"); return window.__seeks.length >= 2 ? { seeks: window.__seeks.slice(), t: v.currentTime, born: window.__born } : null; })()', 5000).catch(() => null) : null;
+    check(!!sk0 && sk0.seeks.join() === '20,0' && sk0.t < 5 && sk0.born === born2, 'Enter on 0:00 seeks to the start, in place: the video is never loaded again', sk0);
+    check(await chrome.ev('(() => { const a = document.activeElement; return !!a && a.classList.contains("pv-link") && a.textContent === "0:00"; })()'), 'and the focus stays on the link');
+    // A YouTube link (an @handle) opens in Lumen through openInLumen; another site, a Quartz tab through createTab.
+    // Both are caught here (a real open would leave this page): the real functions are there, and are put back.
+    const real = await chrome.ev('typeof window.openInLumen === "function" && typeof window.createTab === "function"');
+    check(real, 'Lumen’s openInLumen and Quartz’s createTab are the chrome’s own functions');
+    await chrome.ev('(() => { window.__e2eOil = window.openInLumen; window.__e2eTab = window.createTab; window.__opened = []; window.openInLumen = (u, o) => { window.__opened.push(["lumen", u, o && o.service]); return true; }; window.createTab = (u, o) => { window.__opened.push(["tab", u, !!(o && o.background)]); return { id: -1 }; }; return 1; })()');
+    try {
+      await clickAt('.wp-layer .pv-desc-text a.pv-link-yt', '@lumentest');
+      await clickAt('.wp-layer .pv-desc-text a.pv-link-web', 'example.com/docs');
+      let opened = await chrome.ev('JSON.stringify(window.__opened)').then(JSON.parse);
+      check(JSON.stringify(opened[0]) === JSON.stringify(['lumen', 'https://www.youtube.com/@lumentest', 'youtube']), 'an @handle opens in Lumen (openInLumen, YouTube)', opened);
+      check(JSON.stringify(opened[1]) === JSON.stringify(['tab', 'https://example.com/docs', false]), 'another site (YouTube’s /redirect unwrapped) opens in a Quartz tab, in front', opened);
+      // the keyboard on a YouTube link: focus it, Enter
+      await chrome.ev('(() => { const a = [...document.querySelectorAll(".wp-layer .pv-desc-text a.pv-link-yt")].find((n) => n.textContent === "#lumentest"); if (a) a.focus(); return !!a; })()');
+      await keyIn(chrome, 'Enter', 'Enter', 13);
+      opened = await chrome.ev('JSON.stringify(window.__opened)').then(JSON.parse);
+      check(opened.length === 3 && opened[2][1] === 'https://www.youtube.com/hashtag/lumentest', 'Enter on a hashtag opens its YouTube page in Lumen', opened);
+      // can't open: says why (Quartz has no tab here)
+      await chrome.ev('(() => { window.createTab = () => null; return 1; })()');
+      await clickAt('.wp-layer .pv-desc-text a.pv-link-web', 'example.com/docs');
+      const why = await chrome.ev(`(() => { const l = ${PS}.slots.find((x) => x.boxed).linkLog; return l[l.length - 1]; })()`);
+      check(!!why && why.ok === false && /didn’t open a tab/.test(why.why), 'a link that can’t open says why (here: no tab opened)', why);
+      check(await chrome.ev('location.protocol') !== 'https:' && (await pv()).boxed, 'and no click ever navigated the chrome window: the view is still here');
+    } finally {
+      await chrome.ev('(() => { window.openInLumen = window.__e2eOil; window.createTab = window.__e2eTab; return 1; })()');
+    }
+    const st2 = await pv();
+    check(!!st2 && st2.linkLog.length >= 5 && /links=1/.test(st2.url) && (p ? await p.ev('window.__born') : null) === born2, 'after every link: the same page, never reloaded', st2 && st2.linkLog.map((x) => x.kind + ':' + x.ok));
+    await shot('desc-links', 1280, 800);
+    if (p) p.close();
     // The info can't be read: a player and nothing else.
     await playYT('&bare=1', 'Bare page');
     st = await pvWait('x.applied && /bare/.test(x.url) && (x.phase === "unread" || x.phase === "partial")', 15000);

@@ -133,6 +133,120 @@
     return !!a && ytId(nowUrl) !== a;
   }
 
+  /* ---------------------------------------------------------------- the description's links */
+
+  /*
+   * The description used to be one text node, so its links and chapter times couldn't be clicked in
+   * Lumen. Now the page's own links come over with the text (descLinks in the page: each <a>'s words and
+   * its raw href; ytInitialData's commandRuns when the DOM has none) and the description is drawn as text
+   * nodes and <a> elements, never markup from the page. Each link is one of:
+   *   'time': this video at t seconds: the page's own player seeks and plays (no reload, r62's comments fix);
+   *   'same': this video with no time: nothing to open, and the note says so;
+   *   'yt':   another YouTube page (a video, Shorts, a channel or @handle, a playlist, a hashtag): opened
+   *           in Lumen through window.openInLumen, the way the comments and the tiles open them;
+   *   'web':  any other http(s) site: a Quartz tab (window.createTab), the way the comments open them.
+   * Anything else (javascript:, data:, file:, a mailto) is no link: its words stay plain text.
+   */
+  var YT_BASE = 'https://www.youtube.com';
+  var DESC_LINKS_MAX = 300;
+  /** YouTube's t= / start= ("83", "83s", "1h2m3s") as seconds, or null. */
+  function tSeconds(t) {
+    if (t === null || t === undefined || t === '') return null;
+    var s = String(t);
+    if (/^\d+s?$/.test(s)) return parseInt(s, 10);
+    var m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(s);
+    if (m && (m[1] || m[2] || m[3])) return (Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0);
+    return null;
+  }
+  /** "1:23", "01:02:03" (a chapter time as written) as seconds, or null. */
+  function clockSeconds(text) {
+    var m = /^(?:(\d{1,2}):)?(\d{1,2}):([0-5]\d)$/.exec(String(text || '').trim());
+    if (!m) return null;
+    if (m[1] !== undefined && Number(m[2]) > 59) return null;
+    return (Number(m[1] || 0) * 3600) + (Number(m[2]) * 60) + Number(m[3]);
+  }
+  function isYtHost(h) { return /^(?:(?:www|m)\.)?youtube\.com$/i.test(h) || /^(?:www\.)?youtu\.be$/i.test(h); }
+  /**
+   * A description link as Lumen opens it: { kind, href, t? } (kinds above), or null when it isn't an
+   * http(s) link. href may be YouTube's relative form ("/watch?v=…&t=83s", "/@handle", "/hashtag/x");
+   * YouTube's /redirect?q= is unwrapped to where it goes. videoId: the video that is playing.
+   */
+  function descLink(href, videoId, depth) {
+    var s = String(href || '').trim();
+    if (!s || s.length > 4000) return null;
+    if (/^\/(?!\/)/.test(s)) s = YT_BASE + s;
+    var u;
+    try { u = new URL(s); } catch (e) { return null; }
+    if (!/^https?:$/.test(u.protocol)) return null;
+    if (!isYtHost(u.hostname)) return { kind: 'web', href: u.href };
+    if (u.pathname === '/redirect') {
+      var q = u.searchParams.get('q');
+      return q && (depth || 0) < 2 ? descLink(q, videoId, (depth || 0) + 1) : null;
+    }
+    var v = ytId(u.href);
+    var t = tSeconds(u.searchParams.get('t') || u.searchParams.get('start'));
+    if (v && videoId && v === videoId && !/^\/shorts\//.test(u.pathname)) {
+      return t !== null ? { kind: 'time', href: u.href, t: t } : { kind: 'same', href: u.href };
+    }
+    return { kind: 'yt', href: u.href };
+  }
+  /** Plain text's own links: http(s) addresses and chapter times ("0:00", "1:23:45"), as segments. */
+  var PLAIN_RE = /(https?:\/\/[^\s<>"]+)|(^|[^\w:.])((?:\d{1,2}:)?\d{1,2}:[0-5]\d)(?![\w:])/g;
+  function plainSegs(text, videoId, out) {
+    var s = String(text || '');
+    var at = 0, m;
+    PLAIN_RE.lastIndex = 0;
+    while ((m = PLAIN_RE.exec(s))) {
+      var start, word, l = null;
+      if (m[1]) {
+        start = m.index;
+        word = m[1].replace(/[)\].,;:!?'’"]+$/, '');   // "(see https://x.y/z)." ends at z
+        l = descLink(word, videoId);
+      } else {
+        start = m.index + m[2].length;
+        word = m[3];
+        var sec = clockSeconds(word);
+        if (videoId && sec !== null) l = { kind: 'time', href: YT_BASE + '/watch?v=' + encodeURIComponent(videoId) + '&t=' + sec + 's', t: sec };
+      }
+      if (!l || !word) continue;
+      if (start > at) out.push({ text: s.slice(at, start) });
+      out.push({ text: word, link: l });
+      at = start + word.length;
+      PLAIN_RE.lastIndex = at;
+    }
+    if (at < s.length) out.push({ text: s.slice(at) });
+    return out;
+  }
+  /**
+   * The description as segments [{ text, link? }]: the page's links (links: [{ t: their words, h: href }],
+   * in page order) found in the text in order, the rest of the text scanned for plain addresses and times.
+   * A page link whose words aren't in the text (YouTube rewrote them) is dropped; its words stay text.
+   */
+  function descSegs(text, links, videoId) {
+    var s = String(text || '');
+    var out = [];
+    var at = 0;
+    (Array.isArray(links) ? links : []).slice(0, DESC_LINKS_MAX).forEach(function (pl) {
+      var words = pl && typeof pl.t === 'string' ? pl.t : '';
+      if (!words) return;
+      var i = s.indexOf(words, at);
+      if (i < 0) return;
+      var l = descLink(pl.h, videoId);
+      if (!l) return;
+      if (i > at) plainSegs(s.slice(at, i), videoId, out);
+      out.push({ text: words, link: l });
+      at = i + words.length;
+    });
+    if (at < s.length) plainSegs(s.slice(at), videoId, out);
+    return out;
+  }
+  /** "1:23", "1:02:03" for t seconds (a link's title). */
+  function clock(t) {
+    var n = Math.max(0, Math.floor(Number(t) || 0));
+    var h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), x = n % 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (x < 10 ? '0' : '') + x;
+  }
+
   /** The kinds of page the view shows boxed (Shorts: the full page until the Shorts view). */
   function viewable(kind) { return kind === 'watch' || kind === 'player'; }
 
@@ -206,7 +320,13 @@
       else if (slotTitle && !o.moved) { out.title = slotTitle; out.titleFrom = 'item'; }
       else if (read && read.pageTitle) { out.title = cleanPageTitle(read.pageTitle, service); out.titleFrom = 'page-title'; }
       if (read && read.channel && read.channel.name) out.channel = { name: read.channel.name, subs: read.channel.subs || '', avatar: read.channel.avatar || '', url: read.channel.url || '' };
-      if (read && read.desc && (read.desc.text || read.desc.meta)) out.desc = { text: read.desc.text || '', meta: read.desc.meta || '' };
+      if (read && read.desc && (read.desc.text || read.desc.meta)) {
+        // its links: words and an address, both strings, capped (the page's word, never trusted as markup)
+        var dl = Array.isArray(read.desc.links) ? read.desc.links.slice(0, DESC_LINKS_MAX).filter(function (l) {
+          return l && typeof l.t === 'string' && typeof l.h === 'string' && l.t && l.h && l.t.length <= 500 && l.h.length <= 4000;
+        }).map(function (l) { return { t: l.t, h: l.h }; }) : [];
+        out.desc = { text: String(read.desc.text || ''), meta: String(read.desc.meta || ''), links: dl };
+      }
       out.signedIn = read ? (read.signedIn === true ? true : read.signedIn === false ? false : null) : null;
       ['like', 'dislike', 'sub', 'save'].forEach(function (k) {
         var b = read && read[k];
@@ -249,7 +369,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest() {
-    var V = 4;
+    var V = 5;   // 5: the description's links (desc.links) and seek()
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -348,6 +468,7 @@
             var o = s.owner.videoOwnerRenderer;
             out.channel = { name: runs(o.title), subs: runs(o.subscriberCountText), avatar: o.thumbnail && o.thumbnail.thumbnails && o.thumbnail.thumbnails.length ? o.thumbnail.thumbnails[o.thumbnail.thumbnails.length - 1].url : '' };
             out.desc = s.attributedDescription ? s.attributedDescription.content : runs(s.description);
+            out.descLinks = runLinks(s.attributedDescription);
           }
           if (sec && sec.sectionIdentifier === 'comment-item-section') {
             var ci = (sec.contents || [])[0];
@@ -357,6 +478,60 @@
         });
       } catch (e) { /* a shape Lumen doesn't know: the DOM's word only */ }
       return out;
+    }
+    /** A command's address (urlEndpoint, watchEndpoint with its start, browseEndpoint, its metadata), or ''. */
+    function cmdUrl(c) {
+      var x = c && (c.innertubeCommand || c);
+      if (!x || typeof x !== 'object') return '';
+      if (x.urlEndpoint && x.urlEndpoint.url) return String(x.urlEndpoint.url);
+      if (x.watchEndpoint && x.watchEndpoint.videoId) {
+        var sts = x.watchEndpoint.startTimeSeconds;   // 0 is a real time ("0:00"): it seeks, it never reloads
+        var hasT = sts !== undefined && sts !== null && sts !== '' && isFinite(Number(sts)) && Number(sts) >= 0;
+        return '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (hasT ? '&t=' + Math.floor(Number(sts)) + 's' : '');
+      }
+      if (x.browseEndpoint && x.browseEndpoint.canonicalBaseUrl) return String(x.browseEndpoint.canonicalBaseUrl);
+      if (x.browseEndpoint && x.browseEndpoint.browseId) return '/channel/' + encodeURIComponent(x.browseEndpoint.browseId);
+      var w = x.commandMetadata && x.commandMetadata.webCommandMetadata && x.commandMetadata.webCommandMetadata.url;
+      return w ? String(w) : '';
+    }
+    /** ytInitialData's description links (commandRuns over its content) as [{ t: words, h: address }]. */
+    function runLinks(ad) {
+      if (!ad || typeof ad.content !== 'string' || !Array.isArray(ad.commandRuns)) return [];
+      return ad.commandRuns.slice().sort(function (a, b) { return (a.startIndex || 0) - (b.startIndex || 0); }).map(function (r) {
+        return { t: ad.content.substr(Number(r.startIndex) || 0, Number(r.length) || 0).trim(), h: cmdUrl(r.onTap) };
+      }).filter(function (l) { return l.t && l.h; }).slice(0, 300);
+    }
+    /**
+     * The description's own links as [{ t: their words as shown, h: the raw href }], in page order. The raw
+     * attribute, not a.href: YouTube writes its own pages relative ("/watch?v=…&t=83s", "/@handle"), and the
+     * chrome reads them as youtube.com's whatever origin the page is served from.
+     */
+    function descLinks(root) {
+      if (!root) return [];
+      return QA('a[href]', root).slice(0, 300).map(function (a) {
+        return { t: String(a.innerText || a.textContent || '').trim(), h: String(a.getAttribute('href') || '') };
+      }).filter(function (l) { return l.t && l.h; });
+    }
+    /**
+     * A time in this video (a chapter, a timestamp in the description): the page's own player seeks and plays,
+     * the path the comments' timestamps take (#movie_player.seekTo, the <video> as its fallback). Never a load.
+     */
+    function seek(t) {
+      var n = Math.max(0, Number(t) || 0);
+      var mp = Q('#movie_player');
+      if (mp && mp.classList && mp.classList.contains('ad-showing')) return { ok: false, reason: 'an ad is playing; the time works once it ends' };
+      if (mp && typeof mp.seekTo === 'function') {
+        mp.seekTo(n, true);
+        try { if (typeof mp.playVideo === 'function') mp.playVideo(); } catch (e) { /* the <video> below */ }
+        var pv = Q('#movie_player video');
+        if (pv && pv.paused) { var pp = pv.play(); if (pp && pp.catch) pp.catch(function () { /* the player said no: it stays paused at the time */ }); }
+        return { ok: true, how: 'player' };
+      }
+      var v = Q('#movie_player video') || Q('video');
+      if (!v) return { ok: false, reason: 'there is no video on the page' };
+      v.currentTime = n;
+      if (v.paused) { var vp = v.play(); if (vp && vp.catch) vp.catch(function () { /* stays paused at the time */ }); }
+      return { ok: true, how: 'video' };
     }
     function readYT() {
       var u = new URL(location.href);
@@ -379,7 +554,14 @@
         ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: document.title,
         title: title || d.title || '', titleFrom: title ? 'page' : (d.title ? 'ytInitialData' : ''),
         channel: ch || d.channel || null,
-        desc: { text: (descEl ? (descEl.innerText || txt(descEl)) : '') || d.desc || '', meta: txt(Q('#info-container #info', m)) || txt(Q('#info-container', m)) || d.meta || '' },
+        desc: (function () {
+          var domText = descEl ? (descEl.innerText || txt(descEl)) : '';
+          var links = domText ? descLinks(descEl) : [];
+          // the DOM drew no links (an older layout, links not drawn yet): ytInitialData's runs (for this video only,
+          // dataFor checks); their words are looked for in the text, so a run whose words differ is just text
+          if (!links.length && d.descLinks && d.descLinks.length) links = d.descLinks;
+          return { text: domText || d.desc || '', meta: txt(Q('#info-container #info', m)) || txt(Q('#info-container', m)) || d.meta || '', links: links };
+        })(),
         like: lb ? { found: true, on: pressed(lb), count: txt(lb), label: lb.getAttribute('aria-label') || '' } : { found: false },
         dislike: db ? { found: true, on: pressed(db), label: db.getAttribute('aria-label') || '' } : { found: false },
         sub: sb ? { found: true, on: subscribed(sb), label: sb.getAttribute('aria-label') || txt(sb) } : { found: false },
@@ -459,7 +641,7 @@
       }
       return Promise.resolve({ ok: false, reason: 'unknown button ' + kind });
     }
-    window.__lumenPv = { v: V, apply: apply, read: read, press: press,
+    window.__lumenPv = { v: V, apply: apply, read: read, press: press, seek: seek,
       tick: function (svc, on) { var a = apply(svc, on); var r = read(svc); r.applied = a.on; r.how = a.how || ''; return r; } };
   }
   var GUEST = '(' + String(guest) + ')();';
@@ -469,7 +651,7 @@
 
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
     epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call,
-    ytId: ytId, ytMoved: ytMoved };
+    ytId: ytId, ytMoved: ytMoved, tSeconds: tSeconds, clockSeconds: clockSeconds, descLink: descLink, descSegs: descSegs, clock: clock };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -872,6 +1054,91 @@
 
   function backToPlayer(s) { if (s && s.view && !(pvOf(s) && pvOf(s).save)) { try { s.view.focus(); } catch (e) { /* gone */ } } }
 
+  /* ---------------------------------------------------------------- the description's links */
+
+  /** A link in the description, on the user's click or Enter (descLink's kinds). Each way it can't open says why, in a toast. */
+  var linkLog = [];   // the e2e's view: what each activation did
+  function linkSay(text) {
+    if (CTX && typeof CTX.toast === 'function') CTX.toast(text, true);
+    else console.warn('[lumen-playview] ' + text);
+  }
+  function openDescLink(s, l, words) {
+    var rec = { kind: l.kind, href: l.href, t: l.t === undefined ? null : l.t, ok: null, why: '', at: Date.now() };
+    linkLog.push(rec);
+    if (linkLog.length > 20) linkLog.shift();
+    var fail = function (why) { rec.ok = false; rec.why = why; linkSay(why); return false; };
+    if (l.kind === 'time') {
+      // In place: the page's own player seeks and plays. Never a load of the same video ("0:00" reloaded it in
+      // the comments before r62). Focus stays on the link, so the next chapter is one Tab away.
+      if (!s.view) return fail('Lumen couldn’t jump to ' + clock(l.t) + ': the video’s page is closed.');
+      var v = s.view;
+      js(v, call('seek', [l.t])).then(function (r) {
+        if (r && r.ok) { rec.ok = true; rec.how = r.how; return; }
+        fail('Lumen couldn’t jump to ' + clock(l.t) + ': ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
+      }, function (e) { fail('Lumen couldn’t jump to ' + clock(l.t) + ': YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
+      return true;
+    }
+    if (l.kind === 'same') return fail('That link is the video that’s playing' + (words ? ' (' + String(words).slice(0, 60) + ')' : '') + ', so there is nothing new to open.');
+    if (l.kind === 'yt') {
+      // Lumen's own way in (watch-player.js openInLumen; the comments and the tiles use it): the page opens in
+      // this player, and Back comes back. openInLumen says itself when it falls back to a tab.
+      if (typeof window.openInLumen !== 'function') return openTab(rec, l.href, 'Lumen’s player isn’t loaded in this window, so the YouTube link opened in a Quartz tab.');
+      var ok = false;
+      try { ok = window.openInLumen(l.href, { service: 'youtube' }) !== false; } catch (e) { return fail('Lumen couldn’t open the YouTube link: ' + String((e && e.message) || e).slice(0, 80) + '.'); }
+      rec.ok = ok;
+      if (!ok) rec.why = 'openInLumen said no (its own toast says why)';
+      return ok;
+    }
+    return openTab(rec, l.href, '');
+  }
+  /** Another site: a Quartz tab, in front (app.js createTab; the comments' links take the same path). */
+  function openTab(rec, href, said) {
+    var fail = function (why) { rec.ok = false; rec.why = why; linkSay(why); return false; };
+    if (typeof window.createTab !== 'function') return fail('Quartz can’t open a tab from here, so ' + href.slice(0, 120) + ' didn’t open.');
+    var tab = null;
+    try { tab = window.createTab(href, { background: false }); } catch (e) { return fail('Quartz couldn’t open a tab for ' + href.slice(0, 120) + ': ' + String((e && e.message) || e).slice(0, 80) + '.'); }
+    if (!tab) return fail('Quartz didn’t open a tab for ' + href.slice(0, 120) + '.');
+    rec.ok = true;
+    rec.how = 'tab';
+    if (said) { rec.why = said; linkSay(said); }
+    return true;
+  }
+  /**
+   * The description's text as text nodes and <a> elements: every word from the page goes in through
+   * textContent / createTextNode, never as markup. An <a> with an href: Tab reaches it and Enter presses it
+   * (the browser's own), and its click never navigates the chrome (preventDefault; the middle button too).
+   */
+  function descText(s, dt, text, links, videoId) {
+    descSegs(text, links, videoId).forEach(function (sg) {
+      if (!sg.link) { dt.appendChild(document.createTextNode(sg.text)); return; }
+      var l = sg.link;
+      var a = el('a', 'pv-link pv-link-' + l.kind, sg.text);
+      a.href = l.href;
+      a.rel = 'noopener noreferrer';
+      a.title = l.kind === 'time' ? 'Jump to ' + clock(l.t) : l.kind === 'same' ? 'This video' : l.kind === 'yt' ? 'Open in Lumen' : 'Open ' + l.href.slice(0, 200) + ' in a Quartz tab';
+      a.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openDescLink(s, l, sg.text); });
+      a.addEventListener('auxclick', function (e) { e.preventDefault(); e.stopPropagation(); if (e.button === 1) openDescLink(s, l, sg.text); });
+      a.addEventListener('dragstart', function (e) { e.preventDefault(); });   // a drop on the chrome would navigate it
+      dt.appendChild(a);
+    });
+  }
+  /**
+   * While the description is clamped to three lines, a link in the hidden lines must not take Tab: focus on it
+   * scrolled the clamped box under its own "Show more" and the focus ring sat out of sight. Measured after
+   * layout; Show more draws them all reachable again.
+   */
+  function clampLinks(dt) {
+    var go = function () {
+      if (!dt.isConnected) return;
+      var box = dt.getBoundingClientRect();
+      [].forEach.call(dt.querySelectorAll('a.pv-link'), function (a) {
+        var r = a.getBoundingClientRect();
+        if (r.top >= box.bottom - 1) a.tabIndex = -1; else a.removeAttribute('tabindex');
+      });
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go); else go();
+  }
+
   /* ---------------------------------------------------------------- the info */
 
   function render(s) {
@@ -1037,9 +1304,12 @@
       var d = el('div', 'pv-desc' + (p.more ? ' is-more' : ''));
       if (m.desc.meta) d.appendChild(el('div', 'pv-desc-meta', m.desc.meta));
       if (m.desc.text) {
-        var dt = el('div', 'pv-desc-text', m.desc.text);
+        var dt = el('div', 'pv-desc-text');
         dt.dir = 'auto';   // a right-to-left description reads in its own direction
+        // its links, chapter times and addresses work in Lumen (descText: DOM nodes only, never the page's markup)
+        descText(s, dt, m.desc.text, m.desc.links, m.videoId);
         d.appendChild(dt);
+        if (!p.more) clampLinks(dt);
         if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) {
           var more = button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); });
           more.setAttribute('aria-expanded', p.more ? 'true' : 'false');
@@ -1202,7 +1472,9 @@
       title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '', subs: q('.pv-subs') ? q('.pv-subs').textContent : '',
       ep: q('.pv-ep') ? q('.pv-ep').textContent : '', svc: q('.pv-svc-name') ? q('.pv-svc-name').textContent : '',
       note: q('.pv-why') ? q('.pv-why').textContent : '', like: b('.pv-like'), dislike: b('.pv-dislike'), sub: b('.pv-sub'), savebtn: b('.pv-save'), showPage: b('.pv-showpage'),
-      desc: q('.pv-desc') ? q('.pv-desc').textContent : '', comments: !!q('#lumen-pv-comments'), read: p.read
+      desc: q('.pv-desc') ? q('.pv-desc').textContent : '', comments: !!q('#lumen-pv-comments'), read: p.read,
+      links: m ? [].map.call(m.querySelectorAll('.pv-desc-text a.pv-link'), function (a) { return { text: a.textContent, kind: (/pv-link-(\w+)/.exec(a.className) || [])[1] || '', href: a.getAttribute('href'), tab: a.tabIndex }; }) : [],
+      descHtml: q('.pv-desc-text') ? q('.pv-desc-text').innerHTML.slice(0, 4000) : '', linkLog: linkLog.slice()
     };
   }
 

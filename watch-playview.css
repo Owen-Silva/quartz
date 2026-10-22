@@ -189,6 +189,12 @@
 .pv-desc-text { font-size: 13.5px; line-height: 1.55; color: #d2d4d7; white-space: pre-wrap; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pv-desc.is-more .pv-desc-text { display: block; -webkit-line-clamp: unset; }
+/* The description's links, chapter times and addresses (watch-playview.js descText): the view's accent
+   tint (--lv-on, as the comments' links), underlined on hover, Quartz's focus ring from the keyboard. */
+.pv-link { color: var(--lv-on, #9cc3e6); text-decoration: none; border-radius: 2px; cursor: pointer; }
+.pv-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.pv-link:focus-visible { outline: 2px solid var(--accent, #8ab4d8); outline-offset: 1px; text-decoration: underline; }
+.pv-link-time { font-variant-numeric: tabular-nums; }
 .pv-more { margin-top: 10px; height: 28px; padding: 0 12px; font-size: 12.5px; }
 .pv-comments {
   margin-top: 16px; padding: 18px 20px 12px; border-radius: var(--lv-radius);

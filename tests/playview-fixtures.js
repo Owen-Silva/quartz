@@ -5,13 +5,29 @@
 // and a fake player page for each of Disney+, Hulu, Prime Video and ESPN+ (a header, the player root, a footer).
 //
 // youtubeWatch(q): q.signedout, q.bare (a player and nothing else), q.noplayer (no #movie_player), q.still (YouTube's
-// "Video paused. Continue watching?" after 600 ms).
+// "Video paused. Continue watching?" after 600 ms), q.links (a description with YouTube's own links: chapter times,
+// another site, an @handle, a hashtag, another video, a javascript: link, hostile markup as text; q.vid is the page's
+// video id). #movie_player has YouTube's seekTo / playVideo,
+// counted in window.__seeks / window.__plays.
 'use strict';
 
 const TITLE = 'Lumen Test Video: jumping gjpqy glyphs';
 const CHANNEL = 'Lumen Test Channel';
 const SUBS = '1.24M subscribers';
 const DESC = 'A local clip for Lumen’s playback view.\nSecond line of the description, with descenders: gjpqy.\nThird line.\nFourth line that only shows after Show more.';
+// q.links: a description drawn the way YouTube draws it (relative hrefs for its own pages, /redirect for other
+// sites), with hostile markup as TEXT (escaped here, so the page's innerText has the raw "<script>" words).
+const HOSTILE = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>';
+function descLinksHtml(vid) {
+  const v = encodeURIComponent(String(vid || '').replace(/[^\w-]/g, ''));
+  const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const other = 'https://www.youtube.com/redirect?event=video_description&amp;q=https%3A%2F%2Fexample.com%2Fdocs';
+  return `Chapters: <a class="yt-core-attributed-string__link" href="/watch?v=${v}&amp;t=0s">0:00</a> Intro, <a class="yt-core-attributed-string__link" href="/watch?v=${v}&amp;t=20s">0:20</a> The middle\n` +
+    `Site: <a class="yt-core-attributed-string__link" href="${other}">example.com/docs</a> by <span class="yt-core-attributed-string--link-inherit-color"><a class="yt-core-attributed-string__link" href="/@lumentest">@lumentest</a></span> <a class="yt-core-attributed-string__link" href="/hashtag/lumentest">#lumentest</a>\n` +
+    `Next: <a class="yt-core-attributed-string__link" href="/watch?v=pvOther0001">Another video</a>. Bad: <a href="javascript:window.__pwned=3">not a link</a>\n` +
+    `${esc(HOSTILE)}\n` +
+    `Later: <a class="yt-core-attributed-string__link" href="/watch?v=${v}&amp;t=5s">0:05</a> after the fold`;
+}
 const META = '48,213 views · 3 days ago';
 const TOKEN = 'FAKE-COMMENTS-CONTINUATION-TOKEN-0001';
 const AVATAR = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88"><rect width="88" height="88" fill="#5b6b7a"/><text x="44" y="58" font-size="40" text-anchor="middle" fill="#fff" font-family="Segoe UI">L</text></svg>');
@@ -53,7 +69,7 @@ function youtubeWatch(q) {
         <dislike-button-view-model><button id="dislike" aria-pressed="false" aria-label="Dislike this video"></button></dislike-button-view-model></segmented-like-dislike-button-view-model>
         <button id="save" aria-label="Save to playlist">Save</button></div></div></div>
     <div id="description"><div id="info-container"><span id="info">${META}</span></div>
-      <ytd-text-inline-expander id="description-inline-expander"><yt-attributed-string>${DESC}</yt-attributed-string><button id="expand">...more</button></ytd-text-inline-expander></div>
+      <ytd-text-inline-expander id="description-inline-expander"><yt-attributed-string>${o.links ? descLinksHtml(o.vid) : DESC}</yt-attributed-string><button id="expand">...more</button></ytd-text-inline-expander></div>
     </ytd-watch-metadata>
     <div id="comments"><ytd-comments><h2>Comments</h2><p class="comment">Comment one, from a viewer.</p></ytd-comments></div></div>`;
   const secondary = `<div id="secondary"><div id="player-ads"><ytd-ad-slot-renderer class="sponsored">Sponsored: a card that must not show</ytd-ad-slot-renderer></div>
@@ -123,6 +139,15 @@ function youtubeWatch(q) {
     window.__keys.push(k);
     e.preventDefault();
   });
+  // YouTube's player API on #movie_player, the part Lumen's description times use: seekTo and playVideo, counted.
+  window.__seeks = [];
+  window.__plays = 0;
+  (function () {
+    var mp0 = document.getElementById('movie_player'), v0 = document.getElementById('v');
+    if (!mp0 || !v0) return;
+    mp0.seekTo = function (t) { window.__seeks.push(Number(t)); v0.currentTime = Number(t) || 0; };
+    mp0.playVideo = function () { window.__plays++; var r = v0.play(); if (r && r.catch) r.catch(function () {}); };
+  })();
   ${o.still ? `setTimeout(function () { var d = document.createElement('tp-yt-paper-dialog'); d.id = 'still'; d.innerHTML = '<yt-confirm-dialog-renderer><p>Video paused. Continue watching?</p><div id="confirm-button"><button>Yes</button></div></yt-confirm-dialog-renderer>'; pops.appendChild(d); }, 600);` : ''}
 })();
 </script></body></html>`;
@@ -151,4 +176,4 @@ function servicePlayer(svc, title) {
 <script>window.__keys = []; document.addEventListener('keydown', function (e) { window.__keys.push(e.key); });</script></body></html>`;
 }
 
-module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR };
+module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE };

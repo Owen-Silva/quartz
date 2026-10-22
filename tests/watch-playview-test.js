@@ -149,6 +149,67 @@ vm.runInContext(PV.call('press', ['youtube', 'like', null]), sb).then((r) => { p
 let prOther = null;
 vm.runInContext(PV.call('press', ['hulu', 'like', null]), sb).then((r) => { prOther = r; });
 
+/* ---- the description's links (descLink, descSegs, model, the page's seek) ---------------------------------- */
+const VIDX = 'abcDEF12345';
+const DL = (h) => PV.descLink(h, VIDX);
+check(DL('/watch?v=' + VIDX + '&t=83s').kind === 'time' && DL('/watch?v=' + VIDX + '&t=83s').t === 83, 'a chapter link in this video (YouTube’s relative /watch?v=…&t=83s) is a time: 83 s');
+check(DL('/watch?v=' + VIDX + '&t=0s').kind === 'time' && DL('/watch?v=' + VIDX + '&t=0s').t === 0, '0:00 is a real time: it seeks to the start, never reloads the video');
+check(DL('https://youtu.be/' + VIDX + '?t=1h2m3s').t === 3723 && DL('https://www.youtube.com/watch?v=' + VIDX + '&start=90').t === 90, 'youtu.be ?t=1h2m3s and &start= are times too');
+check(DL('/watch?v=' + VIDX).kind === 'same', 'this video with no time: “same” (nothing to open; the note says so)');
+check(DL('/watch?v=otherVID001').kind === 'yt' && DL('/watch?v=otherVID001&t=30s').kind === 'yt', 'another video (with or without a time) opens in Lumen');
+check(['/shorts/abcDEF12345', 'https://youtu.be/zzzzzzzzzzz', '/@somehandle', '/channel/UC123', '/playlist?list=PL123', '/hashtag/music', 'https://m.youtube.com/@x']
+  .every((h) => DL(h) && DL(h).kind === 'yt' && /^https:\/\/(www|m)\.youtube\.com\/|^https:\/\/youtu\.be\//.test(DL(h).href)), 'Shorts, youtu.be, @handles, channels, playlists and hashtags: YouTube pages, opened in Lumen');
+check(DL('https://www.youtube.com/redirect?event=video_description&q=https%3A%2F%2Fexample.com%2Fpage').kind === 'web' && DL('https://www.youtube.com/redirect?q=https%3A%2F%2Fexample.com%2Fpage').href === 'https://example.com/page', 'YouTube’s /redirect?q= is unwrapped to the site it goes to: a Quartz tab');
+check(DL('https://example.com/x').kind === 'web' && DL('http://example.org').kind === 'web', 'any other http(s) site: a Quartz tab');
+check(['javascript:alert(1)', 'data:text/html,hi', 'file:///c:/x', 'mailto:a@b.c', '', null].every((h) => DL(h) === null), 'javascript:, data:, file: and mailto: are no link at all');
+check(DL('https://www.youtube.com.evil.example/watch?v=' + VIDX + '&t=5s').kind === 'web', 'a host that only starts with youtube.com is another site');
+check(PV.clockSeconds('0:00') === 0 && PV.clockSeconds('1:23') === 83 && PV.clockSeconds('1:23:45') === 5025 && PV.clockSeconds('99:99') === null && PV.clockSeconds('1:60:00') === null, 'chapter times as written: 0:00, 1:23, 1:23:45; nonsense refused');
+check(PV.clock(0) === '0:00' && PV.clock(83) === '1:23' && PV.clock(5025) === '1:23:45', 'and back, for a link’s title');
+// The text with the page's own links: found in order; the rest scanned for plain times and addresses.
+const TXT = 'Chapters:\n0:00 Intro\n1:23 Part two\nSite: example.com/very-lo...\nBy @somehandle #music\nRatio 16:9, 10:30am, v1.2:34';
+const LINKS = [{ t: '0:00', h: '/watch?v=' + VIDX + '&t=0s' }, { t: '1:23', h: '/watch?v=' + VIDX + '&t=83s' },
+  { t: 'example.com/very-lo...', h: 'https://www.youtube.com/redirect?q=https%3A%2F%2Fexample.com%2Fvery-long-path' },
+  { t: '@somehandle', h: '/@somehandle' }, { t: '#music', h: '/hashtag/music' }, { t: 'not in the text', h: '/@nobody' }];
+let segs = PV.descSegs(TXT, LINKS, VIDX);
+check(segs.map((x) => x.text).join('') === TXT, 'the segments are the text, every character, in order', segs);
+const ls = segs.filter((x) => x.link);
+check(ls.map((x) => x.text + '=' + x.link.kind).join('|') === '0:00=time|1:23=time|example.com/very-lo...=web|@somehandle=yt|#music=yt', 'the page’s links become links by their words; one whose words aren’t in the text is dropped', ls.map((x) => x.text + '=' + x.link.kind));
+check(ls[2].link.href === 'https://example.com/very-long-path', 'a shortened address opens the whole one YouTube links to');
+segs = PV.descSegs('Watch at 2:05 and 1:02:03. More: https://example.com/a?b=c). Not 16:9 or 10:30am.', [], VIDX);
+check(segs.filter((x) => x.link).map((x) => x.text + '=' + x.link.kind + (x.link.t !== undefined ? x.link.t : '')).join('|') === '2:05=time125|1:02:03=time3723|https://example.com/a?b=c=web',
+  'no page links (ytInitialData’s plain text): times and addresses in the text are found; “16:9”, “10:30am” and a trailing “).” are not links', segs.filter((x) => x.link));
+check(PV.descSegs('At 2:05', [], '').every((x) => !x.link), 'no video id: a time can’t seek anything, so it stays text');
+// A hostile description: markup and script are words, every one; a hostile href is no link.
+const EVIL = '<img src=x onerror=alert(1)> <script>alert(2)</script> <a href="javascript:alert(3)">click</a> 0:05';
+segs = PV.descSegs(EVIL, [{ t: 'click', h: 'javascript:alert(3)' }, { t: '<script>', h: 'javascript:alert(4)' }], VIDX);
+check(segs.map((x) => x.text).join('') === EVIL && segs.filter((x) => x.link).map((x) => x.text).join() === '0:05', 'a hostile description: its markup is text, its javascript: links are no links (only 0:05 is)', segs);
+// The model: links carried as words and an address only, capped; junk dropped.
+const mL = PV.model('youtube', { ok: true, videoId: VIDX, desc: { text: 'x 0:10', meta: '', links: [{ t: '0:10', h: '/watch?v=' + VIDX + '&t=10s', extra: '<b>' }, { t: 5, h: '/x' }, null, { t: 'a', h: '' }, { t: 'y'.repeat(600), h: '/z' }] } }, null, '');
+check(mL.desc.links.length === 1 && JSON.stringify(mL.desc.links[0]) === JSON.stringify({ t: '0:10', h: '/watch?v=' + VIDX + '&t=10s' }), 'the model keeps each link’s words and address only (strings, capped); junk is dropped', mL.desc.links);
+check(Array.isArray(PV.model('youtube', { ok: true, desc: { text: 'x' } }, null, '').desc.links), 'a read with no links: an empty list, never undefined');
+// The page side: its own links read raw (relative hrefs kept), and seek() in place.
+function aNode(text, href) { return { innerText: text, textContent: text, getAttribute: (k) => (k === 'href' ? href : null) }; }
+const seeks = [];
+const vidEl = { paused: true, currentTime: 7, play() { this.paused = false; seeks.push('play'); return Promise.resolve(); } };
+const mpEl = { classList: { contains: () => false }, seekTo(t, a) { seeks.push('seekTo:' + t + ':' + a); vidEl.currentTime = t; }, playVideo() { seeks.push('playVideo'); vidEl.paused = false; } };
+const descNode = { innerText: 'Intro 0:00 then 1:23', querySelectorAll: (sel) => (sel === 'a[href]' ? [aNode('0:00', '/watch?v=' + VIDX + '&t=0s'), aNode('1:23', '/watch?v=' + VIDX + '&t=83s'), aNode('', '/x')] : []) };
+const doc2 = { documentElement: { hasAttribute: () => false, setAttribute() {}, removeAttribute() {} }, title: 'T - YouTube',
+  querySelector: (sel) => (/yt-attributed-string/.test(sel) ? descNode : sel === '#movie_player' ? mpEl : sel === '#movie_player video' ? vidEl : null), querySelectorAll: () => [] };
+const win2 = { location: { href: 'https://www.youtube.com/watch?v=' + VIDX }, dispatchEvent: () => true };
+const sb2 = vm.createContext({ window: win2, document: doc2, location: win2.location, URL, setTimeout, clearTimeout, Promise, Event: function () {}, KeyboardEvent: function () {}, JSON, Math, Date, Number, String, Array, Object });
+let rd2 = null;
+try { rd2 = vm.runInContext(PV.call('read', ['youtube']), sb2); } catch (e) { rd2 = { err: e.message }; }
+check(rd2 && rd2.desc && rd2.desc.links && rd2.desc.links.length === 2 && rd2.desc.links[0].h === '/watch?v=' + VIDX + '&t=0s', 'the page reads its description’s links with their raw (relative) hrefs; a link with no words is skipped', rd2 && rd2.desc);
+let sk = null;
+try { sk = vm.runInContext(PV.call('seek', [83]), sb2); } catch (e) { sk = { err: e.message }; }
+check(sk && sk.ok && sk.how === 'player' && seeks.join() === 'seekTo:83:true,playVideo', 'seek(83): YouTube’s own player seeks and plays; nothing loads', { sk, seeks });
+mpEl.classList.contains = (c) => c === 'ad-showing';
+sk = vm.runInContext(PV.call('seek', [10]), sb2);
+check(sk && sk.ok === false && /ad is playing/.test(sk.reason), 'during an ad: refused, with the reason in words', sk);
+let sk3 = null;
+try { sk3 = vm.runInContext(PV.call('seek', [5]), sb); } catch (e) { sk3 = { err: e.message }; }
+check(sk3 && sk3.ok === false && /no video/.test(sk3.reason), 'a page with no video: refused, with the reason', sk3);
+
 /* ---- watch-playview-main.js -------------------------------------------------------------------------------- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pv-test-'));
 const handlers = {};
