@@ -25,6 +25,9 @@
 .cm-btn:active:not(:disabled) { background: var(--lv-ctl-press, rgba(255, 255, 255, 0.19)); }
 .cm-btn:focus-visible { outline: 2px solid var(--accent, #8ab4d8); outline-offset: 2px; }
 .cm-btn:disabled { opacity: 0.45; cursor: default; }
+.cm-btn[hidden] { display: none; }   /* "Read more" where nothing is clamped (watch-comments.js fit) */
+/* the section itself takes focus only when the control he was on is gone or busy (watch-comments.js refocus) */
+.cm-root:focus { outline: none; }
 .cm-btn-txt { padding-bottom: 1px; }
 .cm-sort { height: 26px; padding: 0 12px; border-radius: 13px; background: transparent; box-shadow: none; color: var(--lv-text-2, #a9adb3); font-size: 12.5px; }
 .cm-sort:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); color: #e9eaec; }

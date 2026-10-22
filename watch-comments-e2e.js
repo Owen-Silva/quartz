@@ -343,12 +343,38 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     check(await p.waitFor('window.__seek === 65 ? 1 : 0', 4000).catch(() => 0) === 1, 'a timestamp in a comment seeks YouTube’s own player (65 s), no reload');
     await shot('list-after', 1280, 800);
 
+    /* ---- 8b (r62). the keyboard keeps its place; "Read more" only where something is hidden ---- */
+    const enter = async () => { const b = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: 0 };
+      await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown', text: '\r' }, b)); await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, b)); };
+    const RM = `(() => { const it = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop003"]'); const a = document.activeElement; if (!it) return null;
+      return { clamped: it.querySelector('.cm-text').classList.contains('is-clamped'), label: (it.querySelector('.cm-readmore') || {}).textContent || '',
+        focusOn: !!(a && a.classList && a.classList.contains('cm-readmore') && a.closest('.cm-item') === it), active: a ? a.tagName + '.' + a.className : '' }; })()`;
+    const rm0 = await chrome.ev(`(() => { const b = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop003"] .cm-readmore'); if (!b) return false; b.scrollIntoView({ block: 'center' }); b.focus(); return document.activeElement === b; })()`);
+    await enter();
+    await sleep(400);
+    const rm1 = await chrome.ev(RM);
+    check(rm0 && !!rm1 && !rm1.clamped && /Show less/.test(rm1.label) && rm1.focusOn, '“Read more” from the keyboard (Enter): the comment opens and focus stays on its button, now “Show less”', { rm0, rm1 });
+    const kb0 = await vs();
+    await keyIn(chrome, ' ');
+    await sleep(500);
+    const rm2 = await chrome.ev(RM), kb1 = await vs();
+    check(!!rm2 && rm2.clamped && rm2.focusOn && kb1.paused === kb0.paused && kb1.keys === kb0.keys, 'Space on it folds it again, focus still there; the video neither pauses nor plays', { rm2, kb0, kb1 });
+    const FIT = `[...document.querySelectorAll('#lumen-pv-comments .cm-text.is-clamped')].map((t) => { const b = t.nextElementSibling;
+      return { id: t.closest('.cm-item').getAttribute('data-id'), over: t.scrollHeight > t.clientHeight + 1, shown: !!b && b.classList.contains('cm-readmore') && !b.hidden && b.getClientRects().length > 0 }; })`;
+    await sleep(100);
+    const fit8 = await chrome.ev(FIT);
+    check(fit8.length >= 2 && fit8.every((x) => x.over === x.shown), '1280x800: “Read more” shows exactly where the clamp hides text', fit8);
+
     /* ============================ 9. 1920x1000 ============================ */
     await resize(1920, 1000);
     await toComments();
     await shot('list', 1920, 1000);
     const wide = await chrome.ev(`(() => { const r = document.querySelector('#lumen-pv-comments').getBoundingClientRect(); const v = document.querySelector('.wp-layer webview').getBoundingClientRect(); return { cw: Math.round(r.width), vw: Math.round(v.width) }; })()`);
     check(Math.abs(wide.cw - wide.vw) <= 2, 'the comments are as wide as the video', wide);
+    await sleep(200);
+    const fit19 = await chrome.ev(FIT);
+    check(fit19.length >= 2 && fit19.every((x) => x.over === x.shown) && fit19.some((x) => x.id === 'UgxTop006' && !x.over && !x.shown) && fit19.some((x) => x.id === 'UgxTop003' && x.shown),
+      '1920x1000: a 310-character comment that fits in four lines has no dead “Read more”; the long one keeps it', fit19);
     await resize(1280, 800);
 
     /* ============================ 10. the states ============================ */

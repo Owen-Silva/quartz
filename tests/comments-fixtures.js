@@ -29,13 +29,15 @@ function c1Runs(vid) {
     { startIndex: at('@jumpingpixel'), length: '@jumpingpixel'.length, onTap: { innertubeCommand: { browseEndpoint: { browseId: 'UCjump', canonicalBaseUrl: '/@jumpingpixel' } } } },
   ];
 }
+// Over the clamp's 300 characters, one paragraph: on a wide view it fits in four lines, so no "Read more" (r62).
+const MID = 'A medium one, one paragraph: ' + 'the test pattern holds steady while the tone sweeps, and the frame pacing stays even, gjpqy. '.repeat(3).trim();
 const LONG = 'A long one, so Read more shows.\n' + Array.from({ length: 8 }, (_, i) => 'Line ' + (i + 2) + ' of a long comment with descenders gjpqy, about frame pacing and the sine tone.').join('\n');
 
 /** The made-up comment n of a sort ('top' | 'new'). */
 function comment(sort, n, vid) {
   const i = (n - 1) % NAMES.length;
   const id = (sort === 'new' ? 'UgxNew' : 'UgxTop') + String(n).padStart(3, '0');
-  const text = sort === 'top' && n === 1 ? C1_TEXT : sort === 'top' && n === 3 ? LONG
+  const text = sort === 'top' && n === 1 ? C1_TEXT : sort === 'top' && n === 3 ? LONG : sort === 'top' && n === 6 ? MID
     : (sort === 'new' ? 'Newest comment ' + n + ', posted a moment ago.' : 'Top comment ' + n + ': the test pattern scrolls nicely, gjpqy.');
   return { id, n, author: NAMES[i], avatar: av(COLORS[i], NAMES[i].charAt(1).toUpperCase()),
     time: sort === 'new' ? (n === 1 ? '1 minute ago' : n + ' minutes ago') : (n === 2 ? '3 days ago (edited)' : (n % 5 + 1) + ' days ago'),
