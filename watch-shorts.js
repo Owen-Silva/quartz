@@ -735,7 +735,11 @@
       if (isShorts(s.url, s.service)) startReads(s, false);
     });
     v.addEventListener('did-start-navigation', function (e) {
-      if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
+      // A move in place (YouTube's pushState from Short to Short) is not a new document. The <webview> event names
+      // it isInPlace (isSameDocument is the webContents' name, never set here): read as a new document, every move
+      // dropped the trim flag, the read and the open Save list before did-navigate-in-page could close YouTube's
+      // own (r62's unproven 11e), and closed open comments.
+      if (s.view !== v || !e.isMainFrame || e.isInPlace || e.isSameDocument) return;
       p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false; p.cm = false;
       newDocument(s);
       update(s);

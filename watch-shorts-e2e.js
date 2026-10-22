@@ -980,10 +980,10 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       // e. The wheel over comments that overflow scrolls them, never a Short; the arrows in them are theirs too.
       x = await sh();
       const st0 = await steps();
-      const sc0 = await chrome.ev('document.querySelector(".wp-layer .sh-comments").scrollTop');
-      for (let k = 0; k < 3; k++) { await wheelAt(x.cmBox.x + x.cmBox.w / 2, x.cmBox.y + x.cmBox.h / 2, 120); await sleep(120); }
+      const sc0 = await chrome.ev('(document.querySelector(".wp-layer .sh-comments") || { scrollTop: -1 }).scrollTop');
+      for (let k = 0; k < 3 && x.cmBox; k++) { await wheelAt(x.cmBox.x + x.cmBox.w / 2, x.cmBox.y + x.cmBox.h / 2, 120); await sleep(120); }
       await sleep(700);
-      const sc1 = await chrome.ev('document.querySelector(".wp-layer .sh-comments").scrollTop');
+      const sc1 = await chrome.ev('(document.querySelector(".wp-layer .sh-comments") || { scrollTop: -1 }).scrollTop');
       x = await sh();
       check(x.cur === S[3].id && (await steps()) === st0 && sc1 > sc0, 'r63: the wheel over the comments scrolls them and moves no Short', { cur: x.cur, steps: (await steps()) - st0, scroll: [sc0, sc1] });
       const inCm = await chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-comments .cm-sort"); if (b) b.focus(); return !!b && document.activeElement === b; })()');
