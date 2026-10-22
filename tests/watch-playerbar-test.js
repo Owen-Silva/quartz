@@ -164,7 +164,9 @@ check(PB.tileRule(1) === 'full' && PB.tileRule(2) === 'none' && PB.tileRule(4) =
 /* ---- the hooks ---- */
 const wp = fs.readFileSync(path.join(ROOT, 'watch-player.js'), 'utf8');
 check(/\[window\.WatchPlayerExtras, window\.WatchPlayerYT,( window\.LumenPlayview,)? window\.LumenPlayerBar(, window\.LumenShorts)?\]/.test(wp), 'watch-player.js X() hands attach / destroy / sync to the bar (after the play view; the Shorts view, if there, last)');
-check(/LumenPlayerBar\.shortcut\(id\) === true\) return true;\s*\n\s*if \(L\.fsSlot\)/.test(wp), 'Esc asks the bar first (menu, own menu, Lumen\'s window), then the layer');
+// The fullscreen step is `if (L.fsSlot && exitFs())` since r62: a stale fullscreen slot (no page left to
+// leave it) no longer swallows Esc, which then goes on to its next job. The order is what this checks.
+check(/LumenPlayerBar\.shortcut\(id\) === true\) return true;\s*\n\s*if \(L\.fsSlot( && exitFs\(\))?\)/.test(wp), 'Esc asks the bar first (menu, own menu, Lumen\'s window), then the layer');
 const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const order = ['watch/playerbar/youtube.js', 'watch/playerbar/hulu.js', 'watch-playerbar-page.js', 'watch-playerbar.js', 'watch-player.js'].map((f) => idx.indexOf('src="' + f + '"'));
 check(order.every((n, i) => n > 0 && (i === 0 || n > order[i - 1])) && idx.includes('href="watch-playerbar.css"'), 'index.html loads the adapters, the bridge and the bar before the layer, and its CSS', order);
