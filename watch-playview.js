@@ -543,7 +543,9 @@
   function wantTrim(s) {
     var p = pvOf(s), L = layerOf();
     if (!p || !L) return false;
-    return p.mode === 'lumen' && viewable(kindOf(s)) && !s.multi && L.slots.length === 1 && !s.blocked;
+    // Never once the player wasn't found (noRoot): the bar has said "the whole page shows", and a later
+    // update() trimming the page anyway left a bare player with no info and no way back (r62-playview).
+    return p.mode === 'lumen' && viewable(kindOf(s)) && !s.multi && L.slots.length === 1 && !s.blocked && !p.noRoot;
   }
 
   function attach(ctx, s, v) {
