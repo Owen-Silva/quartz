@@ -1,0 +1,24 @@
+# gitleaks findings in history, each checked by hand (open-source-audit quartz.md section 2); none is a secret.
+# Fingerprints are commit:file:rule:line of the public history.
+#   tests/watch-tmdb-test.js:14: a made-up JWT (its aud begins "fake", 18-char signature)
+#   watch-{find,preview,tilepreview,shows}-e2e.js, tests/watch-{preview,shows}-test.js: patterned made-up TMDB keys for the local mock
+#   tests/watch-lumen-optin-test.js:118: a "fixture-" TMDB key with a patterned 0-9/a-f run
+#   bravesearch-harness.js:136: a made-up Brave key; the test asserts its "9876" mask
+#   tests/watch-fixtures/youtube-{history,home,watchlater}.json: continuation tokens in hand-written fixtures
+#   tests/watch-fixtures/prime-signedout.json:440: a return-URL token= parameter on a signed-out page
+#   tests/watch-comments-test.js:32, watch-comments-e2e.js:232: a fixture repliesToken
+a3c8d859ac2a3215342047ea0cdef373bebc2fcf:tests/watch-tmdb-test.js:jwt:14
+c8a53a5cbc3e282059ea9e11128d67f634efa00d:watch-find-e2e.js:generic-api-key:33
+886bd6f25ca8f44f02de6e9c13273a959031c22d:watch-preview-e2e.js:generic-api-key:37
+c176049964a165ca8c0820b0e956b5be56c585eb:watch-tilepreview-e2e.js:generic-api-key:40
+4a83b8fe323d1958e94aa05364f30ebbc056eed3:watch-shows-e2e.js:generic-api-key:45
+2f951782df470524066a6728287c0415680b17bf:tests/watch-preview-test.js:generic-api-key:11
+aaff629974f1dd98a467ac722dcd1fd77cc0cd44:tests/watch-shows-test.js:generic-api-key:42
+2a07d2c539553aaa932df1fdea9a527dfd4724ef:tests/watch-lumen-optin-test.js:generic-api-key:118
+567a96af127fa792a50e27287343154d38632422:bravesearch-harness.js:generic-api-key:136
+87b05bc429bfff8295d18bde5a3d2004ad516001:tests/watch-fixtures/youtube-history.json:generic-api-key:158
+87b05bc429bfff8295d18bde5a3d2004ad516001:tests/watch-fixtures/youtube-home.json:generic-api-key:236
+87b05bc429bfff8295d18bde5a3d2004ad516001:tests/watch-fixtures/youtube-watchlater.json:generic-api-key:108
+a3c8d859ac2a3215342047ea0cdef373bebc2fcf:tests/watch-fixtures/prime-signedout.json:generic-api-key:440
+bb4e0fabd10a8da2c47dd08aafd32f0e88e0e99d:tests/watch-comments-test.js:generic-api-key:32
+bb4e0fabd10a8da2c47dd08aafd32f0e88e0e99d:watch-comments-e2e.js:generic-api-key:232
