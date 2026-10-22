@@ -132,6 +132,13 @@
   height: auto;
 }
 .wp-tile[data-sh="below"] .sh-info { gap: 10px; padding: 14px 16px; height: auto; }
+/* Below the player the info has a fixed band (watch-shorts.js LAY.INFO_H, so the player never jumps from Short to
+   Short); a note, the unsubscribe confirm or the Save list can be taller than it. They were cut off unseen: now the
+   band scrolls (the wheel scrolls it while it can, watch-shorts.js onWheel()), and a note comes first, so the reason
+   is always in sight. */
+.wp-tile[data-sh="below"] .sh-info { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+.wp-tile[data-sh="below"] .sh-info > .pv-why { order: -1; flex: none; }
+.wp-tile[data-sh="below"] .sh-info > * { flex-shrink: 0; }
 .sh-head { display: flex; align-items: center; gap: 8px; }
 .sh-kicker {
   display: inline-flex;

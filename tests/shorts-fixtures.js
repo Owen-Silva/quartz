@@ -29,9 +29,12 @@ function list(id) {
   return [{ id, title: 'Home row Short ' + id, channel: '@lumenhomerow', name: 'Lumen Home Row', likes: '42' }].concat(SHORTS);
 }
 
+// ?long=1 (r62): a very long right-to-left title, an emoji-first very long channel name, and no avatar picture.
+const LONG_TITLE = 'تمرين التزحلق السريع على الجليد للمبتدئين والمحترفين: خمس حركات لتحسين التوازن والسرعة قبل كل مباراة #shorts #baking #skating #training';
+const LONG_NAME = '🏒 The Extremely Long Kitchen Academy Channel Name That Keeps Going';
 function shortsPage(id, q) {
   const o = q || {};
-  const L = list(id);
+  const L = o.long ? list(id).map((s) => Object.assign({}, s, { title: LONG_TITLE, name: LONG_NAME })) : list(id);
   const start = Math.max(0, L.findIndex((s) => s.id === id));
   const reels = L.map((s, i) => `
   <ytd-reel-video-renderer id="r${i}" data-i="${i}"${i === start ? ' is-active' : ''}>
@@ -40,8 +43,8 @@ function shortsPage(id, q) {
       <div class="ytp-chrome-top"><button class="ytp-play-button" aria-label="Pause (k)">II</button></div>${String(i) === String(o.ad) ? `
       <ytd-ad-slot-renderer class="fx-ad"><span class="fx-ad-badge">Sponsored</span><button class="fx-ad-cta" aria-label="Visit advertiser">Visit advertiser</button></ytd-ad-slot-renderer>` : ''}
       <yt-reel-metapanel-view-model id="metapanel">
-        <yt-reel-channel-bar-view-model><img class="yt-core-image" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
-          <span class="ytReelChannelBarViewModelChannelName"><a href="/${esc(s.channel)}">${esc(s.channel)}</a></span>
+        <yt-reel-channel-bar-view-model><img class="yt-core-image" alt=""${o.long ? '' : ' src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="'}>
+          <span class="ytReelChannelBarViewModelChannelName"><a href="/${esc(s.channel)}">${esc(o.long ? s.name : s.channel)}</a></span>
           <subscribe-button-view-model data-ch="${esc(s.channel)}"><button class="sub" aria-label="Subscribe to ${esc(s.name)}">Subscribe</button></subscribe-button-view-model>
         </yt-reel-channel-bar-view-model>
         <yt-shorts-video-title-view-model><h2>${esc(s.title)}</h2></yt-shorts-video-title-view-model>
@@ -147,6 +150,7 @@ ytd-popup-container > *{pointer-events:auto}
     if (e.key === 'ArrowUp') { e.preventDefault(); go(cur - 1, 'key'); }
   });
   [].forEach.call(document.querySelectorAll('.fx-ad-cta'), function (b) { b.addEventListener('click', function (e) { e.stopPropagation(); window.__presses.adCta++; }); });
+  var SLOW = ${o.slowsave ? 2000 : 0};
   var pop = document.getElementById('pop');
   function clearPop() { pop.innerHTML = ''; }
   document.addEventListener('click', function (e) {
@@ -159,6 +163,11 @@ ytd-popup-container > *{pointer-events:auto}
       if (!subs[s.channel]) { subs[s.channel] = true; paint(); return; }
       pop.innerHTML = '<tp-yt-paper-dialog><yt-confirm-dialog-renderer><p>Unsubscribe from ' + s.name + '?</p><div id="confirm-button"><button class="ok">Unsubscribe</button></div></yt-confirm-dialog-renderer></tp-yt-paper-dialog>';
       pop.querySelector('.ok').addEventListener('click', function (ev) { ev.stopPropagation(); window.__presses.confirm++; subs[s.channel] = false; clearPop(); paint(); });
+    }
+    else if (b.classList.contains('menu') && SLOW && !b.__slow) {
+      // ?slowsave=1 (r62): YouTube's menu takes 2 s to open (a press still in flight when the page moves on).
+      window.__presses.slow = (window.__presses.slow || 0) + 1;
+      setTimeout(function () { b.__slow = 1; b.click(); b.__slow = 0; }, SLOW);
     }
     else if (b.classList.contains('menu')) {
       window.__presses.menu++;
@@ -184,12 +193,15 @@ ytd-popup-container > *{pointer-events:auto}
 </script></body></html>`;
 }
 
-function channelShorts(path) {
+function channelShorts(path, q) {
+  const o = q || {};
   const mine = SHORTS.filter((s) => '/' + s.channel === path);
+  // ?dead=1 (r62): the grid's Short links never navigate (a click YouTube swallows).
+  const dead = o.dead ? '<script>document.addEventListener("click", function (e) { if (e.target.closest && e.target.closest("a")) { e.preventDefault(); window.__deadClicks = (window.__deadClicks || 0) + 1; } }, true);</script>' : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Shorts - YouTube</title>
 <script>var ytcfg={data_:{LOGGED_IN:true},get:function(k){return this.data_[k];}};</script></head><body style="background:#0f0f0f;color:#fff;font:14px Arial">
 <div id="masthead-container"><ytd-masthead>YouTube</ytd-masthead></div>
-<ytd-rich-grid-renderer>${mine.map((s) => `<ytd-rich-item-renderer><a href="/shorts/${s.id}" id="thumbnail">${esc(s.title)}</a></ytd-rich-item-renderer>`).join('')}</ytd-rich-grid-renderer>
+<ytd-rich-grid-renderer>${mine.map((s) => `<ytd-rich-item-renderer><a href="/shorts/${s.id}" id="thumbnail">${esc(s.title)}</a></ytd-rich-item-renderer>`).join('')}</ytd-rich-grid-renderer>${dead}
 </body></html>`;
 }
 
