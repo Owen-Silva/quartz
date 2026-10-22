@@ -8321,6 +8321,21 @@
     ));
     s.appendChild(restart);
 
+    /* Updates (updater-chrome.js draws them): the "Check for updates" switch, the state in one
+       sentence with its reason, Check now, and the Update button or why there is none. */
+    var updates = el('div', 'set-field set-updates');
+    updates.setAttribute('data-field', 'updates');
+    if (window.QuartzUpdates && typeof window.QuartzUpdates.renderAbout === 'function') {
+      try {
+        window.QuartzUpdates.renderAbout(updates, { el: el, textButton: textButton, switchRow: switchRow, toast: showToast });
+      } catch (err) {
+        updates.appendChild(el('p', 'set-hint', 'Updates could not be drawn: ' + ((err && err.message) || err)));
+      }
+    } else {
+      updates.appendChild(el('p', 'set-hint', 'Updates: this window did not load updater-chrome.js; restart Quartz.'));
+    }
+    s.appendChild(updates);
+
     /* The first-run welcome, on demand (firstrun.js opens it as a tab). */
     var welcome = el('div', 'set-field');
     welcome.setAttribute('data-field', 'welcome');

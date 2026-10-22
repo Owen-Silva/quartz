@@ -1396,6 +1396,20 @@ app.whenReady().then(async () => {
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
   });
   toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
+  // In-app updates (updater-main.js): a release on GitHub, a card, one button. Never on a test
+  // profile, a linked worktree, or a folder with updates.local.json in it.
+  try {
+    require('./updater-main').install({
+      app, ipcMain, isChromeSender,
+      send: (channel, payload) => { if (!canSend()) return false; win.webContents.send(channel, payload); return true; },
+    }).start();
+  } catch (err) {
+    const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);
+    console.error('[updates] the updater could not start: ' + why);
+    for (const ch of ['updates:state', 'updates:check', 'updates:set', 'updates:later', 'updates:update', 'updates:open-log']) {
+      try { ipcMain.handle(ch, () => { throw new Error('the updater could not start: ' + why); }); } catch { /* already registered */ }
+    }
+  }
   // castlabs ECS: the Widevine CDM must be ready before the first window
   // (components.whenReady). Capped at 4 s so a first run offline still opens;
   // on stock Electron this returns at once.

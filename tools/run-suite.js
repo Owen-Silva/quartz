@@ -113,6 +113,11 @@ const TESTS = [
   // The go-live scripts count processes as arrays: @(Main-Procs) / @(Test-Procs) (a single Quartz
   // came back unrolled, its .Count empty, and the close step skipped closing it).
   { name: 'golive-procs', file: 'tests/golive-procs-test.js' },
+  // In-app updates (updater.js): throwaway git repos and a fake releases API; up to date, ahead,
+  // available, every reason for no button, offline, rate-limited, and each rollback.
+  { name: 'updater', file: 'tests/updater-test.js' },
+  // The same in a real Quartz: the card, the Update button, a real update and the relaunch.
+  { name: 'updater-e2e', file: 'tests/updater-e2e.js', e2e: true },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.

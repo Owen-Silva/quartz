@@ -75,6 +75,35 @@ The install has only been exercised on the author's machine. If `npm ci` fails (
 while installing `@homebridge/node-pty-prebuilt-multiarch`, the terminal back end), please open
 an issue with the log.
 
+### Updating
+
+Quartz checks this repository's GitHub releases about 30 seconds after it starts and then every
+6 hours. Settings > About > **Check for updates** turns that off; **Check now** works either way.
+When a new release is out, a card in the corner of the window says so:
+
+- **Update** fetches the release's tag, moves your clone to it with `git merge --ff-only`, and
+  restarts Quartz with your tabs restored. If the release changes Quartz's dependencies, it first
+  runs `npm ci` in a staging folder (`.quartz-update`) while you keep browsing. That can take
+  several minutes, because it downloads the pinned castlabs Electron. Quartz then closes, a small
+  helper run by your `node` moves the clone to the tag and swaps the new `node_modules` in, and
+  Quartz opens again.
+- **Later** hides the card for a day. Settings > About still shows the release.
+
+The Update button is only offered when the folder is a normal clone of this repository, on its
+default branch, with no uncommitted changes to tracked files, and the release is a fast-forward
+from where you are. Otherwise the card and Settings > About say exactly why, and show the commands
+to update by hand, for example:
+
+```
+git pull --ff-only origin v0.2.0
+npm ci
+```
+
+(`npm ci` only when the release changes the dependencies.) If any step fails, Quartz goes back to
+the commit it was on (`git reset --keep`), keeps its old `node_modules`, says why, and points to
+the log, `updater.log` in your profile folder. Quartz never checks for updates from a linked git
+worktree, from a test profile, or from a folder that contains a file named `updates.local.json`.
+
 ## Configure
 
 Everything is set in **Settings**, inside the app: Look, Claude, Tabs, Downloads, Search,

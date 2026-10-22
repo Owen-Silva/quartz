@@ -15,3 +15,8 @@ quartz-vmp.json
 .env*
 *.pem
 *.key
+
+# Local-only files: never committed. updates.local.json in the app folder turns the in-app
+# updater off (updater.js); .quartz-update/ is the updater's staging folder.
+*.local.json
+.quartz-update/

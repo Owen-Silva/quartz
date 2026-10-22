@@ -1,0 +1,46 @@
+/*
+ * updater.css -- in-app updates (updater-chrome.js). The card itself is the Lumen Alerts card
+ * (watch-alerts.css, .lumen-alert*): this file only adds what an update card has and an alert
+ * card does not -- the three steps, the by-hand commands -- and the rows in Settings > About.
+ * Neutral surfaces, nothing animates at rest, no backdrop-filter.
+ */
+.qup-stack { z-index: 41; }
+
+.qup-steps {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-xs);
+}
+.qup-step {
+  flex: 1 1 0;
+  padding: 3px 0 0;
+  border-top: 2px solid var(--hairline-strong);
+  color: var(--text-3);
+}
+.qup-step.is-done { border-top-color: var(--text-3); color: var(--text-2); }
+.qup-step.is-now { border-top-color: var(--accent); color: var(--text); font-weight: 600; }
+.qup-progress { min-height: 2.8em; }
+
+.qup-manual { margin-top: 8px; }
+.qup-manual-head { color: var(--text-2); font-size: var(--fs-xs); }
+.qup-cmd {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s, 6px);
+  color: var(--text);
+  font-family: var(--mono, Consolas, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-1);
+  user-select: text;
+}
+
+#settings-panel .qup-about-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#settings-panel .qup-about-err { color: var(--danger, var(--text)); }
+#settings-panel .qup-manual { max-width: 560px; }

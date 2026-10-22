@@ -155,6 +155,21 @@ contextBridge.exposeInMainWorld('api', {
       node: process.versions.node
     })
   },
+  // In-app updates (updater-main.js <-> updater-chrome.js). Every call answers the whole state
+  // (status, release, why there is no button, progress, the last failure and the log's path);
+  // update() answers { ok, reason?, relaunch?, state }. onRestart: the update is in and the chrome
+  // writes its session, then restarts (restartNow for a swap, window.restartBrowser otherwise).
+  updates: {
+    state: () => ipcRenderer.invoke('updates:state'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    setEnabled: (on) => ipcRenderer.invoke('updates:set', !!on),
+    later: () => ipcRenderer.invoke('updates:later'),
+    update: () => ipcRenderer.invoke('updates:update'),
+    openLog: () => ipcRenderer.invoke('updates:open-log'),
+    restartNow: () => ipcRenderer.send('updates:restart-now'),
+    onState: (fn) => { ipcRenderer.on('updates:state', (_e, s) => { try { fn(s); } catch (err) { /* the next push redraws */ } }); },
+    onRestart: (fn) => { ipcRenderer.on('updates:restart', (_e, m) => { try { fn(m); } catch (err) { /* main restarts by itself */ } }); }
+  },
   // The window is frameless: the chrome draws its own caption buttons and
   // drives the real window through these.
   win: {
