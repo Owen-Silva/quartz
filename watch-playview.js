@@ -1087,10 +1087,12 @@
     if (p.spKnown && p.spKnown.id === p.item.id) { disable(b, p.spKnown.ok ? '' : p.spKnown.reason); return; }
     disable(b, 'Checking for a show page…');
     if (!ov) { disable(b, 'The Lumen tab isn’t there'); return; }
+    // The answer is filed under the title it was asked for: a reuse can swap p.item while the check is out.
+    var askedId = p.item.id;
     js(ov, showPageJs(p.item, false)).then(function (r) {
-      p.spKnown = { id: p.item && p.item.id, ok: !!(r && r.ok), reason: (r && r.reason) || 'Lumen has no show page for this title' };
+      p.spKnown = { id: askedId, ok: !!(r && r.ok), reason: (r && r.reason) || 'Lumen has no show page for this title' };
       if (b.isConnected) disable(b, p.spKnown.ok ? '' : p.spKnown.reason);
-    }, function (e) { p.spKnown = { id: p.item && p.item.id, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
+    }, function (e) { p.spKnown = { id: askedId, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
   }
   /** The show page in the Lumen tab; the player keeps playing in the mini-player (or closes, without it). */
   function showPage(s, b) {
