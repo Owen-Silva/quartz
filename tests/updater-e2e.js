@@ -82,13 +82,15 @@ async function main() {
   const app = path.join(WORK, 'app');
   git(WORK, 'clone', '-q', '--bare', '--no-local', REPO, origin);
   const branch = git(origin, 'symbolic-ref', '--short', 'HEAD');
+  // The user's clone first, THEN the release lands on origin: the clone is one commit behind it.
+  git(WORK, 'clone', '-q', origin, app);
+  const oldSha = git(app, 'rev-parse', 'HEAD');
   git(WORK, 'clone', '-q', origin, pub);
   fs.writeFileSync(path.join(pub, 'UPDATED-TO-V99.txt'), 'This file arrived with the fake release ' + TAG + '.\n');
   git(pub, 'add', '-A'); git(pub, 'commit', '-q', '-m', 'Fake release ' + TAG); git(pub, 'tag', TAG);
   git(pub, 'push', '-q', 'origin', branch, TAG);
   const tagSha = git(pub, 'rev-parse', 'HEAD');
-  git(WORK, 'clone', '-q', origin, app);
-  const oldSha = git(app, 'rev-parse', 'HEAD');
+  if (tagSha === oldSha) throw new Error('the fake release is not newer than the clone');
   const nmTarget = fs.realpathSync(path.join(REPO, 'node_modules'));
   execFileSync('cmd', ['/c', 'mklink', '/J', path.join(app, 'node_modules'), nmTarget], { stdio: 'ignore' });
   check(fs.existsSync(path.join(app, 'node_modules', 'electron', 'dist', 'electron.exe')), 'app clone ready on ' + branch + ' at ' + oldSha.slice(0, 7) + ', release ' + TAG + ' at ' + tagSha.slice(0, 7));
@@ -121,7 +123,8 @@ async function main() {
     let ct = await chromeTarget(40000);
     if (!ct) throw new Error('the chrome page never came up');
     let c = await new Cdp(ct.webSocketDebuggerUrl).open();
-    const card = await c.waitFor("(() => { const k = document.querySelector('.qup-card[data-status=available]'); return k && k.classList.contains('is-up') ? k.textContent : ''; })()", 40000);
+    const card = await c.waitFor("(() => { const k = document.querySelector('.qup-card[data-status=available]'); return k && k.classList.contains('is-up') ? k.textContent : ''; })()", 40000)
+      .catch(async (e) => { say('no card; updater state: ' + JSON.stringify(await c.ev('window.api.updates.state()').catch((x) => x.message)).slice(0, 600)); return null; });
     check(typeof card === 'string' && card.includes('Quartz ' + TAG + ' is out'), 'the card renders: "Quartz ' + TAG + ' is out"', card);
     const btn = await c.ev("(() => { const b = document.querySelector('.qup-card [data-act=update]'); return b ? b.textContent : ''; })()");
     check(btn === 'Update', 'the card offers the Update button', btn);
