@@ -7504,7 +7504,7 @@
       'with pairing code". It shows an IP address, a PAIRING port and six digits - ' +
       'and that pairing port is not the same number as the connect port below.'));
 
-    field.appendChild(phoneInput('host', 'set-phone-host', 'Phone address', 'e.g. 100.64.0.1'));
+    field.appendChild(phoneInput('host', 'set-phone-host', 'Phone address', 'e.g. the phone\'s Tailscale IP'));
     field.appendChild(phoneInput('pairPort', 'set-phone-pairport', 'Pairing port', '37419'));
     field.appendChild(phoneInput('code', 'set-phone-code', 'Pairing code', '123456'));
 

@@ -46,11 +46,11 @@ function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'quartz-phone-host
   {
     const dir = tmp();
     fs.writeFileSync(path.join(dir, 'phone.json'), JSON.stringify({
-      settings: { enabled: true, host: '100.64.0.1', port: 5555 }, paired: true, tcpipPinned: true
+      settings: { enabled: true, host: '192.0.2.10', port: 5555 }, paired: true, tcpipPinned: true
     }));
     const s = await boot(dir);
-    check(s.settings.host === '100.64.0.1', 'stored host: settings.host loaded');
-    check(s.device.host === '100.64.0.1', 'stored host: device.host loaded');
+    check(s.settings.host === '192.0.2.10', 'stored host: settings.host loaded');
+    check(s.device.host === '192.0.2.10', 'stored host: device.host loaded');
     check(!/set your phone's address/.test(s.device.reason + ' ' + s.reason), 'stored host: no "set your address" line');
     fs.rmSync(dir, { recursive: true, force: true });
   }
