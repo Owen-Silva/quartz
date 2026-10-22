@@ -164,7 +164,9 @@ async function main() {
     let seen = [];
     const t0 = Date.now();
     while (!gone && Date.now() - t0 < 60000) {
-      try { seen = await c.ev('window.__qupSeen.slice()'); } catch (e) { /* the page is going */ }
+      // Raced against a second: once the page is going, a CDP call can get no answer at all.
+      const prev = seen;
+      try { seen = await Promise.race([c.ev('window.__qupSeen.slice()'), sleep(1000).then(() => prev)]); } catch (e) { /* the page is going */ }
       await sleep(100);
     }
     try { c.close(); } catch (e) { /* closed */ }
