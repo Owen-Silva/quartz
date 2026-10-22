@@ -49,6 +49,7 @@
   var PEEK = 128;          // px of the info that always shows under the video (1280x800 included)
   var READS = [250, 900, 2000, 4000, 8000];   // ms after a page loads: read until it is all there
   var PRESS_HOLD_MAX_MS = 2000;   // a held rebuild waits for his release at most this long
+  var PRESS_ANSWER_MS = 15000;    // a press's longest own wait is 7.5 s (Unsubscribe: menu, confirm, state); past this it is said
 
   // The page's own furniture, hidden outright (display:none) while the view is on. Everything
   // else outside the player is only invisible (body visibility), so the page's own buttons and
@@ -551,7 +552,7 @@
   function attach(ctx, s, v) {
     CTX = ctx;
     observeLayer();
-    var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0,
+    var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0, page: 0, navUrl: '',
       timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '' };
     all.push(s);
     if (all.length > 8) all.shift();
@@ -582,12 +583,28 @@
     });
     v.addEventListener('did-start-navigation', function (e) {
       if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
-      p.applied = false; p.noRoot = false; p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
+      // A new document: the last one's reads, notes, press and "Show more" are not this page's. The
+      // seq bump drops a read still out on the old page (it landed after this reset and set "ready").
+      newPage(s);
+      p.navUrl = String(e.url || '');
+      p.applied = false; p.noRoot = false;
       update(s);
     });
     v.addEventListener('did-navigate-in-page', function (e) {
       if (s.view !== v || !e.isMainFrame) return;
-      if (String(e.url || '') === p.lastUrl) return;
+      var url = String(e.url || '');
+      // YouTube moving to ANOTHER video in the page (autoplay, an end-screen card): everything about the
+      // last video goes, the player-not-found verdict too (the new one is looked for again). The lastUrl
+      // check below must not swallow it: a read can land on the new address before this event does.
+      if (s.service === 'youtube' && ytId(url) && ytId(url) !== ytId(p.navUrl || p.itemUrl)) {
+        p.navUrl = url;
+        newPage(s);
+        p.noRoot = false;
+        startReads(s, true);
+        return;
+      }
+      p.navUrl = url;
+      if (url === p.lastUrl) return;
       p.read = null; p.phase = 'loading'; p.save = null; p.confirm = false;
       startReads(s, true);
     });
@@ -608,9 +625,27 @@
     if (!p) return;
     p.item = s.item || null;
     p.itemUrl = s.url;
+    p.navUrl = '';
     if (!p.userMode) p.mode = PREF;
-    p.read = null; p.phase = 'loading'; p.why = ''; p.save = null; p.confirm = false; p.more = false;
+    newPage(s);
     update(s);
+  }
+
+  /**
+   * The slot shows another page (a new document, a reuse, YouTube's move to another video): what Lumen
+   * knew about the last one goes. stopReads + the seq bump: a read or a press still out on the old page
+   * (p.page) is dropped when it lands, never written over the new one (it used to set "ready" with the old info,
+   * or reopen the old Save list); busy goes too, so a press the old page never answered can't leave every
+   * button "Waiting for YouTube…" on the new one.
+   */
+  function newPage(s) {
+    var p = pvOf(s);
+    if (!p) return;
+    stopReads(s);
+    p.seq++;
+    p.page = (p.page || 0) + 1;
+    clearTimeout(p.pressTimer);
+    p.read = null; p.phase = 'loading'; p.why = ''; p.busy = ''; p.save = null; p.confirm = false; p.more = false;
   }
 
   function destroy(ctx, s) {
@@ -775,9 +810,27 @@
     p.why = '';
     var rec = { kind: kind, arg: arg === undefined ? null : arg, at: Date.now(), ok: null, reason: '' };
     p.presses.push(rec);
+    // The press belongs to this page (p.page, bumped by newPage): an answer that lands after the page moved on is dropped. And it
+    // gets PRESS_ANSWER_MS to answer: a page that never does (its frame replaced mid-press) used to keep
+    // every button "Waiting for YouTube…" for the rest of the video, with nothing saying why.
+    var page = p.page;
+    var settled = false;
+    var mine = function () { return s.view === v && p.page === page && !settled; };
+    clearTimeout(p.pressTimer);
+    p.pressTimer = setTimeout(function () {
+      if (!mine()) return;
+      settled = true;
+      p.busy = '';
+      rec.ok = false;
+      rec.reason = 'no answer in ' + Math.round(PRESS_ANSWER_MS / 1000) + ' s';
+      p.why = 'YouTube’s page didn’t answer in ' + Math.round(PRESS_ANSWER_MS / 1000) + ' s: the state shown is what its page last said';
+      render(s);
+    }, PRESS_ANSWER_MS);
     render(s);
     js(v, call('press', [s.service, kind, arg === undefined ? null : arg])).then(function (r) {
-      if (s.view !== v) return;
+      if (!mine()) return;
+      settled = true;
+      clearTimeout(p.pressTimer);
       p.busy = '';
       rec.ok = !!(r && r.ok);
       rec.reason = (r && r.reason) || '';
@@ -786,9 +839,12 @@
       if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
-      return js(v, call('read', [s.service])).then(function (rr) { if (s.view === v && rr && rr.ok) p.read = rr; render(s); });
+      return js(v, call('read', [s.service])).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
     }).catch(function (e) {
-      if (s.view !== v) return;
+      if (s.view !== v || p.page !== page) return;
+      // The press itself, or the read after it: either way the reason is shown (as before this guard).
+      settled = true;
+      clearTimeout(p.pressTimer);
       p.busy = '';
       rec.ok = false;
       rec.reason = (e && e.message) || String(e);
