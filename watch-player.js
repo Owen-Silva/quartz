@@ -283,6 +283,15 @@
     X('destroy', s);
     MV('destroy', s);
     if (s.fs) { try { setPageFullscreen(false); } catch (e) { /* app.js gone */ } }
+    // The layer's own fullscreen state goes with the slot. Its leave-html-full-screen never comes once the view
+    // is gone (that listener checks s.view === v), so a close from fullscreen (the mouse's Back on the first
+    // page, the Watch tab closing) used to leave L.fsSlot and .wp-fs behind: the NEXT title opened as a black,
+    // bar-less window-filling layer (its tile isn't .is-fs) and Esc did nothing (r62-playview).
+    s.fs = false;
+    if (L.fsSlot === s) {
+      L.fsSlot = null;
+      if (L.el) L.el.classList.remove('wp-fs');
+    }
     if (s.view) {
       var v = s.view;
       s.view = null;
@@ -536,7 +545,18 @@
   }
   function exitFs() {
     var s = L.fsSlot;
-    if (!s || !s.view) return false;
+    if (!s) return false;
+    if (!s.view) {
+      // A fullscreen slot without a page (it can't send its leave event): drop the state here, so Esc
+      // goes on to its next job instead of being swallowed by a fullscreen that isn't there.
+      L.fsSlot = null;
+      s.fs = false;
+      if (s.tile) s.tile.classList.remove('is-fs');
+      if (L.el) L.el.classList.remove('wp-fs');
+      try { setPageFullscreen(false); } catch (e) { /* app.js gone */ }
+      place();
+      return false;
+    }
     try { s.view.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(function () { return 1; }, function () { return 0; }) : 0', true).catch(function () { /* the leave event will tell */ }); } catch (e) { /* the leave event will tell */ }
     return true;
   }
@@ -601,7 +621,7 @@
     if (id === 'escape') {
       // Lumen play bar hook: Esc closes its menu, then the service's own menu, then Lumen's full window.
       if (window.LumenPlayerBar && typeof window.LumenPlayerBar.shortcut === 'function' && window.LumenPlayerBar.shortcut(id) === true) return true;
-      if (L.fsSlot) { exitFs(); return true; }
+      if (L.fsSlot && exitFs()) return true;
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
       if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Esc'); return true; }
       close('Esc');
