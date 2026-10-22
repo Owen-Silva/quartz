@@ -53,7 +53,7 @@ const { spawn } = require('child_process');
 const OWNER = 'Owen-Silva';
 const REPO = 'quartz';
 const API_BASE = 'https://api.github.com';
-const OPT_OUT_FILE = 'updates.local.json';   // in the app folder: present = the updater is off
+const OPT_OUT_FILE = 'no-updates.local';     // in the app folder: present = the updater is off
 const STAGING_DIR = '.quartz-update';        // in the app folder (same volume, so the swap is a rename)
 const STATE_FILE = 'updates.json';           // in the profile folder
 const LOG_FILE = 'updater.log';              // in the profile folder

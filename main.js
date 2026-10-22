@@ -1397,7 +1397,7 @@ app.whenReady().then(async () => {
   });
   toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
   // In-app updates (updater-main.js): a release on GitHub, a card, one button. Never on a test
-  // profile, a linked worktree, or a folder with updates.local.json in it.
+  // profile, a linked worktree, or a folder with no-updates.local in it.
   try {
     require('./updater-main').install({
       app, ipcMain, isChromeSender,

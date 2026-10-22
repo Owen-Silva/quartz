@@ -102,7 +102,7 @@ npm ci
 (`npm ci` only when the release changes the dependencies.) If any step fails, Quartz goes back to
 the commit it was on (`git reset --keep`), keeps its old `node_modules`, says why, and points to
 the log, `updater.log` in your profile folder. Quartz never checks for updates from a linked git
-worktree, from a test profile, or from a folder that contains a file named `updates.local.json`.
+worktree, from a test profile, or from a folder that contains a file named `no-updates.local`.
 
 ## Configure
 

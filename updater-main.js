@@ -4,7 +4,7 @@
  * (updater-chrome.js), the six-hourly timer, and the restart at the end of an update.
  *
  * WHO NEVER CHECKS. updater.js already turns itself fully off for the opt-out file
- * (updates.local.json in the app folder) and for a linked git worktree. On top of that:
+ * (no-updates.local in the app folder) and for a linked git worktree. On top of that:
  *   - a test profile (--test-profile) or any other --test run: off, unless an e2e hands it a fake
  *     release API (QUARTZ_TEST_UPDATER_API, honoured ONLY with --test-profile), and even then
  *     it never runs npm ci (allowNpm false);
