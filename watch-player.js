@@ -310,7 +310,14 @@
     var acts = el('div', 'wp-state-acts');
     var drmSvc = !!(svcInfo(s.service) && svcInfo(s.service).drm);
     if (kind === 'blocked' || kind === 'refused' || drmSvc) acts.appendChild(btn('wp-primary', 'Open in Edge', function (b) { toEdge(s, b); }));
-    if (kind === 'failed' && s.view) acts.appendChild(btn('', 'Try again', function () { st.hidden = true; try { s.view.reload(); } catch (e) { /* gone */ } }));
+    // Try again: the state AND its has-state class go (that class hides the view: leaving it on showed a blank tile
+    // over a page that had reloaded fine). A view that can't reload any more says so instead of going quiet.
+    if (kind === 'failed' && s.view) acts.appendChild(btn('', 'Try again', function () {
+      if (!s.view) { showState(s, 'failed', 'The player’s page is gone: open the title again, or open it in a tab.'); return; }
+      st.hidden = true;
+      s.tile.classList.remove('has-state');
+      try { s.view.reload(); } catch (e) { showState(s, 'failed', 'The page couldn’t reload: ' + ((e && e.message) || e) + '. Open the title again, or open it in a tab.'); }
+    }));
     X('stateActs', s, kind, acts);
     acts.appendChild(btn('', 'Open in a tab', function () { toTab(s); }));
     box.appendChild(acts);
