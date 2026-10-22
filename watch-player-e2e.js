@@ -374,6 +374,46 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     say('RAM (all Quartz processes, working set): before ' + memBefore.totalMb + ' MB / ' + memBefore.processes + ' procs; playing ' + memPlaying.totalMb + ' MB / ' + memPlaying.processes + ' procs (player ' + JSON.stringify(memPlaying.players) + '); after close ' + memAfter.totalMb + ' MB / ' + memAfter.processes + ' procs');
     check(memAfter.processes < memPlaying.processes && memAfter.totalMb < memPlaying.totalMb, 'closing frees the player\'s memory', { before: memBefore.totalMb, playing: memPlaying.totalMb, after: memAfter.totalMb });
 
+    // r62-playview regression: Try again left the tile blank. showState('failed') puts `has-state` on the tile
+    // (that class hides the .wp-view, watch-player.css), and its Try again hid the state box but left the class:
+    // the page reloaded fine behind a tile that stayed empty. The failure here is a did-fail-load event sent to
+    // the tile's <webview> itself (the same DOM event the guest sends, with isMainFrame and an error code): the
+    // bug is in the button, not in how the load failed, and a real refused load or a crash costs a renderer.
+    // (Each block below opens its own title and leaves the layer closed, as the mouse's Back above did.)
+    const tileOf = '(() => { const t = document.querySelector(".wp-layer .wp-tile"); const v = t && t.querySelector(".wp-view"); const r = t && t.getBoundingClientRect(); return t ? { state: t.classList.contains("has-state"), vis: v ? getComputedStyle(v).visibility : null, w: Math.round(r.width), h: Math.round(r.height), display: getComputedStyle(t).display } : null; })()';
+    await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/fsclose')}, { service: 'youtube', title: 'Fullscreen close' }), 1`);
+    await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/fsclose', 10000); p = await cdpTo(pt);
+    await p.waitFor('(() => { const v = document.getElementById("v"); return v && v.readyState >= 2; })()', 15000).catch(() => 0);
+    await chrome.ev('(() => { const v = document.querySelector(".wp-layer .wp-view"); const e = new Event("did-fail-load"); Object.assign(e, { isMainFrame: true, errorCode: -105, errorDescription: "ERR_NAME_NOT_RESOLVED", validatedURL: v.src }); v.dispatchEvent(e); return 1; })()');
+    const fl = await chrome.waitFor(`(() => { const s = ${ST}.slots[0]; return s && s.state === 'failed' ? s : null; })()`, 4000).catch(() => null);
+    check(!!fl && /didn’t load/.test(fl.stateText) && /Try again/.test(fl.stateText) && (await chrome.ev(tileOf)).state, 'a page that did not load shows the failed state with Try again (and the tile has-state)', fl && fl.stateText);
+    await chrome.ev('(() => { const b = [...document.querySelectorAll(".wp-layer .wp-state .wp-btn")].find((x) => x.textContent === "Try again"); if (b) b.click(); return !!b; })()');
+    await sleep(1500);
+    const ta = await chrome.ev(tileOf);
+    check(!!ta && !ta.state && ta.vis === 'visible' && (await chrome.ev(ST)).slots[0].state === '', 'Try again: the state goes AND the page shows again (no has-state left hiding the view)', ta);
+
+    // r62-playview regression: a close FROM the video's fullscreen left L.fsSlot and .wp-fs on the layer (its
+    // leave-html-full-screen never comes once the view is gone), so the NEXT title opened as a black, bar-less,
+    // window-filling layer and Esc did nothing. Close the way he hit it: the mouse's Back at the first page.
+    pt = await targetWhere(q, (x) => String(x.url) === FY + '/__p/fsclose', 8000); p = await cdpTo(pt);
+    await p.waitFor('!!document.getElementById("v")', 8000).catch(() => 0);
+    const fsIn2 = await gesture(p, 'document.getElementById("v").requestFullscreen().then(() => 1, (e) => String(e))');
+    const fz = await chrome.waitFor(`(() => { const s = ${ST}; return s.fs ? s : null; })()`, 6000).catch(() => null);
+    await chrome.ev('WatchPlayer.back("mouse"), 1');
+    await chrome.waitFor(`!${ST}.open`, 6000).catch(() => 0);
+    check(!!fz && !(await chrome.ev(ST)).open, 'in the video\'s fullscreen, the mouse\'s Back at the first page closes the layer', { fsIn: fsIn2, fs: !!fz, closed: (await chrome.ev(ST)).lastClosed });
+    await sleep(800);
+    await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/fsafter')}, { service: 'youtube', title: 'After fullscreen' }), 1`);
+    await chrome.waitFor(`(() => { const s = ${ST}; return s.open && s.slots[0] && s.slots[0].wcId !== null; })()`, 10000).catch(() => 0);
+    await sleep(800);
+    const af = await chrome.ev(`(() => { const s = ${ST}; return { wpFs: document.querySelector(".wp-layer").classList.contains("wp-fs"), fs: s.fs, chromeFs: document.body.classList.contains("page-fullscreen"), tile: ${tileOf} }; })()`);
+    check(!af.wpFs && !af.fs && !af.chromeFs, 'the next title after a close from fullscreen opens out of fullscreen (no .wp-fs, no fsSlot, the chrome back)', af);
+    check(!!af.tile && af.tile.w > 0 && af.tile.h > 0 && af.tile.display !== 'none' && af.tile.vis === 'visible', 'and its tile is on screen (not a black window-filling layer)', af.tile);
+    const escTook = await chrome.ev('WatchPlayer.handleShortcut("escape")');
+    await chrome.waitFor(`!${ST}.open`, 4000).catch(() => 0);
+    check(escTook === true && !(await chrome.ev(ST)).open, 'and Esc closes it (no stale fullscreen swallowing the press)', { escTook, closed: (await chrome.ev(ST)).lastClosed });
+
     // A link to another site: a PAGE in the layer (a sheet), not a tab. The sheet's "Open in a tab" is
     // his way to a normal tab (counted in the leak log), and the layer waits behind the Watch tab.
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/__p/away-test')}, { service: 'youtube', title: 'Away test' }), 1`);
