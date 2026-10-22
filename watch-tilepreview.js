@@ -44,6 +44,7 @@
   var MIN_FREE_GB = 1.5;
   var SEQ_BASE = 1000000000;          // trailer asks from here up: watch.js's stage preview counts from 0
   var LOAD_MS = 9000;                 // the player's document must load in this long, or the tile goes back to still
+  var WAIT_MS = 6000;                 // main's gate / trailer answer must come back in this long, or the tile says so
   var REVEAL_FALLBACK_MS = 2500;      // the stage's rule: if the player's messages never arrive, show it anyway
   var MUTE_KEY = 'lumen.tilePreview.muted';
   var CC_KEY = 'lumen.tilePreview.cc';
@@ -162,7 +163,7 @@
    *   hovered(tile)  -> bool                             is the pointer still on the tile
    *   alive(tile)    -> bool                             still on the page, in the lens row
    *   itemOf(tile)   -> { item, event, team }            what the tile is
-   *   hasTmdbKey(), mock()
+   *   hasTmdbKey(), mock(), offline()      (offline: navigator.onLine is false)
    *   mount(tile, url, view) -> handle                   view: { muted, cc, kind, durationSec }
    *        handle: { post(str), reveal(), progress(time, duration), muted(bool), cc(bool), destroy() }
    *   note(tile, text) -> handle { destroy() }           a blocked hover's corner note
@@ -198,6 +199,27 @@
       st.lastWhy = why || '';
     }
 
+    /*
+     * A hover that cannot play: the player and every timer go (the still again), but the tile keeps
+     * the pointer's claim and its corner note says why (The user's rule: no silent fallback). The note
+     * goes with the pointer, like the gate's notes (stop() on leave).
+     */
+    function fail(reason) {
+      clearT('timer'); clearT('loadTimer'); clearT('revealTimer');
+      st.gateSeq++;
+      st.trailerSeq = 0;
+      if (st.handle) { var h = st.handle; st.handle = null; st.destroys++; try { h.destroy(); } catch (e) { /* gone anyway */ } }
+      st.phase = 'blocked';
+      st.lastWhy = String(reason || 'No preview').slice(0, 200);
+      note(st.lastWhy);
+    }
+
+    /** Main's gate or trailer answer must come back in WAIT_MS, or the tile says so (no endless wait). */
+    function armWait(phase) {
+      clearT('loadTimer');
+      st.loadTimer = d.setTimeout(function () { st.loadTimer = 0; if (st.phase === phase) fail('No preview: Lumen didn’t answer'); }, WAIT_MS);
+    }
+
     function note(text) {
       if (st.noteH) { try { st.noteH.destroy(); } catch (e) { /* gone */ } st.noteH = null; }
       if (text && d.note && st.tile) st.noteH = d.note(st.tile, text);
@@ -229,14 +251,18 @@
       st.item = what.item || null;
       st.src = tileSource(what.item, { event: !!what.event, team: !!what.team, hasTmdbKey: !!d.hasTmdbKey() });
       if (st.src.type === 'none') { st.phase = 'none'; st.lastWhy = st.src.reason; return; }   // the tile stays still
+      // no network: the embed would only load Chromium's error page, so say so instead
+      if (d.offline && d.offline()) { st.phase = 'blocked'; st.lastWhy = 'No preview: offline'; note(st.lastWhy); return; }
       st.phase = 'gate';
       st.sentGates++;
       d.send('tilepv', { seq: st.gateSeq });
+      armWait('gate');
     }
 
     /** Main's word on the gate: { seq, ok, reason }. */
     function onGate(raw) {
       if (!raw || typeof raw !== 'object' || raw.seq !== st.gateSeq || st.phase !== 'gate') return;
+      clearT('loadTimer');
       if (!st.tile || !d.alive(st.tile) || !d.hovered(st.tile)) { stop('not on the tile any more'); return; }
       if (raw.ok !== true) {
         st.phase = 'blocked';
@@ -253,6 +279,7 @@
         st.phase = 'trailer';
         st.sentTrailers++;
         d.send('preview', { title: s.title, tv: !!s.tv, seq: st.trailerSeq });
+        armWait('trailer');
         return;
       }
       stop('nothing to play');
@@ -262,6 +289,7 @@
     function onTrailer(raw) {
       if (!raw || typeof raw !== 'object' || !(Number(raw.seq) >= SEQ_BASE)) return false;
       if (raw.seq !== st.trailerSeq || st.phase !== 'trailer') return true;
+      clearT('loadTimer');
       if (!st.tile || !d.alive(st.tile) || !d.hovered(st.tile)) { stop('not on the tile any more'); return true; }
       if (raw.state === 'ok' && YT_ID_RE.test(String(raw.videoId || ''))) { mount(String(raw.videoId), 0, 'trailer'); return true; }
       st.phase = 'none';             // no trailer: nothing plays, the tile stays still
@@ -281,7 +309,7 @@
       st.phase = 'mounted';
       st.videoId = videoId; st.kind = kind; st.start = start || 0;
       st.duration = durationSec;
-      st.loadTimer = d.setTimeout(function () { st.loadTimer = 0; if (st.phase === 'mounted') stop('the player did not load'); }, LOAD_MS);
+      st.loadTimer = d.setTimeout(function () { st.loadTimer = 0; if (st.phase === 'mounted') fail('No preview: the player didn’t load'); }, LOAD_MS);
     }
 
     /** The player's document loaded: say "listening" (the DOM layer does), and arm the fallback reveal. */
@@ -310,7 +338,8 @@
       if (!st.handle) return;
       var m = readMessage(data);
       if (!m) return;
-      if (m.error !== undefined) { stop('the player stopped with error ' + m.error); return; }   // back to the still
+      // back to the still, and the tile says why (101 and 150: the owner turned off playing outside YouTube)
+      if (m.error !== undefined) { fail(m.error === 101 || m.error === 150 ? 'No preview: this video only plays on YouTube' : 'No preview: the player stopped (error ' + m.error + ')'); return; }
       if (typeof m.duration === 'number' && m.duration > 0) {
         var had = st.duration;
         st.duration = m.duration;
@@ -544,6 +573,7 @@
       itemOf: function (tile) { return { item: tile._item || null, event: tile._event || null, team: tile._team || null }; },
       hasTmdbKey: function () { var s = H.snap(); return !!(s && s.tmdb && s.tmdb.hasKey); },
       mock: function () { return mode.mock; },
+      offline: function () { return navigator.onLine === false; },
       mount: mountDom,
       note: noteDom,
       store: store()
@@ -566,7 +596,12 @@
     window.addEventListener('wheel', function () { if (ctl.tile()) ctl.stop('scrolled'); }, { passive: true, capture: true });
     window.addEventListener('keydown', function (e) {
       if (!ctl.tile()) return;
-      if (/^(Arrow|Page|Home|End|Tab|Escape|Enter| )/.test(e.key)) ctl.stop('a key');
+      if (!/^(Arrow|Page|Home|End|Tab|Escape|Enter| )/.test(e.key)) return;
+      // Enter opens the focused tile in watch.js's bubbling keydown, whose openUrl asks handoff() for
+      // the &t= time. Stopping here (capture, first) would lose it, so Enter's stop waits a turn;
+      // handoff() ends the preview itself when it opens, and the late stop is then a no-op.
+      if (e.key === 'Enter') { setTimeout(function () { if (ctl.tile()) ctl.stop('a key'); }, 0); return; }
+      ctl.stop('a key');
     }, true);
     window.addEventListener('blur', function () { if (ctl.tile()) ctl.stop('window blur'); });
     document.addEventListener('visibilitychange', function () { if (document.hidden && ctl.tile()) ctl.stop('hidden'); });
