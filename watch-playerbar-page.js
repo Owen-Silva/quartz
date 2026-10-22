@@ -361,8 +361,8 @@
           v.currentTime = Math.max(lo, Math.min(hi, to));
           break;
         }
-        case 'vol': v.volume = Math.max(0, Math.min(1, num(c.v, v.volume))); if (v.volume > 0 && v.muted && c.unmute !== false) v.muted = false; break;
-        case 'mute': v.muted = !!c.on; break;
+        case 'vol': v.volume = Math.max(0, Math.min(1, num(c.v, v.volume))); if (v.volume > 0 && v.muted && c.unmute !== false) { v.muted = false; ownMute(v, false); } break;
+        case 'mute': v.muted = !!c.on; ownMute(v, !!c.on); break;
         case 'rate': if (ad && ad.on) return { ok: false, blocked: 'ad' }; v.playbackRate = Math.max(0.0625, Math.min(16, num(c.r, 1))); break;
         case 'menus': return { ok: true, menus: menus() };
         case 'pick': { var r1 = choose(String(c.kind), String(c.id)); if (!r1.ok) return r1; return { ok: true, menus: menus(), st: state(false) }; }
@@ -372,6 +372,25 @@
         default: return { ok: false, why: 'unknown command ' + String(c.c).slice(0, 20) };
       }
       return { ok: true, st: state(false) };
+    }
+    /*
+     * Mute through the page's own player too, where it has one (YouTube's .html5-video-player, on watch pages
+     * and #shorts-player alike). The <video>'s muted flag alone is not YouTube's state: its player un-mutes the
+     * next Short (one <video> takes each Short in turn, and YouTube re-applies what IT thinks). Its own
+     * mute() / unMute() also carry to the next video the way its own M key does. Never throws.
+     */
+    function ownMute(v, on) {
+      var p = safe(function () { return v.closest ? v.closest('.html5-video-player') : null; });
+      if (!p) return;
+      // the level stays the bar's: YouTube's unMute() would bring back ITS stored volume, which the bar's
+      // own volume changes (set on the <video>) never told it
+      var keep = v.volume;
+      safe(function () {
+        if (on && typeof p.mute === 'function') p.mute();
+        else if (!on && typeof p.unMute === 'function') p.unMute();
+      });
+      safe(function () { if (v.volume !== keep) v.volume = keep; });
+      safe(function () { if (v.muted !== on) v.muted = on; });
     }
     function status() { return { ok: true, v: B.v, found: !!B.video, on: B.on }; }
     function teardown() {

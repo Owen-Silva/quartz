@@ -126,6 +126,7 @@ check(!/display\s*:\s*none/.test(css) && !/opacity/.test(css), 'hiding is visibi
 check(/html\.lumen-pb-on\.lumen-pb-own \.ytp-chrome-bottom/.test(css), 'the own-menu class brings the service\'s bar back for that moment');
 check(Page.css([], ['x']) === '', 'nothing to hide: no style');
 const src = Page.source({ find: 8000, keys: PB.PAGE_KEYS }, AD.youtube);
+check(src.includes("case 'mute': v.muted = !!c.on; ownMute(v, !!c.on);") && src.includes("v.closest('.html5-video-player')") && /p\.mute\(\)/.test(src) && /p\.unMute\(\)/.test(src), 'mute goes through YouTube’s own player too (its <video> flag alone did not carry to the next Short)');
 check(/err\.name === 'AbortError'\) return;/.test(src), 'an interrupted play() (AbortError: his own quick pause) is not reported as a failure');
 {
   const pbsrc = fs.readFileSync(path.join(__dirname, '..', 'watch-playerbar.js'), 'utf8');

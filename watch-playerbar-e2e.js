@@ -315,6 +315,19 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
       await key(g, 'm'); await sleep(300);
     }
     await key(g, 'm'); await sleep(300);
+    {
+      // r62 (found on real YouTube Shorts): M goes through YouTube's own player too, or its next Short comes back
+      // unmuted. A stand-in API on the fixture's movie_player; its unMute() brings back "its" stored level (1.0),
+      // which must not win over the bar's level.
+      await g.ev('(() => { const p = document.getElementById("movie_player"); const v = document.getElementById("v"); window.__ytm = []; p.mute = () => { window.__ytm.push("mute"); v.muted = true; }; p.unMute = () => { window.__ytm.push("unMute"); v.muted = false; v.volume = 1; }; return 1; })()');
+      const lv = await vid(g, 'v.volume');
+      await key(g, 'm'); await sleep(400);
+      await key(g, 'm'); await sleep(400);
+      const calls = await g.ev('window.__ytm.join(",")');
+      const lv2 = await vid(g, 'v.volume');
+      check(calls === 'mute,unMute' && (await vid(g, 'v.muted')) === false && Math.abs(lv2 - lv) < 0.011, 'M goes through the page’s own player (mute, unMute), and its unMute keeps the bar’s level', { calls, from: lv, to: lv2 });
+      await g.ev('(() => { const p = document.getElementById("movie_player"); delete p.mute; delete p.unMute; return 1; })()');
+    }
     const kr = await vid(g, 'v.playbackRate');
     await key(g, '>', true); await sleep(400);
     check((await vid(g, 'v.playbackRate')) === 1.75 && kr === 1.5, 'Shift+> speeds up a step', { from: kr, to: await vid(g, 'v.playbackRate') });
