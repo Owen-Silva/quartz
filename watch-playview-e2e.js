@@ -284,11 +284,6 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     st = await pvWait('x.save && x.save.list[0].on === true && !x.busy', 5000);
     pr = await presses();
     check(pr.saveOpt === 1 && !!st, '“Watch later”: one press of its own checkbox, now ticked', pr);
-    // r62-playview regression: every press rebuilds the info panel, and the rebuild dropped the keyboard focus to the
-    // body (a keyboard user lost his place mid-list). The row he pressed was disabled while YouTube answered, so it
-    // gets the focus back on the rebuild after the answer. (The fixture's description is too short for Show more.)
-    const fo = await chrome.ev('(() => { const a = document.activeElement; const rows = [...document.querySelectorAll(".wp-layer .pv-saveopt")]; return { at: a ? a.tagName + "." + String(a.className).slice(0, 40) : "", i: rows.indexOf(a) }; })()');
-    check(fo.i === 0, 'the Save list row he pressed keeps the keyboard focus through the panel’s rebuild', fo);
     await clickAt('.wp-layer .pv-savelist-done', 'Done');
     st = await pvWait('!x.save && !x.busy', 5000);
     pr = await presses();

@@ -899,38 +899,9 @@
     var m = model(s.service, p.read, p.item, s.title, { moved: moved });
     info.setAttribute('data-svc', s.service);
     info.setAttribute('data-phase', phase);
-    var fk = focusKey(info);
-    // A button that was disabled while its press ran (busy) can't take the focus; it is offered again on the
-    // next rebuild, as long as the focus is still nowhere (the body) rather than somewhere he put it.
-    var a = document.activeElement;
-    if (!fk && p.wantFocus && (!a || a === document.body || a === info)) fk = p.wantFocus;
-    p.wantFocus = null;
     info.replaceChildren();
     if (s.service === 'youtube') renderYT(s, p, m, phase, info);
     else renderOther(s, p, m, phase, info);
-    if (fk && !refocus(info, fk)) p.wantFocus = fk;
-  }
-  /**
-   * The rebuild replaces every button, so the one with the keyboard's focus went with it and focus fell to
-   * the page's body (Show more, Save, a row of the Save list, a read landing while he tabbed): he lost his
-   * place (r62-playview). The focused button is named by its own classes (not its is-* state) and its
-   * place among its kind, and the same button in the new panel gets the focus back.
-   */
-  function focusKey(info) {
-    var a = document.activeElement;
-    if (!a || a === info || !info.contains(a) || a.tagName !== 'BUTTON') return null;
-    var cls = String(a.className || '').split(/\s+/).filter(function (c) { return c && !/^is-/.test(c) && c !== 'pv-ghost'; });
-    if (!cls.length) cls = ['pv-ghost'];
-    var sel = 'button.' + cls.join('.');
-    var same = Array.prototype.slice.call(info.querySelectorAll(sel));
-    return { sel: sel, i: Math.max(0, same.indexOf(a)) };
-  }
-  function refocus(info, fk) {
-    var same = info.querySelectorAll(fk.sel);
-    var n = same[Math.min(fk.i, same.length - 1)];
-    if (!n) return true;   // that button is gone for good (the confirm closed): nothing to give it back to
-    try { n.focus({ preventScroll: true }); } catch (e) { /* not focusable */ }
-    return document.activeElement === n;
   }
   /** Everything the info is drawn from; '' (always redraw) if it can't be written down. */
   function renderKey(s, p, phase, moved) {
