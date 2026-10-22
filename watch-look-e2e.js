@@ -426,6 +426,22 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
       }
     }
 
+    /* ---- r62: closing the player forgets the field; the next video never opens on the closed one's colours ---- */
+    if (AMB && !SHOTS_ONLY) {
+      await chrome.ev('WatchPlayer.close(), 1');
+      const shut = await ambWait('!a.on && a.lit === 0 && a.key === "" && !a.holdsClosed', 6000);
+      check(!!shut, 'closing the player: the field forgets the video (no canvas keeps its colours, the closed slot is let go)', shut || await amb());
+      // every frame from the moment the next one opens: a lit canvas before anything painted for it = stale colours
+      await chrome.ev(`(() => { window.__ambLog = []; const f = () => { const a = LumenAmbient._state(); window.__ambLog.push({ on: a.on, lit: a.lit, key: a.key, src: a.src });
+        if (window.__ambLog.length < 150) requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()`);
+      await play(VID, 'Golden hour over the lake');
+      await pvWait('x.boxed && x.applied && x.phase === "ready" && x.url.indexOf(' + JSON.stringify(VID) + ') >= 0', 20000);
+      await ambWait('a.on && a.src !== "none"', 8000);
+      const alog = await chrome.ev('window.__ambLog');
+      const stale = alog.filter((x) => x.on && x.lit > 0 && x.src === 'none');
+      check(alog.some((x) => x.on) && stale.length === 0, 'the next video opens on its own colours (or the neutral field), never the closed video’s (' + alog.length + ' frames)', stale.slice(0, 5));
+    }
+
     /* ============================ 2. Shorts ============================ */
     await chrome.ev(`openInLumen(${JSON.stringify(FY + '/shorts/' + S[0].id)}, { service: 'youtube', title: 'Shorts' }), 1`);
     let x = await shWait(`x.on && x.applied && x.phase === 'ready' && x.cur === ${JSON.stringify(S[0].id)}`, 20000);

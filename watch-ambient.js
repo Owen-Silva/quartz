@@ -48,6 +48,7 @@
   var DELTA = 9;             // mean colour change (0..255) under which a new sample paints nothing
   var FILTER = 'blur(4px) saturate(1.5)';
   var GATE_MS = 30000;       // battery saver is asked at most this often
+  var STALE_MS = 700;        // a new video with no colours of its own by then: the neutral field, never the last video's
   var ID_RE = /^[A-Za-z0-9_-]{6,20}$/;
 
   function parse(url) { try { return new URL(String(url || '')); } catch (e) { return null; } }
@@ -172,7 +173,7 @@
   var A = {
     ctx: null, L: null, el: null, field: null, cvs: [], on: 0, src: null,
     slot: null, mode: '', key: '', from: 'none', why: '', off: '',
-    timer: 0, busy: false, sig: null, lastT: -1, seq: 0,
+    timer: 0, busy: false, sig: null, lastT: -1, seq: 0, staleT: 0,
     paints: 0, samples: 0, skipped: 0, stills: 0, maxSampleMs: 0, maxSampleWallMs: 0, maxPaintMs: 0, lastSampleMs: 0,
     saver: null, saverAt: 0, saverAsking: false, mq: null, bound: false, obs: null,
     sinkTile: null, sinkMark: null, sinkObs: null, sunk: false
@@ -281,6 +282,9 @@
   function evaluate() {
     var L = A.L;
     if (!L || !L.el || !A.el) return;
+    // The closed slot is let go once the layer no longer lists it: kept, it held the closed view's whole tile and
+    // its detached <webview> until the next close.
+    if (A.gone && (!L.slots || L.slots.indexOf(A.gone) < 0)) A.gone = null;
     var p = pick(L);
     if (p.s && p.s === A.gone) p = { why: 'the player is closing' };
     var on = !!p.s;
@@ -290,6 +294,7 @@
       A.why = p.why; A.off = p.why;
       if (A.slot) { stop(); A.slot = null; }
       sinkOff();
+      if (!L.open || L.el.hidden) blank();
       return;
     }
     A.why = '';
@@ -303,9 +308,26 @@
         A.key = key; A.sig = null; A.lastT = -1; A.from = 'none';
         stop();
         paintStill(s.service, url, key);
+        // Until this video's own still or frame paints, the field still shows the LAST video's colours: on a slow
+        // network (a still that takes seconds, or never loads) that stayed behind the new video. Not painted by
+        // STALE_MS: the neutral field (paint() cross-fades the real colours over it when they come).
+        clearTimeout(A.staleT);
+        A.staleT = setTimeout(function () { A.staleT = 0; if (A.key === key && A.from === 'none') neutral(); }, STALE_MS);
       }
     }
     schedule();
+  }
+
+  /* The player closed: the field forgets its video. Kept, the next video opened showed the last one's colours
+     at full strength (the canvas stayed .on behind the closed layer) and cross-faded from them, 1.6 s, after its
+     own still had loaded. The canvases are dropped while the layer is hidden, so nothing fades on screen; the
+     next open starts like the first one (its still, or the neutral field after STALE_MS). Canvases only: no
+     MutationObserver watches them. */
+  function blank() {
+    if (!A.key && A.from === 'none') return;
+    clearTimeout(A.staleT); A.staleT = 0;
+    A.key = ''; A.sig = null; A.lastT = -1; A.from = 'none';
+    for (var i = 0; i < A.cvs.length; i++) A.cvs[i].classList.toggle('on', false);
   }
 
   function gateNow() {
@@ -458,7 +480,8 @@
       on: !!(A.L && A.L.el && A.L.el.classList.contains('amb-on')), mode: A.slot ? A.mode : '', key: A.key, src: A.from,
       refreshing: !!(A.timer || A.busy), off: A.off, why: A.why, every: EVERY,
       paints: A.paints, samples: A.samples, skipped: A.skipped, stills: A.stills,
-      maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, maxSampleWallMs: A.maxSampleWallMs, saver: A.saver, sunk: A.sunk
+      maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, maxSampleWallMs: A.maxSampleWallMs, saver: A.saver, sunk: A.sunk,
+      holdsClosed: !!A.gone, lit: A.cvs.filter(function (c) { return c.classList.contains('on'); }).length
     };
   }
 
