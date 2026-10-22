@@ -438,6 +438,8 @@ run('watch-multiview-e2e', async ({ check, launch, say, profileDir }) => {
           if (!outFs) await fp.ev('document.fullscreenElement ? document.exitFullscreen().then(() => 1) : 0').catch(() => 0);
         }
         fp.close();
+        // an Esc within 500 ms of leaving fullscreen is the fullscreen's, never multiview's (watch-player-multi onBack)
+        await sleep(800);
       }
     }
 
