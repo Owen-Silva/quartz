@@ -304,7 +304,7 @@ run('watch-ytlib-e2e', async ({ check, launch, say, profileDir }) => {
     await click(`[...(${ROW}).querySelectorAll('.card')].find((c) => c._item && c._item.vid === '${NEW_IDS[0]}')`);
     const p1 = await chrome.waitFor(`(() => { const s = ${PST}; return s.open && s.n === 1 && s.slots[0].url ? s : null; })()`, 15000).catch(() => null);
     check(!!p1 && p1.slots[0].url === FY + '/watch?v=' + NEW_IDS[0], 'a click on a New tile plays it in the player layer (the watch page, rebased to the test)', p1 && p1.slots[0].url);
-    check(p1 && /Reading the Shooter/.test(p1.title) && (await chrome.ev('tabs.length')) === tabsBefore, 'the layer\'s bar has the title; no new tab opened', p1 && p1.title);
+    check(p1 && /Reading the Weather/.test(p1.title) && (await chrome.ev('tabs.length')) === tabsBefore, 'the layer\'s bar has the title; no new tab opened', p1 && p1.title);
     const s1 = await wait(`(() => { const s = ${YS}.subs; return s && s.newCount === 1 ? s : null; })()`, 10000);
     const r1 = await g.ev(`(() => { const r = ${ROW}; const c = r && [...r.querySelectorAll('.card')].find((x) => x._item && x._item.vid === '${NEW_IDS[0]}'); return { badge: (r.querySelector('.lr-h .yt-badge') || {}).textContent || '', played: c ? c.classList.contains('is-new') || !!c.querySelector('.yt-new') : 'gone', other: !![...r.querySelectorAll('.card.is-new')].find((x) => x._item && x._item.vid === '${NEW_IDS[1]}') }; })()`);
     check(!!s1 && r1.badge === '1 new' && r1.played === false && r1.other, 'the played video\'s New mark clears; the badge says "1 new"; the other stays new', r1);
