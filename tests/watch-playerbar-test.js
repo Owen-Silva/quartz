@@ -214,6 +214,8 @@ check(/data-field', 'watchplaybar'/.test(st) && /LumenPlayerBar\.renderSetting\(
   check(src.includes("(e.key === 'ArrowUp' || e.key === 'ArrowDown') && R.hasAttribute('data-lumen-sh')"), 'the page bridge leaves Up/Down to YouTube on Lumen\'s Shorts view (never the volume there)');
   check(src.includes("case 'rate': if (ad && ad.on) return { ok: false, blocked: 'ad' }"), 'no speed change while an ad plays (any service)');
   check(src.includes("current() === e.target) attach(e.target)") && src.includes('else if (now && now !== v) attach(now)'), 'the bridge swaps to the Short that plays now (on its playing, and on a rescan)');
+  check(/else if \(\(e\.type === 'playing' \|\| e\.type === 'loadedmetadata'\) && B\.video && !B\.video\.isConnected/.test(src), 'a page that replaces its <video> (no URL change): the new one starting takes the bar over (it froze on the removed one)');
+  check(/if \(v && now === null && area\(v\) === 0\) \{ var vis = pick\(\)/.test(src), 'rescan: an attached video with no box while another is on screen (Shorts -> watch page): the bar follows the visible one');
   const pbjs = fs.readFileSync(path.join(ROOT, 'watch-playerbar.js'), 'utf8');
   check(/inShorts\(s\) && \(e\.key === 'ArrowUp' \|\| e\.key === 'ArrowDown'\)\) return;/.test(pbjs) && /return shortsMove\(s, k === 'ArrowDown' \? 1 : -1\)/.test(pbjs), 'in the chrome Up/Down on a Short go to the Shorts view; from the page, the bar hands them to it');
   const pbcss = fs.readFileSync(path.join(ROOT, 'watch-playerbar.css'), 'utf8');

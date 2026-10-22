@@ -528,6 +528,12 @@ run('watch-playerbar-e2e', async ({ check, launch, say }) => {
       await chrome.waitFor(S + ' && ' + S + '.on === true && !' + S + '.fell', 12000).catch(() => 0);
       st = await chrome.ev(S);
       check(st && st.on === true && !st.fell && st.reason === '', 'after the fallback, a video in-page at a new URL: the bar comes back on, the old reason gone', { on: st && st.on, fell: st && st.fell, reason: st && st.reason });
+      // r62: the page swaps its <video> element (no URL change, the next episode in the same player): the bar follows
+      // the new one (it froze on the removed one)
+      await n.ev('(() => { const o = document.querySelector("video"); const v = document.createElement("video"); v.src = "/__media/clip.mp4"; v.muted = true;'
+        + ' v.style.cssText = o.style.cssText; o.remove(); document.body.appendChild(v); v.addEventListener("loadedmetadata", () => { v.currentTime = 40; v.play().catch(() => 0); }, { once: true }); return 1; })()').catch(() => 0);
+      const sw = await chrome.waitFor(S + ' && ' + S + '.st && ' + S + '.st.c >= 39 ? ' + S + ' : null', 10000).catch(() => null);
+      check(!!sw && sw.on === true, 'the page replaces its <video> without a URL change: the bar follows the new one', sw && sw.st && { c: sw.st.c, d: sw.st.d });
     }
     if (n) n.close();
 

@@ -133,6 +133,9 @@
       // Another Short's video starts (YouTube moved on, or a neighbour it preloaded took over): the bar follows
       // the current one at once, on the video's own event (no polling).
       if ((e.type === 'playing' || e.type === 'play' || e.type === 'loadedmetadata') && A.current && e.target && e.target.tagName === 'VIDEO' && current() === e.target) attach(e.target);
+      // A page that swaps its <video> element without a URL change (the next episode in the same player): the
+      // old one left the page, so it never fires again and the bar froze on it. The new one starting takes over.
+      else if ((e.type === 'playing' || e.type === 'loadedmetadata') && B.video && !B.video.isConnected && e.target && e.target.tagName === 'VIDEO' && e.target.isConnected) attach(e.target);
     }
     function onTime(e) {
       if (e.target !== B.video) return;
