@@ -87,7 +87,12 @@
     for (var i = 0; i < (rules || []).length; i++) {
       var r = rules[i];
       if (!hostIs(host, r.host)) continue;
-      for (var j = 0; j < r.prefixes.length; j++) if (u.pathname.indexOf(r.prefixes[j]) === 0) return true;
+      // A prefix is whole path segments: '/video' is amazon.com/video and /video/..., never /videogames
+      // (a shopping link counted as Prime Video and stayed in its layer instead of opening as a page, r62-playview).
+      for (var j = 0; j < r.prefixes.length; j++) {
+        var px = r.prefixes[j], rest = u.pathname.charAt(px.length);
+        if (u.pathname.indexOf(px) === 0 && (px.charAt(px.length - 1) === '/' || rest === '' || rest === '/')) return true;
+      }
     }
     return false;
   }

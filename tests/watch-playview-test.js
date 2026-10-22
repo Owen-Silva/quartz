@@ -98,6 +98,30 @@ m = PV.model('espn', null, null, 'Game · Live');
 check(m.title === 'Game' && m.titleFrom === 'item', 'ESPN with only the slot’s title: its first part');
 check(PV.complete(read) === true && PV.complete(Object.assign({}, read, { sub: { found: false } })) === false && PV.complete(null) === false, 'complete(): title, channel, Like and Subscribe');
 
+/* ---- r62-playview: a YouTube page that moved on to another video ------------------------------------------ */
+// The view used to treat YouTube as never "moved": after autoplay or an end-screen card (moves in the page),
+// the LAST video's title from Lumen's row stood in under the next one, and stayed when the read failed.
+check(PV.ytId('https://www.youtube.com/watch?v=abcDEF12345&t=30s') === 'abcDEF12345' && PV.ytId('https://youtu.be/abcDEF12345') === 'abcDEF12345'
+  && PV.ytId('https://www.youtube.com/live/abcDEF12345') === 'abcDEF12345' && PV.ytId('https://www.youtube.com/@chan') === '', 'ytId: watch, youtu.be and live addresses; a channel has none');
+check(PV.ytMoved('https://www.youtube.com/watch?v=AAAAAAAAAAA', 'https://www.youtube.com/watch?v=BBBBBBBBBBB&pp=x') === true, 'ytMoved: another video id is a move');
+check(PV.ytMoved('https://www.youtube.com/watch?v=AAAAAAAAAAA', 'https://www.youtube.com/watch?v=AAAAAAAAAAA&t=95s&pp=x') === false
+  && PV.ytMoved('https://youtu.be/AAAAAAAAAAA', 'https://www.youtube.com/watch?v=AAAAAAAAAAA') === false, 'ytMoved: the same video with a time or a short link is not');
+check(PV.ytMoved('https://www.youtube.com/@chan', 'https://www.youtube.com/watch?v=BBBBBBBBBBB') === false, 'ytMoved: an item that was not one video never moves');
+{
+  const rowItem = { title: 'Video A (from the row)' };
+  const mv = PV.model('youtube', null, rowItem, 'Video A (slot)', { moved: true });
+  check(mv.title === '' && mv.titleFrom === '', 'model: moved and not read yet: no title from the row (the skeleton, never the last video’s)', mv);
+  const mv2 = PV.model('youtube', { ok: true, videoId: 'BBBBBBBBBBB', pageTitle: 'Video B - YouTube' }, rowItem, 'Video A (slot)', { moved: true });
+  check(mv2.title === 'Video B' && mv2.titleFrom === 'page-title', 'model: moved, the page has only its <title>: that, cleaned', mv2);
+}
+// watch-player-hosts.js: an Amazon prefix is whole path segments (amazon.com/videogames is shopping, not Prime Video).
+{
+  const Hs = require(path.join(ROOT, 'watch-player-hosts'));
+  check(Hs.serviceFor('https://www.amazon.com/videogames/b?node=468642') === '' && Hs.serviceFor('https://www.amazon.com/video/detail/B0X') === 'prime'
+    && Hs.serviceFor('https://www.amazon.com/gp/video/detail/B0X') === 'prime' && Hs.serviceFor('https://www.amazon.com/Amazon-Video/b?node=2858778011') === 'prime',
+  'hosts: amazon.com/videogames is not Prime Video; /video/, /gp/video and /Amazon-Video still are');
+}
+
 /* ---- whyOff ---------------------------------------------------------------------------------------------- */
 const mm = PV.model('youtube', read, null, '');
 check(PV.whyOff(mm, 'like', 'ready') === '' && /Save button isn’t on this page/.test(PV.whyOff(mm, 'save', 'ready')), 'a found button is on; a missing one says why');
