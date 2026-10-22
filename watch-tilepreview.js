@@ -201,7 +201,7 @@
 
     /*
      * A hover that cannot play: the player and every timer go (the still again), but the tile keeps
-     * the pointer's claim and its corner note says why (The user's rule: no silent fallback). The note
+     * the pointer's claim and its corner note says why (a standing rule: no silent fallback). The note
      * goes with the pointer, like the gate's notes (stop() on leave).
      */
     function fail(reason) {

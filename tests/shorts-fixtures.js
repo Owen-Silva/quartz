@@ -30,8 +30,8 @@ function list(id) {
 }
 
 // ?long=1 (r62): a very long right-to-left title, an emoji-first very long channel name, and no avatar picture.
-const LONG_TITLE = 'تمرين التزحلق السريع على الجليد للمبتدئين والمحترفين: خمس حركات لتحسين التوازن والسرعة قبل كل مباراة #shorts #baking #skating #training';
-const LONG_NAME = '🏒 The Extremely Long Kitchen Academy Channel Name That Keeps Going';
+const LONG_TITLE = 'تمرين الأداء السريع على الجيتار للمبتدئين والمحترفين: خمس حركات لتحسين التوازن والسرعة قبل كل عرض حي #shorts #guitar #strings #training';
+const LONG_NAME = '🎸 The Extremely Long Guitar Training Channel Name That Keeps Going';
 function shortsPage(id, q) {
   const o = q || {};
   const L = o.long ? list(id).map((s) => Object.assign({}, s, { title: LONG_TITLE, name: LONG_NAME })) : list(id);

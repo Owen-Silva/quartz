@@ -841,7 +841,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
         return { dir: t.dir, cdir: getComputedStyle(t).direction, clamped: t.scrollHeight > t.clientHeight + 2, ndir: getComputedStyle(n).direction, av: av.textContent, img: !!av.querySelector('img'),
           info: r(i), title: r(t), name: r(n), sub: r(i.querySelector('.pv-sub')), tile: r(i.closest('.wp-tile')) }; })()`);
       check(lg.dir === 'auto' && lg.cdir === 'rtl' && lg.clamped, 'r62: a long right-to-left title reads right to left, clamped', lg);
-      check(lg.av === '🏒' && !lg.img, 'r62: no avatar picture: the channel’s whole first character (an emoji, not half of one)', { av: lg.av, img: lg.img });
+      check(lg.av === '🎸' && !lg.img, 'r62: no avatar picture: the channel’s whole first character (an emoji, not half of one)', { av: lg.av, img: lg.img });
       check(lg.name.r <= lg.info.r && lg.sub.r <= lg.info.r && lg.title.r <= lg.info.r && lg.info.b <= lg.tile.b, 'r62: the long title and channel stay inside Lumen’s info, the info inside the layer', lg);
       await shot(1280, 800, 'r62-long');
       await resize(1920, 1000);
