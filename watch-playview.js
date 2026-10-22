@@ -560,7 +560,10 @@
     p.cover.appendChild(el('span', 'pv-cover-bar'));
     p.cover.appendChild(el('span', 'pv-cover-txt', 'Loading the player…'));
     p.info = el('div', 'pv-info');
-    p.info.setAttribute('aria-live', 'polite');
+    // No aria-live on the panel: it is rebuilt whole on each read or press, so a screen reader read the title,
+    // channel and description out again every time. The one-line notes (.pv-why, role=status) say what changed.
+    p.info.setAttribute('role', 'region');
+    p.info.setAttribute('aria-label', 'About this video');
     p.info.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return;
       p.pressing = true;
@@ -854,6 +857,18 @@
     return true;
   }
 
+  /**
+   * Esc (watch-player.js takeShortcut, after the play bar, fullscreen and a sheet): the Unsubscribe confirm
+   * closes (nothing pressed), then YouTube's Save list (its own close, like Done). true = Esc was used here.
+   */
+  function escape(ctx, s) {
+    var p = pvOf(s);
+    if (!p || !s.tile.classList.contains('pv')) return false;
+    if (p.confirm) { p.confirm = false; render(s); backToPlayer(s); return true; }
+    if (p.save) { if (!p.busy) press(s, 'save-close'); backToPlayer(s); return true; }
+    return false;
+  }
+
   function backToPlayer(s) { if (s && s.view && !(pvOf(s) && pvOf(s).save)) { try { s.view.focus(); } catch (e) { /* gone */ } } }
 
   /* ---------------------------------------------------------------- the info */
@@ -884,9 +899,38 @@
     var m = model(s.service, p.read, p.item, s.title, { moved: moved });
     info.setAttribute('data-svc', s.service);
     info.setAttribute('data-phase', phase);
+    var fk = focusKey(info);
+    // A button that was disabled while its press ran (busy) can't take the focus; it is offered again on the
+    // next rebuild, as long as the focus is still nowhere (the body) rather than somewhere he put it.
+    var a = document.activeElement;
+    if (!fk && p.wantFocus && (!a || a === document.body || a === info)) fk = p.wantFocus;
+    p.wantFocus = null;
     info.replaceChildren();
     if (s.service === 'youtube') renderYT(s, p, m, phase, info);
     else renderOther(s, p, m, phase, info);
+    if (fk && !refocus(info, fk)) p.wantFocus = fk;
+  }
+  /**
+   * The rebuild replaces every button, so the one with the keyboard's focus went with it and focus fell to
+   * the page's body (Show more, Save, a row of the Save list, a read landing while he tabbed): he lost his
+   * place (r62-playview). The focused button is named by its own classes (not its is-* state) and its
+   * place among its kind, and the same button in the new panel gets the focus back.
+   */
+  function focusKey(info) {
+    var a = document.activeElement;
+    if (!a || a === info || !info.contains(a) || a.tagName !== 'BUTTON') return null;
+    var cls = String(a.className || '').split(/\s+/).filter(function (c) { return c && !/^is-/.test(c) && c !== 'pv-ghost'; });
+    if (!cls.length) cls = ['pv-ghost'];
+    var sel = 'button.' + cls.join('.');
+    var same = Array.prototype.slice.call(info.querySelectorAll(sel));
+    return { sel: sel, i: Math.max(0, same.indexOf(a)) };
+  }
+  function refocus(info, fk) {
+    var same = info.querySelectorAll(fk.sel);
+    var n = same[Math.min(fk.i, same.length - 1)];
+    if (!n) return true;   // that button is gone for good (the confirm closed): nothing to give it back to
+    try { n.focus({ preventScroll: true }); } catch (e) { /* not focusable */ }
+    return document.activeElement === n;
   }
   /** Everything the info is drawn from; '' (always redraw) if it can't be written down. */
   function renderKey(s, p, phase, moved) {
@@ -900,7 +944,10 @@
 
   function titleEl(text, phase) {
     var h = el('h1', 'pv-title');
-    if (text) h.textContent = text;
+    // dir=auto: an Arabic or Hebrew title reads in its own direction. title: the clamp cuts a long one at two
+    // lines, so the whole of it is on hover.
+    h.dir = 'auto';
+    if (text) { h.textContent = text; h.title = text; }
     else { h.classList.add('pv-skel'); h.textContent = phase === 'loading' ? 'Loading the title…' : 'Untitled'; }
     return h;
   }
@@ -1018,8 +1065,14 @@
       var d = el('div', 'pv-desc' + (p.more ? ' is-more' : ''));
       if (m.desc.meta) d.appendChild(el('div', 'pv-desc-meta', m.desc.meta));
       if (m.desc.text) {
-        d.appendChild(el('div', 'pv-desc-text', m.desc.text));
-        if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) d.appendChild(button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); }));
+        var dt = el('div', 'pv-desc-text', m.desc.text);
+        dt.dir = 'auto';   // a right-to-left description reads in its own direction
+        d.appendChild(dt);
+        if (m.desc.text.length > 180 || /\n/.test(m.desc.text)) {
+          var more = button('pv-ghost pv-more', p.more ? 'Show less' : 'Show more', function () { p.more = !p.more; render(s); });
+          more.setAttribute('aria-expanded', p.more ? 'true' : 'false');
+          d.appendChild(more);
+        }
       }
       info.appendChild(d);
     }
@@ -1157,7 +1210,7 @@
 
   return Object.assign({}, PURE, {
     // watch-player.js X() hooks
-    attach: attach, reuse: reuse, destroy: destroy, sync: sync, stateActs: stateActs,
+    attach: attach, reuse: reuse, destroy: destroy, sync: sync, stateActs: stateActs, escape: escape,
     // watch-player-yt.js's "Full page" button
     toggleFor: toggleFor, toggle: toggle,
     // Settings > Lumen

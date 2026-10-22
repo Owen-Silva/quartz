@@ -120,6 +120,7 @@
     L.markEl = el('span', 'wp-mark');
     bar.appendChild(L.markEl);
     L.titleEl = el('span', 'wp-title');
+    L.titleEl.dir = 'auto';   // an Arabic or Hebrew title reads in its own direction, punctuation where it belongs
     bar.appendChild(L.titleEl);
     L.noteEl = el('span', 'wp-note');
     L.noteEl.setAttribute('role', 'status');
@@ -657,6 +658,9 @@
       if (L.fsSlot && exitFs()) return true;
       if (Date.now() - L.fsLeftAt < ESC_AFTER_FS_MS) return true;
       if (L.sheet && api) { api.sheetClose(L.sheet.id, 'Esc'); return true; }
+      // The Lumen view's own open things (the Unsubscribe confirm, the Save list) close before the player does:
+      // Esc on "Unsubscribe from X?" used to close the whole video.
+      if (X('escape', focused()) === true) return true;
       close('Esc');
       return true;
     }
