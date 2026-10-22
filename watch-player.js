@@ -446,6 +446,7 @@
   function close(why) {
     if (!L.open) return false;
     L.open = false;
+    note('');   // a note is about this title ("could not be guarded", an app link stopped): never the next one's
     MV('close', why);
     if (L.sheet && api) { api.sheetClose(L.sheet.id, 'the player closed'); }
     hideSheet();
@@ -526,7 +527,8 @@
       if (b) b.disabled = false;
       if (r && r.ok) {
         toast('Opened in Microsoft Edge' + (slot.blocked ? ': ' + slot.blocked : ''));
-        if (L.slots.length === 1) close('Open in Edge');
+        // Only if the layer still shows THIS title: Edge's answer can come after he closed it and opened another.
+        if (L.open && L.slots.length === 1 && L.slots[0] === slot) close('Open in Edge');
       } else toast('Couldn’t open Microsoft Edge' + (r && r.reason ? ': ' + r.reason : ''), true);
     }, function (err) { if (b) b.disabled = false; toast('Couldn’t open Microsoft Edge: ' + ((err && err.message) || err), true); });
   }
