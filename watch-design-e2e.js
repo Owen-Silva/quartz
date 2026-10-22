@@ -406,6 +406,24 @@ if (require.main === module) {
         check(ring.t >= ring.bar, where + ': the focused card (and its ring) is below the bar', ring);
       }
 
+      // Lumen's motion: nothing over 150 ms on the Lumen page (watch.css :root takes Lumen's set; tokens.css,
+      // which times the rest of Quartz, stays as it is). Every token as this page resolves it (a probe span
+      // times itself by it), the hero's and a card's own transitions, and the tile preview's fade (.tpv: the
+      // preview exists only while hovered, so a bare .tpv is timed by the same rule).
+      const mo = await g.ev(`(() => {
+        const dur = (expr) => { const s = document.createElement('span'); s.style.setProperty('transition-duration', expr); document.body.appendChild(s); const v = getComputedStyle(s).transitionDuration; s.remove(); return v; };
+        const td = (el) => (el ? getComputedStyle(el).transitionDuration : null);
+        const tpv = document.createElement('div'); tpv.className = 'tpv'; const btn = document.createElement('div'); btn.className = 'tpv-btn'; tpv.appendChild(btn); document.body.appendChild(tpv);
+        const r = { tokens: {}, stage: td(document.getElementById('stage')), card: td(document.querySelector('.card')), tpv: td(tpv), tpvBtn: td(btn) };
+        for (const k of ['xs', 's', 'm', 'l', 'xs-out', 's-out', 'm-out', 'l-out']) r.tokens[k] = dur('var(--m-dur-' + k + ')');
+        tpv.remove();
+        return r; })()`);
+      const secs = (v) => String(v == null ? 'x' : v).split(',').map((x) => parseFloat(x));
+      const under = (v) => secs(v).every((s) => s >= 0 && s <= 0.15 + 1e-6);
+      check(Object.values(mo.tokens).every(under) && mo.tokens.m === '0.15s', 'Lumen page: every motion token is 150 ms or less (m ' + mo.tokens.m + ', s ' + mo.tokens.s + ', xs ' + mo.tokens.xs + ')', mo.tokens);
+      check(under(mo.stage) && under(mo.card), 'Lumen page: the hero and the cards move in 150 ms or less (' + mo.stage + ' / ' + mo.card + ')', mo);
+      check(mo.tpv === '0.12s' && under(mo.tpvBtn), 'Lumen page: the tile preview fades in within 150 ms (' + mo.tpv + ')', mo);
+
       // reduced motion: the change is a short fade only
       await g.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
       await go(0); await sleep(300); await go(1); await sleep(400);

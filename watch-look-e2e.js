@@ -331,6 +331,40 @@ run('watch-look-e2e', async ({ check, launch, say }) => {
       const a1 = await ambWait('a.src === "frame" && a.samples >= 1', 12000);
       check(!!a1, 'then from the playing frame (the page’s own canvas sample)', a1 || await amb());
     } else await sleep(4000);
+    if (!SHOTS_ONLY) {
+      // Lumen's motion: nothing over 150 ms, on Lumen's elements only (watch-player.css sets Lumen's set on
+      // .wp-layer and .lumen-alerts; this window's :root keeps tokens.css's set for the rest of Quartz).
+      // dur(host, expr): a probe span inside host times itself by expr, so a token reads as host resolves it.
+      const mo = await chrome.ev(`(() => {
+        const dur = (host, expr) => { const s = document.createElement('span'); s.style.setProperty('transition-duration', expr); host.appendChild(s); const v = getComputedStyle(s).transitionDuration; s.remove(); return v; };
+        const td = (el) => (el ? getComputedStyle(el).transitionDuration : null);
+        const L = document.querySelector('.wp-layer.wp-in');
+        const cs = Array.from(document.querySelectorAll('.wp-layer .amb-c'));
+        const on = cs.find((c) => c.classList.contains('on')), off = cs.find((c) => !c.classList.contains('on'));
+        const al = document.createElement('div'); al.className = 'lumen-alerts'; al.style.setProperty('visibility', 'hidden'); document.body.appendChild(al);
+        const sp = document.getElementById('settings-panel');
+        const r = {
+          layerIn: td(L), layerOut: L ? dur(L, 'var(--m-dur-m-out)') : null, layerM: L ? dur(L, 'var(--m-dur-m)') : null,
+          ambOn: td(on), ambOff: td(off), ambOffDelay: off ? getComputedStyle(off).transitionDelay : null, field: td(document.querySelector('.wp-layer .amb-f')),
+          alertIn: dur(al, 'var(--m-dur-xs)'), alertOut: dur(al, 'var(--m-dur-xs-out)'),
+          quartzM: dur(document.body, 'var(--m-dur-m)'), quartzMOut: dur(document.body, 'var(--m-dur-m-out)'),
+          settingsIn: sp ? dur(sp, 'var(--m-in)') : null
+        };
+        al.remove();
+        return r; })()`);
+      const under = (v) => String(v == null ? 'x' : v).split(',').every((x) => { const s = parseFloat(x); return s >= 0 && s <= 0.15 + 1e-6; });
+      check(!!mo.layerIn && under(mo.layerIn) && mo.layerM === '0.15s' && under(mo.layerOut), 'the player layer opens and closes in 150 ms or less (in ' + mo.layerIn + ', out ' + mo.layerOut + ')', mo);
+      check(mo.ambOn === '0.15s' && mo.ambOff === '0s' && mo.ambOffDelay === '0.15s' && mo.field === '0.15s',
+        'the ambient field changes colour in 150 ms, the new picture over the old (old drops at ' + mo.ambOffDelay + '), and sinks in ' + mo.field, mo);
+      check(under(mo.alertIn) && under(mo.alertOut), 'the Lumen Alerts card moves in 150 ms or less (' + mo.alertIn + ' / ' + mo.alertOut + ')', mo);
+      check(mo.quartzM === '0.44s' && mo.settingsIn === '0.44s' && mo.quartzMOut === '0.198s', 'the rest of Quartz keeps its own motion: :root --m-dur-m ' + mo.quartzM + ', Settings opens in ' + mo.settingsIn, mo);
+      // reduced motion: the layer is a short fade, the field swaps colours with no fade at all
+      await chrome.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+      const rm = await chrome.ev(`(() => { const L = document.querySelector('.wp-layer.wp-in'); const c = document.querySelector('.wp-layer .amb-c.on'); const o = document.querySelector('.wp-layer .amb-c:not(.on)');
+        return { layer: L ? getComputedStyle(L).transitionDuration : null, tf: L ? getComputedStyle(L).transitionProperty : null, ambOn: c ? getComputedStyle(c).transitionDuration : null, ambOff: o ? getComputedStyle(o).transitionDuration + ' +' + getComputedStyle(o).transitionDelay : null }; })()`);
+      await chrome.send('Emulation.setEmulatedMedia', { features: [] });
+      check(rm.layer === '0.12s' && rm.tf === 'opacity' && rm.ambOn === '0s' && rm.ambOff === '0s +0s', 'reduced motion: the layer only fades (' + rm.layer + ') and the field swaps without a fade', rm);
+    }
     for (const [w, h] of SIZES) {
       await resize(w, h);
       await scrollTo(0);

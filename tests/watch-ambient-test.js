@@ -98,7 +98,16 @@ check(/\.amb-sunk[^{]*\.amb-f\s*\{\s*opacity:\s*\.2/.test(amb) && /new Intersect
 // classList.remove()/add() rewrite the class attribute even when nothing changes; the layer's MutationObserver
 // runs evaluate() on every class write, so evaluate()'s path must use toggle(x, force) (a no-op when settled).
 check(!/L\.el\.classList\.(remove|add)\(/.test(read('watch-ambient.js')), 'the field never writes the layer\'s class unless it changes (no remove()/add() on L.el: its MutationObserver would loop)');
-check(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.amb-c(?:,\s*\.amb-f)?\s*\{\s*transition:\s*none/.test(amb), 'reduced motion: the colours change without a fade');
+check(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.amb-c,\s*\.amb-c\.on(?:,\s*\.amb-f)?\s*\{\s*transition:\s*none/.test(amb), 'reduced motion: the colours change without a fade (.amb-c.on named too: its own rule outranks .amb-c)');
+// Lumen's motion rule: nothing over 150 ms. Every length the sheet times a transition by, and --amb-x itself.
+{
+  const lens = (amb.replace(/\/\*[\s\S]*?\*\//g, '').match(/transition:[^;}]*/g) || []).join(' ').match(/\d*\.?\d+m?s\b/g) || [];
+  const ms = lens.map((t) => parseFloat(t) * (/ms$/.test(t) ? 1 : 1000));
+  const x = /--amb-x:\s*(\d+)ms/.exec(amb);
+  check(!!x && Number(x[1]) <= 150 && ms.every((v) => v <= 150), 'the field\'s fades are all 150 ms or less (--amb-x ' + (x ? x[1] + ' ms' : 'missing') + ')', lens);
+  check(/\.amb-c\s*\{[^}]*transition:\s*opacity 0s linear var\(--amb-x\)/.test(amb) && /\.amb-c\.on\s*\{[^}]*z-index:\s*1/.test(amb),
+    'a colour change covers instead of crossing: the new canvas fades in on top, the old one drops only once covered (no dip to the base)');
+}
 const idx = read('index.html');
 check(/<link rel="stylesheet" href="watch-ambient.css">/.test(idx) && /<script src="watch-ambient.js"><\/script>/.test(idx), 'index.html loads the field');
 check(/LumenAmbient\.attach\(ctx, s, v\)/.test(read('watch-playview.js')) && /LumenAmbient\.destroy\(ctx, s\)/.test(read('watch-playview.js')), 'the playback view hands the field each slot (attach / destroy)');

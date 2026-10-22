@@ -56,7 +56,7 @@
   var FRONT_WAIT_MS = 10000;
   var HOVER_MS = 140;
   var WHEEL_GAP_MS = 380;
-  var STAGE_SWAP_MS = 150;
+  var STAGE_SWAP_MS = 60;      // the stage's leave (watch.css .stage.out: --m-dur-s-out, 54 ms in Lumen's set) plus a margin
   var WASH_DELAY_MS = 220;
   var TOAST_MS = 4200;
   var TOAST_MAX = 3;
@@ -2203,7 +2203,7 @@
       t._gone = true;
       if (reduced()) { t.remove(); return; }
       t.classList.add('out');
-      setTimeout(function () { t.remove(); }, 200);
+      setTimeout(function () { t.remove(); }, 60);   // .toast.out: --m-dur-xs-out, 45 ms in Lumen's set (watch.css :root)
     };
     if (opts.err) {
       var x = button('icon-btn sm', '', dismiss);

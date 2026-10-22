@@ -60,6 +60,22 @@
   --row-sub: color-mix(in srgb, var(--text-3) 50%, var(--text-2));
   --row-err: var(--danger);
   --row-warn: var(--warn);
+  /* LUMEN'S MOTION: nothing over 150 ms. tokens.css's set (xs 240 / s 320 / m 440 / l 560 ms) times
+     all of Quartz and stays as it is; this page is its own document (watch.html), so its :root takes
+     Lumen's set: the same curves (--m-spring, --m-accel, --m-fade-*), the same order of sizes and the
+     same OUT = 45 % of IN, only quicker. The spring is 41 points over normalised time, so the same
+     points over 150 ms are the same spring, settled sooner. The -out names are restated next to
+     their IN so they never inherit a value computed from tokens.css's longer IN. The player layer,
+     its ambient field and the Alerts card live in Quartz's own window and take the same set on
+     their own elements (watch-player.css), never on that window's :root. */
+  --m-dur-xs: 100ms;
+  --m-dur-s: 120ms;
+  --m-dur-m: 150ms;
+  --m-dur-l: 150ms;
+  --m-dur-xs-out: calc(var(--m-dur-xs) * .45);
+  --m-dur-s-out: calc(var(--m-dur-s) * .45);
+  --m-dur-m-out: calc(var(--m-dur-m) * .45);
+  --m-dur-l-out: calc(var(--m-dur-l) * .45);
 }
 html[data-theme="light"] {
   --wash-a: .3;

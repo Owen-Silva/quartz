@@ -40,7 +40,17 @@
 .wp-layer.amb-on { --amb-a: .9; --lumen-view-bg: transparent; }
 .wp-layer.amb-on.amb-sh { --amb-a: .8; }
 
-.amb-f { position: absolute; inset: 0; opacity: var(--amb-a); transition: opacity .5s cubic-bezier(.4, 0, .2, 1); will-change: opacity; }
+/* Motion: nothing over 150 ms (Lumen's rule; it was 1.6 s for the colours and .5 s for the sink), on
+   the same curve as before. --amb-x is the one length for both. */
+.amb { --amb-x: 150ms; }
+.amb-f { position: absolute; inset: 0; opacity: var(--amb-a); transition: opacity var(--amb-x) cubic-bezier(.4, 0, .2, 1); will-change: opacity; isolation: isolate; }
+/* The colour change: the NEW canvas fades in OVER the old one, which holds at full strength until the
+   new one covers it and only then drops (a 0 s step at the end, unseen under the new picture). The old
+   way, both crossing at once, let the dark base show through mid-swap: the moment both sit at .5, the
+   two together cover only 1 - .5 x .5 = 75 % of it. Over 1.6 s that dip read as a slow
+   breath; squeezed into 150 ms it is a 25 % dim-and-back every time the colours change, a blink.
+   Covering instead of crossing keeps the field at 100 % the whole way. The z-index stays inside
+   .amb-f (its own stacking context), under the wash. */
 .amb-c {
   position: absolute;
   left: -5%;
@@ -48,10 +58,11 @@
   width: 110%;
   height: 110%;
   opacity: 0;
-  transition: opacity 1.6s cubic-bezier(.4, 0, .2, 1);
+  z-index: 0;
+  transition: opacity 0s linear var(--amb-x);
   will-change: opacity;
 }
-.amb-c.on { opacity: 1; }
+.amb-c.on { opacity: 1; z-index: 1; transition: opacity var(--amb-x) cubic-bezier(.4, 0, .2, 1); }
 
 /* The wash: a vignette that keeps the light round the player, the bar's band, and the info's band
    at the foot (the playback view's info peeks there: PEEK = 128 px). Static: painted once. */
@@ -91,5 +102,5 @@
 .wp-layer.amb-on .wp-tile.pv { will-change: scroll-position; }
 
 @media (prefers-reduced-motion: reduce) {
-  .amb-c, .amb-f { transition: none; }
+  .amb-c, .amb-c.on, .amb-f { transition: none; }   /* .amb-c.on named: its own rule outranks .amb-c */
 }
