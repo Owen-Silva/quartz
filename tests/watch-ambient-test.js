@@ -104,5 +104,64 @@ check(/<link rel="stylesheet" href="watch-ambient.css">/.test(idx) && /<script s
 check(/LumenAmbient\.attach\(ctx, s, v\)/.test(read('watch-playview.js')) && /LumenAmbient\.destroy\(ctx, s\)/.test(read('watch-playview.js')), 'the playback view hands the field each slot (attach / destroy)');
 check(/watch-ambient-main/.test(read('main.js')) && /lumen-ambient:gate/.test(read('preload.js')), 'main and the preload carry the battery-saver gate');
 
-console.log('watch-ambient-test: ' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+/* ---- r62: the field across videos, in a small fake DOM (no Electron): never the last video's colours ---- */
+function fakeCls() {
+  const set = new Set();
+  return { contains: (c) => set.has(c), add: (c) => set.add(c), remove: (c) => set.delete(c),
+    toggle: (c, f) => { const on = f === undefined ? !set.has(c) : !!f; if (on) set.add(c); else set.delete(c); return on; } };
+}
+const ctx2d = { save() {}, restore() {}, fillRect() {}, drawImage() {}, putImageData() {}, createRadialGradient: () => ({ addColorStop() {} }) };
+function fakeNode(tag) {
+  return { tagName: String(tag).toUpperCase(), classList: fakeCls(), children: [], style: {}, hidden: false, isConnected: true, setAttribute() {},
+    appendChild(c) { this.children.push(c); c.parentNode = this; return c; }, insertBefore(c) { return this.appendChild(c); },
+    removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentNode = null; return c; }, addEventListener() {}, getContext: () => ctx2d };
+}
+const images = [];
+const saved = { document: global.document, window: global.window, Image: global.Image };
+global.document = { createElement: fakeNode, addEventListener() {}, hidden: false, hasFocus: () => true };
+global.window = { matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {} };
+global.Image = function () { images.push(this); };   // a still loads only when the test says (a slow network)
+delete require.cache[require.resolve(path.join(ROOT, 'watch-ambient'))];
+const AD = require(path.join(ROOT, 'watch-ambient'));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const loadStill = (id) => { const im = images.filter((x) => String(x.src).indexOf('/vi/' + id + '/') > 0).pop(); if (!im) return false; im.naturalWidth = 320; im.naturalHeight = 180; im.onload(); return true; };
+function viewFor() { const h = {}; return { h, executeJavaScript: () => new Promise(() => {}), addEventListener: (k, fn) => { h[k] = fn; } }; }
+(async () => {
+  try {
+    const layer = fakeNode('div');
+    const LL = { el: layer, open: true, slots: [], grid: null };
+    const tile = () => { const t = fakeNode('div'); t.classList.add('pv'); return t; };
+    const v1 = viewFor();
+    const s1 = { tile: tile(), view: v1, service: 'youtube', url: 'https://www.youtube.com/watch?v=vidAAAAAAA1' };
+    LL.slots = [s1];
+    AD.attach({ L: LL }, s1, v1);
+    check(loadStill('vidAAAAAAA1') && AD._state().src === 'still' && AD._state().lit === 1, 'fake DOM: the first video paints from its still', AD._state());
+    // in place, to the next video, whose still is slow
+    v1.h['did-navigate-in-page']({ url: 'https://www.youtube.com/watch?v=vidBBBBBBB2' });
+    const mid = AD._state();
+    await wait(900);
+    const late = AD._state();
+    check(/vidBBBBBBB2/.test(mid.key) && late.src === 'neutral' && late.lit === 1, 'the next video with no colours yet: the neutral field after a moment, not the last video’s', { mid, late });
+    check(loadStill('vidBBBBBBB2') && AD._state().src === 'still', 'and its still paints over it when it comes', AD._state());
+    // the player closes: the field forgets that video
+    AD.destroy({ L: LL }, s1);
+    LL.open = false; layer.hidden = true; LL.slots = [];
+    AD.destroy({ L: LL }, s1);
+    const shut = AD._state();
+    check(shut.lit === 0 && shut.key === '' && shut.src === 'none', 'the player closed: no canvas keeps the last video’s colours', shut);
+    check(shut.holdsClosed === false, 'and the closed slot (its tile and <webview>) is let go once the layer drops it', shut);
+    // another video opens: nothing of the old one shows while its still loads
+    const v3 = viewFor();
+    const s3 = { tile: tile(), view: v3, service: 'youtube', url: 'https://www.youtube.com/watch?v=vidCCCCCCC3' };
+    LL.open = true; layer.hidden = false; LL.slots = [s3];
+    AD.attach({ L: LL }, s3, v3);
+    const open3 = AD._state();
+    check(open3.on && open3.lit === 0 && /vidCCCCCCC3/.test(open3.key), 'the next video opened: the field starts empty (its still or the neutral one), never the closed video’s colours', open3);
+    check(loadStill('vidCCCCCCC3') && AD._state().src === 'still' && AD._state().lit === 1, 'then its own still', AD._state());
+  } catch (e) {
+    check(false, 'the fake-DOM field ran', String(e && e.stack || e));
+  }
+  global.document = saved.document; global.window = saved.window; global.Image = saved.Image;
+  console.log('watch-ambient-test: ' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})();

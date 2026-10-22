@@ -113,7 +113,11 @@
     if (!x || typeof x !== 'object') return '';
     if (x.urlEndpoint && x.urlEndpoint.url) return String(x.urlEndpoint.url);
     if (x.watchEndpoint && x.watchEndpoint.videoId) {
-      return YT + '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (x.watchEndpoint.startTimeSeconds ? '&t=' + Number(x.watchEndpoint.startTimeSeconds) + 's' : '');
+      // startTimeSeconds 0 is a real time ("0:00" in a chapter list): it seeks to the start, it never opens the video
+      // again (a truthiness test dropped it, so "0:00" reloaded the video he was watching).
+      var sts = x.watchEndpoint.startTimeSeconds;
+      var hasT = sts !== undefined && sts !== null && sts !== '' && isFinite(Number(sts)) && Number(sts) >= 0;
+      return YT + '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (hasT ? '&t=' + Math.floor(Number(sts)) + 's' : '');
     }
     if (x.browseEndpoint) {
       if (x.browseEndpoint.canonicalBaseUrl) return YT + x.browseEndpoint.canonicalBaseUrl;
@@ -158,7 +162,9 @@
     return Math.round(n * (k === 'K' ? 1e3 : k === 'M' ? 1e6 : k === 'B' ? 1e9 : 1));
   }
   function repliesToken(rr) {
-    var c = rr && Array.isArray(rr.contents) ? rr.contents : [];
+    // YouTube's web client now puts a thread's replies token under subThreads (contents is the older place): read
+    // only from contents, every thread on real YouTube came back with no replies at all (r62, real-YouTube probe).
+    var c = rr ? [].concat(Array.isArray(rr.contents) ? rr.contents : [], Array.isArray(rr.subThreads) ? rr.subThreads : []) : [];
     for (var i = 0; i < c.length; i++) { var t = contToken(c[i].continuationItemRenderer); if (t) return t; }
     return '';
   }
@@ -427,14 +433,19 @@
       var ed = editOf(box);
       if (!ed) return Promise.resolve({ ok: false, reason: 'YouTube’s comment box didn’t open' });
       fill(ed, text);
-      var before = comments().length;
+      // His comment, read back: a comment with his text that didn't have it before the press (in this thread for a
+      // reply). By text alone, someone else's identical comment ("First!") was taken for his; and when YouTube showed
+      // his text differently, "the page's first comment" was: a reply came back as the pinned comment, by someone
+      // else. No match: Lumen shows his own words and says the page didn't show them back yet (never a stranger's).
+      var want = String(text).replace(/\s+/g, ' ').trim();
+      var where = function () { return scope ? QA('ytd-comment-view-model, ytd-comment-renderer', scope) : comments(); };
+      var his = function (n) { return txt(Q('#content-text', n)) === want; };
+      var had = where().filter(his);
       return wait(function () { return submitOf(box); }, 2500).then(function (b) {
         if (!b) return { ok: false, reason: 'YouTube’s Comment button stayed off' };
         b.click();   // the one press
-        var want = String(text).replace(/\s+/g, ' ').trim();
         return wait(function () {
-          var mine = comments().filter(function (n) { return txt(Q('#content-text', n)) === want; })[0];
-          return mine || (comments().length > before ? comments()[0] : null);
+          return where().filter(function (n) { return his(n) && had.indexOf(n) < 0; })[0] || null;
         }, 6000).then(function (n) {
           if (!n) return { ok: true, confirmed: false };
           return { ok: true, confirmed: true, comment: { id: idOf(n), author: txt(Q('#author-text', n)), text: txt(Q('#content-text', n)), time: txt(Q('#published-time-text', n)) } };
@@ -558,6 +569,12 @@
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
       expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null };
     st.root.addEventListener('focusin', function (e) { st.focus = e.target; });
+    st.root.tabIndex = -1;   // where focus waits when the control he was on is gone or busy (refocus), never a Tab stop
+    if (typeof ResizeObserver === 'function') {
+      var lastW = -1;
+      st.ro = new ResizeObserver(function (es) { var w = es.length ? Math.round(es[es.length - 1].contentRect.width) : -1; if (w !== lastW) { lastW = w; fitSoon(st); } });
+      st.ro.observe(st.root);
+    }
     st.root.addEventListener('pointerdown', function (e) { if (e.button === 0) st.pressing = true; }, true);
     // Typing in a comment box is his: never the player's keys (K, J, L, F, M, Space, the arrows).
     st.root.addEventListener('keydown', function (e) {
@@ -570,7 +587,12 @@
     if (STATES.length > 4) teardown(STATES.shift());
     return st;
   }
-  function teardown(st) { if (st && st.io) { st.io.disconnect(); st.io = null; } }
+  function teardown(st) {
+    if (!st) return;
+    if (st.io) { st.io.disconnect(); st.io = null; }
+    if (st.ro) { st.ro.disconnect(); st.ro = null; }
+    if (st.fitRaf) { cancelAnimationFrame(st.fitRaf); st.fitRaf = 0; }
+  }
   /* The slot closed (watch-playview.js destroy): its section goes with it. Kept, a closed slot's state held its
      whole comments DOM, its listeners and the detached <webview> (lumen-perf: +650 nodes and +150 listeners per
      closed video view, up to four of them). */
@@ -716,8 +738,16 @@
     r.loading = true; r.why = '';
     st.requests++;
     draw(st);
+    // Dropped (the list was asked again: a sort, offline, Try again): the thread must not keep "Loading replies…"
+    // for ever, with its own loads refused while r.loading holds. Still on screen, it says so and offers Try again.
+    var dropped = function () {
+      r.loading = false;
+      if (st.replies[c.id] !== r) return;
+      r.why = 'Replies didn’t finish loading.';
+      if (st.root.isConnected) draw(st);
+    };
     js(st.view, call('load', [r.next])).then(function (x) {
-      if (seq !== st.seq) return;
+      if (seq !== st.seq) { dropped(); return; }
       r.loading = false;
       if (!x || !x.ok) { r.why = 'Replies didn’t load: ' + ((x && x.reason) || 'YouTube’s page didn’t answer') + '.'; draw(st); return; }
       var p = parse(x.json, st.videoId);
@@ -725,7 +755,7 @@
       merge(r.items, p.items);
       r.next = p.next;
       draw(st);
-    }).catch(function (e) { if (seq === st.seq) { r.loading = false; r.why = 'Replies didn’t load: ' + ((e && e.message) || e) + '.'; draw(st); } });
+    }).catch(function (e) { if (seq === st.seq) { r.loading = false; r.why = 'Replies didn’t load: ' + ((e && e.message) || e) + '.'; draw(st); } else dropped(); });
   }
 
   /* ---------------------------------------------------------------- presses */
@@ -802,8 +832,66 @@
 
   /* ---------------------------------------------------------------- drawing */
 
+  /* A redraw rebuilds the section, so the button he pressed from the keyboard is a new node: focus fell to the
+     page, his next Tab started from the top of the window and Space played or paused the video instead of
+     pressing the next control. The control with focus is remembered (its comment, its kind, its place) and the
+     new one takes focus, without scrolling. The comment boxes keep their own (draw: keep / keepReply). */
+  var FOCUS_KINDS = ['cm-sort', 'cm-open-inline', 'cm-open', 'cm-readmore', 'cm-like', 'cm-replybtn', 'cm-replies', 'cm-morereplies',
+    'cm-retry', 'cm-more', 'cm-cancel', 'cm-post', 'cm-replysend', 'cm-link'];
+  function itemOf(n) { return n && n.closest ? n.closest('.cm-item') : null; }
+  function focusKey(st) {
+    var a = document.activeElement;
+    if (!a || a === document.body || !st.root.contains(a)) return null;
+    if (a === st.root) return st.refocus || null;   // a control that was off (busy) the last time: try it again
+    if (a.tagName === 'TEXTAREA' || !a.classList) return null;
+    var kind = FOCUS_KINDS.filter(function (k) { return a.classList.contains(k); })[0];
+    if (!kind) return null;
+    var item = itemOf(a);
+    var same = [].filter.call((item || st.root).querySelectorAll('.' + kind), function (n) { return itemOf(n) === item; });
+    return { id: item ? item.getAttribute('data-id') : null, kind: kind, i: Math.max(0, same.indexOf(a)) };
+  }
+  function refocus(st, k) {
+    st.refocus = null;
+    if (!k || !st.root.isConnected) return;
+    var a = document.activeElement;
+    if (a && a !== document.body && a !== st.root) return;   // focus is somewhere on purpose (a box, another control)
+    var item = k.id === null ? null : [].filter.call(st.root.querySelectorAll('.cm-item'), function (n) { return n.getAttribute('data-id') === k.id; })[0] || null;
+    var scope = item || (k.id === null ? st.root : null);
+    var same = scope ? [].filter.call(scope.querySelectorAll('.' + k.kind), function (n) { return itemOf(n) === item; }) : [];
+    var tries = [same[k.i], same[same.length - 1], item && item.querySelector('button:not(:disabled), a[href]'), st.root];
+    for (var i = 0; i < tries.length; i++) {
+      var t = tries[i];
+      if (!t) continue;
+      try { t.focus({ preventScroll: true }); } catch (e) { continue; }
+      if (document.activeElement === t) { if (t === st.root) st.refocus = k; return; }
+    }
+  }
+
+  /* "Read more" only where the clamp hides something: a comment over CLAMP characters can still fit in four lines
+     on a wide view, and there "Read more" did nothing. Measured once per frame after a draw, and again when the
+     section's width changes (a narrower window clamps more); reads first, then writes. */
+  function fitSoon(st) {
+    if (st.fitRaf || typeof requestAnimationFrame !== 'function') return;
+    st.fitRaf = requestAnimationFrame(function () { st.fitRaf = 0; fit(st); });
+  }
+  function fit(st) {
+    if (!st.root.isConnected) return;
+    var ts = [].slice.call(st.root.querySelectorAll('.cm-text.is-clamped'));
+    var over = ts.map(function (t) { return t.scrollHeight > t.clientHeight + 1; });
+    ts.forEach(function (t, i) {
+      var b = t.nextElementSibling;
+      if (b && b.classList.contains('cm-readmore') && b.hidden !== !over[i]) b.hidden = !over[i];
+    });
+  }
+
   function draw(st) {
     if (st.pressing) { st.pendingDraw = true; return; }
+    var fk = focusKey(st);
+    drawNow(st);
+    refocus(st, fk);
+    fitSoon(st);
+  }
+  function drawNow(st) {
     var r = st.root;
     var keep = r.querySelector('.cm-compose textarea');
     var keepReply = r.querySelector('.cm-replybox textarea');
@@ -905,6 +993,7 @@
     ta.className = 'cm-input';
     ta.rows = 1;
     ta.placeholder = 'Add a comment…';
+    ta.dir = 'auto';
     ta.setAttribute('aria-label', 'Add a comment');
     ta.maxLength = 10000;
     if (ta.value !== c.text) ta.value = c.text;
@@ -949,6 +1038,9 @@
   }
   function textEl(st, c) {
     var t = el('div', 'cm-text' + (long(c) && !st.expanded['t:' + c.id] ? ' is-clamped' : ''));
+    // Each comment's own direction (Arabic, Hebrew, Persian): without it an RTL comment read left to right, its
+    // punctuation and any Latin words at the wrong end.
+    t.dir = 'auto';
     (c.segs || []).forEach(function (s) {
       if (!s.link) { t.appendChild(document.createTextNode(s.text)); return; }
       var a = el('a', 'cm-link cm-link-' + s.link.kind, s.text);
@@ -970,6 +1062,7 @@
     if (c.pinned) body.appendChild(el('div', 'cm-pin', c.pinnedText || 'Pinned'));
     var meta = el('div', 'cm-meta');
     var au = el('span', 'cm-author' + (c.creator ? ' is-creator' : ''), c.author || 'A viewer');
+    au.dir = 'auto';
     meta.appendChild(au);
     if (c.verified) { var vf = el('span', 'cm-verified', '✓'); vf.title = 'Verified'; vf.setAttribute('aria-label', 'Verified'); meta.appendChild(vf); }
     if (c.time) meta.appendChild(el('span', 'cm-time', c.time));
@@ -1015,6 +1108,9 @@
         if (r.loading) { var ld = el('div', 'cm-end cm-end-sm'); ld.appendChild(el('span', 'cm-spin')); ld.appendChild(el('span', 'cm-end-txt', 'Loading replies…')); rl.appendChild(ld); }
         else if (r.why) rl.appendChild(line(r.why, 'err', btn('cm-ghost cm-retry', 'Try again', function () { r.why = ''; loadReplies(st, c); })));
         else if (r.next && r.items.length) rl.appendChild(btn('cm-ghost-txt cm-morereplies', 'Show more replies', function () { loadReplies(st, c); }));
+        // "N replies" that came back empty (removed, or held for review): said, never an empty fold.
+        else if (!r.items.length && !r.next) rl.appendChild(line('YouTube’s page sent no replies to show (they may have been removed or held for review).', ''));
+        else if (!r.items.length) rl.appendChild(line('Replies didn’t load.', 'err', btn('cm-ghost cm-retry', 'Try again', function () { r.why = ''; loadReplies(st, c); })));
         body.appendChild(rl);
       }
     }
@@ -1027,6 +1123,7 @@
     ta.className = 'cm-input';
     ta.rows = 1;
     ta.placeholder = 'Add a reply…';
+    ta.dir = 'auto';
     ta.setAttribute('aria-label', 'Reply to ' + (c.author || 'this comment'));
     if (ta.value !== st.replyText) ta.value = st.replyText;
     ta.disabled = !!st.replyBusy;

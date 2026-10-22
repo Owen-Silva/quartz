@@ -319,11 +319,51 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     check(!!c && o2.reply === 1 && c.replies.UgxTop002.items[0].text === 'Thanks, gjpqy', 'Reply = one press of YouTube’s own Comment in that thread; the reply shows under it', { own: o2, r: c && c.replies.UgxTop002 });
     check(o2.post === 1 && Object.values(o2.like).reduce((a, b) => a + b, 0) === 2, 'nothing else was pressed in the whole run', o2);
 
+    /* ---- 7b (r62). his reply is read back only as his: YouTube shows his text differently ---- */
+    // Before r62 a reply whose text YouTube's page showed differently came back as the page's FIRST comment (the
+    // pinned one, by someone else). Here the page shows every new comment's text with a suffix.
+    await p.ev(`(() => { const o = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) {
+        const t = n.id === 'content-text' ? n : (n.querySelector ? n.querySelector('#content-text') : null);
+        if (t && !t.__m) { t.__m = 1; t.textContent += ' (as YouTube shows it)'; } } });
+      o.observe(document.querySelector('ytd-comments'), { childList: true, subtree: true }); window.__mangle = o; return 1; })()`);
+    await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop002"] .cm-replybtn', 'Reply (2)');
+    await chrome.waitFor('document.activeElement && document.activeElement.closest && !!document.activeElement.closest(".cm-replybox")', 4000).catch(() => 0);
+    await chrome.send('Input.insertText', { text: 'A second reply' });
+    await sleep(300);
+    await clickAt('#lumen-pv-comments .cm-replysend', 'Reply send (2)');
+    c = await csWait('x.replies.UgxTop002 && x.replies.UgxTop002.items.length >= 2 && x.replies.UgxTop002.items[0].mine', 15000);
+    await p.ev('window.__mangle && window.__mangle.disconnect(), 1');
+    const r2 = c && c.replies.UgxTop002.items[0];
+    check(!!r2 && r2.text === 'A second reply' && r2.author === 'You' && r2.id !== 'UgxTop001' && Object.values(c.notes).some((n) => /didn’t show it back/.test(n.text)),
+      'a reply YouTube shows differently: Lumen shows his own words and says the page didn’t show them back (never another comment)', { r2, notes: c && c.notes });
+
     /* ============================ 8. a timestamp seeks the video ============================ */
     await p.ev('document.getElementById("movie_player").seekTo = function (t) { window.__seek = t; }; 1');
     await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-link-time', '1:05');
     check(await p.waitFor('window.__seek === 65 ? 1 : 0', 4000).catch(() => 0) === 1, 'a timestamp in a comment seeks YouTube’s own player (65 s), no reload');
     await shot('list-after', 1280, 800);
+
+    /* ---- 8b (r62). the keyboard keeps its place; "Read more" only where something is hidden ---- */
+    const enter = async () => { const b = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: 0 };
+      await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown', text: '\r' }, b)); await chrome.send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, b)); };
+    const RM = `(() => { const it = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop003"]'); const a = document.activeElement; if (!it) return null;
+      return { clamped: it.querySelector('.cm-text').classList.contains('is-clamped'), label: (it.querySelector('.cm-readmore') || {}).textContent || '',
+        focusOn: !!(a && a.classList && a.classList.contains('cm-readmore') && a.closest('.cm-item') === it), active: a ? a.tagName + '.' + a.className : '' }; })()`;
+    const rm0 = await chrome.ev(`(() => { const b = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop003"] .cm-readmore'); if (!b) return false; b.scrollIntoView({ block: 'center' }); b.focus(); return document.activeElement === b; })()`);
+    await enter();
+    await sleep(400);
+    const rm1 = await chrome.ev(RM);
+    check(rm0 && !!rm1 && !rm1.clamped && /Show less/.test(rm1.label) && rm1.focusOn, '“Read more” from the keyboard (Enter): the comment opens and focus stays on its button, now “Show less”', { rm0, rm1 });
+    const kb0 = await vs();
+    await keyIn(chrome, ' ');
+    await sleep(500);
+    const rm2 = await chrome.ev(RM), kb1 = await vs();
+    check(!!rm2 && rm2.clamped && rm2.focusOn && kb1.paused === kb0.paused && kb1.keys === kb0.keys, 'Space on it folds it again, focus still there; the video neither pauses nor plays', { rm2, kb0, kb1 });
+    const FIT = `[...document.querySelectorAll('#lumen-pv-comments .cm-text.is-clamped')].map((t) => { const b = t.nextElementSibling;
+      return { id: t.closest('.cm-item').getAttribute('data-id'), over: t.scrollHeight > t.clientHeight + 1, shown: !!b && b.classList.contains('cm-readmore') && !b.hidden && b.getClientRects().length > 0 }; })`;
+    await sleep(100);
+    const fit8 = await chrome.ev(FIT);
+    check(fit8.length >= 2 && fit8.every((x) => x.over === x.shown), '1280x800: “Read more” shows exactly where the clamp hides text', fit8);
 
     /* ============================ 9. 1920x1000 ============================ */
     await resize(1920, 1000);
@@ -331,6 +371,10 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     await shot('list', 1920, 1000);
     const wide = await chrome.ev(`(() => { const r = document.querySelector('#lumen-pv-comments').getBoundingClientRect(); const v = document.querySelector('.wp-layer webview').getBoundingClientRect(); return { cw: Math.round(r.width), vw: Math.round(v.width) }; })()`);
     check(Math.abs(wide.cw - wide.vw) <= 2, 'the comments are as wide as the video', wide);
+    await sleep(200);
+    const fit19 = await chrome.ev(FIT);
+    check(fit19.length >= 2 && fit19.every((x) => x.over === x.shown) && fit19.some((x) => x.id === 'UgxTop006' && !x.over && !x.shown) && fit19.some((x) => x.id === 'UgxTop003' && x.shown),
+      '1920x1000: a 310-character comment that fits in four lines has no dead “Read more”; the long one keeps it', fit19);
     await resize(1280, 800);
 
     /* ============================ 10. the states ============================ */
