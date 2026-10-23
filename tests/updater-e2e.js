@@ -160,7 +160,16 @@ async function main() {
     await c.ev("(typeof Settings.close === 'function' && Settings.close()), 1").catch(() => 0);
 
     // ---- Update ---------------------------------------------------------------------------------
-    await c.ev("window.__qupSeen = []; window.api.updates.onState((s) => window.__qupSeen.push(s.status + ':' + (s.progress ? s.progress.stage : ''))); document.querySelector('.qup-card [data-act=update]').click(); 1");
+    // Every state the page gets is also PUSHED to this test through a CDP binding, the moment it
+    // arrives. Polling alone loses the last one: 'restarting' lands a moment before the restart
+    // request, and the page can be gone before the next poll reads it.
+    const pushed = [];
+    c.ws.on('message', (raw) => {
+      try { const m = JSON.parse(String(raw)); if (m.method === 'Runtime.bindingCalled' && m.params && m.params.name === '__qupPush') pushed.push(m.params.payload); } catch (e) { /* not ours */ }
+    });
+    await c.send('Runtime.enable');
+    await c.send('Runtime.addBinding', { name: '__qupPush' });
+    await c.ev("window.__qupSeen = []; window.api.updates.onState((s) => { const v = s.status + ':' + (s.progress ? s.progress.stage : ''); window.__qupSeen.push(v); try { window.__qupPush(v); } catch (e) { /* no binding */ } }); document.querySelector('.qup-card [data-act=update]').click(); 1");
     let seen = [];
     const t0 = Date.now();
     while (!gone && Date.now() - t0 < 60000) {
@@ -170,6 +179,7 @@ async function main() {
       await sleep(100);
     }
     try { c.close(); } catch (e) { /* closed */ }
+    if (pushed.length > seen.length) { say('the pushed states have ' + (pushed.length - seen.length) + ' the last poll missed: ' + pushed.slice(seen.length).join(', ')); seen = pushed.slice(); }
     check(gone, 'Quartz quit by itself after Update', { seen });
     const stages = seen.filter((x) => x.startsWith('updating:')).map((x) => x.split(':')[1]);
     check(stages.includes('downloading') && stages.includes('installing') && stages[stages.length - 1] === 'restarting', 'progress: downloading -> installing -> restarting', seen);
