@@ -430,6 +430,10 @@
       // YouTube from one watch page to the next (Up next's Play now, a title opened while one plays): YouTube's own
       // in-page move instead of a whole new page (watch-player-yt.js pageMove, r64). It loads the page itself, the
       // way below, when YouTube doesn't take the move, and says why.
+      // This open supersedes any move still pending on the slot (its timers and late answers act only while
+      // _ytMove is theirs): a move to B whose page hasn't answered must not load B over this title (a channel,
+      // the same video again) when its fallback timer fires. pageMove bumps it again for its own move.
+      one._ytMove = (one._ytMove || 0) + 1;
       if (X('pageMove', one, from, u, ref) !== true) loadInto(one, u, ref);
     } else {
       clearSlots();
@@ -448,6 +452,10 @@
   /** Load u in a slot's own view (the reuse's load; watch-player-yt.js's move falls back to it). ref: the embed's Referer. */
   function loadInto(s, u, ref) {
     if (!s || !s.view) return;
+    // Any load supersedes an in-place move still pending (watch-player-yt.js pageMove): its fallback or its
+    // landing check must never load the older video over this page. The move's own fallback lands here too,
+    // after it has settled, so the bump costs it nothing.
+    s._ytMove = (s._ytMove || 0) + 1;
     if (ref) { try { s.view.setAttribute('httpreferrer', ref); } catch (e) { /* the load carries it */ } }
     try { var pr = ref ? s.view.loadURL(u, { httpReferrer: ref }) : s.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { s.view.setAttribute('src', u); }
   }

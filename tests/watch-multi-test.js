@@ -184,6 +184,105 @@ try { fs.unlinkSync(freeFile); } catch (e) { /* none */ }
     for (const [what, from, to, ref] of no) check(YT.pageMove(c, s, from, to, ref) === undefined && s.asked.length === 0, 'move: not in place, ' + what + ' (the old load)');
     s.multi = true;
     check(YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined) === undefined, 'move: not in place in a multiview tile (the embed)');
+
+    // The move script itself (the code pageMove hands the page), run on a stand-in page: it acts only on a page
+    // still on the video Lumen moves FROM (a script Electron held until a load ended may run in a newer document).
+    c = ctxFor(); s = slot(() => new Promise(() => {}));
+    YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw&t=42s', undefined);
+    const code = s.asked[0] || '';
+    check(/\("aqz-KE-bpKQ","jNQXAC9IVRw",42,\d+\)$/.test(code), 'move: the script is told the video it moves from, then the next one', code.slice(-50));
+    const runMove = (v) => {
+      const sent = [];
+      const ls = {};
+      const app = { dispatchEvent: (e) => { sent.push(e.detail && e.detail.endpoint && e.detail.endpoint.watchEndpoint.videoId); (ls['yt-navigate-start'] || []).forEach((f) => f()); return true; } };
+      const page = {
+        location: { pathname: '/watch', search: '?v=' + v + '&list=x' },
+        document: { querySelector: (q) => (q === 'ytd-app' ? app : null) },
+        window: { addEventListener: (n, f) => { (ls[n] = ls[n] || []).push(f); }, removeEventListener: (n, f) => { ls[n] = (ls[n] || []).filter((g) => g !== f); } },
+        CustomEvent: function (n, o) { this.type = n; this.detail = o && o.detail; },
+        URLSearchParams, Promise, setTimeout, String,
+      };
+      return vm.runInNewContext(code, page).then((r) => ({ r, sent }));
+    };
+    const elsewhere = await runMove('dQw4w9WgXcQ');
+    check(elsewhere.r === 'not the video Lumen moved from' && elsewhere.sent.length === 0, 'move script: a page on another video answers so and fires no move there', elsewhere);
+    const onA = await runMove('aqz-KE-bpKQ');
+    check(onA.r === 'ok' && onA.sent.length === 1 && onA.sent[0] === 'jNQXAC9IVRw', 'move script: the page still on the video it moves from fires YouTube\'s move to the next', onA);
+
+    // A move YouTube took must land, and any newer load of the slot ends a pending move. The scenarios share one
+    // wait past the landing check (4 s); each has its own slot and layer, so each is judged on its own loads.
+    // The layer's real loadInto (watch-player.js): the load every reuse and every fallback goes through.
+    const wpSrc = fs.readFileSync(path.join(ROOT, 'watch-player.js'), 'utf8');
+    const li = wpSrc.indexOf('function loadInto(s, u, ref) {');
+    let end = -1;
+    for (let i = wpSrc.indexOf('{', li), depth = 0; li !== -1 && i < wpSrc.length; i++) {
+      if (wpSrc[i] === '{') depth++;
+      else if (wpSrc[i] === '}' && --depth === 0) { end = i + 1; break; }
+    }
+    const lctx = vm.createContext({});
+    vm.runInContext(wpSrc.slice(li, end), lctx, { filename: 'watch-player.js loadInto' });
+    const loadInto = lctx.loadInto;
+    check(typeof loadInto === 'function', 'watch-player.js loadInto runs on its own (the unit below uses the real one)');
+    const reuse = wpSrc.slice(wpSrc.indexOf('var from = one.url'), wpSrc.indexOf("X('pageMove', one"));
+    check(/one\._ytMove = \(one\._ytMove \|\| 0\) \+ 1;/.test(reuse), 'watch-player.js reuse: an open supersedes a pending move before pageMove is asked');
+    // A slot whose view records its loads and can say its address and its in-page moves (a <webview>'s).
+    const live = (answer, url) => {
+      const s = slot(answer);
+      const ls = {};
+      Object.assign(s.view, {
+        url, loads: [],
+        getURL: () => s.view.url,
+        loadURL: (u) => { s.view.loads.push(u); s.view.url = u; return Promise.resolve(); },
+        setAttribute: () => {},
+        addEventListener: (n, f) => { (ls[n] = ls[n] || []).push(f); },
+        removeEventListener: (n, f) => { ls[n] = (ls[n] || []).filter((g) => g !== f); },
+        emit: (n, e) => (ls[n] || []).slice().forEach((f) => f(e)),
+        heard: (n) => (ls[n] || []).length,
+      });
+      return s;
+    };
+    const layer = () => { const c = { loads: [], notes: [] }; c.load = (s, u, ref) => { c.loads.push(u); loadInto(s, u, ref); }; c.note = (t) => c.notes.push(t); return c; };
+    const A = W + 'aqz-KE-bpKQ', B = W + 'jNQXAC9IVRw';
+    // 2 (first: lastMove is the newest move's). Taken and landed: the page's own in-page move names B
+    //    (did-navigate-in-page), at once.
+    const c2 = layer(), s2 = live(() => Promise.resolve('ok'), A);
+    YT.pageMove(c2, s2, A, B, undefined);
+    await tick();
+    check(s2.view.heard('did-navigate-in-page') === 1, 'move: a taken move listens for its landing', s2.view.heard('did-navigate-in-page'));
+    s2.view.url = B; s2.view.emit('did-navigate-in-page', { url: B, isMainFrame: true });
+    const landedRec = YT._state().lastMove;
+    check(landedRec && landedRec.how === 'in-page' && landedRec.landed === true && s2.view.heard('did-navigate-in-page') === 0, 'move: the page names the next video: landed, and the listener is gone', landedRec);
+    // 1. YouTube took the move ('ok') but the page stays on A (the move died on the way): B loads, said.
+    const c1 = layer(), s1 = live(() => Promise.resolve('ok'), A);
+    YT.pageMove(c1, s1, A, B, undefined);
+    // 3. Taken, and the address names B when the check runs (no event heard): landed, nothing loads.
+    const c3 = layer(), s3 = live(() => Promise.resolve('ok'), A);
+    YT.pageMove(c3, s3, A, B, undefined);
+    // 4. A page that never answers, then a channel opened on the same slot (the reuse's loadInto): the old
+    //    move's fallback timer must not load B over the channel.
+    const c4 = layer(), s4 = live(() => new Promise(() => {}), A);
+    YT.pageMove(c4, s4, A, B, undefined);
+    loadInto(s4, 'https://www.youtube.com/@channel');
+    // 5. Taken, still moving, then the same video again (the reuse's loadInto): the landing check loads nothing.
+    const c5 = layer(), s5 = live(() => Promise.resolve('ok'), A);
+    YT.pageMove(c5, s5, A, B, undefined);
+    await tick();
+    s3.view.url = B + '&pp=x';
+    loadInto(s5, A + '&t=5s');
+    await tick(1300);
+    check(c1.loads.length === 0, 'move: a taken move is given time to land (no load at 1.3 s)', c1.loads);
+    check(s4.view.loads.length === 1 && s4.view.loads[0] === 'https://www.youtube.com/@channel' && c4.loads.length === 0 && c4.notes.length === 0, 'move: a newer load on the slot: the old move\'s fallback never loads its video over it', { view: s4.view.loads, layer: c4.loads });
+    await tick(3000);
+    check(c1.loads.length === 1 && c1.loads[0] === B && s1.view.loads[0] === B, 'move: taken but the page stayed on the last video: the next one loads the old way', { loads: c1.loads, view: s1.view.loads });
+    check(c1.notes.length === 1 && c1.notes[0] === 'Loading the next video the slow way: YouTube started the move but stayed on the last video', 'move: that fallback is said in the bar, with its reason', c1.notes);
+    check(c2.loads.length === 0 && c2.notes.length === 0 && s2.view.loads.length === 0, 'move: landed: no load and no note after the check', { loads: c2.loads, notes: c2.notes });
+    check(c3.loads.length === 0 && c3.notes.length === 0 && s3.view.loads.length === 0, 'move: the address names the next video at the check: no load', { loads: c3.loads, notes: c3.notes });
+    check(c5.loads.length === 0 && c5.notes.length === 0 && s5.view.loads.length === 1 && s5.view.loads[0] === A + '&t=5s', 'move: the same video opened again while a move was landing: that load stands, the landing check loads nothing', { loads: c5.loads, view: s5.view.loads });
+    // The refusals are said in the bar too (not only the console and lastMove).
+    const c6 = layer(), s6 = live(() => Promise.resolve('no YouTube app on the page'), A);
+    YT.pageMove(c6, s6, A, B, undefined);
+    await tick();
+    check(c6.notes.length === 1 && c6.notes[0] === 'Loading the next video the slow way: no YouTube app on the page' && s6.view.loads[0] === B, 'move: a refused move says why in the bar and loads the old way', c6.notes);
   } finally { console.warn = quiet; }
   console.log('watch-multi-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -77,11 +77,14 @@ nav{display:flex;gap:16px;padding:14px 20px} a,button{color:#9cc8e0;font:inherit
 }
 // ?spa=1 on a YouTube /watch fixture: a stand-in for YouTube's app (its <ytd-app>, its 'yt-navigate' move from one
 // video to the next inside the page: yt-navigate-start at once, then the new address and the new video), so the e2e
-// can see Lumen's in-place move (watch-player-yt.js move, r64) without real YouTube.
+// can see Lumen's in-place move (watch-player-yt.js move, r64) without real YouTube. A move to an id starting
+// "stuck" starts (yt-navigate-start) and then dies on the way: the page stays on the last video, the way a real
+// move does when the network drops (Lumen must notice and load the next video the old way, said).
 const SPA_APP = `<ytd-app></ytd-app><script>window.__doc = 'doc' + Math.random(); window.__moves = 0;
 document.querySelector('ytd-app').addEventListener('yt-navigate', (e) => {
   const ep = e.detail && e.detail.endpoint; const id = ep && ep.watchEndpoint && ep.watchEndpoint.videoId; if (!id) return;
   window.__moves++; window.dispatchEvent(new CustomEvent('yt-navigate-start'));
+  if (/^stuck/.test(id)) return;
   setTimeout(() => { history.pushState({}, '', ep.commandMetadata.webCommandMetadata.url); document.getElementById('name').textContent = 'youtube video ' + id;
     const v = document.getElementById('v'); v.src = '/__media/clip.mp4?' + id; const p = v.play(); if (p && p.catch) p.catch(() => 0); }, 60);
 });</script>`;
@@ -399,13 +402,29 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
       if (okA) {
         const doc0 = await mp.ev('window.__doc');
         const wc0 = (await chrome.ev(ST)).slots[0].wcId;
+        // Every text the layer's note shows from here on (a later note, the play view's, may replace a fallback's).
+        await chrome.ev('(() => { const el = document.querySelector(".wp-layer .wp-note"); window.__e2eNotes = []; if (window.__e2eNoteObs) window.__e2eNoteObs.disconnect(); window.__e2eNoteObs = new MutationObserver(() => { if (el.textContent) window.__e2eNotes.push(el.textContent); }); window.__e2eNoteObs.observe(el, { childList: true, characterData: true, subtree: true }); return 1; })()');
         await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=spaVideoB2')}, { service: 'youtube', title: 'Move B' }), 1`);
         const st = await chrome.waitFor(`(() => { const s = ${ST}; return s.slots[0] && s.slots[0].url.indexOf('spaVideoB2') !== -1 ? s : null; })()`, 6000).catch(() => null);
-        const mv = await chrome.ev(MV);
-        check(!!mv && mv.how === 'in-page' && mv.id === 'spaVideoB2', 'move: Up next to another YouTube video moves the page in place (no reload)', mv);
+        // Its own move's record: the page's answer comes after the open, and the landing after that.
+        const mv = await chrome.waitFor(`(() => { const m = ${MV}; return m && m.id === 'spaVideoB2' && (m.how !== 'in-page' || m.landed) ? m : null; })()`, 6000).catch(() => null) || await chrome.ev(MV);
+        check(!!mv && mv.how === 'in-page' && mv.id === 'spaVideoB2' && mv.landed === true, 'move: Up next to another YouTube video moves the page in place (no reload), and it lands', mv);
         const pg = await pageNow(mp);
         check(!!st && st.slots[0].wcId === wc0 && !!pg && pg[0] === doc0 && pg[1] === 1 && /spaVideoB2/.test(pg[2]), 'move: the same page and document, now on the next video', { slot: st && { url: st.slots[0].url, wcId: st.slots[0].wcId }, wc0, page: pg, doc0 });
         check(await plays(mp), 'move: the next video plays');
+        const notes0 = await chrome.ev('window.__e2eNotes.slice()');
+        check(!notes0.some((t) => /the slow way/.test(t)), 'move: an in-place move shows no fallback note', notes0);
+        // A move YouTube starts but never lands (the stand-in's "stuck" id: yt-navigate-start, then nothing): after
+        // the landing check (4 s) the slot loads the next video the old way, keeps the reason and says it in the bar.
+        await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=stuckVideoD4')}, { service: 'youtube', title: 'Move D' }), 1`);
+        const mvT = await chrome.waitFor(`(() => { const m = ${MV}; return m && m.id === 'stuckVideoD4' && m.how === 'in-page' ? m : null; })()`, 3000).catch(() => null);
+        const pgT = await pageNow(mp);
+        check(!!mvT && !!pgT && pgT[0] === doc0 && pgT[1] === 2 && /spaVideoB2/.test(pgT[2]), 'move: a move the page starts but never finishes: taken, the page still on the last video', { mv: mvT, page: pgT });
+        const mvD = await chrome.waitFor(`(() => { const m = ${MV}; return m && m.id === 'stuckVideoD4' && m.how === 'reload' ? m : null; })()`, 8000).catch(() => null) || await chrome.ev(MV);
+        check(!!mvD && mvD.how === 'reload' && mvD.why === 'YouTube started the move but stayed on the last video' && mvD.ms >= 3900, 'move: it never lands: the slot loads the next video the old way after the landing check, and keeps why', mvD);
+        const mtD = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=stuckVideoD4') === 0, 10000);
+        const notesD = await chrome.ev('window.__e2eNotes.slice()');
+        check(!!mtD && notesD.indexOf('Loading the next video the slow way: YouTube started the move but stayed on the last video') !== -1, 'move: that fallback is said in the layer\'s bar, with its reason', { loaded: !!mtD, notes: notesD });
         // The fallback: a page with no YouTube app (the plain fixture) loads the old way, and says why.
         await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=hiLockupB02')}, { service: 'youtube', title: 'Plain' }), 1`);
         mt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=hiLockupB02') === 0, 10000);
@@ -415,7 +434,10 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
         const mt2 = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=plainVideoC3') === 0, 10000);
         const mv2 = await chrome.ev(MV);
         check(!!mt2 && !!mv2 && mv2.how === 'reload' && /no YouTube app/.test(mv2.why || '') && mv2.id === 'plainVideoC3', 'move: a page without YouTube\'s app loads the next video the old way, and the reason is kept', mv2);
+        const notes2 = await chrome.ev('window.__e2eNotes.slice()');
+        check(notes2.indexOf('Loading the next video the slow way: no YouTube app on the page') !== -1, 'move: that fallback is said in the bar too', notes2);
       }
+      await chrome.ev('(() => { if (window.__e2eNoteObs) window.__e2eNoteObs.disconnect(); window.__e2eNoteObs = null; return 1; })()').catch(() => 0);
       await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
       await sleep(900);
     }
