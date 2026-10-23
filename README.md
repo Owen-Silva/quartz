@@ -3,7 +3,7 @@
 A Windows desktop browser built on Electron, where web pages, Claude Code sessions, terminals,
 native Windows apps and your Android phone all live as tabs, with a streaming hub (Lumen) on top.
 
-![Quartz in its light theme: a Wikipedia article split beside a Command Prompt tab running git, with MDN and GitHub tabs open](docs/screenshot.png)
+![Quartz in its light theme: the MDN guide to CSS grid layout split beside a Command Prompt tab running git, with Wikipedia and GitHub tabs open](docs/screenshot.png)
 
 Quartz is a personal project, published so others can read it, run it and learn from it.
 It is unofficial and not affiliated with any of the services it works with (see
