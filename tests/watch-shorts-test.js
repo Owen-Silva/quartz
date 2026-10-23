@@ -271,6 +271,99 @@ check(SH.shortUrl('Xk3pQ9vLm2A') === 'https://www.youtube.com/shorts/Xk3pQ9vLm2A
 check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd-shorts ytd-engagement-panel-section-list-renderer') >= 0,
   'r63: YouTube’s own action bar (its Comments, Share) and its comments panel stay under the trim');
 
+/* ---- r64: the read the moment the page has it (guest until()), and a move's lag ------------------------------ */
+// The page answers an ask at once when its read differs from what the chrome has (sig), else when YouTube's app
+// changes under it (a MutationObserver), else at the ask's time limit (final). One wait at a time; stop() ends it.
+// For a moment after the address names the next Short, a read whose player or title is still the last Short's is
+// not the new Short's (videoId ''), so the info never names the new Short with the old one's title.
+{
+  const vm = require('vm');
+  const attrs = {};
+  const obs = [];
+  // (the page's own is-active watch, watchActive(), filters is-active alone: only the read's waits are counted)
+  class MO { constructor(fn) { this.fn = fn; this.on = false; obs.push(this); } observe(t, o) { this.on = true; this.wait = !(o && o.attributeFilter && o.attributeFilter.length === 1); } disconnect() { this.on = false; } }
+  const fire = (recs) => obs.filter((o) => o.on).forEach((o) => o.fn(recs || [{ type: 'childList' }]));
+  const live = () => obs.filter((o) => o.on && o.wait).length;
+  let title = 'First Short', chan = '@one', pid = 'aaaaaaaaaaa';
+  const node = (t) => ({ textContent: t, getAttribute: () => null, href: 'https://www.youtube.com/' + t });
+  const player = { getVideoData: () => ({ video_id: pid }), getPlayerResponse: () => ({}) };
+  const video = { readyState: 0, videoWidth: 0, videoHeight: 0, currentSrc: '', addEventListener() {} };
+  const reel = { getBoundingClientRect: () => ({ top: 0, bottom: 800, height: 800 }), hasAttribute: () => false, setAttribute() {}, removeAttribute() {},
+    querySelector: (sel) => (sel === 'yt-shorts-video-title-view-model h2' ? node(title) : sel === 'yt-reel-channel-bar-view-model a[href*="/@"]' ? node(chan)
+      : sel === '#shorts-player' ? player : sel === '#shorts-player video' ? video : null) };
+  const app = { hasAttribute: (k) => !!attrs['app:' + k], setAttribute: (k) => { attrs['app:' + k] = 1; }, removeAttribute: (k) => { delete attrs['app:' + k]; }, querySelector: (sel) => (sel === 'video' ? video : null) };
+  const doc = { documentElement: { hasAttribute: (k) => !!attrs[k], setAttribute: (k) => { attrs[k] = 1; }, removeAttribute: (k) => { delete attrs[k]; } }, body: {},
+    querySelector: (sel) => (sel === 'ytd-reel-video-renderer[is-active]' ? reel : sel === 'ytd-shorts' ? app : null),
+    querySelectorAll: (sel) => (sel === 'ytd-reel-video-renderer' ? [reel] : sel === '[data-lumen-sh-root]' ? (attrs['app:data-lumen-sh-root'] ? [app] : []) : []) };
+  const win = { addEventListener() {}, dispatchEvent() {}, innerHeight: 800, MutationObserver: MO };
+  const loc = { pathname: '/shorts/aaaaaaaaaaa', href: 'https://www.youtube.com/shorts/aaaaaaaaaaa' };
+  const ctx = vm.createContext({ window: win, document: doc, location: loc, innerHeight: 800, setTimeout, clearTimeout, Event: function () {}, MutationObserver: MO, Promise, Date, Math });
+  vm.runInContext('(' + String(SH.guest) + ')();', ctx);
+  const G = win.__lumenSh;
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  pending.push((async () => {
+    const a = await G.until(true, '', 5000);
+    check(a.ok && a.applied && a.videoId === 'aaaaaaaaaaa' && a.title === 'First Short' && !a.final && a.waited < 50 && live() === 0,
+      'r64: an ask the chrome has nothing for is answered at once, the trim applied', { applied: a.applied, id: a.videoId, waited: a.waited, live: live() });
+    // Nothing new: the page waits (one observer); a change in YouTube's app answers it.
+    let b = null;
+    const pb = G.until(true, a.sig, 5000).then((x) => { b = x; });
+    await wait(60);
+    check(b === null && live() === 1, 'r64: an ask with nothing new waits in the page (one observer, no answer yet)', { live: live() });
+    // Lumen's own trim attribute written in the page: never taken for YouTube's app changing.
+    fire([{ type: 'attributes', attributeName: 'data-lumen-sh-root' }]);
+    await wait(60);
+    check(b === null && live() === 1, 'r64: Lumen’s own data-lumen-sh writes never wake the wait');
+    chan = '@one'; title = 'First Short';
+    fire();
+    await wait(60);
+    check(b === null, 'r64: a change in YouTube’s app that changes nothing Lumen shows answers nothing');
+    title = 'First Short, edited';
+    fire();
+    await pb;
+    check(!!b && b.title === 'First Short, edited' && !b.final && b.waited < 1000 && live() === 0, 'r64: the read answers the moment the page changes, and its observer goes',
+      { title: b && b.title, waited: b && b.waited, live: live() });
+    // The time limit answers (final), observer gone.
+    const c = await G.until(true, b.sig, 120);
+    check(c.final && c.waited >= 100 && live() === 0, 'r64: at the ask’s time limit the page answers anyway (final)', { final: c.final, waited: c.waited, live: live() });
+    // A newer ask answers the older one at once; stop() ends a wait without touching the trim.
+    let d = null;
+    const pd = G.until(true, c.sig, 5000).then((x) => { d = x; });
+    const e = G.until(true, c.sig, 5000);
+    await pd;
+    check(!!d && !d.final && live() === 1, 'r64: a newer ask answers the older one (one wait at a time)', { live: live() });
+    G.stop();
+    const e1 = await e;
+    check(e1.ok && live() === 0 && !!attrs['data-lumen-sh'], 'r64: stop() ends the wait and its observer, the trim left as it was', { live: live() });
+    G.apply(false);
+    check(!attrs['data-lumen-sh'], 'r64: apply(false) still takes the trim off');
+    G.apply(true);
+    // A move: the address names the next Short while the player and the title are still the last one's.
+    loc.pathname = '/shorts/bbbbbbbbbbb'; loc.href = 'https://www.youtube.com/shorts/bbbbbbbbbbb';
+    const m1 = G.tick(true);
+    check(m1.videoId === '' && m1.lag === 'player', 'r64: the address moved, the player still the last Short’s: not the new Short’s read yet', { id: m1.videoId, lag: m1.lag });
+    pid = 'bbbbbbbbbbb';
+    const m2 = G.tick(true);
+    check(m2.videoId === '' && m2.lag === 'title', 'r64: the player moved, the title and channel still the last Short’s: not yet either', { id: m2.videoId, lag: m2.lag });
+    // An ask in the lag answers when the renderer has the new Short's own title.
+    let m3 = null;
+    const pm = G.until(true, '', 5000).then((x) => { m3 = x; });
+    await pm;
+    const pm2 = G.until(true, m3.sig, 5000).then((x) => { m3 = x; });
+    title = 'Second Short'; chan = '@two';
+    fire();
+    await pm2;
+    check(!!m3 && m3.videoId === 'bbbbbbbbbbb' && m3.title === 'Second Short' && !m3.lag, 'r64: the new Short’s own title in the page: its read, at once', { id: m3 && m3.videoId, title: m3 && m3.title });
+    // A Short whose title and channel really are the last one's (a series): shown once the lag is over.
+    loc.pathname = '/shorts/ccccccccccc'; pid = 'ccccccccccc';
+    const s1 = await G.until(true, '', 3000);
+    const t0 = Date.now();
+    const s2 = await G.until(true, s1.sig, 4000);
+    check(s1.videoId === '' && s2.videoId === 'ccccccccccc' && s2.title === 'Second Short' && !s2.final && Date.now() - t0 < 2200,
+      'r64: the same title and channel on the next Short: read as its own once the lag (1500 ms) is over, not at the time limit', { s1: s1.videoId, s2: s2.videoId, ms: Date.now() - t0 });
+  })());
+}
+
 Promise.all(pending).then(() => {
   console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;

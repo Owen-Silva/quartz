@@ -342,8 +342,10 @@
       if (!f) { if (was) { html.removeAttribute('data-lumen-sh'); nudge(); } return { on: false, root: false }; }
       QA('[data-lumen-sh-root]').forEach(function (n) { if (n !== f.el) n.removeAttribute('data-lumen-sh-root'); });
       var fresh = !f.el.hasAttribute('data-lumen-sh-root');
-      f.el.setAttribute('data-lumen-sh-root', '');
-      html.setAttribute('data-lumen-sh', '');
+      // Written only when they change: the same value written again is still a mutation, and the read's own
+      // observer (until()) took each one for YouTube's app changing, so a wait checked itself every 30 ms.
+      if (fresh) f.el.setAttribute('data-lumen-sh-root', '');
+      if (!was) html.setAttribute('data-lumen-sh', '');
       if (fresh || !was) nudge();
       // The current Short is snapped to the top after any resize (YouTube's own scroll position).
       if (fresh || !was) { var a = active(); if (a && a.scrollIntoView) setTimeout(function () { try { a.scrollIntoView({ block: 'start' }); } catch (e) { /* gone */ } }, 30); }
@@ -397,7 +399,7 @@
       var out = { ok: true, kind: k, url: location.href, videoId: k === 'short' ? idOf(location.pathname) : '', signedIn: signedIn(), pageTitle: document.title,
         title: '', channel: null, like: { found: false }, dislike: { found: false }, sub: { found: false }, save: { found: false },
         canPrev: null, canNext: null, root: !!Q('[data-lumen-sh-root]'), on: document.documentElement.hasAttribute('data-lumen-sh'),
-        reels: reels().length, links: k === 'grid' || k === 'feed' ? QA('a[href*="/shorts/"]').length : 0, ad: false };
+        reels: reels().length, links: k === 'grid' || k === 'feed' ? QA('a[href*="/shorts/"]').length : 0, ad: false, ready: document.readyState };
       out.asp = aspect();
       if (!r) return out;
       out.ad = !!Q(AD_SEL, r);
@@ -610,8 +612,78 @@
       }
     }
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    window.__lumenSh = { v: V, apply: apply, read: read, aspect: aspect, step: step, openFirst: openFirst, press: press,
-      tick: function (on) { var a = apply(on); if (a.on) watchActive(); var x = read(); x.applied = a.on; x.how = a.how || ''; return x; } };
+
+    /* --- the read, the moment the page has it (until()) ---- */
+    // The chrome used to ask at fixed times (250, 900, 2000 ms after a load; 150, 500, 1100 ms after a move): the
+    // cover stayed over a page that was ready to trim until the next ask, and a moved Short's info waited at least
+    // 150 ms for its first. Now it asks ONCE and the page answers as soon as its read says something the chrome
+    // hasn't seen (sig): YouTube's app changing under it wakes the check (a MutationObserver, its checks 30 ms apart
+    // at most), and the ask's own time limit answers anyway (final). One wait at a time: a newer ask answers the
+    // older one at once (the chrome drops that by its seq), and stop() ends it, so no observer outlives its read.
+    function now(on) { var a = on === null ? { on: document.documentElement.hasAttribute('data-lumen-sh') } : apply(on); if (a.on) watchActive(); var x = read(); x.applied = a.on; x.how = a.how || ''; return x; }
+    function sigOf(x) {
+      var b = function (k) { var o = x[k] || {}; return o.found ? (o.on ? 2 : 1) + ':' + (o.count || '') : 0; };
+      return [x.kind, x.videoId, x.applied ? 1 : 0, x.root ? 1 : 0, x.reels > 0 ? 1 : 0, x.links > 0 ? 1 : 0, x.title, x.channel ? x.channel.name + '|' + (x.channel.avatar ? 1 : 0) : '',
+        b('like'), b('dislike'), b('sub'), b('save'), x.canPrev, x.canNext, x.ad ? 1 : 0, x.signedIn, x.ready === 'loading' ? 0 : 1].join('\u0001');
+    }
+    // A move in place: YouTube's address names the next Short a moment before its one renderer and its one player
+    // have the Short's own title, channel and buttons. Read in that moment, the info named the new Short with the
+    // last one's title. So for LAG ms after the address first names a Short, a read whose player still holds
+    // another video, or whose title and channel are still those last answered for another Short, is not this
+    // Short's yet (videoId ''): the chrome keeps its skeleton. After LAG it is taken as it is (an ad's own player,
+    // two Shorts of one series), so a page that never changes them still shows what it has.
+    var LAG = 1500;
+    var seen = { id: '', at: 0 }, told = { id: '', title: '', chan: '' };
+    function current(x) {
+      var at = x.videoId;
+      if (!at) return x;
+      if (seen.id !== at) { seen.id = at; seen.at = Date.now(); }
+      var r = active(), pid = r ? playerId(r) : '';
+      var chan = x.channel ? x.channel.name : '';
+      var lag = Date.now() - seen.at < LAG && ((pid && pid !== at) || (told.id && told.id !== at && !!x.title && x.title === told.title && chan === told.chan));
+      if (lag) { x.lag = pid && pid !== at ? 'player' : 'title'; x.videoId = ''; return x; }
+      if (x.title) { told.id = at; told.title = x.title; told.chan = chan; }
+      return x;
+    }
+    var wt = null;
+    function stop() { if (wt) wt.end(null); return { ok: true }; }
+    function until(on, sig, ms) {
+      if (wt) wt.end(null);
+      return new Promise(function (ok) {
+        var t0 = Date.now(), me = {}, timer = 0, chk = 0, lagT = 0, obs = null;
+        var answer = function (x, final) { x.sig = sigOf(x); x.final = !!final; x.waited = Date.now() - t0; return x; };
+        var x0 = answer(current(now(on)), !(ms > 0));
+        if (x0.sig !== sig || x0.final || !window.MutationObserver) { ok(x0); return; }
+        var onRs = function () { if (!chk) chk = setTimeout(check, 0); };   // the HTML parsed: no mutation need say so
+        var close = function () { if (wt === me) wt = null; clearTimeout(timer); clearTimeout(chk); clearTimeout(lagT); timer = chk = lagT = 0; if (obs) obs.disconnect(); obs = null; try { document.removeEventListener('readystatechange', onRs); } catch (e) { /* no document events */ } };
+        // stopped (stop(), a newer ask): answered without touching the trim; the time limit: read once more.
+        me.end = function (final) { if (wt !== me) return; close(); ok(answer(current(now(final ? on : null)), !!final)); };
+        var check = function () {
+          chk = 0;
+          if (wt !== me) return;
+          var x = current(now(on));
+          var s1 = sigOf(x);
+          if (s1 !== sig) { close(); ok(answer(x, false)); return; }
+          if (x.lag) lagged(x);
+        };
+        // Still lagging behind the address: looked at again apart from YouTube's mutations (its one player
+        // changes video without one), every 100 ms and once more as the lag runs out.
+        var lagged = function (x) { clearTimeout(lagT); lagT = setTimeout(function () { lagT = 0; check(); }, Math.max(30, Math.min(100, LAG - (Date.now() - seen.at) + 5))); };
+        wt = me;
+        timer = setTimeout(function () { me.end(true); }, ms);
+        // The attributes read() looks at (not the player's own style churn); Lumen's own data-lumen-sh* writes never count.
+        obs = new MutationObserver(function (recs) {
+          if (chk) return;
+          for (var i = 0; i < recs.length; i++) { if (!(recs[i].type === 'attributes' && /^data-lumen-sh/.test(recs[i].attributeName || ''))) { chk = setTimeout(check, 30); return; } }
+        });
+        obs.observe(Q('ytd-shorts') || document.body || document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
+          attributeFilter: ['is-active', 'aria-pressed', 'aria-label', 'aria-disabled', 'disabled', 'href', 'src', 'hidden'] });
+        try { document.addEventListener('readystatechange', onRs); } catch (e) { /* no document events: the observer and the time limit still answer */ }
+        if (x0.lag) lagged(x0);
+      });
+    }
+    window.__lumenSh = { v: V, apply: function (on) { var a = apply(on); if (!on) stop(); return a; }, read: read, aspect: aspect, step: step, openFirst: openFirst, press: press,
+      tick: function (on) { return current(now(on)); }, until: until, stop: stop };
   }
   var GUEST = '(' + String(guest) + ')();';
   function call(method, args) {
@@ -684,7 +756,7 @@
     var p = s._sh = { phase: 'loading', read: null, shown: null, shownId: '', applied: false, noRoot: false, why: '', busy: '', seq: 0, timers: [],
       presses: [], steps: [], wheel: null, wheels: 0, confirm: false, save: null, opened: '', logged: '', lastUrl: '', layout: null,
       aspect: 0, aspT: 0, aspSeq: 0, easeT: 0, navs: 0, whyShort: false, failedLoad: false, sig: '', refocus: '', trimmed: false,
-      cm: false, share: null, shareT: 0 };
+      cm: false, share: null, shareT: 0, reading: 0, asking: false, askOn: false, ask: 0, readEnd: 0, readSig: '', readDoc: -1 };
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'sh-cover');
@@ -726,13 +798,22 @@
       touch = null;
       if (Math.abs(dy) >= 48) step(s, dy > 0 ? 1 : -1, 'touch');
     }, { passive: true });
-    v.addEventListener('dom-ready', function () {
-      if (s.view !== v) return;
+    var trim = function () {
       try {
         var pr = v.insertCSS(trimCss());
         if (pr && pr.catch) pr.catch(function (e) { p.why = 'Lumen couldn’t trim YouTube’s page: ' + ((e && e.message) || e); render(s); });
       } catch (e) { p.why = 'Lumen couldn’t trim YouTube’s page: ' + ((e && e.message) || e); }
-      if (isShorts(s.url, s.service)) startReads(s, false);
+    };
+    // The trim and the reads start when the new document COMMITS (did-navigate), not at dom-ready: YouTube's Shorts
+    // page starts its player while its HTML is still streaming in (real YouTube, warm: the first frame ~650 ms after
+    // the click, dom-ready 1.5-2 s), and a page that busy answered the first ask late, so the cover hid a Short that
+    // was already playing for 1-2 s. dom-ready inserts the trim again (in case the commit's went to a document
+    // that didn't last; a second copy of the same rules changes nothing) and starts the reads only if the commit
+    // didn't (readDoc: this document's reads are running).
+    v.addEventListener('dom-ready', function () {
+      if (s.view !== v) return;
+      trim();
+      if (isShorts(s.url, s.service) && !(p.reading && p.readDoc === p.navs)) { startReads(s, false); p.readDoc = p.navs; }
     });
     v.addEventListener('did-start-navigation', function (e) {
       // A move in place (YouTube's pushState from Short to Short) is not a new document. The <webview> event names
@@ -765,7 +846,14 @@
       else update(s);
     });
     // A new document committed: whatever the old one wore is gone with it.
-    v.addEventListener('did-navigate', function () { if (s.view === v) p.trimmed = false; });
+    v.addEventListener('did-navigate', function (e) {
+      if (s.view !== v) return;
+      p.trimmed = false;
+      if (p.failedLoad || !isShorts((e && e.url) || s.url, s.service)) return;
+      trim();
+      startReads(s, false);
+      p.readDoc = p.navs;
+    });
     v.addEventListener('did-fail-load', function (e) {
       if (s.view !== v || !e.isMainFrame || e.errorCode === -3) return;
       p.phase = online() ? 'failed' : 'offline';
@@ -847,11 +935,21 @@
 
   function shOn(s) { return !!(s && s.tile && s.tile.classList.contains('sh')); }
 
+  /**
+   * The reads of one load or one move (seq): ONE ask at a time that the page answers when its read changes (guest
+   * until()), each answer shown at once, the next ask carrying what this one said (sig), until the read is complete
+   * or the time is up (READ_MS after a load, MOVE_MS after a move: the last entries of READS and MOVES, the times
+   * the old fixed asks ended at). The answer at the time limit is the last one (final): its reasons are said.
+   */
+  var READ_MS = READS[READS.length - 1], MOVE_MS = MOVES[MOVES.length - 1];
   function stopReads(s) {
     var p = shOf(s);
     if (!p) return;
     p.timers.forEach(function (t) { clearTimeout(t); });
     p.timers = [];
+    // A wait still open in the page ends (its observer with it); its answer is dropped (p.reading).
+    if (p.reading && p.asking && s.view) js(s.view, call('stop', [])).catch(function () { /* the page went: nothing waits there */ });
+    p.reading = 0; p.asking = false;
   }
   function startReads(s, moved) {
     var p = shOf(s);
@@ -860,19 +958,39 @@
     var seq = ++p.seq;
     if (!online()) { p.phase = 'offline'; update(s); return; }
     if (p.phase !== 'failed') p.phase = moved && p.applied ? 'moving' : 'loading';
-    var list = moved ? MOVES : READS;
-    list.forEach(function (ms, i) { p.timers.push(setTimeout(function () { tick(s, seq, i === list.length - 1); }, ms)); });
+    p.reading = seq;
+    p.readEnd = Date.now() + (moved ? MOVE_MS : READ_MS);
+    p.readSig = '';
+    // A page that never answers (hung, its script gone) still gets its reason: past the time limit with an ask
+    // still open, the reads end as an unanswered last read would.
+    p.timers.push(setTimeout(function () {
+      if (p.seq !== seq || p.reading !== seq) return;
+      if (p.phase === 'ready') { stopReads(s); return; }   // shown complete already: nothing to say
+      var f = follow(idOf(s.url, s.service), p.shown, '');
+      p.phase = !online() ? 'offline' : f.fresh && p.shown && (p.shown.title || (p.shown.channel && p.shown.channel.name)) ? 'partial' : 'unread';
+      p.why = 'YouTube’s page didn’t answer Lumen’s read';
+      stopReads(s);
+      update(s);
+    }, p.readEnd - Date.now() + 3000));
+    tick(s, seq);
     update(s);
   }
 
-  function tick(s, seq, last) {
+  function tick(s, seq) {
     var p = shOf(s);
-    if (!p || p.seq !== seq || !s.view) return;
+    if (!p || p.seq !== seq || p.reading !== seq || !s.view) return;
     var v = s.view;
     var on = onFor(s);
-    js(v, call('tick', [on])).then(function (r) {
-      if (s.view !== v || p.seq !== seq) return;
+    // ask: this ask's own number. A newer ask (the view turned on or off while one was open: update()) answers the
+    // older one in the page; that answer is dropped here, so one load never runs two loops of asks.
+    var ask = p.ask = (p.ask || 0) + 1;
+    p.asking = true; p.askOn = on;
+    js(v, call('until', [on, p.readSig, Math.max(0, p.readEnd - Date.now())])).then(function (r) {
+      if (s.view !== v || p.seq !== seq || p.reading !== seq || p.ask !== ask) return;
+      p.asking = false;
       if (!r || !r.ok) throw new Error('no answer from the page');
+      var last = !!r.final || Date.now() >= p.readEnd - 20;
+      p.readSig = String(r.sig || '');
       p.read = r;
       p.applied = !!r.applied;
       if (r.on || r.applied) p.trimmed = true;
@@ -881,7 +999,9 @@
       var cur = idOf(s.url, s.service);
       // A grid (a channel's Shorts, Subscriptions' Shorts, the feed before YouTube picks): its first Short.
       if ((r.kind === 'grid' || (r.kind === 'feed' && !r.reels)) && on) {
-        if (r.links && p.opened !== r.url) {
+        // Not while its HTML is still streaming in (the reads start at the commit now): a link half built then
+        // isn't the grid's first Short, and the feed picks its own once its app is up.
+        if (r.links && p.opened !== r.url && r.ready !== 'loading') {
           p.opened = r.url;
           js(v, call('openFirst', [])).then(function (o) { if (o && !o.ok && s.view === v) { p.why = 'YouTube’s page has ' + o.reason; render(s); } }, function () { /* the next tick says */ });
         } else if (last) {
@@ -892,6 +1012,8 @@
           logLine((r.links ? 'the first Short never opened: ' : 'no Shorts to open: ') + r.kind);
         }
         update(s);
+        if (!last) tick(s, seq);   // the next ask: YouTube opening the Short (or the grid filling) answers it
+        else stopReads(s);
         return;
       }
       if (on && !r.applied && last && r.kind === 'short') {
@@ -903,13 +1025,25 @@
       var f = follow(cur, r, p.shownId);
       if (f.fresh) { p.shown = r; p.shownId = f.id; }
       var done = f.fresh && complete(r) && (!on || r.applied);
-      if (done) { p.phase = 'ready'; stopReads(s); }
-      else if (last) p.phase = !f.fresh ? 'unread' : (r.title || (r.channel && r.channel.name)) ? 'partial' : 'unread';
+      // Complete is shown as ready at once, but the page is still asked until the time is up: the asks cost nothing
+      // while nothing changes (the page answers only a change), and what YouTube fills in after it is complete still
+      // shows: the channel's picture its <img> hadn't loaded yet (the old fixed asks stopped at the first complete
+      // read, ~150 ms in, when it usually had), and its one renderer's own late correction of a title or channel.
+      if (done) p.phase = 'ready';
+      else if (last && p.phase !== 'ready') p.phase = !f.fresh ? 'unread' : (r.title || (r.channel && r.channel.name)) ? 'partial' : 'unread';
+      if (last) stopReads(s);
       if (on && p.logged !== s.id + ':' + (p.applied ? 'on' : 'off') && p.applied) { p.logged = s.id + ':on'; logLine('opened: ' + ((route(s.url, s.service) || {}).kind || 'short')); }
       update(s);
+      if (!last) tick(s, seq);   // the next ask, carrying this answer's sig: the page answers when it changes
     }).catch(function (e) {
-      if (s.view !== v || p.seq !== seq) return;
-      if (last) { p.phase = online() ? 'unread' : 'offline'; p.why = 'Lumen couldn’t read YouTube’s page: ' + ((e && e.message) || e); update(s); }
+      if (s.view !== v || p.seq !== seq || p.reading !== seq || p.ask !== ask) return;
+      p.asking = false;
+      // A page that didn't answer (still loading its own script, busy): asked again shortly while there is time,
+      // never in a tight loop; at the time limit the reason is said.
+      if (Date.now() < p.readEnd - 20) { p.timers.push(setTimeout(function () { tick(s, seq); }, 150)); return; }
+      p.phase = online() ? 'unread' : 'offline'; p.why = 'Lumen couldn’t read YouTube’s page: ' + ((e && e.message) || e);
+      stopReads(s);
+      update(s);
     });
   }
 
@@ -918,6 +1052,9 @@
     var p = shOf(s), L = layerOf();
     if (!p || !L) return;
     var on = onFor(s);
+    // An ask open in the page was made for the other state (the layer went to the corner, or came back): asked
+    // again, so the page's checks never put the trim back on a page that isn't the Shorts view (or leave it off).
+    if (p.reading && p.asking && p.askOn !== on && s.view) tick(s, p.reading);
     var boxed = on && !p.noRoot;
     s.tile.classList.toggle('sh', boxed);
     s.tile.classList.toggle('sh-wait', boxed && !p.applied && p.phase !== 'failed' && p.phase !== 'offline');
@@ -1038,6 +1175,7 @@
     if (!p || !s.view || !shOn(s)) return false;
     var v = s.view;
     var rec = { dir: dir, how: how, at: Date.now(), ok: null, via: '', reason: '' };
+    var u0 = p.lastUrl;
     p.steps.push(rec);
     if (p.steps.length > 50) p.steps.shift();
     js(v, call('step', [dir])).then(function (r) {
@@ -1045,8 +1183,11 @@
       rec.ok = !!(r && r.ok); rec.via = (r && r.how) || ''; rec.reason = (r && r.reason) || '';
       if (!rec.ok) { p.why = rec.reason || 'YouTube’s page didn’t move'; p.whyShort = true; render(s); return; }
       if (p.why && /first Short|last Short|didn’t move/.test(p.why)) p.why = '';
-      // The address changes with YouTube's own move (did-navigate-in-page reads the new Short); read anyway.
-      startReads(s, true);
+      // The address changes with YouTube's own move (did-navigate-in-page reads the new Short); read anyway, unless
+      // that already happened (its reads, started for the new address, are the move's: restarting them dropped an
+      // ask the page was about to answer). Asked before the address moves, the page answers with the Short still
+      // on it; did-navigate-in-page then reads the new one.
+      if (p.lastUrl === u0) startReads(s, true);
     }, function (e) { if (s.view === v) { rec.ok = false; rec.reason = (e && e.message) || String(e); p.why = 'YouTube’s page didn’t answer: ' + rec.reason; p.whyShort = true; render(s); } });
     return true;
   }
