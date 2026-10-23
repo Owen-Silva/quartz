@@ -201,6 +201,18 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     const r0 = reqs.filter((r) => r.vid === VID);
     check(r0.length === 1 && r0[0].token === X.FIRST && r0[0].client === 'WEB' && /application\/json/.test(r0[0].ctype) && (r0[0].site === 'same-origin' || r0[0].site === '') && !r0[0].key,
       'the data: one request, the page’s own same-origin POST /youtubei/v1/next with ytInitialData’s token and the page’s context, no API key', r0);
+    check(!!c && c.from === 'view', 'r64: the first page went out with the token the view had already read (no second trip into the page first)', c && c.from);
+    // r64: the view's info draws move the section into the new mount; they never rebuild it (it was rebuilt whole on
+    // each). The view's draw, as it does it (watch-playview.js renderYT): a new mount in place of the old, the event.
+    const mk = await chrome.ev(`(() => { const n = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop001"]'); const old = document.getElementById('lumen-pv-comments');
+      const sl = LumenPlayview._state().slots.find((x) => x.boxed); const v = document.querySelector('.wp-layer .wp-tile.pv webview');
+      if (!n || !old || !sl || !v) return { err: !n ? 'no comment' : !old ? 'no mount' : !sl ? 'no slot' : 'no webview' };
+      n.__r64 = 1;
+      const box = document.createElement('section'); box.className = 'pv-comments'; box.id = 'lumen-pv-comments'; box.hidden = true; old.replaceWith(box);
+      document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: sl.id, wcId: sl.wcId, videoId: ${JSON.stringify(VID)}, comments: null, container: box, view: v } }));   // no toggle: the section keeps the view’s own
+      const m = document.querySelector('#lumen-pv-comments .cm-item[data-id="UgxTop001"]');
+      return { same: !!(m && m.__r64), shown: !box.hidden, n: document.querySelectorAll('#lumen-pv-comments .cm-item').length }; })()`);
+    check(!!mk && mk.same && mk.shown && mk.n >= 20, 'the view draws its info again: the comments are the same nodes, moved into the new mount, not rebuilt', mk);
     await toComments();
     await shot('list', 1280, 800);
 

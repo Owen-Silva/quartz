@@ -290,10 +290,71 @@ check(t.btn.hidden === true, 'without watch-playview.js: the watch page has no b
 t.s1.url = 'https://www.youtube.com/embed/abcDEF12345'; t.Y.sync(t.ctx, t.s1);
 check(t.btn.hidden === false && t.btn.textContent === 'Full page', 'and the embed still offers “Full page”');
 
+/* ---- r64: the read's watch (between the timed reads, answered as soon as the page draws something new) ---- */
+check(PV.READS[0] === 0 && PV.READS[PV.READS.length - 1] === 8000, 'the first read is at once (dom-ready); the last timed read still says at 8 s', PV.READS);
+const mos = [];
+sb.MutationObserver = function (fn) { const o = { fn, on: false, opts: null, observe(n, opts) { o.on = true; o.opts = opts; }, disconnect() { o.on = false; } }; mos.push(o); return o; };
+vm.runInContext(PV.call('tick', ['youtube', true]), sb);   // the read the chrome has
+const w0 = Date.now();
+let wr = null, wAt = 0;
+vm.runInContext(PV.call('watch', ['youtube', true, 5000]), sb).then((r) => { wr = r; wAt = Date.now() - w0; });
+const mo1 = mos[mos.length - 1];
+check(!!mo1 && mo1.on && mo1.opts && mo1.opts.childList && mo1.opts.subtree && !mo1.opts.attributes, 'a watch observes the page’s own DOM (children and text, never attributes)', mo1 && mo1.opts);
+mo1.fn([]);   // a change the info doesn't show: no new read handed out
+let wSame = null;
+setTimeout(() => {
+  wSame = wr;
+  doc.title = 'Another title - YouTube';
+  mo1.fn([]); mo1.fn([]); mo1.fn([]);   // three changes in a row: one read
+}, 160);
+let wq = null, wqAt = 0;
+setTimeout(() => {
+  const q0 = Date.now();
+  vm.runInContext(PV.call('watch', ['youtube', true, 120]), sb).then((r) => { wq = r; wqAt = Date.now() - q0; });
+}, 420);
+
+// A player that turns up while a watch waits: the watch says so (canRoot) and never trims the page itself (the chrome
+// does, or doesn't: after "the whole page shows" a late player must not be trimmed behind the bar's back).
+let wp = null;
+setTimeout(() => {
+  const mp = { tagName: 'DIV', querySelector: (q) => (q === 'video' ? { tagName: 'VIDEO' } : null), hasAttribute: () => false, setAttribute: () => {}, removeAttribute: () => {} };
+  vm.runInContext(PV.call('watch', ['youtube', true, 3000]), sb).then((r) => { wp = r; });
+  doc.querySelector = (q) => (q === '#movie_player' ? mp : null);
+  mos[mos.length - 1].fn([]);
+}, 560);
+setTimeout(() => {
+  check(!!wp && wp.canRoot === true && wp.applied === false && !('data-lumen-pv' in attrs), 'a player turns up during a watch: it is said (canRoot), and the watch never trims the page itself', { wp: wp && { canRoot: wp.canRoot, applied: wp.applied }, attrs });
+  doc.querySelector = () => null;
+}, 820);
+// The early read: the page's videoDetails (before its app has run), for this address's video only.
+let e1 = null, e2 = 'pending', e2At = 0;
+setTimeout(() => {
+  win.ytInitialPlayerResponse = { videoDetails: { videoId: 'otherVID999', title: 'Another video', author: 'Someone' } };
+  const t0 = Date.now();
+  vm.runInContext(PV.call('early', [120]), sb).then((r) => { e2 = r; e2At = Date.now() - t0; });
+}, 600);
+setTimeout(() => {
+  win.ytInitialPlayerResponse = { videoDetails: { videoId: 'abcDEF12345', title: 'Early title', author: 'The Channel', channelId: 'UCabc_123', shortDescription: 'See https://example.com/a at 1:05' } };
+  vm.runInContext(PV.call('early', [3000]), sb).then((r) => { e1 = r; });
+}, 760);
+setTimeout(() => {
+  check(e2 === null && e2At >= 100, 'early read: videoDetails for another video (an in-page move keeps the first one’s) is never used; null at its limit', { e2, e2At });
+  check(!!e1 && e1.early && e1.title === 'Early title' && e1.channel && e1.channel.name === 'The Channel' && e1.channel.url === 'https://www.youtube.com/channel/UCabc_123' && e1.desc.text === 'See https://example.com/a at 1:05'
+    && e1.like.found === false && e1.applied === false && e1.comments === null && !('data-lumen-pv' in attrs), 'early read: this video’s title, channel and description at once; no buttons, no trim, no comments token', e1);
+  const em = e1 && PV.model('youtube', e1, null, '');
+  check(!!em && em.title === 'Early title' && em.channel.name === 'The Channel' && em.desc.links.length === 0 && em.videoId === 'abcDEF12345', 'and the info draws from it (the plain description’s links come from its text)', em && { title: em.title, ch: em.channel });
+  delete win.ytInitialPlayerResponse;
+}, 900);
+setTimeout(() => {
+  check(wSame === null, 'a page change that reads the same: the watch keeps waiting (nothing new to draw)');
+  check(!!wr && wr.pageTitle === 'Another title - YouTube' && wAt < 1000 && !mo1.on, 'the page draws something new: the watch answers with it within a read gap, not at its 5 s limit, and lets go of the page', { wAt, title: wr && wr.pageTitle, on: mo1.on });
+  check(!!wq && wq.ok && wq.pageTitle === 'Another title - YouTube' && wqAt >= 100 && wqAt < 1000 && !mos[mos.length - 1].on, 'nothing new: the watch answers at its limit with the same read, and lets go', { wqAt });
+}, 800);
+
 setTimeout(() => {
   check(pr && pr.ok === false && /Like button isn’t on this page/.test(pr.reason), 'a press with no button on the page: refused, with the reason (never a silent no-op)', pr);
   check(prOther && prOther.ok === false, 'nothing is pressed on Disney+, Hulu, Prime or ESPN');
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* temp */ }
   console.log('watch-playview-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
-}, 50);
+}, 1000);

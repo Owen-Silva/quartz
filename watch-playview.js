@@ -47,7 +47,21 @@
 
   var NAMES = { youtube: 'YouTube', disney: 'Disney+', hulu: 'Hulu', prime: 'Prime Video', espn: 'ESPN' };
   var PEEK = 128;          // px of the info that always shows under the video (1280x800 included)
-  var READS = [250, 900, 2000, 4000, 8000];   // ms after a page loads: read until it is all there
+  // ms after a page loads: read until it is all there. The first read is at once (r64): the page's own data
+  // (ytInitialData, an inline script) is there at dom-ready, so the title, the channel and the description need no
+  // wait; it was 250 ms of nothing on every open. The later ones are the backstop under the watch below.
+  var READS = [0, 900, 2000, 4000, 8000];
+  // Between those reads, a WATCH in the page (r64): one read the moment the page changes what the info shows (its
+  // like and Subscribe buttons drawn, the player there), coalesced to one read per WATCH_GAP_MS, answered by
+  // WATCH_MS at the latest. Only while the info is incomplete, one at a time. A read that waited for the next
+  // fixed time held YouTube's buttons (and the trim's cover) back up to 2 s after the page had drawn them.
+  var WATCH_MS = 2500;
+  var WATCH_GAP_MS = 100;
+  // The page's first words, before its own app has run (r64): YouTube's watch HTML defines ytInitialPlayerResponse
+  // (its videoDetails: the title, the channel's name, the description) about 180 KB BEFORE the player and app
+  // scripts that must run before ytInitialData and dom-ready, and on this machine those scripts are most of the
+  // open. An early read at commit answers from it (read only: no trim, no buttons, no comments), at most EARLY_MS.
+  var EARLY_MS = 6000;
   var PRESS_HOLD_MAX_MS = 2000;   // a held rebuild waits for his release at most this long
   var SHOW_PAGE_ANSWER_MS = 8000; // the Lumen tab opens a show page at once; past this the press is given up, with the reason
   var PRESS_ANSWER_MS = 15000;    // a press's longest own wait is 7.5 s (Unsubscribe: menu, confirm, state); past this it is said
@@ -368,8 +382,8 @@
    * sets or clears the view's flag, reads what the info shows, and presses the page's OWN buttons.
    * Serialised with String(); it uses nothing from outside itself.
    */
-  function guest() {
-    var V = 5;   // 5: the description's links (desc.links) and seek()
+  function guest(GAP) {
+    var V = 6;   // 5: the description's links (desc.links) and seek(); 6: watch()
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -473,7 +487,8 @@
           if (sec && sec.sectionIdentifier === 'comment-item-section') {
             var ci = (sec.contents || [])[0];
             var tok = ci && ci.continuationItemRenderer && ci.continuationItemRenderer.continuationEndpoint && ci.continuationItemRenderer.continuationEndpoint.continuationCommand;
-            if (tok && tok.token) out.comments = { token: String(tok.token).slice(0, 400) };
+            // capped well above a real token's length (a cut one would fail): watch-comments.js asks the page itself for one this long
+            if (tok && tok.token) out.comments = { token: String(tok.token).slice(0, 4000) };
           }
         });
       } catch (e) { /* a shape Lumen doesn't know: the DOM's word only */ }
@@ -644,10 +659,78 @@
       }
       return Promise.resolve({ ok: false, reason: 'unknown button ' + kind });
     }
-    window.__lumenPv = { v: V, apply: apply, read: read, press: press, seek: seek,
-      tick: function (svc, on) { var a = apply(svc, on); var r = read(svc); r.applied = a.on; r.how = a.how || ''; return r; } };
+    // The last read handed to the chrome, as words: watch() answers only with something it hasn't seen.
+    var lastSig = '';
+    function tick(svc, on) { var a = apply(svc, on); var r = read(svc); lastSig = JSON.stringify(r) + '|' + a.on; r.applied = a.on; r.how = a.how || ''; return r; }
+    /* A read as soon as the page draws something new (watch-playview.js WATCH_MS): its own DOM changes, coalesced
+       to one read per GAP ms (YouTube's player redraws its clock every second; attributes aren't watched at all),
+       answered with the first read that differs from the last one handed out, or the read at ms. The observer
+       goes with the answer. It only READS: the trim is the chrome's to set (tick / apply), never a watch's, so a
+       watch still out after the chrome gave up on the player ("the whole page shows") or after Full page was
+       pressed can't trim the page behind its back. A player that turns up is said (canRoot); the chrome trims. */
+    function peek(svc) {
+      var r = read(svc), html = document.documentElement;
+      var on = html.hasAttribute('data-lumen-pv') && !!Q('[data-lumen-pv-root]');
+      r.sig = JSON.stringify(r) + '|' + on;
+      r.applied = on;
+      r.canRoot = !on && !!findRoot(svc);
+      return r;
+    }
+    function watch(svc, on, ms) {
+      return new Promise(function (ok) {
+        var mo = null, t = 0, end = 0, over = false;
+        function finish(r) { if (over) return; over = true; if (mo) mo.disconnect(); clearTimeout(t); clearTimeout(end); ok(r); }
+        function look() {
+          t = 0;
+          var r = peek(svc), j = r.sig;
+          delete r.sig;
+          // new to the chrome: what the info shows changed, or a player it wants trimmed is there now
+          if (j !== lastSig || (on && r.canRoot)) { lastSig = j; finish(r); }
+        }
+        end = setTimeout(function () { var r = peek(svc); lastSig = r.sig; delete r.sig; finish(r); }, Math.max(100, Number(ms) || 0));
+        try {
+          mo = new MutationObserver(function () { if (!t && !over) t = setTimeout(look, GAP); });
+          mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+        } catch (e) { /* the timer answers */ }
+        look();
+      });
+    }
+    /* early(ms): the info's words from ytInitialPlayerResponse.videoDetails as soon as the parser has passed it,
+       for THIS address's video only (an in-page move keeps the first video's object: never shown for another id),
+       or null by DOMContentLoaded / ms (the reads at dom-ready take over). Nothing on the page is touched. */
+    function early(ms) {
+      return new Promise(function (ok) {
+        var mo = null, end = 0, over = false;
+        function finish(r) {
+          if (over) return; over = true;
+          if (mo) mo.disconnect(); clearTimeout(end);
+          try { document.removeEventListener('DOMContentLoaded', last); } catch (e) { /* gone */ }
+          ok(r);
+        }
+        function look() {
+          var u; try { u = new URL(location.href); } catch (e) { return null; }
+          var id = u.searchParams.get('v') || ((/^\/live\/([^/?#]+)/.exec(u.pathname) || [])[1]) || '';
+          var pr = window.ytInitialPlayerResponse, vd = pr && typeof pr === 'object' ? pr.videoDetails : null;
+          if (!id || !vd || vd.videoId !== id || !vd.title) return null;
+          var signed = null;
+          try { if (window.ytcfg && typeof window.ytcfg.get === 'function') { var li = window.ytcfg.get('LOGGED_IN'); if (typeof li === 'boolean') signed = li; } } catch (e) { signed = null; }
+          return { ok: true, early: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: document.title,
+            title: String(vd.title || '').slice(0, 500), titleFrom: 'player',
+            channel: vd.author ? { name: String(vd.author).slice(0, 200), url: /^UC[\w-]+$/.test(String(vd.channelId || '')) ? 'https://www.youtube.com/channel/' + vd.channelId : '', subs: '', avatar: '' } : null,
+            desc: { text: String(vd.shortDescription || '').slice(0, 10000), meta: '', links: [] },
+            like: { found: false }, dislike: { found: false }, sub: { found: false }, save: { found: false }, comments: null, root: false, on: false, applied: false };
+        }
+        function try1() { var r = look(); if (r) finish(r); }
+        function last() { finish(look()); }
+        end = setTimeout(last, Math.max(100, Number(ms) || 0));
+        try { document.addEventListener('DOMContentLoaded', last); } catch (e) { /* the timer answers */ }
+        try { mo = new MutationObserver(try1); mo.observe(document.documentElement || document, { childList: true, subtree: true }); } catch (e) { /* the timer answers */ }
+        try1();
+      });
+    }
+    window.__lumenPv = { v: V, apply: apply, read: read, press: press, seek: seek, tick: tick, watch: watch, early: early };
   }
-  var GUEST = '(' + String(guest) + ')();';
+  var GUEST = '(' + String(guest) + ')(' + WATCH_GAP_MS + ');';
   function call(method, args) {
     return GUEST + 'window.__lumenPv.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
@@ -783,6 +866,11 @@
       p.applied = false; p.noRoot = false;
       update(s);
     });
+    // The new document is in (commit): its first words, long before dom-ready (EARLY_MS). A YouTube video page only.
+    v.addEventListener('did-navigate', function (e) {
+      if (s.view !== v || s.service !== 'youtube' || pageKind(String((e && e.url) || ''), s.service) !== 'watch') return;
+      earlyRead(s);
+    });
     v.addEventListener('did-navigate-in-page', function (e) {
       if (s.view !== v || !e.isMainFrame) return;
       var url = String(e.url || '');
@@ -865,6 +953,7 @@
     if (!p) return;
     p.timers.forEach(function (t) { clearTimeout(t); });
     p.timers = [];
+    p.watch = 0; p.reading = 0;   // a watch still out on the page is dropped when it lands (took: reading)
   }
 
   /** Read the page at READS after it loads (or moves in place), until it is all there. */
@@ -874,6 +963,7 @@
     stopReads(s);
     var seq = ++p.seq;
     if (!online()) { p.phase = 'offline'; update(s); return; }
+    p.reading = seq;
     READS.forEach(function (ms, i) {
       p.timers.push(setTimeout(function () { tick(s, seq, i === READS.length - 1); }, inPage ? Math.max(120, ms / 2) : ms));
     });
@@ -885,9 +975,18 @@
     if (!p || p.seq !== seq || !s.view) return;
     var v = s.view;
     var on = wantTrim(s);
-    js(v, call('tick', [s.service, on])).then(function (r) {
+    took(s, seq, v, on, js(v, call('tick', [s.service, on])), last, false);
+  }
+  /** A read's answer (a timed read's, or a watch's): the info from it, and the next watch while it is incomplete. */
+  function took(s, seq, v, on, pr, last, watched) {
+    var p = pvOf(s);
+    pr.then(function (r) {
       if (s.view !== v || p.seq !== seq) return;
+      if (watched && p.reading !== seq) return;   // the reads are over (complete, or the last one said): it adds nothing
       if (!r || !r.ok) throw new Error('no answer from the page');
+      // A watch saw the player turn up: the trim is the chrome's to set, so a read that sets it goes now (its
+      // answer carries on from there); this answer is only words.
+      if (watched && on && r.canRoot && !r.applied && wantTrim(s)) { tick(s, seq, false); return; }
       p.lastUrl = r.url || p.lastUrl;
       p.read = r;
       p.applied = !!r.applied;
@@ -898,12 +997,45 @@
       }
       var done = s.service === 'youtube' ? complete(r) && (!on || r.applied) : (!on || r.applied);
       if (done) { p.phase = 'ready'; stopReads(s); }
-      else if (last) p.phase = s.service === 'youtube' && !(r.title || (r.channel && r.channel.name)) ? 'unread' : 'partial';
+      else if (last) { p.phase = s.service === 'youtube' && !(r.title || (r.channel && r.channel.name)) ? 'unread' : 'partial'; p.reading = 0; }
+      else watchRead(s, seq);
       update(s);
     }).catch(function (e) {
       if (s.view !== v || p.seq !== seq) return;
       if (last) { p.phase = online() ? 'unread' : 'offline'; p.why = 'Lumen couldn’t read the page: ' + ((e && e.message) || e); update(s); }
     });
+  }
+
+  /**
+   * The next read as soon as the page draws something new (WATCH_MS): one watch out at a time per page read
+   * (p.watch holds its seq), none once the reads stop (complete, the last timed read, a new page: stopReads
+   * drops p.watch). A watch that fails or never answers costs nothing: the timed reads still come.
+   */
+  function watchRead(s, seq) {
+    var p = pvOf(s);
+    if (!p || p.watch === seq || p.seq !== seq || p.reading !== seq || !s.view || !online()) return;
+    var v = s.view, on = wantTrim(s);
+    p.watch = seq;
+    var pr = js(v, call('watch', [s.service, on, WATCH_MS]));
+    var free = function () { if (p.watch === seq) p.watch = 0; };
+    // freed before its answer is taken, so the answer can ask for the next watch
+    took(s, seq, v, on, pr.then(function (r) { free(); return r; }, function (e) { free(); throw e; }), false, true);
+  }
+
+  /**
+   * The early read (EARLY_MS): drawn only while no read of the page has landed yet, and dropped once the reads at
+   * dom-ready start (startReads bumps seq) or the slot moves on (newPage). Its answer is words only; the comments
+   * wait for the page's own data (watch-comments.js: early), so it never costs an extra /next.
+   */
+  function earlyRead(s) {
+    var p = pvOf(s);
+    if (!p || p.read || !s.view || !online()) return;
+    var v = s.view, seq = p.seq;
+    js(v, call('early', [EARLY_MS])).then(function (r) {
+      if (s.view !== v || p.seq !== seq || p.read || !r || !r.ok || !r.early) return;
+      p.read = r;
+      update(s);
+    }, function () { /* the reads at dom-ready say */ });
   }
 
   /** Classes, the trim and the info, from the slot's state. */
@@ -1342,7 +1474,7 @@
     cm.hidden = true;
     info.appendChild(cm);
     // view + toggle: for watch-comments.js (its reads in the page, and "Open comments on YouTube" = Full page).
-    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, container: cm,
+    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, signedIn: m.signedIn, early: !!(p.read && p.read.early), container: cm,
       view: s.view, toggle: function () { return toggle(s); } } })); } catch (e) { /* no listeners */ }
   }
 

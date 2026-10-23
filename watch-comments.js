@@ -60,6 +60,7 @@
 
   var YT = 'https://www.youtube.com';
   var PAGE_MAX = 400;          // comments kept in the list (older ones stay, the next pages stop)
+  var HOOK_TOKEN_MAX = 4000;   // the view's token is cut at this (watch-playview.js dataFor); one that long may be cut: the page is asked
   var SHORT_RO = 'Not in Lumen for a Short yet: its comments are for reading';   // a Short's Like / Reply (words 'shortread')
   var CLAMP = 300;             // characters before "Read more"
 
@@ -593,6 +594,7 @@
     if (st && st.key === key) return st;
     if (st) { teardown(st); STATES.splice(STATES.indexOf(st), 1); }
     st = { slot: d.slot, key: key, wcId: d.wcId, videoId: d.videoId, short: !!d.short, hookToken: d.comments && d.comments.token ? String(d.comments.token) : '',
+      hookSigned: typeof d.signedIn === 'boolean' ? d.signedIn : null,
       phase: 'loading', why: '', message: '', signedIn: null, header: null, items: [], next: '', sortLabel: '', loading: false, pageWhy: '',
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
       expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null };
@@ -645,14 +647,26 @@
     var tile = box.closest ? box.closest('.wp-tile') : null;
     st.tile = d.scroller || tile || st.tile;   // what scrolls the list (the next page loads at its end): the tile, or the Shorts view's mount
     st.view = d.view || (tile ? tile.querySelector('webview') : null) || st.view;
+    var hadToggle = !!st.toggle;
     st.toggle = typeof d.toggle === 'function' ? d.toggle : st.toggle;
     var hadFocus = st.focus && st.root.contains(st.focus) && (document.activeElement === document.body || !document.activeElement) ? st.focus : null;
     box.hidden = false;
     box.replaceChildren(st.root);
     if (hadFocus && hadFocus.isConnected) { try { hadFocus.focus({ preventScroll: true }); } catch (e) { /* gone */ } }
     pageCss(st);
-    if (!st.started) { st.started = true; start(st); }
-    else draw(st);
+    // Started: the section is only moved into the view's new mount (its nodes as they were). It was redrawn whole
+    // on each of the view's info draws (every page read while the video opens, up to 400 comments rebuilt each
+    // time) though nothing in it had changed; only "Open comments on YouTube" depends on the view (its toggle).
+    if (!st.started) {
+      // the view's later reads carry the page's own data: its token and sign-in, for start()
+      if (d.comments && d.comments.token) st.hookToken = String(d.comments.token);
+      if (typeof d.signedIn === 'boolean') st.hookSigned = d.signedIn;
+      // The view's early words (watch-playview.js EARLY_MS: from the page before its app has run): the page's own
+      // data isn't there yet, so asking now would cost a whole /next for what the page is about to hold. The
+      // loading state shows; the view's next draw starts them.
+      if (d.early) { st.phase = 'loading'; draw(st); }
+      else { st.started = true; start(st); }
+    } else if (hadToggle !== !!st.toggle) draw(st);
     watchScroll(st);
   }
   document.addEventListener('lumen-pv-info', onInfo);
@@ -674,6 +688,17 @@
     st.phase = 'loading';
     draw(st);
     if (!st.view) { fail(st, 'the video’s page isn’t there'); return; }
+    // The view's own read already carries this video's first comments token (the page's data, checked to be this
+    // video's: watch-playview.js dataFor) and its sign-in: the first page is asked for at once, not after one more
+    // trip into the page (first()) while YouTube's page is at its busiest, opening. A Short's section, a video the
+    // page moved to in place (its data is the first video's: no token) or a token cut short ask the page as before.
+    if (!st.short && st.hookToken && st.hookToken.length < HOOK_TOKEN_MAX) {
+      st.signedIn = st.hookSigned;
+      st.from = 'view';
+      page(st, st.hookToken, 'first', seq);
+      return;
+    }
+    st.from = 'page';
     js(st.view, call('first', st.short ? [st.videoId] : [])).then(function (r) {
       if (seq !== st.seq) return;
       if (!r || !r.ok) { fail(st, (r && r.reason) || 'YouTube’s page didn’t answer'); return; }
@@ -1241,7 +1266,7 @@
       links: (c.segs || []).filter(function (s) { return s.link; }).map(function (s) { return { text: s.text, href: s.link.href, kind: s.link.kind }; }) }; };
     var rep = {};
     Object.keys(st.replies).forEach(function (k) { var r = st.replies[k]; rep[k] = { n: r.items.length, next: !!r.next, loading: r.loading, why: r.why, items: r.items.map(flat) }; });
-    return { slot: st.slot, videoId: st.videoId, phase: st.phase, why: st.why, message: st.message, signedIn: st.signedIn, count: st.header ? st.header.countText : '',
+    return { slot: st.slot, videoId: st.videoId, from: st.from || '', phase: st.phase, why: st.why, message: st.message, signedIn: st.signedIn, count: st.header ? st.header.countText : '',
       sorts: st.header ? st.header.sorts.map(function (s) { return s.label; }) : [], sort: st.sortLabel, n: st.items.length, next: !!st.next, loading: st.loading, pageWhy: st.pageWhy,
       requests: st.requests, items: st.items.map(flat), replies: rep, expanded: Object.keys(st.expanded).filter(function (k) { return st.expanded[k]; }),
       notes: JSON.parse(JSON.stringify(st.notes)), attached: st.root.isConnected,
