@@ -184,7 +184,7 @@ const ctx = vm.createContext(win);
     const W = FD.makeWindow({});
     W.load(path.join(ROOT, 'watch-comments.js'));
     const LC = W.win.LumenComments;
-    const loads = (calls) => calls.filter((c) => c.code.indexOf('__lumenCm.load(') >= 0);
+    const loads = (calls) => calls.filter((c) => c.code.length < 1024 && c.code.indexOf('L.load(') >= 0);
     // A section the way the view draws one: its info's lumen-pv-info, with the page's own first token (no trip into the page).
     async function openSection(slot) {
       const pg = FD.page(W.doc);
@@ -203,6 +203,8 @@ const ctx = vm.createContext(win);
     const A = await openSection('cmA');
     const stA = LC._state().states.filter((x) => x.slot === 'cmA')[0];
     check(loads(A.pg.calls).length === 1 && stA && stA.loading, 'an opened section: its first page of comments is out on the page', stA);
+    check(A.pg.calls.length === 2 && A.pg.calls[0].code === LC.INSTALL && A.pg.calls[1].code.length < 1024 && LC.INSTALL.length > 5000 && LC.GUEST_V === 2,
+      'the comments’ reader goes in once, first; the load that can wait is a short call under 1 KB (never the ' + LC.INSTALL.length + '-char reader)', A.pg.calls.map((c) => c.code.length));
     A.root.appendChild(new FD.El(W.doc, 'div'));   // a drawn row
     const callsAtClose = A.pg.calls.length;
     LC.forget('cmA');

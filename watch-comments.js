@@ -542,8 +542,19 @@
     window.__lumenCm = { v: V, first: first, load: load, press: press, showOwn: showOwn, seek: seek, state: state };
   }
   var GUEST = '(' + String(guest) + ')();';
+  function argList(args) { return (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(','); }
+  /** The reader installed and one call made, in one string (the unit tests' sandboxes). */
   function call(method, args) {
-    return GUEST + 'window.__lumenCm.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
+    return GUEST + 'window.__lumenCm.' + method + '(' + argList(args) + ')';
+  }
+  /* The reader goes into a page once per document (INSTALL: it runs at once and settles); every call is then a short
+     string (short). Electron keeps a call's code until its promise settles, and a load or a press into a page that
+     went away never settles: a ~14 KB copy of the reader was kept per such call (the same as watch-playview.js's,
+     lumen-perf r64). A page without the reader answers notInstalled; the chrome puts it in and asks once more. */
+  var INSTALL = GUEST + 'true';
+  var GUEST_V = Number((/var V = (\d+);/.exec(String(guest)) || [])[1]) || 0;
+  function short(method, args) {
+    return '(function(){var L=window.__lumenCm;return L&&L.v===' + GUEST_V + '?L.' + method + '(' + argList(args) + '):{ok:false,notInstalled:true};})()';
   }
 
   /**
@@ -557,7 +568,7 @@
 
   var PURE = { YT: YT, PAGE_MAX: PAGE_MAX, CLAMP: CLAMP, runs: runs, safeImg: safeImg, linkOf: linkOf, tSeconds: tSeconds, cmdUrl: cmdUrl,
     segsFromContent: segsFromContent, segsFromRuns: segsFromRuns, num: num, parse: parse, section: section, countLabel: countLabel,
-    words: words, long: long, merge: merge, guest: guest, call: call, PAGE_CSS: PAGE_CSS };
+    words: words, long: long, merge: merge, guest: guest, call: call, short: short, INSTALL: INSTALL, GUEST_V: GUEST_V, PAGE_CSS: PAGE_CSS };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -611,6 +622,30 @@
     return { run: run, close: close, open: function () { return out.length; } };
   }
   function ask(st, v, code) { var pr = js(v, code); return st && st.gate ? st.gate.run(pr) : pr; }
+  /* The reader into the view's current document, once: a count of its documents is kept on the view itself (its
+     did-navigate), so every section on the view shares it. */
+  function putReader(st, v) {
+    if (!v || typeof v.addEventListener !== 'function') return;
+    if (!v.__lumenCmDocs) { var dn = v.__lumenCmDocs = { n: 1, inst: 0 }; v.addEventListener('did-navigate', function () { dn.n++; }); }
+    var d = v.__lumenCmDocs;
+    if (d.inst === d.n) return;
+    var n = d.inst = d.n;
+    ask(st, v, INSTALL).then(function (r) { if (r !== true && d.inst === n) d.inst = 0; }, function () { if (d.inst === n) d.inst = 0; });
+  }
+  /** A call by the reader's name (short); a page without the reader gets it and the call goes once more; still none says why. */
+  function askCm(st, v, method, args) {
+    putReader(st, v);
+    var go = function () { return ask(st, v, short(method, args)); };
+    return go().then(function (r) {
+      if (!r || !r.notInstalled) return r;
+      if (v && v.__lumenCmDocs) v.__lumenCmDocs.inst = 0;
+      putReader(st, v);
+      return go().then(function (r2) {
+        if (r2 && r2.notInstalled) throw new Error('Lumen’s comments reader couldn’t be put in the page');
+        return r2;
+      });
+    });
+  }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function cap(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
@@ -738,7 +773,7 @@
       return;
     }
     st.from = 'page';
-    ask(st, st.view, call('first', st.short ? [st.videoId] : [])).then(function (r) {
+    askCm(st, st.view, 'first', st.short ? [st.videoId] : []).then(function (r) {
       if (seq !== st.seq) return;
       if (!r || !r.ok) { fail(st, (r && r.reason) || 'YouTube’s page didn’t answer'); return; }
       st.signedIn = r.signedIn;
@@ -759,7 +794,7 @@
     st.loading = true; st.pageWhy = '';
     st.requests++;
     draw(st);
-    ask(st, st.view, call('load', [token])).then(function (r) {
+    askCm(st, st.view, 'load', [token]).then(function (r) {
       if (seq !== st.seq) return;
       st.loading = false;
       if (!r || !r.ok) {
@@ -839,7 +874,7 @@
       r.why = 'Replies didn’t finish loading.';
       if (st.root.isConnected) draw(st);
     };
-    ask(st, st.view, call('load', [r.next])).then(function (x) {
+    askCm(st, st.view, 'load', [r.next]).then(function (x) {
       if (seq !== st.seq) { dropped(); return; }
       r.loading = false;
       if (!x || !x.ok) { r.why = 'Replies didn’t load: ' + ((x && x.reason) || 'YouTube’s page didn’t answer') + '.'; draw(st); return; }
@@ -867,7 +902,7 @@
     if (kind === 'reply') st.replyBusy = true;
     draw(st);
     var v = st.view;
-    ask(st, v, call('press', [kind, { id: id, text: text || '' }])).then(function (r) {
+    askCm(st, v, 'press', [kind, { id: id, text: text || '' }]).then(function (r) {
       st.busy[bkey] = false;
       rec.ok = !!(r && r.ok);
       rec.reason = (r && r.reason) || '';
@@ -912,7 +947,7 @@
     var ok = false;
     try { ok = !!st.toggle(); } catch (e) { ok = false; }
     if (!ok) return false;
-    setTimeout(function () { ask(st, v, call('showOwn')).catch(function () { /* the page shows anyway */ }); }, 350);
+    setTimeout(function () { askCm(st, v, 'showOwn').catch(function () { /* the page shows anyway */ }); }, 350);
     return true;
   }
 
@@ -928,7 +963,7 @@
     };
     if (l.kind === 'time') {
       if (!st.view) return say('Lumen couldn’t jump to that time: the video’s page is closed.');
-      ask(st, st.view, call('seek', [l.t])).then(function (r) {
+      askCm(st, st.view, 'seek', [l.t]).then(function (r) {
         if (r && r.ok === false) say('Lumen couldn’t jump to that time: ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
       }, function (e) { say('Lumen couldn’t jump to that time: YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
       return true;

@@ -550,7 +550,7 @@ const leakDone = (async () => {
   const LP = W.win.LumenPlayview;
   const pctx = {};
   const URL0 = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-  const of = (calls, m) => calls.filter((c) => c.code.indexOf('__lumenPv.' + m + '(') >= 0);
+  const of = (calls, m) => calls.filter((c) => c.code.length < 1024 && c.code.indexOf('L.' + m + '(') >= 0);
   // A slot opened the way watch-player.js does, to the point where its page has an early read and a watch out.
   async function openSlot(id) {
     const pg = FD.page(W.doc);
@@ -572,8 +572,16 @@ const leakDone = (async () => {
 
   const A = await openSlot('A');
   const pA = A.s._pv;
-  const outA = of(A.pg.calls, 'early').length === 1 && of(A.pg.calls, 'watch').length === 1 && !!pA.gate && pA.gate.open() === 2;
-  check(outA, 'an opened video view: its early read and a watch are out on the page', A.pg.calls.map((c) => (/__lumenPv\.(\w+)\(/.exec(c.code) || [])[1]));
+  const kinds = (calls) => calls.map((c) => (c.code === PV.INSTALL ? 'INSTALL' : (/L\.(\w+)\(/.exec(c.code) || [])[1] || '?') + ':' + c.code.length);
+  const outA = of(A.pg.calls, 'early').length === 1 && of(A.pg.calls, 'watch').length === 1 && !!pA.gate && pA.gate.open() === 3;
+  check(outA, 'an opened video view: its early read and a watch are out on the page (and the reader’s install, unanswered here)', kinds(A.pg.calls));
+  // The reader goes in once per document; every call that can wait is a short string that names it (lumen-perf r64:
+  // Electron kept a ~28 KB copy of the reader per never-answered call).
+  const installs = A.pg.calls.filter((c) => c.code === PV.INSTALL).length;
+  check(installs === 1 && A.pg.calls[0].code === PV.INSTALL && A.pg.calls.every((c) => c.code === PV.INSTALL || c.code.length < 1024),
+    'the reader goes in once for the document, first; every other call (the early read, the reads, the watch) is under 1 KB', kinds(A.pg.calls));
+  check(['early', 'watch', 'press', 'tick', 'read', 'apply', 'seek'].every((m) => PV.short(m, ['youtube', true, 2500, 'x'.repeat(100)]).length < 1024) && PV.GUEST_V === 9 && PV.INSTALL.length > 10000,
+    'every page call’s string is under 1 KB, the reader (' + PV.INSTALL.length + ' chars) only in its install, and the short calls name its version (' + PV.GUEST_V + ')');
   pA.info.appendChild(new FD.El(W.doc, 'div'));   // as a drawn info would hold
   const callsAtClose = A.pg.calls.length;
   closeSlot(A);
@@ -586,10 +594,26 @@ const leakDone = (async () => {
   check(A.pg.calls.length === callsAtClose, 'and nothing more is asked of a closed view’s page', A.pg.calls.length - callsAtClose);
   check(!LP._state().slots.some((x) => x.id === 'A'), 'the closed slot is no longer one of the view’s slots');
 
+  {
+    // A page without the reader (a new document since, an older Quartz's): the call answers notInstalled; the reader
+    // goes in again and the call goes once more, and that answer is taken.
+    const C = await openSlot('C');
+    const pC = C.s._pv;
+    const n0 = C.pg.calls.length;
+    of(C.pg.calls, 'watch')[0].ok({ ok: false, notInstalled: true });
+    await wait(10);
+    const again = C.pg.calls.slice(n0);
+    check(again.length === 2 && again[0].code === PV.INSTALL && /L\.watch\(/.test(again[1].code) && again[1].code.length < 1024, 'a page without the reader: it goes in again, then the same call once more', kinds(again));
+    again[1].ok({ ok: true, svc: 'youtube', url: URL0, title: 'Words again', channel: { name: 'C' }, like: { found: false }, sub: { found: false } });
+    await wait(10);
+    check(!!pC.read && pC.read.title === 'Words again', 'and its answer is taken', pC.read && pC.read.title);
+    closeSlot(C);
+  }
+
   if (gcNow) {
     // The leak itself: a closed view whose page never answers (its early read and watch out for good) is collected.
     const B = await openSlot('B');
-    const pending = B.pg.calls.filter((c) => !/__lumenPv\.tick\(/.test(c.code));   // held, as the page holds them
+    const pending = B.pg.calls.filter((c) => c.code !== PV.INSTALL && !/L\.tick\(/.test(c.code));   // held, as the page holds them
     const refs = { slot: new WeakRef(B.s), tile: new WeakRef(B.s.tile), info: new WeakRef(B.s._pv.info), view: new WeakRef(B.pg.v) };
     closeSlot(B);
     B.s = null; B.pg = null;

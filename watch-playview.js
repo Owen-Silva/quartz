@@ -807,8 +807,24 @@
     window.__lumenPv = { v: V, apply: apply, read: read, press: press, seek: seek, tick: tick, watch: watch, early: early };
   }
   var GUEST = '(' + String(guest) + ')(' + WATCH_GAP_MS + ');';
+  function argList(args) { return (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(','); }
+  /** The reader installed and one call made, in one string (the unit tests' sandboxes, and any page used once). */
   function call(method, args) {
-    return GUEST + 'window.__lumenPv.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
+    return GUEST + 'window.__lumenPv.' + method + '(' + argList(args) + ')';
+  }
+  /*
+   * The reader goes into a page ONCE per document (INSTALL: it runs at once and settles), and every call the chrome
+   * makes is then a short string that uses the reader already there (short). Electron keeps a call's code until its
+   * promise settles, and a call into a page that went away never settles: with the reader in front of every call,
+   * each video view opened and closed kept one more ~28 KB copy of it (lumen-perf, r64: the early read's, held by an
+   * executeJavaScript that never answered; the gate frees Lumen's own closures, not Electron's copy of the code).
+   * A page without this reader (a new document, a page where it never went in, an older Quartz's) answers
+   * notInstalled, and the chrome puts it in and asks once more (watch-playview.js askPv).
+   */
+  var INSTALL = GUEST + 'true';
+  var GUEST_V = Number((/var V = (\d+);/.exec(String(guest)) || [])[1]) || 0;
+  function short(method, args) {
+    return '(function(){var L=window.__lumenPv;return L&&L.v===' + GUEST_V + '?L.' + method + '(' + argList(args) + '):{ok:false,notInstalled:true};})()';
   }
 
   /*
@@ -848,7 +864,7 @@
   }
 
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, STALE_MS: STALE_MS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
-    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call, gate: gate,
+    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call, short: short, INSTALL: INSTALL, GUEST_V: GUEST_V, gate: gate,
     ytId: ytId, ytMoved: ytMoved, tSeconds: tSeconds, clockSeconds: clockSeconds, descLink: descLink, descSegs: descSegs, clock: clock };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -920,6 +936,32 @@
     out.catch(function (e) { if (e && e.code === 'late') p.lates = (p.lates || 0) + 1; });
     return out;
   }
+  /** The reader into this document, once (INSTALL: it runs at once and settles); calls sent after it run after it. */
+  function putReader(s, v) {
+    var p = pvOf(s);
+    if (!p || p.instDoc === p.docN) return;
+    var doc = p.instDoc = p.docN;
+    ask(s, v, INSTALL, CALL_MS).then(function (r) { if (r !== true && p.instDoc === doc) p.instDoc = -1; }, function () { if (p.instDoc === doc) p.instDoc = -1; });
+  }
+  /**
+   * A call into the page by the reader's name (short: a few hundred bytes, never the reader itself). A page that
+   * has no reader (notInstalled: a new document since, or one it never got into) gets it, and the call goes once
+   * more; still none says why (never a silent nothing: the caller's own failure path shows it).
+   */
+  function askPv(s, v, method, args, ms) {
+    var p = pvOf(s);
+    putReader(s, v);
+    var go = function () { return ask(s, v, short(method, args), ms); };
+    return go().then(function (r) {
+      if (!r || !r.notInstalled) return r;
+      if (p) p.instDoc = -1;
+      putReader(s, v);
+      return go().then(function (r2) {
+        if (r2 && r2.notInstalled) throw new Error('Lumen’s reader couldn’t be put in the page');
+        return r2;
+      });
+    });
+  }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function layerOf() { return CTX && CTX.L ? CTX.L : null; }
 
@@ -948,7 +990,7 @@
     observeLayer();
     var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0, page: 0, navUrl: '',
       timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '',
-      gate: gate(), gone: false };   // gate: its calls into the page (destroy() ends them); gone: destroyed
+      gate: gate(), gone: false, docN: 0, instDoc: -1 };   // gate: its calls into the page (destroy() ends them); gone: destroyed
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'pv-cover');
@@ -992,6 +1034,8 @@
       p.applied = false; p.noRoot = false;
       update(s);
     });
+    // A new document (commit): it has no reader yet (putReader puts it in with the next call).
+    v.addEventListener('did-navigate', function () { if (s.view === v) p.docN++; });
     // The new document is in (commit): its first words, long before dom-ready (EARLY_MS). A YouTube video page only.
     v.addEventListener('did-navigate', function (e) {
       if (s.view !== v || s.service !== 'youtube' || pageKind(String((e && e.url) || ''), s.service) !== 'watch') return;
@@ -1115,7 +1159,7 @@
     if (!p || p.seq !== seq || !s.view) return;
     var v = s.view;
     var on = wantTrim(s);
-    took(s, seq, v, on, ask(s, v, call('tick', [s.service, on])), last, false);
+    took(s, seq, v, on, askPv(s, v, 'tick', [s.service, on]), last, false);
   }
   /** A read's answer (a timed read's, or a watch's): the info from it, and the next watch while it is incomplete. */
   function took(s, seq, v, on, pr, last, watched) {
@@ -1175,7 +1219,7 @@
     if (!p || p.watch === seq || p.seq !== seq || p.reading !== seq || !s.view || !online()) return;
     var v = s.view, on = wantTrim(s);
     p.watch = seq;
-    var pr = ask(s, v, call('watch', [s.service, on, WATCH_MS]), WATCH_MS + LATE_MS);
+    var pr = askPv(s, v, 'watch', [s.service, on, WATCH_MS], WATCH_MS + LATE_MS);
     var free = function () { if (p.watch === seq) p.watch = 0; };
     // freed before its answer is taken, so the answer can ask for the next watch
     took(s, seq, v, on, pr.then(function (r) { free(); return r; }, function (e) { free(); throw e; }), false, true);
@@ -1191,7 +1235,7 @@
     var p = pvOf(s);
     if (!p || p.read || !s.view || !online()) return;
     var v = s.view, seq = p.seq;
-    ask(s, v, call('early', [EARLY_MS]), EARLY_MS + LATE_MS).then(function (r) {
+    askPv(s, v, 'early', [EARLY_MS], EARLY_MS + LATE_MS).then(function (r) {
       if (s.view !== v || p.seq !== seq || p.read || !r || !r.ok || !r.early) return;
       p.read = r;
       update(s);
@@ -1211,7 +1255,7 @@
     if (s.view && p.applied !== wantTrim(s) && (p.applied || p.phase !== 'loading')) {
       var v = s.view;
       var want = wantTrim(s);
-      ask(s, v, call('apply', [s.service, want])).then(function (a) { if (s.view === v) { p.applied = !!(a && a.on); render(s); } }, function () { /* the next load says */ });
+      askPv(s, v, 'apply', [s.service, want]).then(function (a) { if (s.view === v) { p.applied = !!(a && a.on); render(s); } }, function () { /* the next load says */ });
     }
     render(s);
     syncBar(s);
@@ -1312,7 +1356,7 @@
       render(s);
     }, PRESS_ANSWER_MS);
     render(s);
-    ask(s, v, call('press', [s.service, kind, arg === undefined ? null : arg]), PRESS_ANSWER_MS + LATE_MS).then(function (r) {
+    askPv(s, v, 'press', [s.service, kind, arg === undefined ? null : arg], PRESS_ANSWER_MS + LATE_MS).then(function (r) {
       if (!mine()) return;
       settled = true;
       clearTimeout(p.pressTimer);
@@ -1324,7 +1368,7 @@
       if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
-      return ask(s, v, call('read', [s.service])).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
+      return askPv(s, v, 'read', [s.service]).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
     }).catch(function (e) {
       if (s.view !== v || p.page !== page) return;
       // Past the gate's limit (ask) with the press already settled: PRESS_ANSWER_MS's note has said why, or the press
@@ -1374,7 +1418,7 @@
       // the comments before r62). Focus stays on the link, so the next chapter is one Tab away.
       if (!s.view) return fail('Lumen couldn’t jump to ' + clock(l.t) + ': the video’s page is closed.');
       var v = s.view;
-      ask(s, v, call('seek', [l.t])).then(function (r) {
+      askPv(s, v, 'seek', [l.t]).then(function (r) {
         if (r && r.ok) { rec.ok = true; rec.how = r.how; return; }
         fail('Lumen couldn’t jump to ' + clock(l.t) + ': ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
       }, function (e) { fail('Lumen couldn’t jump to ' + clock(l.t) + ': YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
