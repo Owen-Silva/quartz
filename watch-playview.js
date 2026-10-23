@@ -365,6 +365,18 @@
     return !!(r && r.title && r.channel && r.channel.name && r.like && r.like.found && r.sub && r.sub.found);
   }
 
+  /**
+   * Whether the info's lumen-pv-info says early (watch-comments.js then waits for the view's next draw instead of
+   * asking for the comments itself): only while the reads that will replace the early words are still to come
+   * (phase 'loading'). An early read stays the info's read until a later one lands; when every read after it
+   * failed (took: the last one's catch), the reads are over, the info says 'unread' and why, and early:true there
+   * left the comments "Loading…" for good with no reason. Ended reads ('unread', 'partial', 'ready', 'failed',
+   * 'offline') say false: the comments start, from the page's own data or /next, or show their own reason.
+   */
+  function infoEarly(phase, read) {
+    return !!(read && read.early) && phase === 'loading';
+  }
+
   /** The words for a disabled button or a note under the row, or '' when it can be pressed. */
   function whyOff(m, key, phase) {
     if (phase === 'offline') return 'You’re offline';
@@ -754,7 +766,7 @@
   }
 
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
-    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, whyOff: whyOff, guest: guest, call: call,
+    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call,
     ytId: ytId, ytMoved: ytMoved, tSeconds: tSeconds, clockSeconds: clockSeconds, descLink: descLink, descSegs: descSegs, clock: clock };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -1043,7 +1055,8 @@
   /**
    * The early read (EARLY_MS): drawn only while no read of the page has landed yet, and dropped once the reads at
    * dom-ready start (startReads bumps seq) or the slot moves on (newPage). Its answer is words only; the comments
-   * wait for the page's own data (watch-comments.js: early), so it never costs an extra /next.
+   * wait for the page's own data (watch-comments.js: early), so it never costs an extra /next. They wait only while
+   * the reads are still to come (infoEarly): reads that all failed end the wait, never leave it "Loading…" for good.
    */
   function earlyRead(s) {
     var p = pvOf(s);
@@ -1496,7 +1509,7 @@
     cm.hidden = true;
     info.appendChild(cm);
     // view + toggle: for watch-comments.js (its reads in the page, and "Open comments on YouTube" = Full page).
-    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, signedIn: m.signedIn, early: !!(p.read && p.read.early), container: cm,
+    try { document.dispatchEvent(new CustomEvent('lumen-pv-info', { detail: { slot: s.id, wcId: s.wcId, videoId: m.videoId, comments: m.comments, signedIn: m.signedIn, early: infoEarly(p.phase, p.read), container: cm,
       view: s.view, toggle: function () { return toggle(s); } } })); } catch (e) { /* no listeners */ }
   }
 

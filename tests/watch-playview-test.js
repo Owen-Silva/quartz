@@ -417,6 +417,13 @@ setTimeout(() => {
     && e1.like.found === false && e1.applied === false && e1.comments === null && !('data-lumen-pv' in attrs), 'early read: this video’s title, channel and description at once; no buttons, no trim, no comments token', e1);
   const em = e1 && PV.model('youtube', e1, null, '');
   check(!!em && em.title === 'Early title' && em.channel.name === 'The Channel' && em.desc.links.length === 0 && em.videoId === 'abcDEF12345', 'and the info draws from it (the plain description’s links come from its text)', em && { title: em.title, ch: em.channel });
+  // r64 (#5): the early read stays the info's read until a later one lands. All the reads after it failing (took's
+  // catch on the last one: phase 'unread', with why) used to leave lumen-pv-info saying early:true on every draw,
+  // and the comments waited "Loading…" for good with no reason. early is said only while reads are still to come.
+  check(!!e1 && PV.infoEarly('loading', e1) === true, 'early read, the reads still to come: lumen-pv-info says early (the comments wait one draw for the page’s own data)');
+  check(!!e1 && PV.infoEarly('unread', e1) === false, 'early read, then every read failed (the info says unread, and why): early is false, so the comments start (the page’s data or /next) or say their own reason');
+  check(!!e1 && ['partial', 'ready', 'failed', 'offline'].every((ph) => PV.infoEarly(ph, e1) === false), 'and in every other end state (partial, ready, failed, offline): false');
+  check(PV.infoEarly('loading', Object.assign({}, e1, { early: undefined })) === false && PV.infoEarly('loading', null) === false, 'a page read (not the early one), or none: false, as before');
   delete win.ytInitialPlayerResponse;
 }, 900);
 setTimeout(() => {
