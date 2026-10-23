@@ -699,6 +699,38 @@ const leakDone = (async () => {
       'a view closed while its page loads: its held calls end “closed”, and none is ever sent', { heldN, sent: pg2.calls.length, calls: p2.tl.calls });
   }
 
+  // A slow page (r64): still loading 12 s after its commit. The held calls' limits start when they go, so the early read
+  // and the reads due meanwhile never end "late" before they are sent; the info says the page is still loading (held),
+  // and the reads land the moment it stops, with no failure note.
+  {
+    const pg = FD.page(W.doc);
+    let loading = true;
+    pg.v.isLoadingMainFrame = () => loading;
+    const s = { id: 'SLOW', wcId: 7, service: 'youtube', url: URL0, item: null, tile: new FD.El(W.doc, 'div') };
+    W.doc.body.appendChild(s.tile);
+    s.view = pg.v;
+    s.tile.appendChild(pg.v);
+    LP.attach(pctx, s, pg.v);
+    pg.v.dispatchEvent({ type: 'did-start-navigation', isMainFrame: true, url: URL0 });
+    pg.v.dispatchEvent({ type: 'did-navigate', url: URL0 });
+    pg.v.dispatchEvent({ type: 'dom-ready' });
+    await wait(12000);
+    const p = s._pv;
+    const st = LP._state().slots.find((x) => x.id === 'SLOW');
+    check(pg.calls.length === 0 && (p.lates || 0) === 0 && p.tl.calls.every((c) => c.held && c.how === undefined) && p.phase === 'loading' && p.why === '' && !!st && st.held === true,
+      'a page still loading after 12 s: nothing sent, nothing “late”, no failure; the info says it is still loading (held)', { sent: pg.calls.length, lates: p.lates, calls: p.tl.calls.map((c) => c.k + (c.how ? '!' + c.how : '')), phase: p.phase, why: p.why, held: st && st.held });
+    loading = false;
+    pg.v.dispatchEvent({ type: 'did-stop-loading' });
+    await wait(10);
+    const full = { ok: true, svc: 'youtube', url: URL0, videoId: 'dQw4w9WgXcQ', title: 'Slow page title', channel: { name: 'Slow channel' }, like: { found: true }, sub: { found: true },
+      descRead: true, desc: { text: 'Its description', meta: '', links: [] }, applied: true, root: true, on: true };
+    pg.calls.forEach((c) => c.ok(c.code === PV.INSTALL ? true : Object.assign({}, full)));
+    await wait(30);
+    check(p.phase === 'ready' && p.read && p.read.title === 'Slow page title' && (p.lates || 0) === 0 && p.why === '' && p.held === false && !!p.ended && p.ended.how === 'complete',
+      'at its stop the calls go, with their own limits from then: the info lands, complete, with no “late” and no note', { phase: p.phase, title: p.read && p.read.title, lates: p.lates, why: p.why, held: p.held, ended: p.ended, sent: kinds(pg.calls) });
+    closeSlot({ s, pg });
+  }
+
   if (gcNow) {
     // The leak itself: a closed view whose page never answers (its early read and watch out for good) is collected.
     const B = await openSlot('B');

@@ -987,13 +987,32 @@
     try { return v.isLoadingMainFrame() === true; } catch (e) { return false; }
   }
   function afterLoad(p) { return new Promise(function (go) { p.waiters.push(go); }); }
+  /*
+   * A page still loading past HELD_NOTE_MS (a slow page: its stop came 6.4 s after dom-ready in a real-YouTube probe):
+   * the info says so (renderYT / renderOther: p.held) instead of only "Loading the title...", and the calls go, with
+   * their own limits, the moment the page stops.
+   */
+  var HELD_NOTE_MS = 6000;
+  function holding(s, p) {
+    if (p.heldT || p.held) return;
+    p.heldT = setTimeout(function () { p.heldT = 0; if (!p.gone && p.waiters.length) { p.held = true; render(s); } }, HELD_NOTE_MS);
+  }
   function ask(s, v, code, ms, kind) {
     var p = pvOf(s);
-    var held = !!(p && p.waiters) && loadingNow(s, v);
+    if (!p || !p.gate) return js(v, code);
+    var held = !!p.waiters && loadingNow(s, v);
     var rec = { k: kind || 'call', sent: tlAt(p), held: held };   // went: when a held call went (the stop)
-    var pr = held ? afterLoad(p).then(function () { rec.went = tlAt(p); return js(v, code); }) : js(v, code);
-    if (!p || !p.gate) return pr;
-    var out = p.gate.run(pr, ms || CALL_MS);
+    var out;
+    if (held) {
+      // The hold has no limit of its own (only close() ends it): a slow page's reads still land when it stops, as
+      // they did before the hold. The call's own limit (ms) starts when it goes, so it measures the page, not the load.
+      holding(s, p);
+      out = p.gate.run(afterLoad(p), 0).then(function () {
+        if (p.gate.shut()) { var e = new Error('the view is closed'); e.code = 'closed'; throw e; }
+        rec.went = tlAt(p);
+        return p.gate.run(js(v, code), ms || CALL_MS);
+      });
+    } else out = p.gate.run(js(v, code), ms || CALL_MS);
     if (p.tl) { p.tl.calls.push(rec); if (p.tl.calls.length > TL_MAX) p.tl.calls.shift(); }
     out.then(function (r) { rec.ans = tlAt(p); if (r && r.notInstalled) rec.how = 'notInstalled'; }, function (e) { rec.ans = tlAt(p); rec.how = (e && e.code) || 'error'; });
     // a call past its limit, counted for the e2e and the probes (_state: lates; the reads' end says it too)
@@ -1108,6 +1127,9 @@
       if (s.view !== v) return;
       p.stopDoc = p.docN;
       tlMark(p, 'stop');
+      clearTimeout(p.heldT);
+      p.heldT = 0;
+      p.held = false;
       var w = p.waiters;
       p.waiters = [];
       w.forEach(function (go) { go(); });
@@ -1191,6 +1213,7 @@
     p.page = (p.page || 0) + 1;
     if (p.gate) p.gate.close();
     p.waiters = [];   // calls held for a load that may never stop: dropped with the view (ask)
+    clearTimeout(p.heldT);
     clearTimeout(p.pressTimer);
     clearTimeout(p.pressT);
     p.pressing = false; p.pendingRender = false;
@@ -1611,7 +1634,7 @@
     var it = p.item || {};
     try {
       return JSON.stringify([s.service, s.id, s.wcId, s.title, phase, moved, p.why, p.busy, p.confirm, p.more, p.save, p.spKnown,
-        p.lastShowPage || 0, !!p.spOpening, it.id, it.title, it.subtitle, p.read]);
+        p.lastShowPage || 0, !!p.spOpening, it.id, it.title, it.subtitle, p.read, !!p.held]);
     } catch (e) { return ''; }
   }
   function stripT(u) { return String(u || '').replace(/[?&]t=\d+s?/, ''); }
@@ -1725,6 +1748,8 @@
     // Why anything is off: one line, the reason in words.
     if (phase === 'offline') note(info, 'You’re offline. The video’s details load when you’re back online.', 'warn');
     else if (phase === 'failed') note(info, p.why || 'YouTube’s page didn’t load.', 'err');
+    // still loading past HELD_NOTE_MS (ask: holding): said, never only a skeleton that looks stuck
+    else if (phase === 'loading' && p.held) note(info, 'YouTube’s page is still loading, so Lumen hasn’t read it yet. The details come the moment it finishes.', '');
     // The reads ended on a page still drawn for the last video (readYT: stale): the channel, description and buttons
     // are missing for that reason, said before "signed out" (which would leave the missing channel unexplained).
     else if ((phase === 'unread' || phase === 'partial') && m.stale) note(info, 'YouTube’s page still showed the last video’s details when Lumen last read it, so this video’s aren’t here'
@@ -1799,6 +1824,7 @@
     if (p.spOpening) disable(sp, 'Opening…');
     if (phase === 'offline') note(info, 'You’re offline. ' + m.name + '’s player needs the connection back.', 'warn');
     else if (phase === 'failed') note(info, p.why || m.name + '’s page didn’t load.', 'err');
+    else if (phase === 'loading' && p.held) note(info, m.name + '’s page is still loading, so Lumen hasn’t read it yet. The details come the moment it finishes.', '');
     else if (p.why) note(info, p.why, 'warn');
     else if (!m.title && phase !== 'loading') note(info, 'Lumen couldn’t read this title from ' + m.name + '’s page.', 'warn');
   }
@@ -1912,7 +1938,7 @@
     var b = function (sel) { var n = q(sel); return n ? { text: n.textContent.trim(), disabled: n.disabled, pressed: n.getAttribute('aria-pressed'), why: n.getAttribute('data-why') || '' } : null; };
     return {
       id: s.id, wcId: s.wcId, service: s.service, url: s.url, kind: kindOf(s), mode: p.mode, userMode: p.userMode, boxed: s.tile.classList.contains('pv'),
-      phase: p.phase, ended: p.ended || null, lates: p.lates || 0, timeline: p.tl ? { ev: Object.assign({}, p.tl.ev), calls: p.tl.calls.map(function (c) { return Object.assign({}, c); }) } : null, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
+      phase: p.phase, ended: p.ended || null, lates: p.lates || 0, held: !!p.held, timeline: p.tl ? { ev: Object.assign({}, p.tl.ev), calls: p.tl.calls.map(function (c) { return Object.assign({}, c); }) } : null, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
       view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, cover: p.cover && !p.cover.hidden,
       title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '', subs: q('.pv-subs') ? q('.pv-subs').textContent : '',
       ep: q('.pv-ep') ? q('.pv-ep').textContent : '', svc: q('.pv-svc-name') ? q('.pv-svc-name').textContent : '',
