@@ -747,12 +747,57 @@
       tick: function (on) { return current(now(on)); }, until: until, stop: stop };
   }
   var GUEST = '(' + String(guest) + ')();';
+  function argList(args) { return (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(','); }
+  /** The reader installed and one call made, in one string (the unit tests' sandboxes, and any page used once). */
   function call(method, args) {
-    return GUEST + 'window.__lumenSh.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
+    return GUEST + 'window.__lumenSh.' + method + '(' + argList(args) + ')';
+  }
+  /*
+   * The reader goes into a page ONCE per document (INSTALL: it runs at once and settles), and every call the chrome
+   * makes is then a short string that uses the reader already there (short). Electron keeps a call's code until its
+   * promise settles, and a call into a page that went away never settles: with the ~28 KB reader in front of every
+   * call, each wait in the page (until(), a step, a press, openFirst) left one more copy of it behind when its page
+   * or view went (r64: the video view's and comments' readers had the same pin). A page without this reader (a new
+   * document, a page it never went into, an older Quartz's) answers notInstalled, and the chrome puts it in and asks
+   * once more (askSh); still none fails the call with the reason, through the caller's own failure path.
+   */
+  var INSTALL = GUEST + 'true';
+  var GUEST_V = Number((/var V = (\d+);/.exec(String(guest)) || [])[1]) || 0;
+  function short(method, args) {
+    return '(function(){var L=window.__lumenSh;return L&&L.v===' + GUEST_V + '?L.' + method + '(' + argList(args) + '):{ok:false,notInstalled:true};})()';
+  }
+
+  /**
+   * The reader into this view's document, once (INSTALL runs at once and settles). Calls sent after it run after it
+   * (one page runs its calls in order), so this costs no round trip. The document count is on the view itself
+   * (did-navigate: shDocs), so a slot's new view starts with none in.
+   */
+  function putReader(run, v) {
+    if (!v || v.__shInst === (v.__shDocs || 0)) return;
+    var doc = v.__shInst = v.__shDocs || 0;
+    run(v, INSTALL).then(function (r) { if (r !== true && v.__shInst === doc) v.__shInst = -1; }, function () { if (v.__shInst === doc) v.__shInst = -1; });
+  }
+  /**
+   * A call into the page by the reader's method name (short: a few hundred bytes, never the reader itself). A page
+   * with no reader (notInstalled) gets it put in and the call goes once more; still none says why (never a silent
+   * nothing: the caller's own failure path shows the reason). run(v, code): the chrome's js() (a test's fake).
+   */
+  function askVia(run, v, method, args) {
+    putReader(run, v);
+    var go = function () { return run(v, short(method, args)); };
+    return go().then(function (r) {
+      if (!r || !r.notInstalled) return r;
+      v.__shInst = -1;
+      putReader(run, v);
+      return go().then(function (r2) {
+        if (r2 && r2.notInstalled) throw new Error('Lumen’s reader couldn’t be put in YouTube’s page');
+        return r2;
+      });
+    });
   }
 
   var PURE = { ORIGIN: ORIGIN, READS: READS, MOVES: MOVES, WHEEL: WHEEL, LAY: LAY, ASP: ASP, shape: shape, initial: initial, HIDE: HIDE, KEEP: KEEP, route: route, isShorts: isShorts, idOf: idOf,
-    entryUrl: entryUrl, shortUrl: shortUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call };
+    entryUrl: entryUrl, shortUrl: shortUrl, gesture: gesture, keyStep: keyStep, follow: follow, complete: complete, box: box, trimCss: trimCss, guest: guest, call: call, short: short, INSTALL: INSTALL, GUEST_V: GUEST_V, askVia: askVia };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
   /* ================================================================ the chrome */
@@ -791,6 +836,7 @@
   function js(v, code) {
     try { var p = v.executeJavaScript(code, true); return p && p.then ? p : Promise.resolve(p); } catch (e) { return Promise.reject(e); }
   }
+  function askSh(v, method, args) { return askVia(js, v, method, args); }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function layerOf() { return CTX && CTX.L ? CTX.L : null; }
   function shOf(s) { return s && s._sh ? s._sh : null; }
@@ -896,7 +942,7 @@
       if (p.whyShort) { p.why = ''; p.whyShort = false; }
       // YouTube's Save list was for the Short just left: it is closed in the page too (left open, invisible
       // under the trim, the next Save read its ticks for the new Short).
-      if (p.save) js(v, call('press', ['save-close', null])).catch(function () { /* the page went: nothing open */ });
+      if (p.save) askSh(v, 'press', ['save-close', null]).catch(function () { /* the page went: nothing open */ });
       p.save = null; p.confirm = false;
       // A refused copy already said under the Short just left is that Short's reason (r62: a reason never outlives
       // its Short). A copy still in flight, or "Link copied: <its link>", stays: each note names its own link, so a
@@ -906,8 +952,10 @@
       if (isShorts(u, s.service)) startReads(s, true);
       else update(s);
     });
-    // A new document committed: whatever the old one wore is gone with it.
+    // A new document committed: whatever the old one wore is gone with it, Lumen's reader too (putReader puts it
+    // in again with the next call).
     v.addEventListener('did-navigate', function (e) {
+      v.__shDocs = (v.__shDocs || 0) + 1;
       if (s.view !== v) return;
       p.trimmed = false;
       if (p.failedLoad || !isShorts((e && e.url) || s.url, s.service)) return;
@@ -1009,7 +1057,7 @@
     p.timers.forEach(function (t) { clearTimeout(t); });
     p.timers = [];
     // A wait still open in the page ends (its observer with it); its answer is dropped (p.reading).
-    if (p.reading && p.asking && s.view) js(s.view, call('stop', [])).catch(function () { /* the page went: nothing waits there */ });
+    if (p.reading && p.asking && s.view) askSh(s.view, 'stop', []).catch(function () { /* the page went: nothing waits there */ });
     p.reading = 0; p.asking = false;
   }
   function startReads(s, moved) {
@@ -1046,7 +1094,7 @@
     // older one in the page; that answer is dropped here, so one load never runs two loops of asks.
     var ask = p.ask = (p.ask || 0) + 1;
     p.asking = true; p.askOn = on;
-    js(v, call('until', [on, p.readSig, Math.max(0, p.readEnd - Date.now())])).then(function (r) {
+    askSh(v, 'until', [on, p.readSig, Math.max(0, p.readEnd - Date.now())]).then(function (r) {
       if (s.view !== v || p.seq !== seq || p.reading !== seq || p.ask !== ask) return;
       p.asking = false;
       if (!r || !r.ok) throw new Error('no answer from the page');
@@ -1064,7 +1112,7 @@
         // isn't the grid's first Short, and the feed picks its own once its app is up.
         if (r.links && p.opened !== r.url && r.ready !== 'loading') {
           p.opened = r.url;
-          js(v, call('openFirst', [])).then(function (o) { if (o && !o.ok && s.view === v) { p.why = 'YouTube’s page has ' + o.reason; render(s); } }, function () { /* the next tick says */ });
+          askSh(v, 'openFirst', []).then(function (o) { if (o && !o.ok && s.view === v) { p.why = 'YouTube’s page has ' + o.reason; render(s); } }, function () { /* the next tick says */ });
         } else if (last) {
           // No Shorts on the grid, or its first Short was clicked and YouTube never opened it: either way the
           // cover says why instead of "Opening the channel's Shorts…" for good.
@@ -1127,7 +1175,7 @@
     // page under it stayed hidden (body visibility: hidden).
     if (s.view && (p.applied || p.trimmed) && !on) {
       var v = s.view;
-      js(v, call('apply', [false])).then(function () { if (s.view === v) { p.applied = false; p.trimmed = false; render(s); } }, function () { /* the next load says */ });
+      askSh(v, 'apply', [false]).then(function () { if (s.view === v) { p.applied = false; p.trimmed = false; render(s); } }, function () { /* the next load says */ });
     }
     render(s);
   }
@@ -1152,7 +1200,7 @@
       p.aspT = setTimeout(function () {
         p.aspT = 0;
         if (p.seq !== seq || s.view !== v || Date.now() - t0 > ASP.POLL) return;
-        js(v, call('aspect', [])).then(function (a) {
+        askSh(v, 'aspect', []).then(function (a) {
           if (p.seq !== seq || s.view !== v) return;
           setAspect(s, a);
           if (!(a && a.fresh)) next();
@@ -1239,7 +1287,7 @@
     var u0 = p.lastUrl;
     p.steps.push(rec);
     if (p.steps.length > 50) p.steps.shift();
-    js(v, call('step', [dir])).then(function (r) {
+    askSh(v, 'step', [dir]).then(function (r) {
       if (s.view !== v) return;
       rec.ok = !!(r && r.ok); rec.via = (r && r.how) || ''; rec.reason = (r && r.reason) || '';
       if (!rec.ok) { p.why = rec.reason || 'YouTube’s page didn’t move'; p.whyShort = true; render(s); return; }
@@ -1296,7 +1344,7 @@
     // forId: the Short Lumen's info names. The page refuses a press when its own Short is another one (the address
     // or YouTube's one player already moved on), so a click never likes or subscribes the Short that came next.
     var target = kind === 'save-toggle' || kind === 'save-close' ? '' : forId;
-    js(v, call('press', [kind, arg === undefined ? null : arg, target])).then(function (r) {
+    askSh(v, 'press', [kind, arg === undefined ? null : arg, target]).then(function (r) {
       if (s.view !== v || p.navs !== nav) return;   // a new document since (newDocument()): not this press's page
       p.busy = '';
       rec.ok = !!(r && r.ok);
@@ -1306,11 +1354,11 @@
       p.whyShort = !!p.why;
       // YouTube's Save list opened for a Short he has since moved on from: closed in the page, never shown as this one's.
       var gone = !!forId && idOf(s.url, s.service) !== forId;
-      if ((kind === 'save-open' || kind === 'save-toggle') && gone && r && r.ok) { js(v, call('press', ['save-close', null])).catch(function () { /* the page went */ }); p.save = null; }
+      if ((kind === 'save-open' || kind === 'save-toggle') && gone && r && r.ok) { askSh(v, 'press', ['save-close', null]).catch(function () { /* the page went */ }); p.save = null; }
       else if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
-      return js(v, call('read', [])).then(function (rr) {
+      return askSh(v, 'read', []).then(function (rr) {
         if (s.view !== v || p.navs !== nav) return;
         if (!rr || !rr.ok) { render(s); return; }
         p.read = rr;

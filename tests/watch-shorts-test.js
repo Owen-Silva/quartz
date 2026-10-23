@@ -434,6 +434,53 @@ check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd
   })());
 }
 
+/* ---- r64: the reader goes into a page once per document; every call is short ------------------------------ */
+// Electron keeps a call's code until its promise settles, and a call into a page that went away never settles: the
+// ~30 KB reader in front of every call (until(), step, press, openFirst all wait in the page) left a copy behind
+// each time. Now INSTALL (the reader, run at once) goes in once per document, and every call is a short string.
+{
+  const calls = [['until', [true, 'x'.repeat(300), 2500]], ['step', [1]], ['press', ['save-toggle', 3, 'abcdefghijk']], ['openFirst', []], ['stop', []],
+    ['read', []], ['aspect', []], ['apply', [false]], ['tick', [true]]];
+  const sizes = calls.map(([m, a]) => SH.short(m, a).length);
+  check(SH.INSTALL.length > 20000 && sizes.every((n) => n < 1024) && SH.GUEST_V > 0, 'r64 calls: every call the chrome makes is under 1 KB (the reader itself goes in once)',
+    { install: SH.INSTALL.length, sizes, v: SH.GUEST_V });
+  // The chrome's own code: no page call carries the reader (call()), and its only executeJavaScript is js(), used by
+  // askSh (askVia: INSTALL or a short call). So no call over 1 KB can wait in a page.
+  const src = fs.readFileSync(path.join(ROOT, 'watch-shorts.js'), 'utf8');
+  const chrome = src.slice(src.indexOf('/* ================================================================ the chrome */'));
+  check(chrome.length > 1000 && !/(^|[^.\w])call\(/.test(chrome) && (chrome.match(/\bjs\(/g) || []).length === 1 && (chrome.match(/executeJavaScript\(/g) || []).length === 1,
+    'r64 calls: the chrome never sends the reader with a call; its one executeJavaScript is js(), reached only through askSh', { calls: (chrome.match(/(^|[^.\w])call\(/g) || []).length, js: (chrome.match(/\bjs\(/g) || []).length });
+  // INSTALL runs at once and settles (true, not a promise); a page without the reader answers notInstalled.
+  const vm = require('vm');
+  const bare = vm.createContext({ window: {}, document: {} });
+  const ni = vm.runInContext(SH.short('until', [true, '', 2500]), bare);
+  check(ni && ni.notInstalled === true && ni.ok === false, 'r64 calls: a page without the reader answers notInstalled (never runs nothing silently)', ni);
+  // askVia: once per document, a retry after notInstalled, a reason when the reader never goes in.
+  const page = { installed: false, broken: false };
+  const sent = [];
+  const run = (v, code) => {
+    sent.push(code === SH.INSTALL ? 'INSTALL' : code.length < 1024 ? 'short' : 'BIG');
+    if (code === SH.INSTALL) { if (!page.broken) page.installed = true; return Promise.resolve(true); }
+    return Promise.resolve(page.installed ? { ok: true } : { ok: false, notInstalled: true });
+  };
+  const view = {};
+  pending.push((async () => {
+    const r1 = await SH.askVia(run, view, 'until', [true, '', 2500]);
+    const r2 = await SH.askVia(run, view, 'step', [1]);
+    check(r1.ok && r2.ok && sent.join(',') === 'INSTALL,short,short', 'r64 calls: the reader goes in once for the document, first; every call after is short', sent.slice());
+    view.__shDocs = 1; page.installed = false; sent.length = 0;
+    const r3 = await SH.askVia(run, view, 'read', []);
+    check(r3.ok && sent.join(',') === 'INSTALL,short', 'r64 calls: a new document gets the reader again with its first call', sent.slice());
+    page.installed = false; sent.length = 0;   // the reader gone with no new document Lumen saw
+    const r4 = await SH.askVia(run, view, 'press', ['like', null, 'abcdefghijk']);
+    check(r4.ok && sent.join(',') === 'short,INSTALL,short', 'r64 calls: a notInstalled answer brings one install and one retry, whose answer is taken', sent.slice());
+    page.installed = false; page.broken = true; sent.length = 0;
+    let why = '';
+    try { await SH.askVia(run, view, 'step', [1]); } catch (e) { why = e.message; }
+    check(/reader couldn’t be put in YouTube’s page/.test(why) && sent.join(',') === 'short,INSTALL,short', 'r64 calls: a reader that never goes in fails the call with its reason (once retried, never silent)', { why, sent });
+  })());
+}
+
 Promise.all(pending).then(() => {
   console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;
