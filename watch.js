@@ -45,6 +45,16 @@
   var Shape = window.WatchShape || null;
   var Merge = window.WatchMerge || null;
 
+  /* The stills come from i.ytimg.com. Its connection (DNS, TCP, TLS) is opened now, while this page
+     parses, says hello and waits for its rows, instead of when the first tile asks (r64). A hint
+     only: nothing is fetched, and a page with no YouTube rows just lets the idle socket close. */
+  try {
+    var pc = document.createElement('link');
+    pc.rel = 'preconnect';
+    pc.href = 'https://i.ytimg.com';
+    (document.head || document.documentElement).appendChild(pc);
+  } catch (err) { /* a hint: nothing to say if it cannot be given */ }
+
   var LINE = 'quartz-watch:';
   var SEARCH_DEBOUNCE_MS = 300;
   var SEARCH_MIN_CHARS = 2;     // a shorter query searches his own rows only, never YouTube
@@ -1430,6 +1440,10 @@
     if (lazy) img.loading = 'lazy';
     img.decoding = 'async';
     img.referrerPolicy = 'no-referrer';
+    // The hero is the page's biggest picture (maxres) and the first thing looked at: it goes first on
+    // the one connection to i.ytimg.com it shares with every tile (r64), instead of waiting for layout
+    // to raise it from the default image priority.
+    if (hero) img.fetchPriority = 'high';
     artLoad(img, it, function () {
       if (img.parentNode) img.parentNode.removeChild(img);
       artFallback(art, it);
