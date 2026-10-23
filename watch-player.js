@@ -491,7 +491,7 @@
     document.body.classList.remove('wp-playing');
     L.el.classList.remove('wp-in');
     if (reduced() || L.el.hidden) teardownDom();
-    else { L.el.classList.add('wp-out'); setTimeout(teardownDom, 700); }
+    else { L.el.classList.add('wp-out'); setTimeout(teardownDom, 300); }   // transitionend's fallback: the close is --m-dur-m-out, 67.5 ms in Lumen's set
     // The keyboard goes back to the rows, where he left them.
     var v = L.owner && L.owner.viewEl;
     if (v) { try { v.focus(); } catch (e) { /* not focusable */ } }
