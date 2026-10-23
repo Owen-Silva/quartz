@@ -919,7 +919,7 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
       };
       const pageMove = (dir) => (guest ? Promise.race([guest.ev('(() => { const b = document.querySelector(' + JSON.stringify(dir > 0 ? '#navigation-button-down button' : '#navigation-button-up button') + '); if (!b) return 0; b.click(); return 1; })()').catch(() => 0), sleep(4000).then(() => 0)]) : Promise.resolve(0));
       const cm = () => chrome.ev('(() => { const c = LumenComments._current(); if (!c) return null; return { videoId: c.videoId, phase: c.phase, why: c.why, n: c.n, count: c.count, sorts: c.sorts, attached: c.attached, shown: c.shown, whyShown: c.whyShown, texts: c.items.map((i) => i.text) }; })()');
-      const cmWait = (cond, ms) => chrome.waitFor(`(() => { const c = LumenComments._current(); return c && (${cond}) ? { videoId: c.videoId, phase: c.phase, n: c.n, attached: c.attached, why: c.why, whyShown: c.whyShown, texts: c.items.map((i) => i.text) } : null; })()`, ms || 8000).catch(() => null);
+      const cmWait = (cond, ms) => chrome.waitFor(`(() => { const c = LumenComments._current(); return c && (${cond}) ? { videoId: c.videoId, phase: c.phase, n: c.n, attached: c.attached, why: c.why, shown: c.shown, whyShown: c.whyShown, texts: c.items.map((i) => i.text) } : null; })()`, ms || 8000).catch(() => null);
       const boxText = () => chrome.ev('(() => { const b = document.querySelector(".wp-layer .sh-info .sh-comments"); return b ? b.textContent : null; })()');
       const attached = () => chrome.ev('LumenComments._state().states.filter((t) => t.attached).map((t) => t.videoId)');
       const active = () => chrome.ev('(() => { const a = document.activeElement; return a ? (a.tagName === "WEBVIEW" ? "webview" : (a.className || a.tagName)) : ""; })()');
@@ -1013,7 +1013,8 @@ run('watch-shorts-e2e', async ({ check, launch, say }) => {
 
       // g. Comments again (keyboard): closed; the focus stays on the button (Tab goes on from there).
       await chrome.ev('document.querySelector(".wp-layer .sh-comments-btn").focus(), 1');
-      await keyIn(chrome, 'Enter', 'Enter', 13);
+      // A real Enter (keyDown with its text, so the button's own activation runs, as a keyboard's does).
+      for (const k of [{ type: 'keyDown', text: String.fromCharCode(13) }, { type: 'keyUp' }]) await chrome.send('Input.dispatchKeyEvent', Object.assign({ key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }, k));
       await sleep(400);
       x = await sh();
       check(!!x && !x.cm && !x.cmBox && x.cmbtn && !x.cmbtn.disabled && (await chrome.ev('document.querySelector(".wp-layer .sh-comments-btn").getAttribute("aria-expanded")')) === 'false',
