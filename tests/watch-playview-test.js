@@ -344,6 +344,38 @@ function ytPage(addrId, flexyId, extra) {
     const ro2 = po.read();
     check(!!ro2 && ro2.descRead === false && ro2.desc.text === '' && PV.complete(ro2) === false, 'another video’s player data is never taken for this one’s (no words, no “none”)', ro2 && { descRead: ro2.descRead, desc: ro2.desc });
     check(PV.complete(Object.assign({}, read)) === true && PV.complete(Object.assign({}, read, { descRead: false })) === false, 'complete(): a read with descRead false is not; one without the field counts as before');
+    // The page manager's data for B (r64): on real YouTube B's description was drawn seconds after its title and
+    // buttons, and the info showed the player's plain words, without the hashtags and @mentions a reload of B linked.
+    // ytd-page-manager holds B's /next data at once: read like a reload's ytInitialData, for B only.
+    {
+      const ydB = (id, text, runs) => ({ currentVideoEndpoint: { watchEndpoint: { videoId: id } }, contents: { twoColumnWatchNextResults: { results: { results: { contents: [
+        { videoSecondaryInfoRenderer: { owner: { videoOwnerRenderer: { title: { runs: [{ text: 'Channel B' }] } } }, attributedDescription: { content: text, commandRuns: runs } } },
+        { itemSectionRenderer: { sectionIdentifier: 'comment-item-section', contents: [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN-OF-B' } } } }] } },
+      ] } } } } });
+      const B_TXT = 'Video B: #tagb and @channelb at 0:05';
+      const runs = [{ startIndex: 19, length: 9, onTap: { innertubeCommand: { browseEndpoint: { browseId: 'UCbbbbbbbbbb', canonicalBaseUrl: '/@channelb' } } } },
+        { startIndex: 9, length: 5, onTap: { innertubeCommand: { commandMetadata: { webCommandMetadata: { url: '/hashtag/tagb' } }, browseEndpoint: { browseId: 'FEhashtag' } } } }];
+      const pd = ytPage(VB, VA);   // stale: the page still A's, the player on B
+      pd.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VB, title: 'Video B from the player', author: 'Channel B', shortDescription: B_TXT } }) };
+      pd.nodes['ytd-page-manager'] = { getCurrentData: () => ({ response: ydB(VB, B_TXT, runs) }) };
+      const s1 = pd.read();
+      check(!!s1 && s1.stale && s1.descFrom === 'pageData' && s1.desc.text === B_TXT && s1.desc.links.length === 2 && s1.desc.links[0].h === '/hashtag/tagb' && s1.desc.links[1].h === '/@channelb'
+        && s1.descRead === false && s1.comments === null && PV.complete(s1) === false,
+        'stale page, the page manager on B: B’s description with its hashtag and @mention links at once (in page order); not complete yet; no comments token from it', s1 && { descFrom: s1.descFrom, links: s1.desc && s1.desc.links, descRead: s1.descRead, comments: s1.comments });
+      pd.flexAttrs['video-id'] = VB;
+      pd.nodes['#title h1'] = Object.assign({}, pd.nodes['#title h1'], { textContent: 'Video B title', innerText: 'Video B title' });
+      pd.nodes['#channel-name #text a'] = Object.assign({}, pd.nodes['#channel-name #text a'], { textContent: 'Channel B', innerText: 'Channel B' });
+      pd.nodes['#description-inline-expander yt-attributed-string'] = null;   // the DOM's description not drawn yet
+      const s2 = pd.read();
+      check(!!s2 && !s2.stale && s2.descRead === true && s2.descFrom === 'pageData' && s2.desc.links.length === 2 && PV.complete(s2) === true,
+        'the page redrawn for B, its DOM description not yet: read from B’s data, and complete', s2 && { stale: s2.stale, descRead: s2.descRead, descFrom: s2.descFrom });
+      const segs = PV.descSegs(s2.desc.text, s2.desc.links, VB).filter((x) => x.link).map((x) => x.link.kind + ':' + x.text);
+      check(segs.join(',') === 'yt:#tagb,yt:@channelb,time:0:05', 'drawn as a reload draws them: the hashtag, the @mention and the time', segs);
+      const po = ytPage(VB, VA);
+      po.nodes['ytd-page-manager'] = { getCurrentData: () => ({ response: ydB(VA, 'Video A’s description', []) }) };
+      const s3 = po.read();
+      check(!!s3 && s3.descFrom === '' && s3.desc.text === '' && s3.desc.links.length === 0, 'the page manager still on A: nothing of it is shown for B', s3 && { descFrom: s3.descFrom, desc: s3.desc });
+    }
   }
   check(PV.STALE_MS >= PV.READS[PV.READS.length - 1], 'a stale page is waited for at least a whole load’s span (' + PV.STALE_MS + ' ms), not the in-place reads’ 4 s', PV.STALE_MS);
   // An older guest still in the page (installed by the last Quartz): the new one replaces it, so the stale check is in.
@@ -580,7 +612,7 @@ const leakDone = (async () => {
   const installs = A.pg.calls.filter((c) => c.code === PV.INSTALL).length;
   check(installs === 1 && A.pg.calls[0].code === PV.INSTALL && A.pg.calls.every((c) => c.code === PV.INSTALL || c.code.length < 1024),
     'the reader goes in once for the document, first; every other call (the early read, the reads, the watch) is under 1 KB', kinds(A.pg.calls));
-  check(['early', 'watch', 'press', 'tick', 'read', 'apply', 'seek'].every((m) => PV.short(m, ['youtube', true, 2500, 'x'.repeat(100)]).length < 1024) && PV.GUEST_V === 9 && PV.INSTALL.length > 10000,
+  check(['early', 'watch', 'press', 'tick', 'read', 'apply', 'seek'].every((m) => PV.short(m, ['youtube', true, 2500, 'x'.repeat(100)]).length < 1024) && PV.GUEST_V === 10 && PV.INSTALL.length > 10000,
     'every page call’s string is under 1 KB, the reader (' + PV.INSTALL.length + ' chars) only in its install, and the short calls name its version (' + PV.GUEST_V + ')');
   pA.info.appendChild(new FD.El(W.doc, 'div'));   // as a drawn info would hold
   const callsAtClose = A.pg.calls.length;

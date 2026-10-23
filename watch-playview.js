@@ -408,7 +408,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest(GAP) {
-    var V = 9;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT); 8: playerFor; 9: descRead
+    var V = 10;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT); 8: playerFor; 9: descRead; 10: movedData
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -492,12 +492,42 @@
           on: cb.hasAttribute('checked') || cb.getAttribute('aria-checked') === 'true' };
       }).filter(function (o) { return o.name; });
     }
+    /*
+     * The page's own data for a video it moved to in place (r64). ytInitialData stays the FIRST video's for the whole
+     * document; after an in-place move (Up next, YouTube's autoplay, an end-screen card) YouTube fetches the next
+     * video's data (/next) and keeps it in its page manager (ytd-page-manager getCurrentData().response, and the
+     * yt-navigate-finish event's detail), then redraws from it. A real-YouTube probe (r64, 3 in-place moves): the page
+     * manager had the new video's description 1.0-1.2 s after the move, as the title was drawn, while the page's own
+     * description element stayed EMPTY for the whole 9 s watched; so the reads showed the player's plain words (its
+     * addresses and times, none of the hashtags or @mentions), 10 links where a reload of the same video showed 18, and
+     * ended "partial" at STALE_MS. This is the same data a reload's ytInitialData has, so its description and links
+     * are read the same way (dataFor), for THIS id only (idOf): another video's data is never taken.
+     */
+    var navResp = null;
+    try {
+      document.addEventListener('yt-navigate-finish', function (e) {
+        var r = e && e.detail && e.detail.response && e.detail.response.response;
+        if (r && typeof r === 'object') navResp = r;
+      });
+    } catch (e) { /* the page manager below, or the DOM */ }
+    function idOf(d) { try { return String(d.currentVideoEndpoint.watchEndpoint.videoId || ''); } catch (e) { return ''; } }
+    function movedData(id) {
+      var c = [navResp];
+      try { var pm = Q('ytd-page-manager'); var cd = pm && typeof pm.getCurrentData === 'function' ? pm.getCurrentData() : null; if (cd && typeof cd === 'object') c.unshift(cd.response); } catch (e) { /* the event's */ }
+      for (var i = 0; i < c.length; i++) if (c[i] && typeof c[i] === 'object' && idOf(c[i]) === id) return c[i];
+      return null;
+    }
     function dataFor(id) {
       var yd = window.ytInitialData;
       var out = {};
       try {
-        var dataId = yd && yd.currentVideoEndpoint && yd.currentVideoEndpoint.watchEndpoint && yd.currentVideoEndpoint.watchEndpoint.videoId;
-        if (!yd || !id || dataId !== id) return out;
+        if (!id) return out;
+        // a page opened on this video: its ytInitialData; one moved to it in place: the page manager's data for it.
+        // From the latter only the words and the description: the comments keep their own path (watch-comments.js).
+        var own = !!yd && idOf(yd) === id;
+        if (!own) yd = movedData(id);
+        if (!yd) return out;
+        out.from = own ? 'ytInitialData' : 'pageData';
         var cs = yd.contents.twoColumnWatchNextResults.results.results.contents || [];
         cs.forEach(function (c) {
           var p = c.videoPrimaryInfoRenderer, s = c.videoSecondaryInfoRenderer, sec = c.itemSectionRenderer;
@@ -513,7 +543,7 @@
             var ci = (sec.contents || [])[0];
             var tok = ci && ci.continuationItemRenderer && ci.continuationItemRenderer.continuationEndpoint && ci.continuationItemRenderer.continuationEndpoint.continuationCommand;
             // capped well above a real token's length (a cut one would fail): watch-comments.js asks the page itself for one this long
-            if (tok && tok.token) out.comments = { token: String(tok.token).slice(0, 4000) };
+            if (tok && tok.token && own) out.comments = { token: String(tok.token).slice(0, 4000) };
           }
         });
       } catch (e) { /* a shape Lumen doesn't know: the DOM's word only */ }
@@ -640,7 +670,7 @@
       var ip = window.ytInitialPlayerResponse, ipv = ip && typeof ip === 'object' ? ip.videoDetails : null;
       var none = (pd && pd.desc === '') || !!(ipv && ipv.videoId === id && typeof ipv.shortDescription === 'string' && !ipv.shortDescription.trim());
       var descRead = !stale && (!!domText || !!d.desc || none);
-      var descFrom = domText ? 'page' : d.desc ? 'ytInitialData' : pd && pd.desc ? 'player' : '';
+      var descFrom = domText ? 'page' : d.desc ? (d.from || 'ytInitialData') : pd && pd.desc ? 'player' : '';
       return {
         ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: stale ? '' : document.title,
         stale: stale, drawnId: drawnId,
