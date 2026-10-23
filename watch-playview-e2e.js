@@ -419,9 +419,12 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     await pvWait('x.applied && x.phase === "ready" && /mv=1/.test(x.url)', 15000);
     p = await guestFor(FY + '/watch?v=' + VID + '&mv=1');
     await p.ev(`(() => { history.pushState({}, '', '/watch?v=${NEXT_ID}'); const h = document.querySelector('ytd-watch-metadata #title h1 yt-formatted-string'); if (h) h.textContent = ${JSON.stringify(NEXT_T)}; document.title = ${JSON.stringify(NEXT_T + ' - YouTube')}; return 1; })()`);
-    const seen = [];
-    for (let i = 0; i < 8; i++) { const x = await pv(); seen.push(x ? x.title : null); await sleep(120); }
+    const seen = [], covers = [];
+    for (let i = 0; i < 8; i++) { const x = await pv(); seen.push(x ? x.title : null); covers.push(x ? [x.cover, x.applied] : null); await sleep(120); }
     check(seen.every((x) => x !== ROW_T), 'a move in the page to another video: the info never shows the last row’s title (the skeleton or the new read)', seen);
+    // r64: the move is in the same document (<webview> says isInPlace): the trim stays and the cover never comes back
+    // (it was read as a new document: the cover over the playing video, the trim forgotten, until a read put it back)
+    check(covers.every((c) => !!c && c[0] === false && c[1] === true), 'an in-place move: the page stays trimmed and the “Loading the player…” cover never comes back over it', covers);
     const barT = await chrome.waitFor(`(() => { const t = ${ST}.title; return t && t.indexOf(${JSON.stringify(NEXT_T)}) >= 0 ? t : null; })()`, 3000).catch(() => null);
     const movedUrl = (await chrome.ev(ST)).slots[0].url;
     // ... and the view read the new video afresh (newPage): nothing busy, the player looked for again, ready.

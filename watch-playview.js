@@ -771,7 +771,11 @@
       startReads(s, false);
     });
     v.addEventListener('did-start-navigation', function (e) {
-      if (s.view !== v || !e.isMainFrame || e.isSameDocument) return;
+      // A move in the same document (YouTube's own autoplay, an end-screen card, Lumen's in-place move) is NOT a new
+      // document: <webview>'s event names it isInPlace (isSameDocument is the webContents' name and is never set here,
+      // r63 found the same in watch-shorts.js). Read as one, every in-place move brought the cover back and restarted
+      // the reads from nothing; did-navigate-in-page below handles it (another video: newPage + reads; same: re-read).
+      if (s.view !== v || !e.isMainFrame || e.isInPlace || e.isSameDocument) return;
       // A new document: the last one's reads, notes, press and "Show more" are not this page's. The
       // seq bump drops a read still out on the old page (it landed after this reset and set "ready").
       newPage(s);
