@@ -23,7 +23,8 @@
  *     homepage:     'newtab',
  *     claudeDir:    null | absolute path,   // Claude pane's folder; null = home
  *     claudeResume: true | false,           // --continue on a restored beside pane
- *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions
+ *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions;
+ *                                           // off on a new profile
  *     claudeNotify: true | false,           // toast when a pane goes quiet
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
@@ -40,6 +41,7 @@
  *     ownBackground: null | { kind: 'builtin'|'image'|'video'|'none', ... },
  *                   // the last "Own picture" choice, restored by that mode
  *     bgMigration:  1 once the one-time move to 'desktop' ran
+ *     claudeSkipMigration: 1 once the one-time skip-permissions check ran
  *     lookSync:     true | false,           // "Match Helm and Mantle"
  *     glass:        { dark: { blurPx, dim, panel }, light: { ... },
  *                     render: 'picture' }    // shared through Look Sync
@@ -159,10 +161,12 @@
     homepage: 'newtab',
     claudeDir: null,
     claudeResume: true,
-    /* Every Claude pane starts with --dangerously-skip-permissions. On by
-       default on purpose: these chambers run on the user's own machine, and a
-       session sitting on a confirmation nobody is watching is a stuck pane. */
-    claudeSkipPermissions: true,
+    /* true: every Claude pane starts with --dangerously-skip-permissions, so
+       Claude runs tools without asking. OFF by default: a new profile gets
+       Claude Code's own permission prompts until the user turns this on.
+       Profiles from before this default changed were migrated to an explicit
+       true (migrateClaudeSkip), so they keep working the way they did. */
+    claudeSkipPermissions: false,
     /* A quiet Windows notification when a background Claude pane stops working
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
@@ -217,6 +221,10 @@
     /* 1 once the one-time move to 'desktop' has run (migrateBackground):
        a later "Own picture" choice is never migrated again. */
     bgMigration: 0,
+    /* 1 once the one-time skip-permissions check has run (migrateClaudeSkip):
+       an existing profile that never set claudeSkipPermissions got an
+       explicit true, a new profile got nothing. It never runs again. */
+    claudeSkipMigration: 0,
     /* Look Sync (looksync.js): ON, Quartz reads and writes the theme, the
        accent and the glass shared with Helm and Mantle through
        %APPDATA%\look-sync\look.json; OFF, it keeps its own. The background
@@ -499,6 +507,9 @@
       case 'ownBackground': return normalizeOwnBackground(value);
       case 'accentHue': return normalizeHue(value);
       case 'bgMigration': return value === 1 ? 1 : 0;
+      case 'claudeSkipMigration': return value === 1 ? 1 : 0;
+      /* Only an explicit true skips the prompts; anything else asks. */
+      case 'claudeSkipPermissions': return value === true;
       default: return value;
     }
   }
@@ -544,8 +555,11 @@
   }
 
   function reset() {
-    state = {};
-    try { window.localStorage.removeItem(STORAGE_KEY); } catch (err) { /* fine */ }
+    /* The skip-permissions marker survives a reset: without it the next
+       boot would see a used profile with the key unset and turn skipping
+       back ON, which is the opposite of "defaults". */
+    state = { claudeSkipMigration: 1 };
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (err) { /* fine */ }
     var keys = Object.keys(DEFAULTS);
     react(keys);
     emit(keys);
@@ -705,6 +719,43 @@
     if (raw && typeof raw === 'object' && isFinite(raw.rev) && raw.rev >= stamp) stamp = Number(raw.rev) + 1;
     patch.newtabBackground = { kind: 'desktop', dim: old.dim, rev: stamp };
     return patch;
+  }
+
+  /**
+   * THE one-time skip-permissions check, as a pure function (test seam:
+   * Settings._migrateClaudeSkip). claudeSkipPermissions used to default to
+   * ON and now defaults to OFF; this keeps every profile that already
+   * existed on the behaviour it had. Returns the patch to store, or null
+   * when it already ran (claudeSkipMigration === 1).
+   *   - stored: the settings object as it was read from localStorage, BEFORE
+   *     anything in this load wrote to it;
+   *   - hadSession: whether localStorage already held a saved tab session.
+   * The profile counts as existing when the stored object has any key, or a
+   * session was saved. Every build since the background migration writes
+   * bgMigration on its first load, so any profile that has run Quartz since
+   * then has a non-empty object; the session key covers an older profile
+   * that never touched a setting but did open a tab. A brand-new profile has
+   * neither on its first load, because this runs before anything writes.
+   *   - existing, and claudeSkipPermissions is not a boolean (never set):
+   *     write true, the old default;
+   *   - existing with an explicit true or false: untouched;
+   *   - new: only the marker, so the new default (off) holds.
+   */
+  function migrateClaudeSkipState(stored, hadSession) {
+    var s = stored && typeof stored === 'object' ? stored : {};
+    if (s.claudeSkipMigration === 1) return null;
+    var patch = { claudeSkipMigration: 1 };
+    var existing = Object.keys(s).length > 0 || hadSession === true;
+    if (existing && typeof s.claudeSkipPermissions !== 'boolean') patch.claudeSkipPermissions = true;
+    return patch;
+  }
+
+  /** Runs at load, before migrateBackground (which writes even on a new profile). */
+  function migrateClaudeSkip() {
+    var hadSession = false;
+    try { hadSession = window.localStorage.getItem('session') !== null; } catch (err) { /* blocked: no evidence */ }
+    var patch = migrateClaudeSkipState(load(), hadSession);
+    if (patch) set(patch);
   }
 
   /* Set when the migration ran in THIS load: { ownKept: kind | null }.
@@ -3119,14 +3170,17 @@
 
     field.appendChild(switchRow(
       'Skip permission prompts',
-      get('claudeSkipPermissions') !== false,
-      function (next) { set({ claudeSkipPermissions: next }); }
+      get('claudeSkipPermissions') === true,
+      function (next) { set({ claudeSkipPermissions: next === true }); }
     ));
 
+    field.appendChild(el('p', 'set-hint',
+      'Claude runs tools without asking first. Turn on only if you trust what you run.'));
+
     var hint = el('p', 'set-hint');
-    hint.appendChild(document.createTextNode('Every Claude pane starts with '));
+    hint.appendChild(document.createTextNode('On, every Claude pane starts with '));
     hint.appendChild(el('code', 'set-code', 'claude --dangerously-skip-permissions'));
-    hint.appendChild(document.createTextNode(', so nothing waits on a confirmation.'));
+    hint.appendChild(document.createTextNode('. Off, Claude asks before it runs a tool, as it does in a terminal.'));
     field.appendChild(hint);
   }
 
@@ -9133,7 +9187,10 @@
 
   /* The one-time move to "Same as desktop" (the old own pick is kept in
      ownBackground) happens before anything reads the key: app.js builds
-     the first new tab URL from it. */
+     the first new tab URL from it. The skip-permissions check goes first:
+     it judges "new profile" by an empty stored object, and the background
+     migration writes one on every profile. */
+  migrateClaudeSkip();
   migrateBackground();
 
   /* Accent and site theme are applied at script load, not at DOMContentLoaded:
@@ -9273,6 +9330,9 @@
        or null; whether it ran in THIS load (and what own kind it kept);
        the normalizers every stored/pushed value goes through. */
     _migrateBackground: migrateBackgroundState,
+    /* The pure one-time skip-permissions check: (stored, hadSession) ->
+       patch or null. */
+    _migrateClaudeSkip: migrateClaudeSkipState,
     _migrationRan: migrationRan,
     _normalizeGlass: normalizeGlass,
     _normalizeOwnBackground: normalizeOwnBackground,

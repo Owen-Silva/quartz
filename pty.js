@@ -29,11 +29,10 @@ const DEFAULT_CWD = os.homedir();
 // restored Claude pane). `--resume` is NOT on the list any more: it fed the
 // "Resume a Claude conversation" picker, which went with Claude tabs, so it
 // is dropped like any other token -- and a session id never had a way in.
-// `--dangerously-skip-permissions` is how every chamber is meant to start:
-// the tab is the user's own machine, and a session that stops to ask for a
-// confirmation is a session nobody is watching. The Settings switch
-// "Skip permission prompts" turns it off; the flag still has to be on this
-// list for the renderer to be able to ask for it at all.
+// `--dangerously-skip-permissions` rides along only when the Settings switch
+// "Skip permission prompts" is on (off on a new profile, so Claude asks
+// before it runs a tool); the flag still has to be on this list for the
+// renderer to be able to ask for it at all.
 const ALLOWED_ARGS = new Set(['--continue', '--dangerously-skip-permissions']);
 
 // Two ways to say "not a fresh session". Passing both is a CLI error, so the

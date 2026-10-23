@@ -9322,15 +9322,16 @@ function claudeDefaultTitle(tab) {
   return claudeTitleFor(tab && tab.cwd);
 }
 
-// Every chamber starts with this unless the Settings switch says otherwise:
-// a session that stops to ask for a confirmation is a session nobody is
-// watching. pty.js allowlists it; preload.js puts it on the Enter-to-restart
-// spawn too (terminal.js drops the first-spawn flags on purpose).
+// A chamber starts with this only when Settings -> Claude "Skip permission
+// prompts" is on (off on a new profile; profiles from before that default
+// changed were migrated to an explicit on, see settings.js). pty.js
+// allowlists it; preload.js puts it on the Enter-to-restart spawn too
+// (terminal.js drops the first-spawn flags on purpose).
 const CLAUDE_SKIP_ARG = '--dangerously-skip-permissions';
 
-/** The setting, read the same way everywhere: unset means yes. */
+/** The setting, read the same way everywhere: only an explicit true skips. */
 function claudeSkipPermissions() {
-  return settingGet('claudeSkipPermissions') !== false;
+  return settingGet('claudeSkipPermissions') === true;
 }
 
 /**

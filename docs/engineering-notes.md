@@ -800,7 +800,8 @@ browser button). Everything but the site styles — a view onto sitestyles.js's 
 key bindings, which live in their
 own `shortcuts` record, persists as one JSON object in `localStorage['settings']`
 (`searchEngine`, `siteTheme`, `palette`, `accentHue`, `chips`, `chipsSource`, `homepage`,
-`claudeDir`, `claudeResume`, `claudeSkipPermissions`, `claudeNotify`, `tabSleepMinutes`,
+`claudeDir`, `claudeResume`, `claudeSkipPermissions` with its one-time `claudeSkipMigration` marker,
+`claudeNotify`, `tabSleepMinutes`,
 `workspaceSleep`, `workspaceSleepMinutes`,
 `downloadsAskWhere`, `newtabBackground`, `bookmarksBar`, `apps` with its `pins`, the ids of the
 apps on the new tab's dock, and `music` with the idle-music preferences); missing keys fall back to
@@ -1092,11 +1093,20 @@ Security notes), and xterm is opened lazily, because building it into a hidden 0
 gives a permanently broken session. When a session exits the pane prints `[session ended] press
 Enter to start a new one`, and Enter restarts it in place.
 
-Every chamber starts `claude --dangerously-skip-permissions`. Settings → Claude has a "Skip
-permission prompts" switch, on by default; with it off, a new tab starts plain `claude`. app.js
-builds the arguments, pty.js allowlists the flag alongside `--continue` and `--resume` (see
+Settings → Claude has a "Skip permission prompts" switch (`claudeSkipPermissions`). On, a chamber
+starts `claude --dangerously-skip-permissions`; off, it starts plain `claude`, which asks before it
+runs a tool. Only an explicit `true` counts as on, and a new profile has it off. A one-time check in
+settings.js (`migrateClaudeSkip`, marker `claudeSkipMigration`) keeps profiles from before that
+default changed on the old behaviour: on the first load of the new version, before anything else
+writes the settings object, a profile whose stored settings object has any key, or whose
+localStorage holds a saved `session`, counts as existing, and if it never set the switch it gets an
+explicit `true`. Every build since the background migration writes `bgMigration` on its first
+load, so any profile that has run Quartz since has a non-empty object. A switch set either way is
+untouched, the check never runs twice, and Settings reset keeps the marker so a reset lands on off.
+app.js builds the arguments, pty.js allowlists the flag alongside `--continue` and `--resume` (see
 Security notes), and preload carries it onto the Enter-to-restart path through a pushed pref, so a
-restarted chamber is not quietly stricter than the one it replaced.
+restarted chamber is not quietly stricter than the one it replaced. preload's own default is off,
+so nothing is skipped before app.js pushes the switch.
 
 **Other programs in a chamber.** pty.js is no longer claude-only. A static PROGRAMS table names
 claude, PowerShell, pwsh, cmd, Python, Node and Git Bash, each with its own fixed arguments and its
@@ -1209,8 +1219,8 @@ one place a `resume` option becomes flags, and pty.js allowlists exactly those t
 Security notes). They are honoured on the first spawn only: Enter-to-restart in a finished pane
 always starts a plain session, because a conversation that has already ended must not be resumed
 twice and re-passing `--resume` would reopen the picker instead. "Plain" means without a resume
-flag: `--dangerously-skip-permissions` does ride along, since that one is a setting and not a
-one-time act.
+flag: `--dangerously-skip-permissions` does ride along when the switch is on, since that one is a
+setting and not a one-time act.
 
 **Permissions.** Electron grants everything by default, which would make this the most generous
 browser on the machine, so the handler is explicit: a short silent-allow list, a prompted list,
@@ -1261,7 +1271,8 @@ The chrome is trusted and every guest is not. These are the places that line is 
   node, then every `on*`, `srcdoc` and `style` attribute plus any URL attribute whose value —
   control characters squeezed out first — starts `javascript:`, `vbscript:` or `data:text/html`.
 - **PTY arguments are allowlisted per program.** In pty.js, only claude accepts `--continue`,
-  `--resume` and `--dangerously-skip-permissions`, bare; the shells and interpreters in the PROGRAMS
+  `--resume` and `--dangerously-skip-permissions` (sent only when Settings → Claude "Skip permission
+  prompts" is on, off by default), bare; the shells and interpreters in the PROGRAMS
   table accept no renderer arguments at all. Anything else is dropped with a warning and the session
   still starts, plain, so a bad argument costs you a resume and never a tab. The program id is
   matched against the table rather than used as a path, so `pty:start` with an unknown or path-like

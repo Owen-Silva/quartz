@@ -53,6 +53,9 @@ const TESTS = [
   { name: 'autopause-link', file: 'autopause-harness.js', args: ['--link'] },
   { name: 'bravesearch', file: 'bravesearch-harness.js' },
   { name: 'claudeanswer', file: 'claudeanswer-harness.js' },
+  // Claude "Skip permission prompts": off on a new profile, the one-time migration that keeps an older
+  // profile on, app.js's start arguments and preload's default (settings.js / app.js / preload.js in vm).
+  { name: 'claudeskip', file: 'claudeskip-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.

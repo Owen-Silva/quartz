@@ -5,15 +5,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 // This user's home folder (the chrome's preload runs unsandboxed, so it may require 'os').
 const HOME_DIR = require('os').homedir();
 
-// Claude chambers start with --dangerously-skip-permissions unless the
-// renderer has said otherwise (api.pty.setPrefs). It is kept HERE rather than
+// Claude chambers start with --dangerously-skip-permissions only once the
+// renderer has said the Settings switch is on (api.pty.setPrefs). Until then
+// nothing is skipped, so a new profile (switch off by default) never has a
+// moment where a spawn runs without Claude's prompts. It is kept HERE rather than
 // only at the call site in app.js because pty.start() is the one funnel every
 // spawn goes through: terminal.js drops the first-spawn flags when the user
 // presses Enter to restart a finished session, and that restart should skip
 // prompts exactly like the tab it replaces. pty.js de-duplicates, so a call
 // that already carries the flag is unaffected.
 const SKIP_PERMISSIONS_ARG = '--dangerously-skip-permissions';
-let ptySkipPermissions = true; // default until the renderer says otherwise
+let ptySkipPermissions = false; // off until the renderer says the switch is on
 
 function withSkipPermissions(opts) {
   const out = (opts && typeof opts === 'object') ? { ...opts } : {};
@@ -933,7 +935,7 @@ contextBridge.exposeInMainWorld('api', {
     // { skipPermissions } -- the Settings switch, pushed by app.js at boot and
     // on every change. Nothing crosses IPC: it only steers start() above.
     setPrefs: (prefs) => {
-      ptySkipPermissions = !(prefs && prefs.skipPermissions === false);
+      ptySkipPermissions = !!(prefs && prefs.skipPermissions === true);
     },
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),

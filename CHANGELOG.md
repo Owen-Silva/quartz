@@ -16,11 +16,14 @@ or use Restart browser in Settings → About — to pick any of this up.
   A folder that has been deleted or mistyped falls back to the default rather than failing the tab.
 - Settings has a Claude section: a default folder with a picker and validation, a resume switch,
   and a skip-permissions switch.
-- Claude tabs skip permission prompts. Every chamber starts
-  `claude --dangerously-skip-permissions`; Settings → Claude has a "Skip permission prompts"
-  switch, on by default, and with it off a new tab starts plain `claude`. pty.js allowlists the
-  flag alongside `--continue` and `--resume`, and the Enter-to-restart path keeps it through a
-  pushed pref.
+- Claude tabs can skip permission prompts. Settings → Claude has a "Skip permission prompts"
+  switch; with it on, a chamber starts `claude --dangerously-skip-permissions`, and with it off
+  it starts plain `claude`, which asks before it runs a tool. The switch is off on a new profile.
+  A profile from before that default changed, with the switch never touched, was set to on once
+  at its first start of the new version, so it keeps skipping as it did; a profile that set the
+  switch either way is left alone. pty.js allowlists the flag alongside `--continue` and
+  `--resume`, and the Enter-to-restart path keeps it through a pushed pref (off until the
+  renderer says otherwise).
 - Resume a conversation opens Claude Code's own picker, from the strip menu, the Claude chip menu,
   Ctrl+click on the Claude button, or the command palette. Restarting after the picker does not
   re-pass the flag.
