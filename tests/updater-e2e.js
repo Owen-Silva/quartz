@@ -187,7 +187,14 @@ async function main() {
       c = await new Cdp(ct.webSocketDebuggerUrl).open();
       const done = await c.waitFor("(() => { const k = document.querySelector('.qup-card[data-status=updated]'); return k ? k.textContent : ''; })()", 30000);
       check(typeof done === 'string' && done.includes('Quartz is now on ' + TAG), 'after the restart the card says "Quartz is now on ' + TAG + '"', done);
-      const s2 = await c.ev('window.api.updates.state()');
+      // The relaunched Quartz runs its first check right away, so the state can read 'checking' for a
+      // moment: wait (up to 20 s) for that check to settle before judging it.
+      let s2 = null;
+      for (let i = 0; i < 100; i++) {
+        try { s2 = await c.ev('window.api.updates.state()'); } catch (e) { s2 = null; }
+        if (s2 && s2.status !== 'checking') break;
+        await sleep(200);
+      }
       // 'current' once the first check after the restart has run; updated stays set either way.
       check(s2 && /^(updated|current)$/.test(s2.status) && s2.updated && s2.updated.tag === TAG && s2.current && tagSha.startsWith(s2.current.sha),
         'state: updated to ' + TAG + ', current sha is the tag', s2 && { status: s2.status, updated: s2.updated, current: s2.current });
