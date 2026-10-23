@@ -24,6 +24,8 @@ const { run, Cdp, sleep } = require('./tests/e2e-kit');
 // i.ytimg.com never resolves in this instance: a still this file doesn't answer (one asked before
 // its CDP client attached) fails here instead of reaching YouTube's real CDN
 const NO_YT_NET = ['--host-resolver-rules=MAP *.ytimg.com ~NOTFOUND'];
+// the host of the one probe image guest() sends through the page to prove Fetch pauses its requests
+const PROBE_HOST = 'fetch-probe.invalid';
 const Mock = require('./tests/watch-mock');
 const F = require('./tests/watch-snapshot');
 const Stills = require('./tests/watch-yt-stills');
@@ -78,6 +80,7 @@ async function guest(q, errors) {
     else if (m.method === 'Fetch.requestPaused') {
       const u = m.params.request.url, rid = m.params.requestId;
       let host = ''; try { host = new URL(u).hostname; } catch (e) { host = ''; }
+      if (host === PROBE_HOST) { g.probed = true; g.send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'image/svg+xml' }], body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"/>').toString('base64') }); return; }
       g.fetched = g.fetched || { drawn: 0, yt: 0, logos: 0 };
       const fulfill = (mime, body) => g.send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: mime }], body: Buffer.from(body).toString('base64') });
       // YouTube's stills: drawn here at YouTube's own sizes and formats (the sharp-art chain asks /vi_webp/ first)
@@ -87,8 +90,32 @@ async function guest(q, errors) {
     }
   });
   await g.send('Runtime.enable');
-  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] });
+  // The target lists watch.html while its first navigation is still in flight: the frame still holds the
+  // initial empty document. Fetch enabled then never reaches the watch.html document that commits next (not
+  // one of its requests is paused, so every still came from the real CDN: "0 title cards"). So Fetch is
+  // enabled once watch.html itself is the document, and a probe image proves it pauses the page's requests.
+  const t0 = Date.now();
+  for (let i = 0; i < 400; i++) {
+    const r = await g.send('Runtime.evaluate', { expression: 'location.href', returnByValue: true });
+    if (/^file:.*\/watch\.html(\?|#|$)/.test(String(r && r.result && r.result.result && r.result.result.value))) break;
+    await sleep(25);
+  }
+  if (Date.now() - t0 > 50) console.log('[e2e] waited ' + (Date.now() - t0) + ' ms for watch.html to commit before enabling Fetch');
+  const FETCH = { patterns: [{ urlPattern: 'https://*', resourceType: 'Image', requestStage: 'Request' }] };
+  const fe = await g.send('Fetch.enable', FETCH);
   if (fe && fe.error) console.log('[e2e] Fetch.enable failed: ' + JSON.stringify(fe.error));
+  const probe = async (n) => {
+    g.probed = false;
+    await g.send('Runtime.evaluate', { expression: '(() => { const i = new Image(); i.src = "https://' + PROBE_HOST + '/' + n + '-' + Date.now() + '.png"; window.__e2eProbe = i; return 1; })()' });
+    for (let i = 0; i < 60 && !g.probed; i++) await sleep(50);
+    return g.probed;
+  };
+  if (!(await probe(1))) {
+    console.log('[e2e] Fetch did not pause the probe image: enabling it again');
+    await g.send('Fetch.disable');
+    await g.send('Fetch.enable', FETCH);
+    if (!(await probe(2))) console.log('[e2e] Fetch still does not pause the page\'s images');
+  }
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
