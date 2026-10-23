@@ -133,12 +133,15 @@
       var hasT = sts !== undefined && sts !== null && sts !== '' && isFinite(Number(sts)) && Number(sts) >= 0;
       return YT + '/watch?v=' + encodeURIComponent(x.watchEndpoint.videoId) + (hasT ? '&t=' + Math.floor(Number(sts)) + 's' : '');
     }
-    if (x.browseEndpoint) {
-      if (x.browseEndpoint.canonicalBaseUrl) return YT + x.browseEndpoint.canonicalBaseUrl;
-      if (x.browseEndpoint.browseId) return YT + '/channel/' + encodeURIComponent(x.browseEndpoint.browseId);
-    }
+    if (x.browseEndpoint && x.browseEndpoint.canonicalBaseUrl) return YT + x.browseEndpoint.canonicalBaseUrl;
+    // The command's own address next. A hashtag is browseEndpoint { browseId: 'FEhashtag', params } with its address
+    // /hashtag/<tag> in the metadata: browseId first sent every hashtag in a comment to /channel/FEhashtag, a page
+    // that isn't there (r63 found it; watch-playview.js cmdUrl has the same order). A bare browseId is a channel
+    // only when it is one (UC...); anything else stays plain text, never a made-up address.
     var w = dig(x, ['commandMetadata', 'webCommandMetadata', 'url']);
-    return w ? String(w) : '';
+    if (w) return String(w);   // a path ('/hashtag/music'): linkOf puts it on youtube.com
+    if (x.browseEndpoint && x.browseEndpoint.browseId && /^UC/.test(x.browseEndpoint.browseId)) return YT + '/channel/' + encodeURIComponent(x.browseEndpoint.browseId);
+    return '';
   }
 
   /** A comment's text as segments [{ text, link? }] from the entity shape (content + commandRuns). */
@@ -849,11 +852,34 @@
     return true;
   }
 
-  function openLink(st, l) {
-    if (!l) return;
-    if (l.kind === 'time' && st.view) { js(st.view, call('seek', [l.t])).catch(function () { /* the player stays */ }); return; }
-    if (l.kind === 'yt' && typeof window.openInLumen === 'function') { window.openInLumen(l.href, { service: 'youtube' }); return; }
-    if (typeof window.createTab === 'function') { try { window.createTab(l.href, { background: false }); } catch (e) { /* nothing more */ } }
+  /* A link in a comment (c: the comment or reply it is in). Every way it can fail says why, on that comment (its
+     note line, role=status) and in the console: with createTab missing a click on a site link did nothing at all,
+     and a failed seek or tab was swallowed the same way (r63 found it; watch-playview.js openDescLink says each). */
+  function openLink(st, l, c) {
+    if (!l) return false;
+    var say = function (why) {
+      try { console.warn('[lumen-comments] ' + why); } catch (e) { /* no console */ }
+      if (c && c.id) note(st, c.id, why);
+      return false;
+    };
+    if (l.kind === 'time') {
+      if (!st.view) return say('Lumen couldn’t jump to that time: the video’s page is closed.');
+      js(st.view, call('seek', [l.t])).then(function (r) {
+        if (r && r.ok === false) say('Lumen couldn’t jump to that time: ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
+      }, function (e) { say('Lumen couldn’t jump to that time: YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
+      return true;
+    }
+    if (l.kind === 'yt' && typeof window.openInLumen === 'function') {
+      // openInLumen says itself when it falls back to a tab or can't open the page
+      try { window.openInLumen(l.href, { service: 'youtube' }); return true; } catch (e) { return say('Lumen couldn’t open that YouTube link: ' + String((e && e.message) || e).slice(0, 80) + '.'); }
+    }
+    var where = String(l.href || '').slice(0, 120);
+    if (typeof window.createTab !== 'function') return say('Quartz can’t open a tab from here, so ' + where + ' didn’t open.');
+    var tab = null;
+    try { tab = window.createTab(l.href, { background: false }); } catch (e) { return say('Quartz couldn’t open a tab for ' + where + ': ' + String((e && e.message) || e).slice(0, 80) + '.'); }
+    if (!tab) return say('Quartz didn’t open a tab for ' + where + '.');
+    if (l.kind === 'yt') say('Lumen’s player isn’t loaded in this window, so the YouTube link opened in a Quartz tab.');
+    return true;
   }
 
   /* ---------------------------------------------------------------- drawing */
@@ -1078,7 +1104,7 @@
       a.href = s.link.href;
       a.rel = 'noopener noreferrer';
       a.title = s.link.kind === 'time' ? 'Jump to ' + s.text : s.link.kind === 'yt' ? 'Open in Lumen' : 'Open ' + s.link.href + ' in a Quartz tab';
-      a.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openLink(st, s.link); });
+      a.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openLink(st, s.link, c); });
       a.addEventListener('auxclick', function (e) { e.preventDefault(); });
       t.appendChild(a);
     });

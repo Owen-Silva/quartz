@@ -89,6 +89,19 @@ check(C.linkOf('https://youtu.be/abc?t=30', 'abc').kind === 'time', 'youtu.be ti
   const n = C.linkOf(C.cmdUrl({ innertubeCommand: { watchEndpoint: { videoId: 'abc' } } }), 'abc');
   check(!!z && z.kind === 'time' && z.t === 0 && !!n && n.kind === 'yt', 'a “0:00” timestamp seeks to the start; a link to the video with no time stays a link', { z, n });
 }
+// r64: a hashtag in a comment is browseEndpoint FEhashtag + params, its address in the metadata; browseId first sent
+// it to /channel/FEhashtag (r63's real-YouTube probe). A channel's UC id still links; a bare other browseId is text.
+{
+  const text = 'Love it #music and @chan';
+  const segs = C.segsFromContent({ content: text, commandRuns: [
+    { startIndex: 8, length: 6, onTap: { innertubeCommand: { commandMetadata: { webCommandMetadata: { url: '/hashtag/music', webPageType: 'WEB_PAGE_TYPE_BROWSE' } }, browseEndpoint: { browseId: 'FEhashtag', params: 'CAESBW11c2lj' } } } },
+    { startIndex: 19, length: 5, onTap: { innertubeCommand: { browseEndpoint: { browseId: 'UCchan123' } } } }] }, 'abc');
+  const tag = segs.filter((s) => s.text === '#music')[0], ch = segs.filter((s) => s.text === '@chan')[0];
+  check(!!tag && !!tag.link && tag.link.href === 'https://www.youtube.com/hashtag/music' && tag.link.kind === 'yt', 'a comment’s hashtag goes to YouTube’s /hashtag/<tag> page, never /channel/FEhashtag', tag);
+  check(!!ch && !!ch.link && ch.link.href === 'https://www.youtube.com/channel/UCchan123', 'a bare channel id (UC...) still goes to its channel', ch);
+  const bare = C.cmdUrl({ innertubeCommand: { browseEndpoint: { browseId: 'FEhashtag', params: 'x' } } });
+  check(bare === '', 'a hashtag with no address of its own is plain text, never a made-up /channel/ page', bare);
+}
 // r62: real YouTube's web client (10-22) puts a thread's replies token under commentRepliesRenderer.subThreads.
 {
   const thread = (rr) => ({ onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: [{ commentThreadRenderer: {

@@ -365,6 +365,16 @@ run('watch-comments-e2e', async ({ check, launch, say }) => {
     const fit8 = await chrome.ev(FIT);
     check(fit8.length >= 2 && fit8.every((x) => x.over === x.shown), '1280x800: “Read more” shows exactly where the clamp hides text', fit8);
 
+    /* ---- 8c (r64). a site link with no way to open a tab says why, on that comment (it did nothing at all) ---- */
+    const ct0 = await chrome.ev('(() => { window.__r64ct = window.createTab; window.createTab = undefined; return typeof window.createTab; })()');
+    await clickAt('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-link-web', 'the example.com link');
+    const ct1 = await chrome.waitFor(`(() => { const c = LumenComments._current(); const n = c && c.notes.UgxTop001;
+      const shown = [...document.querySelectorAll('#lumen-pv-comments .cm-item[data-id="UgxTop001"] .cm-why-txt')].map((x) => x.textContent);
+      return n && shown.length ? { note: n.text, shown } : null; })()`, 3000).catch(() => null);
+    await chrome.ev('(() => { window.createTab = window.__r64ct; delete window.__r64ct; return typeof window.createTab; })()');
+    check(ct0 === 'undefined' && !!ct1 && /can’t open a tab/.test(ct1.note) && ct1.shown.some((t) => /example\.com/.test(t) && /didn’t open/.test(t)),
+      'createTab missing: a site link in a comment says why it didn’t open, on that comment (never a silent click)', { ct0, ct1 });
+
     /* ============================ 9. 1920x1000 ============================ */
     await resize(1920, 1000);
     await toComments();
