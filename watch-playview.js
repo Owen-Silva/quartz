@@ -928,10 +928,43 @@
    *  the trim, a seek), which waits only for the page's busy main thread. */
   var LATE_MS = 1000;
   var CALL_MS = 8000;
-  function ask(s, v, code, ms) {
-    var p = pvOf(s), pr = js(v, code);
+  /*
+   * This page's timeline (r64), for the e2e and the probes (_state: timeline). ms from the slot's last new page (a new
+   * document's start, an in-place move to another video): the page's own events (commit, domready, stop), the info's
+   * first words and description (words, desc, descFrom), and every call Lumen sent into the page: its kind (install,
+   * or the reader's method), sent, answered (ans) or how it ended (how), and held (sent while the new document's main
+   * frame was still loading, so it went at stop: below). At most TL_MAX calls, so a page read for hours keeps no more.
+   */
+  var TL_MAX = 48;
+  function tlNew() { return { t0: Date.now(), ev: {}, calls: [] }; }
+  function tlAt(p) { return p && p.tl ? Date.now() - p.tl.t0 : -1; }
+  function tlMark(p, k) { if (p && p.tl && p.tl.ev[k] === undefined) p.tl.ev[k] = tlAt(p); }
+  /*
+   * A call into a new document while its main frame is still loading is HELD by Electron until the page's
+   * did-stop-loading (webContents.executeJavaScript waits for it then), not run at dom-ready: a real-YouTube probe (r64)
+   * found every call Lumen and the probe sent from the commit on answered 5-40 ms after did-stop-loading, and the page's
+   * own dom-ready -> did-stop-loading span (3 ms to 6.4 s, its images, scripts and frames) was the whole spread of
+   * "info after dom-ready". Held there, a call's code is Electron's until the page stops loading, and a view closed
+   * before then never gets its answer: the code is kept for good (the ~28 KB reader, the r64 leak). So Lumen holds such
+   * a call itself (afterLoad: a closure on the slot that destroy() drops) and sends it at did-stop-loading, the moment
+   * Electron would have run it: nothing of Electron's waits on a page that may never stop, and nothing is later.
+   * loadingNow is Electron's own test (isLoadingMainFrame); a document that has stopped once is never asked again.
+   */
+  function loadingNow(s, v) {
+    var p = pvOf(s);
+    if (!p || p.stopDoc === p.docN || !v || typeof v.isLoadingMainFrame !== 'function') return false;
+    try { return v.isLoadingMainFrame() === true; } catch (e) { return false; }
+  }
+  function afterLoad(p) { return new Promise(function (go) { p.waiters.push(go); }); }
+  function ask(s, v, code, ms, kind) {
+    var p = pvOf(s);
+    var held = !!(p && p.waiters) && loadingNow(s, v);
+    var pr = held ? afterLoad(p).then(function () { return js(v, code); }) : js(v, code);
     if (!p || !p.gate) return pr;
     var out = p.gate.run(pr, ms || CALL_MS);
+    var rec = { k: kind || 'call', sent: tlAt(p), held: held };
+    if (p.tl) { p.tl.calls.push(rec); if (p.tl.calls.length > TL_MAX) p.tl.calls.shift(); }
+    out.then(function (r) { rec.ans = tlAt(p); if (r && r.notInstalled) rec.how = 'notInstalled'; }, function (e) { rec.ans = tlAt(p); rec.how = (e && e.code) || 'error'; });
     // a call past its limit, counted for the e2e and the probes (_state: lates; the reads' end says it too)
     out.catch(function (e) { if (e && e.code === 'late') p.lates = (p.lates || 0) + 1; });
     return out;
@@ -941,7 +974,7 @@
     var p = pvOf(s);
     if (!p || p.instDoc === p.docN) return;
     var doc = p.instDoc = p.docN;
-    ask(s, v, INSTALL, CALL_MS).then(function (r) { if (r !== true && p.instDoc === doc) p.instDoc = -1; }, function () { if (p.instDoc === doc) p.instDoc = -1; });
+    ask(s, v, INSTALL, CALL_MS, 'install').then(function (r) { if (r !== true && p.instDoc === doc) p.instDoc = -1; }, function () { if (p.instDoc === doc) p.instDoc = -1; });
   }
   /**
    * A call into the page by the reader's name (short: a few hundred bytes, never the reader itself). A page that
@@ -951,7 +984,7 @@
   function askPv(s, v, method, args, ms) {
     var p = pvOf(s);
     putReader(s, v);
-    var go = function () { return ask(s, v, short(method, args), ms); };
+    var go = function () { return ask(s, v, short(method, args), ms, method); };
     return go().then(function (r) {
       if (!r || !r.notInstalled) return r;
       if (p) p.instDoc = -1;
@@ -990,7 +1023,8 @@
     observeLayer();
     var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0, page: 0, navUrl: '',
       timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '',
-      gate: gate(), gone: false, docN: 0, instDoc: -1 };   // gate: its calls into the page (destroy() ends them); gone: destroyed
+      gate: gate(), gone: false, docN: 0, instDoc: -1, stopDoc: -1, waiters: [], tl: tlNew() };   // gate: its calls into the page (destroy() ends them); gone: destroyed;
+    // stopDoc: the last document seen to stop loading; waiters: calls held for its stop (ask); tl: the page's timeline
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'pv-cover');
@@ -1015,6 +1049,7 @@
     s.tile.appendChild(p.info);
     v.addEventListener('dom-ready', function () {
       if (s.view !== v) return;
+      tlMark(p, 'domready');
       try {
         var pr = v.insertCSS(trimCss(s.service, adblockOn));
         if (pr && pr.catch) pr.catch(function (e) { p.why = 'Lumen couldn’t trim the page: ' + ((e && e.message) || e); render(s); });
@@ -1035,7 +1070,17 @@
       update(s);
     });
     // A new document (commit): it has no reader yet (putReader puts it in with the next call).
-    v.addEventListener('did-navigate', function () { if (s.view === v) p.docN++; });
+    v.addEventListener('did-navigate', function () { if (s.view === v) { p.docN++; tlMark(p, 'commit'); } });
+    // The page stopped loading: Electron runs a call into it at once from here, so the calls Lumen held meanwhile go
+    // now, in the order they were made (ask: loadingNow).
+    v.addEventListener('did-stop-loading', function () {
+      if (s.view !== v) return;
+      p.stopDoc = p.docN;
+      tlMark(p, 'stop');
+      var w = p.waiters;
+      p.waiters = [];
+      w.forEach(function (go) { go(); });
+    });
     // The new document is in (commit): its first words, long before dom-ready (EARLY_MS). A YouTube video page only.
     v.addEventListener('did-navigate', function (e) {
       if (s.view !== v || s.service !== 'youtube' || pageKind(String((e && e.url) || ''), s.service) !== 'watch') return;
@@ -1097,6 +1142,7 @@
     p.page = (p.page || 0) + 1;
     clearTimeout(p.pressTimer);
     p.read = null; p.phase = 'loading'; p.why = ''; p.busy = ''; p.save = null; p.confirm = false; p.more = false; p.ended = null; p.lates = 0;
+    p.tl = tlNew();
   }
 
   function destroy(ctx, s) {
@@ -1113,6 +1159,7 @@
     p.seq++;
     p.page = (p.page || 0) + 1;
     if (p.gate) p.gate.close();
+    p.waiters = [];   // calls held for a load that may never stop: dropped with the view (ask)
     clearTimeout(p.pressTimer);
     clearTimeout(p.pressT);
     p.pressing = false; p.pendingRender = false;
@@ -1183,7 +1230,7 @@
       // How the reads ended (r64), for the e2e and the probes: complete, the last read (and why it wasn't complete), or
       // an error; at = ms from the reads' start.
       var ended = function (how) { p.ended = { how: how, at: Date.now() - (p.readT0 || 0), stale: !!r.stale, descRead: r.descRead !== false, descFrom: r.descFrom || '', lates: p.lates || 0 }; };
-      if (done) { p.phase = 'ready'; stopReads(s); ended('complete'); }
+      if (done) { p.phase = 'ready'; stopReads(s); ended('complete'); tlMark(p, 'ready'); }
       // The last timed read found the page still the last video's (readYT: stale). After an in-place move the reads
       // run at half their times (the last at 4 s), and a real-YouTube probe measured the redraw at 2.8-4.8 s: the
       // info ended "unread" for good while YouTube drew the video a moment later. So a stale last read goes on: the
@@ -1519,6 +1566,9 @@
     if (p.pressing && info.firstChild) { p.pendingRender = true; return; }
     p.rkey = key;
     var m = model(s.service, p.read, p.item, s.title, { moved: moved });
+    // the timeline's first words and description from a read (tl: words, desc, descFrom)
+    if (p.tl && p.read && m.title) tlMark(p, 'words');
+    if (p.tl && p.read && m.desc && m.desc.text && p.tl.ev.desc === undefined) { tlMark(p, 'desc'); p.tl.ev.descFrom = m.descFrom || (p.read.early ? 'early' : ''); }
     info.setAttribute('data-svc', s.service);
     info.setAttribute('data-phase', phase);
     info.replaceChildren();
@@ -1831,7 +1881,7 @@
     var b = function (sel) { var n = q(sel); return n ? { text: n.textContent.trim(), disabled: n.disabled, pressed: n.getAttribute('aria-pressed'), why: n.getAttribute('data-why') || '' } : null; };
     return {
       id: s.id, wcId: s.wcId, service: s.service, url: s.url, kind: kindOf(s), mode: p.mode, userMode: p.userMode, boxed: s.tile.classList.contains('pv'),
-      phase: p.phase, ended: p.ended || null, lates: p.lates || 0, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
+      phase: p.phase, ended: p.ended || null, lates: p.lates || 0, timeline: p.tl ? { ev: Object.assign({}, p.tl.ev), calls: p.tl.calls.map(function (c) { return Object.assign({}, c); }) } : null, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
       view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, cover: p.cover && !p.cover.hidden,
       title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '', subs: q('.pv-subs') ? q('.pv-subs').textContent : '',
       ep: q('.pv-ep') ? q('.pv-ep').textContent : '', svc: q('.pv-svc-name') ? q('.pv-svc-name').textContent : '',

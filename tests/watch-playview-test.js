@@ -610,6 +610,63 @@ const leakDone = (async () => {
     closeSlot(C);
   }
 
+  // A new document still loading (r64): Electron holds every call into it until did-stop-loading, keeping its code
+  // meanwhile, and a view closed before then never answers. Lumen holds those calls itself and sends them at the stop,
+  // in order; a view closed first sends none of them. The timeline (_state) says when each went and was answered.
+  {
+    const pg = FD.page(W.doc);
+    let loading = true;
+    pg.v.isLoadingMainFrame = () => loading;
+    const s = { id: 'L', wcId: 7, service: 'youtube', url: URL0, item: null, tile: new FD.El(W.doc, 'div') };
+    W.doc.body.appendChild(s.tile);
+    s.view = pg.v;
+    s.tile.appendChild(pg.v);
+    LP.attach(pctx, s, pg.v);
+    pg.v.dispatchEvent({ type: 'did-start-navigation', isMainFrame: true, url: URL0 });
+    pg.v.dispatchEvent({ type: 'did-navigate', url: URL0 });
+    pg.v.dispatchEvent({ type: 'dom-ready' });
+    await wait(30);
+    const p = s._pv;
+    check(pg.calls.length === 0 && p.waiters.length === 3 && p.tl.calls.length === 3 && p.tl.calls.every((c) => c.held && c.ans === undefined),
+      'a page still loading: the reader, the early read and the first read are held by Lumen, none sent to Electron', { sent: kinds(pg.calls), held: p.tl.calls });
+    loading = false;
+    pg.v.dispatchEvent({ type: 'did-stop-loading' });
+    await wait(10);
+    check(kinds(pg.calls).map((k) => k.split(':')[0]).join(',') === 'INSTALL,early,tick' && p.waiters.length === 0 && p.tl.ev.stop >= 0 && p.tl.ev.commit >= 0 && p.tl.ev.domready >= 0,
+      'at its did-stop-loading they go, in the order they were made (the reader first)', { calls: kinds(pg.calls), ev: p.tl.ev });
+    pg.calls[0].ok(true);
+    pg.calls[2].ok({ ok: true, svc: 'youtube', url: URL0, title: 'Loaded words', channel: { name: 'C' }, like: { found: false }, sub: { found: false } });
+    await wait(10);
+    const tk = p.tl.calls.find((c) => c.k === 'tick');
+    check(!!tk && tk.ans >= tk.sent && p.read && p.read.title === 'Loaded words' && LP._state().slots.some((x) => x.id === 'L' && x.timeline && x.timeline.calls.length >= 3),
+      'the first read answered and taken; _state shows the timeline (kind, sent, answered, held)', { tick: tk, read: p.read && p.read.title, st: LP._state().slots.map((x) => x.id + ':' + (x.timeline ? x.timeline.calls.length : 'none')) });
+    const t2 = pg.calls.length;
+    pg.v.dispatchEvent({ type: 'did-navigate', url: URL0 });   // a later read on a page that has stopped: sent at once
+    loading = false;
+    LP.sync(pctx, s);
+    check(p.waiters.length === 0, 'a document that has stopped loading holds nothing', { waiters: p.waiters.length, sent: pg.calls.length - t2 });
+    closeSlot({ s, pg });
+    // closed while still loading: nothing goes, and nothing is kept for it
+    const pg2 = FD.page(W.doc);
+    pg2.v.isLoadingMainFrame = () => true;
+    const s2 = { id: 'L2', wcId: 7, service: 'youtube', url: URL0, item: null, tile: new FD.El(W.doc, 'div') };
+    W.doc.body.appendChild(s2.tile);
+    s2.view = pg2.v;
+    s2.tile.appendChild(pg2.v);
+    LP.attach(pctx, s2, pg2.v);
+    pg2.v.dispatchEvent({ type: 'did-navigate', url: URL0 });
+    pg2.v.dispatchEvent({ type: 'dom-ready' });
+    await wait(30);
+    const p2 = s2._pv;
+    const heldN = p2.waiters.length;
+    closeSlot({ s: s2, pg: pg2 });
+    await wait(10);
+    pg2.v.dispatchEvent({ type: 'did-stop-loading' });
+    await wait(10);
+    check(heldN === 3 && p2.waiters.length === 0 && pg2.calls.length === 0 && p2.tl.calls.every((c) => c.how === 'closed'),
+      'a view closed while its page loads: its held calls end “closed”, and none is ever sent', { heldN, sent: pg2.calls.length, calls: p2.tl.calls });
+  }
+
   if (gcNow) {
     // The leak itself: a closed view whose page never answers (its early read and watch out for good) is collected.
     const B = await openSlot('B');
