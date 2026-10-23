@@ -637,24 +637,25 @@
     // new Short (getVideoData() on its id) at a median 263 ms after a move, the active renderer's title at 264 ms,
     // but the info drew the right title at a median 738 ms: the renderer's OWN player lookup (playerId(r)) stayed on
     // the last Short about 470 ms longer, and held the read back the whole time. So a read is released as soon as
-    // one of the page's players (playerData()) is on the address's Short AND has a title of its own that is not the
-    // last Short's ('player-data'). While the renderer is still the last Short's (its title the last one's, empty,
-    // or its own player elsewhere, inside LAG), the title and channel are the PLAYER's, and the renderer's buttons
-    // (the last Short's Like count and state) are left out: the chrome says it is still reading them. The last
-    // Short's title is never taken from the player: a player whose title is the last one's releases nothing (two
-    // Shorts of one series wait out LAG as before).
+    // one of the page's players (playerData()) is on the address's Short with a title of its own that is not the
+    // last Short's, AND the renderer has a title that is not the last Short's ('player-data'): the player vouches
+    // for the address, the renderer's text is the one shown. The player's title itself is never shown: a first
+    // build that showed it while the renderer still had the last Short's text drew an ad's internal asset name
+    // ("V3 10s 9x16 ...") for 1.5 s on real YouTube, where the renderer then had no title at all. A renderer still
+    // on the last Short's title, or with none, waits under the old rule (LAG, then 'cap'), so the last Short's
+    // title is never shown, and a player whose title is the last one's releases nothing (two Shorts of one series
+    // wait out LAG as before).
     // Where the wait went is in every read (x.gate) and the chrome's _state(): why it was released ('player-data',
     // 'renderer': the page's own read was this Short's, 'cap': LAG ran out with the page still looking like the
-    // last Short) or 'held', and lag: the ms from the address naming the Short to the release (or until now).
+    // last Short) or 'held', and lag: the ms from the read first seeing the address on this Short to the release
+    // (or until now, while held).
     var LAG = 1500;
-    // told: the Short last answered: what was shown (title, chan) and what its renderer said (dom, domChan). They
-    // differ when the player's word was shown; a renderer that never redrew for a Short keeps the one before's.
-    var seen = { id: '', at: 0, last: null, why: '', lag: 0 }, told = { id: '', title: '', chan: '', dom: '', domChan: '' };
+    var seen = { id: '', at: 0, last: null, why: '', lag: 0 }, told = { id: '', title: '', chan: '' };
     function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
     /**
-     * The address's Short as one of the page's players has it: { title, author } from the first player whose
-     * getVideoData() is on id (today's pinned #reel-overlay-container player, the active renderer's own, the page's
-     * first #shorts-player), the title from its player response's videoDetails when getVideoData() has none.
+     * The address's Short as one of the page's players has it: { title } from the first player whose getVideoData()
+     * is on id (today's pinned #reel-overlay-container player, the active renderer's own, the page's first
+     * #shorts-player), from its player response's videoDetails when getVideoData() has no title.
      * null: no player is on id yet (or the page has none Lumen can ask).
      */
     function playerData(r, id) {
@@ -669,13 +670,13 @@
           if (typeof pl.getVideoData !== 'function') continue;
           var vd = pl.getVideoData() || {};
           if (String(vd.video_id || '') !== id) continue;
-          var title = clean(vd.title), author = clean(vd.author);
+          var title = clean(vd.title);
           if (!title && typeof pl.getPlayerResponse === 'function') {
             var d = (pl.getPlayerResponse() || {}).videoDetails || {};
-            if (d.videoId === id) { title = clean(d.title); author = author || clean(d.author); }
+            if (d.videoId === id) title = clean(d.title);
           }
-          return { title: title, author: author };
-        } catch (e) { /* a player mid-swap threw: the next one is asked, and the renderer's own read still stands */ }
+          return { title: title };
+        } catch (e) { /* a player mid-swap threw: the next one is asked, and the old rule still stands */ }
       }
       return null;
     }
@@ -684,42 +685,25 @@
       if (!at) return x;
       var t = Date.now();
       // last: the Short answered before this one (never this one itself: A, B, back to A compares nothing).
-      if (seen.id !== at) seen = { id: at, at: t, last: told.id && told.id !== at ? { title: told.title, chan: told.chan, dom: told.dom, domChan: told.domChan } : null, why: '', lag: 0 };
+      if (seen.id !== at) seen = { id: at, at: t, last: told.id && told.id !== at ? { title: told.title, chan: told.chan } : null, why: '', lag: 0 };
       var L = seen.last;
       var r = active(), pid = r ? playerId(r) : '';
       var chan = x.channel ? x.channel.name : '';
       var dom = x.title;
-      var inLag = t - seen.at < LAG;
-      // The renderer's title is the last Short's: the one shown for it, or the one its renderer said.
-      var oldDom = !!(L && dom && (dom === L.title || dom === L.dom));
       var pd = playerData(r, at);
-      var pdNew = !!(pd && pd.title && !(L && (pd.title === L.title || pd.title === L.dom)));
-      var held = !!((pid && pid !== at) || (L && dom && ((dom === L.title && chan === L.chan) || (dom === L.dom && chan === L.domChan))));
-      if (!pdNew && held && inLag) {
+      var pdNew = !!(pd && pd.title && !(L && pd.title === L.title));
+      // The player vouches for the address and the renderer has moved on from the last Short: released.
+      var vouched = pdNew && !!dom && !(L && dom === L.title);
+      var held = !!((pid && pid !== at) || (L && !!dom && dom === L.title && chan === L.chan));
+      if (!vouched && held && t - seen.at < LAG) {
         x.lag = pid && pid !== at ? 'player' : 'title';
-        x.gate = { why: 'held', lag: t - seen.at, player: pd ? (pd.title ? 'last-title' : 'no-title') : 'none' };
+        x.gate = { why: 'held', lag: t - seen.at, player: pd ? (pd.title ? (pdNew ? 'new-title' : 'last-title') : 'no-title') : 'none' };
         x.videoId = '';
         return x;
       }
-      if (!seen.why) { seen.why = pdNew ? 'player-data' : held ? 'cap' : 'renderer'; seen.lag = t - seen.at; }
-      // The renderer is not this Short's yet: its title is the last Short's (any time: the player knows better),
-      // or (inside LAG) empty, or another one's while its own player is elsewhere. Then the player's title and
-      // channel name are shown, and none of the renderer's buttons.
-      var fromPlayer = pdNew && dom !== pd.title && (oldDom || (inLag && (!dom || !!(pid && pid !== at))));
-      var domChan = chan;
-      if (fromPlayer) {
-        x.title = pd.title;
-        x.channel = pd.author ? { name: pd.author, url: '', avatar: '', subs: '' } : null;
-        x.like = { found: false }; x.dislike = { found: false }; x.sub = { found: false }; x.save = { found: false };
-        x.stale = true;   // the chrome's model: buttons missing because the page still showed the last Short
-      }
-      x.gate = { why: seen.why, lag: seen.lag, from: fromPlayer ? 'player' : 'page' };
-      if (x.title) {
-        // A Short shown from its player alone: its renderer's text is still the one before's (kept, so the NEXT
-        // move still knows it for the last Short's), unless this Short's renderer already said its own.
-        var keep = fromPlayer ? (told.id === at ? { d: told.dom, c: told.domChan } : L ? { d: L.dom, c: L.domChan } : { d: '', c: '' }) : { d: dom, c: domChan };
-        told = { id: at, title: x.title, chan: x.channel ? x.channel.name : '', dom: keep.d, domChan: keep.c };
-      }
+      if (!seen.why) { seen.why = vouched ? 'player-data' : held ? 'cap' : 'renderer'; seen.lag = t - seen.at; }
+      x.gate = { why: seen.why, lag: seen.lag };
+      if (x.title) { told.id = at; told.title = x.title; told.chan = chan; }
       return x;
     }
     var wt = null;

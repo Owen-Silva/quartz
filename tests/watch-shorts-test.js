@@ -368,8 +368,8 @@ check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd
 // Real YouTube: the page's #shorts-player was on the new Short (getVideoData()) ~470 ms before the active renderer's
 // own player lookup was, and that lookup held the read back. The read is released as soon as a player is on the
 // address's Short with a title that is not the last Short's; never by a player with the last Short's title, never by
-// a player on another id. While the renderer is still the last Short's, the title and channel are the player's and
-// the renderer's buttons are left out. Each read says where its wait went (gate: why, lag).
+// a player on another id, never while the renderer still has the last Short's title or none (an ad's slot: the
+// player's title there was the ad's internal asset name). Each read says where its wait went (gate: why, lag).
 {
   const vm = require('vm');
   const attrs = {};
@@ -397,18 +397,22 @@ check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd
   const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
   pending.push((async () => {
     const a = G.tick(true);
-    check(a.videoId === 'aaaaaaaaaaa' && a.title === 'First Short' && a.gate && a.gate.why === 'player-data' && a.gate.from === 'page',
+    check(a.videoId === 'aaaaaaaaaaa' && a.title === 'First Short' && a.gate && a.gate.why === 'player-data',
       'r64 gate: the first Short, its player and renderer agreeing: released by the player’s word, the renderer’s text shown', { id: a.videoId, gate: a.gate });
     // A move: the renderer's own player still on the last Short, its title already the new one's (real YouTube's ~470 ms).
     go('bbbbbbbbbbb'); dp = { video_id: 'bbbbbbbbbbb', title: 'Second Short', author: 'Two' }; title = 'Second Short'; chan = '@two';
     const b = G.tick(true);
-    check(b.videoId === 'bbbbbbbbbbb' && b.title === 'Second Short' && !b.lag && b.gate.why === 'player-data' && b.gate.from === 'page' && b.gate.lag < 100 && b.like.found,
+    check(b.videoId === 'bbbbbbbbbbb' && b.title === 'Second Short' && !b.lag && b.gate.why === 'player-data' && b.gate.lag < 100 && b.like.found,
       'r64 gate: the player on the new Short with a new title releases the read at once (the renderer’s own player still the last one’s)', { id: b.videoId, lag: b.lag, gate: b.gate });
-    // A move where the renderer still shows the last Short: the player's title and channel, no buttons, never the last title.
+    // A move where the renderer still shows the last Short: the player alone releases nothing (never the last title).
     go('ccccccccccc'); dp = { video_id: 'ccccccccccc', title: 'Third Short', author: 'Three' };
     const c = G.tick(true);
-    check(c.videoId === 'ccccccccccc' && c.title === 'Third Short' && c.channel && c.channel.name === 'Three' && !c.like.found && !c.sub.found && c.stale === true && c.gate.from === 'player',
-      'r64 gate: the renderer still the last Short’s: the player’s title and channel, the last Short’s buttons left out', { id: c.videoId, title: c.title, ch: c.channel, gate: c.gate });
+    check(c.videoId === '' && c.gate.why === 'held' && c.gate.player === 'new-title',
+      'r64 gate: the player on the new Short but the renderer still the last Short’s: held, the last title never read as the new Short’s', { id: c.videoId, gate: c.gate });
+    // The renderer with no title at all (an ad's slot): held too; the player's title (an ad's asset name) is never shown.
+    title = '';
+    const c2 = G.tick(true);
+    check(c2.videoId === '' && c2.gate.why === 'held', 'r64 gate: a renderer with no title yet: held, the player’s title not taken', { id: c2.videoId, gate: c2.gate });
     // A move whose player has the LAST Short's title (a series, or a player mid-swap): it releases nothing.
     title = 'Third Short'; chan = '@three'; G.tick(true);   // the renderer redrew for the third Short (told)
     go('ddddddddddd'); dp = { video_id: 'ddddddddddd', title: 'Third Short', author: 'Three' }; rpid = 'ccccccccccc';
@@ -426,7 +430,7 @@ check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd
     // The renderer's own read released it (no player title to go by): 'renderer'.
     go('fffffffffff'); dp = { video_id: 'fffffffffff' }; rpid = 'fffffffffff'; title = 'Sixth Short'; chan = '@six';
     const g = G.tick(true);
-    check(g.videoId === 'fffffffffff' && g.title === 'Sixth Short' && g.gate.why === 'renderer' && g.gate.from === 'page', 'r64 gate: no player title: the renderer’s own read releases it', { id: g.videoId, gate: g.gate });
+    check(g.videoId === 'fffffffffff' && g.title === 'Sixth Short' && g.gate.why === 'renderer', 'r64 gate: no player title: the renderer’s own read releases it', { id: g.videoId, gate: g.gate });
   })());
 }
 
