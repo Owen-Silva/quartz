@@ -584,6 +584,33 @@
   function js(v, code) {
     try { var p = v.executeJavaScript(code, true); return p && p.then ? p : Promise.resolve(p); } catch (e) { return Promise.reject(e); }
   }
+  /*
+   * A section's calls into its page end when the section does (forget, drop). A <webview>'s executeJavaScript into a
+   * page that went away (the slot closed and its view removed) may never answer, and a .then waiting on it held the
+   * whole section: its state, its comment rows and their listeners, and the view's toggle (which holds the closed slot
+   * itself; lumen-perf: +650 nodes and +160 listeners per video view opened and closed, r64). run(pr) answers with the
+   * page's answer, or fails at close() ("the section is closed", code 'closed'); a later answer is dropped, never
+   * applied. Only the gate's own end waits on the page's promise. No time limit here: the page's calls have their own
+   * (a load's request is cut at 15 s, each of a press's waits at 2.5-8 s), and a slow answer to a section still open is
+   * still wanted. watch-playview.js gate() is the same, with a limit per call.
+   */
+  function gate() {
+    var out = [], shut = false;
+    function closed() { var e = new Error('the section is closed'); e.code = 'closed'; return e; }
+    function run(pr) {
+      if (shut) return Promise.reject(closed());
+      return new Promise(function (ok, no) {
+        var over = false;
+        function end(fn, x) { if (over) return; over = true; var i = out.indexOf(stop); if (i >= 0) out.splice(i, 1); fn(x); }
+        function stop() { end(no, closed()); }
+        out.push(stop);
+        Promise.resolve(pr).then(function (r) { end(ok, r); }, function (e) { end(no, e); });
+      });
+    }
+    function close() { shut = true; var l = out; out = []; l.forEach(function (f) { f(); }); }
+    return { run: run, close: close, open: function () { return out.length; } };
+  }
+  function ask(st, v, code) { var pr = js(v, code); return st && st.gate ? st.gate.run(pr) : pr; }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function cap(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
@@ -592,12 +619,13 @@
     var key = String(d.wcId) + '|' + String(d.videoId) + (d.short ? '|short' : '');
     var st = STATES.filter(function (x) { return x.slot === d.slot; })[0];
     if (st && st.key === key) return st;
-    if (st) { teardown(st); STATES.splice(STATES.indexOf(st), 1); }
+    if (st) { drop(st); STATES.splice(STATES.indexOf(st), 1); }   // the last video's section is done with: nothing of it waits on the page
     st = { slot: d.slot, key: key, wcId: d.wcId, videoId: d.videoId, short: !!d.short, hookToken: d.comments && d.comments.token ? String(d.comments.token) : '',
       hookSigned: typeof d.signedIn === 'boolean' ? d.signedIn : null,
       phase: 'loading', why: '', message: '', signedIn: null, header: null, items: [], next: '', sortLabel: '', loading: false, pageWhy: '',
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
-      expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null };
+      expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null,
+      gate: gate(), gone: false };   // gate: its calls into the page (drop ends them); gone: dropped
     st.root.addEventListener('focusin', function (e) { st.focus = e.target; });
     st.root.tabIndex = -1;   // where focus waits when the control he was on is gone or busy (refocus), never a Tab stop
     if (typeof ResizeObserver === 'function') {
@@ -631,10 +659,21 @@
     for (var i = STATES.length - 1; i >= 0; i--) {
       var st = STATES[i];
       if (st.slot !== slot || (which === 'short' && !st.short)) continue;
-      teardown(st);
-      st.view = null; st.tile = null; st.focus = null;
+      drop(st);
       STATES.splice(i, 1);
     }
+  }
+  /* A section that is done with (its slot closed, its video gone): the calls still out on its page end (gate), the seq
+     bump drops an answer already on its way, gone stops any late draw, and what it held goes: the view, the toggle
+     (the slot itself), its rows and their listeners. So a page that never answers keeps, at most, an empty state. */
+  function drop(st) {
+    teardown(st);
+    st.gone = true;
+    st.seq++;
+    if (st.gate) st.gate.close();
+    st.view = null; st.tile = null; st.focus = null; st.toggle = null;
+    st.root.replaceChildren();
+    st.items = []; st.replies = {}; st.expanded = {}; st.header = null;
   }
 
   /** The view drew its info: put this slot's comments in the mount (the same node, so nothing reloads). */
@@ -699,7 +738,7 @@
       return;
     }
     st.from = 'page';
-    js(st.view, call('first', st.short ? [st.videoId] : [])).then(function (r) {
+    ask(st, st.view, call('first', st.short ? [st.videoId] : [])).then(function (r) {
       if (seq !== st.seq) return;
       if (!r || !r.ok) { fail(st, (r && r.reason) || 'YouTube’s page didn’t answer'); return; }
       st.signedIn = r.signedIn;
@@ -720,7 +759,7 @@
     st.loading = true; st.pageWhy = '';
     st.requests++;
     draw(st);
-    js(st.view, call('load', [token])).then(function (r) {
+    ask(st, st.view, call('load', [token])).then(function (r) {
       if (seq !== st.seq) return;
       st.loading = false;
       if (!r || !r.ok) {
@@ -800,7 +839,7 @@
       r.why = 'Replies didn’t finish loading.';
       if (st.root.isConnected) draw(st);
     };
-    js(st.view, call('load', [r.next])).then(function (x) {
+    ask(st, st.view, call('load', [r.next])).then(function (x) {
       if (seq !== st.seq) { dropped(); return; }
       r.loading = false;
       if (!x || !x.ok) { r.why = 'Replies didn’t load: ' + ((x && x.reason) || 'YouTube’s page didn’t answer') + '.'; draw(st); return; }
@@ -828,7 +867,7 @@
     if (kind === 'reply') st.replyBusy = true;
     draw(st);
     var v = st.view;
-    js(v, call('press', [kind, { id: id, text: text || '' }])).then(function (r) {
+    ask(st, v, call('press', [kind, { id: id, text: text || '' }])).then(function (r) {
       st.busy[bkey] = false;
       rec.ok = !!(r && r.ok);
       rec.reason = (r && r.reason) || '';
@@ -873,7 +912,7 @@
     var ok = false;
     try { ok = !!st.toggle(); } catch (e) { ok = false; }
     if (!ok) return false;
-    setTimeout(function () { js(v, call('showOwn')).catch(function () { /* the page shows anyway */ }); }, 350);
+    setTimeout(function () { ask(st, v, call('showOwn')).catch(function () { /* the page shows anyway */ }); }, 350);
     return true;
   }
 
@@ -889,7 +928,7 @@
     };
     if (l.kind === 'time') {
       if (!st.view) return say('Lumen couldn’t jump to that time: the video’s page is closed.');
-      js(st.view, call('seek', [l.t])).then(function (r) {
+      ask(st, st.view, call('seek', [l.t])).then(function (r) {
         if (r && r.ok === false) say('Lumen couldn’t jump to that time: ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
       }, function (e) { say('Lumen couldn’t jump to that time: YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
       return true;
@@ -962,6 +1001,7 @@
   }
 
   function draw(st) {
+    if (st.gone) return;   // dropped: its root stays empty (drop)
     if (st.pressing) { st.pendingDraw = true; return; }
     var fk = focusKey(st);
     drawNow(st);

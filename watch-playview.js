@@ -791,8 +791,44 @@
     return GUEST + 'window.__lumenPv.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
 
+  /*
+   * A slot's calls into its page, each with an end (r64). A <webview>'s executeJavaScript into a page that goes away
+   * (the slot closed and its view removed, or a new document) may never answer, and every .then waiting on it kept
+   * what it touched alive: the slot, its tile, the info and the comments' mount under it. lumen-perf measured +650
+   * nodes and +160 listeners per video view opened and closed, once the watch's and the early read's long waits (r64:
+   * WATCH_MS, EARLY_MS) left one out at nearly every close; the view before r64 stayed flat.
+   * run(pr, ms) answers with the page's answer, or fails at ms ("the page didn't answer in N s", code 'late') or at
+   * close() ("the view is closed", code 'closed'), whichever comes first. An answer after that is dropped, never
+   * applied. Only the gate's own end waits on the page's promise (no slot, no view, no node), so a page that never
+   * answers holds nothing of a closed view. ms 0: no limit, close() only.
+   */
+  function gate() {
+    var out = [], shut = false;
+    function err(code, msg) { var e = new Error(msg); e.code = code; return e; }
+    function run(pr, ms) {
+      if (shut) return Promise.reject(err('closed', 'the view is closed'));
+      return new Promise(function (ok, no) {
+        var t = 0, over = false;
+        function end(fn, x) {
+          if (over) return;
+          over = true;
+          clearTimeout(t);
+          var i = out.indexOf(stop);
+          if (i >= 0) out.splice(i, 1);
+          fn(x);
+        }
+        function stop() { end(no, err('closed', 'the view is closed')); }
+        out.push(stop);
+        if (ms > 0) t = setTimeout(function () { end(no, err('late', 'the page didn’t answer in ' + (Math.round(ms / 100) / 10) + ' s')); }, ms);
+        Promise.resolve(pr).then(function (r) { end(ok, r); }, function (e) { end(no, e); });
+      });
+    }
+    function close() { shut = true; var l = out; out = []; l.forEach(function (f) { f(); }); }
+    return { run: run, close: close, open: function () { return out.length; }, shut: function () { return shut; } };
+  }
+
   var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, STALE_MS: STALE_MS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
-    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call,
+    epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call, gate: gate,
     ytId: ytId, ytMoved: ytMoved, tSeconds: tSeconds, clockSeconds: clockSeconds, descLink: descLink, descSegs: descSegs, clock: clock };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
 
@@ -851,6 +887,15 @@
   function js(v, code) {
     try { var p = v.executeJavaScript(code, true); return p && p.then ? p : Promise.resolve(p); } catch (e) { return Promise.reject(e); }
   }
+  /** Every call into a page goes through its slot's gate (gate(): destroy() ends what is still out, and each has a
+   *  limit): ms is the call's own wait in the page plus LATE_MS; CALL_MS for one that runs at once there (a read,
+   *  the trim, a seek), which waits only for the page's busy main thread. */
+  var LATE_MS = 1000;
+  var CALL_MS = 8000;
+  function ask(s, v, code, ms) {
+    var p = pvOf(s), pr = js(v, code);
+    return p && p.gate ? p.gate.run(pr, ms || CALL_MS) : pr;
+  }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function layerOf() { return CTX && CTX.L ? CTX.L : null; }
 
@@ -878,7 +923,8 @@
     CTX = ctx;
     observeLayer();
     var p = s._pv = { mode: PREF, userMode: false, phase: 'loading', read: null, applied: false, noRoot: false, why: '', busy: '', seq: 0, page: 0, navUrl: '',
-      timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '' };
+      timers: [], presses: [], item: s.item || null, itemUrl: s.url, confirm: false, save: null, more: false, info: null, cover: null, lastUrl: '',
+      gate: gate(), gone: false };   // gate: its calls into the page (destroy() ends them); gone: destroyed
     all.push(s);
     if (all.length > 8) all.shift();
     p.cover = el('div', 'pv-cover');
@@ -991,6 +1037,18 @@
     var p = pvOf(s);
     if (!p) return;
     stopReads(s);
+    // Nothing of the closed view outlives it (gate): the calls still out on its page end now (one the page answers
+    // later is dropped, never applied), the seq and page bumps drop any answer already on its way, gone stops a late
+    // timer's render (the show page's, a held press's release) from drawing the info, and its comments' mount, again.
+    // The info is emptied too, so if anything still holds the tile it holds no title, description or comments.
+    p.gone = true;
+    p.seq++;
+    p.page = (p.page || 0) + 1;
+    if (p.gate) p.gate.close();
+    clearTimeout(p.pressTimer);
+    clearTimeout(p.pressT);
+    p.pressing = false; p.pendingRender = false;
+    if (p.info) p.info.replaceChildren();
     var i = all.indexOf(s);
     if (i >= 0) all.splice(i, 1);
   }
@@ -1032,7 +1090,7 @@
     if (!p || p.seq !== seq || !s.view) return;
     var v = s.view;
     var on = wantTrim(s);
-    took(s, seq, v, on, js(v, call('tick', [s.service, on])), last, false);
+    took(s, seq, v, on, ask(s, v, call('tick', [s.service, on])), last, false);
   }
   /** A read's answer (a timed read's, or a watch's): the info from it, and the next watch while it is incomplete. */
   function took(s, seq, v, on, pr, last, watched) {
@@ -1083,7 +1141,7 @@
     if (!p || p.watch === seq || p.seq !== seq || p.reading !== seq || !s.view || !online()) return;
     var v = s.view, on = wantTrim(s);
     p.watch = seq;
-    var pr = js(v, call('watch', [s.service, on, WATCH_MS]));
+    var pr = ask(s, v, call('watch', [s.service, on, WATCH_MS]), WATCH_MS + LATE_MS);
     var free = function () { if (p.watch === seq) p.watch = 0; };
     // freed before its answer is taken, so the answer can ask for the next watch
     took(s, seq, v, on, pr.then(function (r) { free(); return r; }, function (e) { free(); throw e; }), false, true);
@@ -1099,7 +1157,7 @@
     var p = pvOf(s);
     if (!p || p.read || !s.view || !online()) return;
     var v = s.view, seq = p.seq;
-    js(v, call('early', [EARLY_MS])).then(function (r) {
+    ask(s, v, call('early', [EARLY_MS]), EARLY_MS + LATE_MS).then(function (r) {
       if (s.view !== v || p.seq !== seq || p.read || !r || !r.ok || !r.early) return;
       p.read = r;
       update(s);
@@ -1109,7 +1167,7 @@
   /** Classes, the trim and the info, from the slot's state. */
   function update(s) {
     var p = pvOf(s), L = layerOf();
-    if (!p || !L) return;
+    if (!p || !L || p.gone) return;
     var boxed = isBoxed(s);
     s.tile.classList.toggle('pv', boxed);
     layoutBox(s);
@@ -1119,7 +1177,7 @@
     if (s.view && p.applied !== wantTrim(s) && (p.applied || p.phase !== 'loading')) {
       var v = s.view;
       var want = wantTrim(s);
-      js(v, call('apply', [s.service, want])).then(function (a) { if (s.view === v) { p.applied = !!(a && a.on); render(s); } }, function () { /* the next load says */ });
+      ask(s, v, call('apply', [s.service, want])).then(function (a) { if (s.view === v) { p.applied = !!(a && a.on); render(s); } }, function () { /* the next load says */ });
     }
     render(s);
     syncBar(s);
@@ -1220,7 +1278,7 @@
       render(s);
     }, PRESS_ANSWER_MS);
     render(s);
-    js(v, call('press', [s.service, kind, arg === undefined ? null : arg])).then(function (r) {
+    ask(s, v, call('press', [s.service, kind, arg === undefined ? null : arg]), PRESS_ANSWER_MS + LATE_MS).then(function (r) {
       if (!mine()) return;
       settled = true;
       clearTimeout(p.pressTimer);
@@ -1232,9 +1290,12 @@
       if (kind === 'save-open' || kind === 'save-toggle') p.save = r && r.ok ? { list: r.list || [] } : null;
       if (kind === 'save-close') p.save = null;
       if (kind === 'unsubscribe') p.confirm = false;
-      return js(v, call('read', [s.service])).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
+      return ask(s, v, call('read', [s.service])).then(function (rr) { if (s.view === v && p.page === page && rr && rr.ok) p.read = rr; render(s); });
     }).catch(function (e) {
       if (s.view !== v || p.page !== page) return;
+      // Past the gate's limit (ask) with the press already settled: PRESS_ANSWER_MS's note has said why, or the press
+      // answered and only the read after it never came (the state shown is the press's, as it always was).
+      if (e && e.code === 'late' && settled) return;
       // The press itself, or the read after it: either way the reason is shown (as before this guard).
       settled = true;
       clearTimeout(p.pressTimer);
@@ -1279,7 +1340,7 @@
       // the comments before r62). Focus stays on the link, so the next chapter is one Tab away.
       if (!s.view) return fail('Lumen couldn’t jump to ' + clock(l.t) + ': the video’s page is closed.');
       var v = s.view;
-      js(v, call('seek', [l.t])).then(function (r) {
+      ask(s, v, call('seek', [l.t])).then(function (r) {
         if (r && r.ok) { rec.ok = true; rec.how = r.how; return; }
         fail('Lumen couldn’t jump to ' + clock(l.t) + ': ' + ((r && r.reason) || 'YouTube’s page said no') + '.');
       }, function (e) { fail('Lumen couldn’t jump to ' + clock(l.t) + ': YouTube’s page didn’t answer (' + String((e && e.message) || e).slice(0, 80) + ').'); });
@@ -1358,7 +1419,7 @@
 
   function render(s) {
     var p = pvOf(s);
-    if (!p || !p.info) return;
+    if (!p || !p.info || p.gone) return;   // a destroyed slot's info stays empty (destroy)
     var info = p.info;
     var boxed = s.tile.classList.contains('pv');
     p.cover.hidden = !(boxed && !p.applied && p.phase === 'loading');
@@ -1604,7 +1665,7 @@
     if (!ov) { disable(b, 'The Lumen tab isn’t there'); return; }
     // The answer is filed under the title it was asked for: a reuse can swap p.item while the check is out.
     var askedId = p.item.id;
-    js(ov, showPageJs(p.item, false)).then(function (r) {
+    ask(s, ov, showPageJs(p.item, false), SHOW_PAGE_ANSWER_MS + LATE_MS).then(function (r) {
       p.spKnown = { id: askedId, ok: !!(r && r.ok), reason: (r && r.reason) || 'Lumen has no show page for this title' };
       if (b.isConnected) disable(b, p.spKnown.ok ? '' : p.spKnown.reason);
     }, function (e) { p.spKnown = { id: askedId, ok: false, reason: 'Lumen couldn’t check: ' + ((e && e.message) || e) }; if (b.isConnected) disable(b, p.spKnown.reason); });
@@ -1628,7 +1689,7 @@
       render(s);
     }, SHOW_PAGE_ANSWER_MS);
     render(s);
-    js(ov, showPageJs(p.item, true)).then(function (r) {
+    ask(s, ov, showPageJs(p.item, true), SHOW_PAGE_ANSWER_MS + LATE_MS).then(function (r) {
       if (!settle()) return;
       if (!r || !r.ok) { p.why = (r && r.reason) || 'The show page didn’t open'; render(s); return; }
       p.lastShowPage = Date.now();

@@ -455,10 +455,113 @@ setTimeout(() => {
   check(!!wq && wq.ok && wq.pageTitle === 'Another title - YouTube' && wqAt >= 100 && wqAt < 1000 && !mos[mos.length - 1].on, 'nothing new: the watch answers at its limit with the same read, and lets go', { wqAt });
 }, 800);
 
+/* ---- a closed view holds nothing (r64) ------------------------------------------------------------------------- */
+// lumen-perf: +650 nodes and +160 listeners per video view opened and closed, the whole view kept alive by a page call
+// that never answered (a removed <webview>'s executeJavaScript: the watch's and the early read's long waits left one
+// out at nearly every close). gate(): every call ends at its limit or at the slot's close; an answer after that is
+// never applied, and nothing of the closed view waits on the page's promise.
+const FD = require('./fake-dom');
+const gcNow = FD.gcFn();
+const wait = (ms) => new Promise((r) => setTimeout(r, ms || 0));
+const leakDone = (async () => {
+  check(!!gcNow, 'node’s GC is reachable for the closed-view checks');
+  const G = PV.gate();
+  const never = new Promise(() => {});
+  let late = null;
+  const t0 = Date.now();
+  await G.run(never, 60).then(() => { late = 'answered'; }, (e) => { late = e; });
+  check(late && late.code === 'late' && /didn’t answer in 0\.1 s/.test(late.message) && Date.now() - t0 >= 50 && G.open() === 0,
+    'a page call that never answers fails at its limit, with the reason, and is no longer out', late && (late.message || late));
+  let ans = null, rej = null;
+  await G.run(Promise.resolve({ ok: 1 }), 5000).then((r) => { ans = r; });
+  await G.run(Promise.reject(new Error('page threw')), 5000).catch((e) => { rej = e; });
+  check(ans && ans.ok === 1 && rej && rej.message === 'page threw' && G.open() === 0, 'an answer, or the page’s own error, passes through as it was (and its limit goes with it)');
+  let answer = null, applied = false, out1 = null;
+  const r1 = G.run(new Promise((ok) => { answer = ok; }), 0).then(() => { applied = true; }, (e) => { out1 = e; });
+  const r2 = G.run(never, 0).catch((e) => e);
+  const twoOut = G.open() === 2;
+  G.close();
+  await r1;
+  const e2 = await r2;
+  answer({ ok: true });   // the page answers after the close
+  await wait(5);
+  check(twoOut && out1 && out1.code === 'closed' && /view is closed/.test(out1.message) && e2 && e2.code === 'closed' && G.open() === 0, 'close() ends every call still out ("the view is closed")');
+  check(!applied, 'an answer after the close is dropped, never applied');
+  let after = null;
+  await G.run(Promise.resolve(1), 100).then(() => { after = 'ran'; }, (e) => { after = e; });
+  check(after && after.code === 'closed', 'a call after the close fails at once');
+  if (gcNow) {
+    const G2 = PV.gate();
+    const held = new Promise(() => {});   // the page's promise: held, never answered
+    const ref = (() => { const big = { rows: new Array(2000).fill('row') }; G2.run(held, 0).then(() => big.rows.length, () => big.rows.length); return new WeakRef(big); })();
+    await FD.collect(gcNow);
+    const kept = ref.deref() !== undefined;
+    G2.close();
+    await FD.collect(gcNow);
+    check(kept && ref.deref() === undefined, 'what waits on a page that never answers is held while the call is out and released by close()');
+  }
+
+  // The chrome itself (a stand-in DOM, no layer: the info isn't drawn; the reads and the gate are what run).
+  const W = FD.makeWindow({ api: { adblock: { state: () => Promise.resolve({ enabled: true }), onStateChanged() {} } } });
+  W.load(path.join(ROOT, 'watch-playview.js'));
+  const LP = W.win.LumenPlayview;
+  const pctx = {};
+  const URL0 = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const of = (calls, m) => calls.filter((c) => c.code.indexOf('__lumenPv.' + m + '(') >= 0);
+  // A slot opened the way watch-player.js does, to the point where its page has an early read and a watch out.
+  async function openSlot(id) {
+    const pg = FD.page(W.doc);
+    const s = { id, wcId: 7, service: 'youtube', url: URL0, item: null, tile: new FD.El(W.doc, 'div') };
+    W.doc.body.appendChild(s.tile);
+    s.view = pg.v;
+    s.tile.appendChild(pg.v);
+    LP.attach(pctx, s, pg.v);
+    pg.v.dispatchEvent({ type: 'did-navigate', url: URL0 });   // the commit: the early read (EARLY_MS) goes out
+    pg.v.dispatchEvent({ type: 'dom-ready' });                 // the timed reads begin, the first at once
+    await wait(30);
+    const t1 = of(pg.calls, 'tick')[0];
+    if (t1) t1.ok({ ok: true, svc: 'youtube', url: URL0, title: 'First words', channel: null, like: { found: false }, sub: { found: false } });   // incomplete: a watch goes out
+    await wait(10);
+    return { s, pg };
+  }
+  // watch-player.js destroySlot's order: the hooks, then the view goes, then the tile.
+  function closeSlot(o) { LP.destroy(pctx, o.s); o.s.view = null; o.pg.v.remove(); o.s.tile.remove(); }
+
+  const A = await openSlot('A');
+  const pA = A.s._pv;
+  const outA = of(A.pg.calls, 'early').length === 1 && of(A.pg.calls, 'watch').length === 1 && !!pA.gate && pA.gate.open() === 2;
+  check(outA, 'an opened video view: its early read and a watch are out on the page', A.pg.calls.map((c) => (/__lumenPv\.(\w+)\(/.exec(c.code) || [])[1]));
+  pA.info.appendChild(new FD.El(W.doc, 'div'));   // as a drawn info would hold
+  const callsAtClose = A.pg.calls.length;
+  closeSlot(A);
+  check(!!pA.gate && pA.gate.open() === 0 && pA.gate.shut() && pA.gone === true, 'destroy() ends every call still out on the closed view’s page');
+  check(pA.info.childNodes.length === 0, 'destroy() empties the info (no title, description or comments mount left on it)');
+  of(A.pg.calls, 'early')[0].ok({ ok: true, early: true, svc: 'youtube', url: URL0, title: 'Late early words', channel: { name: 'Late channel' } });
+  of(A.pg.calls, 'watch')[0].ok({ ok: true, svc: 'youtube', url: URL0, title: 'Late watch words', channel: { name: 'C' }, like: { found: true }, sub: { found: true }, applied: false });
+  await wait(20);
+  check(pA.read && pA.read.title === 'First words' && pA.phase === 'loading', 'the closed view’s page answering late: nothing of it is applied', { title: pA.read && pA.read.title, phase: pA.phase });
+  check(A.pg.calls.length === callsAtClose, 'and nothing more is asked of a closed view’s page', A.pg.calls.length - callsAtClose);
+  check(!LP._state().slots.some((x) => x.id === 'A'), 'the closed slot is no longer one of the view’s slots');
+
+  if (gcNow) {
+    // The leak itself: a closed view whose page never answers (its early read and watch out for good) is collected.
+    const B = await openSlot('B');
+    const pending = B.pg.calls.filter((c) => !/__lumenPv\.tick\(/.test(c.code));   // held, as the page holds them
+    const refs = { slot: new WeakRef(B.s), tile: new WeakRef(B.s.tile), info: new WeakRef(B.s._pv.info), view: new WeakRef(B.pg.v) };
+    closeSlot(B);
+    B.s = null; B.pg = null;
+    await FD.collect(gcNow);
+    const alive = Object.keys(refs).filter((k) => refs[k].deref() !== undefined);
+    check(pending.length === 2 && alive.length === 0, 'a closed video view whose page never answers is collected whole (slot, tile, info, view)', { pending: pending.length, alive });
+  }
+})();
+
 setTimeout(() => {
   check(pr && pr.ok === false && /Like button isn’t on this page/.test(pr.reason), 'a press with no button on the page: refused, with the reason (never a silent no-op)', pr);
   check(prOther && prOther.ok === false, 'nothing is pressed on Disney+, Hulu, Prime or ESPN');
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* temp */ }
-  console.log('watch-playview-test: ' + pass + ' passed, ' + fail + ' failed');
-  process.exit(fail ? 1 : 0);
+  leakDone.catch((e) => check(false, 'the closed-view checks ran to the end', e && e.stack)).then(() => {
+    console.log('watch-playview-test: ' + pass + ' passed, ' + fail + ' failed');
+    process.exit(fail ? 1 : 0);
+  });
 }, 1000);

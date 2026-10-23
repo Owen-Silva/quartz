@@ -173,6 +173,60 @@ const ctx = vm.createContext(win);
   } catch (e) {
     check(false, 'the in-page script ran', String(e && e.stack || e));
   }
+  // ---- a closed slot's section holds nothing (r64) ----------------------------------------------------------------
+  // The same leak as watch-playview.js's: a page call that never answered (a removed <webview>'s executeJavaScript)
+  // held the section (its rows, their listeners) and, through the view's toggle, the closed slot itself. forget():
+  // the calls still out end, a late answer is never applied, and what is left holds nothing of the view.
+  try {
+    const FD = require('./fake-dom');
+    const gcNow = FD.gcFn();
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms || 0));
+    const W = FD.makeWindow({});
+    W.load(path.join(ROOT, 'watch-comments.js'));
+    const LC = W.win.LumenComments;
+    const loads = (calls) => calls.filter((c) => c.code.indexOf('__lumenCm.load(') >= 0);
+    // A section the way the view draws one: its info's lumen-pv-info, with the page's own first token (no trip into the page).
+    async function openSection(slot) {
+      const pg = FD.page(W.doc);
+      const tile = new FD.El(W.doc, 'div');
+      tile.className = 'wp-tile';
+      const box = new FD.El(W.doc, 'div');
+      tile.appendChild(box);
+      tile.appendChild(pg.v);
+      W.doc.body.appendChild(tile);
+      const theSlot = { id: slot, rows: new Array(2000).fill('row') };   // the slot the view's toggle holds
+      W.doc.dispatchEvent(new W.win.CustomEvent('lumen-pv-info', { detail: { slot, wcId: 7, videoId: 'dQw4w9WgXcQ', comments: { token: X.FIRST }, signedIn: false, early: false,
+        container: box, view: pg.v, toggle: function () { return !!theSlot.id; } } }));
+      await wait(10);
+      return { pg, box, tile, theSlot, root: box.firstChild };
+    }
+    const A = await openSection('cmA');
+    const stA = LC._state().states.filter((x) => x.slot === 'cmA')[0];
+    check(loads(A.pg.calls).length === 1 && stA && stA.loading, 'an opened section: its first page of comments is out on the page', stA);
+    A.root.appendChild(new FD.El(W.doc, 'div'));   // a drawn row
+    const callsAtClose = A.pg.calls.length;
+    LC.forget('cmA');
+    W.doc.body.removeChild(A.tile);
+    check(A.root.childNodes.length === 0, 'forget() empties the section (no rows, no listeners left on them)');
+    check(!LC._state().states.some((x) => x.slot === 'cmA'), 'the closed slot’s section is gone from the list');
+    loads(A.pg.calls)[0].ok({ ok: true, json: X.next({ continuation: X.FIRST }, '', 'dQw4w9WgXcQ').json });   // the page answers after the close
+    await wait(20);
+    check(A.root.childNodes.length === 0 && A.pg.calls.length === callsAtClose, 'its page answering late: nothing is drawn, and nothing more is asked of it', { rows: A.root.childNodes.length, asked: A.pg.calls.length - callsAtClose });
+    check(!!gcNow, 'node’s GC is reachable for the closed-section checks');
+    if (gcNow) {
+      const B = await openSection('cmB');
+      const pending = loads(B.pg.calls);   // held, never answered, as the page holds it
+      const refs = { slot: new WeakRef(B.theSlot), root: new WeakRef(B.root), view: new WeakRef(B.pg.v) };
+      LC.forget('cmB');
+      W.doc.body.removeChild(B.tile);
+      B.theSlot = null; B.root = null; B.pg = null; B.box = null; B.tile = null;
+      await FD.collect(gcNow);
+      const alive = Object.keys(refs).filter((k) => refs[k].deref() !== undefined);
+      check(pending.length === 1 && alive.length === 0, 'a closed slot’s section whose page never answers is collected (its rows, its view, the slot its toggle held)', { pending: pending.length, alive });
+    }
+  } catch (e) {
+    check(false, 'the closed-section checks ran', String(e && e.stack || e));
+  }
   console.log('watch-comments-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;
 })();
