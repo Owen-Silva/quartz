@@ -451,6 +451,7 @@ function create(deps) {
   const pausedUntil = {};        // id -> a game / memory pause: timed reads do not look again before this
   const lastForced = {};
   let gameCache = { at: 0, name: '' };
+  let gameLooking = null;        // the one look (tasklist) on its way, shared by every caller
   let searchNext = 0;
   const searchCache = new Map();
   const trailerCache = new Map();   // 'tv|title' -> { at, answer }; hover previews, never written to disk
@@ -620,10 +621,27 @@ function create(deps) {
     return gameCache.name;
   }
 
+  /** True when checkGame() would look now (a tasklist), false when it answers from the last look. */
+  function gameLookDue() {
+    if (typeof test.gameRunning === 'function') return false;
+    if (process.platform !== 'win32' && typeof test.gameLook !== 'function') return false;
+    return now() - gameCache.at >= GAME_CHECK_TTL_MS;
+  }
+
   function checkGame() {
-    if (typeof test.gameRunning === 'function' || process.platform !== 'win32') return Promise.resolve(gameRunning());
+    if (typeof test.gameRunning === 'function' || (process.platform !== 'win32' && typeof test.gameLook !== 'function')) return Promise.resolve(gameRunning());
     if (now() - gameCache.at < GAME_CHECK_TTL_MS) return Promise.resolve(gameCache.name);
-    return new Promise((resolve) => {
+    if (gameLooking) return gameLooking;
+    // test.gameLook (the harness): an async stand-in for the tasklist, cached exactly like it.
+    if (typeof test.gameLook === 'function') {
+      gameLooking = Promise.resolve().then(() => test.gameLook()).then((n) => String(n || ''), () => '').then((name) => {
+        gameCache = { at: now(), name };
+        gameLooking = null;
+        return name;
+      });
+      return gameLooking;
+    }
+    gameLooking = new Promise((resolve) => {
       cp.execFile('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 4000, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
         let name = '';
         if (!err && typeof out === 'string') {
@@ -632,9 +650,11 @@ function create(deps) {
         }
         // No answer is not a reason to stop reading; it counts as "no game" for a minute.
         gameCache = { at: now(), name };
+        gameLooking = null;
         resolve(name);
       });
     });
+    return gameLooking;
   }
 
   function usesView(id) {
@@ -1059,6 +1079,7 @@ function create(deps) {
       result = Shape.cleanResult({ state: 'error', reason: 'its reader failed (' + String((err && err.message) || err).slice(0, 100) + ')' });
     }
     if (dead()) return;
+    if (token) token.wrote = true;   // pump: a game look that ends after this point stops nothing
     s.readAt = now();
     s.captured = captured;
     s.state = result.state;
@@ -1138,9 +1159,20 @@ function create(deps) {
         const forced = forcedQueued.delete(id);
         const bg = bgQueued.delete(id);
         if (!forced && !bg && !anyVisible()) { pushAll(); continue; }
-        starting = id;
-        // Conditions can change while earlier services read (a game starts): look again.
-        try { await checkGame(); } finally { starting = null; }
+        // Conditions can change while earlier services read (a game starts): look again. The look
+        // is one tasklist (r64: 0.3-0.8 s), and a read the user is waiting on (a Retry / Read now,
+        // or a Lumen page in sight) used to sit behind it before its first page even started
+        // loading. Such a read, when the last look found no game, now starts BESIDE the look:
+        // a game this look finds stops it at once (gameLook below: its reader destroyed, nothing
+        // written) and pauses it with the game's reason, exactly as a look before it would have.
+        // Background reads still wait for the look: nobody is waiting on them.
+        let gameLook = null;
+        if ((forced || anyVisible()) && !gameRunning() && gameLookDue()) {
+          gameLook = checkGame();
+        } else {
+          starting = id;
+          try { await checkGame(); } finally { starting = null; }
+        }
         if (gen !== epoch) continue;   // forgotten while it waited
         if (!loadPrefs().enabled[id]) continue;   // turned off while it waited
         const why = blocker(id, true);
@@ -1160,20 +1192,47 @@ function create(deps) {
           try { await ytlib.acquire(); } finally { starting = null; }
           if (stopped || gen !== epoch || !loadPrefs().enabled[id]) { ytlib.release(); continue; }
         }
+        // The look beside it answered while this read waited for the lock, and found a game.
+        if (gameLook && gameRunning()) {
+          setPaused(id, blocker(id, true) || ('paused while ' + gameRunning() + ' is running'));
+          if (ytlib) ytlib.release();
+          pushAll();
+          continue;
+        }
         reading = id;
+        const watchedAt = watched[id];
         delete watched[id];      // this read picks up whatever he watched
         readStartedAt = now();
         readLimit = readLimitMs(id);
         pushAll();
         // The time limit: past it the read is stopped (its reader destroyed, its late answer
         // dropped) and the service says so -- the page never sits on "Updating…" forever.
-        const token = { dead: false };
+        const token = { dead: false, done: false, wrote: false };
         const LATE = {};
         let r = null;
+        // The look started beside this read (above) found a game: stop the read now, quietly --
+        // its readers destroyed, nothing written (readService checks token.dead before it writes).
+        let gameStop = '';
+        if (gameLook) {
+          gameLook.then((name) => {
+            if (!name || token.dead || token.done || token.wrote) return;
+            gameStop = name;
+            token.dead = true;
+            for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'cancelled');
+          });
+        }
         try {
           r = await within(readService(id, token).then(() => null, (err) => { log('Lumen reader error: ' + ((err && err.message) || err)); return null; }), readLimit, LATE);
         } catch (err) { log('Lumen reader error: ' + ((err && err.message) || err)); }
-        if (r === LATE) {
+        token.done = true;
+        const gameStopped = !!gameStop && !token.wrote;
+        if (gameStopped) {
+          // Paused with the game's reason, as blocker() says it; the rows stay as they were.
+          const why = blocker(id, true) || ('paused while ' + gameStop + ' is running');
+          setPaused(id, why);
+          if (watchedAt && !watched[id]) watched[id] = watchedAt;
+          log('Lumen stopped reading ' + Shape.serviceById(id).name + ': ' + why);
+        } else if (r === LATE) {
           token.dead = true;
           for (const w of Array.from(liveReaders.keys())) destroyReader(w, 'watchdog');
           const s = loadCache().services[id];
@@ -1189,8 +1248,8 @@ function create(deps) {
         readLimit = 0;
         // The feed may follow a background-refresh read with no Lumen page open (Lumen Alerts) only
         // while the background gates still pass (bgBlocker: battery saver, a game, 2.5 GB, minimised).
-        if (ytlib) { ytlib.release(); ytlib.afterRead(id, loadCache().services[id].state, bgRun && !bgBlocker()); }
-        if (alerts) { try { alerts.onRead(id, loadCache().services[id]); } catch (err) { log('Lumen Alerts failed after a read: ' + ((err && err.message) || err)); } }
+        if (ytlib) { ytlib.release(); if (!gameStopped) ytlib.afterRead(id, loadCache().services[id].state, bgRun && !bgBlocker()); }
+        if (alerts && !gameStopped) { try { alerts.onRead(id, loadCache().services[id]); } catch (err) { log('Lumen Alerts failed after a read: ' + ((err && err.message) || err)); } }
         // A read that failed (or ran out of time) can be retried at once: the 30-s gap only
         // folds a double click on a read still on its way.
         if (loadCache().services[id].state === 'error') delete lastForced[id];
@@ -1284,10 +1343,18 @@ function create(deps) {
     if (stopped || !anyVisible()) { schedule(); return; }
     const due = openDueIds();
     if (!due.length) { schedule(); return; }
-    checkGame().then(() => {
+    const go = () => {
       if (anyVisible()) for (const id of due) enqueue(id, false);
       schedule();
-    }).catch((err) => failLoud('start its reads', err));
+    };
+    // The last look found no game and a new one is due (r64): queue now, so the first read
+    // starts beside that look (pump) instead of behind it. A game it finds stops that read and
+    // pauses the rest, as a look before them would have.
+    if (!gameRunning() && gameLookDue()) {
+      try { go(); } catch (err) { failLoud('start its reads', err); }
+      return;
+    }
+    checkGame().then(go).catch((err) => failLoud('start its reads', err));
   }
 
   /** Fresh after watching: a title opened from Watch marks its service to re-read when he comes back. */

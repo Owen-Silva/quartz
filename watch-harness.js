@@ -845,6 +845,55 @@ async function reviewFixTests() {
     await w.settle();
     check(w.calls.length === Shape.SERVICE_IDS.length, 'fix6b: a page turning visible looks at once, backoff or not', w.calls);
   } finally { w.cleanup(); }
+
+  // --- r64. a Retry starts its reader BESIDE the game look (the tasklist), not behind it; a game
+  // that look finds stops the read (nothing written) and pauses it with the game's reason.
+  for (const found of ['', 'valorant']) {
+    const tag = found ? 'r64 look finds a game' : 'r64 look finds none';
+    let lookDone = null;
+    let nLooks = 0;
+    w = fakeWorld({ test: { gameRunning: undefined, gameLook: () => { nLooks++; return new Promise((r) => { lookDone = r; }); } } });
+    try {
+      const g = w.guest();
+      // The page's hello: its fresh-on-open reads start beside the first look (no game found yet,
+      // none cached), which then says no game; a minute on, that cached answer is stale.
+      g.say('quartz-watch:hello {}');
+      await w.settle();
+      check(nLooks === 1 && !!lookDone && w.calls.length >= 1, tag + ': a page opening starts its first read while the game look is still out', { nLooks, calls: w.calls });
+      if (lookDone) lookDone('');
+      await w.settle();
+      for (let i = 0; i < 40 && w.calls.length < Shape.SERVICE_IDS.length; i++) await w.settle();
+      check(nLooks === 1 && w.calls.length === Shape.SERVICE_IDS.length, '(setup) ' + tag + ': the hello read everything after one look', { nLooks, calls: w.calls.length });
+      const before = JSON.stringify(w.svc(g.last('__applyWatch'), 'youtube').counts);
+      w.advance(2 * 60e3);
+      w.calls.length = 0;
+      lookDone = null;
+      w.behaviour.youtube = () => ({ extracted: { ok: true, n: 5 }, delayMs: 2000 });
+      w.wm.refresh('youtube');
+      await w.settle();
+      check(nLooks === 2 && !!lookDone && w.calls.length === 1 && w.calls[0].indexOf('youtube:home') === 0,
+        tag + ': the Retry\'s reader is loading while the game look is still out', { nLooks, calls: w.calls });
+      // A second Retry while the look is out queues behind the first read and adds no tasklist.
+      w.wm.refresh('disney');
+      await w.settle();
+      check(nLooks === 2, tag + ': a second Retry while the look is out adds no look', nLooks);
+      lookDone(found);
+      await w.settle();
+      w.advance(2100);
+      for (let i = 0; i < 4; i++) await w.fire();
+      for (let i = 0; i < 10; i++) await w.settle();
+      const sv = w.svc(g.last('__applyWatch'), 'youtube');
+      if (!found) {
+        check(sv.state === 'ok' && sv.counts.resume === 5 && !sv.paused, tag + ': the read lands as before', sv && { state: sv.state, counts: sv.counts, paused: sv.paused });
+        check(w.calls.some((c) => c.indexOf('disney:') === 0), tag + ': the second Retry reads after it', w.calls);
+      } else {
+        check(JSON.stringify(sv.counts) === before && sv.paused === 'paused while VALORANT is running', tag + ': nothing written, paused for the game', sv && { counts: sv.counts, before, paused: sv.paused });
+        check(w.logs.some((l) => /stopped reading YouTube: paused while VALORANT/.test(l)), tag + ': the stop is logged with its reason', w.logs.slice(-3));
+        const dv = w.svc(g.last('__applyWatch'), 'disney');
+        check(!w.calls.some((c) => c.indexOf('disney:') === 0) && dv.paused === 'paused while VALORANT is running', tag + ': the second Retry pauses on the found game, unread', { calls: w.calls, paused: dv.paused });
+      }
+    } finally { w.cleanup(); }
+  }
 }
 
 async function mainTests() {
