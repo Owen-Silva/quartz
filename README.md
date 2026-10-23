@@ -37,7 +37,11 @@ Node.js 22.12 or newer but below 27, and git; see [Requirements](#requirements) 
   style sheet for the browser's own chrome, light and dark themes, palettes and built-in
   backgrounds.
 - **New tab page.** Shortcuts, a clock, live system stats (CPU, memory, disk, network, GPU) and
-  an apps dock.
+  an apps dock. Every piece of it can be hidden or dragged to any spot on the page, so the
+  layout is yours; hidden pieces come back where they were.
+- **Autocorrect.** A misspelled word is fixed as you finish typing it, in any text box on any
+  page, by the Windows spell checker. Backspace right after puts back what you typed. Password,
+  email and code fields are never touched, and it can be turned off per site.
 - **Lumen.** One page for what you are watching on YouTube, Disney+, Hulu, Prime Video and ESPN,
   plus live scores, a mini-player and multiview. Off until you turn services on (below).
 - **Phone tab.** Your Android phone's screen in a tab, over adb and scrcpy (below).
