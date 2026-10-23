@@ -121,6 +121,9 @@ const STEP_BUDGET_MS = 20000;
 const WATCHDOG_GRACE_MS = 5000;     // a step that outlives its budget by this much is ended from outside
 const POLL_MS = 500;
 const DEFAULT_SETTLE_MS = 2500;
+// The view steps that read at dom-ready instead of the load (runViewStep's EARLY READ): YouTube's
+// own pages, whose rows are server-rendered into the document (watch/adapters/youtube.js, watch/ytlib.js).
+const EARLY_READ_URL = /^https:\/\/(www\.|m\.)?youtube\.com\//;
 const MAX_CAPTURES = 40;
 const MAX_CAPTURE_BYTES = 12 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 16 * 1024 * 1024;
@@ -452,7 +455,8 @@ function create(deps) {
   const searchCache = new Map();
   const trailerCache = new Map();   // 'tv|title' -> { at, answer }; hover previews, never written to disk
   const searchLive = new Map();  // guest -> its one search in flight { seq, ctrl, stale }
-  let finder = null;             // watch-find-main.js: Enter's search on every service (made on first use)
+  const ytFlights = new Map();   // 'yt|query' -> the one YouTube results fetch for it in flight (ytFlight)
+  let finder = null;            // watch-find-main.js: Enter's search on every service (made on first use)
   let shows = null;              // watch-shows-main.js: the show pages' reads (made on first use)
   // Boot grace: reads enqueued in the first bootGraceMs stay queued (the page says "Waiting to
   // read X") and the first reader starts at create() + bootGraceMs. The harness passes 0.
@@ -863,15 +867,39 @@ function create(deps) {
           Math.min(3000, Math.max(0, deadline - now())), ENABLE_TIMEOUT);
         if (enabled !== true) captureBroken = enabled === ENABLE_TIMEOUT ? 'DevTools did not answer' : 'DevTools refused';
       }
+      // EARLY READ (r64). YouTube server-renders its rows into an inline <script> (ytInitialData,
+      // ytcfg's LOGGED_IN): they are complete when the document is parsed (dom-ready), while the
+      // load event waits on the rest of YouTube's app (its scripts, styles, fonts, frames) -- the part
+      // Lumen throws away. So a YouTube step that has an extract and a ready() test reads at dom-ready
+      // and every POLL_MS after, and ends the moment ready() says the tree is there; its window goes at
+      // once (no YouTube app left running beside Lumen's own page). Not ready yet: it waits for the
+      // load and reads exactly as before. wc.executeJavaScript would itself wait for the load
+      // (Electron holds it until did-stop-loading), so the early read runs in wc.mainFrame.
+      const earlyOk = !patterns.length && !!step.extract && typeof step.ready === 'function' && EARLY_READ_URL.test(String(step.url || ''))
+        && !!wc.mainFrame && typeof wc.mainFrame.executeJavaScript === 'function';
+      let domReady = false;
+      let early = null;
+      let onDom = null;
+      const domP = earlyOk ? new Promise((r) => { onDom = () => { domReady = true; r(); }; try { wc.once('dom-ready', onDom); } catch { r(); } }) : null;
       const loadP = wc.loadURL(url).then(() => { loaded = true; }, (err) => {
         if (err && (err.errno === -3 || /ERR_ABORTED/.test(String(err.code || err.message)))) { loaded = true; return; }
         loadErr = err;
       });
-      // The load itself, inside the budget.
+      // The load itself, inside the budget (or, for an early read, until ready() says so).
       while (!loaded && !loadErr && !crashed && !h0.killed && now() < deadline) {
-        await Promise.race([loadP, sleep(POLL_MS)]);
+        await Promise.race(domP && !domReady ? [loadP, domP, sleep(POLL_MS)] : [loadP, sleep(POLL_MS)]);
+        if (!domReady || loaded || loadErr || crashed || h0.killed) continue;
+        const v = await extractFrom(wc, step.extract, Math.min(5000, Math.max(0, deadline - now())), true);
+        let ok = false;
+        try { ok = !!step.ready(v); } catch { ok = false; }
+        if (ok) { early = v; break; }
       }
-      if (h0.killed) {
+      if (onDom && !domReady) { try { wc.removeListener('dom-ready', onDom); } catch { /* fake or gone */ } }
+      if (early && !h0.killed && !crashed) {
+        out.extracted = early;
+        out.early = true;
+        out.ok = true;
+      } else if (h0.killed) {
         out.error = { code: h0.killed === 'cancelled' ? 'cancelled' : 'timeout', detail: h0.killed === 'cancelled' ? 'cancelled' : 'the reader stopped answering' };
       } else if (loadErr && !loaded) {
         out.error = classifyNetError(loadErr, hostOf(url));
@@ -952,10 +980,12 @@ function create(deps) {
     return Promise.race([Promise.resolve(p).finally(() => clearTimer(h)), cap]);
   }
 
-  async function extractFrom(wc, expr, ms) {
+  async function extractFrom(wc, expr, ms, inFrame) {
     try {
-      // userGesture false, as for the scroll: reading globals needs no activation.
-      const v = await within(wc.executeJavaScript('(function(){try{return (' + expr + ');}catch(e){return null;}})()', false), ms || 5000);
+      // userGesture false, as for the scroll: reading globals needs no activation. inFrame: the
+      // early read, in the main frame now, without waiting for the page's load (runViewStep).
+      const code = '(function(){try{return (' + expr + ');}catch(e){return null;}})()';
+      const v = await within(inFrame ? wc.mainFrame.executeJavaScript(code, false) : wc.executeJavaScript(code, false), ms || 5000);
       if (v === undefined) return null;
       // A page cannot hand back something absurd: past the cap it is dropped, not truncated.
       try { if (JSON.stringify(v).length > MAX_EXTRACT_CHARS) return null; } catch { return null; }
@@ -1698,6 +1728,9 @@ function create(deps) {
     trailerCache.clear();
     if (finder) finder.forget();
     searchNext = 0;
+    // A YouTube fetch in flight still answers the searches waiting on it (uncached: their epoch is
+    // old), but no search after Forget joins it.
+    ytFlights.clear();
     for (const k of Object.keys(paused)) delete paused[k];
     for (const k of Object.keys(pausedUntil)) delete pausedUntil[k];
     for (const k of Object.keys(lastForced)) delete lastForced[k];
@@ -1823,36 +1856,95 @@ function create(deps) {
     if (!yt || typeof yt.searchUrl !== 'function' || typeof yt.parseSearch !== 'function') {
       return { ok: false, state: 'error', reason: 'this build has no YouTube search', items: [] };
     }
-    const key = 'yt|' + q.toLowerCase();
+    const key = ytSearchKey(q);
     const hit = searchCache.get(key);
     if (hit && now() - hit.at < SEARCH_TTL_MS) return hit.answer;
     const cancelled = { ok: false, state: 'cancelled', reason: 'cancelled', items: [] };   // never shown
-    // Searches go out SEARCH_GAP_MS apart. One replaced while it waits never fetches at all,
-    // and does not hold a slot: the newest search goes as soon as the gap allows.
-    for (;;) {
-      if (job && job.stale) return cancelled;
-      const wait = searchNext - now();
-      if (wait <= 0) break;
-      await sleep(wait);
-    }
-    searchNext = now() + SEARCH_GAP_MS;
-    const r = await runStep({ name: 'search', type: 'fetch', as: 'text', url: yt.searchUrl(q), budgetMs: 10000, signal: job && job.ctrl ? job.ctrl.signal : undefined });
-    if ((job && job.stale) || (r.error && r.error.code === 'cancelled')) return cancelled;
+    // The one fetch of this query's results page, shared with every search waiting for the same
+    // words (ytFlight). This search leaves it when its own job is cancelled.
+    const fl = ytFlight(key, q, yt);
+    fl.adopted = false;
+    fl.users++;
+    const sig = job && job.ctrl ? job.ctrl.signal : null;
+    let left = false;
+    const leave = (early) => {
+      if (left) return;
+      left = true;
+      fl.users--;
+      if (early && fl.users <= 0 && !fl.adopted) dropFlight(key, fl);
+    };
+    let onAbort = null;
+    const abortP = sig && typeof sig.addEventListener === 'function' ? new Promise((r) => {
+      onAbort = () => { leave(true); r(cancelled); };
+      if (sig.aborted) onAbort(); else sig.addEventListener('abort', onAbort, { once: true });
+    }) : null;
     let answer;
-    if (r.error) answer = { ok: false, state: 'error', reason: r.error.detail, items: [] };
-    else {
-      let items = [];
-      try { items = Shape.cleanItems(yt.parseSearch(r.text || ''), 20); } catch { items = []; }
-      const channels = FindMain ? FindMain.channelsFrom(r.text || '') : [];
-      answer = items.length ? { ok: true, state: 'ok', reason: '', items, channels }
-        : { ok: false, state: 'error', reason: "YouTube's results page had nothing Lumen could read (YouTube changed its layout?)", items: [] };
+    try {
+      answer = await (abortP ? Promise.race([fl.p, abortP]) : fl.p);
+    } finally {
+      if (onAbort) { try { sig.removeEventListener('abort', onAbort); } catch { /* gone */ } }
+      leave(false);
     }
-    if (answer.ok) {
-      rememberSearch(key, job, answer);
-    } else {
-      log('Lumen search on YouTube failed: ' + answer.reason);
-    }
+    if ((job && job.stale) || !answer || answer.state === 'cancelled') return cancelled;
+    if (answer.ok) rememberSearch(key, job, answer);
     return answer;
+  }
+
+  function ytSearchKey(q) { return 'yt|' + String(q || '').toLowerCase(); }
+
+  /**
+   * One YouTube results fetch per query at a time (r64). Typing "bluey" sends the as-you-type search;
+   * Enter on the same words a moment later used to abort that fetch and queue the same page again
+   * behind SEARCH_GAP_MS (+1.2 s and a second fetch before the tiles). Now every search for the same
+   * words waits on this one: { users, adopted, dead, ctrl, p }. It is aborted only when the last
+   * search waiting on it is cancelled (a newer query replaced them), so "the next search aborts the
+   * one in flight" still holds for different words. `adopted`: Enter took it over from the typed
+   * search it cancelled and joins on its next turn (watch-find-main.js calls youtube() in a
+   * microtask), so that cancel does not abort it.
+   * Searches still go out SEARCH_GAP_MS apart. One replaced while it waits never fetches at all,
+   * and does not hold a slot: the newest search goes as soon as the gap allows. Its answer (or
+   * failure, logged once) resolves fl.p; each search caches it under its own Forget epoch.
+   */
+  function ytFlight(key, q, yt) {
+    const had = ytFlights.get(key);
+    if (had && !had.dead) return had;
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const fl = { users: 0, adopted: false, dead: false, ctrl, p: null };
+    const gone = () => fl.dead || !!(ctrl && ctrl.signal.aborted);
+    const cancelled = { ok: false, state: 'cancelled', reason: 'cancelled', items: [] };
+    ytFlights.set(key, fl);
+    fl.p = (async () => {
+      for (;;) {
+        if (gone()) return cancelled;
+        const wait = searchNext - now();
+        if (wait <= 0) break;
+        await sleep(wait);
+      }
+      searchNext = now() + SEARCH_GAP_MS;
+      const r = await runStep({ name: 'search', type: 'fetch', as: 'text', url: yt.searchUrl(q), budgetMs: 10000, signal: ctrl ? ctrl.signal : undefined });
+      if (gone() || (r.error && r.error.code === 'cancelled')) return cancelled;
+      let answer;
+      if (r.error) answer = { ok: false, state: 'error', reason: r.error.detail, items: [] };
+      else {
+        let items = [];
+        try { items = Shape.cleanItems(yt.parseSearch(r.text || ''), 20); } catch { items = []; }
+        const channels = FindMain ? FindMain.channelsFrom(r.text || '') : [];
+        answer = items.length ? { ok: true, state: 'ok', reason: '', items, channels }
+          : { ok: false, state: 'error', reason: "YouTube's results page had nothing Lumen could read (YouTube changed its layout?)", items: [] };
+      }
+      if (!answer.ok) log('Lumen search on YouTube failed: ' + answer.reason);
+      return answer;
+    })().catch((err) => ({ ok: false, state: 'error', reason: String((err && err.message) || err).slice(0, 160), items: [] }))
+      .finally(() => { if (ytFlights.get(key) === fl) ytFlights.delete(key); });
+    return fl;
+  }
+
+  /** No search waits on this fetch any more: stop it (a fetch still waiting for the gap never goes out). */
+  function dropFlight(key, fl) {
+    if (fl.dead) return;
+    fl.dead = true;
+    if (ytFlights.get(key) === fl) ytFlights.delete(key);
+    try { if (fl.ctrl) fl.ctrl.abort(); } catch { /* gone */ }
   }
 
   /* --- hover-preview trailers (watch/preview.js, watch/tmdb.js trailer()) -------------------- */
@@ -1928,8 +2020,17 @@ function create(deps) {
       case 'find': {
         const f = findMain();
         if (!f) { pushTo(contents, '__applyWatchFind', { seq: req.seq, q: req.q, kind: 'fatal', reason: 'this build has no search across services' }); break; }
-        // Enter replaces the as-you-type search: one YouTube read, not two.
-        if (!req.only) { const job = searchLive.get(contents); if (job) { cancelSearch(job); searchLive.delete(contents); } }
+        // Enter replaces the as-you-type search: one YouTube read, not two. When that search is
+        // fetching these same words, Enter adopts its fetch (ytFlight) instead of starting over.
+        if (!req.only) {
+          const job = searchLive.get(contents);
+          if (job) {
+            const fl = ytFlights.get(ytSearchKey(req.q));
+            if (fl && !fl.dead) fl.adopted = true;
+            cancelSearch(job);
+            searchLive.delete(contents);
+          }
+        }
         f.run(req.q, req.seq, contents, { only: req.only, force: req.force }).catch((err) => log('Lumen search failed: ' + ((err && err.message) || err)));
         break;
       }
@@ -2154,7 +2255,7 @@ function create(deps) {
       guests: guests.size, visible: Array.from(guestVisible.entries()).filter(([g, v]) => v && guests.has(g)).length,
       queue: queue.slice(), reading, starting, timerAt, bootTimer: !!bootTimer, paused: Object.assign({}, paused),
       pausedUntil: Object.assign({}, pausedUntil), viewAlive: liveReaders.size > 0, readers: liveReaders.size,
-      searchCache: searchCache.size, trailerCache: trailerCache.size, searchesLive: searchLive.size, lastForced: Object.keys(lastForced).length,
+      searchCache: searchCache.size, trailerCache: trailerCache.size, searchesLive: searchLive.size, ytFlights: ytFlights.size, lastForced: Object.keys(lastForced).length,
       bgTimerAt, bgQueued: Array.from(bgQueued), bgLastAt, bgWaiting, bgPausedUntil, bgReads, watched: Object.assign({}, watched),
       readStartedAt, readLimit, find: finder ? finder.state() : null,
     }),

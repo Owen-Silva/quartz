@@ -428,6 +428,121 @@ async function reviewFixTests() {
     check(s6.signal.aborted === true && w.wm.state().searchesLive === 0, 'fix1: a page that closes cancels its search');
   } finally { w.cleanup(); }
 
+  // --- r64. Enter on the words the as-you-type search is still fetching: that ONE fetch answers Enter
+  // (no abort, no second fetch behind the 1.2-s gap); Enter on different words still aborts it.
+  w = fakeWorld();
+  try {
+    const g = w.guest();
+    g.say('quartz-watch:hello {}');
+    await w.settle();
+    w.behaviour.search = (step) => (/youtube\.com\/results\?/.test(String(step.url)) ? { text: '<html>RESULTS</html>', delayMs: 800 } : {});
+    const ytCalls = () => w.calls.filter((c) => /youtube\.com\/results\?search_query=/.test(c));
+    const n0 = ytCalls().length;
+    g.say('quartz-watch:search {"q":"bluey","seq":1}');
+    await w.settle();
+    const s1 = w.steps.filter((s) => /search_query=bluey$/.test(String(s.url))).pop();
+    check(ytCalls().length === n0 + 1 && !!s1, 'r64: the typed search fetches its results page', ytCalls().slice(n0));
+    g.say('quartz-watch:find {"q":"bluey","seq":2}');
+    await w.settle();
+    check(s1 && s1.signal && s1.signal.aborted === false, 'r64: Enter on the same words does not abort the fetch in flight');
+    w.advance(900);
+    await w.fire();
+    await w.settle();
+    const ytParts = g.pushed.filter((p) => p.fn === '__applyWatchFind' && p.payload.kind === 'youtube');
+    check(ytCalls().length === n0 + 1, 'r64: ...and fetches nothing again', ytCalls().slice(n0));
+    check(ytParts.length === 1 && ytParts[0].payload.seq === 2 && ytParts[0].payload.answer.ok === true && ytParts[0].payload.answer.items.length === 1,
+      "r64: Enter's YouTube part is answered from that fetch", ytParts.map((p) => p.payload));
+    check(!g.pushed.some((p) => p.fn === '__applyWatchSearch' && p.payload.seq === 1), 'r64: the typed search Enter replaced still never answers the page');
+    check(w.wm.state().ytFlights === 0, 'r64: no YouTube fetch left in flight', w.wm.state().ytFlights);
+    // different words: the typed fetch is aborted, Enter fetches its own words after the gap
+    w.advance(5000);
+    g.say('quartz-watch:search {"q":"peppa","seq":3}');
+    await w.settle();
+    const s3 = w.steps.filter((s) => /search_query=peppa$/.test(String(s.url))).pop();
+    g.say('quartz-watch:find {"q":"peppa pig","seq":4}');
+    await w.settle();
+    check(!!s3 && s3.signal.aborted === true, 'r64: Enter on different words still aborts the typed fetch');
+    w.advance(1300);
+    await w.fire();
+    await w.settle();
+    w.advance(900);
+    await w.fire();
+    await w.settle();
+    const last = g.pushed.filter((p) => p.fn === '__applyWatchFind' && p.payload.kind === 'youtube').pop();
+    check(ytCalls().some((c) => /search_query=peppa%20pig$/.test(c)) && last && last.payload.seq === 4 && last.payload.answer.ok === true,
+      "r64: ...and answers from its own words' fetch", ytCalls().slice(n0));
+    // Forget: a search after it never joins a fetch from before it
+    g.say('quartz-watch:search {"q":"zebra","seq":5}');
+    await w.settle();
+    g.say('quartz-watch:forget {}');
+    await w.settle();
+    check(w.wm.state().ytFlights === 0, 'r64: Forget lets no later search join a fetch from before it', w.wm.state().ytFlights);
+  } finally { w.cleanup(); }
+
+  // --- r64. the EARLY READ: a YouTube view step reads at dom-ready (in the main frame) and ends when
+  // ready() says so, without waiting for the load; not ready yet, it waits for the load as before.
+  for (const mode of ['early', 'late', 'other']) {
+    const made = [];
+    const pages = { early: mode === 'early' ? { data: { rows: 1 } } : { data: null }, late: { data: { rows: 2 } } };
+    class EarlyBW {
+      constructor() {
+        const wcH = {};
+        const self = this;
+        this.destroyed = false;
+        this.handlers = {};
+        const wc = this.webContents = {
+          url: '', js: [], frameJs: [], destroyed: false, finish: null,
+          on(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+          once(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+          removeListener(ev, fn) { const l = wcH[ev] || []; const i = l.indexOf(fn); if (i !== -1) l.splice(i, 1); },
+          emit(ev, ...a) { for (const fn of (wcH[ev] || []).slice()) fn(...a); },
+          setAudioMuted() {}, setFrameRate() {}, setWindowOpenHandler() {},
+          isDestroyed() { return self.destroyed; },
+          loadURL(url) { wc.url = url; setImmediate(() => wc.emit('dom-ready')); return new Promise((r) => { wc.finish = r; }); },
+          executeJavaScript(code) { wc.js.push(code); return Promise.resolve(pages.late); },
+          mainFrame: { executeJavaScript(code) { wc.frameJs.push(code); return Promise.resolve(pages.early); } },
+          getURL() { return wc.url; }, getTitle() { return ''; },
+        };
+        made.push(this);
+      }
+      once(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); }
+      isDestroyed() { return this.destroyed; }
+      destroy() { if (this.destroyed) return; this.destroyed = true; for (const fn of (this.handlers.closed || [])) fn(); }
+    }
+    const url = mode === 'other' ? 'https://www.disneyplus.com/home' : 'https://www.youtube.com/';
+    const id = mode === 'other' ? 'disney' : 'youtube';
+    const reader = {
+      id,
+      steps: () => [{ name: 'home', type: 'view', url, extract: '({ data: window.ytInitialData || null })', ready: (x) => !!(x && x.data), budgetMs: 20000 }],
+      parse: (read) => {
+        const s = read.steps.home;
+        if (!s.ok) return { state: 'error', reason: (s.error && s.error.detail) || 'no' };
+        return { state: 'ok', items: mk(id, 'rec', s.extracted.data.rows), profile: '' };
+      },
+    };
+    const w2 = fakeWorld({ realSteps: true, fetch: fakeFetch(), BrowserWindow: EarlyBW, session: { defaultSession: {} }, prefs: { v: 2, enabled: { [id]: true } }, adapters: { [id]: reader } });
+    try {
+      const g = w2.guest();
+      g.say('quartz-watch:hello {}');
+      await w2.settle();
+      const bw = made[0];
+      if (mode === 'early') {
+        const s = w2.svc(w2.wm.snapshot(), 'youtube');
+        check(!!bw && bw.webContents.frameJs.length >= 1 && bw.webContents.js.length === 0 && bw.destroyed === true, 'r64 early: read in the main frame at dom-ready, the window gone before its load', bw && { frame: bw.webContents.frameJs.length, js: bw.webContents.js.length, destroyed: bw.destroyed });
+        check(s && s.state === 'ok' && s.counts.rec === 1, 'r64 early: its rows land without the load', s && { state: s.state, counts: s.counts });
+      } else {
+        const s0 = w2.svc(w2.wm.snapshot(), id);
+        check(!!bw && bw.destroyed === false && s0.state !== 'ok', 'r64 ' + mode + ': ' + (mode === 'late' ? 'not ready at dom-ready' : 'not YouTube') + ': the step still waits for the load', bw && { destroyed: bw.destroyed, state: s0.state });
+        if (bw) bw.webContents.finish();
+        for (let i = 0; i < 5; i++) await w2.settle();
+        const s = w2.svc(w2.wm.snapshot(), id);
+        check(bw && bw.destroyed === true && bw.webContents.js.length >= 1 && s.state === 'ok' && s.counts.rec === 2, 'r64 ' + mode + ': after the load it reads exactly as before',
+          bw && { destroyed: bw.destroyed, js: bw.webContents.js.length, frame: bw.webContents.frameJs.length, state: s.state, counts: s.counts });
+        if (mode === 'other') check(bw && bw.webContents.frameJs.length === 0, 'r64 other: a page that is not YouTube is never read early');
+      }
+    } finally { w2.cleanup(); }
+  }
+
   // --- 2. a snapshot that throws reaches the page as { v, now, fatal }; pushAll never dies quietly
   w = fakeWorld();
   const origRows = Merge.buildRows;
