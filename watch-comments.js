@@ -621,12 +621,40 @@
     function close() { shut = true; var l = out; out = []; l.forEach(function (f) { f(); }); }
     return { run: run, close: close, open: function () { return out.length; } };
   }
-  function ask(st, v, code) { var pr = js(v, code); return st && st.gate ? st.gate.run(pr) : pr; }
+  /* A call into a document whose main frame is still loading is HELD by Electron until the page's did-stop-loading,
+     keeping its code meanwhile, and a view closed before then never answers: the ~14 KB reader put in at dom-ready
+     was kept (the same as watch-playview.js's, r64). So such a call waits in Lumen instead (st.waiters, closures that
+     drop() lets go) and goes at did-stop-loading, when Electron would have run it. loadingNow is Electron's own test
+     (isLoadingMainFrame); a document that has stopped once (docs.stop) is never asked again. */
+  function loadingNow(v) {
+    var d = v && v.__lumenCmDocs;
+    if (!d || d.stop === d.n || typeof v.isLoadingMainFrame !== 'function') return false;
+    try { return v.isLoadingMainFrame() === true; } catch (e) { return false; }
+  }
+  function ask(st, v, code) {
+    if (!st || !st.gate) return js(v, code);
+    if (!st.waiters || !loadingNow(v)) return st.gate.run(js(v, code));
+    var d = v.__lumenCmDocs;
+    if (d.wait.indexOf(st) < 0) d.wait.push(st);
+    return st.gate.run(new Promise(function (go) { st.waiters.push(go); })).then(function () {
+      if (st.gone) { var e = new Error('the section is closed'); e.code = 'closed'; throw e; }
+      return st.gate.run(js(v, code));
+    });
+  }
   /* The reader into the view's current document, once: a count of its documents is kept on the view itself (its
-     did-navigate), so every section on the view shares it. */
+     did-navigate), so every section on the view shares it; so are its stop and the sections waiting for it. */
   function putReader(st, v) {
     if (!v || typeof v.addEventListener !== 'function') return;
-    if (!v.__lumenCmDocs) { var dn = v.__lumenCmDocs = { n: 1, inst: 0 }; v.addEventListener('did-navigate', function () { dn.n++; }); }
+    if (!v.__lumenCmDocs) {
+      var dn = v.__lumenCmDocs = { n: 1, inst: 0, stop: 0, wait: [] };
+      v.addEventListener('did-navigate', function () { dn.n++; });
+      v.addEventListener('did-stop-loading', function () {
+        dn.stop = dn.n;
+        var w = dn.wait;
+        dn.wait = [];
+        w.forEach(function (x) { var l = x.waiters || []; x.waiters = []; l.forEach(function (go) { go(); }); });
+      });
+    }
     var d = v.__lumenCmDocs;
     if (d.inst === d.n) return;
     var n = d.inst = d.n;
@@ -660,7 +688,7 @@
       phase: 'loading', why: '', message: '', signedIn: null, header: null, items: [], next: '', sortLabel: '', loading: false, pageWhy: '',
       replies: {}, busy: {}, notes: {}, composer: { open: false, text: '', busy: false, why: '' }, replyTo: '', replyText: '', replyBusy: false,
       expanded: {}, requests: 0, seq: 0, view: null, tile: null, toggle: null, root: el('div', 'cm-root'), io: null, focus: null,
-      gate: gate(), gone: false };   // gate: its calls into the page (drop ends them); gone: dropped
+      gate: gate(), gone: false, waiters: [] };   // gate: its calls into the page (drop ends them); gone: dropped; waiters: held for the page's stop (ask)
     st.root.addEventListener('focusin', function (e) { st.focus = e.target; });
     st.root.tabIndex = -1;   // where focus waits when the control he was on is gone or busy (refocus), never a Tab stop
     if (typeof ResizeObserver === 'function') {
@@ -706,6 +734,10 @@
     st.gone = true;
     st.seq++;
     if (st.gate) st.gate.close();
+    // calls held for a load that may never stop go with it (ask), and the view no longer names it
+    st.waiters = [];
+    var dn = st.view && st.view.__lumenCmDocs;
+    if (dn && dn.wait) dn.wait = dn.wait.filter(function (x) { return x !== st; });
     st.view = null; st.tile = null; st.focus = null; st.toggle = null;
     st.root.replaceChildren();
     st.items = []; st.replies = {}; st.expanded = {}; st.header = null;

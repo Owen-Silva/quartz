@@ -186,8 +186,8 @@ const ctx = vm.createContext(win);
     const LC = W.win.LumenComments;
     const loads = (calls) => calls.filter((c) => c.code.length < 1024 && c.code.indexOf('L.load(') >= 0);
     // A section the way the view draws one: its info's lumen-pv-info, with the page's own first token (no trip into the page).
-    async function openSection(slot) {
-      const pg = FD.page(W.doc);
+    async function openSection(slot, pg0) {
+      const pg = pg0 || FD.page(W.doc);
       const tile = new FD.El(W.doc, 'div');
       tile.className = 'wp-tile';
       const box = new FD.El(W.doc, 'div');
@@ -214,6 +214,33 @@ const ctx = vm.createContext(win);
     loads(A.pg.calls)[0].ok({ ok: true, json: X.next({ continuation: X.FIRST }, '', 'dQw4w9WgXcQ').json });   // the page answers after the close
     await wait(20);
     check(A.root.childNodes.length === 0 && A.pg.calls.length === callsAtClose, 'its page answering late: nothing is drawn, and nothing more is asked of it', { rows: A.root.childNodes.length, asked: A.pg.calls.length - callsAtClose });
+    // A page still loading (r64): Electron holds a call into it until did-stop-loading, keeping its code (the ~14 KB
+    // reader), and a section closed first never gets its answer. The section holds its calls itself and sends them at
+    // the stop, in order; one forgotten while its page loads sends none, and the view no longer names it.
+    {
+      const pgL = FD.page(W.doc);
+      let loadingL = true;
+      pgL.v.isLoadingMainFrame = () => loadingL;
+      const L = await openSection('cmL', pgL);
+      const heldL = pgL.calls.length;
+      loadingL = false;
+      pgL.v.dispatchEvent({ type: 'did-stop-loading' });
+      await wait(10);
+      check(heldL === 0 && pgL.calls.length === 2 && pgL.calls[0].code === LC.INSTALL && /L\.load\(/.test(pgL.calls[1].code),
+        'a page still loading: the reader and the first load wait in Lumen, and go at its did-stop-loading (the reader first)', { heldL, calls: pgL.calls.map((c) => c.code.length) });
+      LC.forget('cmL');
+      W.doc.body.removeChild(L.tile);
+      const pgM = FD.page(W.doc);
+      pgM.v.isLoadingMainFrame = () => true;
+      const M = await openSection('cmM', pgM);
+      const waitingM = pgM.v.__lumenCmDocs ? pgM.v.__lumenCmDocs.wait.length : -1;
+      LC.forget('cmM');
+      W.doc.body.removeChild(M.tile);
+      pgM.v.dispatchEvent({ type: 'did-stop-loading' });
+      await wait(10);
+      check(waitingM === 1 && pgM.calls.length === 0 && pgM.v.__lumenCmDocs.wait.length === 0,
+        'a section forgotten while its page loads: none of its calls is ever sent, and the view holds nothing of it', { waitingM, sent: pgM.calls.length, wait: pgM.v.__lumenCmDocs.wait.length });
+    }
     check(!!gcNow, 'node’s GC is reachable for the closed-section checks');
     if (gcNow) {
       const B = await openSection('cmB');
