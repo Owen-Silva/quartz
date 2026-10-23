@@ -285,6 +285,24 @@ function ytPage(addrId, flexyId, extra) {
   check([noId, noFlexy].every((r) => r && r.stale === false && r.title === 'Video A title' && r.channel && r.channel.name === 'Channel A' && r.like.found && PV.complete(r) === true),
     'ytd-watch-flexy with no video-id, or none at all: read as before (nothing to compare), complete', { noId, noFlexy });
   check(PV.complete(ytPage(VB, '').read()) === true, 'and so without a video-id a moved page reads as it did before (the timing is the only guard there)');
+  // The player moves on before the page redraws (a real-YouTube probe: 1-1.3 s sooner): its title and channel for
+  // THIS id stand in while the page is stale; never another id's; still not complete (no buttons).
+  const pp = ytPage(VB, VA);
+  pp.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VB, title: 'Video B from the player', author: 'Channel B', channelId: 'UCbbbbbbbbbb' } }) };
+  const rp = pp.read();
+  check(!!rp && rp.stale && rp.title === 'Video B from the player' && rp.titleFrom === 'player' && rp.channel && rp.channel.name === 'Channel B' && rp.channel.url === 'https://www.youtube.com/channel/UCbbbbbbbbbb'
+    && !rp.like.found && rp.desc.text === '' && PV.complete(rp) === false, 'stale page, the player already on B: B’s title and channel from the player; no buttons or description yet, so not complete', rp);
+  const pa = ytPage(VB, VA);
+  pa.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VA, title: 'Video A title', author: 'Channel A' } }), getVideoData: () => ({ video_id: VA, title: 'Video A title', author: 'Channel A' }) };
+  const ra = pa.read();
+  check(!!ra && ra.title === '' && ra.channel === null, 'the player still on A: nothing from it (another id’s words are never shown under B)', ra && { title: ra.title, channel: ra.channel });
+  const pg = ytPage(VB, VA);
+  pg.nodes['#movie_player'] = { getVideoData: () => ({ video_id: VB, title: 'Video B (getVideoData)', author: 'Channel B' }) };
+  const rg = pg.read();
+  check(!!rg && rg.title === 'Video B (getVideoData)' && rg.channel && rg.channel.name === 'Channel B' && rg.channel.url === '', 'no getPlayerResponse: getVideoData for this id does the same', rg && { title: rg.title, channel: rg.channel });
+  const mpl = PV.model('youtube', rp, { title: 'Video B (Lumen’s row)' }, '', { moved: false });
+  check(mpl.title === 'Video B from the player' && mpl.titleFrom === 'player' && mpl.channel.name === 'Channel B', 'the info draws the player’s title over the row’s', mpl);
+  check(PV.STALE_MS >= PV.READS[PV.READS.length - 1], 'a stale page is waited for at least a whole load’s span (' + PV.STALE_MS + ' ms), not the in-place reads’ 4 s', PV.STALE_MS);
   // An older guest still in the page (installed by the last Quartz): the new one replaces it, so the stale check is in.
   const old = ytPage(VB, VA, { __lumenPv: { v: 6, read: () => ({ ok: true, svc: 'youtube', title: 'Video A title', old: true }) } });
   const ro = old.read();

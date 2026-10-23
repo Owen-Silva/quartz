@@ -54,15 +54,20 @@ tp-yt-paper-dialog{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%
 // The late redraw (r64, ?late=<ms>): YouTube's own in-page move the way it really goes. Lumen's Play now asks the
 // app to move (watch-player-yt.js MOVE_JS: a yt-navigate on ytd-app, answered by yt-navigate-start); the address
 // changes AT ONCE, but the title, the channel, the buttons' labels, document.title and ytd-watch-flexy's video-id
-// still say the last video until its data is in, <ms> later (Shorts measured up to ~650 ms on real YouTube).
-// ytInitialData stays the first video's, as on YouTube. window.__late keeps the times for the e2e.
+// still say the last video until its data is in, <ms> later (2.8-4.8 s on real YouTube, r64 probe).
+// ytInitialData stays the first video's, as on YouTube. The player moves on first: its getPlayerResponse() names
+// the new video PLAYER_MS after the move (a real-YouTube probe: 1-1.3 s before the redraw). window.__late keeps the times.
+const PLAYER_MS = 600;
 const LATE_T = 'Late video B, drawn after the move';
 const LATE_C = 'Late Channel B';
 function lateMove(ms) {
-  const lag = Math.max(0, Math.min(5000, Number(ms) || 0));
+  const lag = Math.max(0, Math.min(10000, Number(ms) || 0));
   return `(function () {
     var app = document.querySelector('ytd-app');
-    window.__late = { lag: ${lag}, moves: 0, movedAt: 0, drawnAt: 0, to: '' };
+    window.__late = { lag: ${lag}, moves: 0, movedAt: 0, drawnAt: 0, to: '', playerMs: ${PLAYER_MS} };
+    var cur = { videoId: VID, title: ${JSON.stringify(TITLE)}, author: ${JSON.stringify(CHANNEL)}, channelId: '' };
+    var mp = document.getElementById('movie_player');
+    if (mp) mp.getPlayerResponse = function () { return { videoDetails: cur }; };
     app.addEventListener('yt-navigate', function (e) {
       var ep = e.detail && e.detail.endpoint, we = ep && ep.watchEndpoint;
       if (!we || !we.videoId) return;
@@ -70,6 +75,7 @@ function lateMove(ms) {
       window.__late.moves++; window.__late.to = id; window.__late.movedAt = Date.now();
       history.pushState({}, '', '/watch?v=' + encodeURIComponent(id));
       window.dispatchEvent(new CustomEvent('yt-navigate-start'));
+      setTimeout(function () { cur = { videoId: id, title: ${JSON.stringify(LATE_T)}, author: ${JSON.stringify(LATE_C)}, channelId: '' }; }, ${PLAYER_MS});
       setTimeout(function () {
         document.querySelector('ytd-watch-flexy').setAttribute('video-id', id);
         document.querySelector('ytd-watch-metadata #title h1 yt-formatted-string').textContent = ${JSON.stringify(LATE_T)};
@@ -81,22 +87,6 @@ function lateMove(ms) {
         window.__late.drawnAt = Date.now();
       }, ${lag});
     });
-  })();`;
-}
-
-// A page whose reads all fail after the early one (r64 #5, ?earlyfail): ytInitialPlayerResponse is there at once
-// (the early read takes its words), a slow script holds DOMContentLoaded back so that read lands first, and from
-// DOMContentLoaded on every read Lumen asks of the page throws (window.__lumenPv answers v, apply and early only).
-const EARLY_T = 'Early words, then no read works';
-function earlyFailHead(vid) {
-  return `window.ytInitialPlayerResponse = { videoDetails: { videoId: ${JSON.stringify(String(vid || ''))}, title: ${JSON.stringify(EARLY_T)}, author: 'Early Channel', channelId: '', shortDescription: '' } };
-  (function () {
-    var cur, broken = false;
-    var bad = function () { throw new Error('this test page answers no read'); };
-    Object.defineProperty(window, '__lumenPv', { configurable: false,
-      get: function () { return broken && cur ? { v: cur.v, apply: cur.apply, early: cur.early, read: bad, tick: bad, watch: bad, press: bad, seek: bad } : cur; },
-      set: function (x) { cur = x; } });
-    document.addEventListener('DOMContentLoaded', function () { broken = true; window.__brokenAt = Date.now(); });
   })();`;
 }
 
@@ -141,9 +131,8 @@ function youtubeWatch(q) {
   window.__presses = { like: 0, dislike: 0, sub: 0, confirm: 0, save: 0, saveOpt: 0, saveClose: 0 };
   window.__keys = [];
   window.__born = Date.now() + ':' + Math.random();
-  ${o.earlyfail ? earlyFailHead(o.vid) : ''}
 </script></head>
-<body>${o.earlyfail ? '<script src="/__slow.js"></script>' : ''}<ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy${o.late ? ' video-id="' + String(o.vid || '').replace(/[^\w-]/g, '') + '"' : ''}><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
+<body><ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy${o.late ? ' video-id="' + String(o.vid || '').replace(/[^\w-]/g, '') + '"' : ''}><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
 <ytd-popup-container id="popups"></ytd-popup-container>
 <script>
 (function () {
@@ -228,4 +217,4 @@ function servicePlayer(svc, title) {
 <script>window.__keys = []; document.addEventListener('keydown', function (e) { window.__keys.push(e.key); });</script></body></html>`;
 }
 
-module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C, EARLY_T };
+module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C };

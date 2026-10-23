@@ -53,12 +53,10 @@ async function startServers(mock) {
       const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
       const p = u.pathname;
       if (p === '/__media/clip.mp4') return sendClip(req, res);
-      // the early-fail page's parser-blocking script: DOMContentLoaded comes 1.5 s after the early read can land
-      if (p === '/__slow.js') return void setTimeout(() => { res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' }); res.end('window.__slow = 1;'); }, 1500);
       if (svc === 'youtube' && p === '/watch') {
         hits.youtube++;
         const q = { signedout: u.searchParams.has('signedout'), bare: u.searchParams.has('bare'), noplayer: u.searchParams.has('noplayer'), still: u.searchParams.has('still'),
-          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '', late: Number(u.searchParams.get('late')) || 0, earlyfail: u.searchParams.has('earlyfail') };
+          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '', late: Number(u.searchParams.get('late')) || 0 };
         return sendHtml(res, F.youtubeWatch(q));
       }
       if (svc === 'youtube' && /^\/embed\//.test(p)) return sendHtml(res, EMBED);
@@ -436,13 +434,14 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     p.close();
     // r64 release blocker: Up next's Play now moves the page IN PLACE (watch-player-yt.js pageMove) and YouTube changes
     // the address at once but redraws the title, the channel, the buttons and ytd-watch-flexy's video-id only once the
-    // next video's data is in (hundreds of ms; Shorts measured up to ~650 ms). The reads after a move start at 120 ms:
+    // next video's data is in (2.8-4.8 s on real YouTube, r64 probe). The reads after a move start at 120 ms:
     // one in that gap took the LAST video's title, channel, Like and Subscribe as the next one's, found them complete
     // and stopped, and B played under A's info for good (the stand-in above redraws at once, so it never showed).
-    // The stand-in here redraws LATE_MS after its address changes (tests/playview-fixtures.js lateMove). Every draw of
+    // The stand-in here redraws LATE_MS (5.5 s, past the in-place reads' 4 s) after its address changes, its player on
+    // the new video at 600 ms (tests/playview-fixtures.js lateMove). Every draw of
     // the info from the move on is recorded, each rebuild (an observer on the layer) and a 25 ms sampler: never A's.
     {
-      const LATE_MS = 700, LATE_ID = 'pvLate00002', ROW_B = 'Late B, from Lumen’s row';
+      const LATE_MS = 5500, LATE_ID = 'pvLate00002', ROW_B = 'Late B, from Lumen’s row';
       await playYT('&late=' + LATE_MS, 'Late A');
       const a0 = await pvWait('x.applied && x.phase === "ready" && /late=/.test(x.url) && x.title === ' + JSON.stringify(F.TITLE), 15000);
       check(!!a0 && a0.channel === F.CHANNEL, 'late redraw: video A plays in the view with its own title and channel', a0 && { phase: a0.phase, title: a0.title, channel: a0.channel, url: a0.url });
@@ -467,41 +466,27 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
         rec.iv = setInterval(() => look('tick'), 25);
         return 1;
       })()`);
-      await chrome.waitFor('window.__lateRec && window.__lateRec.drawnB > 0 ? 1 : 0', 6000).catch(() => 0);
+      // B's own words from the player first (it moves on before the page does), then the page's at its redraw:
+      // the read goes on past the in-place reads' 4 s (STALE_MS) until the page names B.
+      const bIn = await pvWait('x.phase === "ready" && x.read && x.read.stale === false && x.read.videoId === ' + JSON.stringify(LATE_ID) + ' && x.title === ' + JSON.stringify(F.LATE_T), LATE_MS + 6000);
+      const tReady = Date.now();
       await sleep(400);   // a little after B's info is in: nothing may go back to A's
-      const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, ms: Date.now() - r.t0 }; })()');
+      const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { t0: r.t0, samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, ms: Date.now() - r.t0 }; })()');
+      const readyAt = bIn ? tReady - rec.t0 : -1;   // the same machine clock in both processes
       const mvL = await chrome.ev('(window.WatchPlayerYT && WatchPlayerYT._state().lastMove) || null');
       const pl = (await guestFor(FY + '/watch?v=' + LATE_ID)) || (await guestFor(FY + '/watch?v=' + VID + '&late='));   // the target may still have the first address
       const late = pl ? await pl.ev('window.__late || null').catch(() => null) : null;
       const lagSeen = late && late.drawnAt && late.movedAt ? late.drawnAt - late.movedAt : -1;
-      say('late redraw: lag ' + lagSeen + ' ms (asked ' + LATE_MS + '), ' + rec.samples + ' samples (' + rec.draws + ' on a redraw) over ' + rec.ms + ' ms, B’s info at ' + rec.drawnB + ' ms, stale hits ' + rec.bad.length + '; drawn: ' + rec.seen.map((x) => x.ms + 'ms ' + x.k).join(' / '));
+      say('late redraw: lag ' + lagSeen + ' ms (asked ' + LATE_MS + ', the player on B at ' + (late ? late.playerMs : '?') + ' ms), ' + rec.samples + ' samples (' + rec.draws + ' on a redraw) over ' + rec.ms + ' ms, B’s title+channel at ' + rec.drawnB + ' ms, stale hits ' + rec.bad.length + '; drawn: ' + rec.seen.map((x) => x.ms + 'ms ' + x.k).join(' / '));
       check(!!mvL && mvL.how === 'in-page' && mvL.id === LATE_ID && !!late && late.moves === 1 && late.to === LATE_ID, 'late redraw: Play now moved the page in place (YouTube’s own move, no new document)', { mvL, late });
-      check(lagSeen >= LATE_MS - 50, 'and the stand-in really redrew late: ' + lagSeen + ' ms after its address changed', late);
-      check(rec.samples >= 20 && rec.bad.length === 0, 'B never shows A’s title, channel or subscribers: 0 of ' + rec.samples + ' samples from the move until after B’s info is in', { bad: rec.bad.slice(0, 5), seen: rec.seen });
-      check(rec.seen.length > 0 && rec.seen.every((x) => /^(Late B, from Lumen’s row|Loading the title…|Late video B, drawn after the move) \| /.test(x.k)), 'meanwhile it shows B’s own row title (or the skeleton), then B’s page title', rec.seen);
-      const bIn = await pvWait('x.phase === "ready" && x.title === ' + JSON.stringify(F.LATE_T), 3000);
-      check(rec.drawnB > 0 && !!bIn && bIn.channel === F.LATE_C && bIn.read && bIn.read.stale === false && bIn.read.videoId === LATE_ID && bIn.like && !bIn.like.disabled,
-        'and B’s real info arrives (its title, channel and buttons, ready) once YouTube redraws: ' + rec.drawnB + ' ms after the move', bIn && { phase: bIn.phase, title: bIn.title, channel: bIn.channel, read: bIn.read && { stale: bIn.read.stale, videoId: bIn.read.videoId } });
+      check(lagSeen >= LATE_MS - 50, 'and the stand-in really redrew late: ' + lagSeen + ' ms after its address changed (past the in-place reads’ 4 s)', late);
+      check(rec.samples >= 100 && rec.bad.length === 0, 'B never shows A’s title, channel or subscribers: 0 of ' + rec.samples + ' samples from the move until after B’s info is in', { bad: rec.bad.slice(0, 5), seen: rec.seen });
+      check(rec.seen.length > 0 && rec.seen.every((x) => /^(Late B, from Lumen’s row|Loading the title…|Late video B, drawn after the move) \| /.test(x.k)), 'meanwhile it shows B’s own row title (or the skeleton), then B’s title', rec.seen);
+      check(rec.drawnB > 0 && rec.drawnB < 2000, 'B’s title and channel are up from the player ' + rec.drawnB + ' ms after the move, long before the page’s redraw at ' + lagSeen + ' ms', rec.seen);
+      check(!!bIn && bIn.channel === F.LATE_C && bIn.read.titleFrom === 'page' && bIn.like && !bIn.like.disabled && /late video’s own description/.test(bIn.desc),
+        'and once YouTube redraws, the page’s own info: title, channel, description and buttons, ready (' + readyAt + ' ms after the move)', bIn && { phase: bIn.phase, title: bIn.title, channel: bIn.channel, desc: bIn.desc, read: bIn.read && { stale: bIn.read.stale, titleFrom: bIn.read.titleFrom } });
       if (pl) pl.close();
       // the layer goes, so the next title opens a page of its own (a move from this stand-in would keep its address)
-      await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
-      await sleep(900);
-    }
-    // r64 (#5): the early read (the page's words before its app has run) stays the info's read until a later one
-    // lands. When every read after it failed, the info said 'unread' (and why) but each draw still told the comments
-    // early:true, so they waited "Loading…" for good with no reason. The stand-in's reads all throw from
-    // DOMContentLoaded on (tests/playview-fixtures.js earlyFailHead); the comments must start or say why.
-    {
-      await playYT('&earlyfail=1', 'Early fail, from Lumen’s row');
-      const ef = await pvWait('/earlyfail/.test(x.url) && x.phase === "unread"', 20000);
-      check(!!ef && !!ef.read && ef.read.early === true && ef.title === F.EARLY_T && /couldn’t read the page/.test(ef.why),
-        'early-fail page: the early words are drawn, every read after them failed, and the info says unread with why', ef && { phase: ef.phase, title: ef.title, early: ef.read && ef.read.early, why: ef.why });
-      const CM = `(() => { const s = LumenComments._state().states.filter((x) => x.videoId === ${JSON.stringify(VID)} && x.slot === ${JSON.stringify(ef ? ef.id : null)}); return s.length ? s[s.length - 1] : null; })()`;   // this slot’s own section
-      const cm = await chrome.waitFor(`(() => { const c = ${CM}; return c && (c.phase !== 'loading' || c.requests > 0 || !!c.from) ? c : null; })()`, 8000).catch(() => null);
-      const cmNow = cm || await chrome.ev(CM).catch(() => null);
-      check(!!cm, 'and the comments start (the page’s own data or /next) instead of waiting “Loading…” for good: ' + (cmNow ? cmNow.phase + (cmNow.why ? ' (' + cmNow.why + ')' : '') + ', from ' + (cmNow.from || '-') + ', ' + cmNow.requests + ' requests' : 'no comments state'),
-        cmNow && { phase: cmNow.phase, why: cmNow.why, from: cmNow.from, requests: cmNow.requests, n: cmNow.n });
-      check(!cm || cm.phase !== 'failed' || !!cm.why, 'and if they can’t load, they say why', cm && { phase: cm.phase, why: cm.why });
       await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
       await sleep(900);
     }

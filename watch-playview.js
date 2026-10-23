@@ -57,6 +57,10 @@
   // fixed time held YouTube's buttons (and the trim's cover) back up to 2 s after the page had drawn them.
   var WATCH_MS = 2500;
   var WATCH_GAP_MS = 100;
+  // A page still drawn for the last video at the last timed read (readYT: stale, after an in-place move) is waited
+  // for up to here, from the start of the reads: a whole load's span (READS ends at 8 s) and a second more. On real
+  // YouTube the redraw came 2.8-4.8 s after the address changed (r64 probe); past this the info says why.
+  var STALE_MS = 9000;
   // The page's first words, before its own app has run (r64): YouTube's watch HTML defines ytInitialPlayerResponse
   // (its videoDetails: the title, the channel's name, the description) about 180 KB BEFORE the player and app
   // scripts that must run before ytInitialData and dom-ready, and on this machine those scripts are most of the
@@ -398,7 +402,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest(GAP) {
-    var V = 7;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT)
+    var V = 8;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT); 8: playerFor
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -566,6 +570,19 @@
       if (v.paused) { var vp = v.play(); if (vp && vp.catch) vp.catch(function () { /* stays paused at the time */ }); }
       return { ok: true, how: 'video' };
     }
+    /** The player's own title and channel for video id (getPlayerResponse's videoDetails, else getVideoData), or null. */
+    function playerFor(id) {
+      var mp = Q('#movie_player');
+      if (!mp || !id) return null;
+      try {
+        var pr = typeof mp.getPlayerResponse === 'function' ? mp.getPlayerResponse() : null;
+        var vd = pr && typeof pr === 'object' ? pr.videoDetails : null;
+        if (vd && vd.videoId === id && vd.title) return { title: String(vd.title).slice(0, 500), author: String(vd.author || '').slice(0, 200), channelId: String(vd.channelId || '') };
+        var gd = typeof mp.getVideoData === 'function' ? mp.getVideoData() : null;
+        if (gd && gd.video_id === id && gd.title) return { title: String(gd.title).slice(0, 500), author: String(gd.author || '').slice(0, 200), channelId: '' };
+      } catch (e) { /* the page's words only */ }
+      return null;
+    }
     function readYT() {
       var u = new URL(location.href);
       var id = u.searchParams.get('v') || ((/^\/live\/([^/?#]+)/.exec(u.pathname) || [])[1]) || '';
@@ -577,7 +594,7 @@
       }
       // A watch page still drawn for ANOTHER video (r64). After an in-place move (Up next's Play now, YouTube's own
       // autoplay, an end-screen card) YouTube changes the address at once but redraws its watch page only once the
-      // next video's data is in: hundreds of ms later (up to ~650 ms measured on Shorts). Until then the title, the
+      // next video's data is in: seconds later (2.8-4.8 s in a real-YouTube probe). Until then the title, the
       // channel, the description, Like and Subscribe on the page are all the LAST video's, and ytd-watch-flexy still
       // names that video in its video-id. A read in that gap took them for this video's, found them complete, and the
       // reads stopped: the next video played under the last one's info for good. So while the flexy names another
@@ -596,10 +613,19 @@
       if (ch && d.channel) { if (!ch.subs) ch.subs = d.channel.subs; if (!ch.avatar) ch.avatar = d.channel.avatar; }
       var descEl = stale ? null : Q('#description-inline-expander yt-attributed-string', m) || Q('#description #snippet-text', m) || Q('#description-inline-expander', m);
       var lb = stale ? null : likeBtn(), db = stale ? null : dislikeBtn(), sb = stale ? null : subBtn(), vb = stale ? null : saveBtn();
+      // The player moves on before the page does (a real-YouTube probe, r64: getVideoData() named the new id 1-1.3 s
+      // before the page redrew; the redraw itself came 2.8-4.8 s after the address). While the page is stale, the
+      // player's own title and channel stand in, for THIS id only (playerFor checks it). No buttons, so complete()
+      // stays false and the reads go on to the redraw, which brings the description and the buttons.
+      var pl = stale ? playerFor(id) : null;
+      if (pl) {
+        title = pl.title;
+        if (pl.author) ch = { name: pl.author, url: /^UC[\w-]+$/.test(pl.channelId) ? 'https://www.youtube.com/channel/' + pl.channelId : '', subs: '', avatar: '' };
+      }
       return {
         ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: stale ? '' : document.title,
         stale: stale, drawnId: drawnId,
-        title: title || d.title || '', titleFrom: title ? 'page' : (d.title ? 'ytInitialData' : ''),
+        title: title || d.title || '', titleFrom: title ? (pl ? 'player' : 'page') : (d.title ? 'ytInitialData' : ''),
         channel: ch || d.channel || null,
         desc: (function () {
           var domText = descEl ? (descEl.innerText || txt(descEl)) : '';
@@ -765,7 +791,7 @@
     return GUEST + 'window.__lumenPv.' + method + '(' + (args || []).map(function (a) { return JSON.stringify(a === undefined ? null : a); }).join(',') + ')';
   }
 
-  var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
+  var PURE = { NAMES: NAMES, PEEK: PEEK, READS: READS, STALE_MS: STALE_MS, HIDE: HIDE, ADSLOTS: ADSLOTS, BAR: BAR, KEEP: KEEP, pageKind: pageKind, viewable: viewable, boxedFor: boxedFor, trimCss: trimCss,
     epParts: epParts, cleanPageTitle: cleanPageTitle, model: model, complete: complete, infoEarly: infoEarly, whyOff: whyOff, guest: guest, call: call,
     ytId: ytId, ytMoved: ytMoved, tSeconds: tSeconds, clockSeconds: clockSeconds, descLink: descLink, descSegs: descSegs, clock: clock };
   if (typeof document === 'undefined' || typeof window === 'undefined') return PURE;
@@ -994,6 +1020,7 @@
     var seq = ++p.seq;
     if (!online()) { p.phase = 'offline'; update(s); return; }
     p.reading = seq;
+    p.readT0 = Date.now();   // STALE_MS counts from here (took: a stale last read)
     READS.forEach(function (ms, i) {
       p.timers.push(setTimeout(function () { tick(s, seq, i === READS.length - 1); }, inPage ? Math.max(120, ms / 2) : ms));
     });
@@ -1027,6 +1054,16 @@
       }
       var done = s.service === 'youtube' ? complete(r) && (!on || r.applied) : (!on || r.applied);
       if (done) { p.phase = 'ready'; stopReads(s); }
+      // The last timed read found the page still the last video's (readYT: stale). After an in-place move the reads
+      // run at half their times (the last at 4 s), and a real-YouTube probe measured the redraw at 2.8-4.8 s: the
+      // info ended "unread" for good while YouTube drew the video a moment later. So a stale last read goes on: the
+      // watch stays out (it answers at the redraw: video-id, title and channel change in the same tick) and one more
+      // read comes at STALE_MS after the reads began, a whole load's span, which says why if it is still stale.
+      else if (last && r.stale && p.staleSeq !== seq && Date.now() - (p.readT0 || 0) < STALE_MS) {
+        p.staleSeq = seq;
+        p.timers.push(setTimeout(function () { tick(s, seq, true); }, Math.max(0, STALE_MS - (Date.now() - (p.readT0 || 0)))));
+        watchRead(s, seq);
+      }
       else if (last) { p.phase = s.service === 'youtube' && !(r.title || (r.channel && r.channel.name)) ? 'unread' : 'partial'; p.reading = 0; }
       else watchRead(s, seq);
       update(s);
@@ -1471,7 +1508,7 @@
     // The reads ended on a page still drawn for the last video (readYT: stale): the channel, description and buttons
     // are missing for that reason, said before "signed out" (which would leave the missing channel unexplained).
     else if ((phase === 'unread' || phase === 'partial') && m.stale) note(info, 'YouTube’s page still showed the last video’s details when Lumen last read it, so this video’s aren’t here'
-      + (m.title && m.titleFrom === 'item' ? '; the title is from Lumen’s row' : '') + '. “Full page” shows YouTube’s own.', 'warn');
+      + (m.title && m.titleFrom === 'item' ? '; the title is from Lumen’s row' : m.title && m.titleFrom === 'player' ? '; the title and channel are from YouTube’s player' : '') + '. “Full page” shows YouTube’s own.', 'warn');
     else if (m.signedIn === false) note(info, 'You’re signed out of YouTube here: Like, Dislike, Subscribe and Save need you signed in.', 'warn',
       button('pv-ghost pv-signin', 'Sign in on YouTube’s page', function () { if (!toggle(s) && CTX) CTX.note('YouTube’s Sign in is at the top right of its page'); }));
     else if (p.why) note(info, p.why, /couldn’t|didn’t|isn’t|not /i.test(p.why) ? 'warn' : '');
