@@ -364,6 +364,72 @@ check(SH.HIDE.indexOf('reel-action-bar-view-model') >= 0 && SH.HIDE.indexOf('ytd
   })());
 }
 
+/* ---- r64: the player's own word ends a move's lag (guest current(), playerData()) ------------------------------ */
+// Real YouTube: the page's #shorts-player was on the new Short (getVideoData()) ~470 ms before the active renderer's
+// own player lookup was, and that lookup held the read back. The read is released as soon as a player is on the
+// address's Short with a title that is not the last Short's; never by a player with the last Short's title, never by
+// a player on another id. While the renderer is still the last Short's, the title and channel are the player's and
+// the renderer's buttons are left out. Each read says where its wait went (gate: why, lag).
+{
+  const vm = require('vm');
+  const attrs = {};
+  class MO { constructor(fn) { this.fn = fn; } observe() {} disconnect() {} }
+  let title = 'First Short', chan = '@one', rpid = 'aaaaaaaaaaa';
+  let dp = { video_id: 'aaaaaaaaaaa', title: 'First Short', author: 'One' };
+  const node = (t) => ({ textContent: t, getAttribute: () => null, href: 'https://www.youtube.com/' + t });
+  const btn = { getAttribute: (k) => (k === 'aria-label' ? 'like this video' : null), closest: () => null, textContent: '12' };
+  const rplayer = { getVideoData: () => ({ video_id: rpid }), getPlayerResponse: () => ({}) };     // the renderer's own: no title
+  const dplayer = { getVideoData: () => dp, getPlayerResponse: () => ({}) };                     // today's pinned one
+  const video = { readyState: 0, videoWidth: 0, videoHeight: 0, currentSrc: '', addEventListener() {} };
+  const reel = { getBoundingClientRect: () => ({ top: 0, bottom: 800, height: 800 }), hasAttribute: () => false, setAttribute() {}, removeAttribute() {},
+    querySelector: (sel) => (sel === 'yt-shorts-video-title-view-model h2' ? (title ? node(title) : null) : sel === 'yt-reel-channel-bar-view-model a[href*="/@"]' ? node(chan)
+      : sel === 'like-button-view-model button' ? btn : sel === '#shorts-player' ? rplayer : sel === '#shorts-player video' ? video : null) };
+  const app = { hasAttribute: (k) => !!attrs['app:' + k], setAttribute: (k) => { attrs['app:' + k] = 1; }, removeAttribute: (k) => { delete attrs['app:' + k]; }, querySelector: (sel) => (sel === 'video' ? video : null) };
+  const doc = { documentElement: { hasAttribute: (k) => !!attrs[k], setAttribute: (k) => { attrs[k] = 1; }, removeAttribute: (k) => { delete attrs[k]; } }, body: {},
+    querySelector: (sel) => (sel === 'ytd-reel-video-renderer[is-active]' ? reel : sel === 'ytd-shorts' ? app : sel === '#reel-overlay-container #shorts-player' ? dplayer : null),
+    querySelectorAll: (sel) => (sel === 'ytd-reel-video-renderer' ? [reel] : sel === '[data-lumen-sh-root]' ? (attrs['app:data-lumen-sh-root'] ? [app] : []) : []) };
+  const win = { addEventListener() {}, dispatchEvent() {}, innerHeight: 800, MutationObserver: MO };
+  const loc = { pathname: '/shorts/aaaaaaaaaaa', href: 'https://www.youtube.com/shorts/aaaaaaaaaaa' };
+  const ctx = vm.createContext({ window: win, document: doc, location: loc, innerHeight: 800, setTimeout, clearTimeout, Event: function () {}, MutationObserver: MO, Promise, Date, Math });
+  vm.runInContext('(' + String(SH.guest) + ')();', ctx);
+  const G = win.__lumenSh;
+  const go = (id) => { loc.pathname = '/shorts/' + id; loc.href = 'https://www.youtube.com' + loc.pathname; };
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  pending.push((async () => {
+    const a = G.tick(true);
+    check(a.videoId === 'aaaaaaaaaaa' && a.title === 'First Short' && a.gate && a.gate.why === 'player-data' && a.gate.from === 'page',
+      'r64 gate: the first Short, its player and renderer agreeing: released by the player’s word, the renderer’s text shown', { id: a.videoId, gate: a.gate });
+    // A move: the renderer's own player still on the last Short, its title already the new one's (real YouTube's ~470 ms).
+    go('bbbbbbbbbbb'); dp = { video_id: 'bbbbbbbbbbb', title: 'Second Short', author: 'Two' }; title = 'Second Short'; chan = '@two';
+    const b = G.tick(true);
+    check(b.videoId === 'bbbbbbbbbbb' && b.title === 'Second Short' && !b.lag && b.gate.why === 'player-data' && b.gate.from === 'page' && b.gate.lag < 100 && b.like.found,
+      'r64 gate: the player on the new Short with a new title releases the read at once (the renderer’s own player still the last one’s)', { id: b.videoId, lag: b.lag, gate: b.gate });
+    // A move where the renderer still shows the last Short: the player's title and channel, no buttons, never the last title.
+    go('ccccccccccc'); dp = { video_id: 'ccccccccccc', title: 'Third Short', author: 'Three' };
+    const c = G.tick(true);
+    check(c.videoId === 'ccccccccccc' && c.title === 'Third Short' && c.channel && c.channel.name === 'Three' && !c.like.found && !c.sub.found && c.stale === true && c.gate.from === 'player',
+      'r64 gate: the renderer still the last Short’s: the player’s title and channel, the last Short’s buttons left out', { id: c.videoId, title: c.title, ch: c.channel, gate: c.gate });
+    // A move whose player has the LAST Short's title (a series, or a player mid-swap): it releases nothing.
+    title = 'Third Short'; chan = '@three'; G.tick(true);   // the renderer redrew for the third Short (told)
+    go('ddddddddddd'); dp = { video_id: 'ddddddddddd', title: 'Third Short', author: 'Three' }; rpid = 'ccccccccccc';
+    const d = G.tick(true);
+    check(d.videoId === '' && !!d.lag && d.gate.why === 'held' && d.gate.player === 'last-title',
+      'r64 gate: a player on the new id with the last Short’s title does not release the read', { id: d.videoId, lag: d.lag, gate: d.gate });
+    // A player on another id (the last Short's, or one further on) with a new title: it releases nothing either.
+    dp = { video_id: 'eeeeeeeeeee', title: 'Fifth Short', author: 'Five' };
+    const e = G.tick(true);
+    check(e.videoId === '' && e.gate.why === 'held' && e.gate.player === 'none', 'r64 gate: a player on another id does not release the read', { id: e.videoId, gate: e.gate });
+    // Nothing ever releases it early: at LAG the read is taken as it is ('cap'), as before.
+    await wait(1560);
+    const f = G.tick(true);
+    check(f.videoId === 'ddddddddddd' && f.gate.why === 'cap' && f.gate.lag >= 1500, 'r64 gate: no release by the player or the renderer: the read at LAG, said as the cap', { id: f.videoId, gate: f.gate });
+    // The renderer's own read released it (no player title to go by): 'renderer'.
+    go('fffffffffff'); dp = { video_id: 'fffffffffff' }; rpid = 'fffffffffff'; title = 'Sixth Short'; chan = '@six';
+    const g = G.tick(true);
+    check(g.videoId === 'fffffffffff' && g.title === 'Sixth Short' && g.gate.why === 'renderer' && g.gate.from === 'page', 'r64 gate: no player title: the renderer’s own read releases it', { id: g.videoId, gate: g.gate });
+  })());
+}
+
 Promise.all(pending).then(() => {
   console.log('watch-shorts-test: ' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;

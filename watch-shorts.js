@@ -632,17 +632,94 @@
     // another video, or whose title and channel are still those last answered for another Short, is not this
     // Short's yet (videoId ''): the chrome keeps its skeleton. After LAG it is taken as it is (an ad's own player,
     // two Shorts of one series), so a page that never changes them still shows what it has.
+    //
+    // The player's own word ends the wait early (r64, measured on real YouTube): the page's #shorts-player had the
+    // new Short (getVideoData() on its id) at a median 263 ms after a move, the active renderer's title at 264 ms,
+    // but the info drew the right title at a median 738 ms: the renderer's OWN player lookup (playerId(r)) stayed on
+    // the last Short about 470 ms longer, and held the read back the whole time. So a read is released as soon as
+    // one of the page's players (playerData()) is on the address's Short AND has a title of its own that is not the
+    // last Short's ('player-data'). While the renderer is still the last Short's (its title the last one's, empty,
+    // or its own player elsewhere, inside LAG), the title and channel are the PLAYER's, and the renderer's buttons
+    // (the last Short's Like count and state) are left out: the chrome says it is still reading them. The last
+    // Short's title is never taken from the player: a player whose title is the last one's releases nothing (two
+    // Shorts of one series wait out LAG as before).
+    // Where the wait went is in every read (x.gate) and the chrome's _state(): why it was released ('player-data',
+    // 'renderer': the page's own read was this Short's, 'cap': LAG ran out with the page still looking like the
+    // last Short) or 'held', and lag: the ms from the address naming the Short to the release (or until now).
     var LAG = 1500;
-    var seen = { id: '', at: 0 }, told = { id: '', title: '', chan: '' };
+    // told: the Short last answered: what was shown (title, chan) and what its renderer said (dom, domChan). They
+    // differ when the player's word was shown; a renderer that never redrew for a Short keeps the one before's.
+    var seen = { id: '', at: 0, last: null, why: '', lag: 0 }, told = { id: '', title: '', chan: '', dom: '', domChan: '' };
+    function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+    /**
+     * The address's Short as one of the page's players has it: { title, author } from the first player whose
+     * getVideoData() is on id (today's pinned #reel-overlay-container player, the active renderer's own, the page's
+     * first #shorts-player), the title from its player response's videoDetails when getVideoData() has none.
+     * null: no player is on id yet (or the page has none Lumen can ask).
+     */
+    function playerData(r, id) {
+      if (!id) return null;
+      var cands = [Q('#reel-overlay-container #shorts-player'), r ? Q('#shorts-player', r) : null, Q('#shorts-player'), r ? Q('.html5-video-player', r) : null];
+      var asked = [];
+      for (var i = 0; i < cands.length; i++) {
+        var pl = cands[i];
+        if (!pl || asked.indexOf(pl) >= 0) continue;
+        asked.push(pl);
+        try {
+          if (typeof pl.getVideoData !== 'function') continue;
+          var vd = pl.getVideoData() || {};
+          if (String(vd.video_id || '') !== id) continue;
+          var title = clean(vd.title), author = clean(vd.author);
+          if (!title && typeof pl.getPlayerResponse === 'function') {
+            var d = (pl.getPlayerResponse() || {}).videoDetails || {};
+            if (d.videoId === id) { title = clean(d.title); author = author || clean(d.author); }
+          }
+          return { title: title, author: author };
+        } catch (e) { /* a player mid-swap threw: the next one is asked, and the renderer's own read still stands */ }
+      }
+      return null;
+    }
     function current(x) {
       var at = x.videoId;
       if (!at) return x;
-      if (seen.id !== at) { seen.id = at; seen.at = Date.now(); }
+      var t = Date.now();
+      // last: the Short answered before this one (never this one itself: A, B, back to A compares nothing).
+      if (seen.id !== at) seen = { id: at, at: t, last: told.id && told.id !== at ? { title: told.title, chan: told.chan, dom: told.dom, domChan: told.domChan } : null, why: '', lag: 0 };
+      var L = seen.last;
       var r = active(), pid = r ? playerId(r) : '';
       var chan = x.channel ? x.channel.name : '';
-      var lag = Date.now() - seen.at < LAG && ((pid && pid !== at) || (told.id && told.id !== at && !!x.title && x.title === told.title && chan === told.chan));
-      if (lag) { x.lag = pid && pid !== at ? 'player' : 'title'; x.videoId = ''; return x; }
-      if (x.title) { told.id = at; told.title = x.title; told.chan = chan; }
+      var dom = x.title;
+      var inLag = t - seen.at < LAG;
+      // The renderer's title is the last Short's: the one shown for it, or the one its renderer said.
+      var oldDom = !!(L && dom && (dom === L.title || dom === L.dom));
+      var pd = playerData(r, at);
+      var pdNew = !!(pd && pd.title && !(L && (pd.title === L.title || pd.title === L.dom)));
+      var held = !!((pid && pid !== at) || (L && dom && ((dom === L.title && chan === L.chan) || (dom === L.dom && chan === L.domChan))));
+      if (!pdNew && held && inLag) {
+        x.lag = pid && pid !== at ? 'player' : 'title';
+        x.gate = { why: 'held', lag: t - seen.at, player: pd ? (pd.title ? 'last-title' : 'no-title') : 'none' };
+        x.videoId = '';
+        return x;
+      }
+      if (!seen.why) { seen.why = pdNew ? 'player-data' : held ? 'cap' : 'renderer'; seen.lag = t - seen.at; }
+      // The renderer is not this Short's yet: its title is the last Short's (any time: the player knows better),
+      // or (inside LAG) empty, or another one's while its own player is elsewhere. Then the player's title and
+      // channel name are shown, and none of the renderer's buttons.
+      var fromPlayer = pdNew && dom !== pd.title && (oldDom || (inLag && (!dom || !!(pid && pid !== at))));
+      var domChan = chan;
+      if (fromPlayer) {
+        x.title = pd.title;
+        x.channel = pd.author ? { name: pd.author, url: '', avatar: '', subs: '' } : null;
+        x.like = { found: false }; x.dislike = { found: false }; x.sub = { found: false }; x.save = { found: false };
+        x.stale = true;   // the chrome's model: buttons missing because the page still showed the last Short
+      }
+      x.gate = { why: seen.why, lag: seen.lag, from: fromPlayer ? 'player' : 'page' };
+      if (x.title) {
+        // A Short shown from its player alone: its renderer's text is still the one before's (kept, so the NEXT
+        // move still knows it for the last Short's), unless this Short's renderer already said its own.
+        var keep = fromPlayer ? (told.id === at ? { d: told.dom, c: told.domChan } : L ? { d: L.dom, c: L.domChan } : { d: '', c: '' }) : { d: dom, c: domChan };
+        told = { id: at, title: x.title, chan: x.channel ? x.channel.name : '', dom: keep.d, domChan: keep.c };
+      }
       return x;
     }
     var wt = null;
@@ -1619,6 +1696,7 @@
     var m = p.info && !p.info.hidden ? p.info : null;
     var q = function (sel) { return m ? m.querySelector(sel) : null; };
     var b = function (n) { return n ? { text: n.textContent.trim(), disabled: n.disabled, pressed: n.getAttribute('aria-pressed'), why: n.getAttribute('data-why') || '' } : null; };
+    // gate: where the last read's wait after a move went (the page's current(): why it was released, its lag in ms).
     return {
       id: s.id, url: s.url, route: route(s.url, s.service), cur: idOf(s.url, s.service), on: shOn(s), mode: s.tile.getAttribute('data-sh') || '', phase: p.phase,
       applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), steps: p.steps.slice(), wheels: p.wheels, confirm: p.confirm, save: p.save,
@@ -1627,7 +1705,7 @@
       note: q('.pv-why') ? q('.pv-why').textContent : '', like: b(q('.pv-like')), dislike: b(q('.pv-dislike')), sub: b(q('.pv-sub')), savebtn: b(q('.pv-save')),
       cmbtn: b(q('.sh-comments-btn')), sharebtn: b(q('.sh-share')), cm: p.cm, cmShort: m && m.contains(p.cmBox) ? p.cmBox.getAttribute('data-short') : '', cmBox: m && m.contains(p.cmBox) ? rect(p.cmBox) : null,
       share: p.share ? { id: p.share.id, url: p.share.url, ok: p.share.ok, why: p.share.why } : null, notes: m ? [].map.call(m.querySelectorAll('.pv-why'), function (n) { return n.textContent; }) : [],
-      prev: b(p.prev), next: b(p.next), read: p.read, aspect: p.aspect, ease: s.tile.hasAttribute('data-sh-ease')
+      prev: b(p.prev), next: b(p.next), read: p.read, gate: p.read && p.read.gate ? p.read.gate : null, aspect: p.aspect, ease: s.tile.hasAttribute('data-sh-ease')
     };
   }
 
