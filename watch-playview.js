@@ -963,7 +963,8 @@
    * document's start, an in-place move to another video): the page's own events (commit, domready, stop), the info's
    * first words and description (words, desc, descFrom), and every call Lumen sent into the page: its kind (install,
    * or the reader's method), sent, answered (ans) or how it ended (how), and held (sent while the new document's main
-   * frame was still loading, so it went at stop: below). At most TL_MAX calls, so a page read for hours keeps no more.
+   * frame was still loading, so it went at stop: below; went, when it did). At most TL_MAX calls, so a page read for
+   * hours keeps no more.
    */
   var TL_MAX = 48;
   function tlNew() { return { t0: Date.now(), ev: {}, calls: [] }; }
@@ -989,10 +990,10 @@
   function ask(s, v, code, ms, kind) {
     var p = pvOf(s);
     var held = !!(p && p.waiters) && loadingNow(s, v);
-    var pr = held ? afterLoad(p).then(function () { return js(v, code); }) : js(v, code);
+    var rec = { k: kind || 'call', sent: tlAt(p), held: held };   // went: when a held call went (the stop)
+    var pr = held ? afterLoad(p).then(function () { rec.went = tlAt(p); return js(v, code); }) : js(v, code);
     if (!p || !p.gate) return pr;
     var out = p.gate.run(pr, ms || CALL_MS);
-    var rec = { k: kind || 'call', sent: tlAt(p), held: held };
     if (p.tl) { p.tl.calls.push(rec); if (p.tl.calls.length > TL_MAX) p.tl.calls.shift(); }
     out.then(function (r) { rec.ans = tlAt(p); if (r && r.notInstalled) rec.how = 'notInstalled'; }, function (e) { rec.ans = tlAt(p); rec.how = (e && e.code) || 'error'; });
     // a call past its limit, counted for the e2e and the probes (_state: lates; the reads' end says it too)

@@ -664,7 +664,7 @@ const leakDone = (async () => {
     loading = false;
     pg.v.dispatchEvent({ type: 'did-stop-loading' });
     await wait(10);
-    check(kinds(pg.calls).map((k) => k.split(':')[0]).join(',') === 'INSTALL,early,tick' && p.waiters.length === 0 && p.tl.ev.stop >= 0 && p.tl.ev.commit >= 0 && p.tl.ev.domready >= 0,
+    check(kinds(pg.calls).map((k) => k.split(':')[0]).join(',') === 'INSTALL,early,tick' && p.waiters.length === 0 && p.tl.calls.slice(0, 3).every((c) => c.went >= c.sent) && p.tl.ev.stop >= 0 && p.tl.ev.commit >= 0 && p.tl.ev.domready >= 0,
       'at its did-stop-loading they go, in the order they were made (the reader first)', { calls: kinds(pg.calls), ev: p.tl.ev });
     pg.calls[0].ok(true);
     pg.calls[2].ok({ ok: true, svc: 'youtube', url: URL0, title: 'Loaded words', channel: { name: 'C' }, like: { found: false }, sub: { found: false } });
