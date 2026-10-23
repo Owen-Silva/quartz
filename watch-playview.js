@@ -354,6 +354,9 @@
       out.comments = read && read.comments ? read.comments : null;
       // the page was still drawn for the last video (readYT: stale): what's missing is missing for that reason
       out.stale = !!(read && read.stale);
+      // the page hadn't drawn this video's description (readYT: descRead); descFrom 'player': the words shown are the player's
+      out.descPending = !!(read && read.descRead === false && !read.stale);
+      out.descFrom = read && read.descFrom ? String(read.descFrom) : '';
       return out;
     }
     // Disney+, Hulu, Prime Video, ESPN: the item is the truth while the page is still the one opened.
@@ -365,8 +368,11 @@
   }
 
   /** Whether a YouTube read has everything the info shows (so the reads can stop). */
+  // A YouTube read is complete with its title, channel, Like and Subscribe, and its description READ (readYT:
+  // descRead, false while the page's description isn't drawn for this video; a read without the field, an older
+  // guest's, counts as before).
   function complete(r) {
-    return !!(r && r.title && r.channel && r.channel.name && r.like && r.like.found && r.sub && r.sub.found);
+    return !!(r && r.title && r.channel && r.channel.name && r.like && r.like.found && r.sub && r.sub.found && r.descRead !== false);
   }
 
   /**
@@ -402,7 +408,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest(GAP) {
-    var V = 8;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT); 8: playerFor
+    var V = 9;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT); 8: playerFor; 9: descRead
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -577,9 +583,10 @@
       try {
         var pr = typeof mp.getPlayerResponse === 'function' ? mp.getPlayerResponse() : null;
         var vd = pr && typeof pr === 'object' ? pr.videoDetails : null;
-        if (vd && vd.videoId === id && vd.title) return { title: String(vd.title).slice(0, 500), author: String(vd.author || '').slice(0, 200), channelId: String(vd.channelId || '') };
+        if (vd && vd.videoId === id && vd.title) return { title: String(vd.title).slice(0, 500), author: String(vd.author || '').slice(0, 200), channelId: String(vd.channelId || ''),
+          desc: typeof vd.shortDescription === 'string' ? vd.shortDescription.slice(0, 10000) : null };
         var gd = typeof mp.getVideoData === 'function' ? mp.getVideoData() : null;
-        if (gd && gd.video_id === id && gd.title) return { title: String(gd.title).slice(0, 500), author: String(gd.author || '').slice(0, 200), channelId: '' };
+        if (gd && gd.video_id === id && gd.title) return { title: String(gd.title).slice(0, 500), author: String(gd.author || '').slice(0, 200), channelId: '', desc: null };
       } catch (e) { /* the page's words only */ }
       return null;
     }
@@ -622,13 +629,26 @@
         title = pl.title;
         if (pl.author) ch = { name: pl.author, url: /^UC[\w-]+$/.test(pl.channelId) ? 'https://www.youtube.com/channel/' + pl.channelId : '', subs: '', avatar: '' };
       }
+      // The description is READ (descRead) only from a page drawn for this video: its own text in the DOM (with its
+      // links), this id's ytInitialData (a page opened on it), or this id's player data saying it has none. A real-
+      // YouTube probe (r64, in-place moves): ytd-watch-flexy, the title and the buttons were B's about 1 s after the
+      // move while the description wasn't drawn yet; that read was complete, the reads stopped, and B never showed a
+      // description or a link. complete() now waits for descRead. Meanwhile the player's own words for THIS id
+      // (videoDetails.shortDescription) stand in, like its title: words only, no links, never read from the DOM.
+      var domText = descEl ? (descEl.innerText || txt(descEl)) : '';
+      var pd = domText || d.desc ? null : (pl || playerFor(id));
+      var ip = window.ytInitialPlayerResponse, ipv = ip && typeof ip === 'object' ? ip.videoDetails : null;
+      var none = (pd && pd.desc === '') || !!(ipv && ipv.videoId === id && typeof ipv.shortDescription === 'string' && !ipv.shortDescription.trim());
+      var descRead = !stale && (!!domText || !!d.desc || none);
+      var descFrom = domText ? 'page' : d.desc ? 'ytInitialData' : pd && pd.desc ? 'player' : '';
       return {
         ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: stale ? '' : document.title,
         stale: stale, drawnId: drawnId,
         title: title || d.title || '', titleFrom: title ? (pl ? 'player' : 'page') : (d.title ? 'ytInitialData' : ''),
         channel: ch || d.channel || null,
+        descRead: descRead, descFrom: descFrom,
         desc: (function () {
-          var domText = descEl ? (descEl.innerText || txt(descEl)) : '';
+          if (descFrom === 'player') return { text: pd.desc, meta: (stale ? '' : txt(Q('#info-container #info', m)) || txt(Q('#info-container', m))) || '', links: [] };
           var links = domText ? descLinks(descEl) : [];
           // the DOM drew no links (an older layout, links not drawn yet): ytInitialData's runs (for this video only,
           // dataFor checks); their words are looked for in the text, so a run whose words differ is just text
@@ -894,7 +914,11 @@
   var CALL_MS = 8000;
   function ask(s, v, code, ms) {
     var p = pvOf(s), pr = js(v, code);
-    return p && p.gate ? p.gate.run(pr, ms || CALL_MS) : pr;
+    if (!p || !p.gate) return pr;
+    var out = p.gate.run(pr, ms || CALL_MS);
+    // a call past its limit, counted for the e2e and the probes (_state: lates; the reads' end says it too)
+    out.catch(function (e) { if (e && e.code === 'late') p.lates = (p.lates || 0) + 1; });
+    return out;
   }
   function online() { try { return navigator.onLine !== false; } catch (e) { return true; } }
   function layerOf() { return CTX && CTX.L ? CTX.L : null; }
@@ -1028,7 +1052,7 @@
     p.seq++;
     p.page = (p.page || 0) + 1;
     clearTimeout(p.pressTimer);
-    p.read = null; p.phase = 'loading'; p.why = ''; p.busy = ''; p.save = null; p.confirm = false; p.more = false;
+    p.read = null; p.phase = 'loading'; p.why = ''; p.busy = ''; p.save = null; p.confirm = false; p.more = false; p.ended = null; p.lates = 0;
   }
 
   function destroy(ctx, s) {
@@ -1078,6 +1102,7 @@
     var seq = ++p.seq;
     if (!online()) { p.phase = 'offline'; update(s); return; }
     p.reading = seq;
+    p.ended = null;
     p.readT0 = Date.now();   // STALE_MS counts from here (took: a stale last read)
     READS.forEach(function (ms, i) {
       p.timers.push(setTimeout(function () { tick(s, seq, i === READS.length - 1); }, inPage ? Math.max(120, ms / 2) : ms));
@@ -1111,23 +1136,32 @@
         if (CTX && CTX.note) CTX.note(p.why);
       }
       var done = s.service === 'youtube' ? complete(r) && (!on || r.applied) : (!on || r.applied);
-      if (done) { p.phase = 'ready'; stopReads(s); }
+      // How the reads ended (r64), for the e2e and the probes: complete, the last read (and why it wasn't complete), or
+      // an error; at = ms from the reads' start.
+      var ended = function (how) { p.ended = { how: how, at: Date.now() - (p.readT0 || 0), stale: !!r.stale, descRead: r.descRead !== false, descFrom: r.descFrom || '', lates: p.lates || 0 }; };
+      if (done) { p.phase = 'ready'; stopReads(s); ended('complete'); }
       // The last timed read found the page still the last video's (readYT: stale). After an in-place move the reads
       // run at half their times (the last at 4 s), and a real-YouTube probe measured the redraw at 2.8-4.8 s: the
       // info ended "unread" for good while YouTube drew the video a moment later. So a stale last read goes on: the
       // watch stays out (it answers at the redraw: video-id, title and channel change in the same tick) and one more
       // read comes at STALE_MS after the reads began, a whole load's span, which says why if it is still stale.
-      else if (last && r.stale && p.staleSeq !== seq && Date.now() - (p.readT0 || 0) < STALE_MS) {
+      // The same for a page drawn for this video whose description isn't drawn yet (descRead): YouTube draws it after
+      // the title and the buttons, and the watch answers when it does.
+      else if (last && (r.stale || r.descRead === false) && p.staleSeq !== seq && Date.now() - (p.readT0 || 0) < STALE_MS) {
         p.staleSeq = seq;
         p.timers.push(setTimeout(function () { tick(s, seq, true); }, Math.max(0, STALE_MS - (Date.now() - (p.readT0 || 0)))));
         watchRead(s, seq);
       }
-      else if (last) { p.phase = s.service === 'youtube' && !(r.title || (r.channel && r.channel.name)) ? 'unread' : 'partial'; p.reading = 0; }
+      else if (last) { p.phase = s.service === 'youtube' && !(r.title || (r.channel && r.channel.name)) ? 'unread' : 'partial'; p.reading = 0; ended('last'); }
       else watchRead(s, seq);
       update(s);
     }).catch(function (e) {
       if (s.view !== v || p.seq !== seq) return;
-      if (last) { p.phase = online() ? 'unread' : 'offline'; p.why = 'Lumen couldn’t read the page: ' + ((e && e.message) || e); update(s); }
+      if (last) {
+        p.phase = online() ? 'unread' : 'offline'; p.why = 'Lumen couldn’t read the page: ' + ((e && e.message) || e);
+        p.ended = { how: 'error', at: Date.now() - (p.readT0 || 0), why: String((e && e.message) || e), code: (e && e.code) || '', lates: p.lates || 0 };
+        update(s);
+      }
     });
   }
 
@@ -1570,6 +1604,10 @@
     // are missing for that reason, said before "signed out" (which would leave the missing channel unexplained).
     else if ((phase === 'unread' || phase === 'partial') && m.stale) note(info, 'YouTube’s page still showed the last video’s details when Lumen last read it, so this video’s aren’t here'
       + (m.title && m.titleFrom === 'item' ? '; the title is from Lumen’s row' : m.title && m.titleFrom === 'player' ? '; the title and channel are from YouTube’s player' : '') + '. “Full page” shows YouTube’s own.', 'warn');
+    // The reads ended (STALE_MS) on a page drawn for this video whose description it hadn't drawn (readYT: descRead):
+    // said, never a silent blank; the player's own words, when shown, are named as such.
+    else if ((phase === 'unread' || phase === 'partial') && m.descPending) note(info, 'YouTube’s page hadn’t drawn this video’s description when Lumen last read it'
+      + (m.descFrom === 'player' && m.desc ? ', so its words are from YouTube’s player, without their links' : '') + '. “Full page” shows YouTube’s own.', 'warn');
     else if (m.signedIn === false) note(info, 'You’re signed out of YouTube here: Like, Dislike, Subscribe and Save need you signed in.', 'warn',
       button('pv-ghost pv-signin', 'Sign in on YouTube’s page', function () { if (!toggle(s) && CTX) CTX.note('YouTube’s Sign in is at the top right of its page'); }));
     else if (p.why) note(info, p.why, /couldn’t|didn’t|isn’t|not /i.test(p.why) ? 'warn' : '');
@@ -1747,7 +1785,7 @@
     var b = function (sel) { var n = q(sel); return n ? { text: n.textContent.trim(), disabled: n.disabled, pressed: n.getAttribute('aria-pressed'), why: n.getAttribute('data-why') || '' } : null; };
     return {
       id: s.id, wcId: s.wcId, service: s.service, url: s.url, kind: kindOf(s), mode: p.mode, userMode: p.userMode, boxed: s.tile.classList.contains('pv'),
-      phase: p.phase, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
+      phase: p.phase, ended: p.ended || null, lates: p.lates || 0, applied: p.applied, noRoot: p.noRoot, why: p.why, busy: p.busy, presses: p.presses.slice(), confirm: p.confirm, save: p.save, pressing: !!p.pressing,
       view: rect(s.view), tile: rect(s.tile), info: m ? rect(m) : null, cover: p.cover && !p.cover.hidden,
       title: q('.pv-title') ? q('.pv-title').textContent : '', channel: q('.pv-chan-name') ? q('.pv-chan-name').textContent : '', subs: q('.pv-subs') ? q('.pv-subs').textContent : '',
       ep: q('.pv-ep') ? q('.pv-ep').textContent : '', svc: q('.pv-svc-name') ? q('.pv-svc-name').textContent : '',

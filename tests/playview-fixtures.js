@@ -60,6 +60,10 @@ tp-yt-paper-dialog{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%
 const PLAYER_MS = 600;
 const LATE_T = 'Late video B, drawn after the move';
 const LATE_C = 'Late Channel B';
+// B's description: drawn LATE_DESC_MS after the rest of B's redraw (real YouTube draws the title and the buttons first, r64
+// probe), with two links; the player has its words (no links) from PLAYER_MS on.
+const LATE_D = 'The late video’s own description. Chapters: 0:03 and @latechannel';
+const LATE_DESC_MS = 1200;
 function lateMove(ms) {
   const lag = Math.max(0, Math.min(10000, Number(ms) || 0));
   return `(function () {
@@ -75,17 +79,23 @@ function lateMove(ms) {
       window.__late.moves++; window.__late.to = id; window.__late.movedAt = Date.now();
       history.pushState({}, '', '/watch?v=' + encodeURIComponent(id));
       window.dispatchEvent(new CustomEvent('yt-navigate-start'));
-      setTimeout(function () { cur = { videoId: id, title: ${JSON.stringify(LATE_T)}, author: ${JSON.stringify(LATE_C)}, channelId: '' }; }, ${PLAYER_MS});
+      setTimeout(function () { cur = { videoId: id, title: ${JSON.stringify(LATE_T)}, author: ${JSON.stringify(LATE_C)}, channelId: '', shortDescription: ${JSON.stringify(LATE_D)} }; }, ${PLAYER_MS});
       setTimeout(function () {
         document.querySelector('ytd-watch-flexy').setAttribute('video-id', id);
         document.querySelector('ytd-watch-metadata #title h1 yt-formatted-string').textContent = ${JSON.stringify(LATE_T)};
         document.querySelector('#channel-name #text a').textContent = ${JSON.stringify(LATE_C)};
         document.querySelector('#owner-sub-count').textContent = '7 subscribers';
         document.querySelector('#sub').setAttribute('aria-label', 'Subscribe to ' + ${JSON.stringify(LATE_C)} + '.');
-        document.querySelector('#description-inline-expander yt-attributed-string').textContent = 'The late video’s own description.';
+        document.querySelector('#description-inline-expander yt-attributed-string').textContent = '';   // B's isn't drawn yet
         document.title = ${JSON.stringify(LATE_T + ' - YouTube')};
         window.__late.drawnAt = Date.now();
       }, ${lag});
+      setTimeout(function () {
+        var dv = encodeURIComponent(id);
+        document.querySelector('#description-inline-expander yt-attributed-string').innerHTML = 'The late video’s own description. Chapters: '
+          + '<a class="yt-core-attributed-string__link" href="/watch?v=' + dv + '&amp;t=3s">0:03</a> and <a class="yt-core-attributed-string__link" href="/@latechannel">@latechannel</a>';
+        window.__late.descAt = Date.now();
+      }, ${lag} + ${LATE_DESC_MS});
     });
   })();`;
 }
@@ -217,4 +227,4 @@ function servicePlayer(svc, title) {
 <script>window.__keys = []; document.addEventListener('keydown', function (e) { window.__keys.push(e.key); });</script></body></html>`;
 }
 
-module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C };
+module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C, LATE_D, LATE_DESC_MS };

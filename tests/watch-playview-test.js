@@ -302,6 +302,49 @@ function ytPage(addrId, flexyId, extra) {
   check(!!rg && rg.title === 'Video B (getVideoData)' && rg.channel && rg.channel.name === 'Channel B' && rg.channel.url === '', 'no getPlayerResponse: getVideoData for this id does the same', rg && { title: rg.title, channel: rg.channel });
   const mpl = PV.model('youtube', rp, { title: 'Video B (Lumen’s row)' }, '', { moved: false });
   check(mpl.title === 'Video B from the player' && mpl.titleFrom === 'player' && mpl.channel.name === 'Channel B', 'the info draws the player’s title over the row’s', mpl);
+  // The description after an in-place move (r64): on real YouTube ytd-watch-flexy, the title and the buttons were B's
+  // about 1 s after the move while B's description wasn't drawn yet. That read was complete, the reads stopped, and B
+  // never showed a description or a link. Now the description must be READ (descRead) from a page drawn for B.
+  {
+    const pm = ytPage(VB, VA);
+    const B_DESC = 'Video B’s description: 0:05 and @channelb';
+    pm.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VB, title: 'Video B from the player', author: 'Channel B', channelId: 'UCbbbbbbbbbb', shortDescription: B_DESC } }) };
+    const r1 = pm.read();   // stale: the page still A's, the player on B
+    check(!!r1 && r1.stale && r1.title === 'Video B from the player' && r1.descRead === false && r1.descFrom === 'player' && r1.desc.text === B_DESC && r1.desc.links.length === 0 && PV.complete(r1) === false,
+      'stale page, the player on B: B’s title first, and B’s description words from the player (no links); not complete', r1 && { stale: r1.stale, title: r1.title, descRead: r1.descRead, descFrom: r1.descFrom, desc: r1.desc });
+    // YouTube redraws all but the description: ytd-watch-flexy, the title, the channel and the buttons are B's
+    pm.flexAttrs['video-id'] = VB;
+    pm.nodes['#title h1'] = Object.assign({}, pm.nodes['#title h1'], { textContent: 'Video B title', innerText: 'Video B title' });
+    pm.nodes['#channel-name #text a'] = Object.assign({}, pm.nodes['#channel-name #text a'], { textContent: 'Channel B', innerText: 'Channel B' });
+    pm.nodes['#description-inline-expander yt-attributed-string'] = null;   // not drawn yet
+    const r2 = pm.read();
+    check(!!r2 && r2.stale === false && r2.title === 'Video B title' && r2.like.found && r2.sub.found && r2.descRead === false && r2.descFrom === 'player' && PV.complete(r2) === false,
+      'the page drawn for B but not its description: still NOT complete (the reads and the watch go on)', r2 && { stale: r2.stale, title: r2.title, descRead: r2.descRead, descFrom: r2.descFrom });
+    const m2 = PV.model('youtube', r2, null, '');
+    check(m2.descPending === true && m2.descFrom === 'player' && m2.desc && m2.desc.text === B_DESC, 'the info meanwhile: the player’s words, marked as still to be read from the page', m2 && { descPending: m2.descPending, descFrom: m2.descFrom, desc: m2.desc });
+    // then the description, with its links
+    const a = (t, h) => ({ textContent: t, innerText: t, getAttribute: (k) => (k === 'href' ? h : null) });
+    pm.nodes['#description-inline-expander yt-attributed-string'] = { textContent: B_DESC, innerText: B_DESC, getAttribute: () => null, closest: () => null,
+      querySelectorAll: (sel) => (/a\[href\]/.test(sel) ? [a('0:05', '/watch?v=' + VB + '&t=5s'), a('@channelb', '/@channelb')] : []) };
+    const r3 = pm.read();
+    check(!!r3 && r3.descRead === true && r3.descFrom === 'page' && r3.desc.text === B_DESC && r3.desc.links.length === 2 && r3.desc.links[1].h === '/@channelb' && PV.complete(r3) === true,
+      'the page’s own description drawn for B: read, with its 2 links, and now complete', r3 && { descRead: r3.descRead, descFrom: r3.descFrom, links: r3.desc && r3.desc.links });
+    const m3 = PV.model('youtube', r3, null, '');
+    check(m3.descPending === false && m3.desc.links.length === 2, 'and the info takes them (nothing pending)', m3 && { descPending: m3.descPending, links: m3.desc && m3.desc.links });
+    // a video with no description: this id's player data says so, and the read is complete without waiting for one
+    const pn = ytPage(VB, VB);
+    pn.nodes['#description-inline-expander yt-attributed-string'] = null;
+    pn.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VB, title: 'Video B title', author: 'Channel B', shortDescription: '' } }) };
+    const rn = pn.read();
+    check(!!rn && rn.descRead === true && PV.complete(rn) === true, 'no description at all (this id’s player data says so): read, complete, nothing waited for', rn && { descRead: rn.descRead, descFrom: rn.descFrom });
+    // another id's player saying "none" never counts for this one
+    const po = ytPage(VB, VB);
+    po.nodes['#description-inline-expander yt-attributed-string'] = null;
+    po.nodes['#movie_player'] = { getPlayerResponse: () => ({ videoDetails: { videoId: VA, title: 'Video A title', author: 'Channel A', shortDescription: '' } }) };
+    const ro2 = po.read();
+    check(!!ro2 && ro2.descRead === false && ro2.desc.text === '' && PV.complete(ro2) === false, 'another video’s player data is never taken for this one’s (no words, no “none”)', ro2 && { descRead: ro2.descRead, desc: ro2.desc });
+    check(PV.complete(Object.assign({}, read)) === true && PV.complete(Object.assign({}, read, { descRead: false })) === false, 'complete(): a read with descRead false is not; one without the field counts as before');
+  }
   check(PV.STALE_MS >= PV.READS[PV.READS.length - 1], 'a stale page is waited for at least a whole load’s span (' + PV.STALE_MS + ' ms), not the in-place reads’ 4 s', PV.STALE_MS);
   // An older guest still in the page (installed by the last Quartz): the new one replaces it, so the stale check is in.
   const old = ytPage(VB, VA, { __lumenPv: { v: 6, read: () => ({ ok: true, svc: 'youtube', title: 'Video A title', old: true }) } });

@@ -446,8 +446,8 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       const a0 = await pvWait('x.applied && x.phase === "ready" && /late=/.test(x.url) && x.title === ' + JSON.stringify(F.TITLE), 15000);
       check(!!a0 && a0.channel === F.CHANNEL, 'late redraw: video A plays in the view with its own title and channel', a0 && { phase: a0.phase, title: a0.title, channel: a0.channel, url: a0.url });
       await chrome.ev(`(() => {
-        const A_T = ${JSON.stringify(F.TITLE)}, A_C = ${JSON.stringify(F.CHANNEL)}, A_S = ${JSON.stringify(F.SUBS)}, B_T = ${JSON.stringify(F.LATE_T)}, B_C = ${JSON.stringify(F.LATE_C)};
-        const rec = window.__lateRec = { samples: 0, draws: 0, seen: [], bad: [], t0: Date.now(), drawnB: 0 };
+        const A_T = ${JSON.stringify(F.TITLE)}, A_C = ${JSON.stringify(F.CHANNEL)}, A_S = ${JSON.stringify(F.SUBS)}, B_T = ${JSON.stringify(F.LATE_T)}, B_C = ${JSON.stringify(F.LATE_C)}, A_D = ${JSON.stringify(F.DESC.split(String.fromCharCode(10))[0])};
+        const rec = window.__lateRec = { samples: 0, draws: 0, seen: [], bad: [], t0: Date.now(), drawnB: 0, descB: 0, linksB: 0 };
         const look = (how) => {
           const i = document.querySelector('.wp-layer .pv-info');
           if (!i || i.hidden) return;
@@ -456,8 +456,11 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
           rec.samples++; if (how === 'draw') rec.draws++;
           const k = t + ' | ' + c;
           if (!rec.seen.length || rec.seen[rec.seen.length - 1].k !== k) rec.seen.push({ k, ms, how });
-          if (t === A_T || c === A_C || (!!sb && sb === A_S)) rec.bad.push({ t, c, sb, ms, how });
+          const dsc = q('.pv-desc-text'), nl = i.querySelectorAll('.pv-desc-text a.pv-link').length;
+          if (t === A_T || c === A_C || (!!sb && sb === A_S) || dsc.indexOf(A_D) >= 0) rec.bad.push({ t, c, sb, d: dsc.slice(0, 60), ms, how });
           if (!rec.drawnB && t === B_T && c === B_C) rec.drawnB = ms;
+          if (!rec.descB && /late video’s own description/.test(dsc)) rec.descB = ms;
+          if (!rec.linksB && nl >= 2) rec.linksB = ms;
         };
         openInLumen(${JSON.stringify(FY + '/watch?v=' + LATE_ID)}, { service: 'youtube', title: ${JSON.stringify(ROW_B)} });
         look('open');
@@ -471,7 +474,7 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       const bIn = await pvWait('x.phase === "ready" && x.read && x.read.stale === false && x.read.videoId === ' + JSON.stringify(LATE_ID) + ' && x.title === ' + JSON.stringify(F.LATE_T), LATE_MS + 6000);
       const tReady = Date.now();
       await sleep(400);   // a little after B's info is in: nothing may go back to A's
-      const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { t0: r.t0, samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, ms: Date.now() - r.t0 }; })()');
+      const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { t0: r.t0, samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, descB: r.descB, linksB: r.linksB, ms: Date.now() - r.t0 }; })()');
       const readyAt = bIn ? tReady - rec.t0 : -1;   // the same machine clock in both processes
       const mvL = await chrome.ev('(window.WatchPlayerYT && WatchPlayerYT._state().lastMove) || null');
       const pl = (await guestFor(FY + '/watch?v=' + LATE_ID)) || (await guestFor(FY + '/watch?v=' + VID + '&late='));   // the target may still have the first address
@@ -485,6 +488,13 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       check(rec.drawnB > 0 && rec.drawnB < 2000, 'B’s title and channel are up from the player ' + rec.drawnB + ' ms after the move, long before the page’s redraw at ' + lagSeen + ' ms', rec.seen);
       check(!!bIn && bIn.channel === F.LATE_C && bIn.read.titleFrom === 'page' && bIn.like && !bIn.like.disabled && /late video’s own description/.test(bIn.desc),
         'and once YouTube redraws, the page’s own info: title, channel, description and buttons, ready (' + readyAt + ' ms after the move)', bIn && { phase: bIn.phase, title: bIn.title, channel: bIn.channel, desc: bIn.desc, read: bIn.read && { stale: bIn.read.stale, titleFrom: bIn.read.titleFrom } });
+      // r64 (real YouTube): the page drew B's title and buttons before B's description, the read was complete there,
+      // and B never showed a description or a link. The stand-in draws B's description LATE_DESC_MS after the rest.
+      const descLag = late && late.descAt && late.movedAt ? late.descAt - late.movedAt : -1;
+      check(!!bIn && descLag >= lagSeen + F.LATE_DESC_MS - 50 && readyAt >= descLag - 50 && bIn.links.length === 2 && bIn.links.some((l) => l.text === '@latechannel') && bIn.links.some((l) => l.kind === 'time')
+        && !!bIn.ended && bIn.ended.how === 'complete' && bIn.ended.descFrom === 'page',
+        'the description and its 2 links come with the page’s own late draw of them (' + descLag + ' ms after the move, ' + (descLag - lagSeen) + ' ms after the rest of B): not ready before it', bIn && { readyAt, descLag, lagSeen, links: bIn.links, ended: bIn.ended, desc: bIn.desc });
+      check(rec.descB > 0 && rec.descB < lagSeen && rec.linksB >= descLag - 50, 'meanwhile B’s description words show from the player (' + rec.descB + ' ms), its links once the page draws them (' + rec.linksB + ' ms)', { descB: rec.descB, linksB: rec.linksB, descLag, lagSeen });
       if (pl) pl.close();
       // the layer goes, so the next title opens a page of its own (a move from this stand-in would keep its address)
       await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
