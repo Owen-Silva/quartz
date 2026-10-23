@@ -65,7 +65,7 @@ function sendHtml(res, body, headers) {
   res.end(body);
 }
 /** The fixture "service watch page": a playing HTML5 video and every kind of link a service page has. */
-function playerPage(name, other, auth) {
+function playerPage(name, other, auth, spa) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title>
 <style>body{margin:0;background:#0d0e10;color:#ddd;font:14px/1.4 "Segoe UI",sans-serif} video{display:block;width:100%;height:calc(100vh - 120px);background:#000;object-fit:contain}
 nav{display:flex;gap:16px;padding:14px 20px} a,button{color:#9cc8e0;font:inherit} h1{font-size:16px;margin:12px 20px 0}</style></head>
@@ -73,8 +73,18 @@ nav{display:flex;gap:16px;padding:14px 20px} a,button{color:#9cc8e0;font:inherit
 <nav><a id="next" href="/__p/next">More episodes</a><a id="blank" href="/__p/blank" target="_blank">Go to channel</a>
 <a id="away" href="${other}/away">A link to another site</a><button id="pop" onclick="window.open('${auth}/signin','signin','width=480,height=600')">Sign in (popup)</button>
 <button id="app" onclick="location.href='disneyplus://open/x'">Open in the app</button></nav>
-<script>window.addEventListener('message', (e) => { window.__got = e.data; }); window.addEventListener('keydown', (e) => { window.__lastKey = e.key; });</script></body></html>`;
+<script>window.addEventListener('message', (e) => { window.__got = e.data; }); window.addEventListener('keydown', (e) => { window.__lastKey = e.key; });</script>${spa ? SPA_APP : ''}</body></html>`;
 }
+// ?spa=1 on a YouTube /watch fixture: a stand-in for YouTube's app (its <ytd-app>, its 'yt-navigate' move from one
+// video to the next inside the page: yt-navigate-start at once, then the new address and the new video), so the e2e
+// can see Lumen's in-place move (watch-player-yt.js move, r64) without real YouTube.
+const SPA_APP = `<ytd-app></ytd-app><script>window.__doc = 'doc' + Math.random(); window.__moves = 0;
+document.querySelector('ytd-app').addEventListener('yt-navigate', (e) => {
+  const ep = e.detail && e.detail.endpoint; const id = ep && ep.watchEndpoint && ep.watchEndpoint.videoId; if (!id) return;
+  window.__moves++; window.dispatchEvent(new CustomEvent('yt-navigate-start'));
+  setTimeout(() => { history.pushState({}, '', ep.commandMetadata.webCommandMetadata.url); document.getElementById('name').textContent = 'youtube video ' + id;
+    const v = document.getElementById('v'); v.src = '/__media/clip.mp4?' + id; const p = v.play(); if (p && p.catch) p.catch(() => 0); }, 60);
+});</script>`;
 const PLAYER_PATH = /^\/(?:watch$|watch\/player|video\/|play\/|detail\/|movies\/|series\/|__p\/)/;
 
 async function startServers(mock) {
@@ -90,7 +100,7 @@ async function startServers(mock) {
       if (p === '/__p/noframe') return sendHtml(res, '<!doctype html><title>No framing</title><p id="nf">This page refuses to be framed.</p>', { 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'" });
       if (p === '/__p/licence') return sendHtml(res, LICENCE_PAGE);
       if (p === '/__p/widevine') return sendHtml(res, PLAY_HTML);
-      if (PLAYER_PATH.test(p)) return sendHtml(res, playerPage(svc + ' ' + (p === '/watch' ? 'video' : p.replace(/^\/(__p\/)?/, '')), other.origin, auth.origin));
+      if (PLAYER_PATH.test(p)) return sendHtml(res, playerPage(svc + ' ' + (p === '/watch' ? 'video' : p.replace(/^\/(__p\/)?/, '')), other.origin, auth.origin, svc === 'youtube' && p === '/watch' && u.searchParams.get('spa') === '1'));
       // Everything else is the reader's: the mock answers.
       const up = http.request({ host: '127.0.0.1', port: mock.ports[svc], path: req.url, method: req.method, headers: Object.assign({}, req.headers, { host: '127.0.0.1:' + mock.ports[svc] }) }, (r) => {
         res.writeHead(r.statusCode || 502, r.headers);
@@ -374,6 +384,41 @@ run('watch-player-e2e', async ({ check, launch, say, profileDir }) => {
     say('RAM (all Quartz processes, working set): before ' + memBefore.totalMb + ' MB / ' + memBefore.processes + ' procs; playing ' + memPlaying.totalMb + ' MB / ' + memPlaying.processes + ' procs (player ' + JSON.stringify(memPlaying.players) + '); after close ' + memAfter.totalMb + ' MB / ' + memAfter.processes + ' procs');
     check(memAfter.processes < memPlaying.processes && memAfter.totalMb < memPlaying.totalMb, 'closing frees the player\'s memory', { before: memBefore.totalMb, playing: memPlaying.totalMb, after: memAfter.totalMb });
 
+    // r64: a YouTube title opened while a YouTube watch page plays (Up next's Play now) moves the page IN PLACE
+    // (YouTube's own in-page move: no new document, no reload of YouTube's app); a page that can't (no YouTube app
+    // on it) loads the old way, and Lumen keeps the reason. Its own title; the layer closed after.
+    {
+      const MV = '(window.WatchPlayerYT && WatchPlayerYT._state().lastMove) || null';
+      const plays = (pg) => pg.waitFor('(() => { const v = document.getElementById("v"); return v && !v.paused && v.currentTime > 0 ? 1 : 0; })()', 10000).then(() => true, () => false);
+      const pageNow = (pg) => pg.ev('[window.__doc || "", window.__moves || 0, location.search]').catch(() => null);
+      await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=spaVideoA1&spa=1')}, { service: 'youtube', title: 'Move A' }), 1`);
+      let mt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=spaVideoA1') === 0, 10000);
+      let mp = mt ? await cdpTo(mt) : null;
+      const okA = !!mp && await plays(mp);
+      check(okA, 'move: the stand-in YouTube app page plays in the layer');
+      if (okA) {
+        const doc0 = await mp.ev('window.__doc');
+        const wc0 = (await chrome.ev(ST)).slots[0].wcId;
+        await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=spaVideoB2')}, { service: 'youtube', title: 'Move B' }), 1`);
+        const st = await chrome.waitFor(`(() => { const s = ${ST}; return s.slots[0] && s.slots[0].url.indexOf('spaVideoB2') !== -1 ? s : null; })()`, 6000).catch(() => null);
+        const mv = await chrome.ev(MV);
+        check(!!mv && mv.how === 'in-page' && mv.id === 'spaVideoB2', 'move: Up next to another YouTube video moves the page in place (no reload)', mv);
+        const pg = await pageNow(mp);
+        check(!!st && st.slots[0].wcId === wc0 && !!pg && pg[0] === doc0 && pg[1] === 1 && /spaVideoB2/.test(pg[2]), 'move: the same page and document, now on the next video', { slot: st && { url: st.slots[0].url, wcId: st.slots[0].wcId }, wc0, page: pg, doc0 });
+        check(await plays(mp), 'move: the next video plays');
+        // The fallback: a page with no YouTube app (the plain fixture) loads the old way, and says why.
+        await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=hiLockupB02')}, { service: 'youtube', title: 'Plain' }), 1`);
+        mt = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=hiLockupB02') === 0, 10000);
+        mp = mt ? await cdpTo(mt) : null;
+        if (mp) await plays(mp);
+        await chrome.ev(`openInLumen(${JSON.stringify(FY + '/watch?v=plainVideoC3')}, { service: 'youtube', title: 'Plain C' }), 1`);
+        const mt2 = await targetWhere(q, (x) => String(x.url).indexOf(FY + '/watch?v=plainVideoC3') === 0, 10000);
+        const mv2 = await chrome.ev(MV);
+        check(!!mt2 && !!mv2 && mv2.how === 'reload' && /no YouTube app/.test(mv2.why || '') && mv2.id === 'plainVideoC3', 'move: a page without YouTube\'s app loads the next video the old way, and the reason is kept', mv2);
+      }
+      await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
+      await sleep(900);
+    }
     // r62-playview regression: Try again left the tile blank. showState('failed') puts `has-state` on the tile
     // (that class hides the .wp-view, watch-player.css), and its Try again hid the state box but left the class:
     // the page reloaded fine behind a tile that stayed empty. The failure here is a did-fail-load event sent to

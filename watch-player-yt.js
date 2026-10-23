@@ -113,6 +113,68 @@
     if (UI.fullBtn) UI.fullBtn.hidden = true;
     return true;
   }
+  /* ---- one video to the next, in place -------------------------------------------------------
+     Up next's Play now, and any YouTube title opened while a YouTube video plays in the slot, used to
+     loadURL the next watch page: a whole new document, so YouTube's app (its HTML, its scripts, the
+     player) booted again from nothing before the next video could start. YouTube never does that
+     itself: its related list and its autoplay move from one video to the next inside the same page
+     (its 'yt-navigate'). move() asks the page for that same move, and Lumen's views already follow
+     such a move (did-navigate-in-page: the play view re-reads the page, the play bar looks for the
+     video again, Up next is re-armed by the reuse).
+     The page must take it at once (YouTube starts the move, 'yt-navigate-start', within MOVE_MS).
+     When it doesn't (not a watch page, no YouTube app, the event ignored, the page busy), the slot
+     loads the page the old way and the reason is kept (lastMove, the e2e's _state) and logged: the
+     move is slower then, never stuck and never silent. */
+  var MOVE_MS = 400;
+  var MOVE_JS = '(function (id, start, ms) { return new Promise(function (res) {' +
+    ' var app = document.querySelector("ytd-app");' +
+    ' if (location.pathname !== "/watch") return res("this page is not a watch page");' +
+    ' if (!app) return res("no YouTube app on the page");' +
+    ' var done = false, url = "/watch?v=" + id + (start ? "&t=" + start + "s" : "");' +
+    ' function ok() { if (done) return; done = true; window.removeEventListener("yt-navigate-start", ok, true); res("ok"); }' +
+    ' window.addEventListener("yt-navigate-start", ok, true);' +
+    ' var we = { videoId: id }; if (start) we.startTimeSeconds = start;' +
+    ' var ep = { commandMetadata: { webCommandMetadata: { url: url, webPageType: "WEB_PAGE_TYPE_WATCH", rootVe: 3832 } }, watchEndpoint: we };' +
+    ' try { app.dispatchEvent(new CustomEvent("yt-navigate", { bubbles: true, composed: true, detail: { endpoint: ep } })); }' +
+    ' catch (e) { done = true; return res("YouTube refused the move (" + String((e && e.message) || e).slice(0, 80) + ")"); }' +
+    ' setTimeout(function () { if (done) return; done = true; window.removeEventListener("yt-navigate-start", ok, true); res("YouTube did not start the move in " + ms + " ms"); }, ms);' +
+    ' }); })';
+  var lastMove = null;   // { how: 'in-page' | 'reload', why, id, ms, at }
+
+  /** watch-player.js openInLumen's reuse: true when the page is asked to move (it then loads by itself if refused). */
+  function move(ctx, s, from, to, ref) {
+    if (ref || !s || !s.view || s.multi || !ctx || typeof ctx.load !== 'function') return undefined;
+    var a = videoOf(from, s.service);
+    var b = videoOf(to, s.service);
+    // The same video again (a repeat, a new start time) loads as it always did.
+    if (!a || !b || a.embed || b.embed || a.origin !== b.origin || a.id === b.id) return undefined;
+    var v = s.view;
+    var seq = s._ytMove = (s._ytMove || 0) + 1;
+    var t0 = Date.now();
+    var settled = false;
+    function mine() { return !settled && s.view === v && s._ytMove === seq; }
+    function took() {
+      if (!mine()) return;
+      settled = true;
+      lastMove = { how: 'in-page', why: '', id: b.id, ms: Date.now() - t0, at: Date.now() };
+    }
+    function fall(why) {
+      if (!mine()) return;
+      settled = true;
+      lastMove = { how: 'reload', why: why, id: b.id, ms: Date.now() - t0, at: Date.now() };
+      try { console.warn('[lumen] YouTube did not move to the next video in place (' + why + '): loading its page'); } catch (e) { /* no console */ }
+      ctx.load(s, to, '');
+    }
+    var pr = null;
+    try { pr = v.executeJavaScript(MOVE_JS + '(' + JSON.stringify(b.id) + ',' + (Number(b.start) || 0) + ',' + MOVE_MS + ')', true); } catch (e) { pr = null; }
+    if (!pr || typeof pr.then !== 'function') return undefined;
+    pr.then(function (r) { if (r === 'ok') took(); else fall(String(r || 'no answer from the page')); },
+      function (e) { fall('the page did not answer (' + String((e && e.message) || e).slice(0, 80) + ')'); });
+    // A page too busy to answer at all: load it the old way rather than wait on it.
+    setTimeout(function () { fall('the page did not answer in ' + (MOVE_MS + 800) + ' ms'); }, MOVE_MS + 800);
+    return true;
+  }
+
   function bar(ctx, barEl) {
     var b = document.createElement('button');
     b.type = 'button';
@@ -187,8 +249,9 @@
     bar: bar,
     sync: sync,
     stateActs: stateActs,
-    // e2e: press "Full page" the way a click does, and what the button shows
+    pageMove: move,   // watch-player.js X('pageMove'): not 'move' (watch-shorts.js exports its own move)
+    // e2e: press "Full page" the way a click does, and what the button shows; the last in-place move
     _fullPage: function () { return UI.fullBtn && !UI.fullBtn.hidden ? (UI.fullBtn.click(), true) : false; },
-    _state: function () { return { fullShown: !!(UI.fullBtn && !UI.fullBtn.hidden), lastFull: UI.lastFull, label: UI.fullBtn ? UI.fullBtn.textContent : '', pv: UI.pv }; }
+    _state: function () { return { fullShown: !!(UI.fullBtn && !UI.fullBtn.hidden), lastFull: UI.lastFull, label: UI.fullBtn ? UI.fullBtn.textContent : '', pv: UI.pv, lastMove: lastMove }; }
   };
 });

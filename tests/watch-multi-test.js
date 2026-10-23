@@ -138,5 +138,53 @@ try { fs.unlinkSync(freeFile); } catch (e) { /* none */ }
   check(mem.cpuSec === 9.75 && mem.cpuByType.Tab === 7.25 && mem.players[0].cpuSec === 7.25 && mem.players[0].mb === 200, 'memory(): cumulative CPU seconds, per type and per player', mem);
 }
 
-console.log('watch-multi-test: ' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+// watch-player-yt.js move() (r64): Up next / a title opened while a YouTube video plays moves the page in place
+// (YouTube's own in-page move) instead of reloading it; anything the page doesn't take loads the old way, said.
+(async () => {
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
+  const W = 'https://www.youtube.com/watch?v=';
+  const slot = (answer) => {
+    const s = { service: 'youtube', multi: false, asked: [] };
+    s.view = { executeJavaScript: (code) => { s.asked.push(code); return answer(); } };
+    return s;
+  };
+  const ctxFor = () => { const c = { loads: [] }; c.load = (s, u, ref) => c.loads.push([u, ref]); return c; };
+  const quiet = console.warn; console.warn = () => {};
+  try {
+    let c = ctxFor(), s = slot(() => Promise.resolve('ok'));
+    check(YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw&t=42s', undefined) === true && /"jNQXAC9IVRw",42,/.test(s.asked[0] || ''), 'move: a watch page to another video asks the page (the id and the start time)', s.asked[0] && s.asked[0].slice(-40));
+    await tick();
+    check(c.loads.length === 0 && YT._state().lastMove.how === 'in-page' && YT._state().lastMove.id === 'jNQXAC9IVRw', 'move: YouTube took it: no reload', { loads: c.loads, last: YT._state().lastMove });
+    c = ctxFor(); s = slot(() => Promise.resolve('no YouTube app on the page'));
+    YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined);
+    await tick();
+    check(c.loads.length === 1 && c.loads[0][0] === W + 'jNQXAC9IVRw' && YT._state().lastMove.how === 'reload' && /no YouTube app/.test(YT._state().lastMove.why), 'move: refused: the page loads the old way, and the reason is kept', { loads: c.loads, last: YT._state().lastMove });
+    c = ctxFor(); s = slot(() => Promise.reject(new Error('gone')));
+    YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined);
+    await tick();
+    check(c.loads.length === 1 && /did not answer/.test(YT._state().lastMove.why), 'move: the page failed to answer: it loads', YT._state().lastMove);
+    c = ctxFor(); s = slot(() => new Promise(() => {}));
+    YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined);
+    await tick(1300);
+    check(c.loads.length === 1 && /did not answer in/.test(YT._state().lastMove.why), 'move: a page that never answers loads after a bounded wait', YT._state().lastMove);
+    let later = null;
+    c = ctxFor(); s = slot(() => new Promise((r) => { later = r; }));
+    YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined);
+    s._ytMove++;   // another title opened meanwhile
+    later('no YouTube app on the page');
+    await tick();
+    check(c.loads.length === 0, 'move: a late answer for an older move loads nothing', c.loads);
+    c = ctxFor(); s = slot(() => Promise.resolve('ok'));
+    const no = [
+      ['the same video again', W + 'aqz-KE-bpKQ', W + 'aqz-KE-bpKQ&t=10s', undefined],
+      ['to the embed (a Referer)', W + 'aqz-KE-bpKQ', 'https://www.youtube.com/embed/jNQXAC9IVRw', 'https://example.org/'],
+      ['from a channel page', 'https://www.youtube.com/@x', W + 'jNQXAC9IVRw', undefined],
+      ['to a Short', W + 'aqz-KE-bpKQ', 'https://www.youtube.com/shorts/jNQXAC9IVRw', undefined],
+    ];
+    for (const [what, from, to, ref] of no) check(YT.pageMove(c, s, from, to, ref) === undefined && s.asked.length === 0, 'move: not in place, ' + what + ' (the old load)');
+    s.multi = true;
+    check(YT.pageMove(c, s, W + 'aqz-KE-bpKQ', W + 'jNQXAC9IVRw', undefined) === undefined, 'move: not in place in a multiview tile (the embed)');
+  } finally { console.warn = quiet; }
+  console.log('watch-multi-test: ' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})();

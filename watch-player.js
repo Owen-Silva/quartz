@@ -50,7 +50,8 @@
 
   // watch-player-extras.js (straight-to-player fallback, the quality note, Up next, the layer's menu)
   // hooks in at a few points; with the file missing, nothing here changes.
-  var CTX = { L: L, focused: focused, note: note, toast: toast, toEdge: toEdge, showState: showState, open: openInLumen, close: close, svcInfo: svcInfo, api: api };
+  var CTX = { L: L, focused: focused, note: note, toast: toast, toEdge: toEdge, showState: showState, open: openInLumen, close: close, svcInfo: svcInfo, api: api,
+    load: function (s, u, ref) { loadInto(s, u, ref); } };
   // watch-player-yt.js (YouTube: the full watch page, the embed for tiles and as the fallback,
   // "Full page") hooks in the same way, after the extras.
   function X(ev) {
@@ -411,6 +412,7 @@
     var one = L.slots.length === 1 ? L.slots[0] : null;
     if (one && !one.blocked && one.view && one.service === service && !o.blocked) {
       // The same service: this page, in place (Back comes back to the last one).
+      var from = one.url;   // where the page is now (did-navigate / -in-page keep it), for an in-place move
       one.title = o.title || '';
       one.url = u;
       one.fallback = o.fallback || ''; one.item = o.item || null; one.purpose = o.purpose || ''; one.pnote = o.note || '';
@@ -425,8 +427,10 @@
       one.tile.classList.remove('has-state');
       // The embed (watch-player-yt.js) needs its Referer on this load too, not only on a new view's src.
       var ref = X('referrer', one, u);
-      if (ref) { try { one.view.setAttribute('httpreferrer', ref); } catch (e) { /* the load carries it */ } }
-      try { var pr = ref ? one.view.loadURL(u, { httpReferrer: ref }) : one.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { one.view.setAttribute('src', u); }
+      // YouTube from one watch page to the next (Up next's Play now, a title opened while one plays): YouTube's own
+      // in-page move instead of a whole new page (watch-player-yt.js pageMove, r64). It loads the page itself, the
+      // way below, when YouTube doesn't take the move, and says why.
+      if (X('pageMove', one, from, u, ref) !== true) loadInto(one, u, ref);
     } else {
       clearSlots();
       var s = makeSlot(u, { service: service, title: o.title || '', blocked: o.blocked || '', fallback: o.fallback || '', item: o.item || null, purpose: o.purpose || '', note: o.note || '', multi: !!o.multi });
@@ -439,6 +443,13 @@
     show();
     X('opened', focused());
     return true;
+  }
+
+  /** Load u in a slot's own view (the reuse's load; watch-player-yt.js's move falls back to it). ref: the embed's Referer. */
+  function loadInto(s, u, ref) {
+    if (!s || !s.view) return;
+    if (ref) { try { s.view.setAttribute('httpreferrer', ref); } catch (e) { /* the load carries it */ } }
+    try { var pr = ref ? s.view.loadURL(u, { httpReferrer: ref }) : s.view.loadURL(u); if (pr && pr.catch) pr.catch(function () { /* a redirect or a stop: did-fail-load says the rest */ }); } catch (e) { s.view.setAttribute('src', u); }
   }
 
   function clearSlots() {
