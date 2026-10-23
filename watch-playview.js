@@ -1648,9 +1648,11 @@
     // are missing for that reason, said before "signed out" (which would leave the missing channel unexplained).
     else if ((phase === 'unread' || phase === 'partial') && m.stale) note(info, 'YouTube’s page still showed the last video’s details when Lumen last read it, so this video’s aren’t here'
       + (m.title && m.titleFrom === 'item' ? '; the title is from Lumen’s row' : m.title && m.titleFrom === 'player' ? '; the title and channel are from YouTube’s player' : '') + '. “Full page” shows YouTube’s own.', 'warn');
-    // The reads ended (STALE_MS) on a page drawn for this video whose description it hadn't drawn (readYT: descRead):
-    // said, never a silent blank; the player's own words, when shown, are named as such.
-    else if ((phase === 'unread' || phase === 'partial') && m.descPending) note(info, 'YouTube’s page hadn’t drawn this video’s description when Lumen last read it'
+    // The reads ended (STALE_MS) on a page drawn for this video, its buttons there, whose description it hadn't drawn
+    // (readYT: descRead): said, never a silent blank; the player's own words, when shown, are named as such. Only
+    // when the description is what kept the read from complete (Like and Subscribe found): a page that couldn't be
+    // read at all ('unread') or lacks those buttons keeps its own note below (it says more).
+    else if (phase === 'partial' && m.descPending && m.buttons.like.found && m.buttons.sub.found) note(info, 'YouTube’s page hadn’t drawn this video’s description when Lumen last read it'
       + (m.descFrom === 'player' && m.desc ? ', so its words are from YouTube’s player, without their links' : '') + '. “Full page” shows YouTube’s own.', 'warn');
     else if (m.signedIn === false) note(info, 'You’re signed out of YouTube here: Like, Dislike, Subscribe and Save need you signed in.', 'warn',
       button('pv-ghost pv-signin', 'Sign in on YouTube’s page', function () { if (!toggle(s) && CTX) CTX.note('YouTube’s Sign in is at the top right of its page'); }));
