@@ -15,7 +15,10 @@ require('./tools/lowcpu-optional.js');   // first: the CPU cap, when one is conf
 //   - the video ended: Space stops the countdown and stays on this video, and the card says so;
 //   - Enter (YouTube, Hulu, ESPN) or a click (Disney+, Prime Video) on the card's Play now still plays the next one;
 //   - YouTube: the countdown running out untouched still plays the next one; a Space from inside the page (the
-//     play bar's key bridge) stops the countdown too.
+//     play bar's key bridge) stops the countdown too;
+//   - YouTube: K (the same play/pause key) acts like Space, with the focus on the card and from inside the page:
+//     it stops the countdown and pauses the video, never plays the next one, the card says "K plays it again",
+//     and a second K plays the video.
 // One summary line: "watch-upnext-e2e: N passed, M failed".
 'use strict';
 const fs = require('fs');
@@ -99,7 +102,7 @@ async function targetWhere(q, pred, ms) {
   return null;
 }
 async function cdpTo(t) { const c = await new Cdp(t.webSocketDebuggerUrl).open(); await c.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => 0); return c; }
-const KEYS = { ' ': [' ', 'Space', 32], Enter: ['Enter', 'Enter', 13] };
+const KEYS = { ' ': [' ', 'Space', 32], k: ['k', 'KeyK', 75], Enter: ['Enter', 'Enter', 13] };
 async function key(c, k) {
   const [kk, code, vk] = KEYS[k];
   const base = { key: kk, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 0 };
@@ -280,6 +283,37 @@ run('watch-upnext-e2e', async ({ check, launch }) => {
           check(!!h6 && h6.phase === 'held' && h6.how === 'paused' && !!v6 && v6.paused, N + ': Space pressed inside the page stops the countdown and pauses (no advance)', { up: h6 && { phase: h6.phase, how: h6.how }, v: v6 });
           await sleep(2500);
           check((await slotUrl()).indexOf('ep=3') !== -1, N + ': 2.5 s later still on S1 E3', await slotUrl());
+          /* ---- 7. K, the same play/pause key, does what Space does: it stops the countdown and pauses the video
+             (never the next episode), the card names K, and a second K plays the video. First with the focus on
+             the card's Play now, then from inside the page (the bar's key bridge). ---- */
+          const HELD = '(() => { const u = ' + UP + '.upnext; return u && u.phase !== "counting" && (u.how || u.phase === "played") ? u : null; })()';
+          const PLAYS = '(() => { const v = document.querySelector("video"); return v && !v.paused ? 1 : 0; })()';
+          for (const where of ['card', 'page']) {
+            const ep = where === 'card' ? 5 : 6;
+            await chrome.ev('(document.querySelector(".wpx-up:not([hidden]) .wpx-up-cancel") || { click: () => 0 }).click(), 1');
+            await g.ev('(() => { const v = document.querySelector("video"); const p = v.play(); if (p && p.catch) p.catch(() => 0); return 1; })()');
+            await g.waitFor(PLAYS, 4000).catch(() => 0);
+            await sleep(800);
+            await chrome.ev(`WatchPlayerExtras._fake(${JSON.stringify(next(svc, ep))}), WatchPlayerExtras._ended(), 1`);
+            const c7 = await counting();
+            check(!!c7, N + ' (K, ' + where + '): S1 E3 offers S1 E' + ep + ', counting', c7);
+            if (where === 'card') check(/wpx-up-play/.test(await chrome.ev(FOCUS)), N + ' (K, card): the focus is on the card\'s Play now', await chrome.ev(FOCUS));
+            const kc = where === 'card' ? chrome : g;
+            await key(kc, 'k');
+            const h7 = await chrome.waitFor(HELD, 4000).catch(() => null);
+            const v7 = await g.ev(VID).catch(() => null);
+            check(!!h7 && h7.phase === 'held' && h7.how === 'paused' && !!v7 && v7.paused, N + ' (K, ' + where + '): K stops the countdown and pauses the video, never plays the next one', { up: h7 && { phase: h7.phase, how: h7.how }, v: v7 });
+            check(!!h7 && /Countdown stopped and this video paused\. K plays it again\./.test(h7.text || ''), N + ' (K, ' + where + '): the card says the countdown stopped, the video paused, and K plays it again', h7 && h7.text);
+            await sleep(1500);
+            const s7 = await up();
+            check((await slotUrl()).indexOf('ep=3') !== -1 && !!s7 && s7.phase === 'held', N + ' (K, ' + where + '): 1.5 s later still on S1 E3, the card still stopped', { url: await slotUrl(), phase: s7 && s7.phase });
+            await key(kc, 'k');
+            const back7 = await g.waitFor(PLAYS, 4000).then(() => true, () => false);
+            await sleep(600);
+            const s7b = await up();
+            check(back7, N + ' (K, ' + where + '): a second K plays S1 E3 again', await g.ev(VID).catch(() => null));
+            check((await slotUrl()).indexOf('ep=3') !== -1 && !!s7b && s7b.phase !== 'played' && s7b.phase !== 'counting', N + ' (K, ' + where + '): ...and still no next episode', { url: await slotUrl(), phase: s7b && s7b.phase });
+          }
           g.close();
           g = null;
         }

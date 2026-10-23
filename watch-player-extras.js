@@ -17,9 +17,10 @@
      (afterWatching) and answers the next episode from its own
      Continue watching; a card counts 10 s down, with Play now and
      Cancel. The service's own up-next (the page moving on, or the
-     video playing again) cancels Lumen's. Space while the card is
-     up never starts the next episode: it stops the countdown (and
-     pauses the video if it is still playing), and the card says so.
+     video playing again) cancels Lumen's. Space (or K, the same
+     play/pause key) while the card is up never starts the next
+     episode: it stops the countdown (and pauses the video if it is
+     still playing), and the card says so, naming the key.
    - The menu (More): Open in Edge, each with its plain reason --
      cast, a refused licence, or a sharper picture.
    - The profile picker: a note saying Lumen reads the service
@@ -272,7 +273,8 @@
     // phase: none | asking | counting | held (Space stopped the countdown) | none-found.
     // hold: Space came while still asking (the answer then lands as held, never counting). how: what the stop did
     // to the video ('' not known yet, paused, playing, ended, stopped, no video, failed), for the card's words.
-    if (!x.up) x.up = { phase: 'none', el: null, timer: 0, left: 0, next: null, reason: '', hold: false, how: '' };
+    // key: the key that stopped it ('Space' or 'K'), so the card names the key that plays the video again.
+    if (!x.up) x.up = { phase: 'none', el: null, timer: 0, left: 0, next: null, reason: '', hold: false, how: '', key: 'Space' };
     if (!x.up.el) {
       x.up.el = el('div', 'wpx-up');
       x.up.el.setAttribute('role', 'status');
@@ -291,6 +293,7 @@
     up.reason = '';
     up.hold = false;
     up.how = '';
+    up.key = 'Space';
     draw(s);
     var item = s.item;
     var ask = fakeNext ? Promise.resolve(fakeNext) : CTX.api.upNext(item);
@@ -323,9 +326,10 @@
     });
   }
 
-  // The card's words for a stopped countdown: what Space did to the video, in plain words (never a silent change).
-  function heldText(how) {
-    if (how === 'paused') return 'Countdown stopped and this video paused. Space plays it again.';
+  // The card's words for a stopped countdown: what Space (or K) did to the video, in plain words (never a silent
+  // change). key: the key that stopped it, named back as the one that plays the video again.
+  function heldText(how, key) {
+    if (how === 'paused') return 'Countdown stopped and this video paused. ' + (key === 'K' ? 'K' : 'Space') + ' plays it again.';
     if (how === 'playing') return 'Countdown stopped. The next episode won’t start by itself.';
     if (how === 'ended' || how === 'stopped') return 'Countdown stopped. Staying on this video.';
     if (how === 'no video') return 'Countdown stopped. Lumen found no video on the page to pause.';
@@ -349,7 +353,7 @@
     var acts = el('div', 'wpx-up-acts');
     if (up.phase === 'asking') {
       c.appendChild(el('p', 'wpx-up-sub', 'Reading ' + name(s.service) + ' for the next episode…'));
-      if (up.hold) c.appendChild(el('p', 'wpx-up-count is-held', heldText(up.how)));
+      if (up.hold) c.appendChild(el('p', 'wpx-up-count is-held', heldText(up.how, up.key)));
       acts.appendChild(button('wpx-up-cancel', 'Cancel', function () { cancelUpNext(s, 'Cancelled'); }));
     } else if (up.phase === 'held') {
       // Space stopped the countdown: the next episode stays offered (Play now still plays it), nothing counts.
@@ -358,7 +362,7 @@
       var hep = P ? P.epText(P.epOf(hn.subtitle)) : '';
       var hrest = String(hn.subtitle || '').replace(/^\s*S\d+\s*[:.·-]?\s*E\d+\s*[·:.-]?\s*/i, '');
       c.appendChild(el('p', 'wpx-up-sub', [hep, hrest].filter(Boolean).join(' · ')));
-      c.appendChild(el('p', 'wpx-up-count is-held', heldText(up.how)));
+      c.appendChild(el('p', 'wpx-up-count is-held', heldText(up.how, up.key)));
       acts.appendChild(button('wp-primary wpx-up-play', 'Play now', function () { playNext(s); }));
       acts.appendChild(button('wpx-up-cancel', 'Dismiss', function () { cancelUpNext(s, ''); }));
     } else if (up.phase === 'counting') {
@@ -399,7 +403,9 @@
      so Space "pressed" Play now and started the next episode. Now Space with the card up stops the countdown
      instead, pauses the video if it is still playing, and the card says so; a second Space plays or pauses this
      video as Space always does. Enter or a click on Play now, and the countdown running out, still play the next
-     one. */
+     one. K is the same play/pause key (watch-playerbar.js KEYMAP), so it does exactly what Space does here: the
+     first K stops the countdown and pauses, never plays the next episode, the card says "K plays it again", and a
+     second K plays the video. */
 
   // Runs in the service's page (the biggest video, as the ended report reads it). 'hold': pause it if it plays,
   // and say what it was doing; 'toggle': play or pause it.
@@ -418,13 +424,15 @@
     return Promise.resolve('failed');
   }
 
-  // Stop the countdown. via 'space' (the key: also pause a playing video) or 'paused' (the page already paused).
-  function holdUpNext(s, via) {
+  // Stop the countdown. via 'space' (the key, Space or K: also pause a playing video) or 'paused' (the page already
+  // paused). key: 'K' when K was the key, else Space (the card's words name it).
+  function holdUpNext(s, via, key) {
     var up = s && s._x && s._x.up;
     if (!up || (up.phase !== 'asking' && up.phase !== 'counting')) return false;
     stopTimer(up);
     if (up.phase === 'asking') up.hold = true; else up.phase = 'held';
     up.how = via === 'paused' ? 'paused' : '';
+    up.key = key === 'K' ? 'K' : 'Space';
     draw(s);
     if (via === 'space') {
       pageMedia(s, 'hold').then(function (r) {
@@ -437,12 +445,14 @@
     return true;
   }
 
-  // Space with the card counting (or still asking): stop it. true when Space was taken.
-  // watch-playerbar.js key() asks this first for a Space from the page's own key bridge.
-  function upSpace(s) {
+  // Space or K with the card counting (or still asking): stop it. true when the key was taken.
+  // watch-playerbar.js key() asks this first for its play/pause key (Space or K, from the page's own key bridge or
+  // Lumen's chrome); k: the key as pressed (' ', 'k' or 'K').
+  function isPlayKey(k) { return k === 'k' || k === 'K'; }
+  function upSpace(s, k) {
     var up = s && s._x && s._x.up;
     if (!up || up.el.hidden || (up.phase !== 'asking' && up.phase !== 'counting') || (up.phase === 'asking' && up.hold)) return false;
-    return holdUpNext(s, 'space');
+    return holdUpNext(s, 'space', isPlayKey(k) ? 'K' : 'Space');
   }
 
   // The second Space, on the card's own button: this video's play/pause, through Lumen's bar when it is on (the
@@ -454,7 +464,8 @@
   }
 
   function onKey(e) {
-    if (e.key !== ' ' || e.ctrlKey || e.altKey || e.metaKey || !CTX || !CTX.L || !CTX.L.open || !CTX.focused) return;
+    // Space, and K (the same play/pause key: with Lumen's bar off nothing else in the chrome would take it).
+    if ((e.key !== ' ' && !isPlayKey(e.key)) || e.ctrlKey || e.altKey || e.metaKey || !CTX || !CTX.L || !CTX.L.open || !CTX.focused) return;
     var s = CTX.focused();
     var up = s && s._x && s._x.up;
     if (!up || !up.el || up.el.hidden || (up.phase !== 'asking' && up.phase !== 'counting' && up.phase !== 'held')) return;
@@ -471,7 +482,7 @@
     if (e.repeat) return;
     if (up.phase === 'held') toggleVideo(s);
     else if (up.phase === 'asking' && up.hold) toggleVideo(s);
-    else holdUpNext(s, 'space');
+    else holdUpNext(s, 'space', isPlayKey(e.key) ? 'K' : 'Space');
   }
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('keyup', onKey, true);
@@ -527,7 +538,7 @@
 
   window.WatchPlayerExtras = {
     bar: onBar, attach: onAttach, reuse: onReuse, opened: onOpened, destroy: onDestroy, state: state,
-    // watch-playerbar.js key(): a Space from the page's key bridge goes here first (true: the card took it)
+    // watch-playerbar.js key(): a Space or K (its play/pause key) goes here first (true: the card took it)
     space: upSpace,
     // the e2e's seam: the same path a real 'ended' takes
     _ended: function (s) { s = s || (CTX && CTX.focused && CTX.focused()); if (s) { X(s).ended = true; ended(s); } },

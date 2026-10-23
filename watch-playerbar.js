@@ -713,9 +713,10 @@
     var st = P.st || {};
     switch (a.c) {
       case 'toggle':
-        // Space with Lumen's Up next card counting stops the countdown (and pauses a playing video) instead of
-        // playing or pausing here: watch-player-extras.js upSpace (Space used to start the next episode).
-        if (k === ' ' && root.WatchPlayerExtras && typeof root.WatchPlayerExtras.space === 'function' && root.WatchPlayerExtras.space(s) === true) break;
+        // Space or K (both this key) with Lumen's Up next card counting stops the countdown (and pauses a playing
+        // video) instead of playing or pausing here: watch-player-extras.js upSpace (Space used to start the next
+        // episode; K must never start it either).
+        if (root.WatchPlayerExtras && typeof root.WatchPlayerExtras.space === 'function' && root.WatchPlayerExtras.space(s, k) === true) break;
         user(s, { c: 'toggle' });
         break;
       case 'skip': skip(s, a.by); break;
