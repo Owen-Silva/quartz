@@ -231,6 +231,79 @@ check(JSON.stringify(l3.map((l) => [l.t, l.h])) === JSON.stringify([['0:00', '/w
   'no links in the DOM: ytInitialData’s runs, in order; 0:00 keeps t=0s; a hashtag is /hashtag/<tag>, not /channel/FEhashtag', l3);
 check(PV.descSegs(CONTENT, l3, VIDX).filter((x) => x.link).map((x) => x.link.kind).join() === 'time,yt,web', 'and they draw as a time, a YouTube page and another site');
 
+/* ---- r64: a watch page still drawn for the LAST video (an in-place move YouTube hasn't redrawn yet) ---------- */
+// Up next's Play now moves the page in place: the address names video B at once, but YouTube redraws the title,
+// the channel, Like and Subscribe (and ytd-watch-flexy's video-id) hundreds of ms later. A read in that gap took A's
+// info as B's, found it complete, and the reads stopped: B played under A's title for good.
+const VA = 'videoAAAAA1', VB = 'videoBBBBB2';
+function ytPage(addrId, flexyId, extra) {
+  // flexyId: null = no ytd-watch-flexy at all; '' = one with no video-id; an id = its video-id
+  const node = (text, attrs, more) => Object.assign({ textContent: text, innerText: text, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null), closest: () => null, querySelectorAll: () => [] }, more || {});
+  const flexAttrs = flexyId ? { 'video-id': flexyId } : {};
+  const nodes = {
+    'ytd-watch-flexy': flexyId === null ? null : node('', flexAttrs, { setAttribute: (k, v) => { flexAttrs[k] = v; } }),
+    '#title h1': node('Video A title'),
+    '#channel-name #text a': node('Channel A', null, { href: 'https://www.youtube.com/@channela' }),
+    '#owner-sub-count': node('1.2M subscribers'),
+    'like-button-view-model button': node('12K', { 'aria-pressed': 'false', 'aria-label': 'like this video along with 12,345 other people' }),
+    'dislike-button-view-model button': node('', { 'aria-pressed': 'false', 'aria-label': 'Dislike this video' }),
+    '#subscribe-button button': node('Subscribe', { 'aria-label': 'Subscribe to Channel A.' }),
+    'button[aria-label="Save to playlist"]': node('Save', { 'aria-label': 'Save to playlist' }),
+    '#description-inline-expander yt-attributed-string': node('Video A’s description'),
+    '#info-container #info': node('48K views 3 days ago'),
+  };
+  // the page's own data is the FIRST video's after an in-place move (YouTube never rewrites ytInitialData)
+  const yd = { currentVideoEndpoint: { watchEndpoint: { videoId: VA } }, contents: { twoColumnWatchNextResults: { results: { results: { contents: [
+    { videoPrimaryInfoRenderer: { title: { runs: [{ text: 'Video A title' }] } } },
+    { videoSecondaryInfoRenderer: { owner: { videoOwnerRenderer: { title: { runs: [{ text: 'Channel A' }] } } }, attributedDescription: { content: 'Video A’s description' } } },
+    { itemSectionRenderer: { sectionIdentifier: 'comment-item-section', contents: [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN-OF-A' } } } }] } },
+  ] } } } } };
+  const d = { documentElement: { hasAttribute: () => false, setAttribute() {}, removeAttribute() {} }, title: 'Video A title - YouTube',
+    querySelector: (sel) => (sel in nodes ? nodes[sel] : null), querySelectorAll: () => [] };
+  const w = Object.assign({ location: { href: 'https://www.youtube.com/watch?v=' + addrId }, dispatchEvent: () => true, ytInitialData: yd,
+    ytInitialPlayerResponse: { videoDetails: { videoId: VA, title: 'Video A title', author: 'Channel A' } } }, extra || {});
+  const c = vm.createContext({ window: w, document: d, location: w.location, URL, setTimeout, clearTimeout, Promise, Event: function () {}, KeyboardEvent: function () {}, JSON, Math, Date, Number, String, Array, Object });
+  return { w, d, c, flexAttrs, nodes, read: () => { try { return vm.runInContext(PV.call('read', ['youtube']), c); } catch (e) { return { err: e.message }; } } };
+}
+{
+  const st = ytPage(VB, VA).read();
+  check(!!st && st.ok && st.videoId === VB && st.stale === true && st.drawnId === VA, 'stale page (the address says B, ytd-watch-flexy still says A): the read says stale, for B', st);
+  check(!!st && st.title === '' && st.channel === null && st.pageTitle === '' && st.desc.text === '' && st.desc.meta === '' && st.desc.links.length === 0,
+    'and takes none of the DOM’s words: no title, channel, document.title, description or views line (all A’s)', st && { title: st.title, channel: st.channel, pageTitle: st.pageTitle, desc: st.desc });
+  check(!!st && !st.like.found && !st.dislike.found && !st.sub.found && !st.save.found && st.comments === null, 'nor A’s Like, Dislike, Subscribe or Save, nor A’s comments token (ytInitialData is A’s: never used for B)', st && { like: st.like, sub: st.sub, comments: st.comments });
+  check(PV.complete(st) === false, 'so the read is NOT complete: the reads go on and the watch catches YouTube’s redraw');
+  const ms = PV.model('youtube', st, { title: 'Video B (Lumen’s row)' }, 'Video B (slot)', { moved: false });
+  check(ms.title === 'Video B (Lumen’s row)' && ms.titleFrom === 'item' && ms.channel === null && ms.stale === true, 'the info meanwhile: B’s own row title, no channel (never A’s)', ms);
+  const mm2 = PV.model('youtube', st, null, '', { moved: true });
+  check(mm2.title === '' && mm2.titleFrom === '', 'YouTube’s own move (no row for B): the skeleton, never A’s title nor A’s document.title', mm2);
+  check(/Reading YouTube’s page/.test(PV.whyOff(ms, 'like', 'loading')) && /still showed the last video/.test(PV.whyOff(ms, 'like', 'unread')), 'its buttons: “Reading…” while the reads go on; after the last one, why they are off (the page was the last video’s)');
+  const fresh = ytPage(VA, VA).read();
+  check(!!fresh && fresh.stale === false && fresh.title === 'Video A title' && fresh.titleFrom === 'page' && fresh.channel && fresh.channel.name === 'Channel A' && fresh.like.found && fresh.sub.found
+    && fresh.pageTitle === 'Video A title - YouTube' && fresh.desc.text === 'Video A’s description' && fresh.comments && fresh.comments.token === 'TOKEN-OF-A' && PV.complete(fresh) === true,
+    'a page drawn for this video (ytd-watch-flexy’s video-id matches): read as before, complete', fresh);
+  const noId = ytPage(VA, '').read(), noFlexy = ytPage(VA, null).read();
+  check([noId, noFlexy].every((r) => r && r.stale === false && r.title === 'Video A title' && r.channel && r.channel.name === 'Channel A' && r.like.found && PV.complete(r) === true),
+    'ytd-watch-flexy with no video-id, or none at all: read as before (nothing to compare), complete', { noId, noFlexy });
+  check(PV.complete(ytPage(VB, '').read()) === true, 'and so without a video-id a moved page reads as it did before (the timing is the only guard there)');
+  // An older guest still in the page (installed by the last Quartz): the new one replaces it, so the stale check is in.
+  const old = ytPage(VB, VA, { __lumenPv: { v: 6, read: () => ({ ok: true, svc: 'youtube', title: 'Video A title', old: true }) } });
+  const ro = old.read();
+  check(!!ro && !ro.old && ro.stale === true && ro.title === '' && old.w.__lumenPv.v > 6, 'an older guest (v6) in the page is replaced by this one (v' + (old.w.__lumenPv && old.w.__lumenPv.v) + '): its read is stale-aware', ro);
+}
+// The watch on a stale page: YouTube's redraw ends it at once (the text, or the video-id attribute alone).
+const staleW = { at: -1, r: null, rText: null };
+{
+  const pg = ytPage(VB, VA);
+  const mo = [];
+  pg.c.MutationObserver = function (fn) { const o = { fn, on: false, opts: null, observe(n, opts) { o.on = true; o.opts = opts; }, disconnect() { o.on = false; } }; mo.push(o); return o; };
+  vm.runInContext(PV.call('tick', ['youtube', true]), pg.c);   // the stale read the chrome has
+  const t0 = Date.now();
+  vm.runInContext(PV.call('watch', ['youtube', true, 3000]), pg.c).then((r) => { staleW.r = r; staleW.at = Date.now() - t0; });
+  staleW.mo = mo[mo.length - 1];
+  setTimeout(() => { staleW.mo.fn([]); }, 40);   // something else on the page changes: still A's, still stale: no answer
+  setTimeout(() => { staleW.early = staleW.r; pg.flexAttrs['video-id'] = VB; pg.nodes['#title h1'].textContent = 'Video B title'; staleW.mo.fn([{ type: 'attributes', attributeName: 'video-id' }]); }, 200);
+}
+
 /* ---- watch-playview-main.js -------------------------------------------------------------------------------- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pv-test-'));
 const handlers = {};
@@ -299,7 +372,8 @@ const w0 = Date.now();
 let wr = null, wAt = 0;
 vm.runInContext(PV.call('watch', ['youtube', true, 5000]), sb).then((r) => { wr = r; wAt = Date.now() - w0; });
 const mo1 = mos[mos.length - 1];
-check(!!mo1 && mo1.on && mo1.opts && mo1.opts.childList && mo1.opts.subtree && !mo1.opts.attributes, 'a watch observes the page’s own DOM (children and text, never attributes)', mo1 && mo1.opts);
+check(!!mo1 && mo1.on && mo1.opts && mo1.opts.childList && mo1.opts.subtree && (!mo1.opts.attributes || JSON.stringify(mo1.opts.attributeFilter) === '["video-id"]'),
+  'a watch observes the page’s own DOM (children and text; of the attributes only video-id, never the player’s churn)', mo1 && mo1.opts);
 mo1.fn([]);   // a change the info doesn't show: no new read handed out
 let wSame = null;
 setTimeout(() => {
@@ -345,6 +419,11 @@ setTimeout(() => {
   check(!!em && em.title === 'Early title' && em.channel.name === 'The Channel' && em.desc.links.length === 0 && em.videoId === 'abcDEF12345', 'and the info draws from it (the plain description’s links come from its text)', em && { title: em.title, ch: em.channel });
   delete win.ytInitialPlayerResponse;
 }, 900);
+setTimeout(() => {
+  check(staleW.early === null, 'a watch on a stale page: another change while the page is still the last video’s answers nothing (the read is the same stale one)', staleW.early);
+  check(!!staleW.r && staleW.r.stale === false && staleW.r.title === 'Video B title' && staleW.at >= 200 && staleW.at < 1000 && staleW.mo && !staleW.mo.on,
+    'YouTube redraws for this video (video-id turns to B): the watch answers within a read gap (not at its 3 s limit) and lets go', { at: staleW.at, r: staleW.r && { stale: staleW.r.stale, title: staleW.r.title } });
+}, 700);
 setTimeout(() => {
   check(wSame === null, 'a page change that reads the same: the watch keeps waiting (nothing new to draw)');
   check(!!wr && wr.pageTitle === 'Another title - YouTube' && wAt < 1000 && !mo1.on, 'the page draws something new: the watch answers with it within a read gap, not at its 5 s limit, and lets go of the page', { wAt, title: wr && wr.pageTitle, on: mo1.on });

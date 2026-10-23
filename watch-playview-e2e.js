@@ -56,7 +56,7 @@ async function startServers(mock) {
       if (svc === 'youtube' && p === '/watch') {
         hits.youtube++;
         const q = { signedout: u.searchParams.has('signedout'), bare: u.searchParams.has('bare'), noplayer: u.searchParams.has('noplayer'), still: u.searchParams.has('still'),
-          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '' };
+          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '', late: Number(u.searchParams.get('late')) || 0 };
         return sendHtml(res, F.youtubeWatch(q));
       }
       if (svc === 'youtube' && /^\/embed\//.test(p)) return sendHtml(res, EMBED);
@@ -432,6 +432,59 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
     check(!!fresh && fresh.busy === '' && fresh.noRoot === false && fresh.applied, 'and the view reads the new video afresh: its title, nothing busy, the player trimmed', fresh && { phase: fresh.phase, title: fresh.title, busy: fresh.busy, noRoot: fresh.noRoot, why: fresh.why });
     check(!!barT && movedUrl.indexOf('v=' + NEXT_ID) >= 0, 'and the bar drops the slot’s title for the page’s own new title (the slot’s address has the new id)', { bar: barT || (await chrome.ev(`${ST}.title`)), url: movedUrl });
     p.close();
+    // r64 release blocker: Up next's Play now moves the page IN PLACE (watch-player-yt.js pageMove) and YouTube changes
+    // the address at once but redraws the title, the channel, the buttons and ytd-watch-flexy's video-id only once the
+    // next video's data is in (hundreds of ms; Shorts measured up to ~650 ms). The reads after a move start at 120 ms:
+    // one in that gap took the LAST video's title, channel, Like and Subscribe as the next one's, found them complete
+    // and stopped, and B played under A's info for good (the stand-in above redraws at once, so it never showed).
+    // The stand-in here redraws LATE_MS after its address changes (tests/playview-fixtures.js lateMove). Every draw of
+    // the info from the move on is recorded, each rebuild (an observer on the layer) and a 25 ms sampler: never A's.
+    {
+      const LATE_MS = 700, LATE_ID = 'pvLate00002', ROW_B = 'Late B, from Lumen’s row';
+      await playYT('&late=' + LATE_MS, 'Late A');
+      const a0 = await pvWait('x.applied && x.phase === "ready" && /late=/.test(x.url) && x.title === ' + JSON.stringify(F.TITLE), 15000);
+      check(!!a0 && a0.channel === F.CHANNEL, 'late redraw: video A plays in the view with its own title and channel', a0 && { phase: a0.phase, title: a0.title, channel: a0.channel, url: a0.url });
+      await chrome.ev(`(() => {
+        const A_T = ${JSON.stringify(F.TITLE)}, A_C = ${JSON.stringify(F.CHANNEL)}, A_S = ${JSON.stringify(F.SUBS)}, B_T = ${JSON.stringify(F.LATE_T)}, B_C = ${JSON.stringify(F.LATE_C)};
+        const rec = window.__lateRec = { samples: 0, draws: 0, seen: [], bad: [], t0: Date.now(), drawnB: 0 };
+        const look = (how) => {
+          const i = document.querySelector('.wp-layer .pv-info');
+          if (!i || i.hidden) return;
+          const q = (c) => { const n = i.querySelector(c); return n ? n.textContent : ''; };
+          const t = q('.pv-title'), c = q('.pv-chan-name'), sb = q('.pv-subs'), ms = Date.now() - rec.t0;
+          rec.samples++; if (how === 'draw') rec.draws++;
+          const k = t + ' | ' + c;
+          if (!rec.seen.length || rec.seen[rec.seen.length - 1].k !== k) rec.seen.push({ k, ms, how });
+          if (t === A_T || c === A_C || (!!sb && sb === A_S)) rec.bad.push({ t, c, sb, ms, how });
+          if (!rec.drawnB && t === B_T && c === B_C) rec.drawnB = ms;
+        };
+        openInLumen(${JSON.stringify(FY + '/watch?v=' + LATE_ID)}, { service: 'youtube', title: ${JSON.stringify(ROW_B)} });
+        look('open');
+        rec.mo = new MutationObserver(() => look('draw'));
+        rec.mo.observe(document.querySelector('.wp-layer'), { childList: true, subtree: true, characterData: true });
+        rec.iv = setInterval(() => look('tick'), 25);
+        return 1;
+      })()`);
+      await chrome.waitFor('window.__lateRec && window.__lateRec.drawnB > 0 ? 1 : 0', 6000).catch(() => 0);
+      await sleep(400);   // a little after B's info is in: nothing may go back to A's
+      const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, ms: Date.now() - r.t0 }; })()');
+      const mvL = await chrome.ev('(window.WatchPlayerYT && WatchPlayerYT._state().lastMove) || null');
+      const pl = await guestFor(FY + '/watch?v=' + LATE_ID);
+      const late = pl ? await pl.ev('window.__late || null').catch(() => null) : null;
+      const lagSeen = late && late.drawnAt && late.movedAt ? late.drawnAt - late.movedAt : -1;
+      say('late redraw: lag ' + lagSeen + ' ms (asked ' + LATE_MS + '), ' + rec.samples + ' samples (' + rec.draws + ' on a redraw) over ' + rec.ms + ' ms, B’s info at ' + rec.drawnB + ' ms, stale hits ' + rec.bad.length + '; drawn: ' + rec.seen.map((x) => x.ms + 'ms ' + x.k).join(' / '));
+      check(!!mvL && mvL.how === 'in-page' && mvL.id === LATE_ID && !!late && late.moves === 1 && late.to === LATE_ID, 'late redraw: Play now moved the page in place (YouTube’s own move, no new document)', { mvL, late });
+      check(lagSeen >= LATE_MS - 50, 'and the stand-in really redrew late: ' + lagSeen + ' ms after its address changed', late);
+      check(rec.samples >= 20 && rec.bad.length === 0, 'B never shows A’s title, channel or subscribers: 0 of ' + rec.samples + ' samples from the move until after B’s info is in', { bad: rec.bad.slice(0, 5), seen: rec.seen });
+      check(rec.seen.length > 0 && rec.seen.every((x) => /^(Late B, from Lumen’s row|Loading the title…|Late video B, drawn after the move) \| /.test(x.k)), 'meanwhile it shows B’s own row title (or the skeleton), then B’s page title', rec.seen);
+      const bIn = await pvWait('x.phase === "ready" && x.title === ' + JSON.stringify(F.LATE_T), 3000);
+      check(rec.drawnB > 0 && !!bIn && bIn.channel === F.LATE_C && bIn.read && bIn.read.stale === false && bIn.read.videoId === LATE_ID && bIn.like && !bIn.like.disabled,
+        'and B’s real info arrives (its title, channel and buttons, ready) once YouTube redraws: ' + rec.drawnB + ' ms after the move', bIn && { phase: bIn.phase, title: bIn.title, channel: bIn.channel, read: bIn.read && { stale: bIn.read.stale, videoId: bIn.read.videoId } });
+      if (pl) pl.close();
+      // the layer goes, so the next title opens a page of its own (a move from this stand-in would keep its address)
+      await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
+      await sleep(900);
+    }
     // Signed out: the buttons are off and say so; nothing is pressed.
     await playYT('&signedout=1', 'Signed out');
     st = await pvWait('x.service === "youtube" && x.applied && x.phase === "ready" && /signedout/.test(x.url)', 15000);

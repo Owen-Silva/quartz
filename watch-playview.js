@@ -348,6 +348,8 @@
         if (read && !(b && b.found)) out.missing.push(k);
       });
       out.comments = read && read.comments ? read.comments : null;
+      // the page was still drawn for the last video (readYT: stale): what's missing is missing for that reason
+      out.stale = !!(read && read.stale);
       return out;
     }
     // Disney+, Hulu, Prime Video, ESPN: the item is the truth while the page is still the one opened.
@@ -370,6 +372,7 @@
     var b = m.buttons[key];
     if (!b || !b.found) {
       if (phase === 'loading') return 'Reading YouTube’s page…';
+      if (m.stale) return 'YouTube’s page still showed the last video when Lumen last read it';
       return 'YouTube’s ' + ({ like: 'Like', dislike: 'Dislike', sub: 'Subscribe', save: 'Save' })[key] + ' button isn’t on this page';
     }
     return '';
@@ -383,7 +386,7 @@
    * Serialised with String(); it uses nothing from outside itself.
    */
   function guest(GAP) {
-    var V = 6;   // 5: the description's links (desc.links) and seek(); 6: watch()
+    var V = 7;   // 5: the description's links (desc.links) and seek(); 6: watch(); 7: a stale watch page is not read (readYT)
     if (window.__lumenPv && window.__lumenPv.v === V) return;
     var ROOTS = {
       youtube: ['#movie_player'],
@@ -560,16 +563,30 @@
         if (Q('#masthead #avatar-btn, ytd-masthead #avatar-btn')) signed = true;
         else if (Q('#masthead a[href*="ServiceLogin"], ytd-masthead a[href*="ServiceLogin"], #masthead a[href*="accounts.google.com"]')) signed = false;
       }
-      var m = md(), ow = owner();
+      // A watch page still drawn for ANOTHER video (r64). After an in-place move (Up next's Play now, YouTube's own
+      // autoplay, an end-screen card) YouTube changes the address at once but redraws its watch page only once the
+      // next video's data is in: hundreds of ms later (up to ~650 ms measured on Shorts). Until then the title, the
+      // channel, the description, Like and Subscribe on the page are all the LAST video's, and ytd-watch-flexy still
+      // names that video in its video-id. A read in that gap took them for this video's, found them complete, and the
+      // reads stopped: the next video played under the last one's info for good. So while the flexy names another
+      // video, nothing the DOM says about the video is taken (document.title neither: YouTube sets it from the same
+      // data): the read has only what is checked to be this id's (dataFor), complete() stays false, the watch below
+      // catches the redraw, and the read says stale (the chrome says why if it never comes). A flexy with no video-id
+      // (an older layout, a page still opening, the test pages) is read as before: there is nothing to compare.
+      var fx = Q('ytd-watch-flexy');
+      var drawnId = fx && typeof fx.getAttribute === 'function' ? String(fx.getAttribute('video-id') || '') : '';
+      var stale = !!(id && drawnId && drawnId !== id);
+      var m = stale ? null : md(), ow = stale ? null : owner();
       var d = dataFor(id);
-      var title = txt(Q('#title h1', m)) || txt(Q('h1.ytd-watch-metadata', m));
-      var chA = Q('#channel-name #text a', ow) || Q('#channel-name a', ow) || Q('#upload-info a', ow);
+      var title = stale ? '' : txt(Q('#title h1', m)) || txt(Q('h1.ytd-watch-metadata', m));
+      var chA = stale ? null : Q('#channel-name #text a', ow) || Q('#channel-name a', ow) || Q('#upload-info a', ow);
       var ch = chA ? { name: txt(chA), url: chA.href || '', subs: txt(Q('#owner-sub-count', ow)), avatar: (Q('#avatar img', ow) || {}).src || '' } : null;
       if (ch && d.channel) { if (!ch.subs) ch.subs = d.channel.subs; if (!ch.avatar) ch.avatar = d.channel.avatar; }
-      var descEl = Q('#description-inline-expander yt-attributed-string', m) || Q('#description #snippet-text', m) || Q('#description-inline-expander', m);
-      var lb = likeBtn(), db = dislikeBtn(), sb = subBtn(), vb = saveBtn();
+      var descEl = stale ? null : Q('#description-inline-expander yt-attributed-string', m) || Q('#description #snippet-text', m) || Q('#description-inline-expander', m);
+      var lb = stale ? null : likeBtn(), db = stale ? null : dislikeBtn(), sb = stale ? null : subBtn(), vb = stale ? null : saveBtn();
       return {
-        ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: document.title,
+        ok: true, svc: 'youtube', url: location.href, videoId: id, signedIn: signed, pageTitle: stale ? '' : document.title,
+        stale: stale, drawnId: drawnId,
         title: title || d.title || '', titleFrom: title ? 'page' : (d.title ? 'ytInitialData' : ''),
         channel: ch || d.channel || null,
         desc: (function () {
@@ -578,7 +595,7 @@
           // the DOM drew no links (an older layout, links not drawn yet): ytInitialData's runs (for this video only,
           // dataFor checks); their words are looked for in the text, so a run whose words differ is just text
           if (!links.length && d.descLinks && d.descLinks.length) links = d.descLinks;
-          return { text: domText || d.desc || '', meta: txt(Q('#info-container #info', m)) || txt(Q('#info-container', m)) || d.meta || '', links: links };
+          return { text: domText || d.desc || '', meta: (stale ? '' : txt(Q('#info-container #info', m)) || txt(Q('#info-container', m))) || d.meta || '', links: links };
         })(),
         like: lb ? { found: true, on: pressed(lb), count: txt(lb), label: lb.getAttribute('aria-label') || '' } : { found: false },
         dislike: db ? { found: true, on: pressed(db), label: db.getAttribute('aria-label') || '' } : { found: false },
@@ -663,7 +680,8 @@
     var lastSig = '';
     function tick(svc, on) { var a = apply(svc, on); var r = read(svc); lastSig = JSON.stringify(r) + '|' + a.on; r.applied = a.on; r.how = a.how || ''; return r; }
     /* A read as soon as the page draws something new (watch-playview.js WATCH_MS): its own DOM changes, coalesced
-       to one read per GAP ms (YouTube's player redraws its clock every second; attributes aren't watched at all),
+       to one read per GAP ms (YouTube's player redraws its clock every second; of the attributes only video-id is
+       watched: ytd-watch-flexy's turning to this video ends a stale read (readYT) even if its text came first),
        answered with the first read that differs from the last one handed out, or the read at ms. The observer
        goes with the answer. It only READS: the trim is the chrome's to set (tick / apply), never a watch's, so a
        watch still out after the chrome gave up on the player ("the whole page shows") or after Full page was
@@ -690,7 +708,7 @@
         end = setTimeout(function () { var r = peek(svc); lastSig = r.sig; delete r.sig; finish(r); }, Math.max(100, Number(ms) || 0));
         try {
           mo = new MutationObserver(function () { if (!t && !over) t = setTimeout(look, GAP); });
-          mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+          mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['video-id'] });
         } catch (e) { /* the timer answers */ }
         look();
       });
@@ -1437,6 +1455,10 @@
     // Why anything is off: one line, the reason in words.
     if (phase === 'offline') note(info, 'You’re offline. The video’s details load when you’re back online.', 'warn');
     else if (phase === 'failed') note(info, p.why || 'YouTube’s page didn’t load.', 'err');
+    // The reads ended on a page still drawn for the last video (readYT: stale): the channel, description and buttons
+    // are missing for that reason, said before "signed out" (which would leave the missing channel unexplained).
+    else if ((phase === 'unread' || phase === 'partial') && m.stale) note(info, 'YouTube’s page still showed the last video’s details when Lumen last read it, so this video’s aren’t here'
+      + (m.title && m.titleFrom === 'item' ? '; the title is from Lumen’s row' : '') + '. “Full page” shows YouTube’s own.', 'warn');
     else if (m.signedIn === false) note(info, 'You’re signed out of YouTube here: Like, Dislike, Subscribe and Save need you signed in.', 'warn',
       button('pv-ghost pv-signin', 'Sign in on YouTube’s page', function () { if (!toggle(s) && CTX) CTX.note('YouTube’s Sign in is at the top right of its page'); }));
     else if (p.why) note(info, p.why, /couldn’t|didn’t|isn’t|not /i.test(p.why) ? 'warn' : '');

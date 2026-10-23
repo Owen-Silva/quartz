@@ -51,6 +51,39 @@ ytd-playlist-add-to-option-renderer,tp-yt-paper-checkbox,yt-formatted-string{dis
 .sponsored{border:2px solid #f90;padding:12px;margin-bottom:12px}.rec{padding:8px 0;border-bottom:1px solid #eee}
 tp-yt-paper-dialog{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);background:#fff;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.4);z-index:3000}`;
 
+// The late redraw (r64, ?late=<ms>): YouTube's own in-page move the way it really goes. Lumen's Play now asks the
+// app to move (watch-player-yt.js MOVE_JS: a yt-navigate on ytd-app, answered by yt-navigate-start); the address
+// changes AT ONCE, but the title, the channel, the buttons' labels, document.title and ytd-watch-flexy's video-id
+// still say the last video until its data is in, <ms> later (Shorts measured up to ~650 ms on real YouTube).
+// ytInitialData stays the first video's, as on YouTube. window.__late keeps the times for the e2e.
+const LATE_T = 'Late video B, drawn after the move';
+const LATE_C = 'Late Channel B';
+function lateMove(ms) {
+  const lag = Math.max(0, Math.min(5000, Number(ms) || 0));
+  return `(function () {
+    var app = document.querySelector('ytd-app');
+    window.__late = { lag: ${lag}, moves: 0, movedAt: 0, drawnAt: 0, to: '' };
+    app.addEventListener('yt-navigate', function (e) {
+      var ep = e.detail && e.detail.endpoint, we = ep && ep.watchEndpoint;
+      if (!we || !we.videoId) return;
+      var id = String(we.videoId);
+      window.__late.moves++; window.__late.to = id; window.__late.movedAt = Date.now();
+      history.pushState({}, '', '/watch?v=' + encodeURIComponent(id));
+      window.dispatchEvent(new CustomEvent('yt-navigate-start'));
+      setTimeout(function () {
+        document.querySelector('ytd-watch-flexy').setAttribute('video-id', id);
+        document.querySelector('ytd-watch-metadata #title h1 yt-formatted-string').textContent = ${JSON.stringify(LATE_T)};
+        document.querySelector('#channel-name #text a').textContent = ${JSON.stringify(LATE_C)};
+        document.querySelector('#owner-sub-count').textContent = '7 subscribers';
+        document.querySelector('#sub').setAttribute('aria-label', 'Subscribe to ' + ${JSON.stringify(LATE_C)} + '.');
+        document.querySelector('#description-inline-expander yt-attributed-string').textContent = 'The late video’s own description.';
+        document.title = ${JSON.stringify(LATE_T + ' - YouTube')};
+        window.__late.drawnAt = Date.now();
+      }, ${lag});
+    });
+  })();`;
+}
+
 function youtubeWatch(q) {
   const o = q || {};
   const masthead = `<div id="masthead-container"><ytd-masthead id="masthead"><b>YouTube</b><input id="search" placeholder="Search" style="width:420px">
@@ -93,7 +126,7 @@ function youtubeWatch(q) {
   window.__keys = [];
   window.__born = Date.now() + ':' + Math.random();
 </script></head>
-<body><ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
+<body><ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy${o.late ? ' video-id="' + String(o.vid || '').replace(/[^\w-]/g, '') + '"' : ''}><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
 <ytd-popup-container id="popups"></ytd-popup-container>
 <script>
 (function () {
@@ -150,6 +183,7 @@ function youtubeWatch(q) {
     mp0.playVideo = function () { window.__plays++; var r = v0.play(); if (r && r.catch) r.catch(function () {}); };
   })();
   ${o.still ? `setTimeout(function () { var d = document.createElement('tp-yt-paper-dialog'); d.id = 'still'; d.innerHTML = '<yt-confirm-dialog-renderer><p>Video paused. Continue watching?</p><div id="confirm-button"><button>Yes</button></div></yt-confirm-dialog-renderer>'; pops.appendChild(d); }, 600);` : ''}
+  ${o.late ? lateMove(o.late) : ''}
 })();
 </script></body></html>`;
 }
@@ -177,4 +211,4 @@ function servicePlayer(svc, title) {
 <script>window.__keys = []; document.addEventListener('keydown', function (e) { window.__keys.push(e.key); });</script></body></html>`;
 }
 
-module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE };
+module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C };
