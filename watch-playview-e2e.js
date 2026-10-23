@@ -53,10 +53,12 @@ async function startServers(mock) {
       const u = new URL(String(req.url || '/'), 'http://127.0.0.1');
       const p = u.pathname;
       if (p === '/__media/clip.mp4') return sendClip(req, res);
+      // the early-fail page's parser-blocking script: DOMContentLoaded comes 1.5 s after the early read can land
+      if (p === '/__slow.js') return void setTimeout(() => { res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' }); res.end('window.__slow = 1;'); }, 1500);
       if (svc === 'youtube' && p === '/watch') {
         hits.youtube++;
         const q = { signedout: u.searchParams.has('signedout'), bare: u.searchParams.has('bare'), noplayer: u.searchParams.has('noplayer'), still: u.searchParams.has('still'),
-          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '', late: Number(u.searchParams.get('late')) || 0 };
+          links: u.searchParams.has('links'), vid: u.searchParams.get('v') || '', late: Number(u.searchParams.get('late')) || 0, earlyfail: u.searchParams.has('earlyfail') };
         return sendHtml(res, F.youtubeWatch(q));
       }
       if (svc === 'youtube' && /^\/embed\//.test(p)) return sendHtml(res, EMBED);
@@ -469,7 +471,7 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
       await sleep(400);   // a little after B's info is in: nothing may go back to A's
       const rec = await chrome.ev('(() => { const r = window.__lateRec; clearInterval(r.iv); r.mo.disconnect(); return { samples: r.samples, draws: r.draws, seen: r.seen, bad: r.bad, drawnB: r.drawnB, ms: Date.now() - r.t0 }; })()');
       const mvL = await chrome.ev('(window.WatchPlayerYT && WatchPlayerYT._state().lastMove) || null');
-      const pl = await guestFor(FY + '/watch?v=' + LATE_ID);
+      const pl = (await guestFor(FY + '/watch?v=' + LATE_ID)) || (await guestFor(FY + '/watch?v=' + VID + '&late='));   // the target may still have the first address
       const late = pl ? await pl.ev('window.__late || null').catch(() => null) : null;
       const lagSeen = late && late.drawnAt && late.movedAt ? late.drawnAt - late.movedAt : -1;
       say('late redraw: lag ' + lagSeen + ' ms (asked ' + LATE_MS + '), ' + rec.samples + ' samples (' + rec.draws + ' on a redraw) over ' + rec.ms + ' ms, B’s info at ' + rec.drawnB + ' ms, stale hits ' + rec.bad.length + '; drawn: ' + rec.seen.map((x) => x.ms + 'ms ' + x.k).join(' / '));
@@ -482,6 +484,24 @@ run('watch-playview-e2e', async ({ check, launch, say }) => {
         'and B’s real info arrives (its title, channel and buttons, ready) once YouTube redraws: ' + rec.drawnB + ' ms after the move', bIn && { phase: bIn.phase, title: bIn.title, channel: bIn.channel, read: bIn.read && { stale: bIn.read.stale, videoId: bIn.read.videoId } });
       if (pl) pl.close();
       // the layer goes, so the next title opens a page of its own (a move from this stand-in would keep its address)
+      await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
+      await sleep(900);
+    }
+    // r64 (#5): the early read (the page's words before its app has run) stays the info's read until a later one
+    // lands. When every read after it failed, the info said 'unread' (and why) but each draw still told the comments
+    // early:true, so they waited "Loading…" for good with no reason. The stand-in's reads all throw from
+    // DOMContentLoaded on (tests/playview-fixtures.js earlyFailHead); the comments must start or say why.
+    {
+      await playYT('&earlyfail=1', 'Early fail, from Lumen’s row');
+      const ef = await pvWait('/earlyfail/.test(x.url) && x.phase === "unread"', 20000);
+      check(!!ef && !!ef.read && ef.read.early === true && ef.title === F.EARLY_T && /couldn’t read the page/.test(ef.why),
+        'early-fail page: the early words are drawn, every read after them failed, and the info says unread with why', ef && { phase: ef.phase, title: ef.title, early: ef.read && ef.read.early, why: ef.why });
+      const CM = `(() => { const s = LumenComments._state().states.filter((x) => x.videoId === ${JSON.stringify(VID)} && x.slot === ${JSON.stringify(ef ? ef.id : null)}); return s.length ? s[s.length - 1] : null; })()`;   // this slot’s own section
+      const cm = await chrome.waitFor(`(() => { const c = ${CM}; return c && (c.phase !== 'loading' || c.requests > 0 || !!c.from) ? c : null; })()`, 8000).catch(() => null);
+      const cmNow = cm || await chrome.ev(CM).catch(() => null);
+      check(!!cm, 'and the comments start (the page’s own data or /next) instead of waiting “Loading…” for good: ' + (cmNow ? cmNow.phase + (cmNow.why ? ' (' + cmNow.why + ')' : '') + ', from ' + (cmNow.from || '-') + ', ' + cmNow.requests + ' requests' : 'no comments state'),
+        cmNow && { phase: cmNow.phase, why: cmNow.why, from: cmNow.from, requests: cmNow.requests, n: cmNow.n });
+      check(!cm || cm.phase !== 'failed' || !!cm.why, 'and if they can’t load, they say why', cm && { phase: cm.phase, why: cm.why });
       await chrome.ev('WatchPlayer.close("e2e"), 1').catch(() => 0);
       await sleep(900);
     }

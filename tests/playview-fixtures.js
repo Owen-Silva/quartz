@@ -84,6 +84,22 @@ function lateMove(ms) {
   })();`;
 }
 
+// A page whose reads all fail after the early one (r64 #5, ?earlyfail): ytInitialPlayerResponse is there at once
+// (the early read takes its words), a slow script holds DOMContentLoaded back so that read lands first, and from
+// DOMContentLoaded on every read Lumen asks of the page throws (window.__lumenPv answers v, apply and early only).
+const EARLY_T = 'Early words, then no read works';
+function earlyFailHead(vid) {
+  return `window.ytInitialPlayerResponse = { videoDetails: { videoId: ${JSON.stringify(String(vid || ''))}, title: ${JSON.stringify(EARLY_T)}, author: 'Early Channel', channelId: '', shortDescription: '' } };
+  (function () {
+    var cur, broken = false;
+    var bad = function () { throw new Error('this test page answers no read'); };
+    Object.defineProperty(window, '__lumenPv', { configurable: false,
+      get: function () { return broken && cur ? { v: cur.v, apply: cur.apply, early: cur.early, read: bad, tick: bad, watch: bad, press: bad, seek: bad } : cur; },
+      set: function (x) { cur = x; } });
+    document.addEventListener('DOMContentLoaded', function () { broken = true; window.__brokenAt = Date.now(); });
+  })();`;
+}
+
 function youtubeWatch(q) {
   const o = q || {};
   const masthead = `<div id="masthead-container"><ytd-masthead id="masthead"><b>YouTube</b><input id="search" placeholder="Search" style="width:420px">
@@ -125,8 +141,9 @@ function youtubeWatch(q) {
   window.__presses = { like: 0, dislike: 0, sub: 0, confirm: 0, save: 0, saveOpt: 0, saveClose: 0 };
   window.__keys = [];
   window.__born = Date.now() + ':' + Math.random();
+  ${o.earlyfail ? earlyFailHead(o.vid) : ''}
 </script></head>
-<body><ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy${o.late ? ' video-id="' + String(o.vid || '').replace(/[^\w-]/g, '') + '"' : ''}><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
+<body>${o.earlyfail ? '<script src="/__slow.js"></script>' : ''}<ytd-app>${masthead}<div id="page-manager"><ytd-watch-flexy${o.late ? ' video-id="' + String(o.vid || '').replace(/[^\w-]/g, '') + '"' : ''}><div id="columns"><div id="primary">${player}${meta}</div>${secondary}</div></ytd-watch-flexy></div></ytd-app>
 <ytd-popup-container id="popups"></ytd-popup-container>
 <script>
 (function () {
@@ -211,4 +228,4 @@ function servicePlayer(svc, title) {
 <script>window.__keys = []; document.addEventListener('keydown', function (e) { window.__keys.push(e.key); });</script></body></html>`;
 }
 
-module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C };
+module.exports = { youtubeWatch, servicePlayer, TITLE, CHANNEL, SUBS, DESC, META, TOKEN, NAME_FOR, HOSTILE, LATE_T, LATE_C, EARLY_T };
