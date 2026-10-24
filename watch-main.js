@@ -119,6 +119,7 @@ const CACHE_VERSION = 1;
 
 const STEP_BUDGET_MS = 20000;
 const WATCHDOG_GRACE_MS = 5000;     // a step that outlives its budget by this much is ended from outside
+const READER_GONE_MS = 3000;        // the longest a reader waits for the last destroyed reader's page to go (readerGone)
 const POLL_MS = 500;
 const DEFAULT_SETTLE_MS = 2500;
 // The view steps that read at dom-ready instead of the load (runViewStep's EARLY READ): YouTube's
@@ -445,7 +446,13 @@ function create(deps) {
   let pumping = false;
   const liveReaders = new Map(); // every hidden reader window alive now -> its step handle { win, killed }
   const readerContents = new Set(); // ...and their webContents (isReaderContents)
-  let epoch = 0;                 // bumped by forget(): a read from before it is dropped
+  // Readers Lumen has destroyed whose page is not gone yet: webContents -> when destroy() was called.
+  // Electron deletes a window's page a moment AFTER destroy() returns ('destroyed' marks the end), and
+  // a page closed mid-load (the dom-ready early read) takes longer to go. The next reader waits for
+  // it (readerGone), so at most ONE reader page is ever alive.
+  const readersGoing = new Map();
+  let goneWaiters = [];          // resolvers waiting for readersGoing to empty
+  let epoch = 0;                // bumped by forget(): a read from before it is dropped
   let forgottenAt = 0;           // when Forget last emptied the cache (memory only; the page says so until a read lands)
   const paused = {};             // id -> reason the last due read did not start
   const pausedUntil = {};        // id -> a game / memory pause: timed reads do not look again before this
@@ -801,6 +808,47 @@ function create(deps) {
 
   function sleep(ms) { return new Promise((r) => { const h = setTimer(r, ms); if (h && h.unref) h.unref(); }); }
 
+  /** A destroyed reader's page is gone ('destroyed'): forget it, and wake the reader waiting on it. */
+  function readerPageGone(wc) {
+    if (!readersGoing.delete(wc) || readersGoing.size) return;
+    const ws = goneWaiters;
+    goneWaiters = [];
+    for (const r of ws) r();
+  }
+
+  /**
+   * Before a reader opens: wait until every reader page Lumen destroyed is really gone, so two hidden
+   * pages (two renderers, on a machine short of memory) never live at once. r64's early read ends a
+   * YouTube step at dom-ready, mid-load, and such a page outlives its destroy() by a moment; the next
+   * step's page used to open beside it. Waits at most READER_GONE_MS (and never past `deadline`); a
+   * page that has still not gone by then is logged by name and no longer waited on, never silently.
+   * Resolves to the ms waited.
+   */
+  async function readerGone(deadline) {
+    if (!readersGoing.size) return 0;
+    const t0 = now();
+    const cap = Math.max(0, Math.min(READER_GONE_MS, deadline - t0));
+    let h = null;
+    await new Promise((r) => {
+      goneWaiters.push(r);
+      h = setTimer(r, cap);
+      if (h && h.unref) h.unref();
+    });
+    clearTimer(h);
+    if (readersGoing.size) {
+      const stuck = Array.from(readersGoing.keys());
+      readersGoing.clear();
+      const ws = goneWaiters;
+      goneWaiters = [];
+      for (const r of ws) r();
+      let url = '';
+      try { url = hostOf(stuck[0].getURL()); } catch { url = ''; }
+      log('Lumen reader: ' + stuck.length + ' closed reader page' + (stuck.length === 1 ? '' : 's') + (url ? ' (' + url + ')' : '')
+        + ' still not gone after ' + Math.round(now() - t0) + ' ms; the next reader opens beside it');
+    }
+    return now() - t0;
+  }
+
   /**
    * `handle` is this step's own record: runViewStep puts its window on it, and the watchdog
    * (or a cancel) destroys THAT window only -- never another step's reader -- and sets
@@ -825,6 +873,12 @@ function create(deps) {
     let loaded = false;
     let w = null;
     let dbg = null;
+    // At most one reader page alive: the last destroyed one goes first (inside this step's budget).
+    await readerGone(deadline);
+    if (h0.killed) {
+      out.error = { code: h0.killed === 'cancelled' ? 'cancelled' : 'timeout', detail: h0.killed === 'cancelled' ? 'cancelled' : 'the reader stopped answering' };
+      return out;
+    }
     try {
       w = new BW({
         show: false, width: 1280, height: 900, x: -32000, y: -32000, skipTaskbar: true, focusable: false, frame: false,
@@ -841,7 +895,7 @@ function create(deps) {
       // can deny its permission requests without a dialog the user never asked for.
       if (wc) {
         readerContents.add(wc);
-        try { wc.once('destroyed', () => readerContents.delete(wc)); } catch { /* fine */ }
+        try { wc.once('destroyed', () => { readerContents.delete(wc); readerPageGone(wc); }); } catch { /* fine */ }
       }
       try { w.once('closed', () => { liveReaders.delete(w); readerContents.delete(wc); }); } catch { /* fine */ }
       try { wc.setAudioMuted(true); } catch { /* fine */ }
@@ -981,6 +1035,9 @@ function create(deps) {
     if (why && h && !h.killed) h.killed = why;
     let wc = null;
     try { wc = w.webContents; } catch { wc = null; }
+    // Its page goes a moment after destroy() (its 'destroyed', registered in runViewStep, ends
+    // readersGoing's entry; a fake that says so at once never lands in it). The next reader waits.
+    try { if (wc && readerContents.has(wc) && !wc.isDestroyed()) readersGoing.set(wc, now()); } catch { /* gone */ }
     try { if (!w.isDestroyed()) w.destroy(); } catch { /* gone */ }
     liveReaders.delete(w);
     if (wc) readerContents.delete(wc);

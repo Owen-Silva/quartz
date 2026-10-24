@@ -543,6 +543,79 @@ async function reviewFixTests() {
     } finally { w2.cleanup(); }
   }
 
+  // --- r64. at most ONE reader page alive. Electron deletes a destroyed window's page a moment
+  // later ('destroyed' then), and a page ended mid-load (the early read above) takes longer; the
+  // next step's reader opened beside it. Now it opens only once that page is gone; a page that never
+  // goes is waited on at most READER_GONE_MS (3 s), then logged, and the read still finishes.
+  for (const mode of ['goes', 'stuck']) {
+    const made = [];
+    let alive = 0;
+    let maxAlive = 0;
+    class GoesLaterBW {
+      constructor() {
+        const wcH = {};
+        const self = this;
+        this.destroyed = false;
+        this.gone = false;
+        this.handlers = {};
+        alive++; maxAlive = Math.max(maxAlive, alive);
+        const wc = this.webContents = {
+          url: '',
+          on(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+          once(ev, fn) { (wcH[ev] = wcH[ev] || []).push(fn); },
+          removeListener(ev, fn) { const l = wcH[ev] || []; const i = l.indexOf(fn); if (i !== -1) l.splice(i, 1); },
+          emit(ev, ...a) { for (const fn of (wcH[ev] || []).slice()) fn(...a); },
+          setAudioMuted() {}, setFrameRate() {}, setWindowOpenHandler() {},
+          isDestroyed() { return self.gone; },
+          loadURL(url) { wc.url = url; setImmediate(() => wc.emit('dom-ready')); return new Promise(() => {}); },
+          executeJavaScript() { return Promise.resolve(null); },
+          mainFrame: { executeJavaScript() { return Promise.resolve({ data: { rows: 1 } }); } },
+          getURL() { return wc.url; }, getTitle() { return ''; },
+        };
+        made.push(this);
+      }
+      /** The page really goes (Electron, a moment after destroy()): 'destroyed'. */
+      goAway() { if (this.gone) return; this.gone = true; alive--; this.webContents.emit('destroyed'); }
+      once(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); }
+      isDestroyed() { return this.destroyed; }
+      destroy() { if (this.destroyed) return; this.destroyed = true; for (const fn of (this.handlers.closed || [])) fn(); }
+    }
+    const reader = {
+      id: 'youtube',
+      steps: () => ['subscriptions', 'history'].map((n) => ({ name: n, type: 'view', url: 'https://www.youtube.com/feed/' + n, extract: '({ data: window.ytInitialData || null })', ready: (x) => !!(x && x.data), budgetMs: 20000 })),
+      parse: (read) => {
+        const s = read.steps.history;
+        if (!s.ok || !read.steps.subscriptions.ok) return { state: 'error', reason: (s.error && s.error.detail) || 'no' };
+        return { state: 'ok', items: mk('youtube', 'rec', 2), profile: '' };
+      },
+    };
+    const w2 = fakeWorld({ realSteps: true, fetch: fakeFetch(), BrowserWindow: GoesLaterBW, session: { defaultSession: {} }, prefs: { v: 2, enabled: { youtube: true } }, adapters: { youtube: reader } });
+    try {
+      const g = w2.guest();
+      g.say('quartz-watch:hello {}');
+      await w2.settle();
+      check(made.length === 1 && made[0].destroyed && !made[0].gone, 'r64 one reader (' + mode + '): the first page, read early and destroyed but not gone yet, holds the next step back', { made: made.length, destroyed: made[0] && made[0].destroyed });
+      if (mode === 'goes') {
+        made[0].goAway();
+        await w2.settle();
+        check(made.length === 2, "r64 one reader (goes): the next step's reader opens once the last page is gone", made.length);
+        if (made[1]) made[1].goAway();
+        await w2.settle();
+        const s = w2.svc(w2.wm.snapshot(), 'youtube');
+        check(maxAlive === 1 && s && s.state === 'ok', 'r64 one reader (goes): never two reader pages alive, and the read lands', { maxAlive, state: s && s.state });
+        check(!w2.logs.some((l) => /still not gone/.test(l)), 'r64 one reader (goes): nothing logged when every page goes', w2.logs.filter((l) => /still not gone/.test(l)));
+      } else {
+        w2.advance(3000);
+        await w2.fire();
+        await w2.settle();
+        const said = w2.logs.filter((l) => /still not gone after/.test(l));
+        check(made.length === 2 && said.length === 1 && /youtube\.com/.test(said[0]), 'r64 one reader (stuck): a page that never goes is waited on 3 s, then logged by host, and the next reader opens', { made: made.length, said });
+        const s = w2.svc(w2.wm.snapshot(), 'youtube');
+        check(s && s.state === 'ok', 'r64 one reader (stuck): the read still finishes', s && { state: s.state, reason: s.reason });
+      }
+    } finally { w2.cleanup(); }
+  }
+
   // --- 2. a snapshot that throws reaches the page as { v, now, fatal }; pushAll never dies quietly
   w = fakeWorld();
   const origRows = Merge.buildRows;
