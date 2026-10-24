@@ -22,7 +22,8 @@
        hidden or in the background, the layer is closed, in multiview
        or the corner or fullscreen, Windows asks to reduce motion, or
        battery saver is on (watch-ambient-main.js), and it slows to
-       EVERY_IDLE while the field is sunk at the comments. Reduced motion and
+       EVERY_IDLE while the field is sunk at the comments (back to EVERY
+       as it rises, not after the idle wait). Reduced motion and
        battery saver keep the still field; multiview, the corner and
        fullscreen have no field at all.
      - Legibility is the CSS's (watch-ambient.css): the field is dimmed
@@ -173,7 +174,7 @@
   var A = {
     ctx: null, L: null, el: null, field: null, cvs: [], on: 0, src: null,
     slot: null, mode: '', key: '', from: 'none', why: '', off: '',
-    timer: 0, busy: false, sig: null, lastT: -1, seq: 0, staleT: 0,
+    timer: 0, due: 0, busy: false, sig: null, lastT: -1, playing: false, seq: 0, staleT: 0,
     paints: 0, samples: 0, skipped: 0, stills: 0, maxSampleMs: 0, maxSampleWallMs: 0, maxPaintMs: 0, lastSampleMs: 0,
     saver: null, saverAt: 0, saverAsking: false, mq: null, bound: false, obs: null,
     sinkTile: null, sinkMark: null, sinkObs: null, sunk: false
@@ -255,8 +256,15 @@
     A.sinkTile = tile; A.sinkMark = mark;
     A.sinkObs = new IntersectionObserver(function (es) {
       if (!A.sinkMark || !A.sinkMark.isConnected || !es.length) return;
+      var was = A.sunk;
       A.sunk = !es[es.length - 1].isIntersecting;
       if (A.L && A.L.el) A.L.el.classList.toggle('amb-sunk', A.sunk);
+      // Back up at the top while it plays: the idle wait taken while sunk (EVERY_IDLE) is cut to the playing
+      // cadence. Kept, the field at full strength stayed on a picture from the comments for up to 9 s after the
+      // rise (watch-look-e2e "refreshes from the frame every few seconds": 1 sample in 9 s whenever the last
+      // sample before the rise fell while sunk). Never sooner than EVERY from now: a scroll up and down can't
+      // sample faster than the playing cadence.
+      if (was && !A.sunk && A.playing && A.timer && !A.busy && A.due - now() > EVERY) schedule(EVERY);
     }, { root: tile, rootMargin: SINK_PX + 'px 0px 0px 0px', threshold: 0 });
     A.sinkObs.observe(mark);
   }
@@ -305,7 +313,7 @@
       var fresh = key !== A.key;
       A.slot = s; A.mode = p.mode;
       if (fresh) {
-        A.key = key; A.sig = null; A.lastT = -1; A.from = 'none';
+        A.key = key; A.sig = null; A.lastT = -1; A.from = 'none'; A.playing = false;
         stop();
         paintStill(s.service, url, key);
         // Until this video's own still or frame paints, the field still shows the LAST video's colours: on a slow
@@ -351,8 +359,9 @@
     A.off = gateNow();
     if (A.off) { stop(); return; }
     if (A.timer || A.busy) { if (ms === undefined) return; clearTimeout(A.timer); A.timer = 0; }
-    var seq = A.seq;
-    A.timer = setTimeout(function () { A.timer = 0; if (seq === A.seq) sample(seq); }, ms === undefined ? (A.from === 'frame' ? EVERY : FIRST) : ms);
+    var seq = A.seq, wait = ms === undefined ? (A.from === 'frame' ? EVERY : FIRST) : ms;
+    A.due = now() + wait;
+    A.timer = setTimeout(function () { A.timer = 0; if (seq === A.seq) sample(seq); }, wait);
   }
 
   /** The wait to the next sample: the playing cadence, and the idle one while paused or while the field is sunk to
@@ -376,12 +385,14 @@
       if (r && typeof r.ms === 'number') A.maxSampleWallMs = Math.max(A.maxSampleWallMs, r.ms);
       if (!r || !r.ok) {
         A.why = 'no frame sample: ' + ((r && r.reason) || 'no answer');
+        A.playing = false;
         if (r && r.still && A.from === 'none') paintImageUrl(r.still, key);
         schedule(EVERY_IDLE);
         return;
       }
       A.samples++;
       A.why = '';
+      A.playing = !r.paused;
       // Nothing moved since the last one (paused on the same frame): nothing to paint.
       if (r.paused && r.t === A.lastT && A.from === 'frame') { schedule(EVERY_IDLE); return; }
       A.lastT = r.t;
@@ -478,7 +489,7 @@
   function state() {
     return {
       on: !!(A.L && A.L.el && A.L.el.classList.contains('amb-on')), mode: A.slot ? A.mode : '', key: A.key, src: A.from,
-      refreshing: !!(A.timer || A.busy), off: A.off, why: A.why, every: EVERY,
+      refreshing: !!(A.timer || A.busy), nextMs: A.timer ? Math.max(0, Math.round(A.due - now())) : null, off: A.off, why: A.why, every: EVERY,
       paints: A.paints, samples: A.samples, skipped: A.skipped, stills: A.stills,
       maxSampleMs: A.maxSampleMs, maxPaintMs: A.maxPaintMs, lastSampleMs: A.lastSampleMs, maxSampleWallMs: A.maxSampleWallMs, saver: A.saver, sunk: A.sunk,
       holdsClosed: !!A.gone, lit: A.cvs.filter(function (c) { return c.classList.contains('on'); }).length

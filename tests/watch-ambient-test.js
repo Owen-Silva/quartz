@@ -167,6 +167,26 @@ function viewFor() { const h = {}; return { h, executeJavaScript: () => new Prom
     const open3 = AD._state();
     check(open3.on && open3.lit === 0 && /vidCCCCCCC3/.test(open3.key), 'the next video opened: the field starts empty (its still or the neutral one), never the closed video’s colours', open3);
     check(loadStill('vidCCCCCCC3') && AD._state().src === 'still' && AD._state().lit === 1, 'then its own still', AD._state());
+    // r64: scrolled to the comments the wait is the idle one; back up at the top while it plays, the playing
+    // cadence again at once (it kept the 9 s wait: watch-look-e2e, 1 sample in 9 s after the rise)
+    let sink = null;
+    global.IntersectionObserver = function (cb) { sink = cb; this.observe = () => {}; this.disconnect = () => {}; };
+    AD.destroy({ L: LL }, s3); LL.slots = []; AD.destroy({ L: LL }, s3);
+    const v4 = viewFor();
+    v4.executeJavaScript = () => Promise.resolve({ ok: true, w: 48, h: 27, px: '', max: 5, paused: false, t: 1, ms: 1, main: 1 });
+    const s4 = { tile: tile(), view: v4, service: 'youtube', url: 'https://www.youtube.com/watch?v=vidDDDDDDD4' };
+    LL.slots = [s4];
+    AD.attach({ L: LL }, s4, v4);
+    loadStill('vidDDDDDDD4');
+    check(typeof sink === 'function', 'fake DOM: the playback view watches its sink', AD._state());
+    sink([{ isIntersecting: false }]);
+    await wait(AD.EVERY > 0 ? 1700 : 0);
+    const sunkS = AD._state();
+    check(sunkS.sunk && sunkS.samples >= 1 && sunkS.nextMs > AD.EVERY, 'sunk at the comments: the next sample waits the idle ' + sunkS.nextMs + ' ms', sunkS);
+    sink([{ isIntersecting: true }]);
+    const rose = AD._state();
+    check(!rose.sunk && rose.nextMs <= AD.EVERY && rose.nextMs > AD.EVERY - 500, 'risen while it plays: the next sample in ' + rose.nextMs + ' ms, the playing cadence (not the idle wait)', rose);
+    delete global.IntersectionObserver;
   } catch (e) {
     check(false, 'the fake-DOM field ran', String(e && e.stack || e));
   }
