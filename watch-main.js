@@ -813,7 +813,10 @@ function create(deps) {
     if (!readersGoing.delete(wc) || readersGoing.size) return;
     const ws = goneWaiters;
     goneWaiters = [];
-    for (const r of ws) r();
+    // 'destroyed' comes from inside the page's teardown: the next reader opens on the next turn of
+    // the event loop, once that teardown has finished, not in the middle of it.
+    const wake = () => { for (const r of ws) r(); };
+    if (typeof setImmediate === 'function') setImmediate(wake); else wake();
   }
 
   /**
