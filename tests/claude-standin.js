@@ -31,6 +31,9 @@ process.stdout.write('claude stand-in (test only). This is not Claude Code: it r
 
 if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') process.stdin.setRawMode(true);
 process.stdin.setEncoding('utf8');
+// Raw mode is on from here: a test writes only after this row, or the console's line editing
+// would eat escape sequences before this program ever saw them.
+log({ pid: process.pid, ready: true });
 let seen = '';
 process.stdin.on('data', (chunk) => {
   log({ pid: process.pid, in: chunk });

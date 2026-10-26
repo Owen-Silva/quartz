@@ -7,7 +7,8 @@ require('./tools/lowcpu-optional.js');   // first: one capped browser at a time
 //
 // The page sets its own text to an ESC[201~ break-out (plus a C1 CSI and a bidi override) and its
 // title to one too. Checks:
-//   - "Open Claude beside this page" (no page text) keeps the user's setting: the stand-in gets
+//   - with Settings > Claude "Skip permission prompts" turned ON (it is off on a new profile),
+//     "Open Claude beside this page" (no page text) keeps it: the stand-in gets
 //     --dangerously-skip-permissions and runs in the home folder;
 //   - Ask with that text selected opens a NEW page-text chamber beside the page: no skip flag, no
 //     Quartz mark on its argv, cwd = <userData>\claude-scratch\ask-<id>; the chamber says so in
@@ -108,10 +109,14 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     await chrome.waitFor(`!!(${PT})`, 8000);
 
     // ---- plain: "Open Claude beside this page" keeps the user's setting --------------------------
+    // The switch is OFF on a new profile; turn it on, so the plain pane has something to keep and
+    // the page-text pane has something to refuse.
+    await chrome.ev('Settings.set({ claudeSkipPermissions: true }), 1');
+    check(await chrome.waitFor('claudeSkipPermissions() === true', 4000).catch(() => false) === true, 'Settings: Skip permission prompts turned on for the test');
     check(await chrome.ev(`openClaudeBesideTab(${PT})`), 'plain: Claude opens beside the page');
     const plainStart = await waitRows((r) => r.find((x) => x.argv), 20000, 'plain start');
     standins.add(plainStart.pid);
-    check(plainStart.argv.indexOf(SKIP) !== -1 && plainStart.argv.indexOf(MARK) === -1, 'plain: the stand-in got the skip flag (the setting is on by default)', plainStart.argv);
+    check(plainStart.argv.indexOf(SKIP) !== -1 && plainStart.argv.indexOf(MARK) === -1, 'plain: the stand-in got the skip flag (the switch is on)', plainStart.argv);
     check(plainStart.cwd.toLowerCase() === os.homedir().toLowerCase(), 'plain: runs in the home folder', plainStart.cwd);
     check(await chrome.ev(`splitPartner(${PT}).pageText === false`), 'plain: not a page-text chamber');
 

@@ -288,6 +288,11 @@ function bracketBody(bytes) {
   const plain = P.planLaunch(claude, [SKIP], home);
   ok('C1 plain chamber keeps the user setting: skip flag, home folder',
     plain.pageText === false && plain.args.join(' ') === SKIP && plain.cwd.toLowerCase() === home.toLowerCase(), JSON.stringify(plain));
+  const plainOff = P.planLaunch(claude, [], home);
+  ok('C1 plain chamber, switch off (the new-profile default): plain claude, home folder',
+    plainOff.pageText === false && plainOff.args.length === 0 && plainOff.cwd.toLowerCase() === home.toLowerCase(), JSON.stringify(plainOff));
+  const textOff = P.planLaunch(claude, [MARK], home);
+  ok('C1 page-text chamber, switch off: still a scratch folder, no flags', textOff.pageText === true && textOff.args.length === 0 && path.dirname(textOff.cwd) === root);
   const plainResume = P.planLaunch(claude, [SKIP, '--continue'], home);
   eq('C1 plain restored chamber: skip + --continue', plainResume.args.join(' '), SKIP + ' --continue');
 
@@ -376,6 +381,8 @@ function bracketBody(bytes) {
       ok('D1 cwd: a scratch folder under the root, not home', path.dirname(start.cwd).toLowerCase() === root.toLowerCase() && start.cwd.toLowerCase() !== home.toLowerCase(), start.cwd);
       ok('D1 session reports what it ran with', session.pageText === true && session.cwd === start.cwd);
     }
+    const ready = await waitFor((rows) => rows.find((r) => r.ready), 10000);
+    ok('D1 stand-in has its input in raw mode', !!ready);
     if (xterm) {
       // Control first: the UNCLEANED break-out as xterm would send it (the stand-in only records,
       // so nothing runs). Then exactly what xterm sends for the cleaned prompt, then quit.
