@@ -32,13 +32,191 @@ const DEFAULT_CWD = os.homedir();
 // `--dangerously-skip-permissions` rides along only when the Settings switch
 // "Skip permission prompts" is on (off on a new profile, so Claude asks
 // before it runs a tool); the flag still has to be on this list for the
-// renderer to be able to ask for it at all.
+// renderer to be able to ask for it at all. Whatever the switch says, a
+// chamber holding web page text never gets it: that is decided below, not by
+// the renderer (see "Page-text chambers").
 const ALLOWED_ARGS = new Set(['--continue', '--dangerously-skip-permissions']);
 
 // Two ways to say "not a fresh session". Passing both is a CLI error, so the
 // first one asked for wins and the other is dropped. Only `--continue` can
 // pass the allowlist now; the guard stays so re-allowing `--resume` is safe.
 const RESUME_ARGS = new Set(['--continue', '--resume']);
+
+const SKIP_PERMISSIONS_ARG = '--dangerously-skip-permissions';
+
+// ---------------------------------------------------------------------------
+// Page-text chambers
+//
+// "Ask Claude about this page" and "Show Claude this page" put text a web page
+// controls (its selection, title, address, a screenshot of it) into a Claude
+// session's input. A page can hide instructions in that text, so the session
+// that receives it must not be one that runs tools without asking. That is
+// decided HERE, on the trusted side of the bridge, not in the renderer:
+//
+//   - the renderer marks such a spawn with PAGE_TEXT_ARG (a Quartz token, never
+//     put on claude.exe's command line), and ALSO names a cwd inside the
+//     scratch root below;
+//   - any claude spawn that carries the mark OR whose cwd is inside the
+//     scratch root is a page-text chamber: `--dangerously-skip-permissions` is
+//     removed whatever the Settings switch says (preload.js adds it to every
+//     spawn), and the session runs in a scratch folder under the profile, never
+//     in the home folder;
+//   - the cwd rule is what keeps it that way across an Enter-to-restart and a
+//     restored session, which do not all carry the mark.
+//
+// The scratch folder is <userData>\claude-scratch\ask-<id>. The renderer picks
+// the id (so the chip, the session file and a restart all know the folder); a
+// cwd that is not exactly one such folder gets a fresh one made here instead.
+// If no folder can be made the spawn FAILS, with a reason: falling back to the
+// home folder is the one thing this must never do.
+// ---------------------------------------------------------------------------
+const PAGE_TEXT_ARG = '--quartz-page-text';
+const SCRATCH_DIR = 'claude-scratch';
+const SCRATCH_NAME = /^ask-[a-z0-9][a-z0-9-]{5,78}$/i;
+// Empty scratch folders older than this are tidied away (see pruneScratch).
+const SCRATCH_PRUNE_MS = 7 * 24 * 60 * 60 * 1000;
+
+let scratchRootOverride = null; // harness seam
+let scratchPruned = false;
+
+/**
+ * <userData>\claude-scratch, or '' when the profile folder cannot be named.
+ * Read at spawn time, not at require time: main.js moves userData for a test
+ * profile and for the one-time profile move after this module has loaded.
+ */
+function scratchRoot() {
+  if (scratchRootOverride !== null) return scratchRootOverride;
+  let userData = '';
+  try {
+    // Under plain node (the harness) require('electron') is a path string,
+    // not the API, and this answers ''.
+    const electron = require('electron');
+    if (electron && typeof electron === 'object' && electron.app && typeof electron.app.getPath === 'function') {
+      userData = electron.app.getPath('userData');
+    }
+  } catch {
+    userData = '';
+  }
+  return userData ? path.join(userData, SCRATCH_DIR) : '';
+}
+
+function lowerResolved(p) {
+  return path.resolve(p).toLowerCase(); // Windows paths compare case-insensitively
+}
+
+/** True when `target` is the root itself or anything below it. */
+function isUnderRoot(target, root) {
+  if (!root || typeof target !== 'string' || !target.trim()) return false;
+  let t;
+  try { t = lowerResolved(target.trim()); } catch { return false; }
+  const r = lowerResolved(root);
+  return t === r || t.startsWith(r.endsWith(path.sep) ? r : r + path.sep);
+}
+
+/** The cwd when it is exactly <root>\ask-<id>; null for anything else. */
+function namedScratchFolder(cwd, root) {
+  if (!root || typeof cwd !== 'string' || !cwd.trim()) return null;
+  let resolved;
+  try { resolved = path.resolve(cwd.trim()); } catch { return null; }
+  if (path.dirname(resolved).toLowerCase() !== lowerResolved(root)) return null;
+  return SCRATCH_NAME.test(path.basename(resolved)) ? resolved : null;
+}
+
+function newScratchName() {
+  return 'ask-' + Date.now().toString(36) + '-' + crypto.randomBytes(5).toString('hex');
+}
+
+function hasPageTextMark(args) {
+  return Array.isArray(args) && args.some((a) => typeof a === 'string' && a.trim() === PAGE_TEXT_ARG);
+}
+
+/**
+ * Decide, without touching the disk, whether a claude spawn is a page-text
+ * chamber and what it then runs with. Pure, so the harness can check every
+ * case. Throws when it IS one and there is no scratch root to put it in.
+ *
+ * @returns {{pageText:false, args:any} |
+ *           {pageText:true, args:string[], dir:string, reused:boolean}}
+ */
+function planPageText(args, cwd, root) {
+  const marked = hasPageTextMark(args);
+  const named = namedScratchFolder(cwd, root);
+  if (!marked && !named && !isUnderRoot(cwd, root)) return { pageText: false, args: args };
+  if (!root) {
+    throw new Error('no scratch folder for page text (the profile folder is unknown), so the session was not started');
+  }
+  // The mark is ours and the skip flag is exactly what this chamber may not
+  // have; `--continue` stays, so a restored page-text pane resumes its own
+  // conversation in its own scratch folder, still asking before it acts.
+  const kept = Array.isArray(args)
+    ? args.filter((a) => typeof a === 'string' && a.trim() !== PAGE_TEXT_ARG && a.trim() !== SKIP_PERMISSIONS_ARG)
+    : [];
+  return { pageText: true, args: kept, dir: named || path.join(root, newScratchName()), reused: !!named };
+}
+
+/**
+ * Make (or find) the scratch folder and prove it is a real folder of its own:
+ * a link there could point anywhere, the home folder included.
+ * @returns {{dir:string, created:boolean}}
+ */
+function ensureScratchFolder(dir) {
+  let created = false;
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      created = true;
+    }
+    const st = fs.lstatSync(dir);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw Object.assign(new Error('not a plain folder'), { code: 'ENOTDIR' });
+    }
+  } catch (err) {
+    const why = (err && (err.code || err.message)) || 'unknown error';
+    throw new Error('could not make the scratch folder for page text (' + why + '), so the session was not started');
+  }
+  return { dir, created };
+}
+
+/**
+ * Best-effort, once per run, after a new folder is made: remove EMPTY
+ * ask-* folders untouched for a week. rmdirSync refuses a folder with
+ * anything in it, so whatever a session wrote there is never deleted, and a
+ * folder a live session is using is skipped by name.
+ */
+function pruneScratch(root, keep) {
+  if (scratchPruned || !root) return 0;
+  scratchPruned = true;
+  const inUse = new Set([String(keep || '').toLowerCase()]);
+  for (const rec of sessions.values()) if (rec.cwd) inUse.add(String(rec.cwd).toLowerCase());
+  let removed = 0;
+  let names = [];
+  try { names = fs.readdirSync(root); } catch { return 0; }
+  const cutoff = Date.now() - SCRATCH_PRUNE_MS;
+  for (const name of names) {
+    if (!SCRATCH_NAME.test(name)) continue;
+    const full = path.join(root, name);
+    if (inUse.has(full.toLowerCase())) continue;
+    try {
+      const st = fs.lstatSync(full);
+      if (!st.isDirectory() || st.isSymbolicLink() || st.mtimeMs > cutoff) continue;
+      fs.rmdirSync(full); // throws ENOTEMPTY on anything with content
+      removed++;
+    } catch { /* not empty, or in use: leave it */ }
+  }
+  return removed;
+}
+
+// TEST ONLY: a test profile (--test-profile) may run a node script in place
+// of claude.exe (QUARTZ_TEST_CLAUDE = absolute path to a .js file), so an e2e
+// can watch exactly what reaches a Claude session's argv, cwd and input
+// without ever starting the real CLI. A live Quartz ignores the variable.
+function testClaudeStandin(prog) {
+  if (!prog || prog.id !== 'claude') return null;
+  if (!process.argv.includes('--test-profile')) return null;
+  const script = process.env.QUARTZ_TEST_CLAUDE;
+  if (!script || !path.isAbsolute(script) || !isFile(script)) return null;
+  return { bin: process.execPath, pre: [script], env: { ELECTRON_RUN_AS_NODE: '1' } };
+}
 
 // ---------------------------------------------------------------------------
 // Programs
@@ -319,34 +497,72 @@ function suppressConsoleListHelper(p) {
  * @param {(exitCode: number) => void} [opts.onExit]
  * @returns {{ id: string, program: string, cwd: string, args: string[], write: (d: string) => void, resize: (c: number, r: number) => void, kill: () => void }}
  */
+/**
+ * What one spawn will actually run with, decided before anything is spawned:
+ * the cwd, the argv after the allowlist, and whether it is a page-text
+ * chamber (see "Page-text chambers" above). Separate from createSession so
+ * the harness can check the argv for every kind of chamber without a PTY.
+ * Throws for a page-text chamber whose scratch folder cannot be made.
+ *
+ * @returns {{cwd:string, args:string[], pageText:boolean, scratchCreated:boolean}}
+ */
+function planLaunch(prog, args, cwd) {
+  let argsIn = args;
+  let pageText = false;
+  let scratch = null;
+  if (prog.id === 'claude') {
+    const root = scratchRoot();
+    const plan = planPageText(args, cwd, root);
+    if (plan.pageText) {
+      pageText = true;
+      argsIn = plan.args;
+      scratch = ensureScratchFolder(plan.dir);
+      if (scratch.created) pruneScratch(root, scratch.dir);
+    }
+  }
+  return {
+    // A page-text chamber runs in its scratch folder and nowhere else; every
+    // other spawn's cwd is normalized (node-pty throws on a missing one).
+    cwd: scratch ? scratch.dir : resolveCwd(cwd),
+    // Our fixed flags first, then whatever the renderer was allowed to add.
+    args: prog.args.concat(sanitizeArgs(argsIn, prog)),
+    pageText: pageText,
+    scratchCreated: !!(scratch && scratch.created),
+  };
+}
+
 function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) {
   const prog = getProgram(program);
   if (!prog) throw new Error(`unknown program: ${String(program).slice(0, 60)}`);
-  const bin = resolveBin(prog);
+  const standin = testClaudeStandin(prog);
+  const bin = standin ? standin.bin : resolveBin(prog);
   if (!bin) throw new Error(`${prog.title} is not installed (${prog.bin} not found)`);
 
   const id = newId();
   const safeCols = sanitizeDim(cols, 80);
   const safeRows = sanitizeDim(rows, 24);
 
-  // A non-string / non-existent cwd makes node-pty throw, so normalize first.
   // (see cleanEnv below for why the environment is scrubbed before spawning)
-  const safeCwd = resolveCwd(cwd);
-  // Our fixed flags first, then whatever the renderer was allowed to add.
-  const safeArgs = prog.args.concat(sanitizeArgs(args, prog));
+  const launch = planLaunch(prog, args, cwd);
+  const safeCwd = launch.cwd;
+  const safeArgs = launch.args;
+  if (launch.pageText) {
+    console.log('[pty] page-text chamber: permission prompts on, in', safeCwd,
+      launch.scratchCreated ? '(new)' : '(existing)');
+  }
 
-  const p = nodePty.spawn(bin, safeArgs, {
+  const p = nodePty.spawn(bin, standin ? standin.pre.concat(safeArgs) : safeArgs, {
     name: 'xterm-256color',
     cols: safeCols,
     rows: safeRows,
     cwd: safeCwd,
-    env: cleanEnv(),
+    env: standin ? Object.assign(cleanEnv(), standin.env) : cleanEnv(),
   });
 
   // Before anything can kill this session (see the note on the helper above).
   suppressConsoleListHelper(p);
 
-  const record = { id, pty: p, alive: true };
+  const record = { id, pty: p, alive: true, cwd: safeCwd };
   sessions.set(id, record);
 
   p.onData((data) => {
@@ -378,6 +594,8 @@ function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) 
     // What the process actually got, after validation -- not what was asked for.
     cwd: safeCwd,
     args: safeArgs.slice(),
+    // A page-text chamber: no skip-permissions, scratch folder (see above).
+    pageText: launch.pageText,
 
     write(data) {
       if (!record.alive || typeof data !== 'string') return;
@@ -446,11 +664,27 @@ module.exports = {
     sanitizeArgs,
     isStoreStub,
     suppressConsoleListHelper,
+    planLaunch,
+    planPageText,
+    namedScratchFolder,
+    isUnderRoot,
+    ensureScratchFolder,
+    pruneScratch,
+    scratchRoot,
+    testClaudeStandin,
+    PAGE_TEXT_ARG,
+    SCRATCH_DIR,
     setWhereRunner(fn) {
       whereRunner = typeof fn === 'function' ? fn : runWhere;
     },
     clearBinCache() {
       binCache.clear();
+    },
+    // Point the scratch root somewhere (a temp folder); null restores the
+    // real <userData>\claude-scratch. Also re-arms the once-per-run prune.
+    setScratchRoot(dir) {
+      scratchRootOverride = (typeof dir === 'string') ? dir : null;
+      scratchPruned = false;
     },
   },
 };
