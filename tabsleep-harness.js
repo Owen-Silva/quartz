@@ -179,10 +179,11 @@ function sweepWorld() {
     function page(id, extra) { const t = Object.assign({ id, kind: 'page', url: 'https://x/' + id, ready: true, asleep: false, pinned: false, audible: false, broken: false, lastActive: 0, openedAt: 0, viewEl: { audibleNow: false, isCurrentlyAudible() { return this.audibleNow; } } }, extra || {}); tabs.push(t); return t; }
     function activate(id) { const t = tabs.find((x) => x.id === id); activeTabId = id; t.lastActive = clockNow; noteScreenEdges(); }
   ` + ['TAB_SLEEP_DEFAULT_MINUTES', 'TAB_SLEEP_SWEEP_MS'].map((n) => cutConst(n, ';')).join('\n')
-    + ['isTabOnScreen', 'tabIdleSince', 'noteScreenEdges', 'canSleepTab', 'tabSleepMinutes', 'sleepIdleTabs'].map(cutFunction).join('\n')
+    + cutConst('AUDIBLE_SPARE_MS', ';') + '\n'
+    + ['isTabOnScreen', 'tabIdleSince', 'noteScreenEdges', 'viewAudibleNow', 'noteTabSound', 'observeTabSound', 'tabSoundReason', 'canSleepTab', 'tabSleepMinutes', 'sleepIdleTabs'].map(cutFunction).join('\n')
     + `\nthis.api = { get tabs() { return tabs; }, page, activate, sweep: sleepIdleTabs, slept: () => slept, set: (t) => { clockNow = t; },
       split: (a, b) => { a.splitWith = b.id; b.splitWith = a.id; }, unsplit: (a, b) => { a.splitWith = null; b.splitWith = null; noteScreenEdges(); },
-      canSleepTab };`, w);
+      tabSoundReason, canSleepTab };`, w);
   return w.api;
 }
 /** Sweep once a minute from `from` to `to` (minutes); the first minute a tab is slept, or null. */
@@ -226,5 +227,33 @@ function sweepUntil(api, from, to, id) {
   ok('bug1: restored background tab sleeps 15 min after boot, not at once', at === 1015, at);
   ok('bug1: lastActive 0 does not mean idle since 1970', A.lastActive === 0 || A.lastActive >= 1000 * MIN);
 }
+{
+  // BUG 2: the media hint says quiet (one of two elements paused) but Chromium hears sound.
+  const a = sweepWorld();
+  const A = a.page('A'); a.page('B');
+  a.set(0); a.activate('A'); a.set(1 * MIN); a.activate('B');
+  A.audible = false; A.viewEl.audibleNow = true;   // Twitch: an ad element paused, the stream plays on
+  ok('bug2: audible by Chromium, media hint false: never slept in 60 min', sweepUntil(a, 2, 60, 'A') === null);
+  ok('bug2: reason given is "making sound"', a.tabSoundReason(A) === 'making sound');
+  // The sound stops at minute 60 (last seen audible by the minute-60 sweep).
+  a.set(60 * MIN + 30000); A.viewEl.audibleNow = false;
+  const at = sweepUntil(a, 61, 90, 'A');
+  ok('bug2: after the sound stops, spared for at least 2 min', at !== null && at * MIN - (60 * MIN + 30000) >= AUDIBLE_SPARE_OK, at);
+  ok('bug2: and slept within a sweep or two after that', at !== null && at <= 64, at);
+}
+{
+  // Web Audio only (never any media event): spared the same way; a muted media element still counts.
+  const a = sweepWorld();
+  const A = a.page('A'); const C = a.page('C', { audible: true }); a.page('B');
+  a.set(0); a.activate('B');
+  A.viewEl.audibleNow = true;
+  ok('bug2: Web Audio tab (no media events) is not a candidate', a.canSleepTab(A) === false);
+  ok('bug2: media flag alone (muted element playing) still spares', a.canSleepTab(C) === false);
+  ok('bug2: sleepTab itself refuses a tab making sound (moment of sleeping)', /const sound = tabSoundReason\(tab\);\s*if \(sound\)/.test(cutFunction('sleepTab')));
+  ok('bug2: workspace "all" rule uses the real audibility', /tabSoundReason\(tab\)/.test(cutFunction('canSleepInWorkspace')));
+  ok('bug2: the slept log line carries the sound state', /sound: heardAgo === null \? 'was not making sound'/.test(cutFunction('sleepTab')));
+  ok('bug2: media-paused stamps lastAudibleAt', /if \(tab\.audible\) tab\.lastAudibleAt = Date\.now\(\);\s*setTabAudible\(tab, false\)/.test(src));
+}
+
 console.log('\n' + pass + ' pass / ' + fail + ' fail');
 process.exitCode = fail ? 1 : 0;

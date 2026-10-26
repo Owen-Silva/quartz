@@ -15,6 +15,9 @@
 //     rememberTabScroll read when the tab went into the background).
 //   - and across a RESTART: a scrolled tab asleep in another workspace is written to session.json
 //     with its scroll, comes back asleep (not fetched), and wakes at that scroll.
+//   - sound: a page with two players (one pauses, which clears the media flag, the other keeps
+//     playing) and a Web Audio oscillator page are never slept by the idle sweep, sleepTab, "sleep
+//     other tabs" or the workspace rule; once quiet they are spared 2 more minutes, then sleep.
 //   - a new tab page sent to the background of the workspace on screen sleeps after its 15 s grace,
 //     wakes as a fresh Home with theme/settings/layout/Saved/apps/readout re-pushed and the stats
 //     subscription back on it; one holding typed text is kept awake; workspace sleep "off" stands it down.
@@ -28,7 +31,23 @@ const { run, serve, html, sleep } = require('./tests/e2e-kit');
 const CDP = Number(process.env.E2E_CDP) || 9432;
 
 run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
+  // A 2 s 440 Hz tone (8 kHz, 16-bit mono WAV) for the sound checks, built here: no fixture file.
+  const tone = (() => {
+    const rate = 8000, n = rate * 2, data = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * i / rate) * 6000), i * 2);
+    const h = Buffer.alloc(44);
+    h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24);
+    h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(data.length, 40);
+    return Buffer.concat([h, data]);
+  })();
   const srv = await serve((req, res, p) => {
+    if (p === '/tone.wav') { res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': tone.length }); res.end(tone); return true; }
+    // Twitch's shape: two media elements; one keeps playing, the other plays then pauses (an ad, a
+    // preview). The pause fires media-paused for the whole tab while sound is still coming out.
+    if (p === '/twoel.html') return html(res, '<!doctype html><title>Two players</title><audio id="a" src="/tone.wav" loop autoplay></audio><audio id="b" src="/tone.wav" loop autoplay></audio><script>setTimeout(() => document.getElementById("b").pause(), 1500);</script>');
+    // Web Audio only: no media element at all, so no media event ever fires.
+    if (p === '/osc.html') return html(res, '<!doctype html><title>Oscillator</title><script>window.ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain(); g.gain.value = 0.05; o.connect(g).connect(ctx.destination); o.start();</script>');
     if (p === '/long.html' || p === '/far.html') return html(res, '<!doctype html><title>Long page</title><style>body{margin:0}</style><div style="height:9000px;background:linear-gradient(#eee,#999)">top</div>');
     const m = /^\/([a-z0-9]+)\.html$/.exec(p);
     if (!m) return false;
@@ -126,6 +145,42 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   await c.ev(`activateTab(${T('idle')}.id), 1`);
   const idleOk = await c.waitFor(`${T('idle')}.ready === true && !${T('idle')}.asleep && ${T('idle')}.title === 'Page IDLE'`, 15000).catch((e) => e.message);
   check(idleOk === true, 'the swept tab wakes and loads when raised', idleOk);
+
+  // ---- a tab making sound never sleeps (Chromium's audibility, not the media flag) ------------
+  const audibleNow = (name) => c.ev(`${T(name)}.viewEl.isCurrentlyAudible()`).catch((e) => 'threw ' + e.message);
+  await open('two', B + '/twoel.html');
+  const twoSound = await c.waitFor(`${T('two')}.viewEl.isCurrentlyAudible() === true`, 10000).catch((e) => e.message);
+  check(twoSound === true, 'sound: the two-player page is audible to Chromium (autoplay ran)', twoSound);
+  await sleep(2500); // element b has paused by now: media-paused for the whole tab
+  const twoFlag = await c.ev(`({ flag: !!${T('two')}.audible, chromium: ${T('two')}.viewEl.isCurrentlyAudible() })`);
+  say('two players after one paused: media flag ' + twoFlag.flag + ', Chromium audible ' + twoFlag.chromium);
+  check(twoFlag.chromium === true, 'sound: one element paused, the other still audible to Chromium', twoFlag);
+  await open('osc', B + '/osc.html');
+  const oscSound = await c.waitFor(`${T('osc')}.viewEl.isCurrentlyAudible() === true`, 10000).catch((e) => e.message);
+  check(oscSound === true, 'sound: the Web Audio oscillator page is audible to Chromium', oscSound);
+  check(await c.ev(`!!${T('osc')}.audible`) === false, 'sound: Web Audio never set the media flag (why the flag alone is not enough)');
+  await c.ev(`activateTab(${T('front')}.id), 1`);
+  await c.ev(`${T('two')}.lastActive = ${past}; ${T('osc')}.lastActive = ${past}; 1`);
+  await c.ev("Settings.set({ tabSleepMinutes: 15 }), 1");
+  for (let i = 0; i < 3; i++) { await c.ev('sleepIdleTabs()'); await sleep(300); }
+  check(await c.ev(`${T('two')}.asleep`) === false, 'sound: idle sweep (idle 6 h) never sleeps the two-player tab while it plays');
+  check(await c.ev(`${T('osc')}.asleep`) === false, 'sound: idle sweep never sleeps the Web Audio tab while it plays');
+  check(await c.ev(`sleepTab(${T('osc')}, 'asked')`) === false, 'sound: sleepTab itself refuses it at the moment of sleeping');
+  await c.ev('sleepOtherTabs(), 1');
+  check(await c.ev(`!${T('two')}.asleep && !${T('osc')}.asleep`), 'sound: "sleep other tabs" spares both');
+  check(await c.ev(`canSleepInWorkspace(${T('osc')}, 'all')`) === false, 'sound: the workspace "all" rule spares it too');
+  check(await c.ev(`tabSoundReason(${T('osc')})`) === 'making sound', 'sound: the reason is "making sound" (the Sleep tab menu item shows it disabled)');
+  // The sound stops: spared for the 2-minute window, then sleepable.
+  await c.ev(`${T('osc')}.viewEl.executeJavaScript('window.ctx.close().then(() => 1)')`).catch(() => 0);
+  const quiet = await c.waitFor(`${T('osc')}.viewEl.isCurrentlyAudible() === false`, 15000).catch((e) => e.message);
+  check(quiet === true, 'sound: the oscillator stopped (Chromium no longer hears it)', quiet);
+  await c.ev('sleepIdleTabs()');
+  check(await c.ev(`${T('osc')}.asleep`) === false && await c.ev(`tabSoundReason(${T('osc')})`) === 'made sound in the last 2 minutes', 'sound: just stopped, still spared (2-minute window)');
+  await c.ev(`${T('osc')}.lastAudibleAt = Date.now() - 4 * 60000; 1`);
+  await c.ev('sleepIdleTabs()');
+  check(await c.ev(`${T('osc')}.asleep`) === true, 'sound: quiet for longer than the window, the idle sweep sleeps it');
+  check(await c.ev(`${T('two')}.asleep`) === false && await audibleNow('two') === true, 'sound: the two-player tab is still awake and playing');
+  await c.ev(`closeTab(${T('two')}.id), 1`);
 
   // ---- a new tab page sent to the background, in the workspace on screen ---------------------
   // It sleeps after a 15 s grace (sleepBackgroundNewTab), wakes as a fresh Home with everything

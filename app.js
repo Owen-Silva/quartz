@@ -8249,7 +8249,7 @@ function canSleepInWorkspace(tab, mode) {
   // A real page loses its forms and its session on the way back (only its scroll is kept),
   // so 'all' spares exactly what the idle sweep spares.
   if (tab.pinned) return false;
-  if (tab.audible) return false;
+  if (tabSoundReason(tab)) return false; // Chromium's audibility, not the media hint
   return true;
 }
 
@@ -8504,6 +8504,67 @@ function noteScreenEdges(now) {
   }
 }
 
+/*
+ * Is this tab making sound? tab.audible follows the <webview>'s
+ * media-started-playing / media-paused, and those are per webContents, fired
+ * for EVERY media element: one element pausing (an ad ending, a hover preview,
+ * a quality switch, a rebuffer) sets the flag false while the main stream is
+ * still playing, and Web Audio (games, many radio and music players) never
+ * sets it at all. So it is a hint, not the answer. The answer is Chromium's
+ * own audibility, the same signal as Chrome's speaker icon:
+ * <webview>.isCurrentlyAudible(), read at the moment it matters.
+ *
+ * A tab that STOPPED making sound less than AUDIBLE_SPARE_MS ago is spared too,
+ * so a pause between tracks or an ad break does not lose it. The sound is
+ * looked at once per sweep (observeTabSound) and on every media-paused, so the
+ * window is measured from the last time it was SEEN making sound, plus one
+ * sweep of slack: a tab is never slept less than AUDIBLE_SPARE_MS after its
+ * sound really stopped.
+ */
+const AUDIBLE_SPARE_MS = 2 * 60000;
+
+/** Chromium's audibility of this tab's guest, right now. False with no guest. */
+function viewAudibleNow(tab) {
+  if (!isViewUsable(tab)) return false;
+  const viewEl = tab.viewEl;
+  if (typeof viewEl.isCurrentlyAudible !== 'function') return false;
+  // Strictly true: the call is synchronous on Electron 44's <webview>, and if
+  // a future one made it a Promise, a truthy Promise must not read as "always
+  // playing" (nothing would ever sleep again). The media flag still applies.
+  try { return viewEl.isCurrentlyAudible() === true; } catch (err) { return false; }
+}
+
+/** Look at one tab's sound and remember when it was last heard. */
+function noteTabSound(tab, now) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return false;
+  if (tab.audible || viewAudibleNow(tab)) {
+    tab.lastAudibleAt = now || Date.now();
+    return true;
+  }
+  return false;
+}
+
+/** Once per sweep: every awake page's sound, so the spare window has a clock. */
+function observeTabSound(now) {
+  const t = now || Date.now();
+  for (const tab of tabs) noteTabSound(tab, t);
+}
+
+/**
+ * Why this tab must not be slept for its sound, or '' when it may.
+ * Every sleep path asks this (canSleepTab, canSleepInWorkspace, and sleepTab()
+ * itself at the moment of sleeping).
+ */
+function tabSoundReason(tab, now) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return '';
+  const t = now || Date.now();
+  if (noteTabSound(tab, t)) return 'making sound';
+  if (tab.lastAudibleAt && t - tab.lastAudibleAt < AUDIBLE_SPARE_MS + TAB_SLEEP_SWEEP_MS) {
+    return 'made sound in the last 2 minutes';
+  }
+  return '';
+}
+
 /**
  * Whether a tab may be slept right now, idle time aside. Everything excluded
  * here is something the user would notice losing: the tab on screen, a pinned
@@ -8516,8 +8577,8 @@ function canSleepTab(tab) {
   if (tab.asleep) return false;
   if (tab.id === activeTabId) return false;
   if (tab.pinned) return false;
-  if (tab.audible) return false;
   if (tab.broken) return false;
+  if (tabSoundReason(tab)) return false; // playing, or did so in the last 2 min
   // The other half of the split on screen is as visible as the active tab is.
   if (isTabOnScreen(tab)) return false;
   if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return false;
@@ -8544,6 +8605,16 @@ function sleepTab(tab, why) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   if (tab.id === activeTabId) return false; // the tab on screen is never asleep
   if (!viewsEl || !tab.viewEl) return false;
+  // Sound, checked at the moment of sleeping whatever asked for it: the rules
+  // that picked this tab may have looked a minute ago, and the media flag can
+  // be wrong in both directions (see tabSoundReason). The Sleep tab menu item
+  // is disabled with this same reason, so nothing a user clicks lands here.
+  const sound = tabSoundReason(tab);
+  if (sound) {
+    logEvent('tab-sleep-skipped', { url: readCurrentUrl(tab) || tab.url, why: why || 'asked', reason: sound });
+    return false;
+  }
+  const heardAgo = tab.lastAudibleAt ? Date.now() - tab.lastAudibleAt : null;
 
   // Giving the guest back would leave half a split pointing at a placeholder,
   // so the pair breaks up first and the partner goes back to a well of its own.
@@ -8578,7 +8649,13 @@ function sleepTab(tab, why) {
   }
   saveSession(); // the snapshotted url may be newer than the last write
   tab.sleptAt = Date.now();
-  logEvent('tab-slept', { url: tab.url, why: why || 'asked' }); // quartz.log
+  // quartz.log, with the sound state it was judged on, so a "my stream went to
+  // sleep" report can be read straight off the log.
+  logEvent('tab-slept', {
+    url: tab.url, why: why || 'asked', audible: false,
+    sound: heardAgo === null ? 'was not making sound'
+      : 'last made sound ' + Math.round(heardAgo / 1000) + ' s before'
+  });
   return true;
 }
 
@@ -8665,8 +8742,9 @@ function sleepIdleTabs() {
   if (!minutes) return 0; // 0 = never
   const now = Date.now();
   // Clocks first: whatever is on screen now (or left it by a path nobody told
-  // us about) has just been used.
+  // us about) has just been used, and every awake page's sound is looked at.
   noteScreenEdges(now);
+  observeTabSound(now);
   const cutoff = now - minutes * 60000;
   let slept = 0;
   // A copy: sleepTab() only swaps one element, but the sweep should not care.
@@ -10258,7 +10336,11 @@ function tabMenuItemsForTab(tab) {
     // there: disabled on a tab that is not allowed to sleep right now.
     items.push(tab.asleep
       ? { label: 'Wake tab', run: () => wakeTab(tab) }
-      : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) });
+      // Playing (or just stopped): disabled, and the label says why. Sleeping
+      // would silently cut the sound off, which no sleep path may do.
+      : (tabSoundReason(tab)
+        ? { label: 'Sleep tab (not while it is playing sound)', run: () => {}, disabled: true }
+        : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) }));
   } else {
     // A chamber (the Claude pane, or a shell). Claude no longer opens as a
     // tab of its own, so there is no "another one in this folder" row here,
@@ -11199,6 +11281,11 @@ function wireViewEvents(tab) {
   });
   viewEl.addEventListener('media-paused', () => {
     if (stale()) return;
+    // It was making sound until this instant (or another element still is):
+    // the sleep rules' 2-minute spare window counts from here. This event is
+    // per webContents, not per element, so it is NOT proof the tab is quiet;
+    // tabSoundReason() asks Chromium before anything is put to sleep.
+    if (tab.audible) tab.lastAudibleAt = Date.now();
     setTabAudible(tab, false);
   });
 
