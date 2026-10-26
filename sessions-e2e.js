@@ -18,7 +18,8 @@ const fs = require('fs');
 const path = require('path');
 const { run, serve, html, sleep } = require('./tests/e2e-kit');
 
-const CDP = 9431;
+// E2E_CDP lets a parallel lane run this on a port of its own.
+const CDP = Number(process.env.E2E_CDP) || 9431;
 
 run('sessions-e2e', async ({ check, launch, say, profileDir }) => {
   const srv = await serve((req, res, p) => {
