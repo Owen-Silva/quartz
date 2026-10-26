@@ -70,6 +70,11 @@ const TESTS = [
   { name: 'files', file: 'files-harness.js', launch: 9241, e2e: true },
   { name: 'keywords', file: 'keywords-harness.js' },
   { name: 'log', file: 'log-harness.js' },
+  // Ad-block list refresh: when it is due, validation, the atomic write, keep-old on failure, a real
+  // Ghostery build on a fake fetch, the session hooks and the shield line.
+  { name: 'adblock-refresh', file: 'adblock-refresh-harness.js' },
+  // The same in a real Quartz against a local list server: a failed refresh says why, then one swaps in.
+  { name: 'adblock-refresh-e2e', file: 'adblock-refresh-e2e.js', e2e: true },
   { name: 'procfind', file: 'procfind-harness.js' },
   // What notes-pane-main.js asks notes-reader.ps1 for (probe forces a walk) and the gate-off reason.
   { name: 'notes-pane', file: 'notes-pane-harness.js' },
