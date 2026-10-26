@@ -3178,9 +3178,11 @@
       'Claude runs tools without asking first. Turn on only if you trust what you run.'));
 
     var hint = el('p', 'set-hint');
-    hint.appendChild(document.createTextNode('On, every Claude pane starts with '));
+    hint.appendChild(document.createTextNode('On, every Claude pane you open starts with '));
     hint.appendChild(el('code', 'set-code', 'claude --dangerously-skip-permissions'));
-    hint.appendChild(document.createTextNode('. Off, Claude asks before it runs a tool, as it does in a terminal.'));
+    hint.appendChild(document.createTextNode('. Off, Claude asks before it runs a tool, as it does in a terminal. '
+      + 'Panes opened by Ask or Show Claude hold a web page’s text, so they always ask before acting and run in '
+      + 'a scratch folder, whatever this says.'));
     field.appendChild(hint);
   }
 
