@@ -9566,6 +9566,7 @@ function claudeTitleFor(cwd) {
 function claudeDefaultTitle(tab) {
   const program = tabProgram(tab);
   if (program && program !== CLAUDE_PROGRAM) return ptyProgramTitle(program);
+  if (tab && tab.pageText) return PAGE_TEXT_TITLE; // not "ask-<id>", its folder
   return claudeTitleFor(tab && tab.cwd);
 }
 
@@ -9573,7 +9574,9 @@ function claudeDefaultTitle(tab) {
 // prompts" is on (off on a new profile; profiles from before that default
 // changed were migrated to an explicit on, see settings.js). pty.js
 // allowlists it; preload.js puts it on the Enter-to-restart spawn too
-// (terminal.js drops the first-spawn flags on purpose).
+// (terminal.js drops the first-spawn flags on purpose). A chamber holding
+// web page text never gets it, whatever the switch says (see "Page-text
+// chambers" in the Ask section; pty.js enforces it).
 const CLAUDE_SKIP_ARG = '--dangerously-skip-permissions';
 
 /** The setting, read the same way everywhere: only an explicit true skips. */
@@ -9671,6 +9674,9 @@ function createClaudeTab(options) {
   const cwd = (typeof opts.cwd === 'string' && opts.cwd) ? opts.cwd : defaultClaudeCwd();
   const program = terminalProgramName(opts.program) || CLAUDE_PROGRAM;
   const isClaude = program === CLAUDE_PROGRAM;
+  // A chamber that holds web page text (see "Page-text chambers" in the Ask
+  // section): opened for it by Ask/Show, or restored into its scratch folder.
+  const pageText = isClaude && (!!opts.pageText || isScratchCwd(cwd));
 
   const viewEl = document.createElement('div');
   viewEl.className = 'claude-view';
@@ -9684,9 +9690,10 @@ function createClaudeTab(options) {
     viewEl: viewEl,
     chipEl: null,
     titleEl: null,
-    title: isClaude ? claudeTitleFor(cwd) : ptyProgramTitle(program),
+    title: isClaude ? (pageText ? PAGE_TEXT_TITLE : claudeTitleFor(cwd)) : ptyProgramTitle(program),
     url: CLAUDE_URL,
     cwd: cwd,
+    pageText: pageText,
     // The pty.js program this chamber runs. 'claude' behaves exactly as it
     // always has; a shell is the same chamber with a different binary in it.
     program: program,
@@ -9726,7 +9733,11 @@ function createClaudeTab(options) {
   emitWorkspaceChange(); // a tab count moved
   pushReadoutToAll();    // ...so every open new-tab page says so
   saveSession(); // a chamber is a session entry now; debounced with the rest
-  warnMissingCwd(tab);   // ...and says so out loud if the folder has gone
+  // ...and says so out loud if the folder has gone. Not for a page-text
+  // chamber: pty.js makes its scratch folder at spawn (it is not there YET)
+  // and never falls back to home; it says what it is instead.
+  if (pageText) notePageTextChamber(tab);
+  else if (!looksLikeScratchCwd(cwd)) warnMissingCwd(tab);
 
   // Never leave the window with nothing on screen: the very first tab of a boot
   // is raised even when the caller asked for a background one.
@@ -9745,10 +9756,14 @@ function createClaudeTab(options) {
     // terminal.js ignores the key entirely, which just means no resume.
     // A shell takes no renderer args at all (pty.js drops them), so it is
     // handed none.
+    // A page-text chamber asks for no skip flag here (preload adds it to
+    // every spawn; pty.js strips it again) and carries pty.js's mark on EVERY
+    // spawn, restarts included.
     tab.term = factory.create(viewEl, {
       cwd: cwd || undefined,
       program: program,
-      args: isClaude ? claudeStartArgs(opts.resume) : []
+      args: isClaude ? (pageText ? pageTextStartArgs(opts.resume) : claudeStartArgs(opts.resume)) : [],
+      stickyArgs: pageText ? [PAGE_TEXT_ARG] : undefined
     });
   } catch (err) {
     tab.term = null;
@@ -12107,27 +12122,141 @@ function mostRecentTabOfKind(kind) {
  * question and decides when it goes.
  */
 
-/** A quote, not an attachment: a long selection is cut with a note saying so. */
-const ASK_SELECTION_MAX = 4000;
+/*
+ * Page-text chambers. Everything Ask and Show hand over is text a web page
+ * controls -- the selection, the title, the address, a picture of it -- and a
+ * page can hide instructions in it. So:
+ *
+ *   1. it is cleaned and fenced by ONE function, terminal.js's webText
+ *      (askPrompt / showPrompt): no terminal control can survive to close the
+ *      paste early, and the text sits between marks carrying a random token
+ *      under a header saying it is data, not instructions;
+ *   2. it only ever goes into a chamber made for it: never one that skips
+ *      permission prompts, never one in the home folder. pty.js enforces that
+ *      side (the PAGE_TEXT_ARG mark, and any cwd under the scratch root); this
+ *      file picks or makes such a chamber and says so on it;
+ *   3. the paste is marked web, so terminal.js refuses it at the PTY if a
+ *      control code is still in it, and the refusal is shown here.
+ *
+ * Plain "Open Claude beside this page" carries no page text and keeps the
+ * user's setting.
+ */
+const PAGE_TEXT_ARG = '--quartz-page-text'; // pty.js's mark; never reaches claude.exe
+const PAGE_TEXT_TITLE = 'Claude (page text)';
+const MSG_PAGE_TEXT_CHAMBER = 'Asked from a web page: permission prompts are on, and this session runs in '
+  + 'a scratch folder, not your home folder.';
+const MSG_PAGE_TEXT_DISPLACED = 'Page text goes to its own Claude pane, which asks before acting. '
+  + 'The pane that was beside this page is still in the tab strip.';
+const MSG_NO_SCRATCH = "Couldn't open Claude for page text: the browser could not name its scratch folder";
+const MSG_NO_CLEANER = "Couldn't hand this page to Claude: the terminal is not loaded";
+const SCRATCH_NAME_RE = /^ask-[a-z0-9][a-z0-9-]{5,78}$/i; // pty.js's SCRATCH_NAME
 
-function askSelectionText(selection) {
-  const body = String(selection == null ? '' : selection).trim();
-  if (body.length <= ASK_SELECTION_MAX) return body;
-  return body.slice(0, ASK_SELECTION_MAX) + '\n… (selection truncated at ' + ASK_SELECTION_MAX + ' characters)';
+let scratchRootCache = '';    // <userData>\claude-scratch, once main has said
+let scratchRootPending = null;
+
+/**
+ * Where page-text chambers live: <userData>\claude-scratch (pty.js reads the
+ * same folder from app.getPath). Asked once; a failure is retried next time.
+ * @returns {Promise<string>} '' when main could not say.
+ */
+function loadScratchRoot() {
+  if (scratchRootCache) return Promise.resolve(scratchRootCache);
+  if (scratchRootPending) return scratchRootPending;
+  const app = (window.api && window.api.app) ? window.api.app : null;
+  if (!app || typeof app.profile !== 'function') return Promise.resolve('');
+  scratchRootPending = Promise.resolve()
+    .then(() => app.profile())
+    .then((p) => {
+      const userData = (p && typeof p.userData === 'string') ? p.userData.trim().replace(/[\\/]+$/, '') : '';
+      scratchRootCache = userData ? userData + '\\claude-scratch' : '';
+      return scratchRootCache;
+    }, () => '')
+    .then((root) => {
+      scratchRootPending = null;
+      if (root) adoptRestoredPageTextChambers();
+      return root;
+    });
+  return scratchRootPending;
+}
+
+/** True for exactly <scratch root>\ask-<id>, the folders pty.js makes. */
+function isScratchCwd(cwd) {
+  if (!scratchRootCache || typeof cwd !== 'string' || !cwd.trim()) return false;
+  const text = cwd.trim().replace(/[\\/]+$/, '');
+  const at = Math.max(text.lastIndexOf('\\'), text.lastIndexOf('/'));
+  if (at <= 0) return false;
+  return samePath(text.slice(0, at), scratchRootCache) && SCRATCH_NAME_RE.test(text.slice(at + 1));
+}
+
+/**
+ * The same shape by name alone (…\claude-scratch\ask-<id>), for the one thing
+ * that cannot wait for main's answer: not telling the user a restored pane's
+ * folder "is not there, so it opened in home" when pty.js will simply make it
+ * again. Never used to decide where page text may go.
+ */
+function looksLikeScratchCwd(cwd) {
+  const parts = String(cwd == null ? '' : cwd).replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts.length >= 2 && SCRATCH_NAME_RE.test(parts[parts.length - 1])
+    && parts[parts.length - 2].toLowerCase() === 'claude-scratch';
+}
+
+/** A fresh, empty folder name for a new page-text chamber (pty.js creates it). */
+function newScratchCwd(root) {
+  const bytes = new Uint8Array(5);
+  window.crypto.getRandomValues(bytes);
+  let hex = '';
+  for (const b of bytes) hex += (b < 16 ? '0' : '') + b.toString(16);
+  return root + '\\ask-' + Date.now().toString(36) + '-' + hex;
+}
+
+/** claude.exe flags for a page-text chamber: never the skip flag. */
+function pageTextStartArgs(resume) {
+  return resume === true ? ['--continue'] : [];
+}
+
+/** A Claude chamber that holds (or may hold) page text. */
+function isPageTextChamber(tab) {
+  return isClaudeTab(tab) && tabProgram(tab) === CLAUDE_PROGRAM && tab.pageText === true && !!tab.term;
+}
+
+/** The line over the chamber that says what it is (no silent state). */
+function notePageTextChamber(tab) {
+  showAppNote(tab, MSG_PAGE_TEXT_CHAMBER, '');
+}
+
+/**
+ * A pane restored into its scratch folder is a page-text chamber too. pty.js
+ * already runs it that way (its cwd is under the scratch root); this puts the
+ * chip and the note right once main has said where that root is.
+ */
+function adoptRestoredPageTextChambers() {
+  for (const tab of tabs) {
+    if (!isClaudeTab(tab) || tab.pageText || tabProgram(tab) !== CLAUDE_PROGRAM) continue;
+    if (!isScratchCwd(tab.cwd)) continue;
+    tab.pageText = true;
+    setTabTitle(tab, PAGE_TEXT_TITLE);
+    notePageTextChamber(tab);
+  }
+}
+
+loadScratchRoot(); // early, so the first Ask does not wait on it
+
+/** terminal.js's cleaner (see the block above), or null if it is not loaded. */
+function webText() {
+  const t = window.ClaudeTerminal;
+  return (t && t.webText && typeof t.webText.askPrompt === 'function') ? t.webText : null;
 }
 
 /**
  * The text that gets pasted. Both shapes deliberately END where the user's own
- * typing starts -- with a selection the quote block is the whole message and
+ * typing starts -- with a selection the fenced quote is the whole message and
  * the cursor lands under it; without one the sentence is left mid-air after
- * "and ", so finishing it is the only thing left to do.
+ * "and ", so finishing it is the only thing left to do. '' when there is no
+ * cleaner: nothing is pasted uncleaned.
  */
 function askPromptText(url, title, selection) {
-  const quote = askSelectionText(selection);
-  const page = String(url || '').trim();
-  if (quote) return 'From ' + page + '\n\n"""\n' + quote + '\n"""\n\n';
-  const name = String(title == null ? '' : title).trim();
-  return name ? 'Look at ' + page + ' (' + name + ') and ' : 'Look at ' + page + ' and ';
+  const w = webText();
+  return w ? w.askPrompt(url, title, selection) : '';
 }
 
 /**
@@ -12152,46 +12281,89 @@ function askSourceTab(url) {
   return mostRecentTabOfKind('page');
 }
 
-/**
- * The chamber this page should be talking to. In order: the one it is already
- * split with, a free chamber stood beside it, a new one beside it, and — if
- * the page cannot be split at all — whatever chamber exists, else null.
- * Claude only ever opens BESIDE a page now, so with no page to stand next to
- * nothing new is made: the caller says so (MSG_NO_PAGE) instead.
- */
-function claudeChamberFor(page) {
-  const partner = page ? splitPartner(page) : null;
-  if (isClaudeTab(partner)) return partner;
-
-  if (page && page.kind === 'page') {
-    const recent = mostRecentTabOfKind('claude');
-    if (recent && !splitPartner(recent) && splitTabs(page, recent)) return recent;
-    if (openClaudeBesideTab(page)) {
-      const made = splitPartner(page);
-      if (isClaudeTab(made)) return made;
-    }
-  }
-  return mostRecentTabOfKind('claude');
-}
-
 /** What a hand-off with no page to stand beside says, instead of nothing. */
 const MSG_NO_PAGE = 'No page to open Claude beside';
 
-/** terminal.js queues this until the PTY is live, so a brand-new chamber works. */
-function pasteIntoChamber(tab, text) {
+/**
+ * The chamber this page's text should go to, and only ever a page-text one
+ * (there is deliberately no "any chamber" version of this any more). In
+ * order: the one this page is split with, a free one stood beside it, a NEW
+ * one beside it (a plain chamber the page was split with stays in the strip,
+ * and a toast says where it went), and if the page cannot be split, any
+ * page-text chamber. Claude only ever opens BESIDE a page, so with no page
+ * nothing new is made. Says why in a toast whenever it answers null.
+ * @returns {Promise<Object|null>}
+ */
+function pageTextChamberFor(page) {
+  return loadScratchRoot().then((root) => {
+    if (!root) {
+      claudeToast(MSG_NO_SCRATCH);
+      return null;
+    }
+    const partner = page ? splitPartner(page) : null;
+    if (isPageTextChamber(partner)) return partner;
+
+    const mostRecent = (free) => {
+      let best = null;
+      for (const tab of visibleTabs()) {
+        if (!isPageTextChamber(tab) || (free && splitPartner(tab))) continue;
+        if (!best || (tab.lastActive || 0) > (best.lastActive || 0)) best = tab;
+      }
+      return best;
+    };
+
+    if (page && page.kind === 'page') {
+      const displaced = isClaudeTab(partner);
+      const free = mostRecent(true);
+      let claude = (free && splitTabs(page, free)) ? free : null;
+      if (!claude) {
+        const made = createClaudeTab({ background: true, beside: true, pageText: true, cwd: newScratchCwd(root) });
+        if (made) {
+          splitTabs(page, made);
+          claude = made;
+        }
+      }
+      if (claude) {
+        if (displaced) claudeToast(MSG_PAGE_TEXT_DISPLACED);
+        return claude;
+      }
+    }
+    const any = mostRecent(false);
+    if (!any) claudeToast(MSG_NO_PAGE);
+    return any;
+  });
+}
+
+/**
+ * terminal.js queues this until the PTY is live, so a brand-new chamber works.
+ * opts.web marks page text: terminal.js refuses it at the PTY if a control
+ * code is still in it, and the reason goes over the chamber and in a toast.
+ * @returns {boolean} false when it could not be handed over or was refused.
+ */
+function pasteIntoChamber(tab, text, opts) {
   const term = tab && tab.term;
   if (!term || typeof term.paste !== 'function') return false;
+  let refused = false;
+  const pasteOpts = (opts && opts.web) ? {
+    web: true,
+    onRefused: (reason) => {
+      refused = true;
+      claudeToast(reason);
+      if (tabs.includes(tab)) showAppNote(tab, reason, '');
+    }
+  } : undefined;
   try {
-    term.paste(text);
+    term.paste(text, pasteOpts);
   } catch (err) {
     return false;
   }
-  return true;
+  return !refused;
 }
 
 /**
  * @param {{url?:string, title?:string, selection?:string}} payload
- * @returns {boolean} true once the prompt is in (or queued for) a chamber.
+ * @returns {Promise<boolean>} true once the prompt is in (or queued for) a
+ *   page-text chamber.
  */
 function askClaude(payload) {
   const info = payload || {};
@@ -12199,16 +12371,18 @@ function askClaude(payload) {
   const page = askSourceTab(url);
   const title = String(info.title == null ? '' : info.title) || (page ? page.title : '');
   const prompt = askPromptText(url || (page ? readCurrentUrl(page) : ''), title, info.selection);
-
-  const claude = claudeChamberFor(page);
-  if (!claude) {
-    claudeToast(MSG_NO_PAGE);
-    return false;
+  if (!prompt) {
+    claudeToast(MSG_NO_CLEANER);
+    return Promise.resolve(false);
   }
-  // The chamber takes the front so the keystrokes that follow land in the
-  // terminal, not in the page; activateTab() focuses xterm on the next frame.
-  activateTab(claude.id);
-  return pasteIntoChamber(claude, prompt);
+
+  return pageTextChamberFor(page).then((claude) => {
+    if (!claude) return false; // pageTextChamberFor() said why
+    // The chamber takes the front so the keystrokes that follow land in the
+    // terminal, not in the page; activateTab() focuses xterm on the next frame.
+    activateTab(claude.id);
+    return pasteIntoChamber(claude, prompt, { web: true });
+  });
 }
 
 /** The guest's live selection, which — unlike the menu's — is never truncated. */
@@ -12269,24 +12443,16 @@ function claudeToast(message) {
 const MSG_SHOW_FAILED = "Couldn't capture this page";
 
 /**
- * Backslashes survive fine on the way in, but a forward-slash path meets no
- * escaping rule anywhere between the terminal and the tool that opens it —
- * and Claude Code on Windows takes either.
- */
-function screenshotPathText(target) {
-  return String(target == null ? '' : target).replace(/\\/g, '/');
-}
-
-/**
  * The image first, because the file is the point; then where it came from, so
  * the session can go and read the real page. Ends after "and " exactly like
- * askPromptText() does: the question is the only thing left to write.
+ * askPromptText() does: the question is the only thing left to write. The
+ * path (its name carries the page's host), the address and the title all go
+ * through the same cleaner (webText.showPrompt), and the path's backslashes
+ * become forward slashes there. '' when there is no cleaner.
  */
 function showPromptText(target, url, title) {
-  const page = String(url || '').trim();
-  const name = String(title == null ? '' : title).trim();
-  const subject = name ? page + ' (' + name + ')' : page;
-  return 'Look at the screenshot ' + screenshotPathText(target) + ' of ' + subject + ' and ';
+  const w = webText();
+  return w ? w.showPrompt(target, url, title) : '';
 }
 
 /**
@@ -12331,16 +12497,20 @@ function showClaudeThisPage(payload) {
     }
     const url = want || (page ? readCurrentUrl(page) : '');
     const title = String(info.title == null ? '' : info.title) || (page ? page.title : '');
-
-    const claude = claudeChamberFor(page);
-    if (!claude) {
-      claudeToast(MSG_NO_PAGE);
+    const prompt = showPromptText(shot.path, url, title);
+    if (!prompt) {
+      claudeToast(MSG_NO_CLEANER);
       return false;
     }
-    // Same as askClaude(): the chamber takes the front so what is typed next
-    // lands in the terminal rather than in the page.
-    activateTab(claude.id);
-    return pasteIntoChamber(claude, showPromptText(shot.path, url, title));
+
+    // A picture of a page carries its text too: a page-text chamber, as Ask.
+    return pageTextChamberFor(page).then((claude) => {
+      if (!claude) return false; // pageTextChamberFor() said why
+      // Same as askClaude(): the chamber takes the front so what is typed next
+      // lands in the terminal rather than in the page.
+      activateTab(claude.id);
+      return pasteIntoChamber(claude, prompt, { web: true });
+    });
   });
 }
 
