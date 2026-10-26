@@ -10,7 +10,8 @@ require('./lowcpu-optional.js');   // first: one capped browser at a time (2026-
 // The Electron ones (e2e) launch a REAL off-screen test instance each (--test-profile --offscreen,
 // watched by testwatch.js), one at a time. Each refuses to launch under 2.5 GB free RAM (exit 3),
 // which shows here as SKIP with that reason, never as a pass. On a typical development laptop that is the usual
-// case, so run them in the cloud: `cloudtest --recipe quartz-core`.
+// case, so run them in CI: .github/workflows/ci.yml runs --unit on every push and PR, and the full suite
+// nightly and on demand (Actions > ci > Run workflow) on windows-latest.
 //
 // A test passes when it exits 0 AND its own summary line ("<name>: N passed, M failed" or
 // "smoke: N ok, M failed") says 0 failed. No summary line = FAIL, whatever the exit code.
@@ -115,7 +116,9 @@ const TESTS = [
   { name: 'golive-procs', file: 'tests/golive-procs-test.js' },
   // In-app updates (updater.js): throwaway git repos and a fake releases API; up to date, ahead,
   // available, every reason for no button, offline, rate-limited, and each rollback.
-  { name: 'updater', file: 'tests/updater-test.js' },
+  // It spawns a few hundred git processes, which on a busy Windows laptop took ~2 min: past the 90 s unit
+  // default, so the suite timed out a harness that passes. 300 s keeps a real hang a FAIL.
+  { name: 'updater', file: 'tests/updater-test.js', timeout: 300 },
   // The same in a real Quartz: the card, the Update button, a real update and the relaunch.
   { name: 'updater-e2e', file: 'tests/updater-e2e.js', e2e: true },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
