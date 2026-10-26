@@ -155,5 +155,76 @@ const sorted = (set) => Array.from(set).sort((a, b) => a - b);
   ok('sleepBackgroundNewTab: a refusal is logged, not swallowed', /tab-sleep-skipped/.test(sl));
 }
 
+// --- the idle sweep, with a fake clock and a fake strip ------------------------------------
+// The real tabIdleSince / noteScreenEdges / canSleepTab / sleepIdleTabs (and the sound rules),
+// cut from app.js and run against plain objects. sleepTab is a stub that records.
+const MIN = 60000;
+const AUDIBLE_SPARE_OK = 2 * MIN; // the promise: never slept less than 2 min after the sound really stopped
+function sweepWorld() {
+  const w = vm.createContext({});
+  w.clock = 0;
+  vm.runInContext(`
+    var clockNow = 0;
+    var Date = { now: () => clockNow };
+    var tabs = [];
+    var activeTabId = null;
+    var slept = [];
+    var settings = { tabSleepMinutes: 15 };
+    function settingGet(k) { return settings[k]; }
+    function splitPartner(t) { return t.splitWith ? tabs.find((x) => x.id === t.splitWith) || null : null; }
+    function isNewTabUrl(u) { return /newtab/.test(String(u || '')); }
+    function readCurrentUrl(t) { return t ? t.url : ''; }
+    function isViewUsable(t) { return !!(t && t.kind === 'page' && !t.asleep && t.ready && t.viewEl); }
+    function sleepTab(t, why) { if (typeof tabSoundReason === 'function' && tabSoundReason(t)) return false; t.asleep = true; slept.push({ id: t.id, at: clockNow, why }); return true; }
+    function page(id, extra) { const t = Object.assign({ id, kind: 'page', url: 'https://x/' + id, ready: true, asleep: false, pinned: false, audible: false, broken: false, lastActive: 0, openedAt: 0, viewEl: { audibleNow: false, isCurrentlyAudible() { return this.audibleNow; } } }, extra || {}); tabs.push(t); return t; }
+    function activate(id) { const t = tabs.find((x) => x.id === id); activeTabId = id; t.lastActive = clockNow; noteScreenEdges(); }
+  ` + ['TAB_SLEEP_DEFAULT_MINUTES', 'TAB_SLEEP_SWEEP_MS'].map((n) => cutConst(n, ';')).join('\n')
+    + ['isTabOnScreen', 'tabIdleSince', 'noteScreenEdges', 'canSleepTab', 'tabSleepMinutes', 'sleepIdleTabs'].map(cutFunction).join('\n')
+    + `\nthis.api = { get tabs() { return tabs; }, page, activate, sweep: sleepIdleTabs, slept: () => slept, set: (t) => { clockNow = t; },
+      split: (a, b) => { a.splitWith = b.id; b.splitWith = a.id; }, unsplit: (a, b) => { a.splitWith = null; b.splitWith = null; noteScreenEdges(); },
+      canSleepTab };`, w);
+  return w.api;
+}
+/** Sweep once a minute from `from` to `to` (minutes); the first minute a tab is slept, or null. */
+function sweepUntil(api, from, to, id) {
+  for (let m = from; m <= to; m++) {
+    api.set(m * MIN);
+    api.sweep();
+    const s = api.slept().find((x) => x.id === id);
+    if (s) return s.at / MIN;
+  }
+  return null;
+}
+{
+  // BUG 1: read a tab for 20 min, switch away: no sleep until 15 min AFTER leaving.
+  const a = sweepWorld();
+  a.page('A'); a.page('B');
+  a.set(0); a.activate('A');
+  sweepUntil(a, 1, 20, 'A');               // 20 minutes on screen, swept every minute
+  a.set(20 * MIN); a.activate('B');        // switch away at minute 20
+  const at = sweepUntil(a, 21, 60, 'A');
+  ok('bug1: read 20 min then left: not slept before 15 min after leaving', at !== null && at >= 35, at);
+  ok('bug1: slept at the first sweep past 15 min after leaving (minute 35)', at === 35, at);
+}
+{
+  // A tab shown in a split keeps counting as on screen; its clock starts when the split closes.
+  const a = sweepWorld();
+  const A = a.page('A'), B = a.page('B');
+  a.set(0); a.activate('A'); a.split(A, B); a.activate('B');
+  ok('bug1: split partner never sleeps while shown (30 min)', sweepUntil(a, 1, 30, 'A') === null);
+  a.set(30 * MIN + 1); a.unsplit(A, B);
+  const at = sweepUntil(a, 31, 60, 'A');
+  ok('bug1: after the split closes at 30, not slept before 45', at !== null && at >= 45, at);
+}
+{
+  // A restored background tab: idle from boot (openedAt), not "for days" (lastActive 0).
+  const a = sweepWorld();
+  a.set(1000 * MIN);
+  const A = a.page('A', { openedAt: 1000 * MIN }); a.page('B');
+  a.activate('B');
+  const at = sweepUntil(a, 1001, 1030, 'A');
+  ok('bug1: restored background tab sleeps 15 min after boot, not at once', at === 1015, at);
+  ok('bug1: lastActive 0 does not mean idle since 1970', A.lastActive === 0 || A.lastActive >= 1000 * MIN);
+}
 console.log('\n' + pass + ' pass / ' + fail + ' fail');
 process.exitCode = fail ? 1 : 0;

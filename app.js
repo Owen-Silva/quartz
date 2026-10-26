@@ -8473,10 +8473,35 @@ function tabSleepMinutes() {
   return minutes;
 }
 
-/** When this tab was last in front — its creation time until it ever has been. */
+/**
+ * When this tab was last ON SCREEN: its creation time until it ever has been.
+ * lastActive is stamped when a tab LEAVES the screen (noteScreenEdges), not
+ * only when it is raised. It used to be stamped on activation alone, so a tab
+ * read for 20 minutes and then switched away from already counted as 20
+ * minutes idle and went down at the very next sweep.
+ */
 function tabIdleSince(tab) {
   if (!tab) return 0;
   return tab.lastActive || tab.openedAt || 0;
+}
+
+/**
+ * Restart the idle clock of every tab that is on screen now or was at the last
+ * look. Called on every edge that can take a tab off screen: activateTab()
+ * (a tab switch, and so a workspace switch), refreshSplit() (a split closing
+ * or its halves changing) and the start of each idle sweep. A tab on screen,
+ * the other half of a split included, keeps counting as just used. An edge no
+ * caller sees is caught by the next sweep, which can only make the tab sleep
+ * LATER than its time, never earlier. Window blur and minimise do not count:
+ * isTabOnScreen() is about the strip, and the tab in front never sleeps.
+ */
+function noteScreenEdges(now) {
+  const t = now || Date.now();
+  for (const tab of tabs) {
+    const shown = isTabOnScreen(tab);
+    if (shown || tab.wasOnScreen) tab.lastActive = t;
+    tab.wasOnScreen = shown;
+  }
 }
 
 /**
@@ -8638,7 +8663,11 @@ function restoreScrollOnLoad(tab, viewEl, keep) {
 function sleepIdleTabs() {
   const minutes = tabSleepMinutes();
   if (!minutes) return 0; // 0 = never
-  const cutoff = Date.now() - minutes * 60000;
+  const now = Date.now();
+  // Clocks first: whatever is on screen now (or left it by a path nobody told
+  // us about) has just been used.
+  noteScreenEdges(now);
+  const cutoff = now - minutes * 60000;
   let slept = 0;
   // A copy: sleepTab() only swaps one element, but the sweep should not care.
   for (const tab of tabs.slice()) {
@@ -8959,6 +8988,9 @@ function syncSplitOverlays() {
 
 /** Everything a split has to re-do after any change: one call, idempotent. */
 function refreshSplit() {
+  // A split closing or its halves changing takes a tab off screen: its idle
+  // clock starts now, not at the last time it was raised.
+  noteScreenEdges();
   applySplitLayout();
   syncSplitOverlays();
   // Splitting, unsplitting and dragging the divider all resize the well, and a
@@ -9733,6 +9765,13 @@ function activateTab(id) {
   const targetWs = tabWorkspace(target);
   let workspaceMoved = false;
   if (targetWs !== currentWorkspaceId) {
+    // The workspace clock has the same edge as the tab clock: it starts when a
+    // workspace stops being on screen. switchWorkspace() stamps it; raising a
+    // tab from another workspace (a restore, a reopened tab, a module reaching
+    // in) did not, so the workspace left this way read as "left at boot" and
+    // 'all' could sleep its pages at the next sweep.
+    workspaceLeftAt.set(currentWorkspaceId, Date.now());
+    workspaceLeftAt.delete(targetWs);
     currentWorkspaceId = targetWs;
     unsplitAcrossWorkspaces();
     syncChipWorkspaces();
@@ -9824,6 +9863,9 @@ function activateTab(id) {
   // A new tab page that just went to the background sleeps after a short
   // grace (sleepBackgroundNewTab); the one coming forward stops its clock.
   cancelNewTabSleep(target);
+  // Every tab that just left the screen (the outgoing one, its split partner,
+  // a whole workspace's front tab) starts its idle clock NOW.
+  noteScreenEdges();
   if (outgoing && outgoing !== target) noteTabBackgrounded(outgoing);
   if (workspaceMoved) emitWorkspaceChange();
 }
@@ -10981,7 +11023,7 @@ function restoreSession(snapshot) {
   if (!created.length) return false;
 
   // Each workspace's remembered tab, by the index it was stored under. The
-  // build above raised the first tab it made (the window is never empty), so
+  // build above raised the first AWAKE tab it made (if any: a born-asleep tab is never raised), so
   // whatever that wrote is cleared before the stored answers go in.
   if (storedWorkspaces) {
     for (const ws of workspaces) ws.lastActiveTabId = null;
