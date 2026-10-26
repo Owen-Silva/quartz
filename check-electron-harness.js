@@ -71,5 +71,23 @@ ok('upstream-ahead: silent once castlabs tags it', CE.upstreamAhead(index, pin, 
 
 ok('days: floors, never negative', CE.daysBetween('2026-10-25T13:00:00Z', now) === 0 && CE.daysBetween(now, '2026-01-01') === 0);
 
+// --- Settings > About's age sentence (settings.js chromiumAgeLine), lifted out of the file ---
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'settings.js'), 'utf8');
+  const m = /\n  function chromiumAgeLine\(v, now\) \{[\s\S]*?\n  \}\n/.exec(src);
+  ok('about: chromiumAgeLine is in settings.js', !!m);
+  if (m) {
+    const ageLine = new Function(m[0] + '\nreturn chromiumAgeLine;')(); // node only: a harness, not a page
+    const n = new Date('2026-10-26T12:00:00Z');
+    const l1 = ageLine({ chrome: '152.0.7977.130', built: '2026-10-03T03:38:22Z' }, n);
+    ok('about: 23 days -> "3 weeks ago" and the missing-fixes warning', /Chromium 152\.0\.7977\.130 was built on .*\(3 weeks ago\)\. Chromium ships security fixes/.test(l1), l1);
+    const l2 = ageLine({ chrome: '152.0.7977.167', built: '2026-10-22T03:00:00Z' }, n);
+    ok('about: 4 days -> no warning', /\(4 days ago\)\.$/.test(l2), l2);
+    const l3 = ageLine({ chrome: '152.0.7977.130' }, n);
+    ok('about: no build date -> says why, no guess', /cannot be shown: this window did not report when its Electron was built/.test(l3), l3);
+    ok('about: no versions at all -> still a sentence', /cannot be shown/.test(ageLine(null, n)));
+  }
+}
+
 console.log(`check-electron-test: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

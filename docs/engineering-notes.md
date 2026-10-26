@@ -1295,6 +1295,73 @@ The chrome is trusted and every guest is not. These are the places that line is 
   published with its release before it is pushed to the phone, and a mismatch is an error with its
   reason, never a silent retry.
 
+## Engine and page hardening
+
+### Electron and Chromium updates
+
+Quartz runs castlabs' Electron build (Widevine), pinned in `package.json` as
+`github:castlabs/electron-releases#v<x.y.z>+wvcus`. Chromium security fixes reach the browser only
+when that pin moves, and Electron supports only its latest three majors, so a pin left alone quietly
+stops getting fixes. In-the-wild Chromium exploits are the most realistic way a web page takes over
+a browser, so the pin is treated as a security dependency, not a feature one.
+
+**Policy.**
+
+- A same-major patch (`v44.5.1` to `v44.9.3`): bumped within **7 days** of the castlabs tag.
+- A Chrome stable release whose notes say a bug is **exploited in the wild**: bumped the same day the
+  castlabs tag carrying it appears.
+- A new major: within about **3 weeks** of castlabs' stable tag for it, and always before the
+  current major leaves Electron's supported-three window. A major can change Widevine behaviour, so
+  it gets the full DRM e2e (`drm-castlabs-e2e`, `drm-route-e2e`) before it ships.
+
+**Checking.** `node tools/check-electron.js` lists the castlabs tags newer than the pin, the
+Chromium in each, how old the pin is, and one verdict line (up to date, patch behind N days, major
+behind, or BUMP OVERDUE past the windows above). It reads tags with `git ls-remote` and needs no
+token; it never edits `package.json`. Exit 1 means overdue, 2 means the check could not run, with
+the reason on the line. Settings > About shows the running Chromium version and the date its
+Electron was built, read from disk, with no network call.
+
+**Bumping** (on a `wk/` branch, never straight on master):
+
+1. `node tools/check-electron.js` and pick the tag. Read castlabs' release notes for it.
+2. Set `package.json`'s `electron` to `github:castlabs/electron-releases#v<new>+wvcus`, then update
+   the lockfile without running install scripts:
+   `npm install --package-lock-only --ignore-scripts`. Check that `package-lock.json` resolves the
+   tag to a commit SHA, and keep the previous lockfile for rollback.
+3. In a worktree with its own `node_modules` (never the live checkout, never a junction to the
+   shared one): `npm install --ignore-scripts`, then `node node_modules\electron\install.js`,
+   then `npm run quartz-exe`. Not `npm ci`: it deletes node-pty's Electron build, which cannot be
+   rebuilt from npm. Check node-pty's native files are unchanged (`tools\drm-swap.ps1` step 3 does
+   this check).
+4. Run `node tools/run-suite.js --unit`, then the e2e suite through the heavy-test queue, including
+   the castlabs-only DRM e2e. Confirm `process.versions.chrome` in Settings > About.
+5. Merge and ship through the normal updater, which runs `npm ci` in a staging tree when the
+   dependencies change.
+6. **Re-sign for streaming.** An Electron update replaces `node_modules\electron` wholesale, and
+   that removes the castlabs EVS (VMP) signature, so protected video stops working until the build is
+   signed again. With Quartz closed, run
+   `powershell -NoProfile -ExecutionPolicy Bypass -File tools\drm-swap.ps1 -ResignOnly`. It runs
+   `py -3 -m castlabs_evs.vmp -n sign-pkg -H Quartz <dist>` and then `verify-pkg`, checks that
+   `Quartz.exe.sig` exists, and rewrites `node_modules\electron\quartz-vmp.json`. Signing in to
+   EVS (`py -3 -m castlabs_evs.account reauth`) is the user's step. `-H Quartz` matters: without
+   it, only `electron.exe` gets signed.
+7. Rollback: `tools\drm-rollback.ps1` puts the previous `node_modules\electron` back. Then restore
+   the previous `package.json` and `package-lock.json`.
+
+### Content-Security-Policy on bundled pages
+
+Every bundled page carries a `<meta http-equiv="Content-Security-Policy">` above its first script.
+The chrome document (`index.html`) matters most, because it reaches the terminal, the file system
+and the updater through preload. Its policy is `default-src 'none'` plus script files only
+(`script-src file:`, with no inline script and no eval), images from anywhere, and local media,
+fonts, fetches and frames. Inline style is the one exception there: xterm's DOM renderer,
+Electron's `<webview>` shadow root and `userstyle.js` each add a `<style>` element at run time. The
+guest pages refuse inline style. `reader.html`, which shows another site's article HTML, gets only
+web and `data:` images. `file:` is named rather than `'self'` because a `file://` page has an
+opaque origin. `csp-harness.js` checks every page statically, and `csp-e2e.js` opens each page in
+a test instance and fails on any `securitypolicyviolation`. A new bundled page fails the harness
+until it has a policy.
+
 ## Performance
 
 Measured on this machine, tonight. Cold start is about **550ms** from launch to a booted chrome —
