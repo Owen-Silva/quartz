@@ -57,6 +57,11 @@ const TESTS = [
   // Claude "Skip permission prompts": off on a new profile, the one-time migration that keeps an older
   // profile on, app.js's start arguments and preload's default (settings.js / app.js / preload.js in vm).
   { name: 'claudeskip', file: 'claudeskip-harness.js' },
+  // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
+  { name: 'check-electron', file: 'check-electron-harness.js' },
+  // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,
+  // and nothing in the page or its scripts that the policy would refuse (csp-e2e.js is the live half).
+  { name: 'csp', file: 'csp-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
