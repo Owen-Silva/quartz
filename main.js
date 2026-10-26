@@ -2742,25 +2742,59 @@ app.on('certificate-error', (_event, _contents, url, _error, _certificate, callb
 // ---------------------------------------------------------------------------
 // Ad blocking
 //
-// Ghostery's engine owns session.defaultSession's webRequest hooks, so every
+// The ad-block engine owns session.defaultSession's onBeforeRequest and
+// onHeadersReceived hooks (registered by adblock-hooks.js, once), so every
 // <webview> guest is filtered by the one engine -- there is nothing per-tab to
-// wire up. Two things are ours: the persisted preferences (on/off + a per-site
-// allowlist) and the per-tab "blocked" counters the chrome shows.
+// wire up. Ours besides: the persisted preferences (on/off + a per-site
+// allowlist), the per-tab "blocked" counters the chrome shows, and keeping the
+// filter lists fresh (adblock-refresh.js; the cache never refreshed itself).
 //
 // Cosmetic filtering (hiding the container an ad would have filled) needs a
 // preload inside every guest frame. We do NOT reach for will-attach-webview for
 // that -- that hook deliberately strips any preload a PAGE asks for, and must
-// keep doing so. enableBlockingInSession() registers the library's own preload
-// at the SESSION level instead, which is a separate mechanism and reaches every
+// keep doing so. adblock-hooks.js registers the library's own preload at the
+// SESSION level instead, which is a separate mechanism and reaches every
 // frame including guests.
 // ---------------------------------------------------------------------------
 
 const { ElectronBlocker, NetworkFilter } = require('@ghostery/adblocker-electron');
+const adblockRefresh = require('./adblock-refresh');
+const { createAdblockHooks } = require('./adblock-hooks');
 
-/** Serialized engine. First run fetches the lists; later runs load this. */
+/**
+ * Serialized engine. First run fetches the lists; later runs load this, and
+ * the refresher (adblock-refresh.js) rewrites it once a day.
+ */
 function adblockCachePath() {
   return path.join(app.getPath('userData'), 'adblock-engine.bin');
 }
+
+/** { filters, updatedAt } of the cache, so the shrink check need not re-count it. */
+function adblockMetaPath() {
+  return path.join(app.getPath('userData'), 'adblock-engine.json');
+}
+
+/*
+ * Test profiles only (never read without --test-profile), so an e2e run can
+ * drive a refresh against a local list server:
+ *   QUARTZ_ADBLOCK_LIST_BASE      the list host, in place of Ghostery's
+ *   QUARTZ_ADBLOCK_REFRESH_FORCE  1 = refresh even though the cache is fresh
+ *   QUARTZ_ADBLOCK_REFRESH_DELAY  ms before the first check (default 30 s)
+ *   QUARTZ_ADBLOCK_RETRY_MS       ms before a retry after a failure (default 1 h)
+ */
+const ADBLOCK_TEST = process.argv.includes('--test-profile');
+function adblockTestEnv(name) {
+  return ADBLOCK_TEST ? (process.env[name] || '') : '';
+}
+
+/**
+ * What the shield popover says about the lists. `loadError` is set when the
+ * engine could not be built at startup at all (the refresher keeps trying).
+ */
+let adblockLists = { updatedAt: 0, checkedAt: 0, refreshing: false, error: '', filters: 0, loadError: '' };
+
+/** The one refresher, started by initAdblock() once the startup engine is settled. */
+let adblockRefresher = null;
 
 /** { enabled, allow } -- same lazy-path, best-effort style as window-state. */
 function adblockPrefsPath() {
@@ -2775,8 +2809,12 @@ let blockingOn = false;
 
 let adblockPrefs = { enabled: true, allow: [] };
 
-/** host -> the ids of the exception filters we pushed into the engine for it. */
-const allowFilterIds = new Map();
+/**
+ * host -> the ids of the exception filters we pushed into the engine for it.
+ * Belongs to the engine in `blocker`: a refreshed engine gets a new map built
+ * by finishEngine(), assigned in the same step as the engine itself.
+ */
+let allowFilterIds = new Map();
 
 /** webContents id -> { blocked, host } for the page currently loaded there. */
 const adblockCounts = new Map();
@@ -2841,14 +2879,19 @@ function allowRulesFor(host) {
   return [`@@*$domain=${host}`, `@@||${host}^$elemhide`];
 }
 
-function applyAllowRule(host) {
-  if (!blocker || allowFilterIds.has(host)) return;
+/** Push `host`'s exception filters into `engine`, recording their ids in `ids`. */
+function applyAllowRuleTo(engine, ids, host) {
+  if (!engine || ids.has(host)) return;
   const filters = allowRulesFor(host)
     .map((raw) => NetworkFilter.parse(raw))
     .filter(Boolean);
   if (!filters.length) return;
-  blocker.update({ newNetworkFilters: filters });
-  allowFilterIds.set(host, filters.map((filter) => filter.getId()));
+  engine.update({ newNetworkFilters: filters });
+  ids.set(host, filters.map((filter) => filter.getId()));
+}
+
+function applyAllowRule(host) {
+  applyAllowRuleTo(blocker, allowFilterIds, host);
 }
 
 function removeAllowRule(host) {
@@ -2908,15 +2951,15 @@ const UNBREAK_FILTERS = [
  * for a reason nothing on screen or in the log could explain. Every failure is
  * named instead.
  */
-function applyUnbreakRules() {
-  if (!blocker) return;
+function applyUnbreakRules(engine) {
+  if (!engine) return;
   const filters = [];
   for (const raw of UNBREAK_FILTERS) {
     const parsed = NetworkFilter.parse(raw);
     if (parsed) filters.push(parsed);
     else console.error('[adblock] unbreak filter did not parse, so it is NOT applied:', raw);
   }
-  if (filters.length) blocker.update({ newNetworkFilters: filters });
+  if (filters.length) engine.update({ newNetworkFilters: filters });
 }
 
 /*
@@ -2971,10 +3014,10 @@ function scriptletsAllowedOn(url) {
  * list, so it never calls executeJavaScript on the guest. Wrapping the lookup
  * keeps this independent of when the adapter chooses to inject.
  */
-function dropScriptletsOnBrokenHosts() {
-  if (!blocker) return;
-  const inner = blocker.getCosmeticsFilters.bind(blocker);
-  blocker.getCosmeticsFilters = (args) => {
+function dropScriptletsOnBrokenHosts(engine) {
+  if (!engine) return;
+  const inner = engine.getCosmeticsFilters.bind(engine);
+  engine.getCosmeticsFilters = (args) => {
     const result = inner(args);
     if (result && Array.isArray(result.scripts) && result.scripts.length
         && !scriptletsAllowedOn((args && args.url) || '')) {
@@ -2985,33 +3028,37 @@ function dropScriptletsOnBrokenHosts() {
 }
 
 function adblockState() {
-  return {
+  const state = {
     enabled: adblockPrefs.enabled,
     ready: !!blocker && blockingOn,
     allow: [...adblockPrefs.allow],
+    // When the lists in use were downloaded, whether a refresh is running,
+    // and the plain reason the last one (or the startup load) failed.
+    lists: {
+      updatedAt: adblockLists.updatedAt,
+      refreshing: adblockLists.refreshing,
+      error: adblockLists.error,
+      loadError: blocker ? '' : adblockLists.loadError,
+    },
   };
+  // Test profiles also get the hook counters, so an e2e run can measure them.
+  if (ADBLOCK_TEST) state.hooks = adblockHooks.stats();
+  return state;
 }
 
 /**
- * The library's cosmetic-filter IPC handler answers any frame in the session --
- * including our own chrome, which is a file:// page and would get the generic
- * "hide anything that looks like an ad" stylesheet injected into the UI. Wrap
- * it so only real web pages are served. disable() removes the channel again.
+ * The session hooks (webRequest, the cosmetic preload, its two IPC channels)
+ * are registered once and always call the engine in `blocker` -- see
+ * adblock-hooks.js for why that, and not Ghostery's enableBlockingInSession.
+ * It also keeps the guard that stops the cosmetic stylesheet being injected
+ * into our own file:// chrome.
  */
-function guardCosmeticInjection() {
-  ipcMain.removeHandler('@ghostery/adblocker/inject-cosmetic-filters');
-  ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
-    let scheme = '';
-    try {
-      scheme = new URL(url).protocol;
-    } catch {
-      return undefined;
-    }
-    if (scheme !== 'http:' && scheme !== 'https:') return undefined;
-    if (!blocker) return undefined;
-    return blocker.onInjectCosmeticFilters(event, url, msg);
-  });
-}
+const adblockHooks = createAdblockHooks({
+  ipcMain,
+  preloadPath: path.resolve(require.resolve('@ghostery/adblocker-electron-preload')),
+  getBlocker: () => blocker,
+  log: (line) => { if (qlog) qlog.log.line(line); else console.log('[adblock] ' + line); },
+});
 
 function setBlockingEnabled(on) {
   const sess = session.defaultSession;
@@ -3020,12 +3067,11 @@ function setBlockingEnabled(on) {
     return;
   }
   if (on && !blockingOn) {
-    blocker.enableBlockingInSession(sess);
-    guardCosmeticInjection();
+    adblockHooks.enable(sess);
     blockingOn = true;
   } else if (!on && blockingOn) {
     try {
-      blocker.disableBlockingInSession(sess);
+      adblockHooks.disable();
     } catch {
       // Already gone; the flag below is what the rest of the app reads.
     }
@@ -3034,10 +3080,118 @@ function setBlockingEnabled(on) {
 }
 
 /**
+ * Everything Quartz adds to a raw engine, in one place so the startup engine
+ * and every refreshed one get exactly the same: the blocked-count listener,
+ * no scriptlets on the hosts they break, the always-on unbreak exceptions,
+ * and the user's per-site allowlist. Returns the allowlist's filter ids, which
+ * belong to this engine.
+ */
+function finishEngine(engine) {
+  engine.on('request-blocked', (request) => {
+    // request.tabId is the webContents id of the frame that made the request.
+    countBlocked(request && request.tabId);
+  });
+  dropScriptletsOnBrokenHosts(engine);
+  applyUnbreakRules(engine);
+  const ids = new Map();
+  for (const host of adblockPrefs.allow) applyAllowRuleTo(engine, ids, host);
+  return ids;
+}
+
+/**
+ * Put a refreshed engine in use. finishEngine() runs first, on the new engine
+ * only, so a throw there leaves the old one untouched. The swap itself is two
+ * assignments in one synchronous step: the hooks read `blocker` on every call,
+ * so no request ever sees a missing or doubled listener, and an allowlist edit
+ * cannot land between the two (IPC runs on this same thread).
+ */
+function installRefreshedEngine(next) {
+  const ids = finishEngine(next);
+  blocker = next;
+  allowFilterIds = ids;
+  // Startup failed (offline on a first run): blocking starts now.
+  if (!blockingOn) setBlockingEnabled(adblockPrefs.enabled);
+}
+
+/**
+ * Builds a fresh engine in adblock-build-worker.js and hands back its bytes
+ * and filter count. The worker gets 3 minutes and a heap cap; past either it
+ * is stopped and the refresh fails with that reason.
+ */
+function buildEngineInWorker({ countPrev }) {
+  const { Worker } = require('worker_threads');
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const worker = new Worker(path.join(__dirname, 'adblock-build-worker.js'), {
+      workerData: {
+        kind: 'quartz-adblock-build',
+        listBase: adblockTestEnv('QUARTZ_ADBLOCK_LIST_BASE'),
+        cachePath: adblockCachePath(),
+        countPrev,
+        timeoutMs: 60 * 1000,
+      },
+      resourceLimits: { maxOldGenerationSizeMb: 768 },
+    });
+    const timer = setTimeout(() => {
+      done(reject, adblockRefresh.wordsError('the update took longer than 3 minutes'));
+      worker.terminate().catch(() => {});
+    }, 3 * 60 * 1000);
+    worker.once('message', (msg) => {
+      if (msg && msg.ok) done(resolve, { bytes: msg.bytes, filters: msg.filters, prevFilters: msg.prevFilters });
+      else done(reject, adblockRefresh.wordsError((msg && msg.words) || 'the update stopped without saying why'));
+      worker.terminate().catch(() => {});
+    });
+    worker.once('error', (err) => {
+      const oom = err && /ERR_WORKER_OUT_OF_MEMORY|heap/i.test(String(err.code || err.message));
+      done(reject, oom ? adblockRefresh.wordsError('the new lists needed too much memory') : err);
+    });
+    worker.once('exit', (code) => done(reject, adblockRefresh.wordsError('the update stopped (exit ' + code + ')')));
+  });
+}
+
+function startAdblockRefresher() {
+  if (adblockRefresher) return;
+  const delay = Number(adblockTestEnv('QUARTZ_ADBLOCK_REFRESH_DELAY'));
+  const retry = Number(adblockTestEnv('QUARTZ_ADBLOCK_RETRY_MS'));
+  adblockRefresher = adblockRefresh.createRefresher({
+    force: adblockTestEnv('QUARTZ_ADBLOCK_REFRESH_FORCE') === '1',
+    firstDelayMs: delay >= 0 && adblockTestEnv('QUARTZ_ADBLOCK_REFRESH_DELAY') ? delay : undefined,
+    retryMs: retry > 0 ? retry : undefined,
+    cacheMtime: async () => {
+      try { return (await fs.promises.stat(adblockCachePath())).mtimeMs; } catch { return 0; }
+    },
+    readMeta: async () => JSON.parse(await fs.promises.readFile(adblockMetaPath(), 'utf8')),
+    writeMeta: (meta) => fs.promises.writeFile(adblockMetaPath(), JSON.stringify(meta)),
+    build: buildEngineInWorker,
+    deserialize: (bytes) => ElectronBlocker.deserialize(new Uint8Array(bytes)),
+    save: (bytes) => adblockRefresh.writeAtomic(fs.promises, adblockCachePath(), bytes),
+    install: installRefreshedEngine,
+    onState: (s) => {
+      adblockLists = Object.assign({}, adblockLists, s);
+      if (blocker) adblockLists.loadError = '';
+      send('adblock:state-changed', adblockState());
+    },
+    log: (line) => { if (qlog) qlog.log.line(line); else console.log('[adblock] ' + line); },
+  });
+  adblockRefresher.start().catch(() => {});
+  // The hook counters, once per run, so the cost of the hooks is on record.
+  app.once('will-quit', () => {
+    try {
+      const words = adblockHooks.summaryWords();
+      if (words && qlog) qlog.log.line(words);
+    } catch { /* the log may already be closed */ }
+  });
+}
+
+/**
  * Built once at startup and never awaited by window creation: a first run has
  * to fetch ~3 MB of filter lists, and the browser must be usable meanwhile.
- * Offline with no cache simply leaves the engine null -- everything else here
- * degrades to "blocking unavailable" rather than failing.
+ * Offline with no cache leaves the engine null -- the shield says so with the
+ * reason, and the refresher keeps trying (hourly) to build one.
+ *
+ * The startup engine always comes off the cache when there is one, however
+ * old: freshness is the refresher's job, in the background, after startup.
  */
 async function initAdblock() {
   adblockPrefs = readAdblockPrefs();
@@ -3045,31 +3199,35 @@ async function initAdblock() {
   const t0 = Date.now();
   let fromCache = false;
   try { fromCache = fs.existsSync(adblockCachePath()); } catch { /* unknown: says downloaded */ }
+  let engine = null;
   try {
-    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+    engine = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
       path: adblockCachePath(),
       read: fs.promises.readFile,
       write: fs.promises.writeFile,
     });
   } catch (err) {
-    console.error('[adblock] engine unavailable:', (err && err.message) || err);
-    if (qlog) qlog.adblock({ ok: false, reason: (err && err.message) || String(err) });
+    const reason = (err && err.message) || String(err);
+    console.error('[adblock] engine unavailable:', reason);
     blocker = null;
+    adblockLists.loadError = adblockRefresh.failureWords(err);
+    // Not qlog.adblock({ ok: false }): its line says "until Quartz starts
+    // again", and the refresher below now retries without a restart.
+    if (qlog) {
+      qlog.log.line('The ad blocker could not load (' + adblockRefresh.oneLine(reason, 160)
+        + '); pages load with no blocking until it can. It tries again shortly, then every hour.');
+    }
     send('adblock:state-changed', adblockState());
+    startAdblockRefresher();
     return;
   }
   if (qlog) qlog.adblock({ ok: true, ms: Date.now() - t0, fromCache, enabled: adblockPrefs.enabled });
 
-  blocker.on('request-blocked', (request) => {
-    // request.tabId is the webContents id of the frame that made the request.
-    countBlocked(request && request.tabId);
-  });
-
-  dropScriptletsOnBrokenHosts();
-  applyUnbreakRules();
-  for (const host of adblockPrefs.allow) applyAllowRule(host);
+  allowFilterIds = finishEngine(engine);
+  blocker = engine;
   setBlockingEnabled(adblockPrefs.enabled);
   send('adblock:state-changed', adblockState());
+  startAdblockRefresher();
 }
 
 function hostOfUrl(url) {
