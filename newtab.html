@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Content-Security-Policy: only the page's own script files run. Images and the
+     moving background may come from a file, data:, blob: or the web, because the
+     user can pick any of those as a background; nothing else is fetched. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src file: data: blob: https: http:; media-src file: data: blob: https: http:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>New tab</title>
 <!-- Sets data-theme on <html> and paints ?hue= over the --ion* tokens.
      Must stay the first script, and must stay above the stylesheet, or a

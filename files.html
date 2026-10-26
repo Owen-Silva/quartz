@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Content-Security-Policy: own script files only; row icons arrive as data: URLs
+     from main, so nothing is loaded from the network. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src file: data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Files</title>
 <!-- Sets data-theme and data-palette on <html> from ?theme= and ?palette=
      before anything paints, so a light window never flashes dark and a

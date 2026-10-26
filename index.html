@@ -3,6 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Content-Security-Policy for the chrome. This document reaches a terminal
+       (window.api.pty), the file system and the updater through preload, so a
+       single injected script here would be code execution on the machine. The
+       policy makes that much harder: only script FILES run (no inline script,
+       no on*= handlers, no javascript: URLs, no eval / new Function), and
+       nothing can be loaded from or posted to the network except images.
+       Must stay above the first <script>: a meta policy only governs what
+       comes after it.
+         script-src file:          the app's own .js files. Written as file:
+                                   rather than 'self' because a file:// page
+                                   has an opaque origin and 'self' is not a
+                                   portable way to name it.
+         style-src 'unsafe-inline' unavoidable: xterm's DOM renderer, Electron's
+                                   own <webview> shadow root and the user's
+                                   chrome CSS (userstyle.js) each add a
+                                   <style> element whose text is built at run
+                                   time, so no hash or nonce can cover it.
+                                   (el.style.x = ... is CSSOM and needs nothing.)
+         img-src https: http:      site avatars and thumbnails in the Lumen
+                                   player views; file:/data:/blob: for
+                                   backgrounds, favicons and previews.
+         media-src file:           local music and the moving background.
+         connect-src file: data:   backdrop.js decodes a picture with fetch().
+         frame-src file:           the notes pane's iframe fallback. <webview>
+                                   guests are their own documents and are not
+                                   governed by this policy.
+       Everything else falls back to default-src 'none'. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; img-src file: data: blob: https: http:; media-src file: data: blob:; font-src file: data:; connect-src file: data: blob:; frame-src file:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <!-- Sets data-theme on <html> before the stylesheets apply, so light never flashes dark. -->
   <script src="theme-boot.js"></script>
   <title>Quartz</title>
