@@ -3281,8 +3281,9 @@
     ));
 
     field.appendChild(el('p', 'set-hint',
-      'Sleeping tabs free their memory and reload when you come back. ' +
-      'Pinned tabs and tabs playing sound stay awake.'));
+      'Sleeping tabs free their memory and reload when you come back. The time counts from when ' +
+      'you leave a tab. Pinned tabs and tabs making sound (or heard in the last 2 minutes) stay awake. ' +
+      'After a restart only the tab in front loads; the rest wake when clicked.'));
   }
 
   function buildDownloads() {

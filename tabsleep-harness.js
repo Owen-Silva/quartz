@@ -255,5 +255,6 @@ function sweepUntil(api, from, to, id) {
   ok('bug2: media-paused stamps lastAudibleAt', /if \(tab\.audible\) tab\.lastAudibleAt = Date\.now\(\);\s*setTabAudible\(tab, false\)/.test(src));
 }
 
-console.log('\n' + pass + ' pass / ' + fail + ' fail');
+// The suite's summary-line format (tools/run-suite.js): "<name>: N passed, M failed".
+console.log('\ntabsleep: ' + pass + ' passed, ' + fail + ' failed');
 process.exitCode = fail ? 1 : 0;

@@ -75,6 +75,9 @@ const TESTS = [
   { name: 'profilemove', file: 'profilemove-harness.js' },
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
+  // Tab sleep rules: the idle clock starts when a tab leaves the screen, a tab making sound (or heard in
+  // the last 2 minutes) never sleeps, lazy restore and the backgrounded new tab page.
+  { name: 'tabsleep', file: 'tabsleep-harness.js' },
   // look-sync's reads and writes when Windows refuses look.json for a moment (scanner, another app):
   // a refused read is retried and re-checked, so a change that landed is followed, never lost.
   { name: 'looksync', file: 'looksync-harness.js' },
@@ -163,7 +166,7 @@ const TESTS = [
   // The first-run welcome: fresh profile shows it, choices persist, skip sets the flag, an existing
   // profile never sees it, Settings re-opens it. Screenshots of every step, light and dark.
   { name: 'welcome-e2e', file: 'welcome-e2e.js', e2e: true },
-  // The motion Quartz shares with Mantle and Helm (next-week/motion-unison.md): the tokens, every
+  // The motion Quartz shares with Mantle and Helm: the tokens, every
   // surface opening and closing on opacity/translate/scale only, cut short and toggled, reduced
   // motion, the tab strip's arrival and glide.
   { name: 'motion-e2e', file: 'motion-e2e.js', e2e: true },
