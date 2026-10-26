@@ -1,0 +1,148 @@
+# The test suite on GitHub's runners (tools/run-suite.js; one "quartz-suite: N files: ..." verdict line).
+#
+#   unit  every push and pull request: the pure-node harnesses (`run-suite.js --unit`), no Electron.
+#   full  nightly and on demand (Actions > ci > Run workflow): every harness, then every Electron e2e in
+#         a real off-screen --test-profile instance, one at a time, on the castlabs build.
+#
+# Both run on windows-latest. Quartz is a Windows app and several unit harnesses exercise Windows itself
+# (they spawn powershell.exe, make real junctions and file locks, and expect case-insensitive paths), so
+# an Ubuntu job would test a platform Quartz does not run on.
+#
+# A run is judged by the verdict line, never by the exit code alone: no verdict line, or any FAIL in it,
+# fails the job. The verdict and every FAIL / SKIP line (each with its reason) go to the run's summary page.
+#
+# Every action is pinned to a full commit SHA; the comment names the release it was taken from.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '17 7 * * *' # nightly, 07:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run it supersedes. The event is part of the key so a
+# push never cancels the nightly full run, nor the other way round.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    # Like oss-guard: Actions minutes are free only while the repository is public.
+    if: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && !github.event.repository.private }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      # --ignore-scripts: no castlabs Electron download (electron/install.js) and no Quartz.exe stamping
+      # (postinstall: tools/make-quartz-exe.js). No unit harness needs either; node-pty's native build is
+      # not needed either (the one test that opens a terminal is an e2e and skips itself without it).
+      - name: Install (no install scripts)
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: Unit suite
+        run: |
+          set +e
+          node tools/run-suite.js --unit --out=suite-out 2>&1 | tee suite-log.txt
+          echo "run-suite exit code: ${PIPESTATUS[0]}"
+          exit 0
+
+      - name: Verdict
+        run: |
+          verdict=$(grep '^quartz-suite: ' suite-log.txt | tail -n 1)
+          {
+            echo '### Unit suite'
+            echo
+            echo '```'
+            echo "${verdict:-quartz-suite: NO VERDICT LINE (the runner crashed or was killed; see the log)}"
+            grep -E '^(FAIL|SKIP) |^       ' suite-log.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$verdict" ]; then echo "::error::no quartz-suite verdict line"; exit 1; fi
+          if ! echo "$verdict" | grep -q ' 0 FAIL,'; then echo "::error::$verdict"; exit 1; fi
+          echo "$verdict"
+
+      - name: Upload logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-suite-out
+          path: |
+            suite-log.txt
+            suite-out/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  full:
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !github.event.repository.private }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      # npm blocks Electron's own install script on the runner, so install with --ignore-scripts and run
+      # the castlabs ECS download by hand. Quartz.exe is not needed: the e2e tests launch electron.exe.
+      - name: Install, then the castlabs Electron build
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          node node_modules/electron/install.js
+          ls -l node_modules/electron/dist/electron.exe
+          node -p "'electron ' + require('./node_modules/electron/package.json').version"
+
+      # Each e2e launches its own off-screen instance (--test-profile --profile-name=<its own> --offscreen,
+      # its own debugging port) and deletes that throwaway profile afterwards; run-suite runs them one at a time.
+      - name: Full suite
+        run: |
+          set +e
+          node tools/run-suite.js --out=suite-out 2>&1 | tee suite-log.txt
+          echo "run-suite exit code: ${PIPESTATUS[0]}"
+          exit 0
+
+      - name: Verdict
+        run: |
+          verdict=$(grep '^quartz-suite: ' suite-log.txt | tail -n 1)
+          {
+            echo '### Full suite (unit + Electron e2e)'
+            echo
+            echo '```'
+            echo "${verdict:-quartz-suite: NO VERDICT LINE (the runner crashed or was killed; see the log)}"
+            grep -E '^(FAIL|SKIP) |^       ' suite-log.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$verdict" ]; then echo "::error::no quartz-suite verdict line"; exit 1; fi
+          if ! echo "$verdict" | grep -q ' 0 FAIL,'; then echo "::error::$verdict"; exit 1; fi
+          echo "$verdict"
+
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: full-suite-out
+          path: |
+            suite-log.txt
+            suite-out/
+          retention-days: 14
+          if-no-files-found: ignore
