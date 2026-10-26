@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Content-Security-Policy: own script files only; the one connection allowed is
+     the browser's own loopback WebSocket (phone.js, ws://127.0.0.1:<port>). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src data:; connect-src ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Phone</title>
 <!-- Sets data-theme on <html> from ?theme= before anything paints, exactly as
      newtab.html and reader.html do. Must stay the first script and must stay

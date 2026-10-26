@@ -140,16 +140,25 @@
     }
 
     if (els.content) {
-      els.content.innerHTML = String(article.content || '');
+      // Parse into an inert <template> first, sweep it, and only then move it
+      // into the page. A template's content belongs to a document with no
+      // window: nothing in it loads, and nothing in it is checked against this
+      // page's Content-Security-Policy yet. So an article's own style="..."
+      // attributes (which the strict policy would refuse, one console error
+      // each) and any image with a bad URL are gone before the live page sees
+      // them, instead of being swept after they were already parsed live.
+      var tpl = document.createElement('template');
+      tpl.innerHTML = String(article.content || '');
+      var frag = tpl.content;
       // Belt and braces: innerHTML never runs a <script>, but it does leave it
       // in the tree for anything later to move into a document that would.
       // The chrome already sanitised the string, but serialise-then-reparse is
-      // the classic mXSS trick: sweep the LIVE tree too, with the same rules.
-      var unsafe = els.content.querySelectorAll(
+      // the classic mXSS trick: sweep the parsed tree too, with the same rules.
+      var unsafe = frag.querySelectorAll(
         'script, iframe, object, embed, noscript, style, link, meta, base, frame, frameset, form'
       );
       for (var i = 0; i < unsafe.length; i++) unsafe[i].remove();
-      var all = els.content.querySelectorAll('*');
+      var all = frag.querySelectorAll('*');
       var urlAttrs = ['href', 'src', 'srcset', 'action', 'formaction', 'xlink:href', 'poster', 'data'];
       for (var j = 0; j < all.length; j++) {
         var el = all[j];
@@ -166,6 +175,9 @@
           }
         }
       }
+      // Clean now: replace whatever was there (a second article reuses the page).
+      els.content.textContent = '';
+      els.content.appendChild(frag);
       els.content.classList.add('is-filled');
     }
 

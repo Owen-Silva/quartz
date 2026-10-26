@@ -5,6 +5,18 @@ const { contextBridge, ipcRenderer } = require('electron');
 // This user's home folder (the chrome's preload runs unsandboxed, so it may require 'os').
 const HOME_DIR = require('os').homedir();
 
+// When this Electron (and so its Chromium) was built: the release zip stamps dist/version with its
+// build time and the install keeps it. Settings > About turns it into "built N days ago". '' when it
+// cannot be read: About then says so and shows the versions only (no guess, no network call).
+function electronBuilt() {
+  try {
+    const path = require('path');
+    return require('fs').statSync(path.join(path.dirname(process.execPath), 'version')).mtime.toISOString();
+  } catch (e) {
+    return '';
+  }
+}
+
 // Claude chambers start with --dangerously-skip-permissions only once the
 // renderer has said the Settings switch is on (api.pty.setPrefs). Until then
 // nothing is skipped, so a new profile (switch off by default) never has a
@@ -154,7 +166,8 @@ contextBridge.exposeInMainWorld('api', {
     versions: () => ({
       electron: process.versions.electron,
       chrome: process.versions.chrome,
-      node: process.versions.node
+      node: process.versions.node,
+      built: electronBuilt()
     })
   },
   // In-app updates (updater-main.js <-> updater-chrome.js). Every call answers the whole state

@@ -62,6 +62,11 @@ const TESTS = [
   { name: 'askclaude', file: 'askclaude-harness.js' },
   // The same in a real Quartz: Ask with a break-out selection lands inert in a page-text chamber.
   { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
+  // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
+  { name: 'check-electron', file: 'check-electron-harness.js' },
+  // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,
+  // and nothing in the page or its scripts that the policy would refuse (csp-e2e.js is the live half).
+  { name: 'csp', file: 'csp-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
@@ -141,6 +146,8 @@ const TESTS = [
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
   { name: 'uvboost-e2e', file: 'uvboost-e2e.js', e2e: true },
+  // Every bundled page under its CSP in a real instance: zero violations, the policy proven active.
+  { name: 'csp-e2e', file: 'csp-e2e.js', e2e: true, timeout: 240 },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },

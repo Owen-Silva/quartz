@@ -8329,19 +8329,51 @@
     return where;
   }
 
+  /**
+   * How old the Chromium inside this build is, in one plain sentence for About.
+   *
+   * Chromium security fixes reach Quartz only when its Electron is updated (it is pinned to a
+   * castlabs build for Widevine; the policy is in docs/engineering-notes.md), so the age of the
+   * build is the honest measure of how current the engine is. The date comes from
+   * window.api.app.versions().built: the build time Electron's own release files carry, read
+   * from disk by preload. Nothing is fetched for this; no network call is made from About.
+   * When the date is not there (an older preload), the sentence says so instead of guessing.
+   *
+   * v: the versions object (or null); now: a Date. Pure, so it can be exercised without a window.
+   */
+  function chromiumAgeLine(v, now) {
+    var engine = (v && v.chrome) ? 'Chromium ' + v.chrome : 'This Chromium';
+    var built = v && v.built ? new Date(v.built) : null;
+    if (!built || isNaN(built.getTime())) {
+      return 'How old ' + (v && v.chrome ? 'Chromium ' + v.chrome : 'this Chromium') +
+        ' is cannot be shown: this window did not report when its Electron was built.';
+    }
+    var days = Math.max(0, Math.floor((now.getTime() - built.getTime()) / 86400000));
+    var when = built.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    var age = days === 0 ? 'today' : days === 1 ? 'yesterday' :
+      days < 14 ? days + ' days ago' : days < 70 ? Math.floor(days / 7) + ' weeks ago' : Math.floor(days / 30) + ' months ago';
+    var sentence = engine + ' was built on ' + when + ' (' + age + ').';
+    if (days > 21) {
+      sentence += ' Chromium ships security fixes every week or two, so a build this old is probably missing some.';
+    }
+    return sentence;
+  }
+
   function buildAbout() {
     /* The one section with no fold: plain heading, always open (the user's call). */
     var s = plainSection('About');
     var line = 'Quartz';
     var app = window.api && window.api.app;
+    var v = null;
     if (app && typeof app.versions === 'function') {
       try {
-        var v = app.versions() || {};
+        v = app.versions() || {};
         if (v.electron) line += ' · Electron ' + v.electron;
         if (v.chrome) line += ' · Chromium ' + v.chrome;
-      } catch (err) { /* older preload: the bare name is still true */ }
+      } catch (err) { v = null; /* older preload: the bare name is still true */ }
     }
     s.appendChild(el('p', 'set-about', line));
+    s.appendChild(el('p', 'set-hint', chromiumAgeLine(v, new Date())));
 
     /* Where the profile lives, and the one-time move from %APPDATA%\browser
        to %APPDATA%\Quartz when it happened. That move renames the folder with

@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Content-Security-Policy, strict on purpose: this page shows another site's
+     article HTML (sanitised twice, see reader.js and reader-page.js). Even if
+     something slipped through both, no script but the page's own files runs,
+     no inline style applies, and only the article's images load. No media,
+     frames, fonts or connections at all. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file:; img-src https: http: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Reader</title>
 <!-- Sets data-theme on <html> from ?theme=, before anything paints, so a light
      window never flashes dark. Shared with newtab.html: the file reads ?theme=
