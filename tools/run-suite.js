@@ -136,6 +136,8 @@ const TESTS = [
   { name: 'uvquiet-e2e', file: 'uvquiet-e2e.js', e2e: true },
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
   { name: 'uvboost-e2e', file: 'uvboost-e2e.js', e2e: true },
+  // Every bundled page under its CSP in a real instance: zero violations, the policy proven active.
+  { name: 'csp-e2e', file: 'csp-e2e.js', e2e: true, timeout: 240 },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
