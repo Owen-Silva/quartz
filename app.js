@@ -8249,7 +8249,7 @@ function canSleepInWorkspace(tab, mode) {
   // A real page loses its forms and its session on the way back (only its scroll is kept),
   // so 'all' spares exactly what the idle sweep spares.
   if (tab.pinned) return false;
-  if (tab.audible) return false;
+  if (tabSoundReason(tab)) return false; // Chromium's audibility, not the media hint
   return true;
 }
 
@@ -8304,6 +8304,142 @@ function sleepIdleWorkspaces() {
   return slept;
 }
 
+/*
+ * A new tab page that goes to the background IN THE WORKSPACE ON SCREEN.
+ *
+ * Leaving a workspace already puts its new tab pages down at once; inside the
+ * workspace one stays, nothing ever slept one (canSleepTab() spares it as
+ * "nothing to reload", and the workspace sweep skips the workspace on screen).
+ * Every leftover new tab page is a whole renderer plus its moving picture's
+ * layers in the GPU process, and new tabs are opened far more often than they
+ * are closed: Ctrl+T, then a link, then another Ctrl+T.
+ *
+ * So one that has been in the background for NEWTAB_SLEEP_GRACE_MS is slept.
+ * The grace is there for the quick look away and back (Ctrl+Tab, a glance at
+ * another tab): waking is a fresh load, cheap but not free, and nothing is
+ * gained by doing it every few seconds. Waking is the same path the workspace
+ * policy has always used: wakeTab() builds a FRESH new tab page on today's
+ * theme, and its dom-ready pushes everything the Home holds (theme, settings,
+ * layout, Saved row, background, apps, history, readout, music, media) and
+ * re-takes the stats subscription, which only ever follows the page in front.
+ *
+ * The one thing a fresh page cannot get back is something typed into it (the
+ * Saved row's add field, the dock's search, a sticky-note draft) or a dialog
+ * left open. HOME_BUSY_PROBE asks the page first; a page holding either stays
+ * awake and is asked again after NEWTAB_SLEEP_RETRY_MS.
+ */
+const NEWTAB_SLEEP_GRACE_MS = 15000;
+const NEWTAB_SLEEP_RETRY_MS = 60000;
+const HOME_BUSY_PROBE = '(() => {'
+  + 'for (const el of document.querySelectorAll("input, textarea")) {'
+  + '  const t = (el.type || "").toLowerCase();'
+  + '  if (t === "hidden" || t === "checkbox" || t === "radio" || t === "range" || t === "button") continue;'
+  + '  if (el.value && el.value !== el.defaultValue) return "unsaved text";'
+  + '}'
+  + 'for (const el of document.querySelectorAll("[contenteditable]")) {'
+  + '  if (el.isContentEditable && (el.textContent || "").trim()) return "unsaved text";'
+  + '}'
+  + 'if (document.querySelector("dialog[open]")) return "an open dialog";'
+  + 'return "";'
+  + '})()';
+
+/**
+ * Pure: what to do with a backgrounded new tab page right now. The harness
+ * runs this from the source. `f` is a bag of plain facts about the tab.
+ * @returns {'sleep'|'probe'|'retry'|'skip'}
+ *   'probe' = eligible: ask HOME_BUSY_PROBE, then sleep unless it objects.
+ *   'retry' = not settled yet (still loading): look again later.
+ *   'skip'  = not this rule's tab any more; nothing is rescheduled.
+ */
+function newTabSleepVerdict(f) {
+  if (!f || f.gone) return 'skip';             // closed meanwhile
+  if (!f.allowed) return 'skip';               // a sleep setting is off
+  if (f.asleep || f.onScreen) return 'skip';   // already down, or back in front
+  if (!f.newTab) return 'skip';                // navigated: the idle rule owns it now
+  if (!f.inCurrentWorkspace) return 'skip';    // the workspace policy owns it
+  if (f.broken) return 'skip';                 // its card IS the page
+  if (!f.ready) return 'retry';                // no guest to give back yet
+  return 'probe';
+}
+
+/** Start (or restart) the grace clock on a new tab page that just left the front. */
+function scheduleNewTabSleep(tab, delay) {
+  if (!tab || tab.kind !== 'page') return;
+  cancelNewTabSleep(tab);
+  tab.newTabSleepTimer = setTimeout(() => {
+    tab.newTabSleepTimer = 0;
+    sleepBackgroundNewTab(tab);
+  }, delay === undefined ? NEWTAB_SLEEP_GRACE_MS : delay);
+}
+
+function cancelNewTabSleep(tab) {
+  if (tab && tab.newTabSleepTimer) {
+    clearTimeout(tab.newTabSleepTimer);
+    tab.newTabSleepTimer = 0;
+  }
+}
+
+/** activateTab()'s hook: the tab it is moving away from, if it is a new tab page. */
+function noteTabBackgrounded(tab) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return;
+  if (!isNewTabUrl(readCurrentUrl(tab) || tab.url)) return;
+  scheduleNewTabSleep(tab);
+}
+
+function newTabSleepFacts(tab) {
+  return {
+    gone: tabs.indexOf(tab) === -1,
+    allowed: backgroundSleepAllowed(),
+    asleep: !!tab.asleep,
+    onScreen: tab.id === activeTabId || isTabOnScreen(tab),
+    newTab: isNewTabUrl(readCurrentUrl(tab) || tab.url),
+    inCurrentWorkspace: tabWorkspace(tab) === currentWorkspaceId,
+    broken: !!tab.broken,
+    ready: isViewUsable(tab)
+  };
+}
+
+/**
+ * The grace clock ran out. Re-checks everything (a lot can happen in fifteen
+ * seconds), asks the page whether it holds anything a fresh page would lose,
+ * and checks again when the answer comes back.
+ */
+function sleepBackgroundNewTab(tab) {
+  const verdict = newTabSleepVerdict(newTabSleepFacts(tab));
+  if (verdict === 'retry') { scheduleNewTabSleep(tab, NEWTAB_SLEEP_RETRY_MS); return verdict; }
+  if (verdict !== 'probe') return verdict;
+  const viewEl = tab.viewEl;
+  const settle = (busy) => {
+    // The answer is for THIS guest, in the background, still a new tab page.
+    if (tab.viewEl !== viewEl) return;
+    if (newTabSleepVerdict(newTabSleepFacts(tab)) !== 'probe') return;
+    if (busy) {
+      // Kept awake on purpose, not a failure: the chip stays lit (awake is
+      // what it shows) and the log says why, once per try.
+      logEvent('tab-sleep-skipped', { url: tab.url, why: 'newtab-left', reason: String(busy) });
+      scheduleNewTabSleep(tab, NEWTAB_SLEEP_RETRY_MS);
+      return;
+    }
+    if (!sleepTab(tab, 'newtab-left')) {
+      logEvent('tab-sleep-skipped', { url: tab.url, why: 'newtab-left', reason: 'sleepTab refused' });
+      return;
+    }
+    // Nothing here was subscribed for a background page, but the sampler and
+    // the board both key off the live guests: let them see this one is gone.
+    syncStatsSubscription();
+    syncBoardPause();
+  };
+  let pending = null;
+  try { pending = viewEl.executeJavaScript(HOME_BUSY_PROBE); } catch (err) { pending = null; }
+  if (!pending || typeof pending.then !== 'function') {
+    // Could not ask: a page that cannot answer is not one to lose state from.
+    scheduleNewTabSleep(tab, NEWTAB_SLEEP_RETRY_MS);
+    return 'retry';
+  }
+  pending.then((busy) => settle(busy), () => scheduleNewTabSleep(tab, NEWTAB_SLEEP_RETRY_MS));
+  return verdict;
+}
+
 /** How many of a workspace's tabs are asleep. The popover puts this on the row. */
 function workspaceAsleepCount(id) {
   const want = validWorkspaceId(id);
@@ -8337,10 +8473,96 @@ function tabSleepMinutes() {
   return minutes;
 }
 
-/** When this tab was last in front — its creation time until it ever has been. */
+/**
+ * When this tab was last ON SCREEN: its creation time until it ever has been.
+ * lastActive is stamped when a tab LEAVES the screen (noteScreenEdges), not
+ * only when it is raised. It used to be stamped on activation alone, so a tab
+ * read for 20 minutes and then switched away from already counted as 20
+ * minutes idle and went down at the very next sweep.
+ */
 function tabIdleSince(tab) {
   if (!tab) return 0;
   return tab.lastActive || tab.openedAt || 0;
+}
+
+/**
+ * Restart the idle clock of every tab that is on screen now or was at the last
+ * look. Called on every edge that can take a tab off screen: activateTab()
+ * (a tab switch, and so a workspace switch), refreshSplit() (a split closing
+ * or its halves changing) and the start of each idle sweep. A tab on screen,
+ * the other half of a split included, keeps counting as just used. An edge no
+ * caller sees is caught by the next sweep, which can only make the tab sleep
+ * LATER than its time, never earlier. Window blur and minimise do not count:
+ * isTabOnScreen() is about the strip, and the tab in front never sleeps.
+ */
+function noteScreenEdges(now) {
+  const t = now || Date.now();
+  for (const tab of tabs) {
+    const shown = isTabOnScreen(tab);
+    if (shown || tab.wasOnScreen) tab.lastActive = t;
+    tab.wasOnScreen = shown;
+  }
+}
+
+/*
+ * Is this tab making sound? tab.audible follows the <webview>'s
+ * media-started-playing / media-paused, and those are per webContents, fired
+ * for EVERY media element: one element pausing (an ad ending, a hover preview,
+ * a quality switch, a rebuffer) sets the flag false while the main stream is
+ * still playing, and Web Audio (games, many radio and music players) never
+ * sets it at all. So it is a hint, not the answer. The answer is Chromium's
+ * own audibility, the same signal as Chrome's speaker icon:
+ * <webview>.isCurrentlyAudible(), read at the moment it matters.
+ *
+ * A tab that STOPPED making sound less than AUDIBLE_SPARE_MS ago is spared too,
+ * so a pause between tracks or an ad break does not lose it. The sound is
+ * looked at once per sweep (observeTabSound) and on every media-paused, so the
+ * window is measured from the last time it was SEEN making sound, plus one
+ * sweep of slack: a tab is never slept less than AUDIBLE_SPARE_MS after its
+ * sound really stopped.
+ */
+const AUDIBLE_SPARE_MS = 2 * 60000;
+
+/** Chromium's audibility of this tab's guest, right now. False with no guest. */
+function viewAudibleNow(tab) {
+  if (!isViewUsable(tab)) return false;
+  const viewEl = tab.viewEl;
+  if (typeof viewEl.isCurrentlyAudible !== 'function') return false;
+  // Strictly true: the call is synchronous on Electron 44's <webview>, and if
+  // a future one made it a Promise, a truthy Promise must not read as "always
+  // playing" (nothing would ever sleep again). The media flag still applies.
+  try { return viewEl.isCurrentlyAudible() === true; } catch (err) { return false; }
+}
+
+/** Look at one tab's sound and remember when it was last heard. */
+function noteTabSound(tab, now) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return false;
+  if (tab.audible || viewAudibleNow(tab)) {
+    tab.lastAudibleAt = now || Date.now();
+    return true;
+  }
+  return false;
+}
+
+/** Once per sweep: every awake page's sound, so the spare window has a clock. */
+function observeTabSound(now) {
+  const t = now || Date.now();
+  for (const tab of tabs) noteTabSound(tab, t);
+}
+
+/**
+ * Why this tab must not be slept for its sound, or '' when it may.
+ * Every sleep path asks this (canSleepTab, canSleepInWorkspace, and sleepTab()
+ * itself at the moment of sleeping).
+ */
+function tabSoundReason(tab, now) {
+  if (!tab || tab.kind !== 'page' || tab.asleep) return '';
+  const t = now || Date.now();
+  if (noteTabSound(tab, t)) return 'making sound';
+  if (tab.lastAudibleAt && t - tab.lastAudibleAt < AUDIBLE_SPARE_MS + TAB_SLEEP_SWEEP_MS) {
+    return 'made sound in the last 2 minutes';
+  }
+  return '';
 }
 
 /**
@@ -8355,8 +8577,8 @@ function canSleepTab(tab) {
   if (tab.asleep) return false;
   if (tab.id === activeTabId) return false;
   if (tab.pinned) return false;
-  if (tab.audible) return false;
   if (tab.broken) return false;
+  if (tabSoundReason(tab)) return false; // playing, or did so in the last 2 min
   // The other half of the split on screen is as visible as the active tab is.
   if (isTabOnScreen(tab)) return false;
   if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return false;
@@ -8383,6 +8605,16 @@ function sleepTab(tab, why) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   if (tab.id === activeTabId) return false; // the tab on screen is never asleep
   if (!viewsEl || !tab.viewEl) return false;
+  // Sound, checked at the moment of sleeping whatever asked for it: the rules
+  // that picked this tab may have looked a minute ago, and the media flag can
+  // be wrong in both directions (see tabSoundReason). The Sleep tab menu item
+  // is disabled with this same reason, so nothing a user clicks lands here.
+  const sound = tabSoundReason(tab);
+  if (sound) {
+    logEvent('tab-sleep-skipped', { url: readCurrentUrl(tab) || tab.url, why: why || 'asked', reason: sound });
+    return false;
+  }
+  const heardAgo = tab.lastAudibleAt ? Date.now() - tab.lastAudibleAt : null;
 
   // Giving the guest back would leave half a split pointing at a placeholder,
   // so the pair breaks up first and the partner goes back to a well of its own.
@@ -8408,6 +8640,7 @@ function sleepTab(tab, why) {
   tab.viewEl = placeholder;
   tab.ready = false;
   tab.asleep = true;
+  cancelNewTabSleep(tab); // whatever put it down, the grace clock has nothing left to do
   setTabLoading(tab, false); // a load in flight died with the guest
   forgetTabAudio(tab);       // ...and so did any sound it was making
   if (tab.chipEl) {
@@ -8416,7 +8649,13 @@ function sleepTab(tab, why) {
   }
   saveSession(); // the snapshotted url may be newer than the last write
   tab.sleptAt = Date.now();
-  logEvent('tab-slept', { url: tab.url, why: why || 'asked' }); // quartz.log
+  // quartz.log, with the sound state it was judged on, so a "my stream went to
+  // sleep" report can be read straight off the log.
+  logEvent('tab-slept', {
+    url: tab.url, why: why || 'asked', audible: false,
+    sound: heardAgo === null ? 'was not making sound'
+      : 'last made sound ' + Math.round(heardAgo / 1000) + ' s before'
+  });
   return true;
 }
 
@@ -8501,7 +8740,12 @@ function restoreScrollOnLoad(tab, viewEl, keep) {
 function sleepIdleTabs() {
   const minutes = tabSleepMinutes();
   if (!minutes) return 0; // 0 = never
-  const cutoff = Date.now() - minutes * 60000;
+  const now = Date.now();
+  // Clocks first: whatever is on screen now (or left it by a path nobody told
+  // us about) has just been used, and every awake page's sound is looked at.
+  noteScreenEdges(now);
+  observeTabSound(now);
+  const cutoff = now - minutes * 60000;
   let slept = 0;
   // A copy: sleepTab() only swaps one element, but the sweep should not care.
   for (const tab of tabs.slice()) {
@@ -8822,6 +9066,9 @@ function syncSplitOverlays() {
 
 /** Everything a split has to re-do after any change: one call, idempotent. */
 function refreshSplit() {
+  // A split closing or its halves changing takes a tab off screen: its idle
+  // clock starts now, not at the last time it was raised.
+  noteScreenEdges();
   applySplitLayout();
   syncSplitOverlays();
   // Splitting, unsplitting and dragging the divider all resize the well, and a
@@ -9597,6 +9844,13 @@ function activateTab(id) {
   const targetWs = tabWorkspace(target);
   let workspaceMoved = false;
   if (targetWs !== currentWorkspaceId) {
+    // The workspace clock has the same edge as the tab clock: it starts when a
+    // workspace stops being on screen. switchWorkspace() stamps it; raising a
+    // tab from another workspace (a restore, a reopened tab, a module reaching
+    // in) did not, so the workspace left this way read as "left at boot" and
+    // 'all' could sleep its pages at the next sweep.
+    workspaceLeftAt.set(currentWorkspaceId, Date.now());
+    workspaceLeftAt.delete(targetWs);
     currentWorkspaceId = targetWs;
     unsplitAcrossWorkspaces();
     syncChipWorkspaces();
@@ -9685,6 +9939,13 @@ function activateTab(id) {
   syncStatsSubscription();
   // ...and only the new-tab page(s) on screen keep their board running.
   syncBoardPause();
+  // A new tab page that just went to the background sleeps after a short
+  // grace (sleepBackgroundNewTab); the one coming forward stops its clock.
+  cancelNewTabSleep(target);
+  // Every tab that just left the screen (the outgoing one, its split partner,
+  // a whole workspace's front tab) starts its idle clock NOW.
+  noteScreenEdges();
+  if (outgoing && outgoing !== target) noteTabBackgrounded(outgoing);
   if (workspaceMoved) emitWorkspaceChange();
 }
 
@@ -10076,7 +10337,11 @@ function tabMenuItemsForTab(tab) {
     // there: disabled on a tab that is not allowed to sleep right now.
     items.push(tab.asleep
       ? { label: 'Wake tab', run: () => wakeTab(tab) }
-      : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) });
+      // Playing (or just stopped): disabled, and the label says why. Sleeping
+      // would silently cut the sound off, which no sleep path may do.
+      : (tabSoundReason(tab)
+        ? { label: 'Sleep tab (not while it is playing sound)', run: () => {}, disabled: true }
+        : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) }));
   } else {
     // A chamber (the Claude pane, or a shell). Claude no longer opens as a
     // tab of its own, so there is no "another one in this folder" row here,
@@ -10649,6 +10914,68 @@ function loadSession() {
  * @param {object} [snapshot] a session already read (loadSession's winner).
  *        Omitted, it reads localStorage, which is what this has always done.
  */
+/**
+ * Lazy restore: which stored rows come back ASLEEP, and which one is expected
+ * in front. Pure (no DOM, no settings, no tab model), so the session harness
+ * runs this very function from the source.
+ *
+ * Two rules, both for PAGE rows only (a Claude chamber and a native app tab
+ * cannot be rebuilt from a url, so they never sleep and are never born asleep):
+ *   - sleepOthers: every page in a workspace other than `current` (the old
+ *     rule: six preset workspaces used to come back as six renderers).
+ *   - lazy: inside `current` as well, every page but the one that will be in
+ *     front. A 20-tab workspace used to boot 20 renderers and 20 network loads
+ *     competing with the one page the user is looking at; now it boots one,
+ *     and each other tab loads the first time it is clicked (its chip keeps
+ *     its title, favicon and scroll, and wears the asleep crescent meanwhile).
+ *     A PINNED page is kept awake: pinned is the user's way of saying "keep
+ *     this one live" (the idle sweep never sleeps one either), and a pinned
+ *     chat that is not there until clicked would be the surprise this rule
+ *     must not cause. A tab that was playing sound is not special: nothing
+ *     plays at boot anyway, and its url is all there is to restore.
+ *
+ * The front row is predicted the same way restoreSession() picks its target
+ * afterwards: the stored active row if it is in `current`, else the last row
+ * of `current`; with nothing in `current`, the active row, else the last row.
+ * @param {Array<{entry:object,index:number}>} rows  in build order
+ * @returns {{front:number, asleep:Set<number>}} stored indices
+ */
+function restoreAsleepRows(rows, active, current, sleepOthers, lazy) {
+  const list = Array.isArray(rows) ? rows : [];
+  const inCurrent = list.filter((r) => r.entry.ws === current);
+  const pool = inCurrent.length ? inCurrent : list;
+  const activeRow = pool.find((r) => r.index === active);
+  const frontRow = activeRow || pool[pool.length - 1] || null;
+  const front = frontRow ? frontRow.index : -1;
+  const asleep = new Set();
+  for (const r of list) {
+    const e = r.entry;
+    if (e.claude || e.native) continue;
+    if (e.ws !== current) {
+      if (sleepOthers) asleep.add(r.index);
+      continue;
+    }
+    if (lazy && r.index !== front && !e.pinned) asleep.add(r.index);
+  }
+  return { front: front, asleep: asleep };
+}
+
+/**
+ * Whether background tabs of the workspace ON SCREEN may be asleep without
+ * having sat idle: at boot (lazy restore) and when a new tab page goes to the
+ * background (sleepBackgroundNewTab). Off when the user turned either sleep
+ * setting off, because each one says "keep my pages running":
+ *   - workspaceSleep 'off': its own hint promises "every workspace keeps all
+ *     of its pages running, whether or not you are looking at it", and with it
+ *     off the OTHER workspaces already restore awake; sleeping the current
+ *     one's tabs while those run would be backwards.
+ *   - tabSleepMinutes 0 ("Never"): the user asked for background tabs never
+ *     to be put to sleep, and a tab born asleep is a background tab asleep.
+ */
+function backgroundSleepAllowed() {
+  return workspaceSleepMode() !== 'off' && tabSleepMinutes() > 0;
+}
+
 function restoreSession(snapshot) {
   const session = (snapshot === undefined) ? readSession() : snapshot;
   if (!session || !Array.isArray(session.entries)) return false;
@@ -10707,6 +11034,8 @@ function restoreSession(snapshot) {
   const created = [];
   const bySeat = new Map(); // stored entry index -> the tab rebuilt from it
   let wanted = null;
+  let predictedFront = null; // the tab restoreAsleepRows() kept awake to be raised
+  let lazyRestore = false;
   try {
     // All background: the strip is built in order, then the saved tab is raised.
     const resume = settingGet('claudeResume') !== false; // unset means yes
@@ -10716,13 +11045,17 @@ function restoreSession(snapshot) {
     // renderers all decoding the same moving background into the one GPU
     // process before the user had looked at anything.
     const sleepOthers = workspaceSleepMode() !== 'off';
-    for (const row of ordered) {
+    // Lazy restore: inside the workspace coming up on screen, too, only the
+    // tab that will be in front is built awake (see restoreAsleepRows()).
+    lazyRestore = backgroundSleepAllowed();
+    const building = ordered.filter((row) =>
+      !(phoneRows.length > 1 && phoneRows.indexOf(row) !== -1 && row !== phoneRow));
+    const plan = restoreAsleepRows(building, session.active, wantCurrent, sleepOthers, lazyRestore);
+    for (const row of building) {
       const entry = row.entry;
-      if (phoneRows.length > 1 && phoneRows.indexOf(row) !== -1 && row !== phoneRow) continue;
       // Page tabs only: a Claude chamber and a native app tab have their own
       // restore shapes and neither can be rebuilt from a url.
-      const bornAsleep = sleepOthers && !entry.claude && !entry.native
-        && entry.ws !== wantCurrent;
+      const bornAsleep = plan.asleep.has(row.index);
       // A native tab comes back as a PLACEHOLDER and nothing else: relaunching
       // somebody's apps behind their back on every boot is not a restore, it is
       // a surprise. The card on it offers "Start <app>".
@@ -10763,6 +11096,7 @@ function restoreSession(snapshot) {
       created.push(tab);
       bySeat.set(row.index, tab);
       if (row.index === session.active) wanted = tab;
+      if (row.index === plan.front) predictedFront = tab;
     }
   } finally {
     // A throw mid-build must not strand the flag and mute every later save.
@@ -10772,7 +11106,7 @@ function restoreSession(snapshot) {
   if (!created.length) return false;
 
   // Each workspace's remembered tab, by the index it was stored under. The
-  // build above raised the first tab it made (the window is never empty), so
+  // build above raised the first AWAKE tab it made (if any: a born-asleep tab is never raised), so
   // whatever that wrote is cleared before the stored answers go in.
   if (storedWorkspaces) {
     for (const ws of workspaces) ws.lastActiveTabId = null;
@@ -10790,7 +11124,18 @@ function restoreSession(snapshot) {
   const target = (wanted && pool.indexOf(wanted) !== -1) ? wanted : pool[pool.length - 1];
   currentWorkspaceId = tabWorkspace(target);
   syncChipWorkspaces();
-  activateTab(target.id);
+  activateTab(target.id); // wakes it, if the plan below guessed another tab
+  // restoreAsleepRows() guesses the front from the stored rows; the choice just
+  // above is made from the tabs that actually got built. They only differ when
+  // a row failed to build or named a workspace that no longer exists, and then
+  // the guessed tab is awake in the background for nothing: it goes back down
+  // under the same rule, so a boot still ends with one renderer per workspace
+  // on screen, not two. (A pinned tab was never part of the guess.)
+  if (lazyRestore && predictedFront && predictedFront !== target && !predictedFront.asleep
+    && predictedFront.kind === 'page' && !predictedFront.pinned
+    && !isTabOnScreen(predictedFront) && tabWorkspace(predictedFront) === currentWorkspaceId) {
+    sleepTab(predictedFront, 'restore');
+  }
   emitWorkspaceChange(); // one event for the whole rebuild
   saveSession(); // one write, now that the strip is settled
   if (phoneRows.length > 1) {
@@ -10937,6 +11282,11 @@ function wireViewEvents(tab) {
   });
   viewEl.addEventListener('media-paused', () => {
     if (stale()) return;
+    // It was making sound until this instant (or another element still is):
+    // the sleep rules' 2-minute spare window counts from here. This event is
+    // per webContents, not per element, so it is NOT proof the tab is quiet;
+    // tabSoundReason() asks Chromium before anything is put to sleep.
+    if (tab.audible) tab.lastAudibleAt = Date.now();
     setTabAudible(tab, false);
   });
 
