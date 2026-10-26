@@ -57,6 +57,11 @@ const TESTS = [
   // Claude "Skip permission prompts": off on a new profile, the one-time migration that keeps an older
   // profile on, app.js's start arguments and preload's default (settings.js / app.js / preload.js in vm).
   { name: 'claudeskip', file: 'claudeskip-harness.js' },
+  // Ask/Show Claude: web text is cleaned and fenced, a web paste with a control code is refused, and a
+  // page-text chamber never skips permissions and runs in a scratch folder (real ConPTY + stand-in).
+  { name: 'askclaude', file: 'askclaude-harness.js' },
+  // The same in a real Quartz: Ask with a break-out selection lands inert in a page-text chamber.
+  { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
   { name: 'drm', file: 'drm-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
