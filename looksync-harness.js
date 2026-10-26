@@ -153,14 +153,17 @@ async function holdFile(file, share, ms) {
         const d = tmpDir();
         await remoteSet(d, 'theme', 'light');
         const file = path.join(d, LS.FILE);
-        const h = await holdFile(file, 'None', 700);
+        // Held for 2.5 s, not 0.7: on a loaded machine or a hosted CI runner the 'locked' line can reach
+        // node so late that a short lock was already gone by the time the read ran (a flaky FAIL).
+        const h = await holdFile(file, 'None', 2500);
         ok('real lock (share None): PowerShell holds look.json', h.locked, h.out);
         const r = LS.read(d);
         ok('real lock (share None): a read is refused with EBUSY/EPERM/EACCES', r.state === 'error' && /^(EBUSY|EPERM|EACCES)$/.test(r.code || ''), r);
         const s = mk(d, { recheckMs: 200 });
         s.start(); // reads while locked: retries, then a re-check after the lock goes
-        const followed = await until(() => themeApplied(s, 'light'), 4000);
-        ok('real lock (share None): the file is taken once the lock goes', followed && h.free(), { states: s.states.map((x) => x.state + ':' + String(x.reason).slice(0, 60)), out: h.out });
+        const followed = await until(() => themeApplied(s, 'light'), 10000);
+        const freed = await until(() => h.free(), 10000);
+        ok('real lock (share None): the file is taken once the lock goes', followed && freed, { states: s.states.map((x) => x.state + ':' + String(x.reason).slice(0, 60)), out: h.out });
         await h.gone;
         s.close();
       }
