@@ -340,7 +340,9 @@ async function main() {
       check(spawned.length === 1, 'swap failure: the old Quartz is started again');
     }
     const after = make(w, api); after.start();
-    await new Promise((res) => setTimeout(res, 300));
+    // start() reads the swap's result with git in the background. A fixed 300 ms wait raced it on a slow
+    // machine (the state was still "idle"), so poll until it leaves idle, up to 10 s.
+    for (let t0 = Date.now(); after.state().status === 'idle' && Date.now() - t0 < 10000;) await new Promise((res) => setTimeout(res, 50));
     const s = after.state();
     if (!breakIt) check(s.status === 'updated' && s.updated.tag === 'v0.2.0', 'next start after a swap: updated', s.status);
     else check(s.status === 'failed' && /could not be swapped in/.test(s.failure.reason) && /on the version it had/.test(s.failure.reason), 'next start after a failed swap: failed, says why', s.failure);
