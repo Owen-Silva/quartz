@@ -368,7 +368,14 @@ function bracketBody(bytes) {
   try {
     session = pty.createSession({ program: 'claude', cwd: home, cols: 100, rows: 30, args: [SKIP, MARK], onData: () => {}, onExit: () => {} });
   } catch (err) {
-    ok('D0 stand-in session starts in a real PTY', false, err.message);
+    // node-pty's native binary only arrives through its install script, so an `npm ci --ignore-scripts`
+    // tree (the CI unit job) cannot open a real PTY at all. That is a missing tool, not a failure:
+    // say so plainly and skip block D; everywhere Quartz actually runs, the binary is there.
+    if (/Cannot find module .*\.node/.test(String(err && err.message))) {
+      console.log('SKIP D (real PTY): node-pty\'s native module is not installed in this tree (' + err.message.split('\n')[0] + ')');
+    } else {
+      ok('D0 stand-in session starts in a real PTY', false, err.message);
+    }
   }
   process.argv.pop();
   if (session) {

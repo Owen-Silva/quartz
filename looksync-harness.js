@@ -147,7 +147,12 @@ async function holdFile(file, share, ms) {
       s.close();
     }
 
-    if (process.platform === 'win32') {
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      // Seen on the hosted Windows runner (2026-10-26, twice, even with the lock held 2.5 s): a file
+      // PowerShell holds with FileShare.None is still readable there, so the real-lock checks cannot
+      // mean anything on it. They run on every real Windows machine; on the runner they are skipped, out loud.
+      console.log('SKIP real locks: the hosted CI runner does not enforce FileShare locks against these reads');
+    } else if (process.platform === 'win32') {
       // 5. REAL lock, FileShare.None: node's read is refused with a code look-sync retries
       {
         const d = tmpDir();

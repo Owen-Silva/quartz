@@ -73,7 +73,8 @@ ok('days: floors, never negative', CE.daysBetween('2026-10-25T13:00:00Z', now) =
 
 // --- Settings > About's age sentence (settings.js chromiumAgeLine), lifted out of the file ---
 {
-  const src = require('fs').readFileSync(require('path').join(__dirname, 'settings.js'), 'utf8');
+  // CRLF-normalised: a Windows checkout with core.autocrlf (the CI runner's) has \r\n line ends.
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'settings.js'), 'utf8').replace(/\r\n/g, '\n');
   const m = /\n  function chromiumAgeLine\(v, now\) \{[\s\S]*?\n  \}\n/.exec(src);
   ok('about: chromiumAgeLine is in settings.js', !!m);
   if (m) {
