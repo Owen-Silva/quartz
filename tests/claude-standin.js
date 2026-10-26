@@ -10,7 +10,7 @@
 //      and prints a banner long enough (> 200 bytes) for terminal.js to see a first quiet;
 //   3. appends every chunk it reads from its input to the log as a JSON line {"in": "<text>"},
 //      so a test can see exactly which bytes arrived and whether any escape code was among them;
-//   4. exits when it reads the line "__quit__" or after 60 s, whichever is first.
+//   4. exits when it reads the line "__quit__" or after 120 s, whichever is first.
 'use strict';
 const fs = require('fs');
 
@@ -20,7 +20,7 @@ function log(obj) {
   try { fs.appendFileSync(logFile, JSON.stringify(obj) + '\n'); } catch (err) { /* nowhere to say it */ }
 }
 
-log({ argv: process.argv.slice(2), cwd: process.cwd() });
+log({ pid: process.pid, argv: process.argv.slice(2), cwd: process.cwd() });
 
 const ESC = String.fromCharCode(27);
 process.stdout.write(ESC + '[?2004h');
@@ -33,14 +33,14 @@ if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') proce
 process.stdin.setEncoding('utf8');
 let seen = '';
 process.stdin.on('data', (chunk) => {
-  log({ in: chunk });
+  log({ pid: process.pid, in: chunk });
   seen += chunk;
   if (seen.indexOf('__quit__') !== -1) finish();
 });
 
 function finish() {
-  log({ done: true });
+  log({ pid: process.pid, done: true });
   process.stdout.write(ESC + '[?2004l');
   process.exit(0);
 }
-setTimeout(finish, 60000).unref();
+setTimeout(finish, 120000).unref();
