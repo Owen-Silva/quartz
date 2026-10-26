@@ -243,6 +243,15 @@
   color: var(--text-3);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  /* A failed update spells out its reason, which can run to two lines. */
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* A failed update or load: the words carry the reason; the tint only marks
+   that something needs a look. --warn, no glow, no motion. */
+#shield-panel .sh-status.is-warn {
+  color: var(--warn);
 }
 
 /* --- nothing to block (Helm's .empty-note) ---------------------- */

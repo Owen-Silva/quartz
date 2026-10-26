@@ -14,7 +14,10 @@
  * site checks before it reaches, and nothing here blocks on a promise):
  *
  *   api.adblock = {
- *     state(): Promise<{ enabled, ready, allow: string[] }>,
+ *     state(): Promise<{ enabled, ready, allow: string[],
+ *                        lists: { updatedAt, refreshing, error, loadError } }>,
+ *                                 // lists: how fresh the filter lists are, and
+ *                                 // the plain reason an update or load failed
  *     count(wcId): Promise<{ blocked, host, allowed }>,
  *     setEnabled(on),                // fire-and-forget; state-changed follows
  *     allowHost(host, on),           // fire-and-forget; state-changed follows
@@ -40,7 +43,7 @@
 
   /* --- state ---------------------------------------------------- */
   /** The last state() we were told about. Rendered before it is ever true. */
-  var st = { enabled: true, ready: false, allow: [] };
+  var st = stateFrom(null);
 
   /**
    * wcId -> { blocked, host, allowed }: the newest count for every guest seen
@@ -105,10 +108,68 @@
     return String(Math.round(v));
   }
 
-  /** The one line under the switches. Sentence case, no punctuation. */
-  function statusText(state) {
+  var HOUR_MS = 60 * 60 * 1000;
+  var DAY_MS = 24 * HOUR_MS;
+
+  /** "just now", "5 hours ago", "yesterday", "3 days ago" (as adblock-refresh.js says it). */
+  function ageWords(ms) {
+    var v = Number(ms);
+    if (!isFinite(v) || v < HOUR_MS) return 'just now';
+    if (v < DAY_MS) {
+      var h = Math.floor(v / HOUR_MS);
+      return h === 1 ? '1 hour ago' : h + ' hours ago';
+    }
+    var d = Math.floor(v / DAY_MS);
+    return d === 1 ? 'yesterday' : d + ' days ago';
+  }
+
+  /** "today", "yesterday", "3 days ago": the age of the lists in use. */
+  function fromWords(ms) {
+    var v = Number(ms);
+    if (!isFinite(v) || v < DAY_MS) return 'today';
+    return ageWords(v);
+  }
+
+  /** The backend's state, with every field defaulted (the shape is in main.js adblockState()). */
+  function stateFrom(next) {
+    var l = (next && next.lists && typeof next.lists === 'object') ? next.lists : {};
+    return {
+      enabled: !next || next.enabled !== false,
+      ready: !!(next && next.ready),
+      allow: (next && next.allow && typeof next.allow.length === 'number') ? next.allow : [],
+      lists: {
+        updatedAt: Number(l.updatedAt) || 0,
+        refreshing: !!l.refreshing,
+        error: typeof l.error === 'string' ? l.error : '',
+        loadError: typeof l.loadError === 'string' ? l.loadError : ''
+      }
+    };
+  }
+
+  /**
+   * The line under the switches: whether blocking is on, and how fresh the
+   * filter lists are. A failed update or a failed load says so with the
+   * reason, never just goes quiet. Sentence case.
+   */
+  function statusText(state, now) {
     if (!state || !state.enabled) return 'Blocking is off';
-    return state.ready ? 'Filter lists ready' : 'Filter lists loading…';
+    var l = state.lists || {};
+    var t = typeof now === 'number' ? now : Date.now();
+    if (!state.ready) {
+      if (l.loadError) {
+        return l.refreshing ? 'Blocking unavailable (' + l.loadError + '). Trying again…'
+                            : 'Blocking unavailable: ' + l.loadError + '. Will try again soon';
+      }
+      return 'Filter lists loading…';
+    }
+    if (l.refreshing) return 'Updating filter lists…';
+    var age = l.updatedAt > 0 ? t - l.updatedAt : -1;
+    if (l.error) {
+      return 'Couldn’t update filter lists: ' + l.error + '. Using lists from '
+        + (age >= 0 ? fromWords(age) : 'an earlier update') + '.';
+    }
+    if (age < 0) return 'Filter lists ready';
+    return 'Filter lists updated ' + ageWords(age);
   }
 
   /** "blocked on example.com", or just "blocked" when the host is unknown. */
@@ -337,6 +398,8 @@
 
     statusEl = document.createElement('div');
     statusEl.className = 'sh-status';
+    // Polite: an update finishing while the popover is open is read out once.
+    statusEl.setAttribute('aria-live', 'polite');
     statusEl.textContent = statusText(st);
 
     bodyEl.appendChild(bigEl);
@@ -398,7 +461,16 @@
     setRow(siteRow, !rec.allowed);
     setRow(everyRow, !!st.enabled);
     if (siteRow) siteRow.disabled = !rec.host;
-    if (statusEl) statusEl.textContent = statusText(st);
+    paintStatus();
+  }
+
+  /** The status line, tinted when an update or the load failed (the words carry the reason). */
+  function paintStatus() {
+    if (!statusEl) return;
+    statusEl.textContent = statusText(st);
+    var failed = !!st.enabled && !!(st.lists.error || (!st.ready && st.lists.loadError));
+    if (failed) statusEl.classList.add('is-warn');
+    else statusEl.classList.remove('is-warn');
   }
 
   function render() {
@@ -415,11 +487,7 @@
     if (!p) return;
     p.then(function (next) {
       if (!next || typeof next !== 'object') return;
-      st = {
-        enabled: next.enabled !== false,
-        ready: !!next.ready,
-        allow: (next.allow && typeof next.allow.length === 'number') ? next.allow : []
-      };
+      st = stateFrom(next);
       render();
     }).catch(function () { /* no backend; the cached state stands */ });
   }
@@ -534,11 +602,7 @@
       try {
         api.onStateChanged(function (next) {
           if (!next || typeof next !== 'object') return;
-          st = {
-            enabled: next.enabled !== false,
-            ready: !!next.ready,
-            allow: (next.allow && typeof next.allow.length === 'number') ? next.allow : []
-          };
+          st = stateFrom(next);
           render();
           pullCount();
         });
@@ -597,6 +661,8 @@
       isAllowed: isAllowed,
       formatCount: formatCount,
       statusText: statusText,
+      stateFrom: stateFrom,
+      ageWords: ageWords,
       subtitleFor: subtitleFor
     }
   };
