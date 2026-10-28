@@ -60,6 +60,12 @@ or use Restart browser in Settings → About — to pick any of this up.
   PowerShell, cmd, Git Bash, node and claude all start, pwsh reports not installed, and path-like
   ids, unknown ids and extra arguments are all refused. There is no UI for picking a program yet —
   this is the layer under one.
+- Asking Claude about a page is safer. Ask Claude and Show Claude now hand the page to a Claude
+  pane of their own, which always asks before it runs a tool (whatever "Skip permission prompts"
+  says) and works in a scratch folder instead of your home folder; the pane says so. Text from the
+  page is cleaned of hidden characters and marked as untrusted web content, and a paste that could
+  press Enter for you is refused, with the reason shown. A Claude pane you already had beside the
+  page stays in the tab strip, and a note tells you where it went.
 
 ### Tabs
 
@@ -112,6 +118,23 @@ or use Restart browser in Settings → About — to pick any of this up.
   closes with it. Non-http(s) schemes are still refused. Verified live: Pixabay → Log in →
   Continue with Google opened exactly one popup on accounts.google.com with `window.opener` set,
   no stray tab, and the page behind it stayed intact.
+- After a restart only the tab in front loads; the others load when you click them. A new tab
+  page left in the background goes to sleep after 15 seconds, unless you typed something into it.
+- A tab's idle time now counts from when you left it, so a page you read for 20 minutes no longer
+  falls asleep the moment you switch away.
+- A tab that is making sound, or made some in the last 2 minutes, is never put to sleep, even when
+  one video on it pauses while another keeps playing. When "Sleep tab" cannot sleep a tab, the
+  menu item says why.
+- Background tabs now go to sleep sooner when your computer is low on memory, or when a tab is
+  using a lot of memory (over 400 MB) in the background. Your "Sleep tabs after" time still
+  applies when memory is fine, and "Never" still means never. Hover a sleeping tab to see why it
+  slept.
+- A tab with something you typed but have not sent (a message, a comment, a form), a call, your
+  camera or microphone, or a picture-in-picture video is no longer put to sleep. Hover it to see
+  why it stayed awake. If Quartz cannot check a tab, it keeps it awake and says so.
+- The speaker icon on a tab now shows whenever the tab is really making sound: it no longer
+  disappears when one video on a page pauses while another keeps playing, and it now appears for
+  games and players that use Web Audio.
 
 ### Address bar and pages
 
@@ -149,6 +172,11 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Site data can be cleared per site from the site info popover, behind a two-step confirm.
 - Permissions are persisted per origin in `permissions.json` and are deny-by-default; the site info
   popover is where you change or reset them.
+- The ad blocker's filter lists now refresh once a day in the background; before, a profile kept
+  the lists from its first run for ever. If a refresh fails, the blocker keeps the lists it has,
+  and the shield says why and how old they are.
+- Hover the line under the shield's switches to see how much work the ad blocker has done this
+  session: the requests it checked, by type, and the time it spent.
 
 ### Look
 
@@ -312,6 +340,10 @@ or use Restart browser in Settings → About — to pick any of this up.
   hand-edited list, and that editor dims while the history is in charge. The composed row travels
   on the channel the page already listens on — the `?chips` param and the settings push — at most
   once every 5 seconds and only when it actually reads differently.
+- With Windows "Animation effects" turned off, every animation and transition in Quartz now stops
+  (a short fade stays where it helps), including ones added later.
+- Windows contrast themes now get visible edges on controls, a visible focus ring and no
+  background picture.
 
 ### Apps, process icons and YouTube
 
@@ -526,6 +558,9 @@ machine.
   destroyed, render-process-gone, or slept — never had its `audible` flag cleared, so the player
   went on believing a tab was making noise. There is a `forgetTabAudio` path for that now, and the
   250ms follow-up read after a media command is one tracked timer, cleared with the poll.
+- Idle music now steps aside for any tab that is really making sound, including games and players
+  that use Web Audio, and no longer comes back when an ad or a preview pauses while the main video
+  keeps playing.
 
 ### Now playing
 
@@ -868,6 +903,21 @@ Found, and not ours to fix:
 - The PTY environment is scrubbed of `CLAUDE*` variables so a launched session does not think it is
   a child of this one.
 - The shortcut map sent to main is size-checked and validated.
+- The Finnhub, Brave Search and TMDB keys are now encrypted at rest with the system's encryption
+  (DPAPI on Windows), like the Claude key. Keys saved by an older version are encrypted the first
+  time Quartz reads them, and the plain-text copy is removed. If encryption is not available, the
+  key keeps working and Settings says it is stored unencrypted and why; a saved key that can no
+  longer be decrypted is reported beside its field with a request to paste it again.
+- Updates are signed. Quartz now installs a release only when its tag is signed by a key the copy
+  you already have trusts (`release-signers`), and only when the signed tag names exactly the
+  commit being installed. An unsigned or wrongly signed release is not offered: the update card
+  and Settings → About say why, and nothing on disk changes. The release that brings the key is
+  the one exception, and the card says its signature was not checked.
+- The browser window and its built-in pages (new tab, history, files, reader, welcome, phone) now
+  carry a Content-Security-Policy, so a script injected into one of them cannot run inline code
+  or load code from elsewhere.
+- Settings → About says when the Electron (and so the Chromium) build was made and how long ago,
+  with a plain warning once it is more than three weeks old.
 
 ### Developer tooling
 
@@ -881,6 +931,15 @@ Found, and not ours to fix:
   run behind that commit was smoke: 6 ok, 0 failed.
 - The README is current through the last commit: shortcuts, features, security notes, performance
   numbers and a file-by-file map.
+- `CLAUDE.md` holds the working rules for contributors and coding agents. The `ci` workflow runs
+  the unit suite on every push and pull request and the full suite nightly on Windows.
+- A CI `audit` job fails on high or critical advisories in the runtime dependencies, castlabs
+  Electron included, with a one-line verdict in the run summary.
+- `node tools/check-electron.js` reports how far the castlabs Electron pin is behind.
+- Releases are cut with `node tools/release-tag.js`, which signs the tag and verifies it the way
+  the updater will before it is pushed.
+- `node tools/css-lint.js` holds stylesheets to the tokens.css scale; a baseline tolerates today's
+  drift so only new drift fails.
 
 ### Workspaces, the notes pane and the titlebar readouts (2026-09-12, evening)
 
