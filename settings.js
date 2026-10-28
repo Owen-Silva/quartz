@@ -3492,6 +3492,7 @@
     });
 
     if (bkState && bkState.error) field.appendChild(el('p', 'set-note set-brave-error', bkState.error));
+    keyAtRestNotes(field, bkState, 'set-brave');
     var status = braveStatusLine(bkState);
     if (status) field.appendChild(el('p', 'set-note set-brave-status', status));
 
@@ -3502,6 +3503,18 @@
       : has ? 'Quartz results uses this key. '
         : 'Quartz results needs this key: until it is saved, searches show a page saying so, with the plain Brave search one click away. ';
     field.appendChild(el('p', 'set-hint', lead + where));
+  }
+
+  /**
+   * Beside a key field: how main keeps that key at rest (secret-store.js status(): never the key).
+   * A saved key that could not be decrypted says so and asks for the key again; a key kept in plain
+   * text because encryption is unavailable says "stored unencrypted: <reason>". Encrypted and fine
+   * says nothing. Shared by the Brave, TMDB and Finnhub key fields.
+   */
+  function keyAtRestNotes(field, st, prefix) {
+    if (!st) return;
+    if (st.keyError) field.appendChild(el('p', 'set-note ' + prefix + '-key-error', st.keyError));
+    if (st.keyStorageNote) field.appendChild(el('p', 'set-note ' + prefix + '-key-storage', 'Key ' + st.keyStorageNote + '.'));
   }
 
   /* ============================================================
@@ -6507,6 +6520,7 @@
 
     var res = watchResultRow('key');
     if (res) field.appendChild(res);
+    keyAtRestNotes(field, tm, 'set-watch');
 
     var hint = el('p', 'set-hint');
     hint.appendChild(document.createTextNode(has
@@ -6836,6 +6850,8 @@
           st.hasKey = false;
           st.keyMask = '';
           st.keyState = '';
+          st.keyError = '';
+          st.keyStorageNote = '';
         }, 'That key could not be removed');
       }));
     }
@@ -6853,6 +6869,8 @@
     if (stkState && stkState.keyState === 'rejected') {
       field.appendChild(el('p', 'set-note', 'Finnhub refused that key'));
     }
+    if (stkState && stkState.error) field.appendChild(el('p', 'set-note set-stocks-error', stkState.error));
+    keyAtRestNotes(field, stkState, 'set-stocks');
 
     field.appendChild(el('p', 'set-hint', stocksHint(stkState)));
   }

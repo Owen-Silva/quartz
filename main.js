@@ -364,11 +364,16 @@ const apps = appsModule.create({ app, shell });
  * gate in front of the Settings channels, and which URLs are our own pages.
  *
  * The Finnhub key never comes back out of this module. `stocks.describe()` is
- * a mask and a boolean, and that is what IPC returns.
+ * a mask and a boolean, and that is what IPC returns. At rest it is encrypted
+ * with safeStorage (secret-store.js), as are the Brave and TMDB keys below.
  */
+/** quartz.log lines from the key stores (secret-store.js): migrations, unreadable keys. Never a key. */
+const keyStoreLog = (line) => { if (qlog) qlog.log.line('[keys] ' + line); else console.log('[keys] ' + line); };
 const stocks = stocksModule.create({
   app,
   ipcMain,
+  safeStorage: require('electron').safeStorage,
+  keyLog: keyStoreLog,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
 });
@@ -383,6 +388,8 @@ const stocks = stocksModule.create({
 const braveSearch = braveSearchModule.create({
   app,
   ipcMain,
+  safeStorage: require('electron').safeStorage,
+  keyLog: keyStoreLog,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
   apiBase: process.argv.includes('--test-profile') && process.env.QUARTZ_BRAVE_API
@@ -594,6 +601,7 @@ const watch = (() => {
     return require('./watch-main').create({
       app,
       ipcMain,
+      safeStorage: require('electron').safeStorage,   // the TMDB key at rest (secret-store.js)
       session,
       BrowserWindow,
       isChromeSender: (event) => isChromeSender(event),

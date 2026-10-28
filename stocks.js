@@ -31,7 +31,10 @@
  * WHAT IS PERSISTED. One JSON object in <userData>/stocks.json:
  *
  *   { enabled:    true | false,      // the Settings switch
- *     finnhubKey: '' | '<key>',      // never leaves this process
+ *     finnhubKeyEnc: '<base64>',     // the key, safeStorage-encrypted; never leaves this process
+ *                                    // (plain `finnhubKey` only when encryption is unavailable,
+ *                                    // and Settings says so; an older plain file is migrated on
+ *                                    // first read: see secret-store.js)
  *     symbols:    ['SPY', …],        // at most MAX_SYMBOLS, upper case
  *     selected:   'SPY' }            // which row the chart is drawing
  *
@@ -70,6 +73,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const SecretStore = require('./secret-store');
 
 /* --- what the tile starts with ------------------------------------------ */
 
@@ -440,6 +444,12 @@ function create(deps) {
 
   const budget = createBudget(BUDGET_CALLS, BUDGET_WINDOW_MS, now);
 
+  /* The Finnhub key at rest (secret-store.js). keyLog reaches quartz.log; it never receives the key. */
+  const secret = SecretStore.create({
+    field: 'finnhubKey', label: 'Finnhub key', mask: maskKey,
+    safeStorage: d.safeStorage, log: typeof d.keyLog === 'function' ? d.keyLog : (line) => log(line),
+  });
+
   /* --- the store ------------------------------------------------------- */
 
   let store = {
@@ -456,7 +466,10 @@ function create(deps) {
   }
 
   function loadStore() {
-    if (storeLoaded) return store;
+    if (storeLoaded) {
+      if (!store.finnhubKey) store.finnhubKey = secret.get();   // a key saved before encryption was ready
+      return store;
+    }
     storeLoaded = true;
     const file = storePath();
     if (!file) return store;
@@ -466,27 +479,37 @@ function create(deps) {
     try { json = JSON.parse(raw); } catch { return store; }
     if (!json || typeof json !== 'object') return store;
     if (typeof json.enabled === 'boolean') store.enabled = json.enabled;
-    if (typeof json.finnhubKey === 'string') store.finnhubKey = json.finnhubKey.trim();
+    // A plain key from an older build is encrypted here; the file is rewritten without it below.
+    const migrate = secret.load(json);
+    store.finnhubKey = secret.get();
     const symbols = normalizeSymbols(json.symbols);
     if (symbols.length) store.symbols = symbols;
     const selected = normalizeSymbol(json.selected);
     if (selected && store.symbols.indexOf(selected) >= 0) store.selected = selected;
     else store.selected = store.symbols[0] || '';
+    if (migrate.rewrite) saveStore();
     return store;
   }
 
+  /** Write stocks.json; true when it landed. The key goes as secret.fields(): finnhubKeyEnc
+      (or plain finnhubKey when encryption is unavailable; a saved key that cannot be decrypted is
+      written back as it was until the user replaces it). */
   function saveStore() {
     const file = storePath();
-    if (!file) return;
+    if (!file) return false;
     try {
-      fs.writeFileSync(file, JSON.stringify({
+      fs.writeFileSync(file, JSON.stringify(Object.assign({
         enabled: store.enabled,
-        finnhubKey: store.finnhubKey,
+      }, secret.fields(), {
         symbols: store.symbols,
         selected: store.selected,
-      }, null, 2), 'utf8');
+      }), null, 2), { encoding: 'utf8', mode: 0o600 });
+      secret.wrote(true);
+      return true;
     } catch (err) {
       log('store write failed:', (err && err.code) || 'unknown');
+      secret.wrote(false);
+      return false;
     }
   }
 
@@ -912,6 +935,12 @@ function create(deps) {
     };
   }
 
+  /** Where the key is kept, in the renderer-safe words of secret-store.js status(): never the key. */
+  function keyAtRest() {
+    const st = secret.status();
+    return { keyStorage: st.keyStorage, keyStorageNote: st.keyStorageNote, keyError: st.keyError };
+  }
+
   /** The masked shape the Settings pane and the IPC gate hand out. */
   function describe() {
     loadStore();
@@ -920,6 +949,7 @@ function create(deps) {
       hasKey: hasKey(),
       keyMask: maskKey(store.finnhubKey),
       keyState,
+      ...keyAtRest(),
       symbols: symbols(),
       selected: store.selected,
       historyPath,
@@ -1109,19 +1139,21 @@ function create(deps) {
   function setKey(raw) {
     loadStore();
     const next = String(raw == null ? '' : raw).trim();
-    if (next === store.finnhubKey) return describe();
-    store.finnhubKey = next;
+    if (next === store.finnhubKey && !secret.status().keyError) return describe();
+    secret.set(next);
+    store.finnhubKey = secret.get();
     keyState = '';
     keyDeniedAt = 0;
     historyPath = 'unknown';
     historyDone.clear();
     quotes.clear();
     series.clear();
-    saveStore();
+    const wroteOk = saveStore();
     stopSocket();
     stopPolling();
     if (subscribers.size && store.enabled !== false && next) { startSocket(); startPolling(); }
     pushNow();
+    if (!wroteOk && storePath()) return Object.assign(describe(), { error: 'The key could not be written to the profile folder, so it lasts only until Quartz quits.' });
     return describe();
   }
 
