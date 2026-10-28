@@ -995,6 +995,22 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on('mcp:pane', handler);
       return () => ipcRenderer.removeListener('mcp:pane', handler);
-    }
+    },
+    // Ask first: cb({ askId, paneId, text, grantLabel, timeoutMs }) for a read
+    // that waits on the user; answer() with 'once' | 'grant' | 'deny'.
+    onAsk: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:ask', handler);
+      return () => ipcRenderer.removeListener('mcp:ask', handler);
+    },
+    // cb({ askId, choice: 'timeout' }): nobody answered in time; the read was refused.
+    onAskDone: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:ask-done', handler);
+      return () => ipcRenderer.removeListener('mcp:ask-done', handler);
+    },
+    answer: (askId, choice) => ipcRenderer.send('mcp:answer', { askId, choice }),
+    // Ask about this page: the pane may read that one tab without asking.
+    preapprove: (paneId, tabId) => ipcRenderer.send('mcp:preapprove', { paneId, tabId })
   }
 });

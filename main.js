@@ -1602,7 +1602,12 @@ ipcMain.handle('pty:start', (event, { program, cwd, cols, rows, args, readTabs }
   }
 
   handles.set(session.id, session);
-  if (tools && tools.attached) ptyToolRelease.set(session.id, tools.release);
+  if (tools && tools.attached) {
+    ptyToolRelease.set(session.id, tools.release);
+    // What the CLI actually got (after pty.js's allowlist and page-text rule):
+    // a pane that skips Claude Code's prompts is asked by Quartz before list_tabs too.
+    tools.setSkipsPrompts(Array.isArray(session.args) && session.args.indexOf('--dangerously-skip-permissions') !== -1);
+  }
   return session.id;
 });
 

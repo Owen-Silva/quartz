@@ -3215,8 +3215,11 @@
 
     field.appendChild(el('p', 'set-hint',
       'Claude can list your open web tabs, read a page’s text, search your history and notes, and point at a '
-      + 'passage in a page. It cannot click, type or change anything. Every read shows a line over the pane '
-      + 'that asked, and Quartz’s own pages are never shared.'));
+      + 'passage in a page. It cannot click, type or change anything, and Quartz’s own pages are never shared.'));
+    field.appendChild(el('p', 'set-hint',
+      'Reads always ask you first, over the pane that wants them: Allow once, allow that tab for that pane, '
+      + 'or Deny (no answer in a minute is a Deny). This holds even when permission prompts are skipped. '
+      + 'Ask Claude about this page counts as allowing that one page.'));
     field.appendChild(el('p', 'set-hint',
       'Off, new Claude panes start without these tools and say so. Panes already open keep what they started with.'));
   }

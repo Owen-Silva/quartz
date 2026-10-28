@@ -12412,6 +12412,12 @@ function askClaude(payload) {
     // the tab (read_page) rather than the bare address.
     const toolTab = chamberHasTools(claude) ? toolTabId(page) : 0;
     const text = toolTab ? askPromptText(address, title, info.selection, toolTab) : prompt;
+    // The user just chose to share THIS page with THIS pane: its read_page of
+    // this one tab does not ask again (every other read still does).
+    if (toolTab) {
+      const api = window.api && window.api.mcp;
+      try { if (api && typeof api.preapprove === 'function') api.preapprove(claude.id, toolTab); } catch (err) { /* it asks instead */ }
+    }
     return pasteIntoChamber(claude, text, { web: true });
   });
 }
@@ -12546,9 +12552,87 @@ function showToolActivity(p) {
   const line = String((p && p.line) || '');
   if (!line) return;
   const pane = p.paneId ? claudePaneById(p.paneId) : null;
-  if (pane) showAppNote(pane, line, '');
+  // A question waiting over the pane keeps its bar: the line goes to a toast.
+  const asking = !!(pane && pane.toolAsks && pane.toolAsks.length);
+  if (pane && !asking) showAppNote(pane, line, '');
   // The note only shows while its pane does: off screen, say it where the user is.
-  if (!pane || !isTabOnScreen(pane)) claudeToast(line);
+  if (!pane || asking || !isTabOnScreen(pane)) claudeToast(line);
+}
+
+/*
+ * Ask first (the user's rule): every tool call that hands Claude content
+ * (a page's text, history, notes; the tab list too in a pane that skips
+ * Claude Code's prompts) waits on the user. Main sends mcp:ask; this puts a
+ * bar over the pane that asked, "Claude wants to read <title> (<host>)",
+ * with Allow once / Allow this tab for this pane / Deny. One bar at a time
+ * per pane, in order; the dismiss cross is Deny. Main gives up after 60 s
+ * (mcp:ask-done): the read is refused and Claude is told so in those words.
+ * Off screen, a toast says a pane is asking; nothing takes focus.
+ */
+function onToolAsk(p) {
+  if (!p || !p.askId) return;
+  const api = window.api && window.api.mcp;
+  const pane = p.paneId ? claudePaneById(p.paneId) : null;
+  if (!pane) {
+    // Nowhere to ask: refuse, and say so where the user is.
+    try { if (api) api.answer(p.askId, 'deny'); } catch (err) { /* main times out */ }
+    claudeToast(String(p.text || 'A Claude pane asked to read something') + ': refused, its pane is gone');
+    return;
+  }
+  if (!pane.toolAsks) pane.toolAsks = [];
+  pane.toolAsks.push(p);
+  if (pane.toolAsks.length === 1) showToolAsk(pane);
+  if (!isTabOnScreen(pane)) claudeToast(String(p.text || '') + '. Open its Claude pane to allow or deny.');
+}
+
+function showToolAsk(pane) {
+  const p = pane && pane.toolAsks && pane.toolAsks[0];
+  if (!p) return;
+  showAppNote(pane, String(p.text || 'Claude wants to read something'), '');
+  const bar = pane.noteEl;
+  if (!bar) { answerToolAsk(pane, p.askId, 'deny'); return; }
+  bar.classList.add('mcp-ask');
+  bar.dataset.askId = String(p.askId);
+  const cross = bar.lastElementChild; // showAppNote's dismiss: here it means Deny
+  const button = (label, choice) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.dataset.choice = choice;
+    b.style.cssText = 'flex:0 0 auto;font:inherit;color:var(--fg);cursor:pointer;'
+      + 'background:var(--glass-2);border:1px solid rgba(128,128,128,.28);'
+      + 'border-radius:6px;padding:3px 10px;';
+    b.addEventListener('click', () => answerToolAsk(pane, p.askId, choice));
+    bar.insertBefore(b, cross);
+  };
+  button('Allow once', 'once');
+  button(String(p.grantLabel || 'Allow for this pane'), 'grant');
+  button('Deny', 'deny');
+  if (cross) cross.addEventListener('click', () => answerToolAsk(pane, p.askId, 'deny'));
+}
+
+/** The user answered (or the bar went): tell main, take the bar down, show the next one. */
+function answerToolAsk(pane, askId, choice) {
+  const before = (pane.toolAsks || []).length;
+  pane.toolAsks = (pane.toolAsks || []).filter((a) => a.askId !== askId);
+  if (pane.toolAsks.length === before) return; // already answered
+  if (choice) {
+    const api = window.api && window.api.mcp;
+    try { if (api && typeof api.answer === 'function') api.answer(askId, choice); } catch (err) { /* main times out: denied */ }
+  }
+  if (pane.noteEl && pane.noteEl.dataset && pane.noteEl.dataset.askId === String(askId)) clearAppNote(pane);
+  showToolAsk(pane);
+}
+
+/** Main stopped waiting (60 s): the bar goes; main's own line says it was not allowed. */
+function onToolAskDone(p) {
+  if (!p || !p.askId) return;
+  for (const tab of tabs) {
+    if (isClaudeTab(tab) && tab.toolAsks && tab.toolAsks.some((a) => a.askId === p.askId)) {
+      answerToolAsk(tab, p.askId, null);
+      return;
+    }
+  }
 }
 
 function noteToolPane(p) {
@@ -12578,6 +12662,8 @@ function noteToolPane(p) {
     if (typeof api.onQuery === 'function') api.onQuery(answerToolQuery);
     if (typeof api.onActivity === 'function') api.onActivity(showToolActivity);
     if (typeof api.onPane === 'function') api.onPane(noteToolPane);
+    if (typeof api.onAsk === 'function') api.onAsk(onToolAsk);
+    if (typeof api.onAskDone === 'function') api.onAskDone(onToolAskDone);
   } catch (err) { /* an older preload: panes simply get no tools */ }
 })();
 
