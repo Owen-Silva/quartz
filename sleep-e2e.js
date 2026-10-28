@@ -165,7 +165,13 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   await open('osc', B + '/osc.html');
   const oscSound = await c.waitFor(`${T('osc')}.viewEl.isCurrentlyAudible() === true`, 10000).catch((e) => e.message);
   check(oscSound === true, 'sound: the Web Audio oscillator page is audible to Chromium', oscSound);
-  check(await c.ev(`!!${T('osc')}.audible`) === false, 'sound: Web Audio never set the media flag (why the flag alone is not enough)');
+  // A premise about Chromium, not about Quartz: an AudioContext is not a media element, so no
+  // media-started-playing. On the hosted CI runner (no audio endpoint) the flag WAS set for this
+  // page; where that happens the premise cannot be shown, and it is said out loud, not passed.
+  const oscFlag = await c.ev(`({ audible: !!${T('osc')}.audible, heard: !!${T('osc')}.heard })`);
+  say('Web Audio page: media flag ' + oscFlag.audible + ', Chromium heard ' + oscFlag.heard);
+  if (oscFlag.audible) console.log('SKIP sound: Web Audio never set the media flag: Chromium here fired media-started-playing for a page with only an AudioContext, so the premise cannot be shown on this machine');
+  else check(true, 'sound: Web Audio never set the media flag (why the flag alone is not enough)', oscFlag);
   // The speaker follows Chromium (main pushes audio-state-changed), not the per-element events.
   const speaker = (name) => c.ev(`({ heard: !!${T(name)}.heard, shown: !!(${T(name)}.audioEl && ${T(name)}.audioEl.isConnected && !${T(name)}.audioEl.hidden) })`);
   const twoSpk = await speaker('two');
@@ -191,10 +197,15 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   const oscOut = await c.waitFor(`${T('osc')}.heard === false`, 5000).catch((e) => e.message);
   check(oscOut === true && !(await speaker('osc')).shown, 'speaker: goes out when Chromium stops hearing it', oscOut);
   await c.ev('sleepIdleTabs()');
-  check(await c.ev(`${T('osc')}.asleep`) === false && await c.ev(`tabSoundReason(${T('osc')})`) === 'made sound in the last 2 minutes', 'sound: just stopped, still spared (2-minute window)');
+  // The detail says which signal held it, so a stale media flag (no media-paused after the
+  // AudioContext closed) reads as that, not as a bare FAIL.
+  const oscState = () => c.ev(`({ asleep: ${T('osc')}.asleep, reason: tabSoundReason(${T('osc')}), mediaFlag: !!${T('osc')}.audible, chromium: ${T('osc')}.viewEl.isCurrentlyAudible() })`).catch((e) => 'threw ' + e.message);
+  const justStopped = await oscState();
+  check(justStopped.asleep === false && justStopped.reason === 'made sound in the last 2 minutes', 'sound: just stopped, still spared (2-minute window)', justStopped);
   await c.ev(`${T('osc')}.lastAudibleAt = Date.now() - 4 * 60000; 1`);
   await c.ev('sleepIdleTabs()');
-  check(await c.ev(`${T('osc')}.asleep`) === true, 'sound: quiet for longer than the window, the idle sweep sleeps it');
+  const longQuiet = await c.ev(`({ asleep: ${T('osc')}.asleep, mediaFlag: !!${T('osc')}.audible, reason: ${T('osc')}.asleep ? '' : tabSoundReason(${T('osc')}) })`).catch((e) => 'threw ' + e.message);
+  check(longQuiet.asleep === true, 'sound: quiet for longer than the window, the idle sweep sleeps it', longQuiet);
   check(await c.ev(`${T('two')}.asleep`) === false && await audibleNow('two') === true, 'sound: the two-player tab is still awake and playing');
   await c.ev(`closeTab(${T('two')}.id), 1`);
 
@@ -251,8 +262,20 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   check(Array.isArray(memo), 'home: the woken page was pushed theme, settings, layout, Saved, apps and readout', memo);
   const guestTheme = await c.ev(`${T('home')}.viewEl.executeJavaScript("document.documentElement.getAttribute('data-theme')")`).catch((e) => e.message);
   check(guestTheme === await c.ev('getTheme()'), 'home: the woken page wears the chrome theme', guestTheme);
-  const statsNow = await c.waitFor(`statsSubscribed === statsTabEligible(${T('home')}) ? 'ok' : null`, 5000).catch((e) => e.message);
-  check(statsNow === 'ok', 'home: in front again, the stats subscription follows it', statsNow);
+  // The rule is "a usable Home in front AND the window focused" (syncStatsSubscription). The window's
+  // focus comes only from main's push: a test window that never had focus reads as focused, but one
+  // that was given focus and lost it (as on the hosted CI runner) is rightly blurred, and then the
+  // sampler must stay off. Both halves are checked; the focused one is a SKIP, out loud, when the
+  // window here is blurred.
+  const focused = await c.ev('windowHasFocus()');
+  if (focused) {
+    const statsNow = await c.waitFor(`statsSubscribed === statsTabEligible(${T('home')}) ? 'ok' : null`, 5000).catch((e) => e.message);
+    check(statsNow === 'ok', 'home: in front again, the stats subscription follows it', statsNow);
+  } else {
+    console.log('SKIP home: in front again, the stats subscription follows it: main reports this test window blurred, so the sampler is rightly off here');
+    await sleep(500);
+    check(await c.ev('statsSubscribed') === false, 'home: in front again, but the window is blurred: the stats sampler stays unsubscribed');
+  }
   // Typed text keeps a Home awake (a fresh page would lose it); cleared, it sleeps on the next try.
   await newHome('typed');
   const typedSet = await c.ev(`${T('typed')}.viewEl.executeJavaScript("(() => { const i = document.getElementById('saved-input') || document.querySelector('input[type=text]'); if (!i) return false; i.value = 'half typed'; return true; })()")`).catch((e) => e.message);
