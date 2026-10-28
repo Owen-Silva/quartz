@@ -603,7 +603,7 @@ each guest's `getOSProcessId()`, plus the system's free memory; a renderer share
 is split evenly). The sweep asks at most once a minute and only when some candidate is idle long
 enough for an early rule; main caches the answer for 20 s. If the figures are unavailable the early
 rules stop, the timer still applies, and quartz.log says so once. `earlySleepPlan()` is pure and
-harness-tested. An early sleep carries plain words ("memory was low (1.6 GB of 16 GB free)", "it
+harness-tested. An early sleep carries plain words ("memory was low (1.6 GB of 12.0 GB free)", "it
 was using 620 MB of memory in the background"): the sleeping chip's hover ends "put to sleep early:
 ...", and the `tab-slept` log line reads "went to sleep early, because ...".
 

@@ -184,7 +184,7 @@ function sweepWorld() {
     function now(v) { return { then(f) { return now(f ? f(v) : v); } }; }
     function nope(e) { return { then(f, r) { return now(r ? r(e) : undefined); } }; }
     var logs = []; var calls = { probe: 0, memory: 0, music: 0 };
-    var memory = { totalBytes: 11.7 * 1024 * 1024 * 1024, freeBytes: 6 * 1024 * 1024 * 1024 };
+    var memory = { totalBytes: 12 * 1024 * 1024 * 1024, freeBytes: 6 * 1024 * 1024 * 1024 };
     var window = { api: { tabs: {
       prepareSleep(wcId) {
         calls.probe++;
@@ -294,13 +294,13 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
 {
   const a = sweepWorld();
   const P = a.memoryPressure;
-  ok('pressure: 11.7 GB total, 3 GB free is ok', P(3 * GB, 11.7 * GB) === 'ok');
-  ok('pressure: 11.7 GB total, 2.0 GB free is low', P(2.0 * GB, 11.7 * GB) === 'low');
-  ok('pressure: 11.7 GB total, 1.0 GB free is critical', P(1.0 * GB, 11.7 * GB) === 'critical');
+  ok('pressure: 12 GB total, 3 GB free is ok', P(3 * GB, 12 * GB) === 'ok');
+  ok('pressure: 12 GB total, 2.0 GB free is low', P(2.0 * GB, 12 * GB) === 'low');
+  ok('pressure: 12 GB total, 1.0 GB free is critical', P(1.0 * GB, 12 * GB) === 'critical');
   ok('pressure: 32 GB total, 2.4 GB free is low (2.5 GB cap)', P(2.4 * GB, 32 * GB) === 'low');
   ok('pressure: 32 GB total, 4 GB free is ok', P(4 * GB, 32 * GB) === 'ok');
-  ok('pressure: missing figures are unknown, never "low"', P(undefined, 11.7 * GB) === '' && P(1 * GB, 0) === '');
-  const plan = (o) => a.earlySleepPlan(Object.assign({ now: 100 * MIN, minutes: 30, totalBytes: 11.7 * GB, freeBytes: 6 * GB }, o));
+  ok('pressure: missing figures are unknown, never "low"', P(undefined, 12 * GB) === '' && P(1 * GB, 0) === '');
+  const plan = (o) => a.earlySleepPlan(Object.assign({ now: 100 * MIN, minutes: 30, totalBytes: 12 * GB, freeBytes: 6 * GB }, o));
   const ids = (p) => JSON.stringify(p.map((x) => x.id));
   // Six background tabs, idle 1, 3, 6, 9, 12 and 20 minutes.
   const c6 = [1, 3, 6, 9, 12, 20].map((m) => ({ id: 'c' + m, idleSince: 100 * MIN - m * MIN, bytes: 100 * MB }));
@@ -308,12 +308,12 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   ok('early: "Never" (0 minutes) plans nothing even at critical memory', plan({ minutes: 0, freeBytes: 0.5 * GB, candidates: c6 }).length === 0);
   const low = plan({ freeBytes: 1.6 * GB, candidates: c6 });
   ok('low: two per sweep, least recently used first', ids(low) === '["c20","c12"]', low);
-  ok('low: why "memory", the figures in plain words', low[0] && low[0].why === 'memory' && low[0].note === 'memory was low (1.6 GB of 11.7 GB free)', low[0]);
+  ok('low: why "memory", the figures in plain words', low[0] && low[0].why === 'memory' && low[0].note === 'memory was low (1.6 GB of 12.0 GB free)', low[0]);
   ok('low: the 3 most recently used background tabs stay warm', ids(plan({ freeBytes: 1.6 * GB, candidates: c6.slice(0, 4) })) === '["c9"]');
   const young = [1, 2, 3, 4].map((m) => ({ id: 'y' + m, idleSince: 100 * MIN - m * MIN }));
   ok('low: nothing idle under 5 min goes early', plan({ freeBytes: 1.6 * GB, candidates: young }).length === 0);
   const crit = plan({ freeBytes: 0.8 * GB, candidates: c6 });
-  ok('critical: three per sweep, LRU first, "very low"', ids(crit) === '["c20","c12","c9"]' && /^memory was very low \(819 MB of 11\.7 GB free\)$/.test(crit[0].note), crit);
+  ok('critical: three per sweep, LRU first, "very low"', ids(crit) === '["c20","c12","c9"]' && /^memory was very low \(819 MB of 12\.0 GB free\)$/.test(crit[0].note), crit);
   ok('critical: only the most recent stays warm, 2 min grace', ids(plan({ freeBytes: 0.8 * GB, candidates: c6.slice(0, 2) })) === '["c3"]');
   const due = plan({ freeBytes: 0.8 * GB, minutes: 10, candidates: c6 });
   ok('early: a tab already due by the timer is left to the idle rule', due.every((x) => x.id !== 'c12' && x.id !== 'c20'), due);
@@ -333,11 +333,11 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   ['b1', 'b2', 'b3', 'b4', 'b5'].forEach((id, i) => { a.page(id); a.set(i * MIN); a.activate(id); });
   const pin = a.page('pin', { pinned: true }); const loud = a.page('loud'); loud.viewEl.audibleNow = true;
   a.set(5 * MIN); a.activate('F');
-  a.setMemory({ totalBytes: 11.7 * GB, freeBytes: 1.6 * GB });
+  a.setMemory({ totalBytes: 12 * GB, freeBytes: 1.6 * GB });
   a.set(11 * MIN); a.sweep();
   const s = a.slept();
   ok('sweep low: b1 and b2 (least recent) went early, as "memory"', JSON.stringify(s.map((x) => x.id)) === '["b1","b2"]' && s.every((x) => x.why === 'memory'), s);
-  ok('sweep low: the slept tab carries the note', s[0] && /^memory was low \(1\.6 GB of 11\.7 GB free\)$/.test(s[0].note), s[0]);
+  ok('sweep low: the slept tab carries the note', s[0] && /^memory was low \(1\.6 GB of 12\.0 GB free\)$/.test(s[0].note), s[0]);
   ok('sweep low: pinned and sounding tabs stay awake', !pin.asleep && !loud.asleep);
   ok('sweep low: one memory ask per sweep', a.calls.memory === 1, a.calls);
   a.set(12 * MIN); a.sweep();
@@ -418,14 +418,14 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
 {
   const TM = require('./tabsleep-main');
   const m = TM.tabMemory({
-    wcIds: [1, 2, 3, 4], system: { totalBytes: 11.7 * GB, freeBytes: 2 * GB },
+    wcIds: [1, 2, 3, 4], system: { totalBytes: 12 * GB, freeBytes: 2 * GB },
     metrics: [{ pid: 10, memory: { workingSetSize: 500 * 1024 } }, { pid: 11, memory: { workingSetSize: 300 * 1024 } }],
     pidOf: (id) => ({ 1: 10, 2: 11, 3: 11, 4: 99 })[id]
   });
   ok('memory: a guest with its own renderer gets all of it', m.tabs[1] && m.tabs[1].bytes === 500 * MB, m.tabs);
   ok('memory: two guests sharing a renderer split it', m.tabs[2] && m.tabs[2].bytes === 150 * MB && m.tabs[2].sharedWith === 1, m.tabs);
   ok('memory: a guest whose process is unknown is left out', !(4 in m.tabs));
-  ok('memory: system figures pass through', m.freeBytes === 2 * GB && m.totalBytes === 11.7 * GB);
+  ok('memory: system figures pass through', m.freeBytes === 2 * GB && m.totalBytes === 12 * GB);
 
   const el = (tag, o) => Object.assign({
     tagName: tag, type: 'text', value: '', defaultValue: '', isConnected: true, isContentEditable: false,

@@ -8217,7 +8217,7 @@ const TAB_SLEEP_SWEEP_MS = 60000;
  * tab page paints a moving background. Seven of them decode 60 fps each into
  * the one GPU process whether or not their <webview> is hidden — el.hidden on
  * the element does NOT reliably make the guest report document.hidden — so on
- * an 11.7 GB laptop the GPU process sat at 1.9 GB and the whole window lagged.
+ * a laptop with under 12 GB of memory the GPU process sat at 1.9 GB and the whole window lagged.
  *
  *   'newtab' (default) the moment a workspace stops being the one on screen,
  *                      every new tab page in it sleeps. Nothing else does: a
