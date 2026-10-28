@@ -338,31 +338,43 @@
 
 <section id="mod-session" class="module module-session" aria-label="Session"
          data-piece="session" data-kind="card" hidden>
-  <!-- The two counts stay hidden until __applyReadout: an idle-music push
-       can be the thing that reveals the tile, and dashes are worse than no
-       readout. -->
-  <div id="session-rows" hidden>
-    <p class="mod-row">
-      <span id="read-tabs" class="mod-value">--</span>
-      <span id="read-tabs-label" class="mod-label">tabs open</span>
+  <!-- No card: a few quiet pills, each a 30px capsule (the shortcut
+       tiles' shape) with a word and a number, never more than four lines
+       in the piece's 224px, so the piece is never wider or taller than the
+       card it replaced (a dragged layout was arranged around that card).
+       The readout lines stay hidden until __applyReadout: an idle-music
+       push can be the thing that reveals the piece, and dashes are worse
+       than no readout. The blocked pill stays hidden for a chrome that
+       sends no `blocked` field at all (an older build); a chrome that does
+       always says something in it, "Blocker off" included. -->
+  <div id="session-rows" class="sess-lines" hidden>
+    <p class="sess-line">
+      <span id="pill-tabs" class="sess-pill" title="Tabs open in this window, in every workspace">
+        <span id="read-tabs" class="sess-value">--</span>
+        <span id="read-tabs-label" class="sess-label">tabs open</span>
+      </span>
+      <span id="pill-blocked" class="sess-pill" hidden>
+        <span id="read-blocked" class="sess-value"></span>
+        <span id="read-blocked-label" class="sess-label">blocked</span>
+      </span>
     </p>
-    <p class="mod-row">
-      <span id="read-autopause" class="mod-value">--</span>
-      <span class="mod-label">Spotify auto-pause</span>
+    <p class="sess-line">
+      <span id="pill-autopause" class="sess-pill" data-state="unknown">
+        <span class="sess-label">Spotify auto-pause</span>
+        <span id="read-autopause" class="sess-value">Unknown</span>
+      </span>
     </p>
   </div>
 
   <!-- Idle music. The player itself lives in the chrome so it survives tab
-       switches; this is only its face and its two controls. Every state
-       ("Off", "Paused", a mood name, a file name) is one fixed-height line
-       and both controls are a fixed box, so the tile does not change size
-       when the music starts, stops or changes track.
+       switches; this is only its face and its two controls, as one pill
+       row. Every state ("Off", "Paused", a mood name, a file name) is one
+       fixed-height line and both controls are a fixed box, so the piece
+       does not change size when the music starts, stops or changes track.
        Content is newtab.js's: __applyMusic() in, `newtab:music` out. -->
   <div id="mod-music" class="mod-music" data-music="off">
-    <p class="mod-music-head">
+    <p class="mod-music-row" title="Idle music plays while nothing else is playing">
       <span class="mod-music-caption">Idle music</span>
-    </p>
-    <p class="mod-music-row">
       <span id="music-state" class="mod-music-state">Off</span>
       <span class="mod-music-ctls">
         <button id="music-next" type="button" class="mod-music-btn mod-music-next"
@@ -370,8 +382,19 @@
         <button id="music-toggle" type="button" class="mod-music-btn">Turn on</button>
       </span>
     </p>
-    <p class="mod-music-hint">Plays while nothing else is playing</p>
   </div>
+
+  <!-- Claude panes, only while at least one is open: how many are working
+       and how many are waiting on the user (the strip's own needs-you
+       flag). Last, so it coming and going never moves the lines above. -->
+  <p id="session-claude" class="sess-line" hidden>
+    <span id="pill-claude" class="sess-pill" data-waiting="false">
+      <span class="sess-label">Claude</span>
+      <span id="read-claude-working" class="sess-value"></span>
+      <span id="read-claude-sep" class="sess-sep" aria-hidden="true"></span>
+      <span id="read-claude-waiting" class="sess-value sess-waiting"></span>
+    </span>
+  </p>
 </section>
 
 <!-- Live prices. Its data is main's, not the chrome's: stocks.js puts a

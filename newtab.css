@@ -33,10 +33,6 @@
   --ink-0: var(--bg);
   --ink-1: var(--bg);
 
-  --fg:   var(--text);
-  --fg-2: var(--text-2);
-  --fg-3: var(--text-3);
-
   /* rest / hover fills of the controls inside a card */
   --glass:   var(--surface-2);
   --glass-2: var(--surface-3);
@@ -553,7 +549,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 14px;  /* the × glyph, sized to its 22 px circle, not text */
+  font-size: var(--fs-m);  /* the × glyph, sized to its 22 px circle, not text */
 }
 
 .home-box:hover .home-box-tag,
@@ -817,7 +813,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .mod-time-value {
   color: var(--text);
-  font: 600 44px/1.1 var(--font-display);   /* the clock: a display readout, off the text scale on purpose */
+  font: 600 44px/1.1 var(--font-display);   /* css-lint: allow raw-font-size the clock is a display readout, off the text scale on purpose */
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.015em;
   text-shadow: var(--home-shadow);
@@ -845,32 +841,109 @@ html.home-measure .home { grid-template-rows: 100vh; }
 }
 
 /* --- the session readout ------------------------------------- */
-.mod-row {
+/* No card any more: the piece is a few quiet pills over the picture, the
+   way the day's figures sit along the foot of a calm page. Each pill is the
+   shortcut tiles' capsule (30px, a full radius) with a neutral 5% tint of
+   the text colour as its only fill: no border, no shadow, no blur, no
+   accent. A pill is a readout, not a control, so nothing here has a hover;
+   the two idle-music buttons are the only things in the piece you can
+   press, and the only things that answer the pointer.
+
+   GEOMETRY (what keeps a dragged layout where it was): the piece keeps the
+   card's 224px width, and its lines are fixed 30px rows with 6px between
+   them, at most four (tabs + blocked, auto-pause, idle music, Claude) =
+   138px, under the 158px the card stood at. A box no larger than the old
+   one, at any anchor, lies inside the old one's rect, so this change can
+   never push a neighbour further away or fold a stored layout. It CAN let
+   one come back closer: a piece that was never moved, which arrange() had
+   nudged clear of the taller card, now needs a shorter nudge. Measured with
+   the session dropped top-left over the left rail, the unmoved Now playing
+   card sits 56px higher than it did (the card's 158px minus the pills'
+   102px), nearer the place the default arrangement gives it. Every placed
+   piece keeps its rect exactly. A line never wraps: a pill that runs out of
+   room ellipsises its words instead. */
+.module-session {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.sess-lines {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sess-lines[hidden] { display: none; }
+
+/* One row of pills, hugging the rail's outer edge like the cards do. */
+.sess-line {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
   margin: 0;
-  height: 24px;
 }
 
-.mod-row + .mod-row { margin-top: 4px; }
+.sess-line[hidden] { display: none; }
 
-.mod-value {
-  flex: 0 0 auto;
-  min-width: 2ch;
-  color: var(--text);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 24px;
-}
-
-.mod-label {
-  color: var(--text-2);
-  font-size: var(--fs-s);
+.sess-pill {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 30px;
   white-space: nowrap;
   overflow: hidden;
+  /* the bare clock's own shadow: the words sit on the picture too */
+  text-shadow: var(--home-shadow);
+}
+
+.sess-pill[hidden] { display: none; }
+
+.sess-value {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A half the chrome did not fill (no one waiting, say) takes no room. */
+.sess-value:empty { display: none; }
+
+.sess-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sess-sep:empty { display: none; }
+
+/* A Claude pane waiting on the user: the strip's own waiting colour, as a
+   small still dot before the count (the tab chip's mark), never a glow or
+   a fill. */
+.sess-waiting::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: var(--st-waiting);
+  vertical-align: middle;
 }
 
 /* The media tile: the left rail's card under the clock. */
@@ -927,7 +1000,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .mod-media-note {
   width: 20px;
   height: 20px;
-  fill: var(--fg-3);
+  fill: var(--text-3);
 }
 
 .mod-media-art-img:not([hidden]) ~ .mod-media-note { display: none; }
@@ -943,7 +1016,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .mod-media-title {
   height: 18px;
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-s);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
@@ -957,13 +1030,13 @@ html.home-measure .home { grid-template-rows: 100vh; }
 /* "Nothing playing" is a state, not a title: it reads at a label's weight,
    the same way idle music's Off and Paused do. */
 .module-media[data-media="none"] .mod-media-title {
-  color: var(--fg-2);
+  color: var(--text-2);
   font-weight: 400;
 }
 
 .mod-media-artist {
   height: 16px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -980,7 +1053,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   position: relative;
   height: 2px;
   margin: 10px 0 0;
-  border-radius: 1px;
+  border-radius: var(--radius-pill);
   background: var(--edge);
   overflow: hidden;
 }
@@ -990,7 +1063,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   inset: 0;
   transform-origin: left center;
   transform: scaleX(0);
-  border-radius: 1px;
+  border-radius: var(--radius-pill);
   background: var(--ion);
 }
 
@@ -1022,7 +1095,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid transparent;
   border-radius: var(--radius-ctl);
   background: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   cursor: pointer;
   pointer-events: auto;
   transition:
@@ -1038,12 +1111,12 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .mod-media-play svg { width: 15px; height: 15px; }
 
-.mod-media-btn:hover { color: var(--fg); border-color: var(--edge); }
+.mod-media-btn:hover { color: var(--text); border-color: var(--edge); }
 
 .mod-media-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* A control the session does not offer keeps its box — visibility, never
@@ -1061,61 +1134,58 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .module-media[data-media="playing"] .mod-media-glyph-pause { display: block; }
 
 /* --- idle music ---------------------------------------------- */
-/* The face of the chrome's idle player, seated under the three counts in
-   the readout tile. It shares that tile rather than taking one of its own
-   because it is the chrome's own player and belongs with the session it is
-   part of.
+/* The face of the chrome's idle player, one pill row under the readout
+   lines in the session piece. It shares that piece rather than taking one
+   of its own because it is the chrome's own player and belongs with the
+   session it is part of. What it does when pressed is said in the row's
+   tooltip ("plays while nothing else is playing").
 
-   Every box below has a fixed height and both controls a fixed width, so
-   "Off" becoming "Slow tide" — or a long file name, or the Next control
-   appearing for the user's own tracks — never changes the tile's size. Nothing here animates and nothing here has a timer: a module
-   showing "Off" costs exactly what the rest of the tile costs. */
-.mod-music { margin-top: 10px; }
+   The row is the full 224px and every box in it is fixed: the caption,
+   the state line (it ellipsises), and both controls, so "Off" becoming
+   "Slow tide" (or a long file name, or the Next control appearing for the
+   user's own tracks) never changes the piece's size or moves a thing.
+   Nothing here animates and nothing here has a timer: a row showing
+   "Off" costs exactly what the rest of the piece costs. */
+.mod-music { margin-top: 6px; }
 
-/* A hairline over the block, the way the dock head separates its row. */
-.mod-music-head {
-  position: relative;
-  margin: 0 0 6px;
-  height: 18px;
-}
+/* Before the first readout the music is all the piece shows: no gap over it. */
+.sess-lines[hidden] + .mod-music { margin-top: 0; }
 
-.mod-music-head::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  background: var(--hairline);
-}
+/* The Claude line, when there is one, goes under the music row. */
+.mod-music + .sess-line { margin-top: 6px; }
 
-.mod-music-caption {
-  color: var(--fg-3);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  line-height: 18px;
-}
-
-/* The state line and the controls, one row, one height in every state. */
+/* The caption, the state and the controls: one capsule, one height in
+   every state, the same tint as the readout pills. */
 .mod-music-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  height: 30px;
   margin: 0;
-  height: 22px;
+  padding: 0 var(--space-1) 0 11px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  text-shadow: var(--home-shadow);
+}
+
+.mod-music-caption {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-stretch: var(--readout-stretch);
+  letter-spacing: .01em;
+  line-height: 30px;
 }
 
 .mod-music-state {
   flex: 1 1 auto;
   min-width: 0;                    /* so a long track name ellipsises */
-  color: var(--fg);
-  font-size: var(--fs-m);
-  font-weight: 500;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
-  line-height: 22px;
+  line-height: 30px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1125,7 +1195,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    weight, and only a playing title gets the readout voice. */
 .mod-music[data-music="off"] .mod-music-state,
 .mod-music[data-music="paused"] .mod-music-state {
-  color: var(--fg-2);
+  color: var(--text-3);
   font-weight: 400;
 }
 
@@ -1133,24 +1203,25 @@ html.home-measure .home { grid-template-rows: 100vh; }
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* "Turn on", "Play" and "Pause" in one box, so the word changing never
    moves the state line beside it. pointer-events comes back on here and
-   nowhere else in the tile — .module is click-through on purpose. */
+   nowhere else in the piece. The hover is here because these are the
+   only things in it that can be pressed. */
 .mod-music-btn {
   flex: 0 0 auto;
-  width: 52px;
-  height: 20px;
+  width: 50px;
+  height: 22px;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-ctl);
+  border-radius: var(--radius-pill);
   background: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-align: center;
@@ -1162,39 +1233,23 @@ html.home-measure .home { grid-template-rows: 100vh; }
     border-color var(--dur-slow) var(--ease);
 }
 
-.mod-music-next { width: 38px; }
+.mod-music-next { width: 36px; }
 
-.mod-music-btn:hover { color: var(--fg); border-color: var(--edge); }
+.mod-music-btn:hover { color: var(--text); border-color: var(--edge); }
 
 .mod-music-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* Next only means anything for the user's own tracks. It keeps its box
-   either way — visibility, never display — so the row is the same width
+   either way (visibility, never display), so the row is the same width
    and the same height in all four states, and [disabled] keeps it out of
    the tab order while it is not there. */
 .mod-music-next[disabled] {
   visibility: hidden;
   pointer-events: none;
-}
-
-/* The one line in this module that never changes with the state, so it is
-   the one line that may wrap: it fits the tile's 176px to the pixel here,
-   and a machine whose fonts run wider gets a second line and a tile 16px
-   taller — still the same height in all four states, which is the part
-   that matters. */
-.mod-music-hint {
-  margin: 4px 0 0;
-  min-height: 16px;
-  color: var(--fg-3);
-  font-size: var(--fs-xs);
-  font-stretch: var(--readout-stretch);
-  letter-spacing: .01em;
-  line-height: 16px;
-  overflow: hidden;
 }
 
 /* --- the instrument strip ------------------------------------ */
@@ -1241,7 +1296,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .stat-value {
   margin: 0;
   height: 28px;
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-xl);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
@@ -1271,7 +1326,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .stat-label {
   margin: 4px 0 0;
   height: 16px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1353,7 +1408,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0;
   border: 0;
   background: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: inherit;
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
@@ -1364,13 +1419,13 @@ html.home-measure .home { grid-template-rows: 100vh; }
   transition: color var(--dur-slow) var(--ease);
 }
 
-.stats-open:hover { color: var(--fg); }
+.stats-open:hover { color: var(--text); }
 
 .stats-open:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 2px;
-  color: var(--fg);
+  border-radius: var(--radius-xs);
+  color: var(--text);
 }
 
 /* The chevron: two hairlines, down when the fold is closed and up when it
@@ -1412,7 +1467,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   height: 20px;
   margin-top: 8px;
   padding-right: 8px;              /* the body's scrollbar gutter */
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1447,18 +1502,18 @@ html.home-measure .home { grid-template-rows: 100vh; }
   transition: color var(--dur-slow) var(--ease);
 }
 
-.proc-sort:hover { color: var(--fg-2); }
+.proc-sort:hover { color: var(--text-2); }
 
 .proc-sort:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 2px;
-  color: var(--fg-2);
+  border-radius: var(--radius-xs);
+  color: var(--text-2);
 }
 
 /* The sorted column, and the page's one accent below the graphs: a 4px
    caret, nothing lit. */
-.proc-sort.is-active { color: var(--fg-2); }
+.proc-sort.is-active { color: var(--text-2); }
 
 .proc-sort.is-active::after {
   content: '';
@@ -1493,7 +1548,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .procs-body::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--edge);
   background-clip: content-box;
 }
@@ -1502,7 +1557,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   position: relative;
   height: 32px;
   box-sizing: border-box;
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1530,7 +1585,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 /* "(3)" after a grouped program's name, the way Task Manager states it. */
 .proc-count {
   margin-left: 4px;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 /* --- the program's own icon ----------------------------------- */
@@ -1568,8 +1623,8 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 /* Nothing resolved yet, or nothing to resolve: one window outline in the
    quietest foreground, hairline, no fill. Right in both themes because
-   --fg-3 is defined in both. */
-.proc-icon-glyph { color: var(--fg-3); }
+   --text-3 is defined in both. */
+.proc-icon-glyph { color: var(--text-3); }
 
 /* The header names the column the names are in, not the chevron and the
    slot in front of it: 16px of caret + 24px of icon. */
@@ -1591,11 +1646,11 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin: 0 4px 0 0;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: none;
   vertical-align: top;
   cursor: pointer;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .proc-chev::before {
@@ -1611,7 +1666,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 }
 
 .proc-chev.is-open::before { transform: rotate(90deg); }
-.proc-chev:hover { color: var(--fg-2); }
+.proc-chev:hover { color: var(--text-2); }
 
 /* The same ring every other control on this page wears. */
 .proc-chev:focus-visible {
@@ -1634,7 +1689,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    and on the same grid so the four numbers stay in their columns. */
 .proc-row.proc-child {
   height: 28px;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 
@@ -1647,17 +1702,17 @@ html.home-measure .home { grid-template-rows: 100vh; }
   display: inline-block;
   min-width: 62px;
   margin-right: 8px;
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 /* ...and what it holds. A renderer with a tab is the one row anybody
    opened this for, so it is the one that reads at full strength. */
-.proc-child-label { color: var(--fg-2); }
-.proc-row.proc-child.has-label .proc-child-label { color: var(--fg); font-weight: 500; }
+.proc-child-label { color: var(--text-2); }
+.proc-row.proc-child.has-label .proc-child-label { color: var(--text); font-weight: 500; }
 
 .proc-pid {
   margin-left: 6px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1669,7 +1724,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    left out, or why it could not be read. */
 .proc-row.proc-child-note {
   height: 24px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
 }
 
@@ -1680,7 +1735,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 }
 
 /* This browser's own processes: stated, never offered an End task. */
-.proc-row.is-self .proc-name { color: var(--fg-2); }
+.proc-row.is-self .proc-name { color: var(--text-2); }
 
 /* The End task control. Quiet by default and only there on hover or on
    keyboard focus — a row is something to read first. */
@@ -1691,7 +1746,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid transparent;
   border-radius: var(--radius-ctl);
   background: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
@@ -1713,19 +1768,19 @@ html.home-measure .home { grid-template-rows: 100vh; }
   pointer-events: auto;
 }
 
-.proc-end:hover { color: var(--fg); border-color: var(--edge); }
+.proc-end:hover { color: var(--text); border-color: var(--edge); }
 
 .proc-end:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* The armed state. It says what the second press does and nothing more:
    the border states it, not a colour nobody asked for. */
 .proc-end.is-confirm {
   border-color: var(--edge);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* What came back: "Ended", "Protected", "That's this browser". Longer than
@@ -1741,7 +1796,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0 6px;
   border-radius: var(--radius-ctl);
   background: var(--proc-note);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   letter-spacing: .01em;
   white-space: nowrap;
@@ -1752,7 +1807,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 /* The ten dashed rows before the first sample, and any row the sample
    left short. */
-.proc-row.is-blank { color: var(--fg-3); }
+.proc-row.is-blank { color: var(--text-3); }
 
 /* Ten rows or thirty. The control keeps its space when there is nothing
    more to show, so the capsule is the same height either way. */
@@ -1763,7 +1818,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0;
   border: 0;
   background: none;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
@@ -1772,13 +1827,13 @@ html.home-measure .home { grid-template-rows: 100vh; }
   transition: color var(--dur-slow) var(--ease);
 }
 
-.procs-more:hover { color: var(--fg); }
+.procs-more:hover { color: var(--text); }
 
 .procs-more:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 2px;
-  color: var(--fg);
+  border-radius: var(--radius-xs);
+  color: var(--text);
 }
 
 .procs-more.is-idle { visibility: hidden; }
@@ -1833,7 +1888,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .dock-caption {
   margin: 0;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-xs);
   font-weight: 600;
   font-stretch: var(--readout-stretch);
@@ -1850,7 +1905,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0;
   border: 0;
   background: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: inherit;
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
@@ -1861,13 +1916,13 @@ html.home-measure .home { grid-template-rows: 100vh; }
   transition: color var(--dur-slow) var(--ease);
 }
 
-.dock-edit:hover { color: var(--fg); }
+.dock-edit:hover { color: var(--text); }
 
 .dock-edit:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 2px;
-  color: var(--fg);
+  border-radius: var(--radius-xs);
+  color: var(--text);
 }
 
 /* One row reserved: 0 pins and 9 pins are the same height at this width. */
@@ -1905,7 +1960,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 0;
   border-radius: var(--radius-ctl);
   background: var(--glass);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
   cursor: pointer;
   overflow: hidden;
@@ -1925,7 +1980,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .dock-tile:hover {
   background-color: var(--glass-2);
-  color: var(--fg);
+  color: var(--text);
 }
 
 .dock-tile:hover::before,
@@ -1937,7 +1992,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-tile:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* The icon and the light that hangs off its corner. */
@@ -1951,7 +2006,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-icon {
   width: 32px;
   height: 32px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   object-fit: contain;
 }
 
@@ -1964,9 +2019,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
   width: 32px;
   height: 32px;
   border: 1px solid var(--edge);
-  border-radius: 4px;
-  color: var(--fg-3);
-  font-size: 13px;  /* a letter inside the 32 px icon tile, sized to the tile */
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+  font-size: var(--fs-s);  /* a letter inside the 32 px icon tile, sized to the tile */
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
   text-transform: uppercase;
@@ -1980,7 +2035,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    no icon exists for "a shell", and a letter would be a lie. */
 .dock-term {
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;  /* ">_" inside the 32 px icon tile, sized to the tile */
+  font-size: var(--fs-xs);  /* ">_" inside the 32 px icon tile, sized to the tile */
   font-stretch: normal;
   letter-spacing: 0;
   text-transform: none;
@@ -1995,10 +2050,10 @@ html.home-measure .home { grid-template-rows: 100vh; }
   top: 3px;
   left: 3px;
   padding: 0 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--proc-note);
-  color: var(--fg-3);
-  font-size: 10px;                 /* under the 11 px step on purpose: a word in the corner of a 56 px tile, beside the icon */
+  color: var(--text-3);
+  font-size: 10px;                 /* css-lint: allow raw-font-size under the 11 px step on purpose: a word in the corner of a 56 px tile, beside the icon */
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
   line-height: 12px;
@@ -2024,7 +2079,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   display: none;
   height: 16px;
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: var(--radius-pill);   /* 16px tall: the same 8px half-round */
   background: var(--proc-note);
 }
 
@@ -2037,9 +2092,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 0;
   border-radius: 0;
   background: none;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: inherit;
-  font-size: 10px;                 /* under the 11 px step on purpose: "web" has 20 px of a 60 px band; at 11 px it meets the dividers */
+  font-size: 10px;                 /* css-lint: allow raw-font-size under the 11 px step on purpose: "web" has 20 px of a 60 px band; at 11 px it meets the dividers */
   font-stretch: var(--readout-stretch);
   letter-spacing: .02em;
   line-height: 14px;
@@ -2050,27 +2105,27 @@ html.home-measure .home { grid-template-rows: 100vh; }
     color            var(--dur) var(--ease);
 }
 
-.dock-where-opt:first-child { border-radius: 7px 0 0 7px; }
-.dock-where-opt:last-child { border-radius: 0 7px 7px 0; }
+.dock-where-opt:first-child { border-radius: var(--radius-pill) 0 0 var(--radius-pill); }
+.dock-where-opt:last-child { border-radius: 0 var(--radius-pill) var(--radius-pill) 0; }
 
 /* A hairline between them, not around each: three boxes in a 56px band
    would be all edge and no word. */
 .dock-where-opt + .dock-where-opt { border-left: 1px solid var(--edge); }
 
-.dock-where-opt:hover { background-color: var(--glass); color: var(--fg); }
+.dock-where-opt:hover { background-color: var(--glass); color: var(--text); }
 
 /* The one that is on. Filled, with the same hairline the switch this
    replaces spent its accent on — a setting, not an event: no glow. */
 .dock-where-opt.is-on {
   background-color: var(--glass-2);
-  color: var(--fg);
+  color: var(--text);
   box-shadow: inset 0 0 0 1px var(--ion-line);
 }
 
 .dock-where-opt:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* The band is out of flow, so the cell is what makes room for it. Every
@@ -2115,7 +2170,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-add {
   background: none;
   border: 1px dashed var(--edge);
-  color: var(--fg-3);
+  color: var(--text-3);
 }
 
 .dock-add::before { display: none; }      /* the dashed edge is the rim */
@@ -2123,7 +2178,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-add:hover {
   background-color: var(--glass);
   border-color: var(--hairline-strong);
-  color: var(--fg);
+  color: var(--text);
 }
 
 .dock-plus {
@@ -2170,9 +2225,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--edge);
   border-radius: 50%;
   background: var(--proc-note);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
-  font-size: 11px;  /* the × glyph, sized to its button, not text */
+  font-size: var(--fs-2xs);  /* the × glyph, sized to its button, not text */
   line-height: 1;
   cursor: pointer;
   transition:
@@ -2182,12 +2237,12 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .dock.is-editing .dock-remove { display: flex; }
 
-.dock-remove:hover { color: var(--fg); border-color: var(--hairline-strong); }
+.dock-remove:hover { color: var(--text); border-color: var(--hairline-strong); }
 
 .dock-remove:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* What came back when a launch failed, over the tile's foot on its own
@@ -2206,7 +2261,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   padding: 0 2px;
   border-radius: 0 0 var(--radius-ctl) var(--radius-ctl);
   background: var(--proc-note);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -2240,14 +2295,14 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--edge);
   border-radius: var(--radius-ctl);
   background: var(--glass);
-  color: var(--fg);
+  color: var(--text);
   font-family: inherit;
   font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
-.dock-search::placeholder { color: var(--fg-3); }
+.dock-search::placeholder { color: var(--text-3); }
 
 .dock-search:focus {
   outline: none;
@@ -2269,7 +2324,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    It is a label on a column of names, not a section of the page. */
 .dock-group {
   padding: 0 6px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -2288,7 +2343,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   height: 26px;
   padding: 0 6px;
   border-radius: var(--radius-ctl);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-s);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -2301,7 +2356,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   object-fit: contain;
 }
 
@@ -2309,9 +2364,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-result-glyph {
   flex: 0 0 auto;
   width: 16px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 11px;  /* ">_" inside the result row's icon tile, sized to the tile */
+  font-size: var(--fs-2xs);  /* ">_" inside the result row's icon tile, sized to the tile */
   letter-spacing: 0;
   text-align: center;
 }
@@ -2327,7 +2382,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-result-host {
   flex: 0 1 auto;
   min-width: 0;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2338,8 +2393,8 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin-left: auto;
   padding: 0 4px;
   border: 1px solid var(--edge);
-  border-radius: 2px;
-  color: var(--fg-3);
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   letter-spacing: .02em;
   line-height: 14px;
@@ -2348,7 +2403,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 /* Pointed at: one step of ion light over the panel's ground. A white glass
    wash would be invisible here — the picker's interior is near-opaque, and
    in the light theme --glass is whiter than the panel it sits on. */
-.dock-result:hover { background: var(--ion-soft); color: var(--fg); }
+.dock-result:hover { background: var(--ion-soft); color: var(--text); }
 
 /* Where the arrow keys are: the same wash with a 2px rail, the way the
    command palette marks its own selected row. The rail is what separates
@@ -2356,15 +2411,15 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .dock-result.is-active {
   background: var(--ion-soft);
   box-shadow: inset 2px 0 0 var(--ion-line);
-  color: var(--fg);
+  color: var(--text);
 }
 
 .dock-result.is-empty {
-  color: var(--fg-3);
+  color: var(--text-3);
   cursor: default;
 }
 
-.dock-result.is-empty:hover { background: none; color: var(--fg-3); }
+.dock-result.is-empty:hover { background: none; color: var(--text-3); }
 
 /* --- shortcut chips ------------------------------------------ */
 .links {
@@ -2412,14 +2467,14 @@ html.home-measure .home { grid-template-rows: 100vh; }
   width: 16px;
   height: 16px;
   margin-right: 8px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   object-fit: contain;
 }
 
 .chip:hover {
   background-color: var(--home-glass-hover);
   border-color: var(--hairline-strong);
-  color: var(--fg);
+  color: var(--text);
 }
 .chip:active { background-color: color-mix(in srgb, var(--home-glass-hover), var(--text) 8%); }
 
@@ -2432,7 +2487,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .chip:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* --- saved sites --------------------------------------------- */
@@ -2554,7 +2609,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   width: 16px;
   height: 16px;
   margin-right: 7px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   object-fit: contain;
 }
 
@@ -2568,7 +2623,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    one, so the tile reads as powered rather than merely brighter. */
 .rtile:hover {
   background-color: var(--home-glass-hover);
-  color: var(--fg);
+  color: var(--text);
 }
 
 :root[data-bg="video"] .rtile {
@@ -2584,7 +2639,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .rtile:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* A saved tile is the link and its x side by side in one box — a button
@@ -2620,9 +2675,9 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--edge);
   border-radius: 50%;
   background: var(--proc-note);
-  color: var(--fg-2);
+  color: var(--text-2);
   font-family: inherit;
-  font-size: 11px;  /* the × glyph, sized to its button, not text */
+  font-size: var(--fs-2xs);  /* the × glyph, sized to its button, not text */
   line-height: 1;
   cursor: pointer;
   visibility: hidden;
@@ -2641,12 +2696,12 @@ html.home-measure .home { grid-template-rows: 100vh; }
   transition-delay: 0s;
 }
 
-.stile-remove:hover { color: var(--fg); border-color: var(--hairline-strong); }
+.stile-remove:hover { color: var(--text); border-color: var(--hairline-strong); }
 
 .stile-remove:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* The "+" and the fold's count are tiles too, as buttons: the same glass,
@@ -2655,7 +2710,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 .saved-add,
 .saved-more {
   border: 0;
-  color: var(--fg-3);
+  color: var(--text-3);
   cursor: pointer;
 }
 
@@ -2663,7 +2718,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
   justify-content: center;
   width: 30px;
   padding: 0;
-  font-size: 16px;  /* the + glyph, sized to the tile, not text */
+  font-size: var(--fs-l);  /* the + glyph, sized to the tile, not text */
   font-weight: 500;
   line-height: 1;
 }
@@ -2689,14 +2744,14 @@ html.home-measure .home { grid-template-rows: 100vh; }
   border: 1px solid var(--home-edge);
   border-radius: var(--radius-pill);
   background: var(--home-glass-hover);
-  color: var(--fg);
+  color: var(--text);
   font-family: inherit;
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
 }
 
-.saved-input::placeholder { color: var(--fg-3); }
+.saved-input::placeholder { color: var(--text-3); }
 
 .saved-input:focus {
   outline: none;
@@ -2711,7 +2766,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 /* What an empty row is for, beside the "+". */
 .saved-hint {
   padding-left: 2px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -2858,6 +2913,68 @@ body.home-unfold { --home-fold: 0; }
   }
 }
 
+/* --- hero: BEGIN --------------------------------------------- */
+/* ONE FOCAL POINT, on the untouched default Home only: the clock is the
+   hero, large in the centre column over the search, with the date under it.
+   It is the user's own time, not a brand, so the Q sits out while it is
+   there. The rails keep their cards.
+
+   newtab.js puts .is-hero on .home when the layout on screen is the
+   default (HomeLayout.isDefault: nothing hidden, nothing moved) and the
+   page is drawn as the plain flow, and takes it off before anything is
+   measured: edit mode, a free draw and every measure see the classic
+   arrangement, so a drag can never record a place made from the hero's
+   geometry. A customised Home never wears the class, so it renders exactly
+   as it did. EVERY rule in this section is scoped under .home.is-hero (the
+   home-design harness checks that, and that nothing outside it names the
+   class). The clock node never moves: the hero is CSS only.
+
+   Wide (three columns): the clock is lifted out of the left rail onto the
+   centre line, where the Q stood, and the column is pushed down by its
+   height. Folded (under 1296px): the clock is already the line on top of
+   the page, centred, so it only grows. No accent, no glow, no animation:
+   the bare clock's own text shadow, at a larger size. */
+.home.is-hero {
+  --hero-top: clamp(28px, 11vh, 128px);   /* the stage's top padding: where the Q stood */
+  --hero-h: 102px;                        /* the time's 76px line + 6 + the date's 20px line */
+}
+
+.home.is-hero .home-logo { display: none; }
+
+.home.is-hero .module-clock { text-align: center; }
+
+.home.is-hero .mod-time { justify-content: center; }
+
+.home.is-hero .mod-time-value {
+  font: 600 68px/76px var(--font-display);   /* css-lint: allow raw-font-size the hero clock is a display readout, off the text scale on purpose */
+  letter-spacing: -0.02em;
+}
+
+.home.is-hero .mod-time-period { font-size: var(--fs-xl); }
+
+.home.is-hero .mod-date {
+  margin-top: 6px;
+  color: var(--text-2);
+  opacity: 1;
+  line-height: 20px;
+}
+
+@container not style(--home-fold: 1) {
+  .home.is-hero .module-clock {
+    position: absolute;
+    top: var(--hero-top);
+    left: 0;
+    right: 0;
+    width: max-content;                   /* only as wide as the time: the rails stay pressable */
+    height: var(--hero-h);
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .home.is-hero .stage { padding-top: calc(var(--hero-top) + var(--hero-h) + 10px); }
+}
+/* --- hero: END ----------------------------------------------- */
+
 /* --- reduced motion ------------------------------------------ */
 @media (prefers-reduced-motion: reduce) {
   /* a theme flip, a hover and the picture land instantly */
@@ -2896,7 +3013,7 @@ body.home-unfold { --home-fold: 0; }
    spent a session getting rid of. These are close to the foreground's own
    lightness, so the colour reads as a direction rather than as an alarm.
    Two definitions, because the light theme's ground needs the darker pair to
-   clear 4.5:1 the way --fg-3 does. */
+   clear 4.5:1 the way --text-3 does. */
 
 .module-stocks {
   width: var(--rail-w);
@@ -2914,7 +3031,7 @@ body.home-unfold { --home-fold: 0; }
 
 .stk-caption {
   margin: 0;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .08em;
@@ -2928,7 +3045,7 @@ body.home-unfold { --home-fold: 0; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -2946,7 +3063,7 @@ body.home-unfold { --home-fold: 0; }
 
 .stk-market[data-market="open"] { color: var(--ion-dot, var(--ion)); }
 .stk-market[data-market="pre"],
-.stk-market[data-market="after"] { color: var(--fg-2); }
+.stk-market[data-market="after"] { color: var(--text-2); }
 
 /* The one-line states: no key, a refused key, nothing on the wire. This is
    the whole tile in those cases — the chart, the rows and the foot are all
@@ -2954,7 +3071,7 @@ body.home-unfold { --home-fold: 0; }
    frame with a message under it. */
 .stk-note {
   margin: 10px 0 2px;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   line-height: 17px;
@@ -2991,7 +3108,7 @@ body.home-unfold { --home-fold: 0; }
   align-items: center;
   justify-content: center;
   margin: 0;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
 }
@@ -3011,7 +3128,7 @@ body.home-unfold { --home-fold: 0; }
   height: 24px;
   padding: 0 4px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: none;
   color: inherit;
   font: inherit;
@@ -3035,7 +3152,7 @@ body.home-unfold { --home-fold: 0; }
 
 .stk-sym {
   flex: 0 0 46px;
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-xs);
   font-weight: 500;
   font-stretch: var(--readout-stretch);
@@ -3058,7 +3175,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-last {
   flex: 0 0 auto;
   min-width: 56px;
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
@@ -3071,7 +3188,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-chg {
   flex: 0 0 auto;
   min-width: 54px;
-  color: var(--fg-2);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;
@@ -3094,10 +3211,10 @@ body.home-unfold { --home-fold: 0; }
   height: 14px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: none;
-  color: var(--fg-3);
-  font-size: 11px;  /* the × glyph, sized to its button, not text */
+  color: var(--text-3);
+  font-size: var(--fs-2xs);  /* the × glyph, sized to its button, not text */
   line-height: 14px;
   text-align: center;
   visibility: hidden;
@@ -3107,7 +3224,7 @@ body.home-unfold { --home-fold: 0; }
 .stk-row:focus-within .stk-drop,
 .stk-drop:focus-visible { visibility: visible; }
 
-.stk-drop:hover { color: var(--fg); }
+.stk-drop:hover { color: var(--text); }
 
 /* --- the foot ------------------------------------------------ */
 .stk-foot {
@@ -3125,15 +3242,15 @@ body.home-unfold { --home-fold: 0; }
   height: 20px;
   padding: 0;
   border: 1px solid var(--edge);
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: none;
-  color: var(--fg-2);
-  font-size: 13px;  /* the + glyph, sized to its button, not text */
+  color: var(--text-2);
+  font-size: var(--fs-s);  /* the + glyph, sized to its button, not text */
   line-height: 18px;
   text-align: center;
 }
 
-.stk-add:hover { color: var(--fg); border-color: var(--ion-line); }
+.stk-add:hover { color: var(--text); border-color: var(--ion-line); }
 .stk-add:focus-visible { outline: none; border-color: var(--ion-line); }
 
 .stk-add-field {
@@ -3141,9 +3258,9 @@ body.home-unfold { --home-fold: 0; }
   height: 20px;
   padding: 0 6px;
   border: 1px solid var(--ion-line);
-  border-radius: 6px;
+  border-radius: var(--radius-s);
   background: var(--panel-bg);
-  color: var(--fg);
+  color: var(--text);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .04em;
@@ -3154,7 +3271,7 @@ body.home-unfold { --home-fold: 0; }
 
 .stk-as-of {
   flex: 1 1 auto;
-  color: var(--fg-3);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   font-variant-numeric: tabular-nums;

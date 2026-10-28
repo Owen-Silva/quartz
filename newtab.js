@@ -991,30 +991,55 @@ function refreshClock() {
 /*                                                                     */
 /* The chrome pushes it in on every tab change and every status change: */
 /*                                                                     */
-/*   window.__applyReadout({ tabs, autopause })                         */
+/*   window.__applyReadout({ tabs, autopause, claude?, blocked? })      */
 /*     tabs       number of open tabs                                   */
 /*     autopause  'off' | 'on' | 'holding' | 'unknown'                  */
+/*     claude     { working, waiting }: Claude panes running claude.exe,*/
+/*                split by the strip's needs-you flag. The pill shows   */
+/*                only while at least one pane is open.                 */
+/*     blocked    { enabled, ready?, count }: ads and trackers blocked  */
+/*                in this window since it opened (the chrome's running  */
+/*                total off the shield's own per-page counter). Off and */
+/*                not-ready are said in words, never left blank.        */
 /*                                                                     */
-/* A chrome that still sends `claude` (the Claude session count this   */
-/* tile used to show) is ignored: that row is gone from Home.           */
+/* The two optional fields are validated here (whole numbers, not       */
+/* negative); a missing or malformed one hides its pill, which is what  */
+/* an older chrome gets. A chrome that sends `claude` as a bare number  */
+/* (the session count an older tile showed) is the same: no pill.       */
 /*                                                                     */
-/* The tile is [hidden] until the first call, because a readout of      */
-/* dashes is worse than no readout.                                     */
+/* The readout lines are [hidden] until the first call, because a       */
+/* readout of dashes is worse than no readout.                         */
 /* ------------------------------------------------------------------ */
 
 const sessionModule = document.getElementById('mod-session');
-/* The two counts, so they can stay hidden while the tile is on screen:
-   the idle-music module below shares this tile and can be the thing that
-   reveals it, and dashes are still worse than no readout. */
+/* The readout lines, so they can stay hidden while the piece is on screen:
+   the idle-music row shares this piece and can be the thing that reveals
+   it, and dashes are still worse than no readout. */
 const sessionRows = document.getElementById('session-rows');
 const readTabs = document.getElementById('read-tabs');
 const readTabsLabel = document.getElementById('read-tabs-label');
 const readAutopause = document.getElementById('read-autopause');
+const pillAutopause = document.getElementById('pill-autopause');
+const pillBlocked = document.getElementById('pill-blocked');
+const readBlocked = document.getElementById('read-blocked');
+const readBlockedLabel = document.getElementById('read-blocked-label');
+const sessionClaude = document.getElementById('session-claude');
+const pillClaude = document.getElementById('pill-claude');
+const readClaudeWorking = document.getElementById('read-claude-working');
+const readClaudeSep = document.getElementById('read-claude-sep');
+const readClaudeWaiting = document.getElementById('read-claude-waiting');
 
-/* Sentence case, and the only four states the bridge can be in. */
-const AUTOPAUSE_TEXT = { off: 'Off', on: 'On', holding: 'Holding', unknown: '--' };
+/* Sentence case, and the only four states the bridge can be in. Unknown
+   is a word too: the pill never goes blank. */
+const AUTOPAUSE_TEXT = { off: 'Off', on: 'On', holding: 'Holding', unknown: 'Unknown' };
+const AUTOPAUSE_TITLE = {
+  off: 'Spotify auto-pause is off, or its bridge is not running',
+  on: 'Spotify pauses while a tab plays, and picks up again after',
+  holding: 'Spotify is paused for a tab that is playing; it picks up again when that stops',
+  unknown: 'Spotify auto-pause has not reported its state'
+};
 
-let readoutState = { tabs: null, autopause: 'unknown' };
+let readoutState = { tabs: null, autopause: 'unknown', claude: null, blocked: null };
 
 /** A count, or null for "the chrome did not say". Never negative. */
 function readoutCount(value) {
@@ -1024,22 +1049,97 @@ function readoutCount(value) {
   return Math.max(0, Math.round(n));
 }
 
-function paintReadout() {
-  const tabs = readoutState.tabs;
+/** Strict, for the optional fields: a whole number from 0 to a billion, or null. */
+function readoutWhole(value) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  if (value < 0 || value > 1e9) return null;
+  return value;
+}
 
-  setText(readTabs, tabs === null ? '--' : String(tabs));
-  setText(readTabsLabel, tabs === 1 ? 'tab open' : 'tabs open');
-  setText(readAutopause, AUTOPAUSE_TEXT[readoutState.autopause]);
+/**
+ * One push, validated into the state the pills paint. Pure: never throws,
+ * never keeps anything it was given. `claude` and `blocked` are null when
+ * absent or malformed, and a null field hides its pill.
+ */
+function cleanReadout(data) {
+  const next = (data && typeof data === 'object') ? data : {};
+  const mode = String(next.autopause == null ? 'unknown' : next.autopause).toLowerCase();
+  const out = {
+    tabs: readoutCount(next.tabs),
+    autopause: Object.prototype.hasOwnProperty.call(AUTOPAUSE_TEXT, mode) ? mode : 'unknown',
+    claude: null,
+    blocked: null
+  };
+  const c = next.claude;
+  if (c && typeof c === 'object' && !Array.isArray(c)) {
+    const working = readoutWhole(c.working);
+    const waiting = readoutWhole(c.waiting);
+    if (working !== null && waiting !== null) out.claude = { working: working, waiting: waiting };
+  }
+  const b = next.blocked;
+  if (b && typeof b === 'object' && !Array.isArray(b) && typeof b.enabled === 'boolean') {
+    const count = readoutWhole(b.count);
+    // `ready` is optional: a chrome that does not say is taken at its word
+    // that blocking is on.
+    if (count !== null) out.blocked = { enabled: b.enabled, ready: b.ready !== false, count: count };
+  }
+  return out;
+}
+
+/** The blocked pill's words for one validated field: { value, label, title, state }. */
+function blockedWords(b) {
+  if (!b.enabled) {
+    return { value: '', label: 'Blocker off', state: 'off',
+             title: 'Ad and tracker blocking is switched off' };
+  }
+  if (!b.ready) {
+    return { value: '', label: 'Blocker not ready', state: 'not-ready',
+             title: 'Blocking is on, but its filter lists have not loaded, so nothing is blocked yet' };
+  }
+  return { value: b.count.toLocaleString(), label: 'blocked', state: 'on',
+           title: 'Ads and trackers blocked in this window since it opened' };
+}
+
+function paintReadout() {
+  const s = readoutState;
+
+  setText(readTabs, s.tabs === null ? '--' : String(s.tabs));
+  setText(readTabsLabel, s.tabs === 1 ? 'tab open' : 'tabs open');
+  setText(readAutopause, AUTOPAUSE_TEXT[s.autopause]);
+  if (pillAutopause) {
+    pillAutopause.title = AUTOPAUSE_TITLE[s.autopause];
+    pillAutopause.setAttribute('data-state', s.autopause);
+  }
+
+  if (pillBlocked) {
+    pillBlocked.hidden = !s.blocked;
+    if (s.blocked) {
+      const w = blockedWords(s.blocked);
+      setText(readBlocked, w.value);
+      setText(readBlockedLabel, w.label);
+      pillBlocked.title = w.title;
+      pillBlocked.setAttribute('data-state', w.state);
+    }
+  }
+
+  // Only while a Claude pane is open, and only the halves that are not 0.
+  const c = s.claude;
+  const panes = c ? c.working + c.waiting : 0;
+  if (sessionClaude) sessionClaude.hidden = panes === 0;
+  if (panes > 0) {
+    setText(readClaudeWorking, c.working ? c.working + ' working' : '');
+    setText(readClaudeWaiting, c.waiting ? c.waiting + ' waiting' : '');
+    // Empty, not [hidden]: the pill's textContent then reads as drawn.
+    setText(readClaudeSep, (c.working && c.waiting) ? '/' : '');
+    if (pillClaude) {
+      pillClaude.title = 'Claude panes: ' + c.working + ' working, ' + c.waiting + ' waiting for you';
+      pillClaude.setAttribute('data-waiting', c.waiting ? 'true' : 'false');
+    }
+  }
 }
 
 window.__applyReadout = function (data) {
-  const next = (data && typeof data === 'object') ? data : {};
-  const mode = String(next.autopause == null ? 'unknown' : next.autopause).toLowerCase();
-
-  readoutState = {
-    tabs: readoutCount(next.tabs),
-    autopause: Object.prototype.hasOwnProperty.call(AUTOPAUSE_TEXT, mode) ? mode : 'unknown'
-  };
+  readoutState = cleanReadout(data);
   paintReadout();
 
   revealSession();
@@ -1049,22 +1149,37 @@ window.__applyReadout = function (data) {
 };
 
 /**
- * Show the tile these two modules share. Both pushes go through here:
- * whichever lands first is what puts the tile on screen.
+ * Show the piece these two modules share. Both pushes go through here:
+ * whichever lands first is what puts the piece on screen.
  */
 function revealSession() {
   if (sessionModule && sessionModule.hidden) sessionModule.hidden = false;
 }
 
+/** One pill's words as drawn, or '' while it is hidden. */
+function readoutPillText(el) {
+  if (!el || el.hidden) return '';
+  return el.textContent.replace(/\s+/g, ' ').trim();
+}
+
 /** What the readout actually shows, for tests. */
 window.__readout = function () {
+  const s = readoutState;
   return {
-    tabs: readoutState.tabs,
-    autopause: readoutState.autopause,
-    /* The counts, not the tile: idle music can have the tile on screen
+    tabs: s.tabs,
+    autopause: s.autopause,
+    claude: s.claude ? { working: s.claude.working, waiting: s.claude.waiting } : null,
+    blocked: s.blocked ? { enabled: s.blocked.enabled, ready: s.blocked.ready, count: s.blocked.count } : null,
+    /* The counts, not the piece: idle music can have the piece on screen
        before a readout has ever landed. */
     shown: !!(sessionModule && !sessionModule.hidden &&
-              sessionRows && !sessionRows.hidden)
+              sessionRows && !sessionRows.hidden),
+    pills: {
+      tabs: readoutPillText(document.getElementById('pill-tabs')),
+      autopause: readoutPillText(pillAutopause),
+      blocked: readoutPillText(pillBlocked),
+      claude: (sessionClaude && !sessionClaude.hidden) ? readoutPillText(pillClaude) : ''
+    }
   };
 };
 
@@ -4941,6 +5056,9 @@ function homeMeasure(ids) {
   root.classList.add('home-measure');      // no scrollbar while measuring
   document.body.classList.add('home-unfold');
   home.classList.remove('is-free');
+  // Never the hero: every rect a drag or a free draw starts from is the
+  // classic arrangement's (see homeHeroWanted).
+  home.classList.remove('is-hero');
   for (const p of HL.PIECES) {
     const el = homePieceEl(p.id);
     // Its own width, not the last one pinned; and no left/top, which a
@@ -4960,6 +5078,31 @@ function homeMeasure(ids) {
     out[id] = rel;
   }
   return { page: page, rects: out };
+}
+
+/**
+ * ONE FOCAL POINT (newtab.css, the "hero" section): on the untouched
+ * default Home, drawn as the plain flow, the clock is shown large in the
+ * centre column and the Q sits out. It is one class on .home and nothing
+ * else (no node moves), so taking it off gives back the classic page
+ * exactly. Never in edit mode, never on a free page, never on a layout
+ * with anything hidden or moved, and homeMeasure() strips it too: the
+ * classic arrangement is the only one a drag, a free draw or a stored
+ * place is ever derived from.
+ */
+function homeHeroWanted(layout, editing) {
+  return !!HL && !!layout && !editing && Array.isArray(layout.place) &&
+    layout.place.length === 0 && HL.isDefault(layout);
+}
+
+function homeSetHero(on) {
+  const home = document.querySelector('.home');
+  if (home) home.classList.toggle('is-hero', !!on);
+}
+
+function homeHeroOn() {
+  const home = document.querySelector('.home');
+  return !!(home && home.classList.contains('is-hero'));
 }
 
 /** Back to the plain flow: no pinned piece, the fold free to fold. */
@@ -5018,6 +5161,9 @@ function layoutHome() {
   const home = document.querySelector('.home');
   if (!home) return;
   const wantFree = homeDrawn.place.length > 0 || homeEditing;
+  // The hero is decided first, so a free draw (edit mode included) has
+  // already dropped it before homeMeasure() looks at anything.
+  homeSetHero(!wantFree && homeHeroWanted(homeDrawn, homeEditing));
   if (!wantFree) {
     if (homeFree || homeFolded) homeUnfree();
     homeSetFolded(false);
@@ -5198,7 +5344,8 @@ window.__home = function () {
     folded: homeFolded,
     page: homePage,
     rects: rects,
-    rules: !!HL
+    rules: !!HL,
+    hero: homeHeroOn()
   };
 };
 
@@ -6007,8 +6154,8 @@ if (document.readyState === 'loading') {
     return {
       up: css.getPropertyValue('--stk-up').trim() || '#7fb98f',
       down: css.getPropertyValue('--stk-down').trim() || '#c98b86',
-      grid: css.getPropertyValue('--fg-3').trim() || '#a6abb5',
-      flat: css.getPropertyValue('--fg-2').trim() || '#a6abb5'
+      grid: css.getPropertyValue('--text-3').trim() || '#a6abb5',
+      flat: css.getPropertyValue('--text-2').trim() || '#a6abb5'
     };
   }
 

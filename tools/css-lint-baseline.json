@@ -63,20 +63,6 @@
         "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
       }
     },
-    "newtab.css": {
-      "legacy-fg": {
-        "count": 102,
-        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
-      },
-      "raw-font-size": {
-        "count": 12,
-        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
-      },
-      "raw-radius": {
-        "count": 22,
-        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
-      }
-    },
     "phone-page.css": {
       "raw-radius": {
         "count": 2,
@@ -163,12 +149,6 @@
       "raw-radius": {
         "count": 2,
         "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
-      }
-    },
-    "tokens.css": {
-      "unused-space": {
-        "count": 1,
-        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
       }
     },
     "watch-alerts.css": {
