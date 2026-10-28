@@ -6197,7 +6197,6 @@ function chipTooltip(tab) {
   // a tab that "never sleeps" can be explained by hovering it.
   if (!tab.asleep) {
     if (tab.keptAwake && tab.keptAwake.reason) base += ' — kept awake: ' + tab.keptAwake.reason;
-    if (tab.wakeNote) base += ' — ' + tab.wakeNote;
     return base;
   }
   const cost = isNewTabUrl(tab.url)
@@ -8890,7 +8889,6 @@ function sleepTab(tab, why, opts) {
   tab.asleep = true;
   tab.sleepNote = (opts && typeof opts.note === 'string') ? opts.note : '';
   tab.keptAwake = null;
-  tab.wakeNote = '';
   cancelNewTabSleep(tab); // whatever put it down, the grace clock has nothing left to do
   setTabLoading(tab, false); // a load in flight died with the guest
   forgetTabAudio(tab);       // ...and so did any sound it was making
