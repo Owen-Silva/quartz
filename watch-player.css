@@ -168,5 +168,5 @@
 .wp-sheet-hole { flex: 1 1 auto; background: #fff; }
 
 @media (prefers-reduced-motion: reduce) {
-  .wp-layer, .wp-layer.wp-in, .wp-layer.wp-out { transform: none; transition: opacity var(--m-dur-rm) linear; }
+  .wp-layer, .wp-layer.wp-in, .wp-layer.wp-out { transform: none; transition: opacity var(--m-dur-rm) linear; --rm-keep: var(--m-dur-rm); }
 }

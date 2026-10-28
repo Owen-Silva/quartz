@@ -556,6 +556,6 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wc-step.is-on { animation: wc-in-fade var(--m-dur-rm) var(--m-fade-in) both; }
+  .wc-step.is-on { animation: wc-in-fade var(--m-dur-rm) var(--m-fade-in) both; --rm-keep: var(--m-dur-rm); }
   .wc-seg, .wc-check, .wc-dot::after { transition: none; }
 }

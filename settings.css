@@ -1965,10 +1965,10 @@ html[data-theme="light"] #settings-panel {
   #settings-panel .set-nav-item { transition: none; }
 
   /* the scrim keeps its fade (120 ms), like the sheet over it */
-  #settings-scrim, #settings-scrim:not([hidden]) { transition: opacity var(--m-dur-rm) var(--m-fade-in), display var(--m-dur-rm) allow-discrete; }
+  #settings-scrim, #settings-scrim:not([hidden]) { transition: opacity var(--m-dur-rm) var(--m-fade-in), display var(--m-dur-rm) allow-discrete; --rm-keep: var(--m-dur-rm); }
 
   /* reduced motion: it still fades (120 ms), it does not travel */
-  #settings-toast, #settings-toast.is-up { transform: translate(-50%, 0); transition: opacity var(--m-dur-rm) var(--m-fade-in); }
+  #settings-toast, #settings-toast.is-up { transform: translate(-50%, 0); transition: opacity var(--m-dur-rm) var(--m-fade-in); --rm-keep: var(--m-dur-rm); }
 }
 
 /* ============================================================

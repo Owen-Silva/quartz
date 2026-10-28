@@ -1544,8 +1544,8 @@ body,
   .tab.is-born { animation: q-tab-born-fade var(--m-dur-rm) var(--m-fade-in) backwards !important; }
   /* the launch entrance: a 120 ms fade, no settle */
   body:not(.booted) .chrome-layer { transform: none; }
-  body.booted .chrome-layer { transition: opacity var(--m-dur-rm) var(--m-fade-in); }
-  body.booted .navrow { transition: opacity var(--m-dur-rm) var(--m-fade-in); }
+  body.booted .chrome-layer { transition: opacity var(--m-dur-rm) var(--m-fade-in); --rm-keep: var(--m-dur-rm); }
+  body.booted .navrow { transition: opacity var(--m-dur-rm) var(--m-fade-in); --rm-keep: var(--m-dur-rm); }
   .tab.live .dot { animation: none; will-change: auto; }
   .tab.claude.needs-you .dot { animation: none; will-change: auto; }
   .tab.active.loading::after { animation: none; }

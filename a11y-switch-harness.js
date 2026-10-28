@@ -14,10 +14,9 @@
 //   3. "One block covers the whole app" is true: every bundled page in the
 //      repo root reaches tokens.css through the stylesheet it links (directly,
 //      or via chrome.css's @import), so no document is left out.
-//   4. The Home keeps its 120ms opacity fades: every rule in newtab.css that
+//   4. Every 120ms opacity fade survives: any rule, in any root stylesheet, that
 //      times a transition or animation with var(--m-dur-rm) WITHOUT !important
-//      opts in with --rm-keep. Other sheets are listed (info only) so the main
-//      session can see which fades the catch-all now collapses there.
+//      opts in with --rm-keep, or the catch-all would make it instant.
 //
 // What it cannot prove: how a contrast theme actually looks. That needs a
 // real Windows contrast theme on screen; see the lane notes.
@@ -115,23 +114,16 @@ function rmRules(css) {
   return out;
 }
 const sheets = fs.readdirSync(ROOT).filter((f) => /\.css$/.test(f) && f !== 'tokens.css');
-const collapsed = [];
 for (const sheet of sheets) {
   for (const r of rmRules(stripComments(read(sheet)))) {
-    const timed = r.body.split(';').filter((d) => /(transition|animation)[^;]*var\(--m-dur-rm\)/.test(d));
+    const timed = r.body.split(";").filter((d) => /(transition|animation)[^;]*var(--m-dur-rm)/.test(d));
     const important = timed.every((d) => /!important/.test(d));
-    const optsIn = /--rm-keep\s*:\s*var\(--m-dur-rm\)/.test(r.body);
-    if (sheet === 'newtab.css') {
-      ok('newtab.css keeps its fade: ' + r.sel.slice(0, 80), important || optsIn, r.body.trim());
-    } else if (!important && !optsIn) {
-      collapsed.push(sheet + ': ' + r.sel.slice(0, 90));
-    }
+    const optsIn = /--rm-keeps*:s*var(--m-dur-rm)/.test(r.body);
+    // Every sheet, not only the Home: a fade timed at --m-dur-rm that neither
+    // outranks the catch-all (!important on an id or class) nor opts in with
+    // --rm-keep would silently become instant under reduced motion.
+    ok(sheet + " keeps its fade: " + r.sel.slice(0, 80), important || optsIn, r.body.trim());
   }
-}
-if (collapsed.length) {
-  console.log('info: ' + collapsed.length + ' reduced-motion fade(s) outside this lane now collapse to 0.01ms under the catch-all' +
-    ' (add `--rm-keep: var(--m-dur-rm);` to the rule to keep the 120ms fade):');
-  for (const c of collapsed) console.log('  ' + c);
 }
 
 console.log(`a11y-switch: ${pass} passed, ${fail} failed`);
