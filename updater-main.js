@@ -44,6 +44,9 @@ function install(o) {
     off,
     onState: (s) => { try { send('updates:state', s); } catch { /* no window yet */ } },
     log: (line) => { if (!/^ {2}npm: |^git /.test(line)) say(line); },
+    // quartz.log (log.js): the release-signature outcome and failed updates, in addition to
+    // updater.log and the card. main.js passes logLine once its log is up.
+    record: (line) => { if (typeof o.logLine === 'function') { try { o.logLine(line); } catch { /* best effort */ } } },
   });
 
   let restarting = null;   // { mode, timer } once an update is ready to restart

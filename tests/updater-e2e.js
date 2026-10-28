@@ -82,12 +82,22 @@ async function main() {
   const app = path.join(WORK, 'app');
   git(WORK, 'clone', '-q', '--bare', '--no-local', REPO, origin);
   const branch = git(origin, 'symbolic-ref', '--short', 'HEAD');
+  // Signed release tags: the copy under test only installs a tag signed by a key in ITS OWN
+  // release-signers. A throwaway ed25519 key replaces the file in one commit on origin BEFORE the
+  // user's clone (so it is the installed file), and the fake release's tag is signed with it.
+  const key = path.join(WORK, 'e2e-signing-key');
+  execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'quartz-e2e', '-f', key], { stdio: 'ignore' });
+  const [keyType, keyB64] = fs.readFileSync(key + '.pub', 'utf8').trim().split(/\s+/);
+  git(WORK, 'clone', '-q', origin, pub);
+  fs.writeFileSync(path.join(pub, 'release-signers'), 'quartz-release namespaces="git" ' + keyType + ' ' + keyB64 + '\n');
+  git(pub, 'add', '-A'); git(pub, 'commit', '-q', '-m', 'Trust the e2e signing key'); git(pub, 'push', '-q', 'origin', branch);
   // The user's clone first, THEN the release lands on origin: the clone is one commit behind it.
   git(WORK, 'clone', '-q', origin, app);
   const oldSha = git(app, 'rev-parse', 'HEAD');
-  git(WORK, 'clone', '-q', origin, pub);
   fs.writeFileSync(path.join(pub, 'UPDATED-TO-V99.txt'), 'This file arrived with the fake release ' + TAG + '.\n');
-  git(pub, 'add', '-A'); git(pub, 'commit', '-q', '-m', 'Fake release ' + TAG); git(pub, 'tag', TAG);
+  git(pub, 'add', '-A'); git(pub, 'commit', '-q', '-m', 'Fake release ' + TAG);
+  git(pub, '-c', 'gpg.format=ssh', '-c', 'user.signingkey=' + key.split(path.sep).join('/'), '-c', 'gpg.ssh.program=ssh-keygen',
+    'tag', '-s', TAG, '-m', 'Fake release ' + TAG);
   git(pub, 'push', '-q', 'origin', branch, TAG);
   const tagSha = git(pub, 'rev-parse', 'HEAD');
   if (tagSha === oldSha) throw new Error('the fake release is not newer than the clone');
@@ -126,6 +136,9 @@ async function main() {
     const card = await c.waitFor("(() => { const k = document.querySelector('.qup-card[data-status=available]'); return k && k.classList.contains('is-up') ? k.textContent : ''; })()", 40000)
       .catch(async (e) => { say('no card; updater state: ' + JSON.stringify(await c.ev('window.api.updates.state()').catch((x) => x.message)).slice(0, 600)); return null; });
     check(typeof card === 'string' && card.includes('Quartz ' + TAG + ' is out'), 'the card renders: "Quartz ' + TAG + ' is out"', card);
+    const sig = await c.ev('window.api.updates.state().then((s) => s && s.signature)').catch((e) => ({ error: e.message }));
+    check(sig && sig.state === 'verified' && /is signed by a key this copy of Quartz trusts/.test(sig.text || ''),
+      'the release tag\'s signature is verified against the installed release-signers', sig);
     const btn = await c.ev("(() => { const b = document.querySelector('.qup-card [data-act=update]'); return b ? b.textContent : ''; })()");
     check(btn === 'Update', 'the card offers the Update button', btn);
     check(hits.includes('/repos/Owen-Silva/quartz/releases/latest'), 'Quartz asked the (fake) releases API');

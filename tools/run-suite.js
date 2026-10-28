@@ -146,6 +146,11 @@ const TESTS = [
   // It spawns a few hundred git processes, which on a busy Windows laptop took ~2 min: past the 90 s unit
   // default, so the suite timed out a harness that passes. 300 s keeps a real hang a FAIL.
   { name: 'updater', file: 'tests/updater-test.js', timeout: 300 },
+  // Signed release tags (updater.js verifyReleaseTag, the swap helper's second check,
+  // tools/release-tag.js): throwaway repos and ed25519 keys; signed, unsigned, other key, signers
+  // swapped by the release, tag/commit mismatch, rotation, bootstrap, old git, no ssh-keygen.
+  // Spawns git and ssh-keygen a few hundred times, like the updater harness: same 300 s.
+  { name: 'release-signing', file: 'tests/release-signing-test.js', timeout: 300 },
   // The same in a real Quartz: the card, the Update button, a real update and the relaunch.
   { name: 'updater-e2e', file: 'tests/updater-e2e.js', e2e: true },
   // uvquiet's default mode (every activateUvLoop skipped) in a real Electron: work still runs on time.
