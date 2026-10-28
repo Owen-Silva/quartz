@@ -13,7 +13,8 @@
 // What runs:
 //   - the chrome (index.html): boots, Settings > About opens (its age sentence is read back), a
 //     terminal tab starts (xterm draws its rows with <style>), and the policy is proven ACTIVE: an
-//     inline <script> injected into the chrome must not run, and eval must throw;
+//     inline <script> injected into the chrome must not run, and eval must throw (tried from a page
+//     timer: DevTools' own Runtime.evaluate is exempt from 'unsafe-eval' by default);
 //   - newtab, historypage, files, search, watch, welcome, phone and score-pin as tabs;
 //   - reader.html for a served article that carries style= attributes, an inline handler, a
 //     <script> and images: the article must show, with its images and without those three;
@@ -128,8 +129,17 @@ async function main() {
     // The policy is really in force: an inline script must not run, eval must throw.
     const inl = await chrome.ev(`(function(){var s=document.createElement('script');s.textContent='window.__inlineRan=1';document.head.appendChild(s);s.remove();return window.__inlineRan===1;})()`);
     check(inl === false, 'chrome: an injected inline <script> does NOT run');
-    const ev = await chrome.ev(`(function(){try{(0,eval)('1');return 'ran'}catch(e){return e.name}})()`);
-    check(ev === 'EvalError', 'chrome: eval is refused', ev);
+    // eval is tried from a task of the PAGE's own (a timer), never inside the DevTools evaluation:
+    // Runtime.evaluate lifts 'unsafe-eval' for the code it runs (its allowUnsafeEvalBlockedByCSP
+    // parameter defaults to true), so an eval typed straight into it runs on ANY policy and proves
+    // nothing. A timer callback is outside that scope and gets exactly what the chrome's own scripts get.
+    const ev = await chrome.ev(`new Promise(function (done) { setTimeout(function () {
+      var r = {};
+      try { (0, eval)('1'); r.eval = 'ran'; } catch (e) { r.eval = e.name; }
+      try { Function('return 1')(); r.fn = 'ran'; } catch (e) { r.fn = e.name; }
+      done(r);
+    }, 0); })`);
+    check(ev && ev.eval === 'EvalError' && ev.fn === 'EvalError', 'chrome: eval and new Function are refused (tried from a page task, outside DevTools)', ev);
     await sleep(300);
     const expected = chrome.csp.length;  // boot + those two refusals, counted out below
     check(expected > boot.length, 'chrome: the console reports those refusals (the detector works)', chrome.csp.slice(boot.length));
