@@ -918,6 +918,13 @@ Found, and not ours to fix:
   or load code from elsewhere.
 - Settings → About says when the Electron (and so the Chromium) build was made and how long ago,
   with a plain warning once it is more than three weeks old.
+- Quartz now runs on castlabs Electron 44.9.3 (Chromium 152.0.7977.167), up from 44.5.1 (Chromium
+  152.0.7977.130). It carries the fix for an Electron security advisory (GHSA-jr5w-w6x2-84p9, fixed
+  upstream from 44.9.1), and Electron's install-time downloader now uses undici 7.30.1, past five
+  high-severity advisories in 7.29.1. `npm audit --omit=dev` is clean.
+- Protected video after this update: streaming services need the build signed again, and
+  Settings → Protected video says so until it is. See "Electron and Chromium updates" in the
+  engineering notes.
 
 ### Developer tooling
 
@@ -940,6 +947,12 @@ Found, and not ours to fix:
   the updater will before it is pushed.
 - `node tools/css-lint.js` holds stylesheets to the tokens.css scale; a baseline tolerates today's
   drift so only new drift fails.
+- A fresh `npm ci` works again: the castlabs Electron package has no install script, so `npm ci`
+  never downloaded Electron and then stopped with "electron.exe not found". The `postinstall` now
+  runs Electron's installer first; the in-app updater's dependency updates (its staged `npm ci`)
+  depended on this too.
+- `tools/quartz-ff-golive.ps1` refuses a release that changes the dependencies, before it closes
+  Quartz, and its STOP line prints the exact `tools/lumen-golive.ps1` command that ships it.
 
 ### Workspaces, the notes pane and the titlebar readouts (2026-09-12, evening)
 

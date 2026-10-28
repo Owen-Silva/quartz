@@ -43,10 +43,13 @@ Quartz launches as `node_modules\electron\dist\Quartz.exe`, not `electron.exe`, 
 lists it (main, GPU, renderers, utilities) as **Quartz** with the Quartz icon instead of
 "Electron". `tools/make-quartz-exe.js` copies `electron.exe` to `Quartz.exe` in the same folder
 (it needs that folder's DLLs and resources) and stamps its version strings and icon with `rcedit`
-(a devDependency). It runs as npm's `postinstall`, is idempotent (a stamp file next to it), builds
-a running copy aside rather than over it, and exits 1 with a plain reason on any failure. After
-`npm install electron@<x>` run `npm run quartz-exe` to be sure it was rebuilt. `npx electron .`
-test instances still run as `electron.exe` and are unaffected.
+(a devDependency). It is idempotent (a stamp file next to it), builds a running copy aside rather
+than over it, and exits 1 with a plain reason on any failure. It runs as npm's `postinstall`, right
+after Electron's own `install.js` (castlabs' package ships `install.js` but no install script, so
+the `postinstall` runs it; it exits at once when `dist` already holds the pinned version and checks
+the download against the package's `checksums.json`). `npm ci --ignore-scripts` (CI's unit job)
+skips both; run `node node_modules/electron/install.js` and `npm run quartz-exe` yourself after it.
+`npx electron .` test instances still run as `electron.exe` and are unaffected.
 
 The Start Menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Quartz.lnk` launches
 `Quartz.exe` with this project path as its argument and carries `System.AppUserModel.ID =
@@ -1463,27 +1466,49 @@ Electron was built, read from disk, with no network call.
 **Bumping** (on a `wk/` branch, never straight on master):
 
 1. `node tools/check-electron.js` and pick the tag. Read castlabs' release notes for it.
-2. Set `package.json`'s `electron` to `github:castlabs/electron-releases#v<new>+wvcus`, then update
-   the lockfile without running install scripts:
-   `npm install --package-lock-only --ignore-scripts`. Check that `package-lock.json` resolves the
-   tag to a commit SHA, and keep the previous lockfile for rollback.
+2. Set `package.json`'s `electron` to `github:castlabs/electron-releases#v<new>+wvcus` and update the
+   lockfile without running install scripts:
+   `npm install "electron@github:castlabs/electron-releases#v<new>+wvcus" --package-lock-only --ignore-scripts`.
+   Name the package: a bare `npm install --package-lock-only` after editing `package.json` reports
+   "up to date" and leaves `node_modules/electron` in the lockfile on the OLD tag and commit. Check
+   that the lockfile's `node_modules/electron` entry now shows the new version and the tag's commit
+   SHA (`git ls-remote https://github.com/castlabs/electron-releases refs/tags/v<new>+wvcus`), and
+   keep the previous lockfile for rollback. Then `npm update undici --package-lock-only
+   --ignore-scripts` (an optional dependency of `@electron/get`, Electron's downloader; it moves
+   inside `@electron/get`'s own range, no `overrides` entry needed), and `npm audit --omit=dev`: the
+   verdict must be 0 critical, 0 high (the ci `audit` job checks the same).
 3. In a worktree with its own `node_modules` (never the live checkout, never a junction to the
-   shared one): `npm install --ignore-scripts`, then `node node_modules\electron\install.js`,
-   then `npm run quartz-exe`. Not `npm ci`: it deletes node-pty's Electron build, which cannot be
-   rebuilt from npm. Check node-pty's native files are unchanged (`tools\drm-swap.ps1` step 3 does
-   this check).
+   shared one): `npm ci`. Its `postinstall` runs Electron's `install.js` and then
+   `tools/make-quartz-exe.js` (the castlabs package has no install script of its own, so without
+   the first half `npm ci` stopped at "electron.exe not found"). On the 44.5.1 -> 44.9.3 bump,
+   `npm ci` left node-pty's native files byte-identical to the live checkout's, so the old warning
+   that `npm ci` destroys node-pty's Electron build did not reproduce; `tools\drm-swap.ps1` still
+   checks those files and puts them back if npm touched them.
 4. Run `node tools/run-suite.js --unit`, then the e2e suite through the heavy-test queue, including
    the castlabs-only DRM e2e. Confirm `process.versions.chrome` in Settings > About.
-5. Merge and ship through the normal updater, which runs `npm ci` in a staging tree when the
-   dependencies change.
-6. **Re-sign for streaming.** An Electron update replaces `node_modules\electron` wholesale, and
-   that removes the castlabs EVS (VMP) signature, so protected video stops working until the build is
-   signed again. With Quartz closed, run
+5. Ship. A copy whose updater is on takes it through the in-app updater, which runs `npm ci` in a
+   staging tree when the dependencies change. A copy with updates off (`no-updates.local`) never
+   does: `tools/quartz-ff-golive.ps1` refuses any release that changes `package-lock.json` (before
+   it closes Quartz) because it never runs npm, swaps `node_modules\electron` or re-signs, and its
+   STOP line prints the command that does:
+   `powershell -NoProfile -ExecutionPolicy Bypass -File tools\lumen-golive.ps1 -Repo <repo> -Ref <ref> -DryRun`,
+   then the same without `-DryRun`. That closes Quartz, fast-forwards, runs
+   `tools\drm-swap.ps1 -NoMerge` (the old `node_modules\electron` moved aside for
+   `tools\drm-rollback.ps1`, `npm install --ignore-scripts`, `install.js`, `npm run quartz-exe`,
+   EVS `sign-pkg -H Quartz` + `verify-pkg`, the `quartz-vmp.json` marker), checks node-pty and the
+   default-browser registry, and relaunches. `lumen-golive.ps1` has no `-Expect`: check that `<ref>`
+   is still the reviewed SHA between the dry run and the real one.
+6. **Re-sign for streaming** (an updater copy only; the go-live path above already signed). An
+   Electron update replaces `node_modules\electron` wholesale, and the castlabs `dist` carries
+   castlabs' DEVELOPMENT VMP signature only (`electron.exe.sig`; `castlabs_evs.vmp verify-pkg` says
+   "Certificate is valid for development only"), which plays test streams but not Disney+, Prime
+   Video or Netflix. With Quartz closed and EVS signed in (`py -3 -m castlabs_evs.account reauth`,
+   the user's step), run
    `powershell -NoProfile -ExecutionPolicy Bypass -File tools\drm-swap.ps1 -ResignOnly`. It runs
    `py -3 -m castlabs_evs.vmp -n sign-pkg -H Quartz <dist>` and then `verify-pkg`, checks that
-   `Quartz.exe.sig` exists, and rewrites `node_modules\electron\quartz-vmp.json`. Signing in to
-   EVS (`py -3 -m castlabs_evs.account reauth`) is the user's step. `-H Quartz` matters: without
-   it, only `electron.exe` gets signed.
+   `Quartz.exe.sig` exists, and rewrites `node_modules\electron\quartz-vmp.json`. `-H Quartz`
+   matters: without it, only `electron.exe` gets signed. Until then Settings > Protected video says
+   the build is not signed for streaming, and why.
 7. Rollback: `tools\drm-rollback.ps1` puts the previous `node_modules\electron` back. Then restore
    the previous `package.json` and `package-lock.json`.
 

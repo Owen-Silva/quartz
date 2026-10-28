@@ -32,7 +32,7 @@ affiliated with or endorsed by Brave.
 ## Runtime: Electron, Chromium and Widevine
 
 - **Electron for Content Security (castlabs ECS)**, pinned in `package.json` as
-  `github:castlabs/electron-releases#v44.5.1+wvcus`: MIT License, copyright castLabs
+  `github:castlabs/electron-releases#v44.9.3+wvcus`: MIT License, copyright castLabs
   GmbH and the Electron contributors. After `npm ci` its licence is in
   `node_modules/electron/dist/LICENSE`.
 - **Chromium**, which Electron embeds: BSD-style licence plus the notices of its

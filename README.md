@@ -59,7 +59,7 @@ Node.js 22.12 or newer but below 27, and git; see [Requirements](#requirements) 
 - **git**, to clone it.
 - The Electron it installs is **castlabs' Electron for Content Security (ECS)**, a build of
   Electron with Widevine support, pinned in `package.json`
-  (`github:castlabs/electron-releases#v44.5.1+wvcus`). npm fetches it from GitHub.
+  (`github:castlabs/electron-releases#v44.9.3+wvcus`). npm fetches it from GitHub.
 
 ## Install
 
