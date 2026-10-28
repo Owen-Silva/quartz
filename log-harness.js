@@ -195,6 +195,11 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
     check(lines(file).length === n0, 'IPC from anything but the chrome, an unknown kind, or junk writes nothing');
     ipc.emit('log:event', { sender: chrome }, { kind: 'tab-slept', url: 'https://b.example.org/', why: 'workspace' });
     check(/ A tab on b\.example\.org went to sleep with its workspace, to free its memory\.$/.test(lines(file).pop()), 'IPC tab-slept', lines(file).pop());
+    // Early sleeps (app.js earlySleepPlan) carry their reason in plain words.
+    ipc.emit('log:event', { sender: chrome }, { kind: 'tab-slept', url: 'https://b.example.org/', why: 'memory', note: 'memory was low (1.6 GB of 11.7 GB free)', sound: 'was not making sound' });
+    check(/ went to sleep early, because memory was low \(1\.6 GB of 11\.7 GB free\), to free its memory \(was not making sound\)\.$/.test(lines(file).pop()), 'IPC tab-slept early: memory', lines(file).pop());
+    ipc.emit('log:event', { sender: chrome }, { kind: 'tab-sleep-skipped', url: 'https://b.example.org/', reason: 'could not check it for unsaved work (the page did not answer within 1.5 s)' });
+    check(/ was kept awake: could not check it for unsaved work \(the page did not answer within 1\.5 s\)\.$/.test(lines(file).pop()), 'IPC kept awake: a long reason is not cut', lines(file).pop());
     ipc.emit('log:event', { sender: chrome }, { kind: 'tab-woke', url: 'https://b.example.org/', sleptMs: null });
     check(/ A sleeping tab on b\.example\.org woke up\.$/.test(lines(file).pop()), 'IPC tab-woke without a known sleep time', lines(file).pop());
     // ui-error: the chrome showed plain words; the raw text lands here, one line, known places only.
@@ -254,7 +259,8 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
     h.adblock({ ok: true, ms: 12, fromCache: false, enabled: false });
     check(/ freshly downloaded filter lists; blocking is OFF \(turned off in Settings\)\.$/.test(lines(file).pop()), 'adblock via the hook', lines(file).pop());
     app.emit('quit');
-    check(/ Quartz quit after \d+ s\. This run: 1 tab crash, 1 window crash, 1 helper process stop, 3 hangs, 1 failed page load, 1 tab put to sleep, 0 unhandled errors\.$/.test(lines(file).pop()), 'app quit -> the quit line', lines(file).pop());
+    // (two tab-slept events above: the workspace one and the early "memory" one)
+    check(/ Quartz quit after \d+ s\. This run: 1 tab crash, 1 window crash, 1 helper process stop, 3 hangs, 1 failed page load, 2 tabs put to sleep, 0 unhandled errors\.$/.test(lines(file).pop()), 'app quit -> the quit line', lines(file).pop());
     check(read(file).split('\n').filter(Boolean).every((l) => STAMP.test(l) && !/[\x00-\x08]/.test(l)), 'every line of the installed log is one stamped line');
   }
 } catch (e) {

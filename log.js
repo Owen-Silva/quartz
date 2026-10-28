@@ -411,11 +411,14 @@ function createQuartzLog(opts) {
       line(`The ad blocker is ready in ${Math.round(ms)} ms, ${fromCache ? 'from its saved filter lists' : 'with freshly downloaded filter lists'}; blocking is ${enabled ? 'on' : 'OFF (turned off in Settings)'}.`);
     },
 
-    tabSlept({ url, why, sound }) {
+    tabSlept({ url, why, sound, note }) {
       run.slept++;
+      // memory / heavy: sooner than the user's timer (app.js earlySleepPlan); note says why in figures.
       const cause = {
         idle: 'after it went unused', workspace: 'with its workspace',
-        'newtab-left': 'after it sat in the background', restore: 'at startup'
+        'newtab-left': 'after it sat in the background', restore: 'at startup',
+        memory: 'early, because ' + (note || 'memory was low'),
+        heavy: 'early, because ' + (note || 'it was using a lot of memory')
       }[why] || 'because you asked';
       // The sound state it was judged on, so "my stream went to sleep" can be read off the log.
       line(`A tab on ${place(url)} went to sleep ${cause}, to free its memory${sound ? ' (' + sound + ')' : ''}.`);
@@ -515,8 +518,8 @@ function install(deps) {
     const p = payload && typeof payload === 'object' ? payload : {};
     const url = typeof p.url === 'string' ? p.url.slice(0, 2048) : '';
     if (p.kind === 'tab-crashed') log.tabCrashed({ url, reason: oneLine(p.reason, 40), exitCode: Number(p.exitCode) });
-    else if (p.kind === 'tab-slept') log.tabSlept({ url, why: oneLine(p.why, 20), sound: oneLine(p.sound, 60) });
-    else if (p.kind === 'tab-sleep-skipped') log.tabSleepSkipped({ url, reason: oneLine(p.reason, 60) });
+    else if (p.kind === 'tab-slept') log.tabSlept({ url, why: oneLine(p.why, 20), sound: oneLine(p.sound, 60), note: oneLine(p.note, 80) });
+    else if (p.kind === 'tab-sleep-skipped') log.tabSleepSkipped({ url, reason: oneLine(p.reason, 120) });
     else if (p.kind === 'tab-woke') log.tabWoke({ url, sleptMs: Number(p.sleptMs) });
     else if (p.kind === 'ui-error') log.uiError({ where: String(p.where || ''), detail: oneLine(p.detail, 240) });
   });

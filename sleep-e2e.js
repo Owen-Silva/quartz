@@ -23,6 +23,11 @@
 //     subscription back on it; one holding typed text is kept awake; workspace sleep "off" stands it down.
 //   - lazy restore: after the restart only the tab in front of the workspace on screen (and the
 //     pinned one) loads; every other Home tab comes back asleep with its crescent and title.
+//   - the chip's speaker follows Chromium (tab.heard): still lit when one of two players pauses, lit
+//     for Web Audio, out when the sound stops.
+//   - the safe-to-sleep probe: a tab holding text typed through real input is kept awake, and its
+//     hover and the Sleep tab label say why; a script-filled field does not count; an early sleep's
+//     hover says why; main's memory figures (free/total, the guest's renderer) are real numbers.
 // One summary line: "sleep-e2e: N passed, M failed".
 'use strict';
 const { run, serve, html, sleep } = require('./tests/e2e-kit');
@@ -49,6 +54,8 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
     // Web Audio only: no media element at all, so no media event ever fires.
     if (p === '/osc.html') return html(res, '<!doctype html><title>Oscillator</title><script>window.ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain(); g.gain.value = 0.05; o.connect(g).connect(ctx.destination); o.start();</script>');
     if (p === '/long.html' || p === '/far.html') return html(res, '<!doctype html><title>Long page</title><style>body{margin:0}</style><div style="height:9000px;background:linear-gradient(#eee,#999)">top</div>');
+    // The safe-to-sleep probe: a field the user types into, and one a script fills.
+    if (p === '/form.html') return html(res, '<!doctype html><title>Form</title><form><textarea id="t"></textarea><input id="s"></form>');
     const m = /^\/([a-z0-9]+)\.html$/.exec(p);
     if (!m) return false;
     return html(res, `<!doctype html><title>Page ${m[1].toUpperCase()}</title><p>${m[1]}</p>`);
@@ -159,6 +166,13 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   const oscSound = await c.waitFor(`${T('osc')}.viewEl.isCurrentlyAudible() === true`, 10000).catch((e) => e.message);
   check(oscSound === true, 'sound: the Web Audio oscillator page is audible to Chromium', oscSound);
   check(await c.ev(`!!${T('osc')}.audible`) === false, 'sound: Web Audio never set the media flag (why the flag alone is not enough)');
+  // The speaker follows Chromium (main pushes audio-state-changed), not the per-element events.
+  const speaker = (name) => c.ev(`({ heard: !!${T(name)}.heard, shown: !!(${T(name)}.audioEl && ${T(name)}.audioEl.isConnected && !${T(name)}.audioEl.hidden) })`);
+  const twoSpk = await speaker('two');
+  check(twoSpk.heard && twoSpk.shown, 'speaker: one of two players paused, the other playing: the speaker stays lit', twoSpk);
+  const oscLit = await c.waitFor(`${T('osc')}.heard === true`, 5000).catch((e) => e.message);
+  const oscSpk = await speaker('osc');
+  check(oscLit === true && oscSpk.shown, 'speaker: a Web Audio page (no media event ever) lights the speaker', { oscLit, oscSpk });
   await c.ev(`activateTab(${T('front')}.id), 1`);
   await c.ev(`${T('two')}.lastActive = ${past}; ${T('osc')}.lastActive = ${past}; 1`);
   await c.ev("Settings.set({ tabSleepMinutes: 15 }), 1");
@@ -174,6 +188,8 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   await c.ev(`${T('osc')}.viewEl.executeJavaScript('window.ctx.close().then(() => 1)')`).catch(() => 0);
   const quiet = await c.waitFor(`${T('osc')}.viewEl.isCurrentlyAudible() === false`, 15000).catch((e) => e.message);
   check(quiet === true, 'sound: the oscillator stopped (Chromium no longer hears it)', quiet);
+  const oscOut = await c.waitFor(`${T('osc')}.heard === false`, 5000).catch((e) => e.message);
+  check(oscOut === true && !(await speaker('osc')).shown, 'speaker: goes out when Chromium stops hearing it', oscOut);
   await c.ev('sleepIdleTabs()');
   check(await c.ev(`${T('osc')}.asleep`) === false && await c.ev(`tabSoundReason(${T('osc')})`) === 'made sound in the last 2 minutes', 'sound: just stopped, still spared (2-minute window)');
   await c.ev(`${T('osc')}.lastAudibleAt = Date.now() - 4 * 60000; 1`);
@@ -181,6 +197,34 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   check(await c.ev(`${T('osc')}.asleep`) === true, 'sound: quiet for longer than the window, the idle sweep sleeps it');
   check(await c.ev(`${T('two')}.asleep`) === false && await audibleNow('two') === true, 'sound: the two-player tab is still awake and playing');
   await c.ev(`closeTab(${T('two')}.id), 1`);
+
+  // ---- the safe-to-sleep probe, early-sleep reasons, memory figures --------------------------
+  await open('form', B + '/form.html');
+  await c.waitFor(`${T('form')}.viewEl.isLoading() === false`, 10000).catch(() => 0);
+  await sleep(800); // the input tracker goes in once the page has stopped loading
+  // Real input (trusted events), as a user typing: focus the field, then insertText through the guest.
+  await c.ev(`${T('form')}.viewEl.focus(), ${T('form')}.viewEl.executeJavaScript('document.getElementById("t").focus(), 1')`);
+  await c.ev(`${T('form')}.viewEl.insertText('half a reply').then(() => 1)`).catch(() => 0);
+  const typed = await c.ev(`${T('form')}.viewEl.executeJavaScript('document.getElementById("t").value')`).catch((e) => 'threw ' + e.message);
+  check(typed === 'half a reply', 'probe: real typed input reached the field', typed);
+  await c.ev(`activateTab(${T('front')}.id), 1`);
+  const kept = await c.ev(`sleepTabChecked(${T('form')}, 'idle', '', () => true)`);
+  check(kept === false && await c.ev(`${T('form')}.asleep`) === false, 'probe: a tab holding typed text is kept awake', kept);
+  const why = await c.ev(`(${T('form')}.keptAwake || {}).reason || ''`);
+  check(why === 'unsaved text in a form', 'probe: the reason is "unsaved text in a form"', why);
+  check(/kept awake: unsaved text in a form/.test(await c.ev(`${T('form')}.chipEl.title`)), 'probe: the chip hover says why it is awake');
+  check(await c.ev(`sleepMenuLabel(${T('form')})`) === 'Sleep tab (unsaved text in a form would be lost)', 'probe: the Sleep tab item says what it would lose');
+  // The text is sent (cleared); a script fills another field: nothing the user typed is left.
+  await c.ev(`${T('form')}.viewEl.executeJavaScript('document.getElementById("t").value = ""; document.getElementById("s").value = "filled by a script"; 1')`);
+  await c.ev(`${T('form')}.keptAwake = null; 1`);
+  const went = await c.ev(`sleepTabChecked(${T('form')}, 'memory', 'memory was low (test)', () => true)`);
+  check(went === true && await c.ev(`${T('form')}.asleep`) === true, 'probe: typed text gone, a script-filled field only: it sleeps', went);
+  check(/put to sleep early: memory was low \(test\)/.test(await c.ev(`${T('form')}.chipEl.title`)), 'early sleep: the sleeping chip hover says why');
+  const mem = await c.ev(`(async () => { const id = ${T('front')}.viewEl.getWebContentsId(); const m = await window.api.tabs.memory([id]);
+    return { ok: m.ok, free: m.freeBytes, total: m.totalBytes, bytes: m.tabs && m.tabs[id] && m.tabs[id].bytes, reason: m.reason }; })()`);
+  say('memory: ' + JSON.stringify(mem));
+  check(mem.ok && mem.free > 0 && mem.total > mem.free && mem.bytes > 10 * 1024 * 1024, 'memory: main gives free/total and the guest\'s renderer size', mem);
+  await c.ev(`closeTab(${T('form')}.id), 1`);
 
   // ---- a new tab page sent to the background, in the workspace on screen ---------------------
   // It sleeps after a 15 s grace (sleepBackgroundNewTab), wakes as a fresh Home with everything

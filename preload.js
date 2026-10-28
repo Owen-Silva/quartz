@@ -373,6 +373,19 @@ contextBridge.exposeInMainWorld('api', {
   log: {
     event: (kind, details) => ipcRenderer.send('log:event', Object.assign({}, details || {}, { kind: String(kind || '') })),
   },
+  // Tab sleep's main half (tabsleep-main.js). wcId is a <webview>'s getWebContentsId().
+  //   memory(wcIds) -> { ok, totalBytes, freeBytes, tabs: { [wcId]: { bytes, sharedWith } } } | { ok: false, reason }
+  //   prepareSleep(wcId) -> { ok, probe: { ok, busy, tracked } | { ok: false, reason } } | { ok: false, reason }
+  //   onAudioState(fn({ wcId, audible })) -> unsubscribe: Chromium's audibility of a guest, on every change.
+  tabs: {
+    memory: (wcIds) => ipcRenderer.invoke('tabs:memory', { wcIds: Array.isArray(wcIds) ? wcIds.filter(Number.isInteger) : [] }),
+    prepareSleep: (wcId) => ipcRenderer.invoke('tabs:prepare-sleep', { wcId: Number(wcId) }),
+    onAudioState: (cb) => {
+      const handler = (_e, p) => { try { cb(p); } catch (err) { /* the chrome's problem, not the bridge's */ } };
+      ipcRenderer.on('tabs:audio-state', handler);
+      return () => ipcRenderer.removeListener('tabs:audio-state', handler);
+    }
+  },
   // Protected video (drm-main.js). DrmState:
   //   { widevine: { available, services, reason, short, vmp }, edge: { found, how, path },
   //     alwaysEdge: [{ key, name }], detection, extraSites, lastLaunch }

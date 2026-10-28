@@ -97,7 +97,8 @@ const TESTS = [
   // session.json's writer: a refused rename (a scanner holding the file) keeps the snapshot.
   { name: 'sessionfile', file: 'sessionfile-harness.js' },
   // Tab sleep rules: the idle clock starts when a tab leaves the screen, a tab making sound (or heard in
-  // the last 2 minutes) never sleeps, lazy restore and the backgrounded new tab page.
+  // the last 2 minutes) never sleeps, lazy restore and the backgrounded new tab page; sleeping early
+  // (memory low, heavy pages), the safe-to-sleep probe, the speaker following Chromium, tabsleep-main.js.
   { name: 'tabsleep', file: 'tabsleep-harness.js' },
   // look-sync's reads and writes when Windows refuses look.json for a moment (scanner, another app):
   // a refused read is retried and re-checked, so a change that landed is followed, never lost.

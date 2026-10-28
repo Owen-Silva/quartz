@@ -60,6 +60,8 @@ const drmModule = require('./drm-main');
 // quartz.log (log.js): start/quit, crashes, hangs, failed loads, adblock, tab
 // sleep, memory. Installed in whenReady, once userData is final.
 const quartzLog = require('./log');
+// Tab sleep's main half: memory figures, the safe-to-sleep probe, audibility.
+const tabSleepMain = require('./tabsleep-main');
 /** @type {ReturnType<typeof quartzLog.install> | null} */
 let qlog = null;
 
@@ -1404,6 +1406,9 @@ app.whenReady().then(async () => {
     screen: require('electron').screen, powerMonitor: require('electron').powerMonitor,
   });
   toprow = toprowMain.install({ ipcMain, BrowserWindow, test: process.argv.includes('--test-profile') });
+  // Tab sleep (tabsleep-main.js): 'tabs:memory', 'tabs:prepare-sleep' (the safe-to-sleep probe),
+  // and every guest's audio-state-changed pushed to the chrome as 'tabs:audio-state'.
+  tabSleepMain.install({ app, ipcMain, webContents, isChromeSender, chromeContents: () => (canSend() ? win.webContents : null) });
   // In-app updates (updater-main.js): a release on GitHub, a card, one button. Never on a test
   // profile, a linked worktree, or a folder with no-updates.local in it.
   try {
