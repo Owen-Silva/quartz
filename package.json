@@ -7,7 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "node tools/make-quartz-exe.js",
+    "postinstall": "node node_modules/electron/install.js && node tools/make-quartz-exe.js",
     "quartz-exe": "node tools/make-quartz-exe.js"
   },
   "dependencies": {
