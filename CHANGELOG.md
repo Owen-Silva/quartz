@@ -66,6 +66,14 @@ or use Restart browser in Settings → About — to pick any of this up.
   page is cleaned of hidden characters and marked as untrusted web content, and a paste that could
   press Enter for you is refused, with the reason shown. A Claude pane you already had beside the
   page stays in the tab strip, and a note tells you where it went.
+- Claude panes can now read your open tabs. Claude can list your open web tabs, read the page
+  you're on (as you see it, signed in), search your history and your notes folder, and point at a
+  passage by highlighting it in the page. It can't click, type or change anything. Every read asks
+  you first in a bar over the Claude pane (Allow once, Allow this tab for this pane, or Deny; no
+  answer in 60 seconds counts as Deny), even when permission prompts are skipped, and each read
+  shows a line over the pane. "Ask Claude about this page" now has Claude read the page itself,
+  without asking again for that tab. Settings → Claude → "Let Claude panes read your open tabs"
+  turns it off.
 
 ### Tabs
 
