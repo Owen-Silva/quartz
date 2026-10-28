@@ -64,6 +64,9 @@ const TESTS = [
   { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
   // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
   { name: 'check-electron', file: 'check-electron-harness.js' },
+  // tools/audit-verdict.js: the ci audit job's verdict line, and that the castlabs git Electron stays
+  // visible to npm audit (an unversioned lockfile entry would be skipped and pass).
+  { name: 'audit-verdict', file: 'tests/audit-verdict-test.js' },
   // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,
   // and nothing in the page or its scripts that the policy would refuse (csp-e2e.js is the live half).
   { name: 'csp', file: 'csp-harness.js' },
