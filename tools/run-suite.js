@@ -47,6 +47,9 @@ function castlabsBuild() {
  * or null. Unit tests first: they are seconds, and a broken module shows before any launch.
  */
 const TESTS = [
+  // tokens.css's two accessibility switches (reduced-motion catch-all, forced colours) and that every
+  // bundled page reaches tokens.css, so one block really covers the whole app.
+  { name: 'a11y-switch', file: 'a11y-switch-harness.js' },
   { name: 'argvurl', file: 'argvurl-harness.js' },
   // Spotify auto-pause: config migration, the hold machine -> link -> engine, the SMTC helper's wrapper
   // (a fake child), and test mode never sending. Then the shared host protocol (byte-identical with Mantle's).

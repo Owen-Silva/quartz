@@ -425,3 +425,115 @@ html[data-theme="light"] [data-palette="mono"] {
   --bg-blur: 5px;                        /* the Helm setting (Helm settings.json background.blur) */
   --bg-dim: 0.45;
 }
+
+/* ============================================================
+   ACCESSIBILITY SWITCHES. Not tokens, but they live here for one
+   reason: this is the one stylesheet every Quartz document imports
+   (the chrome through chrome.css, and every bundled page), so ONE
+   block here covers the whole app, including any element written
+   after today that nobody remembered to add to a list.
+   ============================================================ */
+
+/* --- reduced motion: the catch-all ----------------------------- */
+/* Windows' "Animation effects" off (Settings > Accessibility > Visual
+   effects) reaches every document as prefers-reduced-motion: reduce.
+
+   Before this block each stylesheet enumerated its own moving parts
+   (chrome.css, newtab.css, settings.css, watch.css ...), so a new
+   transition was non-compliant until somebody added its selector to
+   a list. Now, under the preference:
+
+   1. The shared IN durations collapse, so anything timed with the
+      --m-dur-* tokens (and the -out ones, which are calc()s of them)
+      arrives at once.
+   2. EVERY transition and animation, token or raw literal, is cut to
+      --rm-keep: 0.01ms by default. Not 0: a 0 s transition never fires
+      transitionend, and code that waits for one (a panel's teardown)
+      would wait forever. Delays are left alone; a delay moves nothing.
+      Infinite animations run once (a spinner stops, it does not spin).
+
+   The one motion the preference still allows is a short OPACITY fade,
+   which the existing per-sheet blocks keep at --m-dur-rm (120ms). Those
+   rules already outrank this one wherever they say !important on an id
+   or class (specificity beats the bare *). A rule that keeps its fade
+   WITHOUT !important opts in by setting --rm-keep on itself:
+
+     .thing { transition: opacity var(--m-dur-rm) var(--m-fade-in);
+              --rm-keep: var(--m-dur-rm); }
+
+   --rm-keep is registered with inherits: false, so a panel that keeps
+   its 120ms fade does not hand 120ms to every child under it: each
+   element that does not set it reads the initial 0.01ms. */
+@property --rm-keep {
+  syntax: "<time>";
+  inherits: false;
+  initial-value: 0.01ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --m-dur-xs: 0.01ms;
+    --m-dur-s: 0.01ms;
+    --m-dur-m: 0.01ms;
+    --m-dur-l: 0.01ms;
+  }
+  *, *::before, *::after {
+    animation-duration: var(--rm-keep) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--rm-keep) !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- forced colours (Windows contrast themes) ------------------ */
+/* Under a contrast theme Chromium repaints every colour with the
+   theme's system colours: text, fills and borders are forced, and
+   box-shadow and text-shadow are dropped. Quartz draws most of its
+   edges as translucent tints over a picture and its focus ring as a
+   box-shadow, so without this block a contrast theme leaves controls
+   with no visible edge and focus with no ring at all. Nothing here
+   applies outside a contrast theme.
+
+   Edges and the selected state are OUTLINES drawn inside the box
+   (negative offset), never borders: an outline takes no space, so
+   nothing in the chrome or on a page moves or wraps. */
+@media (forced-colors: active) {
+  /* The picture (and the Home's clip) goes. A photo under Canvas-
+     coloured tints is exactly the clutter a contrast theme exists to
+     remove, and it would sit behind text at an unknown contrast. */
+  .backdrop { display: none !important; }
+
+  /* Nothing frosted, nothing glowing: blur over a flat system colour
+     only smears it, and a shadow under forced text is noise. */
+  *, *::before, *::after {
+    backdrop-filter: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Edges for everything you can press or type into. */
+  button, input, select, textarea, [role="button"], [role="tab"], [role="switch"],
+  [role="menuitem"], .tab {
+    outline: 1px solid ButtonBorder;
+    outline-offset: -1px;
+  }
+  /* Where you are: the active tab, a selected row, a pressed toggle. */
+  .tab.active, [aria-selected="true"], [aria-pressed="true"], [aria-checked="true"],
+  [aria-current]:not([aria-current="false"]) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  /* Focus: --focus-ring is a box-shadow, which forced colours remove,
+     so the ring comes back as an outline in the theme's own colour. */
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 1px !important;
+  }
+  /* A control that cannot be used says so in the theme's own word for
+     it, GrayText, not only by a faded opacity the theme cannot show.
+     (Opacity itself is left alone: some controls are parked at 0 on
+     purpose, the Home's music Next among them.) */
+  :disabled, [aria-disabled="true"] {
+    color: GrayText !important;
+    outline-color: GrayText;
+  }
+}
