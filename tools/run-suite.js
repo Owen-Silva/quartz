@@ -66,6 +66,13 @@ const TESTS = [
   { name: 'askclaude', file: 'askclaude-harness.js' },
   // The same in a real Quartz: Ask with a break-out selection lands inert in a page-text chamber.
   { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
+  // Quartz tools for Claude panes: web text cleaned like terminal.js and fenced, read_page's cap and
+  // paging, the key-checked pipe server over a real pipe, the tools with fake guests, the stdio shim
+  // (in process and as a child), pty.js's --mcp-config/env hand-off, a config file with no key in it.
+  { name: 'mcp', file: 'mcp-harness.js' },
+  // The same in a real Quartz: a stand-in claude.exe starts the server from its --mcp-config file and
+  // calls every tool on a real page; the pane line, quartz.log, Ask's read_page prompt, the switch off.
+  { name: 'mcp-e2e', file: 'mcp-e2e.js', e2e: true },
   // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
   { name: 'check-electron', file: 'check-electron-harness.js' },
   // tools/audit-verdict.js: the ci audit job's verdict line, and that the castlabs git Electron stays

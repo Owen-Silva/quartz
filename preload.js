@@ -28,9 +28,16 @@ function electronBuilt() {
 // that already carries the flag is unaffected.
 const SKIP_PERMISSIONS_ARG = '--dangerously-skip-permissions';
 let ptySkipPermissions = false; // off until the renderer says the switch is on
+// Settings > Claude "Let Claude panes read your open tabs" (mcp-main.js). The
+// same funnel and the same rule: off until the renderer says it is on, so a
+// pane spawned before the settings load never gets the tools by accident.
+// It rides on the spawn as `readTabs`; main reads nothing else to decide.
+let ptyReadTabs = false;
 
 function withSkipPermissions(opts) {
   const out = (opts && typeof opts === 'object') ? { ...opts } : {};
+  if (out.program === undefined || out.program === null || out.program === 'claude') out.readTabs = ptyReadTabs;
+  else delete out.readTabs;
   if (!ptySkipPermissions) return out;
   // Claude-only: it is a claude.exe flag, and every other program in the table
   // takes no renderer args at all (pty.js would drop it, loudly, anyway).
@@ -958,10 +965,11 @@ contextBridge.exposeInMainWorld('api', {
     // Called by terminal.js for the first spawn AND for the Enter-to-restart
     // one, so this is where the skip-permissions flag is guaranteed.
     start: (opts) => ipcRenderer.invoke('pty:start', withSkipPermissions(opts)),
-    // { skipPermissions } -- the Settings switch, pushed by app.js at boot and
-    // on every change. Nothing crosses IPC: it only steers start() above.
+    // { skipPermissions, readTabs } -- the Settings switches, pushed by app.js
+    // at boot and on every change. Nothing crosses IPC: they only steer start().
     setPrefs: (prefs) => {
       ptySkipPermissions = !!(prefs && prefs.skipPermissions === true);
+      ptyReadTabs = !!(prefs && prefs.readTabs === true);
     },
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),
@@ -976,5 +984,46 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('pty:exit', handler);
       return () => ipcRenderer.removeListener('pty:exit', handler);
     }
+  },
+  // Claude panes' read-only tab tools (mcp-main.js). Main asks the chrome for
+  // what only it knows (the tab list, the history store) and the chrome
+  // answers with reply(); every tool call comes back as an activity line to
+  // show over the pane that made it (paneId null: no pane, show a toast).
+  mcp: {
+    // cb({ reqId, op: 'tabs'|'history', args })
+    onQuery: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:query', handler);
+      return () => ipcRenderer.removeListener('mcp:query', handler);
+    },
+    reply: (reqId, result) => ipcRenderer.send('mcp:reply', { reqId, result }),
+    // cb({ paneId, line })
+    onActivity: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:activity', handler);
+      return () => ipcRenderer.removeListener('mcp:activity', handler);
+    },
+    // cb({ paneId, attached, reason }) once per Claude spawn
+    onPane: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:pane', handler);
+      return () => ipcRenderer.removeListener('mcp:pane', handler);
+    },
+    // Ask first: cb({ askId, paneId, text, grantLabel, timeoutMs }) for a read
+    // that waits on the user; answer() with 'once' | 'grant' | 'deny'.
+    onAsk: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:ask', handler);
+      return () => ipcRenderer.removeListener('mcp:ask', handler);
+    },
+    // cb({ askId, choice: 'timeout' }): nobody answered in time; the read was refused.
+    onAskDone: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('mcp:ask-done', handler);
+      return () => ipcRenderer.removeListener('mcp:ask-done', handler);
+    },
+    answer: (askId, choice) => ipcRenderer.send('mcp:answer', { askId, choice }),
+    // Ask about this page: the pane may read that one tab without asking.
+    preapprove: (paneId, tabId) => ipcRenderer.send('mcp:preapprove', { paneId, tabId })
   }
 });
