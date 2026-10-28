@@ -33,7 +33,8 @@ const {
   webContents,
   globalShortcut,
 } = require('electron');
-const { createSession, killAll, listPrograms, hasProgram } = require('./pty');
+const { createSession, killAll, listPrograms, hasProgram, paneIdFromArgs } = require('./pty');
+const claudeToolsModule = require('./mcp-main');
 const autopauseModule = require('./autopause');
 const statsModule = require('./stats');
 const bgFiles = require('./bgfiles');
@@ -1540,32 +1541,68 @@ ipcMain.handle('pty:programs', (event) => {
   }
 });
 
+// Quartz's read-only tab tools for Claude panes (mcp-main.js): list tabs, read
+// a page's text, search history and notes, highlight a quote. Each Claude
+// spawn gets its own key and a --mcp-config file; the pipe server starts with
+// the first pane that has them. `readTabs` is the Settings switch, put on the
+// spawn by preload (off until the chrome has said it is on); off means the
+// pane starts without the tools, and the pane says so (mcp:pane).
+const claudeTools = claudeToolsModule.install({
+  app, ipcMain, webContents, session, send, isChromeSender,
+  getWin: () => win,
+  log: (text) => { if (qlog) qlog.log.line(text); else console.log('[mcp]', text); },
+});
+
+/** pty id -> release() of that spawn's tab tools (key revoked, config file deleted). */
+const ptyToolRelease = new Map();
+
+function releasePtyTools(id) {
+  const release = ptyToolRelease.get(id);
+  if (!release) return;
+  ptyToolRelease.delete(id);
+  try { release(); } catch (err) { console.warn('[mcp] release failed:', err && err.message); }
+}
+
 // `program` and `args` are both passed straight through: pty.js owns the
 // program table AND the per-program arg allowlist, so there is exactly one
 // place that decides what may reach a command line. An id that is not in the
 // table (a renderer-supplied path included) is refused here with a null, which
 // terminal.js already renders as a failed start.
-ipcMain.handle('pty:start', (event, { program, cwd, cols, rows, args } = {}) => {
+ipcMain.handle('pty:start', (event, { program, cwd, cols, rows, args, readTabs } = {}) => {
   if (!isChromeSender(event)) return null;
   if (!hasProgram(program)) {
     console.warn('[pty] refused unknown program:', String(program).slice(0, 60));
     return null;
   }
-  const session = createSession({
-    program,
-    cwd,
-    cols,
-    rows,
-    args,
-    onData: (data) => ptyPush(session.id, data),
-    onExit: (exitCode) => {
-      handles.delete(session.id);
-      ptyFlushFinal(session.id); // the last output, then the exit
-      send('pty:exit', { id: session.id, exitCode });
-    },
-  });
+  // Claude only (pty.js defaults a missing program to claude).
+  const isClaude = program === undefined || program === null || program === 'claude';
+  const tools = isClaude
+    ? claudeTools.prepareLaunch({ paneId: paneIdFromArgs(args), enabled: readTabs === true })
+    : null;
+  let session;
+  try {
+    session = createSession({
+      program,
+      cwd,
+      cols,
+      rows,
+      args,
+      extra: tools && tools.attached ? { args: tools.args, env: tools.env } : null,
+      onData: (data) => ptyPush(session.id, data),
+      onExit: (exitCode) => {
+        handles.delete(session.id);
+        releasePtyTools(session.id);
+        ptyFlushFinal(session.id); // the last output, then the exit
+        send('pty:exit', { id: session.id, exitCode });
+      },
+    });
+  } catch (err) {
+    if (tools) tools.release(); // the spawn failed: its key and file go with it
+    throw err;
+  }
 
   handles.set(session.id, session);
+  if (tools && tools.attached) ptyToolRelease.set(session.id, tools.release);
   return session.id;
 });
 
@@ -1583,6 +1620,7 @@ ipcMain.on('pty:kill', (_event, { id } = {}) => {
   const session = handles.get(id);
   if (!session) return;
   handles.delete(id);
+  releasePtyTools(id);
   ptyFlushFinal(id); // never strand a buffered tail on a closed tab's timer
   session.kill();
 });
@@ -5872,6 +5910,9 @@ app.on('before-quit', (event) => {
   killAll();
   handles.clear();
   for (const id of Array.from(ptyOut.keys())) ptyFlushFinal(id);
+  // The tab tools: every pane's key revoked and config file deleted, the pipe closed.
+  for (const id of Array.from(ptyToolRelease.keys())) releasePtyTools(id);
+  try { claudeTools.stop(); } catch { /* best effort */ }
   // The stats sampler's typeperf child is not ours to leave behind: it is a
   // separate process that would outlive the quit.
   stats.stop();

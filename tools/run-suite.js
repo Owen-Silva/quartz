@@ -62,6 +62,10 @@ const TESTS = [
   { name: 'askclaude', file: 'askclaude-harness.js' },
   // The same in a real Quartz: Ask with a break-out selection lands inert in a page-text chamber.
   { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
+  // Quartz tools for Claude panes: web text cleaned like terminal.js and fenced, read_page's cap and
+  // paging, the key-checked pipe server over a real pipe, the tools with fake guests, the stdio shim
+  // (in process and as a child), pty.js's --mcp-config/env hand-off, a config file with no key in it.
+  { name: 'mcp', file: 'mcp-harness.js' },
   // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
   { name: 'check-electron', file: 'check-electron-harness.js' },
   // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,

@@ -79,6 +79,38 @@ const SCRATCH_PRUNE_MS = 7 * 24 * 60 * 60 * 1000;
 let scratchRootOverride = null; // harness seam
 let scratchPruned = false;
 
+// ---------------------------------------------------------------------------
+// Which pane a Claude spawn belongs to
+//
+// The chrome marks every Claude spawn with `--quartz-pane=<tab id>` (a Quartz
+// token like PAGE_TEXT_ARG: read here, never put on claude.exe's command
+// line). main.js reads it with paneIdFromArgs() so that what the pane's tab
+// tools do (mcp-main.js) can be shown over THAT pane. It names a tab and
+// nothing else: it grants nothing, and a mark that is not a plain number is
+// dropped like any other unknown token.
+// ---------------------------------------------------------------------------
+const PANE_ARG = '--quartz-pane=';
+const PANE_ID = /^[0-9]{1,9}$/;
+
+function isPaneMark(a) {
+  return typeof a === 'string' && a.trim().startsWith(PANE_ARG);
+}
+
+/** The pane id a spawn carries, or '' (no mark, or not a plain number). */
+function paneIdFromArgs(args) {
+  if (!Array.isArray(args)) return '';
+  for (const a of args) {
+    if (!isPaneMark(a)) continue;
+    const id = a.trim().slice(PANE_ARG.length);
+    return PANE_ID.test(id) ? id : '';
+  }
+  return '';
+}
+
+function withoutPaneMark(args) {
+  return Array.isArray(args) ? args.filter((a) => !isPaneMark(a)) : args;
+}
+
 /**
  * <userData>\claude-scratch, or '' when the profile folder cannot be named.
  * Read at spawn time, not at require time: main.js moves userData for a test
@@ -504,15 +536,26 @@ function suppressConsoleListHelper(p) {
  * the harness can check the argv for every kind of chamber without a PTY.
  * Throws for a page-text chamber whose scratch folder cannot be made.
  *
- * @returns {{cwd:string, args:string[], pageText:boolean, scratchCreated:boolean}}
+ * `extra` is main's, never the renderer's: the tab tools' `--mcp-config <file>`
+ * (mcp-main.js) for a Claude spawn, put after our fixed flags and before the
+ * allowlisted renderer flags. Every renderer flag starts with `--`, so none can
+ * be read as a second value of the variadic `--mcp-config`. Ignored for any
+ * other program.
+ *
+ * @returns {{cwd:string, args:string[], pageText:boolean, scratchCreated:boolean, paneId:string}}
  */
-function planLaunch(prog, args, cwd) {
+function planLaunch(prog, args, cwd, extra) {
   let argsIn = args;
   let pageText = false;
   let scratch = null;
+  let paneId = '';
+  let trusted = [];
   if (prog.id === 'claude') {
+    paneId = paneIdFromArgs(args);
+    argsIn = withoutPaneMark(args);
+    if (extra && Array.isArray(extra.args)) trusted = extra.args.filter((a) => typeof a === 'string' && a);
     const root = scratchRoot();
-    const plan = planPageText(args, cwd, root);
+    const plan = planPageText(argsIn, cwd, root);
     if (plan.pageText) {
       pageText = true;
       argsIn = plan.args;
@@ -524,14 +567,26 @@ function planLaunch(prog, args, cwd) {
     // A page-text chamber runs in its scratch folder and nowhere else; every
     // other spawn's cwd is normalized (node-pty throws on a missing one).
     cwd: scratch ? scratch.dir : resolveCwd(cwd),
-    // Our fixed flags first, then whatever the renderer was allowed to add.
-    args: prog.args.concat(sanitizeArgs(argsIn, prog)),
+    // Our fixed flags first, then main's (the tab tools), then whatever the
+    // renderer was allowed to add.
+    args: prog.args.concat(trusted, sanitizeArgs(argsIn, prog)),
     pageText: pageText,
     scratchCreated: !!(scratch && scratch.created),
+    paneId: paneId,
   };
 }
 
-function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) {
+/** Main's extra environment for a Claude spawn (the tab tools' key); {} otherwise. */
+function extraEnv(prog, extra) {
+  if (!prog || prog.id !== 'claude' || !extra || !extra.env || typeof extra.env !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(extra.env)) {
+    if (/^QUARTZ_[A-Z0-9_]+$/.test(k) && typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+function createSession({ program, cwd, cols, rows, args, extra, onData, onExit } = {}) {
   const prog = getProgram(program);
   if (!prog) throw new Error(`unknown program: ${String(program).slice(0, 60)}`);
   const standin = testClaudeStandin(prog);
@@ -543,8 +598,9 @@ function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) 
   const safeRows = sanitizeDim(rows, 24);
 
   // (see cleanEnv below for why the environment is scrubbed before spawning)
-  const launch = planLaunch(prog, args, cwd);
+  const launch = planLaunch(prog, args, cwd, extra);
   const safeCwd = launch.cwd;
+  const env = Object.assign(cleanEnv(), extraEnv(prog, extra));
   const safeArgs = launch.args;
   if (launch.pageText) {
     console.log('[pty] page-text chamber: permission prompts on, in', safeCwd,
@@ -556,7 +612,7 @@ function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) 
     cols: safeCols,
     rows: safeRows,
     cwd: safeCwd,
-    env: standin ? Object.assign(cleanEnv(), standin.env) : cleanEnv(),
+    env: standin ? Object.assign(env, standin.env) : env,
   });
 
   // Before anything can kill this session (see the note on the helper above).
@@ -596,6 +652,8 @@ function createSession({ program, cwd, cols, rows, args, onData, onExit } = {}) 
     args: safeArgs.slice(),
     // A page-text chamber: no skip-permissions, scratch folder (see above).
     pageText: launch.pageText,
+    // The tab the chrome said this spawn belongs to ('' when unmarked).
+    paneId: launch.paneId,
 
     write(data) {
       if (!record.alive || typeof data !== 'string') return;
@@ -654,6 +712,7 @@ module.exports = {
   killAll,
   listPrograms,
   hasProgram,
+  paneIdFromArgs,
   // Test seams only: swap where.exe for a fake and forget what it answered.
   // Nothing in the app calls these.
   __test: {
@@ -674,6 +733,8 @@ module.exports = {
     testClaudeStandin,
     PAGE_TEXT_ARG,
     SCRATCH_DIR,
+    PANE_ARG,
+    extraEnv,
     setWhereRunner(fn) {
       whereRunner = typeof fn === 'function' ? fn : runWhere;
     },
