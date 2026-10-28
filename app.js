@@ -970,15 +970,11 @@ function handleHomeLine(tab, viewEl, text) {
 /* ------------------------------------------------------------------ */
 
 /*
- * The little live readout on the new-tab page (the Session piece's pills):
- * how many tabs are open, what Spotify auto-pause is doing right now, how
- * many Claude panes are working or waiting, and how many ads and trackers
- * the shield has blocked in this window.
+ * The little live line on the new-tab page: how many tabs are open and what
+ * Spotify auto-pause is doing right now.
  * The page is a guest on file:// and can see none of that for itself, so the
  * chrome pushes it — same shape, and the same two guards, as every other push
- * above. Nothing here polls: every number is one the chrome already hears
- * about (tab changes, the needs-you flag, main's autopause and adblock
- * pushes), and every push goes through the memo in pushReadoutToTab().
+ * above.
  */
 
 // Cached so a tab change never has to ask main again: main pushes every change
@@ -995,75 +991,11 @@ function autopauseWord(status) {
   return 'off';
 }
 
-/**
- * Claude panes running claude.exe (not shells), split by the strip's own
- * needs-you flag: waiting = went quiet and wants the user, working = the
- * rest. markClaudeNeedsYou / clearClaudeNeedsYou push on every flip, and a
- * pane opening or closing is a tab change, which pushes anyway.
- */
-function claudeReadout(list) {
-  let working = 0;
-  let waiting = 0;
-  for (const tab of list) {
-    if (!isClaudeProgramTab(tab)) continue;
-    if (tab.needsYou) waiting++;
-    else working++;
-  }
-  return { working, waiting };
-}
-
-/*
- * Ads and trackers blocked in this window since it opened. The shield already
- * pushes a per-page counter down api.adblock.onUpdate ({ wcId, blocked, host,
- * allowed }, at most four a second a page; main restarts a page's counter on
- * every load). This is a second listener on that same channel: it keeps each
- * page's last count and adds every rise to a running total. A count that
- * DROPS is a page that navigated, so its new count is all new and is added
- * whole. The map is bounded: past BLOCKED_PAGES_MAX pages the one heard from
- * longest ago is forgotten (if it ever speaks again its count is taken as
- * new, a small over-count on a window that has seen hundreds of pages).
- */
-const BLOCKED_PAGES_MAX = 256;
-// A blocked count moves in bursts while a page loads: the pill is told at
-// most this often (trailing, so the last number always lands).
-const BLOCKED_PUSH_MS = 2000;
-const blockedTally = { total: 0, last: new Map() };
-// null until the shield has said whether it is on: no `blocked` field at all
-// (the page hides the pill, as it does for an older chrome).
-let blockedEnabled = null;
-let blockedReady = false;
-let blockedPushTimer = 0;
-let blockedPushedAt = 0;
-
-/**
- * Pure: fold one onUpdate payload into a tally ({ total, last: Map }).
- * Returns how much was added. Anything malformed adds nothing.
- */
-function blockedTallyStep(tally, payload, cap) {
-  if (!payload || typeof payload !== 'object') return 0;
-  const id = payload.wcId;
-  const n = Number(payload.blocked);
-  if (!Number.isInteger(id) || !Number.isFinite(n) || n < 0) return 0;
-  const count = Math.floor(n);
-  const had = tally.last.has(id) ? tally.last.get(id) : 0;
-  const add = count >= had ? count - had : count;
-  // Re-inserted, so the Map's order is "heard from longest ago" first.
-  tally.last.delete(id);
-  tally.last.set(id, count);
-  while (tally.last.size > cap) tally.last.delete(tally.last.keys().next().value);
-  tally.total += add;
-  return add;
-}
-
 function readoutSnapshot() {
   // Every open tab, in every workspace: the page is describing the browser,
-  // not the strip in front of it. Claude panes are counted by state, and the
-  // page shows that pill only while there is at least one.
-  const out = { tabs: tabs.length, autopause: autopauseReadout, claude: claudeReadout(tabs) };
-  if (blockedEnabled !== null) {
-    out.blocked = { enabled: blockedEnabled, ready: blockedReady, count: blockedTally.total };
-  }
-  return out;
+  // not the strip in front of it. There is no Claude session count any more:
+  // Claude only opens as a pane beside a page, and the page lost that row.
+  return { tabs: tabs.length, autopause: autopauseReadout };
 }
 
 /** Hand the readout to one open new-tab guest (no-op for anything else). */
@@ -1090,63 +1022,11 @@ function pushReadoutToAll() {
 }
 
 /**
- * A blocked count moved: push it, at most once per BLOCKED_PUSH_MS, and
- * only while a new-tab page is open to show it (one that opens later gets
- * the total in its first readout).
- */
-function scheduleBlockedPush() {
-  if (blockedPushTimer) return;
-  if (!tabs.some((tab) => isNewTabUrl(tab.url))) return;
-  const wait = Math.max(0, BLOCKED_PUSH_MS - (Date.now() - blockedPushedAt));
-  blockedPushTimer = setTimeout(() => {
-    blockedPushTimer = 0;
-    blockedPushedAt = Date.now();
-    pushReadoutToAll();
-  }, wait);
-}
-
-/** The shield's { enabled, ready } -> the pill's on / off / not-ready words. */
-function noteBlockerState(state) {
-  if (!state || typeof state !== 'object') return;
-  const enabled = !!state.enabled;
-  const ready = !!state.ready;
-  if (enabled === blockedEnabled && ready === blockedReady) return;
-  blockedEnabled = enabled;
-  blockedReady = ready;
-  pushReadoutToAll();
-}
-
-/**
- * Called from wireAutopauseReadout() (once, from init()). Feature-detected:
- * a preload without the adblock group sends no `blocked` field, and the page
- * shows no pill for it.
- */
-function wireBlockedReadout() {
-  const ab = (window.api && window.api.adblock) ? window.api.adblock : null;
-  if (!ab || typeof ab.onUpdate !== 'function') return;
-  ab.onUpdate((payload) => {
-    if (blockedTallyStep(blockedTally, payload, BLOCKED_PAGES_MAX) > 0) scheduleBlockedPush();
-  });
-  if (typeof ab.onStateChanged === 'function') ab.onStateChanged(noteBlockerState);
-  if (typeof ab.state !== 'function') return;
-  Promise.resolve()
-    .then(() => ab.state())
-    .then(noteBlockerState)
-    .catch(() => {
-      // The shield did not answer: say it is not confirmed working rather
-      // than leave the pill out (its next state push corrects this).
-      if (blockedEnabled === null) noteBlockerState({ enabled: true, ready: false });
-    });
-}
-
-/**
  * Called once from init(): seed the cached word with one status() call, then
  * follow main's pushes for the rest of the window's life. Feature-detected —
- * a preload without the group leaves the readout saying 'unknown'. The
- * blocked count is wired from here too (same readout, same once).
+ * a preload without the group leaves the readout saying 'unknown'.
  */
 function wireAutopauseReadout() {
-  wireBlockedReadout();
   const ap = (window.api && window.api.autopause) ? window.api.autopause : null;
   if (!ap) return;
   if (typeof ap.onStatus === 'function') {
@@ -9585,7 +9465,6 @@ function markClaudeNeedsYou(tab) {
     tab.chipEl.title = chipTooltip(tab);
   }
   notifyClaudeWaiting(tab);
-  pushReadoutToAll();
 }
 
 /** He looked: the chip goes back to its ordinary live breathe. */
@@ -9601,7 +9480,6 @@ function clearClaudeNeedsYou(tab) {
     try { tab.attnEl.remove(); } catch (err) { /* already detached */ }
     tab.attnEl = null;
   }
-  pushReadoutToAll();
 }
 
 /** Every waiting chamber that is on screen now has been seen. */

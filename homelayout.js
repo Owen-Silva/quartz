@@ -84,7 +84,7 @@
     { id: 'media',   column: 'left',   kind: 'card', label: 'Now playing',
       hint: 'What this computer is playing, with its controls' },
     { id: 'logo',    column: 'centre', kind: 'wide', label: 'Quartz logo',
-      hint: 'The Q over the search box (the untouched default Home shows the clock there instead)' },
+      hint: 'The Q over the search box' },
     { id: 'search',  column: 'centre', kind: 'wide', label: 'Search box',
       hint: 'The address bar still takes the caret on a new tab' },
     { id: 'saved',   column: 'centre', kind: 'wide', label: 'Saved',
@@ -96,7 +96,7 @@
     { id: 'apps',    column: 'centre', kind: 'wide', label: 'Apps',
       hint: 'The app dock' },
     { id: 'session', column: 'right',  kind: 'card', label: 'Session',
-      hint: 'Tabs open, ads blocked, Spotify auto-pause, idle music, and Claude panes working or waiting' },
+      hint: 'Tabs open, Spotify auto-pause and idle music' },
     { id: 'markets', column: 'right',  kind: 'card', label: 'Markets',
       hint: 'Live prices' }
   ];
@@ -195,13 +195,6 @@
     return JSON.stringify(sanitize(a)) === JSON.stringify(sanitize(b));
   }
 
-  /**
-   * True only for a layout that sanitises to the default: nothing hidden,
-   * nothing moved (null, undefined, {}, a v1 layout with an empty hidden
-   * list, garbage). The page draws its one-focal-point hero (the clock
-   * large over the search) for exactly these and for nothing else, so a
-   * Home anybody customised renders exactly as it always did.
-   */
   function isDefault(layout) {
     return same(layout, defaults());
   }

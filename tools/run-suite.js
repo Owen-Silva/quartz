@@ -74,9 +74,6 @@ const TESTS = [
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
   { name: 'filenav', file: 'filenav-harness.js' },
-  // The Home's session pills (readout validation, the blocked tally) and its one focal point: the hero
-  // only on the untouched default, never measured, so a customised Home keeps the classic page.
-  { name: 'home-design', file: 'home-design-harness.js' },
   // Drives an instance it does not start itself (CDP_PORT): the suite launches one for it.
   { name: 'files', file: 'files-harness.js', launch: 9241, e2e: true },
   { name: 'keywords', file: 'keywords-harness.js' },
