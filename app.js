@@ -12555,7 +12555,15 @@ function noteToolPane(p) {
   const pane = p && p.paneId ? claudePaneById(p.paneId) : null;
   if (!pane) return;
   pane.toolsAttached = p.attached === true;
-  if (pane.toolsAttached) return;
+  if (pane.toolsAttached) {
+    // A restart with the switch back on: the old "can't read" line is stale.
+    const shown = pane.noteEl ? String(pane.noteEl.textContent || '') : '';
+    if (shown.indexOf("Claude can't read your tabs") !== -1) {
+      if (pane.pageText) notePageTextChamber(pane);
+      else clearAppNote(pane);
+    }
+    return;
+  }
   const why = String(p.reason || 'no reason given');
   const line = why === 'off in Settings > Claude' ? MSG_TOOLS_OFF
     : "Claude can't read your tabs in this pane: " + why + '.';
