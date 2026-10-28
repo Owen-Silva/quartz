@@ -75,6 +75,17 @@ async function chromeTarget(ms) {
 async function main() {
   const free = freeRamGb();
   if (!(free >= MIN_FREE_GB)) { console.log('updater-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
+  // The world below is cloned from THIS checkout, and a clone of a shallow repository is shallow too,
+  // which the updater refuses by design ("this is a shallow clone"): the test could only fail, on
+  // every check after the card. Say so as a SKIP with the reason, never as a run of confusing FAILs.
+  // (CI checks out with full history for exactly this; see the full job's fetch-depth in ci.yml.)
+  let shallowRepo = '';
+  try { shallowRepo = git(REPO, 'rev-parse', '--is-shallow-repository'); } catch (e) { shallowRepo = ''; }
+  if (shallowRepo === 'true') {
+    try { fs.rmdirSync(WORK); } catch (e) { /* not empty or gone: leave it */ }
+    console.log('updater-e2e: cannot run: this checkout is a shallow clone, so the throwaway clones made from it are shallow too and the updater refuses them by design; fetch the full history (git fetch --unshallow, or fetch-depth: 0 in CI)');
+    process.exit(2);
+  }
 
   // ---- the world --------------------------------------------------------------------------------
   const origin = path.join(WORK, 'origin.git');

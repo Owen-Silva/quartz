@@ -150,7 +150,11 @@ jobs:
       run:
         shell: bash
     steps:
+      # Full history: updater-e2e clones this checkout to stand in for the user's copy, and the
+      # updater refuses a shallow clone by design (a depth-1 checkout gives depth-1 clones).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
