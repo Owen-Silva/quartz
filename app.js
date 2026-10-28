@@ -6193,11 +6193,18 @@ function chipTooltip(tab) {
   // A sleeping chip keeps its title and its favicon, so the tooltip is the only
   // place the state is spelled out — including what waking it costs, because a
   // new tab page comes back identical and a real page comes back reloaded.
-  if (!tab.asleep) return base;
+  // An awake tab the sleep rules wanted to put down but did not (sleepTabChecked): the reason, so
+  // a tab that "never sleeps" can be explained by hovering it.
+  if (!tab.asleep) {
+    if (tab.keptAwake && tab.keptAwake.reason) base += ' — kept awake: ' + tab.keptAwake.reason;
+    if (tab.wakeNote) base += ' — ' + tab.wakeNote;
+    return base;
+  }
   const cost = isNewTabUrl(tab.url)
     ? 'a new tab page comes back fresh'
-    : 'this page will reload';
-  return base + ' — asleep, click to wake (' + cost + ')';
+    : (tab.sleepHistory ? 'this page will reload, with its back/forward history' : 'this page will reload');
+  // An early sleep (memory low, a very heavy page) says why, in the words the log uses.
+  return base + ' — asleep, click to wake (' + cost + ')' + (tab.sleepNote ? ' — put to sleep early: ' + tab.sleepNote : '');
 }
 
 /**
@@ -6228,10 +6235,15 @@ function tabAudioEl(tab) {
   return button;
 }
 
-/** Chip and button follow tab.audible / tab.muted; nothing else reads them. */
+/**
+ * The chip's speaker follows tab.heard (Chromium's own audibility, pushed by main on every
+ * change: see setTabHeard) and tab.muted. NOT tab.audible: that is the media-started-playing /
+ * media-paused level, fired per element, so one element pausing (an ad ending, a hover preview)
+ * cleared the speaker while the stream played on, and Web Audio never lit it at all.
+ */
 function syncTabAudio(tab) {
   if (!tab || isClaudeTab(tab)) return;
-  const show = !!(tab.audible || tab.muted);
+  const show = !!(tab.heard || tab.muted);
   // Nothing has ever made a sound: do not put a button on the chip at all.
   if (!show && !(tab.audioEl && tab.audioEl.isConnected)) return;
   const button = tabAudioEl(tab);
@@ -6258,6 +6270,22 @@ function setTabAudible(tab, on) {
 }
 
 /**
+ * Chromium's audibility of a tab's guest changed (main's 'tabs:audio-state', from the guest's
+ * audio-state-changed: the signal behind Chrome's speaker icon, and the one the sleep rules read
+ * through viewAudibleNow()). The speaker follows it. Going quiet stamps lastAudibleAt, so the
+ * sleep rules' 2-minute spare window counts from the real end of the sound. A new tab page's
+ * moving picture is a muted loop and never lights a speaker.
+ */
+function setTabHeard(tab, on) {
+  if (!tab || tab.kind !== 'page' || isNewTabUrl(tab.url)) return;
+  const heard = !!on;
+  if (heard || tab.heard) tab.lastAudibleAt = Date.now();
+  if (heard === !!tab.heard) return;
+  tab.heard = heard;
+  syncTabAudio(tab);
+}
+
+/**
  * The guest that was making the sound is gone (it crashed, or we took it away
  * to sleep the tab). Chromium fires no media-paused for a renderer that has
  * died, so the flag has to be dropped here or it stands for ever: a stale
@@ -6266,7 +6294,9 @@ function setTabAudible(tab, on) {
  * music off for the life of the window.
  */
 function forgetTabAudio(tab) {
-  if (!tab || !tab.audible) return;
+  if (!tab) return;
+  if (tab.heard) { tab.heard = false; syncTabAudio(tab); }
+  if (!tab.audible) return;
   tab.audible = false;
   syncTabAudio(tab);
   syncMusicPlayback();
@@ -8278,9 +8308,23 @@ function sleepWorkspaceTabs(id, mode) {
   let slept = 0;
   // A copy: sleepTab() swaps an element inside #views while we walk the list.
   for (const tab of workspaceTabs(id).slice()) {
-    if (canSleepInWorkspace(tab, use) && sleepTab(tab, 'workspace')) slept++;
+    if (canSleepInWorkspace(tab, use) && sleepInWorkspaceNow(tab, use)) slept++;
   }
   return slept;
+}
+
+/**
+ * One tab the workspace policy wants down. A new tab page goes at once (it comes back identical,
+ * and leaving a workspace is exactly when its GPU layers should go). A real page ('all' mode) is
+ * asked first, like every automatic sleep of a real page (sleepTabChecked): it may go down a
+ * moment later, or be kept awake with the reason on its chip. Only the at-once ones are counted.
+ * @returns {boolean} true when it went to sleep right now.
+ */
+function sleepInWorkspaceNow(tab, mode) {
+  if (isNewTabUrl(readCurrentUrl(tab) || tab.url)) return sleepTab(tab, 'workspace');
+  if (sleepProbeWaiting(tab)) return false;
+  sleepTabChecked(tab, 'workspace', '', (t) => canSleepInWorkspace(t, mode));
+  return false;
 }
 
 /**
@@ -8446,9 +8490,14 @@ function workspaceAsleepCount(id) {
   return tabs.reduce((n, t) => n + ((t.asleep && tabWorkspace(t) === want) ? 1 : 0), 0);
 }
 
-/** Both sweeps on one interval: one timer, one walk of the strip per minute. */
+/**
+ * Both sweeps on one interval: one timer, one walk of the strip per minute. The tab sweep asks
+ * each real page before sleeping it, so the total arrives as a Promise.
+ */
 function sleepSweep() {
-  return sleepIdleTabs() + sleepIdleWorkspaces();
+  const idle = sleepIdleTabs();
+  const ws = sleepIdleWorkspaces();
+  return Promise.resolve(idle).then((n) => n + ws);
 }
 
 /**
@@ -8500,6 +8549,9 @@ function noteScreenEdges(now) {
   for (const tab of tabs) {
     const shown = isTabOnScreen(tab);
     if (shown || tab.wasOnScreen) tab.lastActive = t;
+    // On screen, the user can see for themselves: a "kept awake" reason from the last probe is
+    // stale the moment they could have sent or cleared what it found. Asked afresh next time.
+    if (shown && tab.keptAwake) { tab.keptAwake = null; if (tab.chipEl) tab.chipEl.title = chipTooltip(tab); }
     tab.wasOnScreen = shown;
   }
 }
@@ -8537,7 +8589,11 @@ function viewAudibleNow(tab) {
 /** Look at one tab's sound and remember when it was last heard. */
 function noteTabSound(tab, now) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
-  if (tab.audible || viewAudibleNow(tab)) {
+  const chromium = viewAudibleNow(tab);
+  // The speaker's fallback: main pushes every audibility change ('tabs:audio-state'); this
+  // look, at least once a sweep, catches one that never arrived.
+  if (chromium !== !!tab.heard) setTabHeard(tab, chromium);
+  if (tab.audible || chromium) {
     tab.lastAudibleAt = now || Date.now();
     return true;
   }
@@ -8585,6 +8641,203 @@ function canSleepTab(tab) {
   return isViewUsable(tab);
 }
 
+/*
+ * Sleeping EARLY: memory pressure and very heavy pages.
+ *
+ * The user's "Sleep tabs after" setting is the longest a background tab stays awake while the
+ * machine has memory to spare. Two rules put one down sooner, and only ever sooner:
+ *
+ *   memory low   free system memory under MEMORY_LOW (20% of the total, at most 2.5 GB):
+ *                background tabs idle for EARLY_SLEEP.low.graceMs sleep, least recently used
+ *                first, a few per sweep, keeping the EARLY_SLEEP.low.warm most recently used
+ *                awake. Under MEMORY_CRITICAL (10%, at most 1.2 GB) the grace is shorter, more
+ *                go per sweep and only the most recent background tab is kept.
+ *   heavy page   a background tab whose renderer holds HEAVY_TAB_BYTES or more, idle for
+ *                HEAVY_GRACE_MS, sleeps whatever the free memory, unless it is the most recently
+ *                used background tab (the one a quick switch back would land on).
+ *
+ * Everything canSleepTab() spares is spared here too (the tab on screen, pinned, making sound or
+ * did so in the last 2 minutes, a new tab page, a broken one), and "Never" (0 minutes) means
+ * never: no early sleeps either. Figures come from main ('tabs:memory': app.getAppMetrics per
+ * guest, the system's free memory), asked at most once per sweep and only when some tab could
+ * actually go early; main caches them for 20 s on top.
+ */
+const MEMORY_LOW = { fraction: 0.20, capBytes: 2.5 * 1024 * 1024 * 1024 };
+const MEMORY_CRITICAL = { fraction: 0.10, capBytes: 1.2 * 1024 * 1024 * 1024 };
+const HEAVY_TAB_BYTES = 400 * 1024 * 1024;
+const HEAVY_GRACE_MS = 5 * 60000;
+const EARLY_SLEEP = {
+  low: { graceMs: 5 * 60000, warm: 3, perSweep: 2 },
+  critical: { graceMs: 2 * 60000, warm: 1, perSweep: 3 }
+};
+/** A tab the probe kept awake is not asked again for this long. */
+const SLEEP_PROBE_RETRY_MS = 5 * 60000;
+
+/** 'ok' | 'low' | 'critical', or '' when the figures are missing. Pure. */
+function memoryPressure(freeBytes, totalBytes) {
+  if (!(freeBytes >= 0) || !(totalBytes > 0)) return '';
+  if (freeBytes < Math.min(MEMORY_CRITICAL.capBytes, totalBytes * MEMORY_CRITICAL.fraction)) return 'critical';
+  if (freeBytes < Math.min(MEMORY_LOW.capBytes, totalBytes * MEMORY_LOW.fraction)) return 'low';
+  return 'ok';
+}
+
+/** 1.6 GB / 620 MB, for the tooltip and the log. Pure. */
+function memoryWords(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1000 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
+}
+
+/**
+ * Pure: which background tabs to put down early, and why, in plain words. The harness runs it.
+ * @param {{ now:number, minutes:number, freeBytes?:number, totalBytes?:number,
+ *           candidates: Array<{ id:*, idleSince:number, bytes?:number }> }} f
+ *   candidates: background pages canSleepTab() allows and the probe has not just kept awake.
+ * @returns {Array<{ id:*, why:'memory'|'heavy', note:string }>}
+ */
+function earlySleepPlan(f) {
+  if (!f || !(f.minutes > 0)) return [];
+  const timerMs = f.minutes * 60000;
+  // Most recently used first. A tab already due by the timer is the idle rule's, not this one's.
+  const list = (f.candidates || []).filter((c) => f.now - c.idleSince < timerMs)
+    .sort((a, b) => b.idleSince - a.idleSince);
+  const out = [];
+  const taken = new Set();
+  list.forEach((c, rank) => {
+    if (rank < 1 || !(c.bytes >= HEAVY_TAB_BYTES)) return;
+    if (f.now - c.idleSince < Math.min(HEAVY_GRACE_MS, timerMs)) return;
+    out.push({ id: c.id, why: 'heavy', note: 'it was using ' + memoryWords(c.bytes) + ' of memory in the background' });
+    taken.add(c.id);
+  });
+  const level = memoryPressure(f.freeBytes, f.totalBytes);
+  const rule = EARLY_SLEEP[level];
+  if (rule) {
+    const grace = Math.min(rule.graceMs, timerMs);
+    const note = 'memory was ' + (level === 'critical' ? 'very ' : '') + 'low (' + memoryWords(f.freeBytes)
+      + ' of ' + memoryWords(f.totalBytes) + ' free)';
+    let n = 0;
+    // Least recently used first, never into the warm set.
+    for (let rank = list.length - 1; rank >= rule.warm && n < rule.perSweep; rank--) {
+      const c = list[rank];
+      if (taken.has(c.id) || f.now - c.idleSince < grace) continue;
+      out.push({ id: c.id, why: 'memory', note });
+      n++;
+    }
+  }
+  return out;
+}
+
+/**
+ * The probe (or the attempt to ask it) said no: keep the tab awake, put the reason on its chip's
+ * hover, and do not ask again for SLEEP_PROBE_RETRY_MS. Logged when the reason changes, not on
+ * every retry, so a draft left open all day is one line, not a hundred.
+ */
+function keepAwakeFor(tab, why, reason) {
+  const same = tab.keptAwake && tab.keptAwake.reason === reason;
+  tab.keptAwake = { reason, retryAt: Date.now() + SLEEP_PROBE_RETRY_MS };
+  if (tab.chipEl) tab.chipEl.title = chipTooltip(tab);
+  if (!same) logEvent('tab-sleep-skipped', { url: readCurrentUrl(tab) || tab.url, why: why || 'asked', reason });
+}
+
+/** Kept awake by the probe a moment ago: not a candidate until its retry time. */
+function sleepProbeWaiting(tab, now) {
+  return !!(tab && (tab.sleepAsking || (tab.keptAwake && tab.keptAwake.retryAt > (now || Date.now()))));
+}
+
+/**
+ * How the automatic rules put a REAL page to sleep: ask it first, then sleep it.
+ *
+ * Main runs the safe-to-sleep probe in an isolated world of the guest (tabsleep-main.js): typed
+ * text the user has not sent, an open call / camera / microphone, picture-in-picture, media the
+ * page says is playing. Any of those keeps the tab awake with that reason ("kept awake: unsaved
+ * text in a form"). THE SAFE RULE: a probe that cannot be asked, throws, or does not answer within
+ * 1.5 s counts as "maybe busy", never as "clear": the tab stays awake, its hover says it could not
+ * be checked and why, and it is asked again after SLEEP_PROBE_RETRY_MS. Losing memory for a while
+ * is recoverable; losing a half-written message is not.
+ *
+ * The same round trip brings back the guest's back/forward history (url, title and Chromium's
+ * pageState: scroll and form values), which wakeTab() restores.
+ *
+ * `still(tab)` re-checks the caller's rule when the answer arrives (a lot can change in 1.5 s).
+ * opts.probe === false skips the question (the user asked for this sleep by hand).
+ * @returns {Promise<boolean>} true when the tab went to sleep.
+ */
+function sleepTabChecked(tab, why, note, still, opts) {
+  const ok = () => tabs.indexOf(tab) !== -1 && !tab.asleep && (still ? still(tab) : canSleepTab(tab));
+  if (!ok() || tab.sleepAsking) return Promise.resolve(false);
+  const api = window.api && window.api.tabs;
+  const probe = !(opts && opts.probe === false);
+  let wcId = null;
+  try { wcId = tab.viewEl.getWebContentsId(); } catch (err) { wcId = null; }
+  if (!api || typeof api.prepareSleep !== 'function' || !Number.isInteger(wcId)) {
+    if (!probe) return Promise.resolve(sleepTab(tab, why, { note }));
+    keepAwakeFor(tab, why, 'could not check it for unsaved work (the page could not be asked)');
+    return Promise.resolve(false);
+  }
+  const viewEl = tab.viewEl;
+  tab.sleepAsking = true;
+  const done = (res) => {
+    tab.sleepAsking = false;
+    if (tab.viewEl !== viewEl || !ok()) return false;
+    const p = res && res.probe;
+    if (probe) {
+      if (!res || !res.ok || !p || !p.ok) {
+        keepAwakeFor(tab, why, 'could not check it for unsaved work (' + ((p && p.reason) || (res && res.reason) || 'no answer') + ')');
+        return false;
+      }
+      if (p.busy) { keepAwakeFor(tab, why, p.busy); return false; }
+    }
+    return sleepTab(tab, why, { note, history: (res && res.ok && res.history) || null });
+  };
+  let pending = null;
+  try { pending = api.prepareSleep(wcId, { probe }); } catch (err) { pending = null; }
+  if (!pending || typeof pending.then !== 'function') return Promise.resolve(done(null));
+  return pending.then(done, (err) => done({ ok: false, reason: (err && err.message) || 'the check failed' }));
+}
+
+/**
+ * Memory figures for the early rules, or null. One IPC per sweep at most, and only when some
+ * candidate is idle long enough that an early rule could apply to it.
+ */
+let tabMemoryNotice = '';
+function queryTabMemory(cands) {
+  const api = window.api && window.api.tabs;
+  if (!api || typeof api.memory !== 'function') return Promise.resolve(null);
+  const ids = [];
+  for (const c of cands) {
+    try { const id = c.tab.viewEl.getWebContentsId(); if (Number.isInteger(id)) { ids.push(id); c.wcId = id; } } catch (err) { /* not attached */ }
+  }
+  let pending = null;
+  try { pending = api.memory(ids); } catch (err) { pending = null; }
+  if (!pending || typeof pending.then !== 'function') return Promise.resolve(null);
+  return pending.then((m) => {
+    if (m && m.ok) { tabMemoryNotice = ''; return m; }
+    // Only the early rules stop; the timer still applies. Logged once per new reason.
+    const reason = (m && m.reason) || 'no answer';
+    if (reason !== tabMemoryNotice) {
+      tabMemoryNotice = reason;
+      logEvent('ui-error', { where: 'tab sleep', detail: 'memory figures unavailable, tabs sleep on the timer only: ' + reason });
+    }
+    return null;
+  }, () => null);
+}
+
+/** The early half of the sweep: ask for memory, plan, put the chosen tabs down (probe first). */
+function sleepEarly(now, minutes, cands) {
+  const graceMin = Math.min(EARLY_SLEEP.critical.graceMs, HEAVY_GRACE_MS, minutes * 60000);
+  if (!cands.some((c) => now - c.idleSince >= graceMin)) return Promise.resolve(0);
+  return queryTabMemory(cands).then((m) => {
+    if (!m) return 0;
+    const plan = earlySleepPlan({
+      now, minutes, freeBytes: m.freeBytes, totalBytes: m.totalBytes,
+      candidates: cands.map((c) => ({ id: c.tab.id, idleSince: c.idleSince, bytes: (m.tabs && c.wcId !== undefined && m.tabs[c.wcId]) ? m.tabs[c.wcId].bytes : 0 }))
+    });
+    return Promise.all(plan.map((p) => {
+      const tab = tabs.find((t) => t.id === p.id);
+      return tab ? sleepTabChecked(tab, p.why, p.note) : false;
+    })).then((r) => r.filter(Boolean).length);
+  });
+}
+
 /**
  * quartz.log (log.js, through preload's api.log): the chrome forwards what only
  * it decides. Never throws and never blocks: a log that is not there is not a
@@ -8596,12 +8849,21 @@ function logEvent(kind, details) {
   } catch (err) { /* the log is best effort */ }
 }
 
+/** Same page, the #fragment aside (history entries and getURL() can differ only there). Pure. */
+function sameDocumentUrl(a, b) {
+  const strip = (u) => String(u || '').split('#')[0];
+  return !!a && strip(a) === strip(b);
+}
+
 /**
  * Put one tab to sleep. The url is snapshotted first: it can only be read while
- * the guest is still attached, and it is the whole of what wakeTab() needs.
+ * the guest is still attached, and it is what wakeTab() needs at the least.
+ * opts.note: plain words for an early sleep (memory low, a heavy page), shown on the chip's hover
+ * and written to the log. opts.history: the guest's back/forward history, captured by
+ * sleepTabChecked() just before this, which wakeTab() restores.
  * @returns {boolean} true when the tab actually went to sleep.
  */
-function sleepTab(tab, why) {
+function sleepTab(tab, why, opts) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   if (tab.id === activeTabId) return false; // the tab on screen is never asleep
   if (!viewsEl || !tab.viewEl) return false;
@@ -8640,6 +8902,13 @@ function sleepTab(tab, why) {
   tab.viewEl = placeholder;
   tab.ready = false;
   tab.asleep = true;
+  tab.sleepNote = (opts && typeof opts.note === 'string') ? opts.note : '';
+  // History captured for THIS url only: a stale capture would put the woken tab somewhere else.
+  const history = opts && opts.history;
+  tab.sleepHistory = (history && Array.isArray(history.entries) && history.entries.length
+    && history.entries[history.index] && sameDocumentUrl(history.entries[history.index].url, tab.url)) ? history : null;
+  tab.keptAwake = null;
+  tab.wakeNote = '';
   cancelNewTabSleep(tab); // whatever put it down, the grace clock has nothing left to do
   setTabLoading(tab, false); // a load in flight died with the guest
   forgetTabAudio(tab);       // ...and so did any sound it was making
@@ -8652,7 +8921,7 @@ function sleepTab(tab, why) {
   // quartz.log, with the sound state it was judged on, so a "my stream went to
   // sleep" report can be read straight off the log.
   logEvent('tab-slept', {
-    url: tab.url, why: why || 'asked', audible: false,
+    url: tab.url, why: why || 'asked', audible: false, note: tab.sleepNote,
     sound: heardAgo === null ? 'was not making sound'
       : 'last made sound ' + Math.round(heardAgo / 1000) + ' s before'
   });
@@ -8692,6 +8961,7 @@ function wakeTab(tab) {
   if (keep && keep.url === target && (keep.x || keep.y)) restoreScrollOnLoad(tab, viewEl, keep);
 
   tab.asleep = false;
+  tab.sleepNote = ''; // the reason it slept early is history now
   if (tab.chipEl) {
     tab.chipEl.classList.remove('asleep');
     tab.chipEl.title = chipTooltip(tab);
@@ -8734,8 +9004,10 @@ function restoreScrollOnLoad(tab, viewEl, keep) {
 }
 
 /**
- * One sweep of the strip, on the 60s interval init() starts.
- * @returns {number} how many tabs were put to sleep.
+ * One sweep of the strip, on the 60s interval init() starts. Two halves: the timer (idle for the
+ * user's minutes) and the early rules (earlySleepPlan: memory low, a very heavy page). Every real
+ * page is asked before it goes (sleepTabChecked), so the answer is a Promise.
+ * @returns {number|Promise<number>} 0 at once for "Never"; otherwise how many tabs were put to sleep.
  */
 function sleepIdleTabs() {
   const minutes = tabSleepMinutes();
@@ -8746,14 +9018,18 @@ function sleepIdleTabs() {
   noteScreenEdges(now);
   observeTabSound(now);
   const cutoff = now - minutes * 60000;
-  let slept = 0;
+  const jobs = [];
+  const early = [];
   // A copy: sleepTab() only swaps one element, but the sweep should not care.
   for (const tab of tabs.slice()) {
     if (!canSleepTab(tab)) continue;
-    if (tabIdleSince(tab) > cutoff) continue;
-    if (sleepTab(tab, 'idle')) slept++;
+    if (sleepProbeWaiting(tab, now)) continue; // kept awake a moment ago: asked again later
+    const idleSince = tabIdleSince(tab);
+    if (idleSince > cutoff) early.push({ tab, idleSince });
+    else jobs.push(sleepTabChecked(tab, 'idle'));
   }
-  return slept;
+  if (early.length) jobs.push(sleepEarly(now, minutes, early));
+  return Promise.all(jobs).then((r) => r.reduce((n, x) => n + (x === true ? 1 : (typeof x === 'number' ? x : 0)), 0));
 }
 
 /**
@@ -8774,6 +9050,22 @@ function sleepOtherTabs() {
     if (canSleepNow(tab) && sleepTab(tab)) slept++;
   }
   return slept;
+}
+
+/**
+ * The tab menu's "Sleep tab": the user asked, so nothing is probed (a menu item they clicked is
+ * not the place to second-guess them; its label already says what would be lost, see
+ * sleepMenuLabel), but the back/forward history is still captured for the wake.
+ */
+function sleepTabByHand(tab) {
+  if (!canSleepNow(tab)) return Promise.resolve(false);
+  return sleepTabChecked(tab, 'asked', '', canSleepNow, { probe: false });
+}
+
+/** "Sleep tab", saying what a recent probe found that the sleep would lose. */
+function sleepMenuLabel(tab) {
+  const r = tab && tab.keptAwake && tab.keptAwake.reason;
+  return (r && !/^could not/.test(r)) ? 'Sleep tab (' + r + ' would be lost)' : 'Sleep tab';
 }
 
 /* ------------------------------------------------------------------ */
@@ -10356,7 +10648,7 @@ function tabMenuItemsForTab(tab) {
       // would silently cut the sound off, which no sleep path may do.
       : (tabSoundReason(tab)
         ? { label: 'Sleep tab (not while it is playing sound)', run: () => {}, disabled: true }
-        : { label: 'Sleep tab', run: () => sleepTab(tab), disabled: !canSleepNow(tab) }));
+        : { label: sleepMenuLabel(tab), run: () => sleepTabByHand(tab), disabled: !canSleepNow(tab) }));
   } else {
     // A chamber (the Claude pane, or a shell). Claude no longer opens as a
     // tab of its own, so there is no "another one in this folder" row here,
@@ -11280,7 +11572,7 @@ function wireViewEvents(tab) {
     // one tab early — and a no-op for every tab in the workspace on screen.
     if (tab.id !== activeTabId && tabWorkspace(tab) !== currentWorkspaceId) {
       const wsMode = sleepModeFor(tabWorkspace(tab));
-      if (canSleepInWorkspace(tab, wsMode)) sleepTab(tab);
+      if (canSleepInWorkspace(tab, wsMode)) sleepInWorkspaceNow(tab, wsMode);
     }
   });
 
@@ -13278,6 +13570,15 @@ function init() {
   // — the chrome outlives every tab in it, and both settings are re-read on
   // each sweep, so a change takes effect without a restart.
   window.setInterval(sleepSweep, TAB_SLEEP_SWEEP_MS);
+  // Chromium's audibility of each guest, pushed by main on every change: the chip's speaker
+  // follows it (setTabHeard). Also never removed, for the same reason as the sweep.
+  if (window.api && window.api.tabs && typeof window.api.tabs.onAudioState === 'function') {
+    window.api.tabs.onAudioState((p) => {
+      if (!p || !Number.isInteger(p.wcId)) return;
+      const tab = tabForWebContentsId(p.wcId);
+      if (tab && !tab.asleep) setTabHeard(tab, p.audible === true);
+    });
+  }
 
   // Re-apply the theme theme-boot.js already stamped on <html>: this is what
   // paints the toggle glyph and hands the theme to terminal.js. Runs before the

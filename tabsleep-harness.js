@@ -6,6 +6,10 @@
 // and which one is predicted in front), newTabSleepVerdict() (what to do with a new tab page
 // that has sat in the background), and HOME_BUSY_PROBE (the page-side check that keeps a Home
 // holding typed text awake), run against a tiny fake document.
+// Plus the early rules (memoryPressure / earlySleepPlan: memory low, very heavy pages), the probe-gated
+// sweep (sleepTabChecked with main faked: busy, no answer, retry timing, reasons shown and logged),
+// the speaker following Chromium (setTabHeard), and tabsleep-main.js: tabMemory, budgetHistory, the
+// isolated-world PROBE and its input TRACKER, against small fakes.
 // The live paths (a real restore, a real sleep and wake) are sessions-e2e.js / sleep-e2e.js.
 const fs = require('fs');
 const path = require('path');
@@ -175,15 +179,45 @@ function sweepWorld() {
     function isNewTabUrl(u) { return /newtab/.test(String(u || '')); }
     function readCurrentUrl(t) { return t ? t.url : ''; }
     function isViewUsable(t) { return !!(t && t.kind === 'page' && !t.asleep && t.ready && t.viewEl); }
-    function sleepTab(t, why) { if (typeof tabSoundReason === 'function' && tabSoundReason(t)) return false; t.asleep = true; slept.push({ id: t.id, at: clockNow, why }); return true; }
-    function page(id, extra) { const t = Object.assign({ id, kind: 'page', url: 'https://x/' + id, ready: true, asleep: false, pinned: false, audible: false, broken: false, lastActive: 0, openedAt: 0, viewEl: { audibleNow: false, isCurrentlyAudible() { return this.audibleNow; } } }, extra || {}); tabs.push(t); return t; }
+    function sleepTab(t, why, opts) { if (typeof tabSoundReason === 'function' && tabSoundReason(t)) return false; t.asleep = true; slept.push({ id: t.id, at: clockNow, why, note: (opts && opts.note) || '', history: (opts && opts.history) || null }); return true; }
+    // Main's half, faked with SYNCHRONOUS thenables so a sweep's sleeps land before sweep() returns.
+    function now(v) { return { then(f) { return now(f ? f(v) : v); } }; }
+    function nope(e) { return { then(f, r) { return now(r ? r(e) : undefined); } }; }
+    var logs = []; var calls = { probe: 0, memory: 0 };
+    var memory = { totalBytes: 11.7 * 1024 * 1024 * 1024, freeBytes: 6 * 1024 * 1024 * 1024 };
+    var window = { api: { tabs: {
+      prepareSleep(wcId, opts) {
+        calls.probe++;
+        const t = tabs.find((x) => x.viewEl && x.viewEl.wcId === wcId);
+        if (!t) return now({ ok: false, reason: 'the page is not running' });
+        if (t.probe === 'reject') return nope(new Error('ipc gone'));
+        if (opts && opts.probe === false) return now({ ok: true, probe: null, history: { index: 0, entries: [{ url: t.url, title: '' }] } });
+        if (t.probe === 'timeout') return now({ ok: true, probe: { ok: false, reason: 'the page did not answer within 1.5 s' } });
+        return now({ ok: true, probe: { ok: true, busy: t.probe || '', tracked: true }, history: t.probe ? null : { index: 0, entries: [{ url: t.url, title: '' }] } });
+      },
+      memory(ids) {
+        calls.memory++;
+        if (!memory) return now({ ok: false, reason: 'test: no figures' });
+        const out = {}; for (const t of tabs) if (t.viewEl && ids.indexOf(t.viewEl.wcId) !== -1) out[t.viewEl.wcId] = { bytes: t.bytes || 50 * 1024 * 1024, sharedWith: 0 };
+        return now({ ok: true, totalBytes: memory.totalBytes, freeBytes: memory.freeBytes, tabs: out });
+      }
+    } } };
+    function logEvent(kind, d) { logs.push(Object.assign({ kind }, d)); }
+    function chipTooltip() { return ''; }
+    function syncTabAudio() {}
+    let tabMemoryNotice = '';
+    var nextWc = 100;
+    function page(id, extra) { const t = Object.assign({ id, kind: 'page', url: 'https://x/' + id, ready: true, asleep: false, pinned: false, audible: false, broken: false, lastActive: 0, openedAt: 0, viewEl: { wcId: nextWc++, audibleNow: false, isCurrentlyAudible() { return this.audibleNow; }, getWebContentsId() { return this.wcId; } } }, extra || {}); tabs.push(t); return t; }
     function activate(id) { const t = tabs.find((x) => x.id === id); activeTabId = id; t.lastActive = clockNow; noteScreenEdges(); }
   ` + ['TAB_SLEEP_DEFAULT_MINUTES', 'TAB_SLEEP_SWEEP_MS'].map((n) => cutConst(n, ';')).join('\n')
     + cutConst('AUDIBLE_SPARE_MS', ';') + '\n'
-    + ['isTabOnScreen', 'tabIdleSince', 'noteScreenEdges', 'viewAudibleNow', 'noteTabSound', 'observeTabSound', 'tabSoundReason', 'canSleepTab', 'tabSleepMinutes', 'sleepIdleTabs'].map(cutFunction).join('\n')
+    + ['MEMORY_LOW', 'MEMORY_CRITICAL', 'HEAVY_TAB_BYTES', 'HEAVY_GRACE_MS', 'SLEEP_PROBE_RETRY_MS'].map((n) => cutConst(n, ';')).join('\n') + '\n'
+    + cutConst('EARLY_SLEEP', '};') + '\n'
+    + ['isTabOnScreen', 'tabIdleSince', 'noteScreenEdges', 'viewAudibleNow', 'noteTabSound', 'observeTabSound', 'tabSoundReason', 'canSleepTab', 'tabSleepMinutes', 'sleepIdleTabs',
+      'setTabHeard', 'memoryPressure', 'memoryWords', 'earlySleepPlan', 'keepAwakeFor', 'sleepProbeWaiting', 'sleepTabChecked', 'queryTabMemory', 'sleepEarly'].map(cutFunction).join('\n')
     + `\nthis.api = { get tabs() { return tabs; }, page, activate, sweep: sleepIdleTabs, slept: () => slept, set: (t) => { clockNow = t; },
       split: (a, b) => { a.splitWith = b.id; b.splitWith = a.id; }, unsplit: (a, b) => { a.splitWith = null; b.splitWith = null; noteScreenEdges(); },
-      tabSoundReason, canSleepTab };`, w);
+      tabSoundReason, canSleepTab, logs, calls, setMemory: (m) => { memory = m; }, earlySleepPlan, memoryPressure, setTabHeard, noteScreenEdges };`, w);
   return w.api;
 }
 /** Sweep once a minute from `from` to `to` (minutes); the first minute a tab is slept, or null. */
@@ -253,6 +287,181 @@ function sweepUntil(api, from, to, id) {
   ok('bug2: workspace "all" rule uses the real audibility', /tabSoundReason\(tab\)/.test(cutFunction('canSleepInWorkspace')));
   ok('bug2: the slept log line carries the sound state', /sound: heardAgo === null \? 'was not making sound'/.test(cutFunction('sleepTab')));
   ok('bug2: media-paused stamps lastAudibleAt', /if \(tab\.audible\) tab\.lastAudibleAt = Date\.now\(\);\s*setTabAudible\(tab, false\)/.test(src));
+}
+
+// --- sleeping early: memory pressure and very heavy pages (earlySleepPlan) --------------------
+const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
+{
+  const a = sweepWorld();
+  const P = a.memoryPressure;
+  ok('pressure: 11.7 GB total, 3 GB free is ok', P(3 * GB, 11.7 * GB) === 'ok');
+  ok('pressure: 11.7 GB total, 2.0 GB free is low', P(2.0 * GB, 11.7 * GB) === 'low');
+  ok('pressure: 11.7 GB total, 1.0 GB free is critical', P(1.0 * GB, 11.7 * GB) === 'critical');
+  ok('pressure: 32 GB total, 2.4 GB free is low (2.5 GB cap)', P(2.4 * GB, 32 * GB) === 'low');
+  ok('pressure: 32 GB total, 4 GB free is ok', P(4 * GB, 32 * GB) === 'ok');
+  ok('pressure: missing figures are unknown, never "low"', P(undefined, 11.7 * GB) === '' && P(1 * GB, 0) === '');
+  const plan = (o) => a.earlySleepPlan(Object.assign({ now: 100 * MIN, minutes: 30, totalBytes: 11.7 * GB, freeBytes: 6 * GB }, o));
+  const ids = (p) => JSON.stringify(p.map((x) => x.id));
+  // Six background tabs, idle 1, 3, 6, 9, 12 and 20 minutes.
+  const c6 = [1, 3, 6, 9, 12, 20].map((m) => ({ id: 'c' + m, idleSince: 100 * MIN - m * MIN, bytes: 100 * MB }));
+  ok('early: plenty of memory, nothing heavy: nothing early', plan({ candidates: c6 }).length === 0);
+  ok('early: "Never" (0 minutes) plans nothing even at critical memory', plan({ minutes: 0, freeBytes: 0.5 * GB, candidates: c6 }).length === 0);
+  const low = plan({ freeBytes: 1.6 * GB, candidates: c6 });
+  ok('low: two per sweep, least recently used first', ids(low) === '["c20","c12"]', low);
+  ok('low: why "memory", the figures in plain words', low[0] && low[0].why === 'memory' && low[0].note === 'memory was low (1.6 GB of 11.7 GB free)', low[0]);
+  ok('low: the 3 most recently used background tabs stay warm', ids(plan({ freeBytes: 1.6 * GB, candidates: c6.slice(0, 4) })) === '["c9"]');
+  const young = [1, 2, 3, 4].map((m) => ({ id: 'y' + m, idleSince: 100 * MIN - m * MIN }));
+  ok('low: nothing idle under 5 min goes early', plan({ freeBytes: 1.6 * GB, candidates: young }).length === 0);
+  const crit = plan({ freeBytes: 0.8 * GB, candidates: c6 });
+  ok('critical: three per sweep, LRU first, "very low"', ids(crit) === '["c20","c12","c9"]' && /^memory was very low \(819 MB of 11\.7 GB free\)$/.test(crit[0].note), crit);
+  ok('critical: only the most recent stays warm, 2 min grace', ids(plan({ freeBytes: 0.8 * GB, candidates: c6.slice(0, 2) })) === '["c3"]');
+  const due = plan({ freeBytes: 0.8 * GB, minutes: 10, candidates: c6 });
+  ok('early: a tab already due by the timer is left to the idle rule', due.every((x) => x.id !== 'c12' && x.id !== 'c20'), due);
+  ok('early: a 1-minute timer leaves nothing for the early rules', plan({ freeBytes: 0.8 * GB, minutes: 1, candidates: c6 }).length === 0);
+  // Heavy: most recent first = top (6 min, 900 MB), big (7 min, 620 MB), small (20 min, 120 MB).
+  const hv = plan({ candidates: [{ id: 'top', idleSince: 94 * MIN, bytes: 900 * MB }, { id: 'big', idleSince: 93 * MIN, bytes: 620 * MB }, { id: 'small', idleSince: 80 * MIN, bytes: 120 * MB }] });
+  ok('heavy: a 620 MB tab idle 7 min sleeps with plenty of memory', ids(hv) === '["big"]' && hv[0].why === 'heavy', hv);
+  ok('heavy: the note gives its size', hv[0] && hv[0].note === 'it was using 620 MB of memory in the background', hv[0]);
+  ok('heavy: the most recently used background tab is spared, however big', !hv.some((x) => x.id === 'top'));
+  ok('heavy: idle under 5 min is not yet', plan({ candidates: [{ id: 'top', idleSince: 99 * MIN }, { id: 'h4', idleSince: 96 * MIN, bytes: 700 * MB }] }).length === 0);
+  ok('heavy + low: a tab is planned once', (() => { const p = plan({ freeBytes: 1.6 * GB, candidates: c6.concat([{ id: 'fat', idleSince: 70 * MIN + 1, bytes: 800 * MB }]) }); return p.filter((x) => x.id === 'fat').length === 1; })());
+}
+{
+  // The sweep end to end with main faked: low memory, five background tabs, pinned, one making sound.
+  const a = sweepWorld();
+  a.page('F');
+  ['b1', 'b2', 'b3', 'b4', 'b5'].forEach((id, i) => { a.page(id); a.set(i * MIN); a.activate(id); });
+  const pin = a.page('pin', { pinned: true }); const loud = a.page('loud'); loud.viewEl.audibleNow = true;
+  a.set(5 * MIN); a.activate('F');
+  a.setMemory({ totalBytes: 11.7 * GB, freeBytes: 1.6 * GB });
+  a.set(11 * MIN); a.sweep();
+  const s = a.slept();
+  ok('sweep low: b1 and b2 (least recent) went early, as "memory"', JSON.stringify(s.map((x) => x.id)) === '["b1","b2"]' && s.every((x) => x.why === 'memory'), s);
+  ok('sweep low: the slept tab carries the note', s[0] && /^memory was low \(1\.6 GB of 11\.7 GB free\)$/.test(s[0].note), s[0]);
+  ok('sweep low: history captured on the way down', s[0] && s[0].history && s[0].history.entries.length === 1, s[0]);
+  ok('sweep low: pinned and sounding tabs stay awake', !pin.asleep && !loud.asleep);
+  ok('sweep low: one memory ask per sweep', a.calls.memory === 1, a.calls);
+  a.set(12 * MIN); a.sweep();
+  ok('sweep low: the 3 warm tabs stay up next sweep', a.slept().length === 2, a.slept());
+  // Figures unavailable: early rules stop, logged once; the timer still runs.
+  const b = sweepWorld(); b.page('F'); b.page('x'); b.set(0); b.activate('F'); b.setMemory(null);
+  for (let m = 1; m <= 14; m++) { b.set(m * MIN); b.sweep(); }
+  ok('no figures: nothing early', b.slept().length === 0);
+  ok('no figures: said once in the log', b.logs.filter((l) => l.kind === 'ui-error').length === 1, b.logs);
+  b.set(15 * MIN); b.sweep();
+  ok('no figures: the timer still sleeps at 15 min', b.slept().length === 1 && b.slept()[0].why === 'idle', b.slept());
+  const c = sweepWorld(); c.page('F'); c.page('x'); c.set(0); c.activate('F');
+  c.set(1 * MIN); c.sweep();
+  ok('no ask at all while no tab is idle 2 min', c.calls.memory === 0, c.calls);
+}
+{
+  // The safe-to-sleep probe: busy, no answer, a failed ask; retry timing; the reason shown and logged.
+  const a = sweepWorld();
+  const D = a.page('draft', { probe: 'unsaved text in a form' }); const T = a.page('hung', { probe: 'timeout' }); const R = a.page('rej', { probe: 'reject' });
+  a.page('F'); a.set(0); a.activate('F');
+  a.set(16 * MIN); a.sweep();
+  ok('probe: none of the three slept', a.slept().length === 0, a.slept());
+  ok('probe: kept awake with the page\'s reason', D.keptAwake && D.keptAwake.reason === 'unsaved text in a form', D.keptAwake);
+  ok('probe: no answer = kept awake, says so (safe rule)', T.keptAwake && T.keptAwake.reason === 'could not check it for unsaved work (the page did not answer within 1.5 s)', T.keptAwake);
+  ok('probe: a failed ask = kept awake, says so', R.keptAwake && R.keptAwake.reason === 'could not check it for unsaved work (ipc gone)', R.keptAwake);
+  const skipped = () => a.logs.filter((l) => l.kind === 'tab-sleep-skipped');
+  ok('probe: each logged as kept awake', skipped().length === 3 && skipped()[0].reason === 'unsaved text in a form', skipped());
+  const asked = a.calls.probe;
+  for (let m = 17; m <= 20; m++) { a.set(m * MIN); a.sweep(); }
+  ok('probe: not asked again inside 5 min', a.calls.probe === asked, a.calls);
+  a.set(21 * MIN); a.sweep();
+  ok('probe: asked again after 5 min', a.calls.probe === asked + 3, a.calls);
+  ok('probe: the same reason is not logged twice', skipped().length === 3, skipped().length);
+  D.probe = ''; a.set(26 * MIN); a.sweep();
+  ok('probe: once the text is gone, the tab sleeps (as idle)', D.asleep && a.slept().some((x) => x.id === 'draft' && x.why === 'idle'), a.slept());
+  for (let m = 27; m <= 70; m++) { a.set(m * MIN); a.sweep(); }
+  ok('probe: a page that never answers is never slept', !T.asleep && !R.asleep);
+  a.set(71 * MIN); a.activate('hung');
+  ok('probe: on screen clears the stale "kept awake" reason', T.keptAwake === null, T.keptAwake);
+}
+{
+  // The speaker follows Chromium's audibility, not the per-element media events.
+  const a = sweepWorld();
+  const S = a.page('S'); a.page('F'); a.set(0); a.activate('F');
+  S.viewEl.audibleNow = true; a.set(1 * MIN); a.sweep();
+  ok('speaker: Web Audio (no media events) lights it by the next sweep', S.heard === true);
+  a.set(2 * MIN); a.setTabHeard(S, false);
+  ok('speaker: going quiet clears it and stamps lastAudibleAt', S.heard === false && S.lastAudibleAt === 2 * MIN, S.lastAudibleAt);
+  ok('speaker: the chip reads tab.heard, not the media flag', /const show = !!\(tab\.heard \|\| tab\.muted\);/.test(cutFunction('syncTabAudio')));
+  ok('speaker: main\'s push drives it', /onAudioState\(\(p\) => \{[\s\S]*?setTabHeard\(tab, p\.audible === true\)/.test(src));
+  ok('speaker: a gone guest drops it', /if \(tab\.heard\) \{ tab\.heard = false; syncTabAudio\(tab\); \}/.test(cutFunction('forgetTabAudio')));
+  ok('workspace "all": real pages are asked first', /sleepTabChecked\(tab, 'workspace'/.test(cutFunction('sleepInWorkspaceNow')));
+  ok('menu: Sleep tab captures history, no probe', /probe: false/.test(cutFunction('sleepTabByHand')));
+}
+
+// --- tabsleep-main.js: memory figures, history budget, the probe and its tracker ------------
+{
+  const TM = require('./tabsleep-main');
+  const m = TM.tabMemory({
+    wcIds: [1, 2, 3, 4], system: { totalBytes: 11.7 * GB, freeBytes: 2 * GB },
+    metrics: [{ pid: 10, memory: { workingSetSize: 500 * 1024 } }, { pid: 11, memory: { workingSetSize: 300 * 1024 } }],
+    pidOf: (id) => ({ 1: 10, 2: 11, 3: 11, 4: 99 })[id]
+  });
+  ok('memory: a guest with its own renderer gets all of it', m.tabs[1] && m.tabs[1].bytes === 500 * MB, m.tabs);
+  ok('memory: two guests sharing a renderer split it', m.tabs[2] && m.tabs[2].bytes === 150 * MB && m.tabs[2].sharedWith === 1, m.tabs);
+  ok('memory: a guest whose process is unknown is left out', !(4 in m.tabs));
+  ok('memory: system figures pass through', m.freeBytes === 2 * GB && m.totalBytes === 11.7 * GB);
+  const entries = Array.from({ length: 80 }, (_, i) => ({ url: 'https://e/' + i, title: 't' + i, pageState: 'x' }));
+  const h = TM.budgetHistory(70, entries, 50, 2 * MB);
+  ok('history: capped to 50 entries around the current one', h.entries.length === 50 && h.entries[h.index].url === 'https://e/70' && h.trimmed === 30, { n: h.entries.length, at: h.index });
+  const big = Array.from({ length: 5 }, (_, i) => ({ url: 'https://b/' + i, title: '', pageState: 'y'.repeat(MB) }));
+  const hb = TM.budgetHistory(4, big, 50, 2 * MB);
+  ok('history: pageState over 2 MB dropped furthest first, entries kept', hb.entries.length === 5 && hb.statesDropped === 3 && hb.entries[4].pageState && hb.entries[3].pageState && !hb.entries[0].pageState, hb.statesDropped);
+  ok('history: junk entries are dropped', TM.budgetHistory(0, [null, { url: '' }, { url: 'https://a/' }], 50, MB).entries.length === 1);
+
+  const el = (tag, o) => Object.assign({
+    tagName: tag, type: 'text', value: '', defaultValue: '', isConnected: true, isContentEditable: false,
+    getAttribute(n) { return (o && o.attrs && o.attrs[n]) || null; },
+    closest(sel) { return (o && o.inSearch && /role="search"/.test(sel)) ? {} : null; }
+  }, o || {});
+  const text = (v, hidden) => ({ nodeValue: v, parentElement: { closest: () => (hidden ? {} : null) } });
+  const probe = (o) => {
+    const doc = {
+      designMode: o.designMode || 'off', body: o.body || null, pictureInPictureElement: o.pip || null,
+      querySelectorAll: (sel) => sel === 'input, textarea' ? (o.els || []) : sel === 'video, audio' ? (o.media || []) : [],
+      createTreeWalker: (root) => { let i = -1; const n = root.textNodes || []; return { nextNode: () => n[++i] || null }; }
+    };
+    const win = { __quartzEdits: o.tracked ? o.tracked.map((e) => ({ deref: () => e })) : undefined };
+    return vm.runInContext(TM.PROBE, vm.createContext({ window: win, document: doc, NodeFilter: { SHOW_TEXT: 4 }, navigator: { mediaSession: { playbackState: o.session || 'none' } } }));
+  };
+  ok('probe: typed text in a field = unsaved text in a form', probe({ tracked: [el('INPUT', { value: 'hello' })] }).busy === 'unsaved text in a form');
+  ok('probe: the answer says the tracker was there', probe({ tracked: [] }).tracked === true && probe({}).tracked === false);
+  ok('probe: a typed field emptied again is fine', probe({ tracked: [el('TEXTAREA', { value: '  ' })] }).busy === '');
+  ok('probe: a search box is not work', probe({ tracked: [el('INPUT', { value: 'lofi', attrs: { role: 'combobox' } }), el('INPUT', { value: 'x', inSearch: true }), el('INPUT', { type: 'search', value: 'q' })] }).busy === '');
+  ok('probe: a password is not work', probe({ tracked: [el('INPUT', { type: 'password', value: 'pw' })] }).busy === '');
+  ok('probe: a field that left the page does not count', probe({ tracked: [el('INPUT', { value: 'x', isConnected: false })] }).busy === '');
+  ok('probe: script-prefilled text with the tracker present does not count', probe({ tracked: [], els: [el('INPUT', { value: 'prefilled', defaultValue: '' })] }).busy === '');
+  ok('probe: no tracker: changed from its loaded value counts (cautious fallback)', probe({ els: [el('INPUT', { value: 'typed', defaultValue: '' })] }).busy === 'unsaved text in a form');
+  ok('probe: no tracker: a value as loaded does not', probe({ els: [el('INPUT', { value: 'q', defaultValue: 'q' })] }).busy === '');
+  const ed = (nodes) => el('DIV', { isContentEditable: true, textNodes: nodes });
+  ok('probe: an editor holding only its placeholder is fine', probe({ tracked: [ed([text('Message #general', true)])] }).busy === '');
+  ok('probe: an editor holding typed text = unsaved text in an editor', probe({ tracked: [ed([text('half a reply')])] }).busy === 'unsaved text in an editor');
+  const stream = (state) => ({ srcObject: { getTracks: () => [{ readyState: state }] } });
+  ok('probe: a live MediaStream = a live call, camera or microphone', probe({ media: [stream('live')] }).busy === 'a live call, camera or microphone');
+  ok('probe: an ended stream is fine', probe({ media: [stream('ended'), { srcObject: null }] }).busy === '');
+  ok('probe: picture-in-picture keeps it', probe({ pip: {} }).busy === 'a picture-in-picture video');
+  ok('probe: OS media controls say playing', probe({ session: 'playing' }).busy === 'media that is playing');
+  ok('probe: a quiet page is clear', probe({}).busy === '');
+
+  // The tracker: trusted input only, one mark per element, a submitted form drops its marks.
+  const listeners = {};
+  const doc = { addEventListener: (k, f) => { listeners[k] = f; }, querySelectorAll: () => [] };
+  const win = {};
+  vm.runInContext(TM.TRACKER, vm.createContext({ window: win, document: doc }));
+  const field = { nodeType: 1, isContentEditable: false };
+  listeners.input({ isTrusted: false, composedPath: () => [field] });
+  ok('tracker: a script\'s synthetic input is not the user', win.__quartzEdits.length === 0);
+  listeners.input({ isTrusted: true, composedPath: () => [field] });
+  listeners.input({ isTrusted: true, composedPath: () => [field] });
+  ok('tracker: the user typing marks the field once', win.__quartzEdits.length === 1 && win.__quartzEdits[0].deref() === field);
+  listeners.submit({ target: { contains: (x) => x === field } });
+  ok('tracker: submitting its form drops the mark', win.__quartzEdits.length === 0);
+  ok('tracker: runs once per page', vm.runInContext(TM.TRACKER, vm.createContext({ window: { __quartzEdits: [] }, document: doc })) === 1);
 }
 
 // The suite's summary-line format (tools/run-suite.js): "<name>: N passed, M failed".

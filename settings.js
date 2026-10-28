@@ -3284,8 +3284,10 @@
 
     field.appendChild(el('p', 'set-hint',
       'Sleeping tabs free their memory and reload when you come back. The time counts from when ' +
-      'you leave a tab. Pinned tabs and tabs making sound (or heard in the last 2 minutes) stay awake. ' +
-      'After a restart only the tab in front loads; the rest wake when clicked.'));
+      'you leave a tab; a tab sleeps sooner when memory runs low or it holds over 400 MB in the ' +
+      'background (hover a sleeping tab to see why). Never means never. Pinned tabs, tabs making sound ' +
+      '(or heard in the last 2 minutes) and tabs with unsent typing, a call or picture-in-picture stay ' +
+      'awake. After a restart only the tab in front loads; the rest wake when clicked.'));
   }
 
   function buildDownloads() {
