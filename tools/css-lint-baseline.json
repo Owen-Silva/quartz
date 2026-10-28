@@ -1,0 +1,321 @@
+{
+  "about": "css-lint baseline: per file per rule, the finding count that is tolerated today and why. Over it fails; under it asks for the count to come down. Regenerate with node tools/css-lint.js --write-baseline (keeps each why).",
+  "files": {
+    "app.js": {
+      "legacy-fg": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "bookmarks.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "chrome.css": {
+      "legacy-fg": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-font-size": {
+        "count": 12,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 5,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "downloads.css": {
+      "raw-font-size": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "drm.css": {
+      "raw-font-size": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "history.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "historypage.css": {
+      "raw-font-size": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "newtab.css": {
+      "legacy-fg": {
+        "count": 102,
+        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
+      },
+      "raw-font-size": {
+        "count": 12,
+        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
+      },
+      "raw-radius": {
+        "count": 22,
+        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
+      }
+    },
+    "phone-page.css": {
+      "raw-radius": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "pip.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "reader-page.css": {
+      "legacy-fg": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "reader.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "score-pin.css": {
+      "raw-font-size": {
+        "count": 4,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "search.css": {
+      "raw-font-size": {
+        "count": 16,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 6,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "settings.css": {
+      "raw-font-size": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 8,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "shield.css": {
+      "raw-font-size": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "siteinfo.css": {
+      "raw-font-size": {
+        "count": 4,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "tabsearch.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "tokens.css": {
+      "unused-space": {
+        "count": 1,
+        "why": "zl-design is fixing these this round; baseline drops to 0 when it lands"
+      }
+    },
+    "watch-alerts.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-comments.css": {
+      "raw-font-size": {
+        "count": 21,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 7,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-find.css": {
+      "raw-font-size": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 5,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-player-extras.css": {
+      "raw-font-size": {
+        "count": 10,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-player-multi.css": {
+      "raw-font-size": {
+        "count": 10,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-player.css": {
+      "raw-font-size": {
+        "count": 8,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-playerbar.css": {
+      "raw-radius": {
+        "count": 12,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-playview.css": {
+      "raw-font-size": {
+        "count": 19,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 10,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-profiles.css": {
+      "raw-font-size": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-shorts.css": {
+      "raw-font-size": {
+        "count": 7,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 5,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-shows.css": {
+      "raw-font-size": {
+        "count": 25,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 12,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-tilemenu.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-tilepreview.css": {
+      "raw-font-size": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 1,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch-ytlib.css": {
+      "raw-font-size": {
+        "count": 6,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 6,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "watch.css": {
+      "raw-font-size": {
+        "count": 17,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 7,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "welcome.css": {
+      "raw-font-size": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 3,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    },
+    "workspaces.css": {
+      "raw-font-size": {
+        "count": 2,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      },
+      "raw-radius": {
+        "count": 5,
+        "why": "Not this lane's file (other round-2 lanes edit it); baseline so only NEW drift fails. Clear it when the file is next restyled."
+      }
+    }
+  }
+}
