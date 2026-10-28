@@ -1402,6 +1402,7 @@ app.whenReady().then(async () => {
     require('./updater-main').install({
       app, ipcMain, isChromeSender,
       send: (channel, payload) => { if (!canSend()) return false; win.webContents.send(channel, payload); return true; },
+      logLine: (line) => { if (qlog) qlog.log.line(line); },
     }).start();
   } catch (err) {
     const why = String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 200);

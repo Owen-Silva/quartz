@@ -23,7 +23,9 @@
  *   - tracked files have no uncommitted changes;  - it is not a shallow clone;
  *   - a fast-forward to the tag is possible;
  *   - when the release changes the dependencies (package.json or package-lock.json beyond their
- *     version fields): npm and node are on PATH.
+ *     version fields): npm and node are on PATH;
+ *   - the release tag is signed by a key in release-signers AS INSTALLED HERE, and names exactly the
+ *     commit the update merges (see "signed release tags" below). A copy with no key yet says so.
  *
  * WHAT UPDATE DOES.
  *   1. Downloading: fetch the tag again and re-check every condition above.
@@ -47,6 +49,7 @@
  * why there is no button, why an update failed and where its log is.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -134,6 +137,163 @@ function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 function tail(s, n) { const t = String(s || '').trim(); return t.length > (n || 300) ? '…' + t.slice(-(n || 300)) : t; }
 function short(sha) { return String(sha || '').slice(0, 7); }
 function clock(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
+/* ---- signed release tags ---------------------------------------------------------------------- */
+/*
+ * A release is installed only when its tag is signed by a key listed in release-signers AS IT IS IN
+ * THE COPY ALREADY INSTALLED. That file is read from the app folder before anything is fetched, and
+ * the fetched release's own copy is never consulted, so a release can never vouch for itself: a new
+ * key only counts once a release signed by an old key has put it there (tools/RELEASING.md).
+ *
+ * Git does the cryptography: `git verify-tag` with gpg.format=ssh hands the signature to
+ * `ssh-keygen -Y verify` with the allowed-signers file, so no GPG install is needed. That takes git
+ * 2.34 or newer and OpenSSH 8.2 or newer; Git for Windows and Windows 11's own OpenSSH both qualify.
+ * Every setting the check depends on is passed on the command line (format, signers file, program,
+ * minimum trust), so the user's own git config can neither weaken it nor send it elsewhere.
+ *
+ * A good signature is not enough on its own: the signed tag object is read back and must name
+ * exactly the commit the update merges, as a commit, under the release's own tag name. An old signed
+ * tag re-published under a new name, or a signed tag that peels to some other commit, is refused.
+ *
+ * Bootstrap. Copies from before signing existed have no release-signers file, so they cannot check
+ * anything (and the code that would check is not in them either). The release that first brings the
+ * file is the one trust-on-first-use step; a copy of THIS code with no key in the file says so in
+ * the card instead of skipping in silence. Any line in the file that is not a comment counts as a
+ * key, so a damaged file fails closed (ssh-keygen rejects it) rather than switching the check off.
+ *
+ * Once a key is in place, an unsigned, wrongly signed or uncheckable tag is refused: no merge,
+ * nothing in the app folder changed, and the reason is in the card, in Settings > About, in
+ * updater.log and in quartz.log. A git or ssh-keygen too old or missing to check is said as exactly
+ * that, never treated as a pass.
+ */
+const SIGNERS_FILE = 'release-signers';
+const MIN_GIT_SSH = [2, 34];
+const KEY_TYPE = /^(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp(?:256|384|521)|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)$/;
+
+/**
+ * An allowed-signers text: { lines, keys }. lines = every non-comment line (what ssh-keygen gets);
+ * keys = the ones that parse as "principal [options] keytype base64key".
+ */
+function parseSigners(text) {
+  const lines = [];
+  const keys = [];
+  for (const raw of String(text == null ? '' : text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    lines.push(line);
+    const t = line.split(/\s+/);
+    for (let i = 1; i < t.length - 1; i++) {
+      if (KEY_TYPE.test(t[i]) && /^[A-Za-z0-9+/]+={0,2}$/.test(t[i + 1])) { keys.push({ principal: t[0], type: t[i], key: t[i + 1] }); break; }
+    }
+  }
+  return { lines, keys };
+}
+
+/**
+ * This copy's release keys, from the app folder on disk: { pinned, lines, keys, error }. A missing
+ * file is "no key yet" (pinned false); an unreadable one is an error, which refuses every update.
+ */
+function readInstalledSigners(appDir) {
+  let text;
+  try { text = fs.readFileSync(path.join(appDir, SIGNERS_FILE), 'utf8'); } catch (e) {
+    if (e && e.code === 'ENOENT') return { pinned: false, lines: [], keys: [], error: '' };
+    return { pinned: true, lines: [], keys: [], error: (e && e.code) || String((e && e.message) || e) };
+  }
+  const p = parseSigners(text);
+  return { pinned: p.lines.length > 0, lines: p.lines, keys: p.keys, error: '' };
+}
+
+/** "git version 2.53.0.windows.2" -> { major, minor, text } or null. */
+function parseGitVersion(s) {
+  const m = /git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(String(s || ''));
+  return m ? { major: +m[1], minor: +m[2], text: m[1] + '.' + m[2] + (m[3] ? '.' + m[3] : '') } : null;
+}
+
+/** git verify-tag's words, as the reason a release is refused. */
+function signatureWhy(tag, out) {
+  const s = String(out || '');
+  const fp = (/key (SHA256:[A-Za-z0-9+/=]+)/.exec(s) || [])[1];
+  if (/no signature found/i.test(s)) return 'the release tag ' + tag + ' is not signed';
+  if (/cannot verify a non-tag object/i.test(s)) return 'the release tag ' + tag + ' is not signed (it is a plain tag with no signature)';
+  if (/No principal matched/i.test(s)) return 'the release tag ' + tag + ' is signed by a key this copy of Quartz does not trust' + (fp ? ' (' + fp + ')' : '');
+  if (/cannot (?:spawn|run)|not found|No such file or directory/i.test(s) && !/allowed keys file/i.test(s)) {
+    return 'git could not run ssh-keygen (OpenSSH), which it needs to check the signature on ' + tag + ': ' + tail(s.split(/\r?\n/)[0], 120);
+  }
+  if (/unknown option -- Y|illegal option -- Y|invalid option/i.test(s)) return 'this computer\'s ssh-keygen is too old to check SSH signatures (OpenSSH 8.2 or newer is needed)';
+  if (/Signature verification failed|incorrect signature|Could not verify signature|Bad "git" signature/i.test(s)) return 'the signature on the release tag ' + tag + ' does not match its contents';
+  if (/Unable to open allowed keys|allowed_signers|invalid key/i.test(s)) return 'this copy\'s ' + SIGNERS_FILE + ' file could not be used to check ' + tag + ': ' + tail(s.split(/\r?\n/).filter((l) => /allowed|invalid/i.test(l))[0] || s, 120);
+  return 'git could not check the signature on ' + tag + (s.trim() ? ': ' + tail(s.trim().split(/\r?\n/)[0], 160) : '');
+}
+
+/**
+ * Is the release tag signed by a key this copy trusts, and does it name exactly `sha`?
+ *   o.run(args)      -> Promise<{ code, stdout, stderr }>, git in the app folder
+ *   o.tag            the release's tag name;  o.tagObject  the tag object (sha) as fetched
+ *   o.sha            the commit the update will merge
+ *   o.signers        readInstalledSigners(appDir), read BEFORE the fetch
+ *   o.bringsKey      (no key yet) whether the release carries one; only changes the sentence
+ *   o.sshProgram     ssh-keygen by default (the tests point it at a missing program)
+ * Resolves { ok, state: 'verified'|'unpinned'|'refused', tag, text, why?, principal?, fingerprint? }.
+ * Never throws: an error is a refusal with its reason.
+ */
+async function verifyReleaseTag(o) {
+  const tag = o.tag;
+  const refuse = (why) => ({ ok: false, state: 'refused', tag, why, text: 'Quartz will not install ' + tag + ': ' + why + '.' });
+  try {
+    const s = o.signers || { pinned: false };
+    if (s.error) return refuse('this copy\'s ' + SIGNERS_FILE + ' file could not be read (' + s.error + ')');
+    if (!s.pinned) {
+      return {
+        ok: true, state: 'unpinned', tag,
+        text: o.bringsKey
+          ? 'This copy of Quartz has no release-signing key yet, so the signature on ' + tag + ' was not checked. This update brings the key; every update after it must be signed.'
+          : 'Neither this copy of Quartz nor ' + tag + ' has a release-signing key (' + SIGNERS_FILE + '), so the signature on ' + tag + ' was not checked.',
+      };
+    }
+    const v = await o.run(['--version']);
+    const ver = parseGitVersion(v.stdout);
+    if (!ver) return refuse('git could not say which version it is, so the signature on ' + tag + ' could not be checked');
+    if (ver.major < MIN_GIT_SSH[0] || (ver.major === MIN_GIT_SSH[0] && ver.minor < MIN_GIT_SSH[1])) {
+      return refuse('this computer\'s git (' + ver.text + ') cannot check SSH signatures; it needs git ' + MIN_GIT_SSH.join('.') + ' or newer');
+    }
+    const obj = String(o.tagObject || '').trim();
+    if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(obj)) return refuse('the release tag ' + tag + ' could not be read after the fetch');
+    const type = await o.run(['cat-file', '-t', obj]);
+    if (type.code !== 0) return refuse('the release tag ' + tag + ' could not be read: ' + tail(type.stderr, 120));
+    if (type.stdout.trim() !== 'tag') return refuse('the release tag ' + tag + ' is not signed (it is a plain tag with no signature)');
+
+    // The signature, against a private copy of the installed keys (comments dropped, LF endings).
+    const dir = fs.mkdtempSync(path.join(o.tmpDir || os.tmpdir(), 'quartz-signers-'));
+    let r;
+    try {
+      const file = path.join(dir, 'allowed_signers');
+      fs.writeFileSync(file, s.lines.join('\n') + '\n');
+      r = await o.run(['-c', 'gpg.format=ssh', '-c', 'gpg.ssh.allowedSignersFile=' + file.split(path.sep).join('/'),
+        '-c', 'gpg.ssh.program=' + (o.sshProgram || 'ssh-keygen'), '-c', 'gpg.minTrustLevel=fully',
+        'verify-tag', '--raw', obj]);
+    } finally {
+      try { removeTree(dir); } catch { /* a temp folder; the OS clears it */ }
+    }
+    const said = String(r.stderr || '') + '\n' + String(r.stdout || '');
+    const good = /Good "git" signature for (\S+) with (\S+) key (SHA256:[A-Za-z0-9+/=]+)/.exec(said);
+    if (r.code !== 0 || !good) return refuse(signatureWhy(tag, said));
+
+    // A good signature on THIS release: the signed object must be this commit, under this name.
+    const body = await o.run(['cat-file', 'tag', obj]);
+    const head = String(body.stdout || '').split(/\r?\n\r?\n/)[0];
+    const field = (k) => (new RegExp('^' + k + ' (.+)$', 'm').exec(head) || [])[1] || '';
+    if (body.code !== 0) return refuse('the signed tag ' + tag + ' could not be read back: ' + tail(body.stderr, 120));
+    if (field('type') !== 'commit') return refuse('the signed tag ' + tag + ' does not name a commit');
+    if (field('object') !== o.sha) return refuse('the signed tag ' + tag + ' names commit ' + short(field('object')) + ', not ' + short(o.sha) + ', the commit this update would install');
+    if (field('tag') !== tag) return refuse('the signature belongs to the tag "' + field('tag') + '", not ' + tag);
+    return {
+      ok: true, state: 'verified', tag, principal: good[1], fingerprint: good[3],
+      text: 'The release tag ' + tag + ' is signed by a key this copy of Quartz trusts (' + good[1] + ', ' + good[3] + ').',
+    };
+  } catch (e) {
+    return refuse('the signature on ' + tag + ' could not be checked: ' + String((e && e.message) || e));
+  }
+}
 
 /* ---- the default runners (tests inject their own) --------------------------------------------- */
 
@@ -268,6 +428,7 @@ function createUpdater(opts) {
     updated: null,
     snoozed: false,
     ahead: false,
+    signature: null,   // { ok, state: 'verified'|'unpinned'|'refused', tag, text } for the release on offer
     logPath,
   };
 
@@ -374,6 +535,8 @@ function createUpdater(opts) {
     }
     r.head = await gitOut(['rev-parse', 'HEAD']);
     if (!r.head) throw new Error('git could not read this folder\'s HEAD (see the log)');
+    // The keys this copy trusts, read from the installed folder BEFORE anything is fetched.
+    const signers = readInstalledSigners(appDir);
     const origin = await originInfo();
     const src = origin.isPublic ? 'origin' : publicUrl;
     const f = await g(['fetch', '--no-tags', '--quiet', src, 'refs/tags/' + tag + ':refs/tags/' + tag], { timeoutMs: 180000 });
@@ -384,7 +547,11 @@ function createUpdater(opts) {
         : 'git could not fetch ' + tag + ': ' + tail(f.stderr, 160);
       throw new Error(why);
     }
-    r.sha = await gitOut(['rev-parse', tag + '^{commit}']);
+    // The tag object as fetched, by sha: the signature check and the commit merged below both hang
+    // off this one immutable name, never off a ref that could move in between.
+    r.tagObject = await gitOut(['rev-parse', '--verify', '--quiet', 'refs/tags/' + tag]);
+    if (!r.tagObject) throw new Error('the tag ' + tag + ' could not be read after the fetch');
+    r.sha = await gitOut(['rev-parse', r.tagObject + '^{commit}']);
     if (!r.sha) throw new Error('the tag ' + tag + ' does not name a commit');
     const inHead = await g(['merge-base', '--is-ancestor', r.sha, 'HEAD']);
     if (inHead.code === 0) { r.ahead = r.sha !== r.head; return r; }   // at or ahead of the release: never prompted
@@ -393,6 +560,8 @@ function createUpdater(opts) {
 
     const why = [];
     const pre = [];
+    r.signature = await checkSignature(tag, r.tagObject, r.sha, signers);
+    if (!r.signature.ok) why.push(r.signature.why + ', so Quartz will not install it');
     if (!origin.isPublic) why.push(origin.url ? 'this folder\'s origin is ' + origin.url + ', not the public repo' : 'this folder has no origin remote');
     const shallow = await gitOut(['rev-parse', '--is-shallow-repository']);
     if (shallow === 'true') why.push('this is a shallow clone');
@@ -423,10 +592,33 @@ function createUpdater(opts) {
     }
     r.canUpdate = why.length === 0;
     r.blocked = why.join('; ');
-    r.manual = ['cd "' + appDir + '"'].concat(pre,
+    // A refused signature gets no commands: copying them would install exactly what was refused.
+    r.manual = !r.signature.ok ? [] : ['cd "' + appDir + '"'].concat(pre,
       ['git pull ' + (diverged ? '' : '--ff-only ') + (origin.isPublic ? 'origin' : publicUrl) + ' ' + tag],
       r.needsNpm ? ['npm ci'] : []);
     return r;
+  }
+
+  /**
+   * verifyReleaseTag for this folder, logged: every outcome to updater.log, and to quartz.log
+   * (o.record) whenever it differs from the last one said there, so a 6-hourly check of the same
+   * refused release is one line, not one per check.
+   */
+  let lastRecorded = '';
+  async function checkSignature(tag, tagObject, sha, signers) {
+    let bringsKey = false;
+    if (!signers.pinned && !signers.error) {
+      const x = await git(['show', sha + ':' + SIGNERS_FILE], { cwd: appDir });
+      bringsKey = x.code === 0 && parseSigners(x.stdout).lines.length > 0;
+    }
+    const v = await verifyReleaseTag({
+      run: (args) => git(args, { cwd: appDir }), tag, tagObject, sha, signers, bringsKey,
+      sshProgram: o.sshProgram, tmpDir: o.tmpDir,
+    });
+    log('Signature: ' + v.text);
+    const said = 'Update signature: ' + v.text;
+    if (said !== lastRecorded && o.record) { lastRecorded = said; try { o.record(said); } catch { /* best effort */ } }
+    return v;
   }
 
   /* -- check ------------------------------------------------------------------------------------- */
@@ -478,6 +670,7 @@ function createUpdater(opts) {
         release: rel, error: '', rateLimited: false, checkedAt: now(),
         canUpdate: r.canUpdate, blocked: r.blocked, manual: r.manual, needsNpm: r.needsNpm, snoozed,
         ahead: r.ahead,
+        signature: r.signature || null,
         failure: r.available ? st.failure : null,
       });
       if (r.available) log('Release ' + rel.tag + ' is out. ' + (r.canUpdate ? 'Update offered.' : 'No button: ' + r.blocked));
@@ -537,6 +730,7 @@ function createUpdater(opts) {
       const r = await inspect(rel);
       st.current.sha = short(r.head);
       if (!r.available) throw new Error('this folder already has ' + rel.tag);
+      st.signature = r.signature || null;
       if (!r.canUpdate) {
         set({ canUpdate: false, blocked: r.blocked, manual: r.manual });
         throw new Error(r.blocked);
@@ -549,7 +743,7 @@ function createUpdater(opts) {
         // The folder itself moves only once Quartz has quit: the swap helper merges, then swaps
         // node_modules. Until then nothing in the app folder has changed.
         relaunchMode = 'swap';
-        saved.pending = { from: old, to: r.sha, tag: rel.tag, mode: 'swap', at: now() };
+        saved.pending = { from: old, to: r.sha, tag: rel.tag, tagObject: r.tagObject, mode: 'swap', at: now() };
         saved.snooze = null;
         persist();
         progress('restarting', 'Restarting: Quartz closes, moves to ' + rel.tag + ' with its new dependencies and opens again with your tabs.');
@@ -574,6 +768,7 @@ function createUpdater(opts) {
       const notes = await rollback(old, mergeTried, staged);
       const full = reason + (notes ? '. ' + notes : '');
       log('Update failed: ' + full);
+      if (o.record) { try { o.record('Update to ' + rel.tag + ' failed: ' + full); } catch { /* best effort */ } }
       set({ status: 'failed', progress: null, failure: { reason: full, log: logPath, at: now() } });
       return { ok: false, reason: full };
     } finally {
@@ -607,7 +802,8 @@ function createUpdater(opts) {
     if (SELF_SOURCE) fs.writeFileSync(helper, SELF_SOURCE); else fs.copyFileSync(__filename, helper);
     const plan = Object.assign({
       appDir, stagingDir, from: saved.pending && saved.pending.from, to: saved.pending && saved.pending.to,
-      tag: saved.pending && saved.pending.tag, log: logPath, result: path.join(dataDir, RESULT_FILE),
+      tag: saved.pending && saved.pending.tag, tagObject: saved.pending && saved.pending.tagObject,
+      log: logPath, result: path.join(dataDir, RESULT_FILE),
     }, relaunch);   // { pid, exe, args, cwd }
     const planPath = path.join(dataDir, PLAN_FILE);
     fs.writeFileSync(planPath, JSON.stringify(plan, null, 2));
@@ -650,6 +846,7 @@ function createUpdater(opts) {
           : 'after the restart this folder is on ' + (short(head) || 'an unknown commit') + ', not ' + p.tag;
       set({ status: 'failed', failure: { reason: reason + '. Quartz is on the version it had', log: logPath, at: now() } });
       log('The update to ' + p.tag + ' did not land: ' + reason);
+      if (o.record) { try { o.record('The update to ' + p.tag + ' did not land: ' + reason); } catch { /* best effort */ } }
     }
     persist();
   }
@@ -743,7 +940,21 @@ async function runSwap(plan, deps) {
     }
     await sleepMs(250);
   }
-  // Quartz is gone: now the folder can move (merge), then node_modules (swap).
+  // Quartz is gone. Before the folder moves, the tag is checked once more against the keys of the
+  // copy that is STILL installed (nothing is merged yet), and must still name plan.to: a plan file
+  // edited to point at another commit is refused here. No key yet = said, and the merge goes on.
+  const sig = await verifyReleaseTag({
+    run: (args) => d.git(args, { cwd: plan.appDir }), tag: plan.tag, tagObject: plan.tagObject, sha: plan.to,
+    signers: readInstalledSigners(plan.appDir), sshProgram: d.sshProgram,
+  });
+  say('signature: ' + sig.text);
+  if (!sig.ok) {
+    write({ ok: false, reason: sig.why + ', so Quartz did not install it' });
+    tidy();
+    relaunch();
+    return false;
+  }
+  // Now the folder can move (merge), then node_modules (swap).
   const m = await d.git(['merge', '--ff-only', plan.to], { cwd: plan.appDir });
   if (m.code !== 0) {
     const reason = 'git merge --ff-only failed: ' + (tail(m.stderr || m.stdout, 200).split(/\r?\n/).filter(Boolean)[0] || 'no reason given');
@@ -781,7 +992,8 @@ async function runSwap(plan, deps) {
 
 module.exports = {
   createUpdater, runSwap, offReason, normaliseRepoUrl, compareVersions, netWhy, removeTree, depsChanged,
-  OPT_OUT_FILE, STAGING_DIR, NPM_TEXT, EVERY_MS, FIRST_CHECK_MS,
+  verifyReleaseTag, readInstalledSigners, parseSigners, parseGitVersion, signatureWhy,
+  OPT_OUT_FILE, STAGING_DIR, NPM_TEXT, EVERY_MS, FIRST_CHECK_MS, SIGNERS_FILE, MIN_GIT_SSH,
 };
 
 if (require.main === module && process.argv[2]) {

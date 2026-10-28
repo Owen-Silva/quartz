@@ -166,6 +166,8 @@
       c.appendChild(el('div', 'lumen-alert-body', 'You have ' + youHave(s) + '.'));
       if (s.canUpdate) {
         if (s.needsNpm) c.appendChild(el('div', 'lumen-alert-body', 'This release changes Quartz\'s dependencies, so the update runs npm ci. That can take several minutes.'));
+        // A copy with no release key yet installs this one unchecked: said, never silent.
+        if (s.signature && s.signature.state === 'unpinned') c.appendChild(el('div', 'lumen-alert-note qup-sig', s.signature.text));
         acts.appendChild(button('Update', 'lumen-alert-btn is-primary', 'update', doUpdate));
       } else {
         c.appendChild(el('div', 'lumen-alert-note', 'No Update button: ' + s.blocked + '.'));
@@ -244,6 +246,13 @@
     field.appendChild(line);
     if (readErr && s) field.appendChild(h.el('p', 'set-hint qup-about-err', readErr));
     if (!s) return;
+    // The release tag's signature: checked and trusted, or not checked (no key yet). A refused one is
+    // already the first reason in "No Update button" below.
+    if (s.status === 'available' && s.signature && s.signature.state !== 'refused') {
+      var sig = h.el('p', 'set-hint qup-about-sig', s.signature.text);
+      sig.setAttribute('data-signature', s.signature.state);
+      field.appendChild(sig);
+    }
     if (s.status === 'available' && !s.canUpdate) {
       field.appendChild(h.el('p', 'set-hint', 'No Update button: ' + s.blocked + '.'));
       if (s.manual && s.manual.length) field.appendChild(manualBlock(s.manual));
