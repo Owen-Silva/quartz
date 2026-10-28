@@ -101,7 +101,11 @@ async function guest(q, errors, log) {
     }
   });
   await g.send('Runtime.enable');
-  await g.send('Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Image', requestStage: 'Request' }] });
+  // Every still is answered by this test; without the interception they go to the unresolvable
+  // i.ytimg.com and every tile falls back to its title card. A refusal stops the run with the reason
+  // (Cdp.send resolves with { error } rather than throwing, so it is read here).
+  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Image', requestStage: 'Request' }] });
+  if (fe && fe.error) throw new Error('Fetch.enable was refused on the Watch page, so no still can be answered by this test: ' + JSON.stringify(fe.error).slice(0, 200));
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
