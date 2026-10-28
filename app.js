@@ -1387,10 +1387,16 @@ function mediaApi() {
  * Some tab is making a sound the user can hear. A MUTED tab is not one of them —
  * muting the video is how they hand the music back, exactly as it works for
  * the Spotify auto-pause hold.
+ *
+ * Either signal counts: tab.audible (media-started-playing / media-paused, per
+ * element) or tab.heard (Chromium's own audibility, the one the speaker follows;
+ * see setTabHeard). tab.heard alone catches a Web Audio game, which fires no media
+ * events, and keeps the music off while a stream plays on after one element (an
+ * ad, a hover preview) paused. Both setters call syncMusicPlayback() on an edge.
  */
 function anyTabAudible() {
   for (const tab of tabs) {
-    if (tab.audible && !tab.muted) return true;
+    if ((tab.audible || tab.heard) && !tab.muted) return true;
   }
   return false;
 }
@@ -6282,6 +6288,8 @@ function setTabHeard(tab, on) {
   if (heard === !!tab.heard) return;
   tab.heard = heard;
   syncTabAudio(tab);
+  // tab.heard is one of anyTabAudible()'s two signals: an edge here moves the idle music.
+  syncMusicPlayback();
 }
 
 /**
@@ -6294,11 +6302,11 @@ function setTabHeard(tab, on) {
  */
 function forgetTabAudio(tab) {
   if (!tab) return;
+  // Either flag feeds anyTabAudible(), so dropping either one is the idle music's cue.
+  const wasSounding = !!(tab.heard || tab.audible);
   if (tab.heard) { tab.heard = false; syncTabAudio(tab); }
-  if (!tab.audible) return;
-  tab.audible = false;
-  syncTabAudio(tab);
-  syncMusicPlayback();
+  if (tab.audible) { tab.audible = false; syncTabAudio(tab); }
+  if (wasSounding) syncMusicPlayback();
 }
 
 /** Mute or unmute one tab. An unattached guest throws; the flag still holds. */
@@ -6312,7 +6320,7 @@ function setTabMuted(tab, on) {
   syncTabAudio(tab);
   // Muting the video is how the idle music gets handed back, so this moves the
   // condition exactly as media-started-playing does.
-  if (tab.audible) syncMusicPlayback();
+  if (tab.audible || tab.heard) syncMusicPlayback();
   saveSession(); // the mute rides along in the session entry
 }
 

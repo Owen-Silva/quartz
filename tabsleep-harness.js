@@ -183,7 +183,7 @@ function sweepWorld() {
     // Main's half, faked with SYNCHRONOUS thenables so a sweep's sleeps land before sweep() returns.
     function now(v) { return { then(f) { return now(f ? f(v) : v); } }; }
     function nope(e) { return { then(f, r) { return now(r ? r(e) : undefined); } }; }
-    var logs = []; var calls = { probe: 0, memory: 0 };
+    var logs = []; var calls = { probe: 0, memory: 0, music: 0 };
     var memory = { totalBytes: 11.7 * 1024 * 1024 * 1024, freeBytes: 6 * 1024 * 1024 * 1024 };
     var window = { api: { tabs: {
       prepareSleep(wcId) {
@@ -204,6 +204,7 @@ function sweepWorld() {
     function logEvent(kind, d) { logs.push(Object.assign({ kind }, d)); }
     function chipTooltip() { return ''; }
     function syncTabAudio() {}
+    function syncMusicPlayback() { calls.music++; }
     let tabMemoryNotice = '';
     var nextWc = 100;
     function page(id, extra) { const t = Object.assign({ id, kind: 'page', url: 'https://x/' + id, ready: true, asleep: false, pinned: false, audible: false, broken: false, lastActive: 0, openedAt: 0, viewEl: { wcId: nextWc++, audibleNow: false, isCurrentlyAudible() { return this.audibleNow; }, getWebContentsId() { return this.wcId; } } }, extra || {}); tabs.push(t); return t; }
@@ -388,6 +389,27 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   ok('speaker: the chip reads tab.heard, not the media flag', /const show = !!\(tab\.heard \|\| tab\.muted\);/.test(cutFunction('syncTabAudio')));
   ok('speaker: main\'s push drives it', /onAudioState\(\(p\) => \{[\s\S]*?setTabHeard\(tab, p\.audible === true\)/.test(src));
   ok('speaker: a gone guest drops it', /if \(tab\.heard\) \{ tab\.heard = false; syncTabAudio\(tab\); \}/.test(cutFunction('forgetTabAudio')));
+  // The idle music follows real sound too: tab.heard is one of anyTabAudible()'s signals, and
+  // every place that moves it hands the music the new fact.
+  const m0 = a.calls.music; a.set(3 * MIN); a.setTabHeard(S, true);
+  ok('idle music: going audible moves it', a.calls.music === m0 + 1, a.calls.music - m0);
+  a.setTabHeard(S, true);
+  ok('idle music: no edge, no call', a.calls.music === m0 + 1, a.calls.music - m0);
+  a.setTabHeard(S, false);
+  ok('idle music: going quiet moves it', a.calls.music === m0 + 2, a.calls.music - m0);
+  {
+    const w = { tabs: [] };
+    vm.createContext(w);
+    vm.runInContext(cutFunction('anyTabAudible') + '\nthis.f = anyTabAudible;', w);
+    const hear = (t) => { w.tabs = t; return w.f(); };
+    ok('idle music: Web Audio alone (heard, no media flag) counts', hear([{ heard: true, audible: false, muted: false }]) === true);
+    ok('idle music: the media flag alone still counts', hear([{ heard: false, audible: true, muted: false }]) === true);
+    ok('idle music: a muted tab never counts', hear([{ heard: true, audible: true, muted: true }]) === false);
+    ok('idle music: silence is silence', hear([{ heard: false, audible: false, muted: false }]) === false);
+  }
+  ok('idle music: a gone guest that was only heard still hands it back',
+    /wasSounding = !!\(tab\.heard \|\| tab\.audible\)[\s\S]*if \(wasSounding\) syncMusicPlayback\(\);/.test(cutFunction('forgetTabAudio')));
+  ok('idle music: muting a heard tab moves it', /if \(tab\.audible \|\| tab\.heard\) syncMusicPlayback\(\);/.test(cutFunction('setTabMuted')));
   ok('workspace "all": real pages are asked first', /sleepTabChecked\(tab, 'workspace'/.test(cutFunction('sleepInWorkspaceNow')));
   ok('menu: "Sleep tab" says what a probe found it would lose', /would be lost/.test(cutFunction('sleepMenuLabel')) && /label: sleepMenuLabel\(tab\)/.test(src));
 }
