@@ -66,6 +66,9 @@ const TESTS = [
   // paging, the key-checked pipe server over a real pipe, the tools with fake guests, the stdio shim
   // (in process and as a child), pty.js's --mcp-config/env hand-off, a config file with no key in it.
   { name: 'mcp', file: 'mcp-harness.js' },
+  // The same in a real Quartz: a stand-in claude.exe starts the server from its --mcp-config file and
+  // calls every tool on a real page; the pane line, quartz.log, Ask's read_page prompt, the switch off.
+  { name: 'mcp-e2e', file: 'mcp-e2e.js', e2e: true },
   // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
   { name: 'check-electron', file: 'check-electron-harness.js' },
   // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,
