@@ -219,8 +219,11 @@ async function waitTarget(pred, ms) {
     await open('front', B + '/plain.html?front');
     const slept = await chrome.ev(`sleepTab(${T('sleepy')}, 'idle')`);
     check(slept === true, 'sleepTab put the background tab to sleep', slept);
-    const sl = await waitLine(/ went to sleep /, 4000);
-    check(sl.length === 1 && / A tab on 127\.0\.0\.1:\d+ went to sleep after it went unused, to free its memory\.$/.test(sl[0]), 'sleep line', sl[0]);
+    // Only THIS tab's line: a new tab page left in the background also goes to sleep on its own
+    // after a 15 s grace ("after it sat in the background"), and this run leaves some behind.
+    // The line ends with the sound state the sleep was judged on; this page never made a sound.
+    const sl = await waitLine(/ A tab on 127\.0\.0\.1:\d+ went to sleep /, 4000);
+    check(sl.length === 1 && / A tab on 127\.0\.0\.1:\d+ went to sleep after it went unused, to free its memory \(was not making sound\)\.$/.test(sl[0]), 'sleep line', sl[0]);
     await sleep(1200);
     check(await chrome.ev(`wakeTab(${T('sleepy')})`) === true, 'wakeTab woke it');
     const wk = await waitLine(/ woke up/, 4000);
@@ -267,7 +270,14 @@ async function waitTarget(pred, ms) {
     check(exited, 'closing the window quit Quartz');
     const all = logLines();
     const last = all[all.length - 1] || '';
-    check(/ Quartz quit after \d+ (s|min)\. This run: 1 tab crash, 0 window crashes, \d+ helper process stops?, 1 hang, \d+ failed page loads?, 1 tab put to sleep, 0 unhandled errors\.$/.test(last), 'the quit line is the last line, and sums the run', last);
+    // The sleep count is the one tab slept above plus every new tab page that slept on its own,
+    // counted from the log itself: the sum is still checked exactly, not loosened to "any number".
+    const sleptLines = all.filter((l) => / went to sleep /.test(l));
+    const ownSleeps = sleptLines.filter((l) => / A tab on Quartz's newtab page went to sleep after it sat in the background, /.test(l)).length;
+    const sleptWords = (1 + ownSleeps) + (ownSleeps ? ' tabs' : ' tab') + ' put to sleep';
+    check(sleptLines.length === 1 + ownSleeps
+      && new RegExp(' Quartz quit after \\d+ (s|min)\\. This run: 1 tab crash, 0 window crashes, \\d+ helper process stops?, 1 hang, \\d+ failed page loads?, ' + sleptWords + ', 0 unhandled errors\\.$').test(last),
+      'the quit line is the last line, and sums the run (' + sleptWords + ')', last);
     check(all.every((l) => /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} [A-Z"]/.test(l)), 'every line: full date and time, then a sentence');
     console.log('[e2e] ---- quartz.log ----');
     for (const l of all) console.log('[log] ' + l);
