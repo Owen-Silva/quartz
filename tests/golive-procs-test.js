@@ -49,5 +49,33 @@ const ff = (() => { try { return fs.readFileSync(path.join(__dirname, '..', 'too
 const verdicts = ff.split(/\r?\n/).filter((l) => /verdict/.test(l) && /Write-Output/.test(l));
 check(verdicts.length >= 1 && verdicts.every((l) => /'ff-golive: /.test(l)), 'quartz-ff-golive.ps1: every verdict line says ff-golive:', verdicts.map((l) => l.trim().slice(0, 50)));
 
+// A DEPENDENCY RELEASE (lockfile or install fields changed, e.g. a castlabs Electron bump) must be
+// refused before Quartz closes, and the refusal must carry the exact command that does take it:
+// a STOP that only names a script leaves the operator to guess the flags, and a forced code-only
+// go-live would leave the live copy on the old Electron.
+const ffLines = ff.split(/\r?\n/);
+const ffCode = ffLines.filter((l) => !/^\s*#/.test(l));
+const depFn = (() => {
+  const i = ffLines.findIndex((l) => /^function Dependency-Release\b/.test(l));
+  if (i < 0) return '';
+  const j = ffLines.findIndex((l, k) => k > i && /^}/.test(l));
+  return ffLines.slice(i, j < 0 ? undefined : j + 1).join('\n');
+})();
+check(!!depFn, 'quartz-ff-golive.ps1: has a Dependency-Release refusal helper');
+check(/lumen-golive\.ps1/.test(depFn) && /-Ref '\s*\+\s*\$Ref/.test(depFn) && /-Repo/.test(depFn) && /-DryRun/.test(depFn),
+  'quartz-ff-golive.ps1: the refusal names lumen-golive.ps1 with -Repo, -Ref <the same ref> and -DryRun', depFn.slice(0, 120));
+check(/castlabs_evs\.account reauth/.test(depFn) && /drm-rollback\.ps1/.test(depFn),
+  'quartz-ff-golive.ps1: the refusal says EVS must be signed in and how to roll back');
+const lockStop = ffCode.filter((l) => /package-lock\.json/.test(l) && /Stop-Golive/.test(l));
+check(lockStop.length >= 1 && lockStop.every((l) => /Stop-Golive \(Dependency-Release/.test(l)),
+  'quartz-ff-golive.ps1: a lockfile change STOPs through Dependency-Release', lockStop.map((l) => l.trim().slice(0, 80)));
+const bareSwapStop = ffCode.filter((l) => /Stop-Golive/.test(l) && /lumen-golive\.ps1/.test(l));
+check(bareSwapStop.length === 0, 'quartz-ff-golive.ps1: no STOP names lumen-golive.ps1 without the full command', bareSwapStop.map((l) => l.trim().slice(0, 80)));
+// The lockfile STOP comes before Quartz is closed (step 2), so a refused release changes nothing.
+const at = (re) => ffLines.findIndex((l) => re.test(l));
+const lockAt = at(/Stop-Golive \(Dependency-Release 'package-lock\.json/);
+const closeAt = at(/^# ---- 2\. close Quartz/);
+check(lockAt > 0 && closeAt > lockAt, 'quartz-ff-golive.ps1: the lockfile refusal runs before the close step', { lockAt, closeAt });
+
 console.log('golive-procs-test: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

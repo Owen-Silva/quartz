@@ -13,6 +13,16 @@ Electron already in node_modules (EVS-signed at release 1) stays as it is: no np
      is either unchanged or differs only in fields npm/Electron never read at install or start (license,
      description, scripts, ...; compared as parsed JSON, the PASS line names them) (else STOP: that
      needs the swap script); node_modules electron is +wvcus and Quartz.exe.sig exists.
+     A DEPENDENCY RELEASE (a new castlabs Electron tag, any lockfile change) is refused here, before
+     Quartz is closed: this script never runs npm, never swaps node_modules\electron and never
+     re-signs, so going ahead would leave the live copy on the OLD Electron under new code. The STOP
+     line prints the exact command that does it instead (Dependency-Release below):
+       tools\lumen-golive.ps1 -Repo <repo> -Ref <ref> -DryRun, then the same without -DryRun,
+     which closes Quartz, fast-forwards, runs tools\drm-swap.ps1 -NoMerge (old electron moved aside
+     for tools\drm-rollback.ps1, npm install --ignore-scripts, electron's install.js, Quartz.exe,
+     castlabs EVS sign-pkg -H Quartz + verify-pkg) and relaunches. EVS must be signed in first
+     (py -3 -m castlabs_evs.account reauth: the user's step); lumen-golive.ps1 has no -Expect, so
+     check that <ref> is still the reviewed SHA between the dry run and the real one.
   1. Snapshot the default-browser registry and node-pty's native files and Quartz.exe(.sig) hashes.
   2. Close Quartz cleanly (CloseMainWindow on the MAIN Quartz.exe of this checkout; never kills).
   3. git merge --ff-only Ref.  (DRY RUN: skipped; the live checkout is never touched.)
@@ -86,6 +96,17 @@ function Rollback-Text {
   Write-Output 'ff-golive: ROLLBACK (close Quartz first, the same clean way; no Electron change to undo):'
   Write-Output ('  1. the code:   git -C ' + $Repo + ' reset --hard ' + $old)
   Write-Output ('  2. relaunch:   explorer.exe "' + $Lnk + '"')
+}
+# The refusal text for a release that changes what npm installs: why this script cannot take it,
+# and the exact command that can. Every "needs the swap" STOP goes through here, so none of them
+# ends on a bare script name (tests/golive-procs-test.js checks that).
+function Dependency-Release([string]$what) {
+  $swapGolive = Join-Path $Repo 'tools\lumen-golive.ps1'
+  return ($what + ': a dependency release. This script never runs npm, swaps node_modules\electron or re-signs, ' +
+    'so the live copy would stay on the old Electron. With EVS signed in ' +
+    '(py -3 -m castlabs_evs.account reauth), run: powershell -NoProfile -ExecutionPolicy Bypass -File "' + $swapGolive +
+    '" -Repo "' + $Repo + '" -Ref ' + $Ref + ' -DryRun, then the same without -DryRun (it closes Quartz, ' +
+    'swaps and re-signs Electron, relaunches; rollback: tools\drm-rollback.ps1)')
 }
 function Stop-Golive([string]$t) {
   Fail $t
@@ -171,7 +192,7 @@ if ($pkgAt -match '"electron":\s*"[^"]*#v[0-9.]+\+wvcus"') { Pass 'preflight: th
 # The lockfile must be byte-identical HEAD..target: any change to it means npm would resolve a
 # different tree, and that is the swap script's job (npm + swap + re-sign), never this one's.
 $lock = Run 'git' @('diff', '--quiet', $script:oldHead, $target, '--', 'package-lock.json')
-if ($lock.code -ne 0) { Stop-Golive 'package-lock.json changed HEAD..target: this needs tools/lumen-golive.ps1 (npm + swap), not this script' }
+if ($lock.code -ne 0) { Stop-Golive (Dependency-Release 'package-lock.json changed HEAD..target') }
 # package.json may change in fields npm and Electron never read at install or start time (license,
 # description, author, scripts, ...): node_modules stays valid, so the release is still code-only.
 # Every field that feeds the install, the swap or the start path must be identical, compared as
@@ -195,7 +216,7 @@ else {
   if (-not $why) { try { $pjNew = ConvertFrom-Json -InputObject $pkgAt } catch { $why = 'target package.json does not parse: ' + (Clean $_.Exception.Message) } }
   if (-not $why -and -not ($pjOld -is [System.Management.Automation.PSCustomObject])) { $why = 'HEAD package.json is not a JSON object' }
   if (-not $why -and -not ($pjNew -is [System.Management.Automation.PSCustomObject])) { $why = 'target package.json is not a JSON object' }
-  if ($why) { Stop-Golive ('package.json changed HEAD..target and ' + $why + '; cannot prove it is code-only, so this needs tools/lumen-golive.ps1') }
+  if ($why) { Stop-Golive (Dependency-Release ('package.json changed HEAD..target and ' + $why + '; it cannot be proved code-only, so it is treated as')) }
   # Install: what npm resolves, fetches, builds or refuses on. Start: Electron runs Quartz.exe on
   # this folder and reads main (the entry), type (how main loads), and name/productName (app.getName(),
   # which names the profile folder under %APPDATA% and the userData path).
@@ -211,8 +232,8 @@ else {
         if ($installFields -ccontains $n) { $blocked += $n }
       }
     }
-  } catch { Stop-Golive ('package.json changed HEAD..target and comparing it failed: ' + (Clean $_.Exception.Message) + '; this needs tools/lumen-golive.ps1') }
-  if ($blocked.Count) { Stop-Golive ('package.json changed install/start fields HEAD..target (' + ($blocked -join ', ') + '): this needs tools/lumen-golive.ps1 (npm + swap), not this script') }
+  } catch { Stop-Golive (Dependency-Release ('package.json changed HEAD..target and comparing it failed (' + (Clean $_.Exception.Message) + '), so it is treated as')) }
+  if ($blocked.Count) { Stop-Golive (Dependency-Release ('package.json changed install/start fields HEAD..target (' + ($blocked -join ', ') + ')')) }
   if ($changed.Count) {
     Pass ('preflight: package.json differs only in non-install fields (' + ($changed -join ', ') + '); lockfile unchanged; code-only release')
     # Lifecycle scripts are not run here (no npm), but the next npm install runs them: say so.
