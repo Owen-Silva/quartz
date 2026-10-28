@@ -34,7 +34,7 @@ const SERVER_VERSION = '1.0.0';
 // gets the newest (the spec's rule: the server answers with one it supports).
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
-const CALL_TIMEOUT_MS = 20000;  // Quartz's own page read gives up at 5 s; this is the outer bound
+const CALL_TIMEOUT_MS = 75000;  // outlasts Quartz's 60 s wait for the user's answer plus its 5 s page read
 const CONNECT_RETRY_MS = 3000;  // the pipe may still be coming up when Claude starts the shim
 const MAX_STDIN_LINE = 4 * 1024 * 1024;
 const MAX_REPLY = 2 * 1024 * 1024;
@@ -310,7 +310,7 @@ function run(input, output, env, opts) {
   });
 }
 
-module.exports = { TOOLS, TOOL_NAMES, PROTOCOLS, SERVER_NAME, handleMessage, callQuartz, run };
+module.exports = { TOOLS, TOOL_NAMES, PROTOCOLS, SERVER_NAME, handleMessage, callQuartz, run, CALL_TIMEOUT_MS };
 
 if (require.main === module) {
   run(process.stdin, process.stdout, process.env, { exitOnEnd: true });

@@ -3,7 +3,7 @@
 //
 //   node mcp-harness.js
 //
-// Six parts:
+// Eight parts:
 //   A. Web text: mcp-main.js's cleaner is the same as terminal.js's webText.clean over a corpus of
 //      break-outs (ESC[201~, the one-character C1 CSI, other C0/C1 controls, odd line breaks, bidi
 //      overrides and isolates, zero-width and tag characters, joiner and selector runs) and of
@@ -22,6 +22,11 @@
 //   E. pty.js: the pane mark, main's extra args/env on a Claude spawn (plain and page-text),
 //      ignored for a shell.
 //   F. The --mcp-config file holds no key; old pane configs are pruned, nothing else.
+//   G. The chrome could not answer (null): a stated failure, never "no tabs".
+//   H. ASK FIRST: read_page, search_history and search_notes (and list_tabs in a pane that skips
+//      Claude Code's prompts) wait for the user; deny / timeout / no window refuse with a reason
+//      and never touch the page; once asks again, grant keeps a tab (or tool) per pane;
+//      grant()/revokePane(); updateKey; the --allowedTools list.
 //
 // Characters are built with cp() (String.fromCodePoint) so this file has no invisible text in it.
 'use strict';
@@ -305,6 +310,8 @@ function makeGuest(o) {
     guest: (wcId) => guests.get(wcId) || null,
     userData: () => userDataDir,
     activity: (meta, line, logLine) => activity.push({ meta, line, logLine }),
+    // ASK FIRST: the user answers Allow once to everything here (section H covers the rest).
+    approve: async () => 'once',
     readTimeoutMs: 200,
   });
   const META = { paneId: '7' };
@@ -696,6 +703,8 @@ function makeGuest(o) {
     guest: () => null,
     userData: () => '',
     activity: () => {},
+    // search_history asks before it queries the chrome: allowed, so G2/G4 reach the null answer.
+    approve: async () => 'once',
     readTimeoutMs: 200,
   });
   const gServer = M.createServer({ tools: gTools, onFailed: (meta, tool, why) => gFailed.push({ meta, tool, why }) });
@@ -708,6 +717,245 @@ function makeGuest(o) {
   ok('G3 read_page with no tab list: ok false', gRead.ok === false, JSON.stringify(gRead));
   ok('G4 each failure reached onFailed with its pane (shown over the pane)', gFailed.length === 3 && gFailed.every((f) => f.meta.paneId === '9'), JSON.stringify(gFailed));
   gServer.close();
+
+  { // its own block: the names below are local to H
+  // ---- H. ASK FIRST: nothing reaches Claude until the user answers the pane's bar ----
+  // A small world of its own: two web tabs (21 Alpha, 22 Beta), the history rows above and a
+  // notes folder; approve() is recorded and answers what each check says.
+  const hNotesUser = path.join(tmp, 'userData-ask');
+  fs.mkdirSync(hNotesUser, { recursive: true });
+  fs.writeFileSync(path.join(hNotesUser, 'notes-pane.json'), JSON.stringify({ dir: notesDir }));
+  const hNoNotesUser = path.join(tmp, 'userData-ask-empty');
+  fs.mkdirSync(hNoNotesUser, { recursive: true });
+  function makeAsk(answer, o) {
+    o = o || {};
+    const h = { reqs: [], lines: [], queries: [] };
+    h.guests = new Map([
+      [201, makeGuest({ url: 'https://alpha.example/a', title: 'Alpha Page', text: 'alpha body text' })],
+      [202, makeGuest({ url: 'https://beta.example/b', title: 'Beta Page', text: 'beta body text' })],
+    ]);
+    const hRows = [
+      { id: 21, title: 'Alpha Page', url: 'https://alpha.example/a', wcId: 201, active: true },
+      { id: 22, title: 'Beta Page', url: 'https://beta.example/b', wcId: 202 },
+    ];
+    const deps = {
+      queryRenderer: async (op) => {
+        h.queries.push(op);
+        if (op === 'tabs') return hRows;
+        if (op === 'history') return historyRows.slice(2, 6);
+        return null;
+      },
+      guest: (wcId) => h.guests.get(wcId) || null,
+      userData: () => o.userData || hNotesUser,
+      activity: (meta, line, logLine) => h.lines.push({ meta, line, logLine }),
+      readTimeoutMs: 200,
+    };
+    if (o.rawApprove) deps.approve = o.rawApprove;
+    else if (answer !== null) deps.approve = async (meta, req) => { h.reqs.push({ meta, req }); return answer(meta, req); };
+    h.tools = M.createTools(deps);
+    h.runs = (wcId) => h.guests.get(wcId).calls.run;
+    h.last = () => (h.lines.length ? h.lines[h.lines.length - 1].line : '');
+    h.count = (op) => h.queries.filter((q) => q === op).length;
+    return h;
+  }
+  const P1 = { paneId: 'p1' };
+  const P2 = { paneId: 'p2' };
+
+  // H1 Deny: refused, said the same way to Claude and over the pane, the page never touched.
+  const hDeny = makeAsk(() => 'deny');
+  const dRes = await hDeny.tools.read_page({ tabId: 21 }, P1);
+  eq('H1 deny: ok false', dRes.ok, false);
+  eq('H1 deny: the refusal Claude gets', dRes.text, 'the user did not allow reading Alpha Page (denied).');
+  eq('H1 deny: the pane line says the same', hDeny.last(), 'Claude: the user did not allow reading Alpha Page (denied)');
+  eq('H1 deny: one activity line', hDeny.lines.length, 1);
+  eq('H1 deny: the guest was never run', hDeny.runs(201), 0);
+  eq('H1 deny: asked once', hDeny.reqs.length, 1);
+  const hr0 = hDeny.reqs[0] ? hDeny.reqs[0].req : {};
+  ok('H1 the ask is for read_page of tab 21, with the meta it came with', hr0.tool === 'read_page' && hr0.tabId === 21
+    && hDeny.reqs[0].meta === P1, JSON.stringify(hr0));
+  ok('H1 the ask text names the title and host', typeof hr0.text === 'string' && hr0.text.indexOf('Claude wants to read') === 0
+    && hr0.text.indexOf('Alpha Page') !== -1 && hr0.text.indexOf('alpha.example') !== -1, show(hr0.text));
+  eq('H1 the grant button reads "Allow this tab for this pane"', hr0.grantLabel, 'Allow this tab for this pane');
+  const dAgain = await hDeny.tools.read_page({ tabId: 21 }, P1);
+  ok('H1 a deny is not remembered: the next read asks (and is denied) again', dAgain.ok === false && hDeny.reqs.length === 2, JSON.stringify(dAgain));
+  const dUnknown = await makeAsk(() => 'yes please').tools.read_page({ tabId: 21 }, P1);
+  eq('H1 an answer that is not once/grant counts as denied', dUnknown.text, 'the user did not allow reading Alpha Page (denied).');
+
+  // H2 No answer in time.
+  const hTime = makeAsk(() => 'timeout');
+  const tRes = await hTime.tools.read_page({ tabId: 21 }, P1);
+  eq('H2 timeout: the refusal names the wait', tRes.text, 'the user did not allow reading Alpha Page (no answer within 60 s).');
+  eq('H2 timeout: the pane line says the same', hTime.last(), 'Claude: the user did not allow reading Alpha Page (no answer within 60 s)');
+  eq('H2 timeout: the guest was never run', hTime.runs(201), 0);
+  eq('H2 APPROVAL_TIMEOUT_MS is 60 s', M.APPROVAL_TIMEOUT_MS, 60000);
+
+  // H3 Quartz could not ask: no approve at all, or an approve that throws.
+  const hNone = makeAsk(null);
+  const nRes = await hNone.tools.read_page({ tabId: 21 }, P1);
+  eq('H3 no approve dep: refused, says Quartz could not ask', nRes.text,
+    'the user did not allow reading Alpha Page (Quartz could not ask (its window is not open)).');
+  eq('H3 no approve dep: the pane line says the same', hNone.last(),
+    'Claude: the user did not allow reading Alpha Page (Quartz could not ask (its window is not open))');
+  eq('H3 no approve dep: the guest was never run', hNone.runs(201), 0);
+  const hReject = makeAsk(() => { throw new Error('ipc gone'); });
+  const rjRes = await hReject.tools.read_page({ tabId: 21 }, P1);
+  ok('H3 an approve that rejects: unavailable, not a throw', rjRes.ok === false && /Quartz could not ask/.test(rjRes.text)
+    && hReject.runs(201) === 0, JSON.stringify(rjRes));
+  const hSync = makeAsk(null, { rawApprove: () => { throw new Error('sync throw'); } });
+  const syRes = await hSync.tools.read_page({ tabId: 21 }, P1);
+  ok('H3 an approve that throws at once: unavailable, not a throw', syRes.ok === false && /Quartz could not ask/.test(syRes.text)
+    && hSync.runs(201) === 0, JSON.stringify(syRes));
+
+  // H4 Allow once: reads, and the next read asks again.
+  const hOnce = makeAsk(() => 'once');
+  const o1 = await hOnce.tools.read_page({ tabId: 21 }, P1);
+  ok('H4 once: reads the page', o1.ok === true && o1.text.indexOf('alpha body text') !== -1 && hOnce.runs(201) === 1, show(o1.text));
+  ok('H4 once: the pane line is the read line', /^Claude read: Alpha Page/.test(hOnce.last()), hOnce.last());
+  const o2 = await hOnce.tools.read_page({ tabId: 21 }, P1);
+  ok('H4 once: the next read of the same tab asks again', o2.ok === true && hOnce.reqs.length === 2 && hOnce.runs(201) === 2, String(hOnce.reqs.length));
+
+  // H5 Allow this tab for this pane: that tab in that pane only.
+  const hGrant = makeAsk(() => 'grant');
+  const g1 = await hGrant.tools.read_page({ tabId: 21 }, P1);
+  ok('H5 grant: reads the page', g1.ok === true && hGrant.runs(201) === 1 && hGrant.reqs.length === 1);
+  const g2 = await hGrant.tools.read_page({ tabId: 21 }, { paneId: 'p1' });
+  ok('H5 grant: the same tab in the same pane (fresh meta, same id) does not ask', g2.ok === true && hGrant.reqs.length === 1
+    && hGrant.runs(201) === 2, String(hGrant.reqs.length));
+  await hGrant.tools.read_page({ tabId: 22 }, P1);
+  ok('H5 grant: a different tab in that pane asks', hGrant.reqs.length === 2 && hGrant.reqs[1].req.tabId === 22, String(hGrant.reqs.length));
+  await hGrant.tools.read_page({ tabId: 21 }, P2);
+  ok('H5 grant: the same tab in a different pane asks', hGrant.reqs.length === 3 && hGrant.reqs[2].meta === P2, String(hGrant.reqs.length));
+  await hGrant.tools.search_history({ query: 'alpha', limit: 3 }, P1);
+  ok('H5 grant: a tab grant does not cover search_history', hGrant.reqs.length === 4 && hGrant.reqs[3].req.tool === 'search_history',
+    String(hGrant.reqs.length));
+
+  // H6 Ask about this page: tools.grant(paneId, tabId) pre-approves; revokePane forgets.
+  const hPre = makeAsk(() => 'deny');
+  eq('H6 grant(pane, tab) answers true', hPre.tools.grant('p1', 21), true);
+  const pr1 = await hPre.tools.read_page({ tabId: 21 }, P1);
+  ok('H6 pre-approved tab in that pane: reads, asks nothing', pr1.ok === true && hPre.reqs.length === 0 && hPre.runs(201) === 1,
+    JSON.stringify(pr1).slice(0, 200));
+  const pr2 = await hPre.tools.read_page({ tabId: 22 }, P1);
+  ok('H6 another tab in that pane asks (and is denied)', pr2.ok === false && hPre.reqs.length === 1 && hPre.runs(202) === 0, JSON.stringify(pr2));
+  const pr3 = await hPre.tools.read_page({ tabId: 21 }, P2);
+  ok('H6 the same tab in another pane asks', pr3.ok === false && hPre.reqs.length === 2, JSON.stringify(pr3));
+  hPre.tools.revokePane('p1');
+  const pr4 = await hPre.tools.read_page({ tabId: 21 }, P1);
+  ok('H6 after revokePane the pane asks again', pr4.ok === false && hPre.reqs.length === 3 && hPre.runs(201) === 1, JSON.stringify(pr4));
+  eq('H6 grant without a pane id: false', hPre.tools.grant('', 21), false);
+  eq('H6 grant of a bad tab id: false', hPre.tools.grant('p1', 0), false);
+  eq('H6 grant of a non-number tab id: false', hPre.tools.grant('p1', 'abc'), false);
+  let revokeThrew = '';
+  try { hPre.tools.revokePane(''); hPre.tools.revokePane(undefined); } catch (err) { revokeThrew = err.message; }
+  eq('H6 revokePane of nothing does not throw', revokeThrew, '');
+
+  // H7 A meta without a pane id never keeps a grant.
+  const hNoPane = makeAsk(() => 'grant');
+  await hNoPane.tools.read_page({ tabId: 21 }, {});
+  const np2 = await hNoPane.tools.read_page({ tabId: 21 }, {});
+  ok('H7 no pane id: a grant is not kept, the next read asks', np2.ok === true && hNoPane.reqs.length === 2, String(hNoPane.reqs.length));
+  await hNoPane.tools.search_history({ query: 'x', limit: 2 }, {});
+  await hNoPane.tools.search_history({ query: 'x', limit: 2 }, {});
+  eq('H7 no pane id: tool grants are not kept either', hNoPane.reqs.length, 4);
+  hNoPane.tools.grant(undefined, 21);
+  await hNoPane.tools.read_page({ tabId: 21 }, {});
+  eq('H7 no pane id: grant(undefined, tab) does not pre-approve', hNoPane.reqs.length, 5);
+
+  // H8 search_history and search_notes ask; a grant covers that tool in that pane only.
+  const hSearch = makeAsk(() => 'grant');
+  const sh1 = await hSearch.tools.search_history({ query: 'kittens', limit: 3 }, P1);
+  const sq = hSearch.reqs[0] ? hSearch.reqs[0].req : {};
+  ok('H8 search_history asks with the tool name and the query', sq.tool === 'search_history' && sq.tabId === undefined
+    && typeof sq.text === 'string' && sq.text.indexOf('Claude wants to search your history for "kittens"') === 0, JSON.stringify(sq));
+  eq('H8 search_history grant label', sq.grantLabel, 'Allow for this pane');
+  ok('H8 search_history granted: answers', sh1.ok === true && /^History matches for "kittens"/.test(sh1.text), show(sh1.text));
+  await hSearch.tools.search_history({ query: 'puppies', limit: 3 }, P1);
+  eq('H8 search_history again in that pane: no ask', hSearch.reqs.length, 1);
+  await hSearch.tools.search_history({ query: 'puppies', limit: 3 }, P2);
+  eq('H8 search_history in another pane: asks', hSearch.reqs.length, 2);
+  await hSearch.tools.read_page({ tabId: 21 }, P1);
+  eq('H8 a search grant does not cover read_page', hSearch.reqs.length, 3);
+  const sn1 = await hSearch.tools.search_notes({ query: 'mitochondria', limit: 3 }, P1);
+  const nq = hSearch.reqs[3] ? hSearch.reqs[3].req : {};
+  ok('H8 search_notes asks with the tool name and the query', nq.tool === 'search_notes'
+    && typeof nq.text === 'string' && nq.text.indexOf('Claude wants to search your notes for "mitochondria"') === 0, JSON.stringify(nq));
+  eq('H8 search_notes grant label', nq.grantLabel, 'Allow for this pane');
+  ok('H8 search_notes granted: answers', sn1.ok === true && /^Notes sections holding every word of "mitochondria"/.test(sn1.text), show(sn1.text));
+  await hSearch.tools.search_notes({ query: 'powerhouse', limit: 3 }, P1);
+  eq('H8 search_notes again in that pane: no ask', hSearch.reqs.length, 4);
+  await hSearch.tools.search_notes({ query: 'powerhouse', limit: 3 }, P2);
+  eq('H8 search_notes in another pane: asks', hSearch.reqs.length, 5);
+  hSearch.tools.revokePane('p1');
+  await hSearch.tools.search_history({ query: 'kittens', limit: 3 }, P1);
+  eq('H8 revokePane drops tool grants too', hSearch.reqs.length, 6);
+
+  const hSDeny = makeAsk(() => 'deny');
+  const shd = await hSDeny.tools.search_history({ query: 'kittens', limit: 3 }, P1);
+  eq('H8 search_history denied: the refusal', shd.text, 'the user did not allow searching their history for "kittens" (denied).');
+  eq('H8 search_history denied: the pane line', hSDeny.last(), 'Claude: the user did not allow searching their history for "kittens" (denied)');
+  eq('H8 search_history denied: the chrome was never asked for history', hSDeny.count('history'), 0);
+  const snd = await hSDeny.tools.search_notes({ query: 'kittens', limit: 3 }, P1);
+  eq('H8 search_notes denied: the refusal', snd.text, 'the user did not allow searching their notes for "kittens" (denied).');
+  eq('H8 search_notes denied: the pane line', hSDeny.last(), 'Claude: the user did not allow searching their notes for "kittens" (denied)');
+  const hNoNotes = makeAsk(() => 'deny', { userData: hNoNotesUser });
+  const nn = await hNoNotes.tools.search_notes({ query: 'kittens', limit: 3 }, P1);
+  ok('H8 search_notes with no notes folder: says so, asks nothing', nn.ok === true && /^No notes to search/.test(nn.text)
+    && hNoNotes.reqs.length === 0, JSON.stringify(nn));
+
+  // H9 list_tabs asks only in a pane that skips Claude Code's own prompts.
+  const hList = makeAsk(() => 'deny');
+  const l1 = await hList.tools.list_tabs({}, P1);
+  ok('H9 list_tabs (skipsPrompts unset): lists, asks nothing', l1.ok === true && /^2 open web tabs/.test(l1.text) && hList.reqs.length === 0, show(l1.text));
+  const l2 = await hList.tools.list_tabs({}, { paneId: 'p1', skipsPrompts: 'true' });
+  ok('H9 list_tabs (skipsPrompts not exactly true): asks nothing', l2.ok === true && hList.reqs.length === 0);
+  const l3 = await hList.tools.list_tabs({}, { paneId: 'p1', skipsPrompts: true });
+  ok('H9 list_tabs (skipsPrompts true): asks', hList.reqs.length === 1 && hList.reqs[0].req.tool === 'list_tabs', JSON.stringify(hList.reqs.map((r) => r.req)));
+  eq('H9 list_tabs denied: the refusal', l3.text, 'the user did not allow listing their open tabs (denied).');
+  eq('H9 list_tabs denied: the pane line', hList.last(), 'Claude: the user did not allow listing their open tabs (denied)');
+  eq('H9 list_tabs denied: the chrome was asked for tabs only by the two allowed calls', hList.count('tabs'), 2);
+  const hListOk = makeAsk(() => 'once');
+  const l4 = await hListOk.tools.list_tabs({}, { paneId: 'p1', skipsPrompts: true });
+  ok('H9 list_tabs (skipsPrompts true) allowed once: lists', l4.ok === true && /^2 open web tabs/.test(l4.text) && hListOk.reqs.length === 1, show(l4.text));
+
+  // H10 highlight never asks (it hands nothing back but found / not found).
+  const hHi = makeAsk(() => 'deny');
+  const hi = await hHi.tools.highlight({ tabId: 21, quote: 'alpha body' }, P1);
+  ok('H10 highlight works with every ask denied, and never calls approve', hi.ok === true && hHi.reqs.length === 0, JSON.stringify(hi));
+  hHi.tools.stop();
+
+  // H11 updateKey: facts learned after the spawn reach the tools through answer().
+  const hKeyed = makeAsk(() => 'deny');
+  const kServer = M.createServer({ tools: hKeyed.tools });
+  const kKey = kServer.addKey({ paneId: 'p9' });
+  const k1 = await kServer.answer({ id: 1, token: kKey, tool: 'list_tabs', args: {} });
+  ok('H11 before updateKey: list_tabs lists without asking', k1.ok === true && hKeyed.reqs.length === 0, JSON.stringify(k1).slice(0, 200));
+  eq('H11 updateKey(key, {skipsPrompts:true}) answers true', kServer.updateKey(kKey, { skipsPrompts: true }), true);
+  const k2 = await kServer.answer({ id: 2, token: kKey, tool: 'list_tabs', args: {} });
+  ok('H11 after updateKey: list_tabs asks, with the updated meta', hKeyed.reqs.length === 1 && hKeyed.reqs[0].meta.skipsPrompts === true
+    && hKeyed.reqs[0].meta.paneId === 'p9', JSON.stringify(hKeyed.reqs.map((r) => r.meta)));
+  ok('H11 after updateKey: denied comes back through the server', k2.ok === false && /listing their open tabs \(denied\)/.test(k2.text), JSON.stringify(k2));
+  kServer.updateKey(kKey, { skipsPrompts: false });
+  const k3 = await kServer.answer({ id: 3, token: kKey, tool: 'list_tabs', args: {} });
+  ok('H11 updateKey back to false: lists again without asking', k3.ok === true && hKeyed.reqs.length === 1);
+  eq('H11 updateKey of a key never handed out: false', kServer.updateKey('not-a-key', { skipsPrompts: true }), false);
+  eq('H11 updateKey of no key: false', kServer.updateKey('', { skipsPrompts: true }), false);
+  kServer.revokeKey(kKey);
+  eq('H11 updateKey of a revoked key: false', kServer.updateKey(kKey, { skipsPrompts: true }), false);
+  kServer.close();
+
+  // H12 The launch: Claude Code's own prompt is skipped only for what Quartz asks about itself.
+  eq('H12 preAllowedArg() exact', M.preAllowedArg(), 'mcp__quartz__read_page,mcp__quartz__search_history,mcp__quartz__search_notes,mcp__quartz__highlight');
+  ok('H12 PRE_ALLOWED_TOOLS does not hold list_tabs', Array.isArray(M.PRE_ALLOWED_TOOLS) && M.PRE_ALLOWED_TOOLS.indexOf('list_tabs') === -1,
+    JSON.stringify(M.PRE_ALLOWED_TOOLS));
+  ok('H12 preAllowedArg() does not name list_tabs', M.preAllowedArg().indexOf('list_tabs') === -1);
+  // The shim's outer bound on one call must outlast Quartz's wait for the user plus the read itself;
+  // otherwise Claude is told "Quartz did not answer" while the bar is still up, and a later Allow
+  // reads a page nobody receives.
+  const shimSrc = fs.readFileSync(path.join(__dirname, 'mcp-shim.js'), 'utf8');
+  const callMs = Number(S.CALL_TIMEOUT_MS) || Number((/const CALL_TIMEOUT_MS = (\d+)/.exec(shimSrc) || [])[1]);
+  ok('H12 mcp-shim CALL_TIMEOUT_MS outlasts APPROVAL_TIMEOUT_MS + READ_TIMEOUT_MS', callMs > M.APPROVAL_TIMEOUT_MS + M.READ_TIMEOUT_MS,
+    'shim ' + callMs + ' ms, ask ' + M.APPROVAL_TIMEOUT_MS + ' + read ' + M.READ_TIMEOUT_MS + ' ms');
+  }
 
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp */ }
   console.log(`mcp-test: ${pass} passed, ${fail} failed`);

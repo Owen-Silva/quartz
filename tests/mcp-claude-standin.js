@@ -12,10 +12,18 @@
 //      pane's key is in it: it must not be; whether the key is in this process's environment: it must
 //      be), then starts the server the file names the way Claude Code does (command + args, env =
 //      this process's env plus the config's env, stdio pipes) and speaks MCP to it: initialize,
-//      notifications/initialized, tools/list, then tools/call list_tabs, read_page on the first listed
-//      tab, highlight a phrase from that page, search_history for a word of its title. Every answer
-//      is logged as {"mcp": "<step>", "res": <JSON-RPC message>};
-//   4. exits when it reads "__quit__" or after 120 s, whichever is first.
+//      notifications/initialized, tools/list, then logs {"mcp": "waiting"} and acts on what it reads
+//      (Quartz asks the user before a read, so the test drives each pane and answers its bar):
+//        "__script__"            tools/call list_tabs, read_page on the first listed tab, highlight a
+//                                phrase from that page, search_history for a word of its title, then
+//                                read_page of the same tab again (logged "read_page_2"), then "finished";
+//        "Look at tab <N> in Quartz" (the Ask about this page paste)   read_page N, logged "ask_read",
+//                                as Claude would on that prompt;
+//        "__read <N>__"          read_page N, logged "cmd_read".
+//      Every answer is logged as {"mcp": "<step>", "res": <JSON-RPC message>}. A tool call waits up
+//      to 75 s: longer than Quartz's 60 s wait for the user's answer, so a timed-out ask is seen as
+//      Quartz's refusal, not as this client giving up;
+//   4. exits when it reads "__quit__" or after 240 s, whichever is first.
 // The key itself is never logged.
 'use strict';
 const fs = require('fs');
@@ -42,10 +50,12 @@ process.stdin.setEncoding('utf8');
 log({ ready: true });
 let seen = '';
 let server = null;
+let wake = null; // the command loop, parked until more input comes
 process.stdin.on('data', (chunk) => {
   log({ in: chunk });
   seen += chunk;
   if (seen.indexOf('__quit__') !== -1) finish();
+  if (wake) { const w = wake; wake = null; w(); }
 });
 
 function finish() {
@@ -54,7 +64,7 @@ function finish() {
   process.stdout.write(ESC + '[?2004l');
   process.exit(0);
 }
-setTimeout(finish, 120000).unref();
+setTimeout(finish, 240000).unref();
 
 // ---- the MCP client -------------------------------------------------------------------------------
 const at = args.indexOf('--mcp-config');
@@ -114,8 +124,10 @@ async function runClient(file) {
   let nextId = 1;
   function request(method, params) {
     const id = nextId++;
+    // A tool call may wait on the user (Quartz gives up after 60 s and says so): wait longer than that.
+    const waitMs = method === 'tools/call' ? 75000 : 30000;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { waiting.delete(id); resolve({ id, timeout: true }); }, 30000);
+      const timer = setTimeout(() => { waiting.delete(id); resolve({ id, timeout: true }); }, waitMs);
       waiting.set(id, (m) => { clearTimeout(timer); resolve(m); });
       server.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     });
@@ -134,24 +146,50 @@ async function runClient(file) {
   });
   server.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   await step('tools/list', 'tools/list', {});
-  const list = await step('list_tabs', 'tools/call', { name: 'list_tabs', arguments: {} });
-  const m = /- tab (\d+)[^:\n]*: "([^"\n]*)"/.exec(textOf(list));
-  if (!m) { log({ mcp: 'stop', why: 'list_tabs named no tab' }); return; }
-  const tabId = Number(m[1]);
-  const title = m[2];
-  const read = await step('read_page', 'tools/call', { name: 'read_page', arguments: { tabId } });
-  // A phrase from the page: QUARTZ_STANDIN_QUOTE when the test names one and the page has it,
-  // else the first long line of the fenced body.
-  const text = textOf(read);
-  let quote = process.env.QUARTZ_STANDIN_QUOTE || '';
-  if (!quote || text.indexOf(quote) === -1) {
-    const body = text.split('\n').filter((l) => l.length > 30 && !/^(---|\(|Tab \d)/.test(l));
-    quote = body.length ? body[0].slice(0, 40).trim() : '';
+
+  // What to do comes from the input, one command at a time, in the order it arrived.
+  const COMMAND = /__script__|__read (\d+)__|Look at tab (\d+) in Quartz/g;
+  let cursor = 0;
+  function nextCommand() {
+    COMMAND.lastIndex = cursor;
+    const m = COMMAND.exec(seen);
+    if (!m) return null;
+    cursor = COMMAND.lastIndex;
+    if (m[0] === '__script__') return { kind: 'script' };
+    if (m[1]) return { kind: 'cmd_read', tabId: Number(m[1]) };
+    return { kind: 'ask_read', tabId: Number(m[2]) };
   }
-  log({ mcp: 'quote', quote });
-  if (quote) await step('highlight', 'tools/call', { name: 'highlight', arguments: { tabId, quote } });
-  const word = title.split(/[^A-Za-z0-9]+/).sort((a, b) => b.length - a.length)[0] || 'page';
-  log({ mcp: 'word', word });
-  await step('search_history', 'tools/call', { name: 'search_history', arguments: { query: word } });
-  log({ mcp: 'finished' });
+  log({ mcp: 'waiting' });
+  for (;;) {
+    const c = nextCommand();
+    if (!c) { await new Promise((r) => { wake = r; }); continue; }
+    log({ mcp: 'command', kind: c.kind, tabId: c.tabId });
+    if (c.kind === 'script') await script();
+    else await step(c.kind, 'tools/call', { name: 'read_page', arguments: { tabId: c.tabId } });
+  }
+
+  async function script() {
+    const list = await step('list_tabs', 'tools/call', { name: 'list_tabs', arguments: {} });
+    const m = /- tab (\d+)[^:\n]*: "([^"\n]*)"/.exec(textOf(list));
+    if (!m) { log({ mcp: 'stop', why: 'list_tabs named no tab' }); return; }
+    const tabId = Number(m[1]);
+    const title = m[2];
+    const read = await step('read_page', 'tools/call', { name: 'read_page', arguments: { tabId } });
+    // A phrase from the page: QUARTZ_STANDIN_QUOTE when the test names one and the page has it,
+    // else the first long line of the fenced body.
+    const text = textOf(read);
+    let quote = process.env.QUARTZ_STANDIN_QUOTE || '';
+    if (!quote || text.indexOf(quote) === -1) {
+      const body = text.split('\n').filter((l) => l.length > 30 && !/^(---|\(|Tab \d)/.test(l));
+      quote = body.length ? body[0].slice(0, 40).trim() : '';
+    }
+    log({ mcp: 'quote', quote });
+    if (quote) await step('highlight', 'tools/call', { name: 'highlight', arguments: { tabId, quote } });
+    const word = title.split(/[^A-Za-z0-9]+/).sort((a, b) => b.length - a.length)[0] || 'page';
+    log({ mcp: 'word', word });
+    await step('search_history', 'tools/call', { name: 'search_history', arguments: { query: word } });
+    // The same tab again: the test answers this one with Deny.
+    await step('read_page_2', 'tools/call', { name: 'read_page', arguments: { tabId } });
+    log({ mcp: 'finished' });
+  }
 }
