@@ -352,6 +352,9 @@ function runOne(t, env) {
     results.push(r);
     console.log(`${r.status.padEnd(4)} ${r.name.padEnd(16)} ${(r.ms / 1000).toFixed(1).padStart(6)} s  ${r.why}`);
     for (const l of r.failLines) console.log('       ' + l.trim().slice(0, 240));
+    // A check a file could not run HERE prints "SKIP <check>: <reason>" (never counted as a pass):
+    // shown under its file, pass or fail, so a green file with skipped checks says so in this log too.
+    if (r.status !== 'SKIP') for (const l of (r.text || '').split(/\r?\n/).filter((x) => /^SKIP\b/.test(x.trim())).slice(0, 8)) console.log('       ' + l.trim().slice(0, 240));
   }
   const n = (s) => results.filter((r) => r.status === s).length;
   const checksPassed = results.reduce((a, r) => a + r.passed, 0);
