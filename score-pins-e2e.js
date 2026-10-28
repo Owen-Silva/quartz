@@ -238,6 +238,12 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   check(p.nhlId === String(NHL_ID) && p.reading.source === 'nhl' && p.reading.away === 1 && p.reading.home === 2, 'NHL game matched to the NHL feed, score read', p);
   cards.nhl = await cardCdp(nhlKey);
   const c = cards.nhl;
+  // Full motion is pinned on the card, not inherited: with Windows' "Show animations" off (as on the
+  // hosted CI runner) the card reads reduce and the goal changes with no animation at all, so the
+  // "goal animates" checks could never pass. The reduced-motion check below sets reduce on purpose
+  // and puts THIS back after, never the system's value.
+  const FULL_MOTION = { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] };
+  await c.send('Emulation.setEmulatedMedia', FULL_MOTION);
   const dom = await c.ev('({a:document.querySelector("#away .ab").textContent,h:document.querySelector("#home .ab").textContent,as:document.querySelector("#away .n").textContent,hs:document.querySelector("#home .n").textContent,line:document.getElementById("line").textContent,lg:document.getElementById("lg").textContent,theme:document.documentElement.dataset.theme})');
   check(dom.a === 'MTL' && dom.h === 'TOR' && dom.as === '1' && dom.hs === '2' && dom.line === '2nd 12:41' && dom.lg === 'NHL', 'the card shows both teams, the score, the period and clock', dom);
   check((await played(c)).length === 0, 'opening a card replays nothing and plays no sound');
@@ -352,7 +358,7 @@ run('score-pins-e2e', async ({ check, launch, say }) => {
   await stripIs(c, '/OVERTURNED/');
   const rmAnims = await c.ev('document.getAnimations().length');
   check(rmAnims === 0, 'reduced motion: the strip and number change with no animation', rmAnims);
-  await c.send('Emulation.setEmulatedMedia', { features: [] });
+  await c.send('Emulation.setEmulatedMedia', FULL_MOTION);
 
   // A second pin, from the palette path (api.scores.pin); the two stack in the corner.
   const nbaGame = snap.sports.live.find((e) => e.league === 'nba');

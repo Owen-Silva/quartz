@@ -73,6 +73,11 @@ run('motion-e2e', async ({ check, launch, say }) => {
   const c = q.chrome;
   await c.send('Page.enable');
   await c.send('Performance.enable');
+  // Full motion is pinned, not inherited: with Windows' "Show animations" off (as on the hosted CI
+  // runner) the system reports reduce, and every full-motion check below would read the reduced path.
+  // Section 3 switches to reduce on purpose and back to THIS, never to the system's value.
+  const FULL_MOTION = { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] };
+  await c.send('Emulation.setEmulatedMedia', FULL_MOTION);
   const ev = (s) => c.ev(s);
   const layouts = async () => { const m = await c.send('Performance.getMetrics'); const x = ((m.result && m.result.metrics) || []).find((k) => k.name === 'LayoutCount'); return x ? x.value : NaN; };
   await ev(`(() => { const t = createTab(${JSON.stringify(B + '/p/1.html')}); activateTab(t.id); return 1; })()`);
@@ -137,7 +142,7 @@ run('motion-e2e', async ({ check, launch, say }) => {
     const moving = r.a.filter((x) => x.p !== 'display');
     check(moving.length > 0 && moving.every((x) => x.p === 'opacity' && x.d === 120) && r.st.tr === 'none' && r.st.sc === 'none', sf.id + ': reduced motion fades (120 ms) and travels not at all', r);
   }
-  await c.send('Emulation.setEmulatedMedia', { features: [] });
+  await c.send('Emulation.setEmulatedMedia', FULL_MOTION);
   await sleep(200);
 
   /* ---- 4. the tab strip ---- */
