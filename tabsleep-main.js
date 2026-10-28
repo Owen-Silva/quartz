@@ -1,6 +1,6 @@
 'use strict';
 // tabsleep-main.js -- the main-process half of tab sleep. app.js decides WHICH background tab
-// to put down and WHEN; it needs three things only main can do:
+// to put down and WHEN; it needs two things only main can do:
 //
 //   1. Memory figures ('tabs:memory'): free/total system memory, and how much each <webview>
 //      guest's renderer is holding, so a tab can be slept sooner than the user's timer when the
@@ -12,9 +12,6 @@
 //      it. It reports typed text the user has not sent or saved, and live media (a call, the
 //      camera or microphone, picture-in-picture). It has PROBE_TIMEOUT_MS to answer; a page that
 //      does not answer is reported as such and app.js keeps it awake (the safe rule).
-//   3. Back/forward history across a sleep: the guest's navigationHistory entries (url, title and
-//      Chromium's pageState, which holds scroll position and form values) captured before the
-//      guest is torn down, and restored into the fresh guest on wake ('tabs:restore-history').
 //
 // Plus one push: each guest's 'audio-state-changed' (Chromium's own audibility, the signal behind
 // Chrome's speaker icon) is forwarded to the chrome as 'tabs:audio-state', so the speaker on a
@@ -26,9 +23,6 @@
 const PROBE_WORLD_ID = 1717;
 const PROBE_TIMEOUT_MS = 1500;
 const MEMORY_CACHE_MS = 20000;
-/** History budget: entries kept around the current one, and the pageState bytes kept in total. */
-const HISTORY_MAX_ENTRIES = 50;
-const HISTORY_MAX_STATE_BYTES = 2 * 1024 * 1024;
 
 /*
  * Installed at every dom-ready, in the probe's world. It marks the fields and editors the USER
@@ -154,37 +148,6 @@ function tabMemory({ wcIds, metrics, pidOf, system }) {
   return { totalBytes: system.totalBytes, freeBytes: system.freeBytes, tabs };
 }
 
-/**
- * Pure: trim captured history to the budget. Entries furthest from the current one go first;
- * then pageState (scroll and form values) is dropped from the furthest entries until the total
- * fits, so Back still works on those, it just reloads them plain.
- * @returns {{ index:number, entries:Array<{url:string,title:string,pageState?:string}>, trimmed:number, statesDropped:number }}
- */
-function budgetHistory(index, entries, maxEntries, maxStateBytes) {
-  const list = Array.isArray(entries) ? entries.filter((e) => e && typeof e.url === 'string' && e.url) : [];
-  let at = Math.min(Math.max(0, Number(index) || 0), Math.max(0, list.length - 1));
-  let lo = 0, hi = list.length;
-  const cap = maxEntries || HISTORY_MAX_ENTRIES;
-  while (hi - lo > cap) {
-    // Drop from whichever end is further from the current entry.
-    if (at - lo >= hi - 1 - at) lo++; else hi--;
-  }
-  const kept = list.slice(lo, hi).map((e) => ({ url: e.url, title: String(e.title || ''), pageState: typeof e.pageState === 'string' ? e.pageState : undefined }));
-  at -= lo;
-  let total = kept.reduce((n, e) => n + (e.pageState ? e.pageState.length : 0), 0);
-  let statesDropped = 0;
-  const order = kept.map((e, i) => i).sort((a, b) => Math.abs(b - at) - Math.abs(a - at));
-  for (const i of order) {
-    if (total <= (maxStateBytes || HISTORY_MAX_STATE_BYTES)) break;
-    if (!kept[i].pageState) continue;
-    total -= kept[i].pageState.length;
-    kept[i].pageState = undefined;
-    statesDropped++;
-  }
-  for (const e of kept) if (e.pageState === undefined) delete e.pageState;
-  return { index: at, entries: kept, trimmed: list.length - kept.length, statesDropped };
-}
-
 /** Electron's figures where they exist (kB), Node's otherwise; the same reading stats.js uses. */
 function defaultSystemMemory() {
   const os = require('os');
@@ -245,44 +208,17 @@ function install(d) {
     const p = payload || {};
     const g = guest(p.wcId);
     if (!g) return { ok: false, reason: 'the page is not running' };
-    const out = { ok: true, probe: null, history: null };
-    if (p.probe !== false) {
-      try {
-        const r = await withTimeout(g.executeJavaScriptInIsolatedWorld(PROBE_WORLD_ID, [{ code: PROBE }]),
-          PROBE_TIMEOUT_MS, 'the page did not answer within ' + (PROBE_TIMEOUT_MS / 1000) + ' s');
-        out.probe = { ok: true, busy: r && typeof r.busy === 'string' ? r.busy.slice(0, 60) : '', tracked: !!(r && r.tracked) };
-      } catch (err) {
-        out.probe = { ok: false, reason: String(err && err.message || err).slice(0, 80) || 'the check failed' };
-      }
-      if (!out.probe.ok || out.probe.busy) return out; // not sleeping: no history needed
-    }
-    if (p.history !== false) {
-      try {
-        const nh = g.navigationHistory;
-        if (nh && typeof nh.getAllEntries === 'function') {
-          out.history = budgetHistory(nh.getActiveIndex(), nh.getAllEntries(), HISTORY_MAX_ENTRIES, HISTORY_MAX_STATE_BYTES);
-        }
-      } catch (err) {
-        out.historyError = String(err && err.message || err).slice(0, 80);
-      }
-    }
-    return out;
-  });
-
-  d.ipcMain.handle('tabs:restore-history', async (event, payload) => {
-    if (!d.isChromeSender(event)) return { ok: false, reason: 'not the chrome' };
-    const p = payload || {};
-    const g = guest(p.wcId);
-    if (!g) return { ok: false, reason: 'the woken page is not running' };
-    const h = p.history || {};
-    const entries = Array.isArray(h.entries) ? h.entries.filter((e) => e && typeof e.url === 'string' && /^(https?|file):/i.test(e.url)) : [];
-    if (!entries.length || entries.length !== (h.entries || []).length) return { ok: false, reason: 'no history that can be restored' };
-    const index = Math.min(Math.max(0, Number(h.index) || 0), entries.length - 1);
+    // Electron holds any executeJavaScript* until the page stops loading, so asking a page that
+    // is still loading would only time out (and leave a waiter behind). Say so instead.
+    let loading = false;
+    try { loading = g.isLoadingMainFrame(); } catch { loading = false; }
+    if (loading) return { ok: true, probe: { ok: false, reason: 'it was still loading' } };
     try {
-      await withTimeout(g.navigationHistory.restore({ index, entries }), 20000, 'the page did not finish loading within 20 s');
-      return { ok: true, count: entries.length, index };
+      const r = await withTimeout(g.executeJavaScriptInIsolatedWorld(PROBE_WORLD_ID, [{ code: PROBE }]),
+        PROBE_TIMEOUT_MS, 'the page did not answer within ' + (PROBE_TIMEOUT_MS / 1000) + ' s');
+      return { ok: true, probe: { ok: true, busy: r && typeof r.busy === 'string' ? r.busy.slice(0, 60) : '', tracked: !!(r && r.tracked) } };
     } catch (err) {
-      return { ok: false, reason: String(err && err.message || err).slice(0, 80) || 'restore failed' };
+      return { ok: true, probe: { ok: false, reason: String(err && err.message || err).slice(0, 80) || 'the check failed' } };
     }
   });
 
@@ -300,4 +236,4 @@ function install(d) {
   });
 }
 
-module.exports = { install, tabMemory, budgetHistory, PROBE, TRACKER, PROBE_WORLD_ID, PROBE_TIMEOUT_MS, MEMORY_CACHE_MS, HISTORY_MAX_ENTRIES, HISTORY_MAX_STATE_BYTES };
+module.exports = { install, tabMemory, PROBE, TRACKER, PROBE_WORLD_ID, PROBE_TIMEOUT_MS, MEMORY_CACHE_MS };

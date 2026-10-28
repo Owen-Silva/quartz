@@ -6202,7 +6202,7 @@ function chipTooltip(tab) {
   }
   const cost = isNewTabUrl(tab.url)
     ? 'a new tab page comes back fresh'
-    : (tab.sleepHistory ? 'this page will reload, with its back/forward history' : 'this page will reload');
+    : 'this page will reload';
   // An early sleep (memory low, a very heavy page) says why, in the words the log uses.
   return base + ' — asleep, click to wake (' + cost + ')' + (tab.sleepNote ? ' — put to sleep early: ' + tab.sleepNote : '');
 }
@@ -8754,22 +8754,17 @@ function sleepProbeWaiting(tab, now) {
  * be checked and why, and it is asked again after SLEEP_PROBE_RETRY_MS. Losing memory for a while
  * is recoverable; losing a half-written message is not.
  *
- * The same round trip brings back the guest's back/forward history (url, title and Chromium's
- * pageState: scroll and form values), which wakeTab() restores.
  *
  * `still(tab)` re-checks the caller's rule when the answer arrives (a lot can change in 1.5 s).
- * opts.probe === false skips the question (the user asked for this sleep by hand).
  * @returns {Promise<boolean>} true when the tab went to sleep.
  */
-function sleepTabChecked(tab, why, note, still, opts) {
+function sleepTabChecked(tab, why, note, still) {
   const ok = () => tabs.indexOf(tab) !== -1 && !tab.asleep && (still ? still(tab) : canSleepTab(tab));
   if (!ok() || tab.sleepAsking) return Promise.resolve(false);
   const api = window.api && window.api.tabs;
-  const probe = !(opts && opts.probe === false);
   let wcId = null;
   try { wcId = tab.viewEl.getWebContentsId(); } catch (err) { wcId = null; }
   if (!api || typeof api.prepareSleep !== 'function' || !Number.isInteger(wcId)) {
-    if (!probe) return Promise.resolve(sleepTab(tab, why, { note }));
     keepAwakeFor(tab, why, 'could not check it for unsaved work (the page could not be asked)');
     return Promise.resolve(false);
   }
@@ -8779,17 +8774,15 @@ function sleepTabChecked(tab, why, note, still, opts) {
     tab.sleepAsking = false;
     if (tab.viewEl !== viewEl || !ok()) return false;
     const p = res && res.probe;
-    if (probe) {
-      if (!res || !res.ok || !p || !p.ok) {
-        keepAwakeFor(tab, why, 'could not check it for unsaved work (' + ((p && p.reason) || (res && res.reason) || 'no answer') + ')');
-        return false;
-      }
-      if (p.busy) { keepAwakeFor(tab, why, p.busy); return false; }
+    if (!res || !res.ok || !p || !p.ok) {
+      keepAwakeFor(tab, why, 'could not check it for unsaved work (' + ((p && p.reason) || (res && res.reason) || 'no answer') + ')');
+      return false;
     }
-    return sleepTab(tab, why, { note, history: (res && res.ok && res.history) || null });
+    if (p.busy) { keepAwakeFor(tab, why, p.busy); return false; }
+    return sleepTab(tab, why, { note });
   };
   let pending = null;
-  try { pending = api.prepareSleep(wcId, { probe }); } catch (err) { pending = null; }
+  try { pending = api.prepareSleep(wcId); } catch (err) { pending = null; }
   if (!pending || typeof pending.then !== 'function') return Promise.resolve(done(null));
   return pending.then(done, (err) => done({ ok: false, reason: (err && err.message) || 'the check failed' }));
 }
@@ -8849,18 +8842,11 @@ function logEvent(kind, details) {
   } catch (err) { /* the log is best effort */ }
 }
 
-/** Same page, the #fragment aside (history entries and getURL() can differ only there). Pure. */
-function sameDocumentUrl(a, b) {
-  const strip = (u) => String(u || '').split('#')[0];
-  return !!a && strip(a) === strip(b);
-}
-
 /**
  * Put one tab to sleep. The url is snapshotted first: it can only be read while
- * the guest is still attached, and it is what wakeTab() needs at the least.
+ * the guest is still attached, and it is the whole of what wakeTab() needs.
  * opts.note: plain words for an early sleep (memory low, a heavy page), shown on the chip's hover
- * and written to the log. opts.history: the guest's back/forward history, captured by
- * sleepTabChecked() just before this, which wakeTab() restores.
+ * and written to the log.
  * @returns {boolean} true when the tab actually went to sleep.
  */
 function sleepTab(tab, why, opts) {
@@ -8903,10 +8889,6 @@ function sleepTab(tab, why, opts) {
   tab.ready = false;
   tab.asleep = true;
   tab.sleepNote = (opts && typeof opts.note === 'string') ? opts.note : '';
-  // History captured for THIS url only: a stale capture would put the woken tab somewhere else.
-  const history = opts && opts.history;
-  tab.sleepHistory = (history && Array.isArray(history.entries) && history.entries.length
-    && history.entries[history.index] && sameDocumentUrl(history.entries[history.index].url, tab.url)) ? history : null;
   tab.keptAwake = null;
   tab.wakeNote = '';
   cancelNewTabSleep(tab); // whatever put it down, the grace clock has nothing left to do
@@ -8961,7 +8943,7 @@ function wakeTab(tab) {
   if (keep && keep.url === target && (keep.x || keep.y)) restoreScrollOnLoad(tab, viewEl, keep);
 
   tab.asleep = false;
-  tab.sleepNote = ''; // the reason it slept early is history now
+  tab.sleepNote = ''; // the reason it slept early no longer applies
   if (tab.chipEl) {
     tab.chipEl.classList.remove('asleep');
     tab.chipEl.title = chipTooltip(tab);
@@ -9053,16 +9035,10 @@ function sleepOtherTabs() {
 }
 
 /**
- * The tab menu's "Sleep tab": the user asked, so nothing is probed (a menu item they clicked is
- * not the place to second-guess them; its label already says what would be lost, see
- * sleepMenuLabel), but the back/forward history is still captured for the wake.
+ * "Sleep tab" in the tab menu. The user asked, so nothing is probed (a menu item they clicked is
+ * not the place to second-guess them), but the label says what a recent probe found that the
+ * sleep would lose.
  */
-function sleepTabByHand(tab) {
-  if (!canSleepNow(tab)) return Promise.resolve(false);
-  return sleepTabChecked(tab, 'asked', '', canSleepNow, { probe: false });
-}
-
-/** "Sleep tab", saying what a recent probe found that the sleep would lose. */
 function sleepMenuLabel(tab) {
   const r = tab && tab.keptAwake && tab.keptAwake.reason;
   return (r && !/^could not/.test(r)) ? 'Sleep tab (' + r + ' would be lost)' : 'Sleep tab';
@@ -10648,7 +10624,7 @@ function tabMenuItemsForTab(tab) {
       // would silently cut the sound off, which no sleep path may do.
       : (tabSoundReason(tab)
         ? { label: 'Sleep tab (not while it is playing sound)', run: () => {}, disabled: true }
-        : { label: sleepMenuLabel(tab), run: () => sleepTabByHand(tab), disabled: !canSleepNow(tab) }));
+        : { label: sleepMenuLabel(tab), run: () => sleepTab(tab), disabled: !canSleepNow(tab) }));
   } else {
     // A chamber (the Claude pane, or a shell). Claude no longer opens as a
     // tab of its own, so there is no "another one in this folder" row here,

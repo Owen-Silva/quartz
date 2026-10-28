@@ -8,7 +8,7 @@
 // holding typed text awake), run against a tiny fake document.
 // Plus the early rules (memoryPressure / earlySleepPlan: memory low, very heavy pages), the probe-gated
 // sweep (sleepTabChecked with main faked: busy, no answer, retry timing, reasons shown and logged),
-// the speaker following Chromium (setTabHeard), and tabsleep-main.js: tabMemory, budgetHistory, the
+// the speaker following Chromium (setTabHeard), and tabsleep-main.js: tabMemory, the
 // isolated-world PROBE and its input TRACKER, against small fakes.
 // The live paths (a real restore, a real sleep and wake) are sessions-e2e.js / sleep-e2e.js.
 const fs = require('fs');
@@ -179,21 +179,20 @@ function sweepWorld() {
     function isNewTabUrl(u) { return /newtab/.test(String(u || '')); }
     function readCurrentUrl(t) { return t ? t.url : ''; }
     function isViewUsable(t) { return !!(t && t.kind === 'page' && !t.asleep && t.ready && t.viewEl); }
-    function sleepTab(t, why, opts) { if (typeof tabSoundReason === 'function' && tabSoundReason(t)) return false; t.asleep = true; slept.push({ id: t.id, at: clockNow, why, note: (opts && opts.note) || '', history: (opts && opts.history) || null }); return true; }
+    function sleepTab(t, why, opts) { if (typeof tabSoundReason === 'function' && tabSoundReason(t)) return false; t.asleep = true; slept.push({ id: t.id, at: clockNow, why, note: (opts && opts.note) || '' }); return true; }
     // Main's half, faked with SYNCHRONOUS thenables so a sweep's sleeps land before sweep() returns.
     function now(v) { return { then(f) { return now(f ? f(v) : v); } }; }
     function nope(e) { return { then(f, r) { return now(r ? r(e) : undefined); } }; }
     var logs = []; var calls = { probe: 0, memory: 0 };
     var memory = { totalBytes: 11.7 * 1024 * 1024 * 1024, freeBytes: 6 * 1024 * 1024 * 1024 };
     var window = { api: { tabs: {
-      prepareSleep(wcId, opts) {
+      prepareSleep(wcId) {
         calls.probe++;
         const t = tabs.find((x) => x.viewEl && x.viewEl.wcId === wcId);
         if (!t) return now({ ok: false, reason: 'the page is not running' });
         if (t.probe === 'reject') return nope(new Error('ipc gone'));
-        if (opts && opts.probe === false) return now({ ok: true, probe: null, history: { index: 0, entries: [{ url: t.url, title: '' }] } });
         if (t.probe === 'timeout') return now({ ok: true, probe: { ok: false, reason: 'the page did not answer within 1.5 s' } });
-        return now({ ok: true, probe: { ok: true, busy: t.probe || '', tracked: true }, history: t.probe ? null : { index: 0, entries: [{ url: t.url, title: '' }] } });
+        return now({ ok: true, probe: { ok: true, busy: t.probe || '', tracked: true } });
       },
       memory(ids) {
         calls.memory++;
@@ -338,7 +337,6 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   const s = a.slept();
   ok('sweep low: b1 and b2 (least recent) went early, as "memory"', JSON.stringify(s.map((x) => x.id)) === '["b1","b2"]' && s.every((x) => x.why === 'memory'), s);
   ok('sweep low: the slept tab carries the note', s[0] && /^memory was low \(1\.6 GB of 11\.7 GB free\)$/.test(s[0].note), s[0]);
-  ok('sweep low: history captured on the way down', s[0] && s[0].history && s[0].history.entries.length === 1, s[0]);
   ok('sweep low: pinned and sounding tabs stay awake', !pin.asleep && !loud.asleep);
   ok('sweep low: one memory ask per sweep', a.calls.memory === 1, a.calls);
   a.set(12 * MIN); a.sweep();
@@ -391,10 +389,10 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   ok('speaker: main\'s push drives it', /onAudioState\(\(p\) => \{[\s\S]*?setTabHeard\(tab, p\.audible === true\)/.test(src));
   ok('speaker: a gone guest drops it', /if \(tab\.heard\) \{ tab\.heard = false; syncTabAudio\(tab\); \}/.test(cutFunction('forgetTabAudio')));
   ok('workspace "all": real pages are asked first', /sleepTabChecked\(tab, 'workspace'/.test(cutFunction('sleepInWorkspaceNow')));
-  ok('menu: Sleep tab captures history, no probe', /probe: false/.test(cutFunction('sleepTabByHand')));
+  ok('menu: "Sleep tab" says what a probe found it would lose', /would be lost/.test(cutFunction('sleepMenuLabel')) && /label: sleepMenuLabel\(tab\)/.test(src));
 }
 
-// --- tabsleep-main.js: memory figures, history budget, the probe and its tracker ------------
+// --- tabsleep-main.js: memory figures, the probe and its tracker ------------------------------
 {
   const TM = require('./tabsleep-main');
   const m = TM.tabMemory({
@@ -406,13 +404,6 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
   ok('memory: two guests sharing a renderer split it', m.tabs[2] && m.tabs[2].bytes === 150 * MB && m.tabs[2].sharedWith === 1, m.tabs);
   ok('memory: a guest whose process is unknown is left out', !(4 in m.tabs));
   ok('memory: system figures pass through', m.freeBytes === 2 * GB && m.totalBytes === 11.7 * GB);
-  const entries = Array.from({ length: 80 }, (_, i) => ({ url: 'https://e/' + i, title: 't' + i, pageState: 'x' }));
-  const h = TM.budgetHistory(70, entries, 50, 2 * MB);
-  ok('history: capped to 50 entries around the current one', h.entries.length === 50 && h.entries[h.index].url === 'https://e/70' && h.trimmed === 30, { n: h.entries.length, at: h.index });
-  const big = Array.from({ length: 5 }, (_, i) => ({ url: 'https://b/' + i, title: '', pageState: 'y'.repeat(MB) }));
-  const hb = TM.budgetHistory(4, big, 50, 2 * MB);
-  ok('history: pageState over 2 MB dropped furthest first, entries kept', hb.entries.length === 5 && hb.statesDropped === 3 && hb.entries[4].pageState && hb.entries[3].pageState && !hb.entries[0].pageState, hb.statesDropped);
-  ok('history: junk entries are dropped', TM.budgetHistory(0, [null, { url: '' }, { url: 'https://a/' }], 50, MB).entries.length === 1);
 
   const el = (tag, o) => Object.assign({
     tagName: tag, type: 'text', value: '', defaultValue: '', isConnected: true, isContentEditable: false,
