@@ -100,6 +100,9 @@ const TESTS = [
   // a refused read is retried and re-checked, so a change that landed is followed, never lost.
   { name: 'looksync', file: 'looksync-harness.js' },
   { name: 'toprow', file: 'toprow-harness.js' },
+  // tools/css-lint.js: raw radii and type sizes off tokens.css's scale, the old --fg names, unused
+  // --space-N steps, the allow comment; then the repository, nothing over tools/css-lint-baseline.json.
+  { name: 'css-lint', file: 'css-lint-harness.js' },
   // Watch: shape/merge, watch-main.js driven by fakes (cache-first, one read at a time, every
   // pause shown), and every service adapter against its hand-written fixtures.
   { name: 'watch', file: 'watch-harness.js' },
