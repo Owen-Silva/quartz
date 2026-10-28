@@ -101,7 +101,11 @@ async function guest(q, errors, log) {
     }
   });
   await g.send('Runtime.enable');
-  await g.send('Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Image', requestStage: 'Request' }] });
+  // Every still is answered by this test; without the interception they go to the unresolvable
+  // i.ytimg.com and every tile falls back to its title card. A refusal stops the run with the reason
+  // (Cdp.send resolves with { error } rather than throwing, so it is read here).
+  const fe = await g.send('Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Image', requestStage: 'Request' }] });
+  if (fe && fe.error) throw new Error('Fetch.enable was refused on the Watch page, so no still can be answered by this test: ' + JSON.stringify(fe.error).slice(0, 200));
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   return g;
 }
@@ -155,6 +159,10 @@ if (require.main === module) {
       await sleep(700);
       const scr = await g.ev('(() => ({ w: innerWidth, dpr: devicePixelRatio, tile: (document.querySelector(".tile-probe") || { getBoundingClientRect: () => ({ width: 0 }) }).getBoundingClientRect().width }))()');
       say('screen: ' + JSON.stringify(scr));
+      // Every <img> that errors from here on, with the URL it tried: if no tile loads, the run says
+      // whether the stills failed before reaching this test's interception (no picture request seen)
+      // or were answered and refused, instead of only "0 loaded".
+      await g.ev("(() => { window.__imgErr = []; document.addEventListener('error', (e) => { const t = e.target; if (t && t.tagName === 'IMG') { window.__imgErrN = (window.__imgErrN || 0) + 1; if (window.__imgErr.length < 6) window.__imgErr.push(String(t.currentSrc || t.src).slice(0, 140)); } }, true); return 1; })()");
       await g.ev('(() => { window.__thumbsApply = window.__applyWatch; window.__applyWatch = function () {}; window.__thumbsApply(' + JSON.stringify(snap) + '); return 1; })()');
 
       // let every tile in the first rows finish its chain
@@ -163,6 +171,7 @@ if (require.main === module) {
       const tiles = await g.ev(TILES);
       const done = tiles.filter((t) => t.done);
       say(tiles.length + ' YouTube tiles, ' + done.length + ' loaded');
+      say('picture requests this test answered: ' + log.length + '; <img> errors: ' + (await g.ev('window.__imgErrN || 0')) + ', first: ' + JSON.stringify(await g.ev('window.__imgErr || []')));
       for (const c of ['A', 'B', 'C', 'D']) {
         const mine = done.filter((t) => CASE.get(t.id) === c);
         const bad = mine.filter((t) => !t.src.endsWith('/' + t.id + '/' + WANT[c]) || t.w !== WANT_W[c]);

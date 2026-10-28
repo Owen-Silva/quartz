@@ -1135,6 +1135,12 @@ if (require.main === module) {
     if ((await chrome.ev('tabs.length')) > tabs0) await chrome.ev(`(() => { const t = tabs.find((t) => String(t.url).indexOf(${JSON.stringify(mock.origin('youtube'))}) === 0); if (t) closeTab(t.id); const w = findWatchTab(); if (w) activateTab(w.id); return 1; })()`);
     await chrome.waitFor(ACTIVE_IS_WATCH, 5000).catch(() => 0);
 
+    // Full motion is pinned for the frame count and the "normal" row-step check, not inherited: with
+    // Windows' "Show animations" off (as on the hosted CI runner) the page would read reduce, run the
+    // fades-only path, and the normal check below could never see a transform. Reduce is set on
+    // purpose further down, and this is put back after it, never the system's value.
+    const FULL_MOTION = { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] };
+    await g.send('Emulation.setEmulatedMedia', FULL_MOTION);
     // Motion: frames over 20 ms while the lens steps rows (the focus band) and the wash cross-fades.
     const mm = await measureMotion(g, { say, trace: TRACE });   // --trace F: trace the long session's stepping too
     const fr = mm.fr;
@@ -1178,7 +1184,7 @@ if (require.main === module) {
     check(normalProps.some((p) => /^(all|transform|translate|scale|rotate|top|left|right|bottom|inset|width|height|max-height|max-width|min-height|min-width|margin|padding|filter|backdrop-filter|-webkit-backdrop-filter|offset)/.test(p)), 'motion (normal): a row step moves things (transform), so the reduced-motion check means something', normalProps);
     check(![...rmSeen].some((p) => /^(all|transform|translate|scale|rotate|top|left|right|bottom|inset|width|height|max-height|max-width|min-height|min-width|margin|padding|filter|backdrop-filter|-webkit-backdrop-filter|offset)/.test(p)), 'prefers-reduced-motion: nothing moves during row steps (no transform/position/size/filter animation; fades only)', [...rmSeen]);
     check(rmStatic.length === 0, 'prefers-reduced-motion: no element transitions transform/position/size/filter, and no keyframe animation runs', rmStatic);
-    await g.send('Emulation.setEmulatedMedia', { features: [] });
+    await g.send('Emulation.setEmulatedMedia', FULL_MOTION);
 
     // Idle CPU, A/B, same instance (only with --measure: 60 s+).
     if (MEASURE) {

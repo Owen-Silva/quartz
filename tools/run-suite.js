@@ -165,7 +165,9 @@ const TESTS = [
   // uvboost in a real Electron: one thread raised, Electron's libuv embed thread; its guard undoes it.
   { name: 'uvboost-e2e', file: 'uvboost-e2e.js', e2e: true },
   // Every bundled page under its CSP in a real instance: zero violations, the policy proven active.
-  { name: 'csp-e2e', file: 'csp-e2e.js', e2e: true, timeout: 240 },
+  // Its own watchdog ends a hung step at 240 s with a named FAIL and cleans up (~30 s); this limit
+  // is only the backstop above that.
+  { name: 'csp-e2e', file: 'csp-e2e.js', e2e: true, timeout: 300 },
   { name: 'log-e2e', file: 'log-e2e.js', e2e: true },
   { name: 'log-e2e-nogate', file: 'log-e2e.js', args: ['--no-gate', '--cdp', '9428'], e2e: true },
   { name: 'drm-e2e', file: 'drm-e2e.js', e2e: true },
@@ -350,6 +352,9 @@ function runOne(t, env) {
     results.push(r);
     console.log(`${r.status.padEnd(4)} ${r.name.padEnd(16)} ${(r.ms / 1000).toFixed(1).padStart(6)} s  ${r.why}`);
     for (const l of r.failLines) console.log('       ' + l.trim().slice(0, 240));
+    // A check a file could not run HERE prints "SKIP <check>: <reason>" (never counted as a pass):
+    // shown under its file, pass or fail, so a green file with skipped checks says so in this log too.
+    if (r.status !== 'SKIP') for (const l of (r.text || '').split(/\r?\n/).filter((x) => /^SKIP\b/.test(x.trim())).slice(0, 8)) console.log('       ' + l.trim().slice(0, 240));
   }
   const n = (s) => results.filter((r) => r.status === s).length;
   const checksPassed = results.reduce((a, r) => a + r.passed, 0);

@@ -83,6 +83,14 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
   try {
     const free = freeRamGb();
     if (!(free >= MIN_FREE_GB)) { console.log('askclaude-e2e: not launched: ' + free.toFixed(2) + ' GB free RAM, needs ' + MIN_FREE_GB + ' GB'); process.exit(3); }
+    // The stand-in runs in a real pseudo-console: without node-pty's native ConPTY module (an
+    // `npm ci --ignore-scripts` tree, as on the hosted CI runner) the chamber cannot start and every
+    // check after "Claude opens" could only time out. A SKIP with the reason, never a FAIL or a pass.
+    const conpty = path.join(APP, 'node_modules', '@homebridge', 'node-pty-prebuilt-multiarch', 'build', 'Release', 'conpty.node');
+    if (!fs.existsSync(conpty)) {
+      console.log('askclaude-e2e: cannot run: needs node-pty built for Electron (' + path.relative(APP, conpty) + ' is missing), so no Claude chamber can start here');
+      process.exit(2);
+    }
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     try { fs.unlinkSync(LOG); } catch (e) { /* none yet */ }
     site = await serve((req, res, p) => (p === '/page.html' ? html(res, PAGE) : false));

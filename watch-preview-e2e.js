@@ -91,6 +91,7 @@ function tmdbServer() {
   return new Promise((r) => srv.listen(TMDB_PORT, '127.0.0.1', () => r(srv)));
 }
 
+const FULL_MOTION = { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] };
 async function guest(q, errors, net) {
   let t = null;
   for (let i = 0; i < 250 && !t; i++) {
@@ -132,6 +133,10 @@ async function guest(q, errors, net) {
     { urlPattern: '*', resourceType: 'Image', requestStage: 'Request' },
   ] });
   await g.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // Full motion is pinned, not inherited: previews never autoplay under reduced motion, and with
+  // Windows' "Show animations" off (as on the hosted CI runner) every hover and rest check would
+  // only see the note. Step 4 sets reduce on purpose and puts THIS back after.
+  await g.send('Emulation.setEmulatedMedia', FULL_MOTION);
   return g;
 }
 
@@ -299,7 +304,7 @@ if (require.main === module) {
       await sleep(1100);
       const s4 = await g.ev(STATE);
       check(s4.frames === 0 && /reduce motion/i.test(s4.note), 'reduced motion: no frame, and the note says why ("' + s4.note + '")', s4);
-      await g.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: '' }] });
+      await g.send('Emulation.setEmulatedMedia', FULL_MOTION);
       await g.ev('(() => { const a = document.activeElement; if (a && a.blur) a.blur(); return 1; })()');
       await sleep(200);
 
