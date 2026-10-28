@@ -843,25 +843,27 @@ html.home-measure .home { grid-template-rows: 100vh; }
 /* --- the session readout ------------------------------------- */
 /* No card any more: the piece is a few quiet pills over the picture, the
    way the day's figures sit along the foot of a calm page. Each pill is the
-   shortcut tiles' capsule (30px, a full radius) with a neutral 5% tint of
-   the text colour as its only fill: no border, no shadow, no blur, no
-   accent. A pill is a readout, not a control, so nothing here has a hover;
+   shortcut tiles' capsule (30px, a full radius) in the Saved chips' own
+   fill (--home-glass), which keeps the words legible over any picture,
+   and nothing else: no border, no shadow, no blur, no accent. Labels are
+   --text-2 and figures --text, one step under the chips' own ink.
+   A pill is a readout, not a control, so nothing here has a hover;
    the two idle-music buttons are the only things in the piece you can
    press, and the only things that answer the pointer.
 
    GEOMETRY (what keeps a dragged layout where it was): the piece keeps the
    card's 224px width, and its lines are fixed 30px rows with 6px between
    them, at most four (tabs + blocked, auto-pause, idle music, Claude) =
-   138px, under the 158px the card stood at. A box no larger than the old
-   one, at any anchor, lies inside the old one's rect, so this change can
-   never push a neighbour further away or fold a stored layout. It CAN let
-   one come back closer: a piece that was never moved, which arrange() had
-   nudged clear of the taller card, now needs a shorter nudge. Measured with
-   the session dropped top-left over the left rail, the unmoved Now playing
-   card sits 56px higher than it did (the card's 158px minus the pills'
-   102px), nearer the place the default arrangement gives it. Every placed
-   piece keeps its rect exactly. A line never wraps: a pill that runs out of
-   room ellipsises its words instead. */
+   138px, under the 158px the card stood at. The drawn box is shorter, but
+   the box an arranged layout is COMPUTED from is not: newtab.js
+   homeRestHeight() reports the session at the old card's 158px whenever
+   the page measures it, so arrange() nudges every unmoved neighbour
+   exactly as it did around the card, and a Home the user arranged before
+   the pills draws every piece where it did, to the pixel (without that, an
+   unmoved Now playing card under a session dropped top-left rose 56px).
+   The cost is an empty 56px keep-clear zone under the pills in arranged
+   layouts. A line never wraps: a pill that runs out of room ellipsises its
+   words instead. */
 .module-session {
   padding: 0;
   border: 0;
@@ -899,8 +901,8 @@ html.home-measure .home { grid-template-rows: 100vh; }
   height: 30px;
   padding: 0 11px;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  color: var(--text-3);
+  background: var(--home-glass);         /* the Saved chips' own fill, without their blur */
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -915,7 +917,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
 
 .sess-value {
   flex: 0 0 auto;
-  color: var(--text-2);
+  color: var(--text);
   font-size: var(--fs-xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1164,13 +1166,13 @@ html.home-measure .home { grid-template-rows: 100vh; }
   margin: 0;
   padding: 0 var(--space-1) 0 11px;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: var(--home-glass);         /* the Saved chips' own fill, without their blur */
   text-shadow: var(--home-shadow);
 }
 
 .mod-music-caption {
   flex: 0 0 auto;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   font-stretch: var(--readout-stretch);
   letter-spacing: .01em;
@@ -1195,7 +1197,7 @@ html.home-measure .home { grid-template-rows: 100vh; }
    weight, and only a playing title gets the readout voice. */
 .mod-music[data-music="off"] .mod-music-state,
 .mod-music[data-music="paused"] .mod-music-state {
-  color: var(--text-3);
+  color: var(--text-2);
   font-weight: 400;
 }
 
