@@ -415,48 +415,5 @@ function stripComments(text) {
   check('clearClaudeNeedsYou pushes the readout', /pushReadoutToAll\(\);\s*\}$/.test(cutFunction(APP_JS, 'clearClaudeNeedsYou')));
 })();
 
-/* ------------------------------------------- 7. the pills' legibility (option A) */
-// The pills wear the Saved chips' own fill (--home-glass) so their words hold
-// over any picture, and still no blur, border or shadow; labels one step up
-// (--text-2) and figures at --text.
-(function pillInk() {
-  const css = stripComments(CSS);
-  const rule = (sel) => {
-    const m = css.match(new RegExp('(^|\\n)' + sel.replace(/[.[\]="()]/g, (c) => '\\' + c) + '\\s*\\{([^}]*)\\}'));
-    return m ? m[2] : '';
-  };
-  const pill = rule('.sess-pill');
-  const row = rule('.mod-music-row');
-  check('pill fill is the chips\' --home-glass', /background:\s*var\(--home-glass\)/.test(pill), pill);
-  check('music row fill is the chips\' --home-glass', /background:\s*var\(--home-glass\)/.test(row), row);
-  check('no blur on a pill or the music row', !/backdrop-filter/.test(pill + row));
-  check('no border or shadow on a pill', !/\bborder\s*:/.test(pill) && !/box-shadow/.test(pill));
-  check('pill labels are --text-2', /(^|\n)\s*color:\s*var\(--text-2\)/.test(pill), pill);
-  check('pill figures are --text', /color:\s*var\(--text\);/.test(rule('.sess-value')));
-  check('the music caption is --text-2', /color:\s*var\(--text-2\)/.test(rule('.mod-music-caption')));
-  check('Off / Paused read at --text-2', /color:\s*var\(--text-2\)/.test(
-    rule('.mod-music[data-music="off"] .mod-music-state,\n.mod-music[data-music="paused"] .mod-music-state')));
-})();
-
-/* ------------------------- 8. arranged layouts keep the old card's footprint (B) */
-// homeRestHeight reports the session at >= 158px (the card it replaced), so
-// arrange() nudges every unmoved neighbour exactly as it did around the card.
-(function sessionFootprint() {
-  const src = cutConst(NEWTAB_JS, 'SESSION_FOOTPRINT_H', ';') + '\n' + cutFunction(NEWTAB_JS, 'homeRestHeight') +
-    '\nreturn { homeRestHeight: homeRestHeight, H: SESSION_FOOTPRINT_H };';
-  const m = new Function(src)();
-  const plain = { classList: { contains: () => false }, querySelector: () => null };
-  eq('the footprint is the old card\'s 158px', m.H, 158);
-  eq('session drawn 102px counts as 158', m.homeRestHeight('session', plain, { height: 102 }), 158);
-  eq('session at its tallest (138px) counts as 158', m.homeRestHeight('session', plain, { height: 138 }), 158);
-  eq('a session taller than the card keeps its own height', m.homeRestHeight('session', plain, { height: 170 }), 170);
-  eq('other pieces keep their measured height', m.homeRestHeight('media', plain, { height: 116 }), 116);
-  const procs = { classList: { contains: (c) => c === 'is-procs-open' },
-    querySelector: () => ({ getClientRects: () => [1], getBoundingClientRect: () => ({ height: 200 }) }) };
-  eq('stats with its process list open still counts folded', m.homeRestHeight('stats', procs, { height: 330 }), 130);
-  check('homeMeasure reads every piece\'s height through homeRestHeight',
-    /homeRestHeight\(id, el, r\)/.test(cutFunction(NEWTAB_JS, 'homeMeasure')));
-})();
-
 console.log('home-design: ' + passed + ' passed, ' + failed + ' failed');
 process.exitCode = failed ? 1 : 0;

@@ -5037,15 +5037,7 @@ function homeRel(r, h) {
  * around (and a long list may run past the window: the page scrolls then,
  * as it always did); so the card counts at its folded height.
  */
-const SESSION_FOOTPRINT_H = 158;
-
 function homeRestHeight(id, el, r) {
-  // The session piece was a 158px card before it became pills (102px drawn
-  // now, 138px at most). Arranged layouts and drags keep laying the unmoved
-  // pieces out around that old footprint, so a Home the user arranged before
-  // the pills draws every piece exactly where it did (newtab.css, "GEOMETRY"
-  // under the session pills).
-  if (id === 'session') return Math.max(r.height, SESSION_FOOTPRINT_H);
   if (id !== 'stats' || !el.classList.contains('is-procs-open')) return r.height;
   const procs = el.querySelector('#procs');
   if (!procs || !procs.getClientRects().length) return r.height;
