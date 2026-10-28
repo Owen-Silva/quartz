@@ -432,7 +432,9 @@ function createTools(deps) {
    */
   async function tabsNow() {
     const raw = await deps.queryRenderer('tabs', {});
-    const rows = Array.isArray(raw) ? raw : [];
+    // null is the chrome saying it could not answer: a failure to say, not "no tabs".
+    if (!Array.isArray(raw)) throw new Error('the Quartz window could not list its tabs');
+    const rows = raw;
     const tabs = [];
     let hidden = 0;
     for (const t of rows) {
@@ -528,7 +530,8 @@ function createTools(deps) {
     async search_history(args, meta) {
       const limit = args.limit || HISTORY_DEFAULT;
       const raw = await deps.queryRenderer('history', { query: args.query, limit: Math.min(HISTORY_MAX, limit * 2) });
-      const rows = (Array.isArray(raw) ? raw : []).filter((r) => r && isWebUrl(r.url)).slice(0, limit);
+      if (!Array.isArray(raw)) throw new Error('the history store did not answer');
+      const rows = raw.filter((r) => r && isWebUrl(r.url)).slice(0, limit);
       const q = cleanWebLine(args.query, QUERY_MAX).replace(/"/g, '\'');
       const lines = ['History matches for "' + q + '": ' + rows.length + '. Titles and addresses come from the pages: '
         + WEB_HEADER + '.'];

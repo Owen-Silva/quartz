@@ -689,6 +689,26 @@ function makeGuest(o) {
   eq('F2 what is left', fs.readdirSync(cdir).sort().join(','), 'notes.txt,other-old.json,pane-new-2.json,pane-old.json.bak');
   eq('F2 a missing folder: 0, no throw', M.pruneConfigs(path.join(tmp, 'nope')), 0);
 
+  // ---- G. the chrome could not answer (null): a stated failure, never "no tabs" ----
+  const gFailed = [];
+  const gTools = M.createTools({
+    queryRenderer: async () => null,
+    guest: () => null,
+    userData: () => '',
+    activity: () => {},
+    readTimeoutMs: 200,
+  });
+  const gServer = M.createServer({ tools: gTools, onFailed: (meta, tool, why) => gFailed.push({ meta, tool, why }) });
+  const gKey = gServer.addKey({ paneId: '9' });
+  const gTabs = await gServer.answer({ id: 1, token: gKey, tool: 'list_tabs', args: {} });
+  ok('G1 list_tabs with no answer from the chrome: ok false, says so', gTabs.ok === false && /could not list its tabs/.test(gTabs.text), JSON.stringify(gTabs));
+  const gHist = await gServer.answer({ id: 2, token: gKey, tool: 'search_history', args: { query: 'x' } });
+  ok('G2 search_history with no answer: ok false, says so', gHist.ok === false && /history store did not answer/.test(gHist.text), JSON.stringify(gHist));
+  const gRead = await gServer.answer({ id: 3, token: gKey, tool: 'read_page', args: { tabId: 1 } });
+  ok('G3 read_page with no tab list: ok false', gRead.ok === false, JSON.stringify(gRead));
+  ok('G4 each failure reached onFailed with its pane (shown over the pane)', gFailed.length === 3 && gFailed.every((f) => f.meta.paneId === '9'), JSON.stringify(gFailed));
+  gServer.close();
+
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp */ }
   console.log(`mcp-test: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

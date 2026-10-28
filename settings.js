@@ -26,6 +26,8 @@
  *     claudeSkipPermissions: true | false,  // --dangerously-skip-permissions;
  *                                           // off on a new profile
  *     claudeNotify: true | false,           // toast when a pane goes quiet
+ *     claudeReadTabs: true | false,         // Claude panes get Quartz's read-only
+ *                                           // tab tools (mcp-main.js); default on
  *     tabSleepMinutes: 0|15|30|60|180,      // 0 = never sleep a background tab
  *     workspaceSleep: 'newtab'|'all'|'off', // sleep tabs in the workspaces
  *                                           // you are not looking at
@@ -170,6 +172,10 @@
     /* A quiet Windows notification when a background Claude pane stops working
        and waits on an answer. The chip's amber mark is not optional; this is. */
     claudeNotify: true,
+    /* Claude panes start with Quartz's read-only tab tools (list tabs, read a
+       page, search history and notes, highlight a quote; mcp-main.js). Every
+       call shows a line over the pane. Off: panes start without them and say so. */
+    claudeReadTabs: true,
     tabSleepMinutes: 30,
     /* Workspace sleep. Every preset workspace opens on a new tab page, and a
        new tab page paints a moving background: six of them decode 60 fps each
@@ -510,6 +516,8 @@
       case 'claudeSkipMigration': return value === 1 ? 1 : 0;
       /* Only an explicit true skips the prompts; anything else asks. */
       case 'claudeSkipPermissions': return value === true;
+      /* Only an explicit false turns the tab tools off. */
+      case 'claudeReadTabs': return value !== false;
       default: return value;
     }
   }
@@ -3037,6 +3045,10 @@
     skip.setAttribute('data-field', 'claudeskip');
     s.appendChild(skip);
 
+    var readTabs = el('div', 'set-field');
+    readTabs.setAttribute('data-field', 'claudereadtabs');
+    s.appendChild(readTabs);
+
     var notify = el('div', 'set-field');
     notify.setAttribute('data-field', 'claudenotify');
     s.appendChild(notify);
@@ -3047,6 +3059,7 @@
     renderClaudeDir();
     renderClaudeResume();
     renderClaudeSkip();
+    renderClaudeReadTabs();
     renderClaudeNotify();
   }
 
@@ -3184,6 +3197,28 @@
       + 'Panes opened by Ask or Show Claude hold a web page’s text, so they always ask before acting and run in '
       + 'a scratch folder, whatever this says.'));
     field.appendChild(hint);
+  }
+
+  function renderClaudeReadTabs() {
+    var field = bodyEl && bodyEl.querySelector('[data-field="claudereadtabs"]');
+    if (!field) return;
+    field.textContent = '';
+
+    /* Main decides per spawn (mcp-main.js prepareLaunch); this switch only
+       says whether a NEW pane gets the tools. A pane already running keeps
+       what it started with, which the hint says. */
+    field.appendChild(switchRow(
+      'Let Claude panes read your open tabs',
+      get('claudeReadTabs') !== false,
+      function (next) { set({ claudeReadTabs: next === true }); }
+    ));
+
+    field.appendChild(el('p', 'set-hint',
+      'Claude can list your open web tabs, read a page’s text, search your history and notes, and point at a '
+      + 'passage in a page. It cannot click, type or change anything. Every read shows a line over the pane '
+      + 'that asked, and Quartz’s own pages are never shared.'));
+    field.appendChild(el('p', 'set-hint',
+      'Off, new Claude panes start without these tools and say so. Panes already open keep what they started with.'));
   }
 
   function renderClaudeNotify() {
@@ -9124,6 +9159,7 @@
       if (keys.indexOf('claudeDir') >= 0) renderClaudeDir();
       if (keys.indexOf('claudeResume') >= 0) renderClaudeResume();
       if (keys.indexOf('claudeSkipPermissions') >= 0) renderClaudeSkip();
+      if (keys.indexOf('claudeReadTabs') >= 0) renderClaudeReadTabs();
       if (keys.indexOf('claudeNotify') >= 0) renderClaudeNotify();
       if (keys.indexOf('tabSleepMinutes') >= 0) renderTabs();
       // The mode decides whether the minutes row is there at all, so both keys
