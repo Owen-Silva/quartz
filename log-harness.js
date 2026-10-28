@@ -259,7 +259,8 @@ const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} /;
     h.adblock({ ok: true, ms: 12, fromCache: false, enabled: false });
     check(/ freshly downloaded filter lists; blocking is OFF \(turned off in Settings\)\.$/.test(lines(file).pop()), 'adblock via the hook', lines(file).pop());
     app.emit('quit');
-    check(/ Quartz quit after \d+ s\. This run: 1 tab crash, 1 window crash, 1 helper process stop, 3 hangs, 1 failed page load, 1 tab put to sleep, 0 unhandled errors\.$/.test(lines(file).pop()), 'app quit -> the quit line', lines(file).pop());
+    // (two tab-slept events above: the workspace one and the early "memory" one)
+    check(/ Quartz quit after \d+ s\. This run: 1 tab crash, 1 window crash, 1 helper process stop, 3 hangs, 1 failed page load, 2 tabs put to sleep, 0 unhandled errors\.$/.test(lines(file).pop()), 'app quit -> the quit line', lines(file).pop());
     check(read(file).split('\n').filter(Boolean).every((l) => STAMP.test(l) && !/[\x00-\x08]/.test(l)), 'every line of the installed log is one stamped line');
   }
 } catch (e) {
