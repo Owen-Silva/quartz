@@ -364,11 +364,16 @@ const apps = appsModule.create({ app, shell });
  * gate in front of the Settings channels, and which URLs are our own pages.
  *
  * The Finnhub key never comes back out of this module. `stocks.describe()` is
- * a mask and a boolean, and that is what IPC returns.
+ * a mask and a boolean, and that is what IPC returns. At rest it is encrypted
+ * with safeStorage (secret-store.js), as are the Brave and TMDB keys below.
  */
+/** quartz.log lines from the key stores (secret-store.js): migrations, unreadable keys. Never a key. */
+const keyStoreLog = (line) => { if (qlog) qlog.log.line('[keys] ' + line); else console.log('[keys] ' + line); };
 const stocks = stocksModule.create({
   app,
   ipcMain,
+  safeStorage: require('electron').safeStorage,
+  keyLog: keyStoreLog,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
 });
@@ -383,6 +388,8 @@ const stocks = stocksModule.create({
 const braveSearch = braveSearchModule.create({
   app,
   ipcMain,
+  safeStorage: require('electron').safeStorage,
+  keyLog: keyStoreLog,
   isChromeSender: (event) => isChromeSender(event),
   isBundledPage: (url) => isBundledPageUrl(url),
   apiBase: process.argv.includes('--test-profile') && process.env.QUARTZ_BRAVE_API
@@ -594,6 +601,7 @@ const watch = (() => {
     return require('./watch-main').create({
       app,
       ipcMain,
+      safeStorage: require('electron').safeStorage,   // the TMDB key at rest (secret-store.js)
       session,
       BrowserWindow,
       isChromeSender: (event) => isChromeSender(event),
@@ -3041,8 +3049,10 @@ function adblockState() {
       loadError: blocker ? '' : adblockLists.loadError,
     },
   };
-  // Test profiles also get the hook counters, so an e2e run can measure them.
-  if (ADBLOCK_TEST) state.hooks = adblockHooks.stats();
+  // The hook counters (calls per type, time in each hook): the shield puts them
+  // on its status line, and an e2e run measures them. A small object, built
+  // only when the state is sent, never per request.
+  state.hooks = adblockHooks.stats();
   return state;
 }
 
@@ -3295,7 +3305,20 @@ function forgetAdblockTab(wcId) {
   adblockSendState.delete(wcId);
 }
 
-ipcMain.handle('adblock:state', () => adblockState());
+// The shield asks for the state when its panel opens: that is also when the
+// hook counters go to quartz.log (on demand, at most once every 15 minutes,
+// on top of the one line at quit), so the log has the numbers the user saw.
+let adblockHooksLoggedAt = 0;
+ipcMain.handle('adblock:state', () => {
+  const t = Date.now();
+  if (qlog && t - adblockHooksLoggedAt >= 15 * 60 * 1000) {
+    try {
+      const words = adblockHooks.summaryWords();
+      if (words) { qlog.log.line(words); adblockHooksLoggedAt = t; }
+    } catch { /* the log is optional */ }
+  }
+  return adblockState();
+});
 
 ipcMain.handle('adblock:count', (_event, payload) => {
   const wcId = payload && payload.wcId;

@@ -198,7 +198,15 @@ async function guest(urlRe, notId) {
     const desc = await chrome.ev('window.api.braveSearch.describe()');
     check(desc.hasKey && desc.keyMask === '••••7a1c' && !JSON.stringify(desc).includes(GOOD), 'describe(): hasKey + mask only', JSON.stringify(desc));
     const stored = JSON.parse(fs.readFileSync(path.join(PROFILE_DIR, 'brave-search.json'), 'utf8'));
-    check(stored.key === GOOD, 'key stored in <userData>/brave-search.json', PROFILE_DIR);
+    // At rest the key is encrypted with safeStorage (secret-store.js): keyEnc only, never the key's text.
+    // Where encryption is unavailable it is kept in plain text and Settings must say so beside the field.
+    if (desc.keyStorage === 'unencrypted') {
+      const note = await chrome.ev("(() => { const n = document.querySelector('.set-brave-key-storage'); return n ? n.textContent : ''; })()");
+      check(stored.key === GOOD && /stored unencrypted: /.test(note), 'no encryption here: kept in plain text, and Settings says why', note);
+    } else {
+      check(desc.keyStorage === 'encrypted' && typeof stored.keyEnc === 'string' && !('key' in stored) &&
+        !fs.readFileSync(path.join(PROFILE_DIR, 'brave-search.json'), 'utf8').includes(GOOD), 'key stored ENCRYPTED in <userData>/brave-search.json (keyEnc, no plain key)', PROFILE_DIR);
+    }
     await chrome.ev('Settings.close(), 1');
 
     // ---- results -----------------------------------------------------------------------------

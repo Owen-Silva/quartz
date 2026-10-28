@@ -313,6 +313,13 @@ function fakeTimers() {
     check(S.statusText(st({}, { ready: false }), T) === 'Filter lists loading…', 'shield: still loading');
     check(S.statusText(st({ updatedAt: T }, { enabled: false }), T) === 'Blocking is off', 'shield: off is off');
     check(S.statusText(S.stateFrom({ enabled: true, ready: true }), T) === 'Filter lists ready', 'shield: an old backend without lists still reads');
+
+    // The hook counters in the status line's details (tooltip).
+    const hk = { requestTotal: 840, request: { script: 300, image: 200, xhr: 150, font: 40 }, headersTotal: 12, headersFiltered: true, requestMs: 101.4, headersMs: 2.3 };
+    check(S.stateFrom({ hooks: hk }).hooks === hk && S.stateFrom({}).hooks === null, 'shield: the state carries the hook counters (null from an old backend)');
+    check(S.hooksText(hk) === 'This session the ad blocker checked 840 requests (script 300, image 200, xhr 150) in 104 ms. Its response-header hook ran 12 times (pages and frames only).', 'shield: the hook details', S.hooksText(hk));
+    check(/on every response: this Electron could not limit it/.test(S.hooksText(Object.assign({}, hk, { headersFiltered: false }))), 'shield: an unfiltered hook says so with the reason');
+    check(S.hooksText(null) === '' && S.hooksText({ requestTotal: 0 }) === '', 'shield: no counters yet = no details');
   }
 } catch (err) {
   check(false, 'harness crashed', (err && err.stack) || err);

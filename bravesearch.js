@@ -24,7 +24,9 @@
 // ignored, so no site can spend the user's searches.
 //
 // THE KEY. Pasted in Settings > Search, kept in <userData>/brave-search.json (the same place and
-// shape as the Finnhub key in stocks.json: the profile folder, never the repo). It only ever goes
+// shape as the Finnhub key in stocks.json: the profile folder, never the repo), ENCRYPTED at rest
+// with Electron safeStorage (secret-store.js: field `keyEnc`; an older plain `key` is migrated on
+// first read; plain text only when encryption is unavailable, and Settings says so). It only ever goes
 // one way: describe() answers `hasKey` and a mask, there is no channel that returns it, and it is
 // never logged. It leaves this process only as the X-Subscription-Token header to Brave.
 //
@@ -45,6 +47,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const SecretStore = require('./secret-store');
 
 const API_BASE = 'https://api.search.brave.com/res/v1';
 const ENDPOINTS = { web: '/web/search', news: '/news/search', videos: '/videos/search' };
@@ -601,6 +604,11 @@ function create(deps) {
   const sleep = typeof d.sleep === 'function' ? d.sleep : (ms) => new Promise((r) => setTimeout(r, ms));
   const isBundledPage = typeof d.isBundledPage === 'function' ? d.isBundledPage : () => false;
   const log = typeof d.log === 'function' ? d.log : (...a) => console.log('[brave-search]', ...a);
+  // The key at rest (secret-store.js). keyLog reaches quartz.log; it never receives the key.
+  const secret = SecretStore.create({
+    field: 'key', label: 'Brave Search key', clean: cleanKey, mask: maskKey,
+    safeStorage: d.safeStorage, log: typeof d.keyLog === 'function' ? d.keyLog : (line) => log(line),
+  });
   const storeFile = d.storePath || (() => {
     if (!electronApp || typeof electronApp.getPath !== 'function') return '';
     try { return path.join(electronApp.getPath('userData'), STORE_FILE); } catch { return ''; }
@@ -615,20 +623,26 @@ function create(deps) {
   const inFlight = new Map();
 
   function load() {
-    if (loaded) return;
+    if (loaded) { if (!key) key = secret.get(); return; }   // a key saved before encryption was ready
     loaded = true;
     const file = storeFile();
     if (!file) return;
     let json = null;
     try { json = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
-    if (json && typeof json.key === 'string') key = cleanKey(json.key);
+    // A plain key from an older build is encrypted here and the file rewritten without it.
+    const r = secret.load(json);
+    key = secret.get();
+    if (r.rewrite) secret.wrote(save());
   }
 
   function save() {
     const file = storeFile();
     if (!file) return false;
     try {
-      if (key) fs.writeFileSync(file, JSON.stringify({ key }, null, 2), { encoding: 'utf8', mode: 0o600 });
+      // keyEnc (or key, when encryption is unavailable); a saved key that cannot be decrypted is
+      // written back as it was, never dropped, until the user replaces or clears it.
+      const fields = secret.fields();
+      if (Object.keys(fields).length) fs.writeFileSync(file, JSON.stringify(fields, null, 2), { encoding: 'utf8', mode: 0o600 });
       else fs.rmSync(file, { force: true });
       return true;
     } catch (err) {
@@ -639,9 +653,13 @@ function create(deps) {
 
   function describe() {
     load();
+    const st = secret.status();
     return {
       hasKey: !!key,
       keyMask: maskKey(key),
+      keyStorage: st.keyStorage,           // 'encrypted' | 'unencrypted' | 'none'
+      keyStorageNote: st.keyStorageNote,   // 'stored unencrypted: <reason>' or ''
+      keyError: st.keyError,               // a saved key that could not be read, or ''
       last: last ? Object.assign({}, last) : null,
       usage: usage ? Object.assign({}, usage) : null,
       signupUrl: SIGNUP_URL,
@@ -654,12 +672,15 @@ function create(deps) {
     const next = cleanKey(raw);
     const typed = String(raw == null ? '' : raw).trim();
     if (typed && !next) return Object.assign(describe(), { error: 'That does not look like a key: it has spaces or odd characters in it.' });
-    if (next === key) return describe();
-    key = next;
+    if (next === key && !secret.status().keyError) return describe();
+    secret.set(next);
+    key = secret.get();
     last = null;
     usage = null;
     cache.clear();
-    if (!save()) return Object.assign(describe(), { error: 'The key could not be written to the profile folder.' });
+    const wroteOk = save();
+    secret.wrote(wroteOk);
+    if (!wroteOk) return Object.assign(describe(), { error: 'The key could not be written to the profile folder.' });
     return describe();
   }
 
@@ -731,10 +752,14 @@ function create(deps) {
     load();
     const req = { q: input.q, kind: input.kind || 'web', offset: input.offset || 0, seq: input.seq || 0 };
     if (!key) {
+      // A saved key that cannot be decrypted is said as that, not as "no key yet".
+      const unreadable = secret.status().keyError;
       const answer = fail(req, {
         state: 'no-key',
-        title: 'No Brave Search key yet',
-        detail: 'Quartz draws this page from the Brave Search API, and that needs a key. Get one at brave.com/search/api, paste it in Settings > Search, then press Try again.',
+        title: unreadable ? 'The saved Brave Search key could not be read' : 'No Brave Search key yet',
+        detail: unreadable
+          ? unreadable.replace(/ Paste the key again\.$/, '') + ' Paste it again in Settings > Search, then press Try again.'
+          : 'Quartz draws this page from the Brave Search API, and that needs a key. Get one at brave.com/search/api, paste it in Settings > Search, then press Try again.',
         retry: true, settings: true,
       });
       remember(answer);

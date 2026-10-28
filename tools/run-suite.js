@@ -54,6 +54,7 @@ const TESTS = [
   { name: 'autopause-link', file: 'autopause-harness.js', args: ['--link'] },
   { name: 'bravesearch', file: 'bravesearch-harness.js' },
   { name: 'claudeanswer', file: 'claudeanswer-harness.js' },
+  { name: 'secret-store', file: 'secret-store-harness.js' },
   // Claude "Skip permission prompts": off on a new profile, the one-time migration that keeps an older
   // profile on, app.js's start arguments and preload's default (settings.js / app.js / preload.js in vm).
   { name: 'claudeskip', file: 'claudeskip-harness.js' },
@@ -64,6 +65,9 @@ const TESTS = [
   { name: 'askclaude-e2e', file: 'askclaude-e2e.js', e2e: true },
   // tools/check-electron.js's pure half: pin parsing, tag order, the bump-policy verdict.
   { name: 'check-electron', file: 'check-electron-harness.js' },
+  // tools/audit-verdict.js: the ci audit job's verdict line, and that the castlabs git Electron stays
+  // visible to npm audit (an unversioned lockfile entry would be skipped and pass).
+  { name: 'audit-verdict', file: 'tests/audit-verdict-test.js' },
   // Every bundled page's Content-Security-Policy: present, above the first script, parses, strict,
   // and nothing in the page or its scripts that the policy would refuse (csp-e2e.js is the live half).
   { name: 'csp', file: 'csp-harness.js' },
@@ -78,6 +82,8 @@ const TESTS = [
   // Ad-block list refresh: when it is due, validation, the atomic write, keep-old on failure, a real
   // Ghostery build on a fake fetch, the session hooks and the shield line.
   { name: 'adblock-refresh', file: 'adblock-refresh-harness.js' },
+  // The narrowed ad-block hooks answer exactly as the library's own did, on a real engine, every type.
+  { name: 'adblock-hooks', file: 'adblock-hooks-harness.js' },
   // The same in a real Quartz against a local list server: a failed refresh says why, then one swaps in.
   { name: 'adblock-refresh-e2e', file: 'adblock-refresh-e2e.js', e2e: true },
   { name: 'procfind', file: 'procfind-harness.js' },

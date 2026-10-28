@@ -142,8 +142,34 @@
         refreshing: !!l.refreshing,
         error: typeof l.error === 'string' ? l.error : '',
         loadError: typeof l.loadError === 'string' ? l.loadError : ''
-      }
+      },
+      // The hook counters (adblock-hooks.js stats()), or null from an older backend.
+      hooks: (next && next.hooks && typeof next.hooks === 'object') ? next.hooks : null
     };
+  }
+
+  /**
+   * The status line's details (its tooltip): what the ad blocker's network
+   * hooks cost this session, in calls and milliseconds, so the narrowed
+   * response hook can be seen working. '' when there is nothing to say yet.
+   */
+  function hooksText(hooks) {
+    if (!hooks) return '';
+    var total = Number(hooks.requestTotal) || 0;
+    if (total <= 0) return '';
+    var types = [];
+    var req = hooks.request && typeof hooks.request === 'object' ? hooks.request : {};
+    for (var k in req) {
+      if (Object.prototype.hasOwnProperty.call(req, k)) types.push([k, Number(req[k]) || 0]);
+    }
+    types.sort(function (a, b) { return b[1] - a[1]; });
+    var top = types.slice(0, 3).map(function (p) { return p[0] + ' ' + p[1]; }).join(', ');
+    var ms = Math.round((Number(hooks.requestMs) || 0) + (Number(hooks.headersMs) || 0));
+    var heads = Number(hooks.headersTotal) || 0;
+    return 'This session the ad blocker checked ' + total + (total === 1 ? ' request' : ' requests')
+      + (top ? ' (' + top + ')' : '') + ' in ' + ms + ' ms. Its response-header hook ran '
+      + heads + (heads === 1 ? ' time' : ' times')
+      + (hooks.headersFiltered === false ? ' (on every response: this Electron could not limit it).' : ' (pages and frames only).');
   }
 
   /**
@@ -468,6 +494,7 @@
   function paintStatus() {
     if (!statusEl) return;
     statusEl.textContent = statusText(st);
+    statusEl.title = hooksText(st.hooks);
     var failed = !!st.enabled && !!(st.lists.error || (!st.ready && st.lists.loadError));
     if (failed) statusEl.classList.add('is-warn');
     else statusEl.classList.remove('is-warn');
@@ -662,6 +689,7 @@
       formatCount: formatCount,
       statusText: statusText,
       stateFrom: stateFrom,
+      hooksText: hooksText,
       ageWords: ageWords,
       subtitleFor: subtitleFor
     }

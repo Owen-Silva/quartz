@@ -3,6 +3,9 @@
 #   unit  every push and pull request: the pure-node harnesses (`run-suite.js --unit`), no Electron.
 #   full  nightly and on demand (Actions > ci > Run workflow): every harness, then every Electron e2e in
 #         a real off-screen --test-profile instance, one at a time, on the castlabs build.
+#   audit every push, pull request, night and manual run: `npm audit --omit=dev` over the runtime
+#         dependencies in package-lock.json; fails on any high or critical advisory (see the job for
+#         the castlabs build).
 #
 # Both run on windows-latest. Quartz is a Windows app and several unit harnesses exercise Windows itself
 # (they spawn powershell.exe, make real junctions and file locks, and expect case-insensitive paths), so
@@ -87,6 +90,57 @@ jobs:
             suite-out/
           retention-days: 14
           if-no-files-found: ignore
+
+  # Known advisories in the runtime dependencies (what ships and runs with the browser; devDependencies
+  # are left out). It runs on pushes and PRs (a new or bumped dependency), on the nightly schedule (a new
+  # advisory against dependencies that did not change) and on demand. npm audit reads only
+  # package-lock.json, so there is no install step.
+  #
+  # Electron is a git dependency (github:castlabs/electron-releases#vX.Y.Z+wvcus), not a registry package.
+  # npm audit still checks it: it matches by the lockfile's name and version, `electron` + `X.Y.Z+wvcus`,
+  # and semver ignores the `+wvcus` build tag, so the castlabs build is audited as upstream electron@X.Y.Z.
+  # That is the true verdict: a castlabs release is upstream Electron at that version plus Widevine, so
+  # upstream's advisories apply to it. Two things are handled by hand so the verdict stays true:
+  #   - npm reports such an advisory as "No fix available" because it cannot move a git dependency. The fix
+  #     is a newer castlabs tag at or above the advisory's patched version (tools/check-electron.js lists
+  #     them); the verdict line says so.
+  # Both are in tools/audit-verdict.js (tested by tests/audit-verdict-test.js), not inline here.
+  #   - If the lockfile ever lost electron's version (an unversioned git entry), audit would skip electron
+  #     without a word and pass. The first step fails the job in that case instead of passing it.
+  audit:
+    if: ${{ !github.event.repository.private }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Electron is visible to the audit
+        run: node tools/audit-verdict.js --check-lock package-lock.json
+
+      # The table is printed in full (every severity); the verdict counts only high and critical.
+      - name: npm audit (runtime dependencies)
+        run: |
+          set +e
+          npm audit --omit=dev
+          npm audit --omit=dev --json > audit.json
+          exit 0
+
+      - name: Verdict
+        run: |
+          verdict=$(node tools/audit-verdict.js audit.json)
+          { echo '### npm audit (runtime dependencies)'; echo; echo '```'; echo "$verdict"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$verdict"
+          case "$verdict" in
+            'npm-audit: runtime deps: 0 critical, 0 high,'*) exit 0 ;;
+            *) echo "::error::$verdict"; exit 1 ;;
+          esac
 
   full:
     if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !github.event.repository.private }}

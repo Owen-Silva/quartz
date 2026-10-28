@@ -41,14 +41,27 @@
  * set or cleared here, so it is never touched.
  *
  * Counters. Every callback bumps a per-resource-type count (an object
- * increment, nothing else), so the saving above is measured rather than
- * assumed: stats() hands them out and summaryWords() says them in one line
- * for quartz.log.
+ * increment, nothing else) and adds the time it spent to a per-hook total
+ * (two performance.now() reads and a number add: no allocation per call), so
+ * the saving above is measured rather than assumed: stats() hands them out,
+ * summaryWords() says them in one line for quartz.log, and hooksText() in
+ * shield.js puts the same numbers on the shield's status line.
+ *
+ * The response hook also gates itself: if it is ever handed a response that
+ * is not a page or a frame (an Electron that refused the `types` filter, see
+ * enable()), it answers {} at once without asking the engine -- exactly what
+ * the engine would have answered, since its onHeadersReceived only acts on
+ * mainFrame/subFrame. Those calls are still counted, under their own type
+ * and in `headersGated`, so a filter that stopped working shows up.
  */
 
 const INJECT_CHANNEL = '@ghostery/adblocker/inject-cosmetic-filters';
 const MUTATION_CHANNEL = '@ghostery/adblocker/is-mutation-observer-enabled';
 const FRAME_TYPES = ['mainFrame', 'subFrame'];
+
+/* A sub-millisecond clock for the time counters; Date.now as a last resort. */
+const perfNow = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+  ? () => performance.now() : () => Date.now();
 
 /**
  * d = {
@@ -56,7 +69,8 @@ const FRAME_TYPES = ['mainFrame', 'subFrame'];
  *   preloadPath,             // Ghostery's PRELOAD_PATH
  *   getBlocker(): engine|null
  *   log(line)                // optional, quartz.log
- *   now()                    // optional, for the harness
+ *   now()                    // optional, for the harness (wall clock, "since")
+ *   clock()                  // optional, for the harness (ms, the time counters)
  * }
  */
 function createAdblockHooks(d) {
@@ -64,7 +78,10 @@ function createAdblockHooks(d) {
   let sess = null;
   let preloadId;
   let headersFiltered = false;
+  const clock = d.clock || perfNow;
   const counts = { request: Object.create(null), headers: Object.create(null), since: now() };
+  // Time inside each hook (ms, summed) and its slowest single call; plain numbers, bumped in place.
+  const time = { requestMs: 0, headersMs: 0, requestMaxMs: 0, headersMaxMs: 0, headersGated: 0 };
 
   function bump(table, details) {
     const t = (details && details.resourceType) || 'other';
@@ -89,13 +106,28 @@ function createAdblockHooks(d) {
   }
 
   function onBeforeRequest(details, callback) {
+    const t0 = clock();
     bump(counts.request, details);
     relay('onBeforeRequest', details, callback);
+    const ms = clock() - t0;
+    time.requestMs += ms;
+    if (ms > time.requestMaxMs) time.requestMaxMs = ms;
   }
 
   function onHeadersReceived(details, callback) {
+    const t0 = clock();
     bump(counts.headers, details);
-    relay('onHeadersReceived', details, callback);
+    const t = details && details.resourceType;
+    if (t === 'mainFrame' || t === 'subFrame') {
+      relay('onHeadersReceived', details, callback);
+    } else {
+      // Not a page or a frame: the engine's answer would be {} -- give it without the call.
+      time.headersGated++;
+      callback({});
+    }
+    const ms = clock() - t0;
+    time.headersMs += ms;
+    if (ms > time.headersMaxMs) time.headersMaxMs = ms;
   }
 
   /*
@@ -167,6 +199,12 @@ function createAdblockHooks(d) {
       headers: Object.assign({}, counts.headers),
       requestTotal: sum(counts.request),
       headersTotal: sum(counts.headers),
+      headersGated: time.headersGated,
+      // Rounded to 0.01 ms: the IPC copy needs no more, and the shield shows whole ms.
+      requestMs: Math.round(time.requestMs * 100) / 100,
+      headersMs: Math.round(time.headersMs * 100) / 100,
+      requestMaxMs: Math.round(time.requestMaxMs * 100) / 100,
+      headersMaxMs: Math.round(time.headersMaxMs * 100) / 100,
     };
   }
 
@@ -179,8 +217,12 @@ function createAdblockHooks(d) {
     const saved = headersFiltered ? Math.max(0, s.requestTotal - s.headersTotal) : 0;
     return 'Ad blocker hooks since ' + new Date(s.since).toISOString().slice(0, 16).replace('T', ' ')
       + ': ' + s.requestTotal + ' requests checked (' + top + '); the response hook ran '
-      + s.headersTotal + (s.headersTotal === 1 ? ' time' : ' times') + (headersFiltered ? ' (pages and frames only, about ' + saved + ' calls saved).' : ' (unfiltered).');
+      + s.headersTotal + (s.headersTotal === 1 ? ' time' : ' times') + (headersFiltered ? ' (pages and frames only, about ' + saved + ' calls saved)' : ' (unfiltered, ' + s.headersGated + ' answered without the engine)')
+      + '; ' + fmtMs(s.requestMs + s.headersMs) + ' ms in the hooks in all (request hook ' + fmtMs(s.requestMs)
+      + ' ms, slowest call ' + fmtMs(s.requestMaxMs) + ' ms; response hook ' + fmtMs(s.headersMs) + ' ms).';
   }
+
+  function fmtMs(v) { return v >= 10 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1); }
 
   return { enable, disable, isEnabled, stats, summaryWords,
     // for the harness

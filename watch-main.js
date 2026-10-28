@@ -80,6 +80,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const SecretStore = require('./secret-store');
 const Shape = require('./watch/shape');
 const Merge = require('./watch/merge');
 const Play = require('./watch/playurl');
@@ -383,6 +384,10 @@ function create(deps) {
   const test = d.test && typeof d.test === 'object' ? d.test : {};
   const now = typeof d.now === 'function' ? d.now : () => Date.now();
   const log = typeof d.log === 'function' ? d.log : (line) => console.log('[watch] ' + line);
+  // The TMDB key at rest (secret-store.js): `tmdbKeyEnc` in watch.json, safeStorage-encrypted; plain
+  // `tmdbKey` only when encryption is unavailable (Settings > Lumen says so); an older plain key is
+  // migrated on first read. prefs.tmdbKey below is the in-memory copy, never written as is.
+  const secret = SecretStore.create({ field: 'tmdbKey', label: 'TMDB key', clean: cleanKey, mask: maskKey, safeStorage: d.safeStorage, log });
   const send = typeof d.send === 'function' ? d.send : () => {};
   const isBundledPage = typeof d.isBundledPage === 'function' ? d.isBundledPage : () => false;
   const openInEdge = typeof d.openInEdge === 'function' ? d.openInEdge : () => Promise.resolve({ ok: false, how: '', reason: 'Edge is not wired in this build' });
@@ -513,7 +518,10 @@ function create(deps) {
    *     what Lumen always did), NOT rewritten, and Settings > Lumen says so (prefsNote).
    */
   function loadPrefs() {
-    if (prefs) return prefs;
+    if (prefs) {
+      if (!prefs.tmdbKey) prefs.tmdbKey = secret.get();   // a key saved before encryption was ready
+      return prefs;
+    }
     let raw = null;
     let unreadable = '';
     const file = fileIn(PREFS_FILE);
@@ -533,13 +541,19 @@ function create(deps) {
       raw = {};
     }
     prefs = cleanPrefs(raw);
+    // The key: decrypt tmdbKeyEnc, or take an older plain tmdbKey and encrypt it (rewrite = drop the plain one).
+    const keyMove = secret.load(raw);
+    prefs.tmdbKey = secret.get();
+    let rewritten = false;
     if (!unreadable && isLegacyPrefs(raw)) {
+      rewritten = true;
       // Made explicit + v: 2, so this install keeps reading what it read before opt-in existed.
       const enabled = Object.assign({}, prefs.enabled);
       if (writePrefsFile(Object.assign({ v: PREFS_VERSION }, raw, { v: PREFS_VERSION, enabled, background: prefs.background, tilePreview: prefs.tilePreview }))) {
         log('Lumen settings moved to opt-in (v' + PREFS_VERSION + '): every choice kept as it was');
       }
     }
+    if (!unreadable && keyMove.rewrite && !rewritten) writePrefsFile(prefs);
     if (Preview && typeof Preview.setEmbedReferer === 'function') Preview.setEmbedReferer(prefs.embedReferer || '');
     return prefs;
   }
@@ -548,12 +562,20 @@ function create(deps) {
   function writePrefsFile(obj) {
     const file = fileIn(PREFS_FILE);
     if (!file) return false;
+    // The key never goes to disk as prefs holds it: secret.fields() decides (tmdbKeyEnc, or plain
+    // tmdbKey only when encryption is unavailable, or a kept unreadable blob).
+    const out = Object.assign({}, obj);
+    delete out.tmdbKey;
+    delete out.tmdbKeyEnc;
+    Object.assign(out, secret.fields());
     try {
-      fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.writeFileSync(file + '.tmp', JSON.stringify(out, null, 2), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(file + '.tmp', file);
+      secret.wrote(true);
       return true;
     } catch (err) {
       log('Lumen settings could not be saved: ' + ((err && err.code) || 'unknown'));
+      secret.wrote(false);
       return false;
     }
   }
@@ -2208,7 +2230,7 @@ function create(deps) {
       services: Shape.SERVICE_IDS.map(serviceView),
       leagues: p.leagues.slice(),
       allLeagues: Shape.LEAGUES.map((l) => ({ id: l.id, name: l.name })),
-      tmdb: { hasKey: !!p.tmdbKey, keyMask: maskKey(p.tmdbKey), signupUrl: 'https://www.themoviedb.org/settings/api' },
+      tmdb: Object.assign({ hasKey: !!p.tmdbKey, keyMask: maskKey(p.tmdbKey), signupUrl: 'https://www.themoviedb.org/settings/api' }, tmdbAtRest()),
       cacheBytes,
       reading,
       background: { on: !!p.background, waiting: p.background ? bgWaiting : '', lastAt: bgLastAt, nextAt: bgTimerAt, reads: bgReads },
@@ -2280,14 +2302,22 @@ function create(deps) {
     return describe();
   }
 
+  /** Where the TMDB key is kept (secret-store.js status(), renderer-safe: never the key). */
+  function tmdbAtRest() {
+    const st = secret.status();
+    return { keyStorage: st.keyStorage, keyStorageNote: st.keyStorageNote, keyError: st.keyError };
+  }
+
   function setTmdbKey(raw) {
     const p = loadPrefs();
     const typed = String(raw == null ? '' : raw).trim();
     const next = cleanKey(raw);
     if (typed && !next) return Object.assign(describe(), { error: 'That does not look like a key: it has spaces or odd characters in it.' });
-    p.tmdbKey = next;
-    savePrefs();
+    secret.set(next);
+    p.tmdbKey = secret.get();
+    const wroteOk = savePrefs();
     pushAll();
+    if (!wroteOk && fileIn(PREFS_FILE)) return Object.assign(describe(), { error: 'The key could not be written to the profile folder, so it lasts only until Quartz quits.' });
     return describe();
   }
 
