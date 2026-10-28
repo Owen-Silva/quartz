@@ -25,7 +25,8 @@ const { OFFSCREEN_ARGS, startWatcher } = require('./testwatch');
 const { FiltersEngine } = require('@ghostery/adblocker');
 const W = require('./adblock-build-worker');
 
-const PROFILE = 'zl-adblock';
+// --profile=<name> lets a second worktree run it without sharing the profile (default zl-adblock).
+const PROFILE = (process.argv.find((a) => a.startsWith('--profile=')) || '--profile=zl-adblock').slice(10);
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const CDP = Number((process.argv.find((a) => a.startsWith('--cdp=')) || '--cdp=9451').slice(6));
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -172,7 +173,10 @@ const GIF = Buffer.from('R0lGODlhAQABAAAAACw=', 'base64');
     const hdr = delta(statsBefore.headers, statsAfter.headers);
     const reqN = Object.values(req).reduce((a, b) => a + b, 0);
     const hdrN = Object.values(hdr).reduce((a, b) => a + b, 0);
-    say('one reload of a 24-subresource page: request hook ' + reqN + ' ' + JSON.stringify(req) + '; headers hook ' + hdrN + ' ' + JSON.stringify(hdr));
+    const msOf = (a, b, k) => Math.round(((b && b[k]) || 0) * 100 - ((a && a[k]) || 0) * 100) / 100;
+    say('one reload of a 24-subresource page: request hook ' + reqN + ' ' + JSON.stringify(req) + ' in ' + msOf(statsBefore, statsAfter, 'requestMs')
+      + ' ms; headers hook ' + hdrN + ' ' + JSON.stringify(hdr) + ' in ' + msOf(statsBefore, statsAfter, 'headersMs') + ' ms');
+    check(typeof statsAfter.requestMs === 'number' && statsAfter.requestMs >= 0 && (statsAfter.headersGated || 0) === 0, 'the hooks time themselves, and nothing needed the in-handler gate', { ms: statsAfter.requestMs, gated: statsAfter.headersGated });
     check(statsAfter.headersFiltered === true, 'the headers hook took the types filter in Electron 44');
     check(Object.keys(hdr).every((k) => k === 'mainFrame' || k === 'subFrame') && hdrN >= 1, 'the headers hook only ever sees pages and frames', hdr);
     check(reqN > hdrN + 15, 'the request hook still sees every subresource (blocking unchanged)', { reqN, hdrN });

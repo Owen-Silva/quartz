@@ -81,6 +81,8 @@ const TESTS = [
   // Ad-block list refresh: when it is due, validation, the atomic write, keep-old on failure, a real
   // Ghostery build on a fake fetch, the session hooks and the shield line.
   { name: 'adblock-refresh', file: 'adblock-refresh-harness.js' },
+  // The narrowed ad-block hooks answer exactly as the library's own did, on a real engine, every type.
+  { name: 'adblock-hooks', file: 'adblock-hooks-harness.js' },
   // The same in a real Quartz against a local list server: a failed refresh says why, then one swaps in.
   { name: 'adblock-refresh-e2e', file: 'adblock-refresh-e2e.js', e2e: true },
   { name: 'procfind', file: 'procfind-harness.js' },
