@@ -27,7 +27,7 @@ const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const WS = require(path.join(__dirname, 'node_modules', 'ws'));
-const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher, waitChromeBooted } = require('./testwatch');
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -128,7 +128,7 @@ async function waitTarget(pred, ms) {
 
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 30000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
-    await chrome.waitFor('typeof createTab === "function" && typeof sleepTab === "function" && !!(window.api && window.api.log)', 20000);
+    await waitChromeBooted((e) => chrome.ev(e), 'typeof sleepTab === "function" && !!(window.api && window.api.log)', 30000, (l) => console.log('[e2e] ' + l));
     check(true, 'chrome up, api.log exposed');
 
     // ---- 1. start + adblock ---------------------------------------------------------------------
