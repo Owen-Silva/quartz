@@ -163,6 +163,9 @@ const TESTS = [
   // It spawns a few hundred git processes, which on a busy Windows laptop took ~2 min: past the 90 s unit
   // default, so the suite timed out a harness that passes. 300 s keeps a real hang a FAIL.
   { name: 'updater', file: 'tests/updater-test.js', timeout: 300 },
+  // An installed copy (Quartz-Setup.exe): install-mode.js tells it from a folder copy, and the
+  // updater judges a release by version and offers the installer link instead of an Update button.
+  { name: 'install-mode', file: 'tests/install-mode-test.js' },
   // Signed release tags (updater.js verifyReleaseTag, the swap helper's second check,
   // tools/release-tag.js): throwaway repos and ed25519 keys; signed, unsigned, other key, signers
   // swapped by the release, tag/commit mismatch, rotation, bootstrap, old git, no ssh-keygen.

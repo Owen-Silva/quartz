@@ -8,7 +8,13 @@
  *   - a test profile (--test-profile) or any other --test run: off, unless an e2e hands it a fake
  *     release API (QUARTZ_TEST_UPDATER_API, honoured ONLY with --test-profile), and even then
  *     it never runs npm ci (allowNpm false);
- *   - a packaged build: there is no git folder to move.
+ *   - a packaged build run from a folder (the stamped Quartz.exe makes Electron call it packaged):
+ *     off, as it always was.
+ *
+ * AN INSTALLED COPY (o.installed, install-mode.js: Quartz-Setup.exe put it there) has no git folder
+ * either, but it does check: the same releases API, judged by version number, and an available
+ * release offers "Download the installer" (the stable Quartz-Setup.exe link) instead of an Update
+ * button. Nothing is downloaded or run without the user; the test-run rules above still apply.
  *
  * THE RESTART. A plain update (no new dependencies) asks the chrome to run window.restartBrowser():
  * the same path as Settings > About > Restart browser, which writes the session first and then
@@ -28,8 +34,9 @@ function install(o) {
   const argv = process.argv;
   const testProfile = argv.includes('--test-profile');
   const testApi = testProfile ? String(process.env.QUARTZ_TEST_UPDATER_API || '') : '';
+  const installed = o.installed === true;
   let off = '';
-  if (app.isPackaged) off = 'a packaged build never updates itself from git';
+  if (app.isPackaged && !installed) off = 'a packaged build never updates itself from git';
   else if (testProfile && !testApi) off = 'a test profile never checks for updates';
   else if (argv.some((a) => /^--test(?:$|[-=])/.test(a) && a !== '--test-profile')) off = 'a test run never checks for updates';
 
@@ -41,6 +48,7 @@ function install(o) {
     repoUrl: testApi ? (process.env.QUARTZ_TEST_UPDATER_REPO || undefined) : undefined,
     firstCheckMs: testApi ? (Number(process.env.QUARTZ_TEST_UPDATER_FIRST_MS) || 1500) : undefined,
     allowNpm: !testProfile,
+    installed,
     off,
     onState: (s) => { try { send('updates:state', s); } catch { /* no window yet */ } },
     log: (line) => { if (!/^ {2}npm: |^git /.test(line)) say(line); },

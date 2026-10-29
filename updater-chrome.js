@@ -169,6 +169,10 @@
         // A copy with no release key yet installs this one unchecked: said, never silent.
         if (s.signature && s.signature.state === 'unpinned') c.appendChild(el('div', 'lumen-alert-note qup-sig', s.signature.text));
         acts.appendChild(button('Update', 'lumen-alert-btn is-primary', 'update', doUpdate));
+      } else if (s.download) {
+        // An installed copy (Quartz-Setup.exe): the new installer is the update.
+        c.appendChild(el('div', 'lumen-alert-body', 'This copy was installed with Quartz-Setup.exe. Download the new installer and run it: it replaces this copy and keeps your tabs, logins and settings.'));
+        acts.appendChild(button('Download the installer', 'lumen-alert-btn is-primary', 'download', function () { openUrl(s.download); }));
       } else {
         c.appendChild(el('div', 'lumen-alert-note', 'No Update button: ' + s.blocked + '.'));
         if (s.manual && s.manual.length) {
@@ -253,13 +257,16 @@
       sig.setAttribute('data-signature', s.signature.state);
       field.appendChild(sig);
     }
-    if (s.status === 'available' && !s.canUpdate) {
+    if (s.status === 'available' && s.download) {
+      field.appendChild(h.el('p', 'set-hint', 'This copy was installed with Quartz-Setup.exe: download the new installer and run it over this one. Your tabs, logins and settings stay.'));
+    } else if (s.status === 'available' && !s.canUpdate) {
       field.appendChild(h.el('p', 'set-hint', 'No Update button: ' + s.blocked + '.'));
       if (s.manual && s.manual.length) field.appendChild(manualBlock(s.manual));
     }
     if (s.status === 'failed' && s.failure) field.appendChild(h.el('p', 'set-hint', 'Log: ' + s.failure.log));
     var row = h.el('div', 'qup-about-acts');
     if (s.status === 'available' && s.canUpdate) row.appendChild(h.textButton('Update to ' + s.release.tag, 'set-btn', doUpdate));
+    if (s.status === 'available' && s.download) row.appendChild(h.textButton('Download the ' + s.release.tag + ' installer', 'set-btn', function () { openUrl(s.download); }));
     if (s.status !== 'off') {
       var chk = h.textButton(s.status === 'checking' ? 'Checking…' : 'Check now', 'set-btn', doCheck);
       if (s.status === 'checking' || s.status === 'updating') chk.disabled = true;

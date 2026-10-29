@@ -45,6 +45,12 @@
  * node_modules back. Quartz stays on the old version and says why, with the log's path. Never a
  * half-updated install.
  *
+ * AN INSTALLED COPY (opts.installed: Quartz-Setup.exe put it in its own folder, see install-mode.js).
+ *   There is no git folder, so nothing above applies except the check itself: the same releases
+ *   API, the release counts as available when its version is newer than package.json's, and the
+ *   state carries `download`, the installer's stable link, in place of an Update button. update()
+ *   refuses with the reason. Running the new installer over this copy is the update.
+ *
  * NEVER SILENT. Every state carries a sentence: why there is no check (off), why a check failed,
  * why there is no button, why an update failed and where its log is.
  */
@@ -56,6 +62,10 @@ const { spawn } = require('child_process');
 const OWNER = 'Owen-Silva';
 const REPO = 'quartz';
 const API_BASE = 'https://api.github.com';
+// An installed copy's way to update: the installer on the latest release, under a name that never
+// changes. Kept here, not required from install-mode.js (which says the same): this file also runs
+// on its own as the swap helper, copied into the profile folder, where no sibling module exists.
+const INSTALLER_URL = 'https://github.com/' + OWNER + '/' + REPO + '/releases/latest/download/Quartz-Setup.exe';
 const OPT_OUT_FILE = 'no-updates.local';     // in the app folder: present = the updater is off
 const STAGING_DIR = '.quartz-update';        // in the app folder (same volume, so the swap is a rename)
 const STATE_FILE = 'updates.json';           // in the profile folder
@@ -397,6 +407,8 @@ function createUpdater(opts) {
   const firstMs = o.firstCheckMs == null ? FIRST_CHECK_MS : o.firstCheckMs;
   const everyMs = o.everyMs || EVERY_MS;
   const allowNpm = o.allowNpm !== false;
+  const installed = o.installed === true;
+  const downloadUrl = String(o.downloadUrl || INSTALLER_URL);
   const logPath = path.join(dataDir, LOG_FILE);
   const statePath = path.join(dataDir, STATE_FILE);
   const stagingDir = path.join(appDir, STAGING_DIR);
@@ -429,6 +441,8 @@ function createUpdater(opts) {
     snoozed: false,
     ahead: false,
     signature: null,   // { ok, state: 'verified'|'unpinned'|'refused', tag, text } for the release on offer
+    installed,         // an installed copy (Quartz-Setup.exe): it updates by running the new installer
+    download: '',      // installed copies only: the installer's link while a newer release is out
     logPath,
   };
 
@@ -522,7 +536,18 @@ function createUpdater(opts) {
    */
   async function inspect(release) {
     const tag = release.tag;
-    const r = { available: false, canUpdate: false, blocked: '', manual: [], needsNpm: false, sha: '', head: '', ahead: false };
+    const r = { available: false, canUpdate: false, blocked: '', manual: [], needsNpm: false, sha: '', head: '', ahead: false, download: '' };
+    if (installed) {
+      // No history to compare: the version number decides, and the installer is the way to update.
+      const cmp = compareVersions(tag, st.current.version);
+      r.ahead = cmp < 0;
+      if (cmp > 0) {
+        r.available = true;
+        r.blocked = 'this copy was installed with Quartz-Setup.exe, so it updates by running the new installer';
+        r.download = downloadUrl;
+      }
+      return r;
+    }
     const isClone = fs.existsSync(path.join(appDir, '.git'));
     if (!isClone) {
       // A folder from a zip: no history to compare, so the version number decides.
@@ -671,6 +696,7 @@ function createUpdater(opts) {
         canUpdate: r.canUpdate, blocked: r.blocked, manual: r.manual, needsNpm: r.needsNpm, snoozed,
         ahead: r.ahead,
         signature: r.signature || null,
+        download: r.download || '',
         failure: r.available ? st.failure : null,
       });
       if (r.available) log('Release ' + rel.tag + ' is out. ' + (r.canUpdate ? 'Update offered.' : 'No button: ' + r.blocked));
@@ -717,6 +743,7 @@ function createUpdater(opts) {
    */
   async function update() {
     if (st.off) return { ok: false, reason: 'updates are off: ' + st.off };
+    if (installed) return { ok: false, reason: 'an installed copy updates by running the new installer (Download the installer)' };
     if (busy) return { ok: false, reason: 'a check or an update is already running' };
     if (st.status === 'updating') return { ok: false, reason: 'an update is already running' };
     if (!st.release || !(st.status === 'available' || st.status === 'failed')) return { ok: false, reason: 'there is no update to install' };
@@ -993,7 +1020,7 @@ async function runSwap(plan, deps) {
 module.exports = {
   createUpdater, runSwap, offReason, normaliseRepoUrl, compareVersions, netWhy, removeTree, depsChanged,
   verifyReleaseTag, readInstalledSigners, parseSigners, parseGitVersion, signatureWhy,
-  OPT_OUT_FILE, STAGING_DIR, NPM_TEXT, EVERY_MS, FIRST_CHECK_MS, SIGNERS_FILE, MIN_GIT_SSH,
+  OPT_OUT_FILE, STAGING_DIR, NPM_TEXT, INSTALLER_URL, EVERY_MS, FIRST_CHECK_MS, SIGNERS_FILE, MIN_GIT_SSH,
 };
 
 if (require.main === module && process.argv[2]) {

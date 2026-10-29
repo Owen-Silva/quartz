@@ -29,8 +29,13 @@
 # same binary renamed and stamped "Quartz" by tools/make-quartz-exe.js (npm
 # postinstall), so a clicked link opens a process Task Manager calls Quartz.
 # Run `npm run quartz-exe` first if Quartz.exe is missing.
+#
+# -InstalledExe <path>: an INSTALLED copy (Quartz-Setup.exe) passes its own
+# Quartz.exe. The commands then start that exe with no app folder
+# ("<exe>" "%1"), and the icon is the exe's own. The installer's uninstaller
+# removes these keys again, but only while they still name its exe.
 
-param([switch]$Unregister, [switch]$RemoveOld, [switch]$Force)
+param([switch]$Unregister, [switch]$RemoveOld, [switch]$Force, [string]$InstalledExe = '')
 
 $ErrorActionPreference = 'Stop'
 
@@ -39,6 +44,10 @@ $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
 $Exe    = Join-Path $AppDir 'node_modules\electron\dist\Quartz.exe'
 $IcoRepo = Join-Path $AppDir 'assets\browser.ico'
+if ($InstalledExe) {
+    $Exe = [System.IO.Path]::GetFullPath($InstalledExe)
+    $IcoRepo = ''
+}
 
 $ProgIdUrl  = 'QuartzURL'
 $ProgIdHtml = 'QuartzHTML'
@@ -188,17 +197,23 @@ if ($Unregister) {
 # Register
 # ---------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $Exe)) {
+    if ($InstalledExe) { throw "Quartz.exe not found at $Exe - reinstall Quartz with Quartz-Setup.exe." }
     throw "Quartz.exe not found at $Exe - run 'npm run quartz-exe' (or npm install) in $AppDir first."
 }
 
 # The repo's own .ico if it is there, Quartz.exe's own icon if it is not.
 # Converting an image into one is not this script's job.
-if (Test-Path -LiteralPath $IcoRepo) { $IconPath = "$IcoRepo,0" } else { $IconPath = "$Exe,0" }
+if ($IcoRepo -and (Test-Path -LiteralPath $IcoRepo)) { $IconPath = "$IcoRepo,0" } else { $IconPath = "$Exe,0" }
 
 # Quoted, always: both paths contain no spaces today, but "C:\Program Files"
 # is one move away and an unquoted command line breaks silently there.
 $CmdPlain = '"' + $Exe + '" "' + $AppDir + '"'
 $CmdUrl   = '"' + $Exe + '" "' + $AppDir + '" "%1"'
+if ($InstalledExe) {
+    # Installed: the app is inside the exe's own resources folder, so no folder argument.
+    $CmdPlain = '"' + $Exe + '"'
+    $CmdUrl   = '"' + $Exe + '" "%1"'
+}
 
 function New-RegKey([string]$Key) {
     if (-not (Test-Path -LiteralPath $Key)) { New-Item -Path $Key -Force | Out-Null }

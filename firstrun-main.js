@@ -59,6 +59,10 @@ function create(opts) {
   const env = o.env || process.env;
   const test = argv.includes('--test-profile');
   const optIn = argv.includes('--first-run');
+  // An installed copy (install-mode.js): its exe is the one Windows should start, with no app
+  // folder on the command line. A folder copy registers the stamped Quartz.exe and its folder.
+  const installed = o.installed === true;
+  const execPath = String(o.execPath || process.execPath);
 
   const dir = () => app.getPath('userData');
   const flagPath = () => path.join(dir(), FLAG_FILE);
@@ -132,7 +136,7 @@ function create(opts) {
 
   /* ---- the default browser ---------------------------------------------------------------- */
 
-  const quartzExe = path.join(appDir, 'node_modules', 'electron', 'dist', 'Quartz.exe');
+  const quartzExe = installed ? execPath : path.join(appDir, 'node_modules', 'electron', 'dist', 'Quartz.exe');
 
   /** Is Quartz what Windows opens https links with right now? Asked of Windows itself. */
   async function defaultStatus() {
@@ -202,7 +206,9 @@ function create(opts) {
       let child;
       const finish = (r) => { if (!done) { done = true; resolve(r); } };
       try {
-        child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
+        const scriptArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script];
+        if (installed) scriptArgs.push('-InstalledExe', execPath);
+        child = spawn('powershell.exe', scriptArgs, {
           windowsHide: true, cwd: appDir,
         });
       } catch (e) {

@@ -55,6 +55,9 @@ let toprow = null;
 const notesPaneModule = require('./notes-pane-main');
 const phoneModule = require('./phone');
 const profileMove = require('./profilemove');
+// Installed by Quartz-Setup.exe, or run from a folder (install-mode.js says why app.isPackaged
+// cannot tell them apart). Every installed-only path below keys off this one value.
+const INSTALLED = require('./install-mode').detect(app);
 const { urlFromArgv } = require('./argvurl');
 const spellModule = require('./spell');
 const drmModule = require('./drm-main');
@@ -245,7 +248,13 @@ if (process.argv.includes('--test-profile')) {
  */
 /** What the profile move did at this start; Settings > About shows it. */
 let profileMoveResult = { ok: true, action: 'test', why: 'a test profile is never moved' };
-if (!process.argv.includes('--test-profile')) {
+// An installed copy has been called Quartz from its first start, so there is no old `browser`
+// profile of its own to move, and %APPDATA%\browser on such a machine may well belong to some
+// other app. It opens %APPDATA%\Quartz like a folder copy does, and leaves `browser` alone.
+if (INSTALLED && !process.argv.includes('--test-profile')) {
+  profileMoveResult = { ok: true, action: 'installed', why: 'an installed copy has always been called Quartz, so there is no old profile folder to move' };
+  console.log('[profile] ' + profileMoveResult.why);
+} else if (!process.argv.includes('--test-profile')) {
   const appData = app.getPath('appData');
   const oldProfileDir = path.join(appData, 'browser');
   const newProfileDir = path.join(appData, app.getName());
@@ -748,7 +757,7 @@ if (watchPlayer && watch && typeof watch.afterWatching === 'function') {
 
 // The first-run welcome's flag and its default-browser step (firstrun-main.js).
 // Created here, before any window: it reads what the profile held before this run.
-require('./firstrun-main').create({ app, ipcMain, shell: require('electron').shell, isChromeSender: (event) => isChromeSender(event), appDir: __dirname });
+require('./firstrun-main').create({ app, ipcMain, shell: require('electron').shell, isChromeSender: (event) => isChromeSender(event), appDir: __dirname, installed: INSTALLED });
 const notesPane = notesPaneModule.create({
   app,
   ipcMain,
@@ -1414,7 +1423,7 @@ app.whenReady().then(async () => {
   // profile, a linked worktree, or a folder with no-updates.local in it.
   try {
     require('./updater-main').install({
-      app, ipcMain, isChromeSender,
+      app, ipcMain, isChromeSender, installed: INSTALLED,
       send: (channel, payload) => { if (!canSend()) return false; win.webContents.send(channel, payload); return true; },
       logLine: (line) => { if (qlog) qlog.log.line(line); },
     }).start();
