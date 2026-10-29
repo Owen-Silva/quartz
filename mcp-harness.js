@@ -27,6 +27,8 @@
 //      Claude Code's prompts) wait for the user; deny / timeout / no window refuse with a reason
 //      and never touch the page; once asks again, grant keeps a tab (or tool) per pane;
 //      grant()/revokePane(); updateKey; the --allowedTools list.
+//   I. app.js's bar over a pane: questions in order, answers to main, and a page-text chamber's own
+//      note kept first under tool lines and back once the last question is answered.
 //
 // Characters are built with cp() (String.fromCodePoint) so this file has no invisible text in it.
 'use strict';
@@ -955,6 +957,81 @@ function makeGuest(o) {
   const callMs = Number(S.CALL_TIMEOUT_MS) || Number((/const CALL_TIMEOUT_MS = (\d+)/.exec(shimSrc) || [])[1]);
   ok('H12 mcp-shim CALL_TIMEOUT_MS outlasts APPROVAL_TIMEOUT_MS + READ_TIMEOUT_MS', callMs > M.APPROVAL_TIMEOUT_MS + M.READ_TIMEOUT_MS,
     'shim ' + callMs + ' ms, ask ' + M.APPROVAL_TIMEOUT_MS + ' + read ' + M.READ_TIMEOUT_MS + ' ms');
+  }
+
+  // ---- I. app.js's bar over a pane: a page-text chamber's own note is never lost ----
+  // The ask bar and the tool lines share the one note slot over a pane (showAppNote). A page-text
+  // chamber's note says what it is (permission prompts on, a scratch folder): a tool line keeps it
+  // first, and once the last question is answered it is back. The functions are app.js's own, run
+  // against a stand-in note slot.
+  {
+    const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+    const fn = (name) => { const m = new RegExp('\\nfunction ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}').exec(src); return m ? m[0] : ''; };
+    const konst = (name) => { const m = new RegExp('\\nconst ' + name + ' = [\\s\\S]*?;\\n').exec(src); return m ? m[0] : ''; };
+    const names = ['claudePaneById', 'toolPaneLine', 'showToolActivity', 'onToolAsk', 'showToolAsk', 'answerToolAsk',
+      'onToolAskDone', 'noteToolPane', 'notePageTextChamber'];
+    const pieces = [konst('MSG_PAGE_TEXT_CHAMBER'), konst('MSG_TOOLS_OFF')].concat(names.map(fn));
+    ok('I0 app.js: the bar functions were found', pieces.every(Boolean), names.filter((n) => !fn(n)).join(', ') || 'a message constant');
+    const toasts = [], answers = [];
+    const el = () => ({ textContent: '', dataset: {}, style: {}, on: {}, addEventListener(t, f) { this.on[t] = f; } });
+    const sb = {
+      tabs: [],
+      toasts, answers,
+      isClaudeTab: (t) => !!t && t.kind === 'claude',
+      isTabOnScreen: () => true,
+      claudeToast: (m) => toasts.push(String(m)),
+      clearAppNote: (t) => { t.noteEl = null; },
+      showAppNote: (t, text) => {
+        const cross = el();
+        const kids = [];
+        t.noteEl = { text: String(text), textContent: String(text), dataset: {}, cls: new Set(), kids, lastElementChild: cross,
+          classList: { add(c) { t.noteEl.cls.add(c); } }, insertBefore(b) { kids.push(b); } };
+      },
+      document: { createElement: el },
+      window: { api: { mcp: { answer: (id, c) => answers.push(id + ':' + c) } } },
+    };
+    vm.createContext(sb);
+    if (pieces.every(Boolean)) {
+      vm.runInContext(pieces.join('\n') + '\nthis.MSG = MSG_PAGE_TEXT_CHAMBER; this.app = { showToolActivity, onToolAsk, onToolAskDone, noteToolPane };', sb);
+      const A = sb.app, MSG = sb.MSG;
+      const chamber = { id: 5, kind: 'claude', pageText: true, noteEl: null };
+      const plain = { id: 6, kind: 'claude', pageText: false, noteEl: null };
+      sb.tabs.push(chamber, plain);
+      const click = (pane, choice) => { const b = pane.noteEl.kids.find((k) => k.dataset.choice === choice); b.on.click(); };
+      sb.showAppNote(chamber, MSG);
+
+      A.showToolActivity({ paneId: '5', line: 'Claude read: Field notes' });
+      ok('I1 page-text chamber: a tool line keeps the chamber note first', chamber.noteEl.text === MSG + ' Claude read: Field notes', chamber.noteEl.text);
+      A.showToolActivity({ paneId: '6', line: 'Claude read: Field notes' });
+      ok('I1 a plain pane shows the tool line alone', plain.noteEl.text === 'Claude read: Field notes', plain.noteEl.text);
+
+      A.onToolAsk({ askId: 1, paneId: '5', text: 'Claude wants to read Field notes (example.com)', grantLabel: 'Allow this tab for this pane' });
+      A.onToolAsk({ askId: 2, paneId: '5', text: 'Claude wants to search your history for "fish"' });
+      ok('I2 the question takes the bar (Allow once / grant / Deny)', chamber.noteEl.cls.has('mcp-ask') && chamber.noteEl.text.indexOf('Claude wants to read') === 0
+        && chamber.noteEl.kids.map((k) => k.dataset.choice).join() === 'once,grant,deny', chamber.noteEl.text);
+      click(chamber, 'once');
+      ok('I3 answered: main hears it, and the next question takes the bar', answers.join() === '1:once' && chamber.noteEl.cls.has('mcp-ask')
+        && chamber.noteEl.text.indexOf('Claude wants to search your history') === 0, answers.join() + ' | ' + chamber.noteEl.text);
+      click(chamber, 'deny');
+      ok('I4 the last question answered: the chamber note is back', answers.join() === '1:once,2:deny' && !!chamber.noteEl
+        && !chamber.noteEl.cls.has('mcp-ask') && chamber.noteEl.text === MSG, chamber.noteEl && chamber.noteEl.text);
+
+      A.onToolAsk({ askId: 3, paneId: '5', text: 'Claude wants to read Field notes (example.com)' });
+      A.onToolAskDone({ askId: 3, choice: 'timeout' });
+      ok('I5 a question main gave up on: the bar goes, nothing is sent, the chamber note is back',
+        answers.length === 2 && !!chamber.noteEl && chamber.noteEl.text === MSG, chamber.noteEl && chamber.noteEl.text);
+
+      A.onToolAsk({ askId: 4, paneId: '6', text: 'Claude wants to read Field notes (example.com)' });
+      click(plain, 'once');
+      ok('I6 a plain pane: answered, the bar goes and no chamber note appears', answers.join() === '1:once,2:deny,4:once' && plain.noteEl === null,
+        plain.noteEl && plain.noteEl.text);
+
+      A.noteToolPane({ paneId: '5', attached: false, reason: 'the key could not be made' });
+      ok('I7 a page-text chamber without the tools says both, its own note first',
+        chamber.noteEl.text === MSG + " Claude can't read your tabs in this pane: the key could not be made.", chamber.noteEl.text);
+      A.noteToolPane({ paneId: '5', attached: true });
+      ok('I7 ... and with the tools back, only the chamber note', chamber.noteEl.text === MSG, chamber.noteEl.text);
+    }
   }
 
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp */ }
