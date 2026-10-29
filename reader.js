@@ -443,13 +443,14 @@
     if (!doc || !doc.documentElement) return null;
 
     // Relative urls in the article resolve against the page they came from,
-    // not against file://.../reader.html.
+    // not against the chrome's file:// address. Not with a <base>: a document
+    // parsed here lives under the chrome's policy, whose base-uri 'none'
+    // refuses one, and the images then pointed at file:///, which reader.html
+    // refuses in turn (csp-e2e). Readability reads doc.baseURI in one place
+    // only (_fixRelativeUris), so the page's address is handed to it there.
     try {
-      var head = doc.head || doc.documentElement.appendChild(doc.createElement('head'));
-      var base = doc.createElement('base');
-      base.setAttribute('href', String(url || ''));
-      head.insertBefore(base, head.firstChild);
-    } catch (err) { /* relative images will simply not load */ }
+      Object.defineProperty(doc, 'baseURI', { value: new URL(String(url || '')).href });
+    } catch (err) { /* not an absolute url: links stay as the page wrote them */ }
 
     try {
       return new Readability(doc).parse();
