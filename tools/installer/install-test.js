@@ -226,7 +226,8 @@ async function main() {
       check(true, 'installed Quartz started and its window is up (CDP target)', target.url.replace(/^.*\/resources\/app\//i, 'resources/app/'));
       c = await cdp(target.webSocketDebuggerUrl);
       let booted = false;
-      for (let i = 0; i < 120 && !booted; i++) { booted = await evaluate(c, "document.body.classList.contains('booted')"); if (!booted) await sleep(250); }
+      // The page target can appear before the document has a body: poll until it boots.
+      for (let i = 0; i < 240 && !booted; i++) { booted = await evaluate(c, "!!(document.body && document.body.classList.contains('booted'))"); if (!booted) await sleep(250); }
       check(booted, 'the chrome booted (body.booted)');
       const missing = await evaluate(c, "JSON.stringify(['tabstrip','newtab','omnibox','views','win-min','win-max','win-close'].filter((id) => !document.getElementById(id)))");
       check(missing === '[]', 'the chrome\'s controls are in the DOM', missing);
@@ -265,6 +266,9 @@ async function main() {
       const target = await chromeTarget(9556, 90000);
       c = await cdp(target.webSocketDebuggerUrl);
       check(true, 'installed Quartz started on the real profile');
+      let up = false;
+      for (let i = 0; i < 240 && !up; i++) { up = await evaluate(c, "!!(document.body && document.body.classList.contains('booted') && window.api)"); if (!up) await sleep(250); }
+      check(up, 'the chrome booted on the real profile');
       const prof = await evaluate(c, 'window.api.app.profile()');
       check(prof && /\\Quartz$/i.test(prof.userData) && prof.thisStart && prof.thisStart.action === 'installed',
         'profile: %APPDATA%\\Quartz, and the one-time move from %APPDATA%\\browser is skipped for an installed copy', prof && { userData: prof.userData, action: prof.thisStart && prof.thisStart.action, why: prof.thisStart && prof.thisStart.why });
