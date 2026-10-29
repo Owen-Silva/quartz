@@ -104,7 +104,15 @@ async function openSession(wsUrl) {
     try { c.ws.terminate(); } catch (e2) { /* never opened */ }
     throw e;
   } finally { clearTimeout(timer); }
-  if (TRACE) say('  ' + tag + ' open');
+  if (TRACE) {
+    say('  ' + tag + ' open');
+    // Why a session ends: Chromium says so (Inspector.detached) before it closes the socket.
+    c.ws.on('close', (code) => say('  ' + tag + ' closed (' + code + ') during "' + phase + '"'));
+    c.ws.on('message', (raw) => {
+      let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
+      if (/^Inspector\./.test(m.method || '')) say('  ' + tag + ' ' + m.method + ' ' + JSON.stringify(m.params || {}));
+    });
+  }
   return c;
 }
 
@@ -186,6 +194,10 @@ async function main() {
       chrome = await attach(ct.webSocketDebuggerUrl);
       await chrome.send('Emulation.setFocusEmulationEnabled', { enabled: true });
       await chrome.ev(LISTENER + '1');
+      // The chrome document this run started on. If anything reloaded the window, the final count
+      // below would read an empty, fresh listener and pass for nothing: it checks this mark first.
+      const chromeMark = 'boot-' + Date.now();
+      await chrome.ev('window.__cspMark = ' + JSON.stringify(chromeMark) + ', 1');
       await chrome.waitFor('typeof createTab === "function" && typeof activateTab === "function" && Array.isArray(tabs) && tabs.length > 0 && !restoring', 30000);
       check(true, 'chrome: booted with its policy (every script file ran: app.js globals are up)');
       check(await chrome.ev('typeof Terminal === "function" && !!window.Settings && !!window.Reader'), 'chrome: xterm, settings.js and reader.js loaded under script-src file:');
@@ -259,8 +271,16 @@ async function main() {
         await g.send('Page.enable');
         await g.send('Page.addScriptToEvaluateOnNewDocument', { source: LISTENER });
         g.csp.length = 0;
-        await g.send('Page.reload', { ignoreCache: true });
-        await sleep(3000);
+        // The page reloads ITSELF, from a task of its own. Never CDP's Page.reload here: on a <webview>
+        // guest it reloads the EMBEDDER (Chromium sends a guest's Page.reload to its outermost main
+        // frame, so a PDF viewer's reload works), i.e. the whole chrome window. Every guest went with
+        // it, each session closed, and the next call on the closed socket never answered: the 240 s
+        // hang in "newtab.html: attach and reload" on 10-27, locally and on the hosted runner.
+        await g.send('Runtime.evaluate', { expression: 'setTimeout(function () { location.reload(); }, 0), 1' });
+        // The new document is the one with the listener; then it has a moment to paint.
+        const reloaded = await g.waitFor('Array.isArray(window.__cspV) && document.readyState === "complete"', 15000).then(() => true, (e) => e.message);
+        if (reloaded !== true) say(pg.file + ': the reload did not finish: ' + reloaded);
+        await sleep(1500);
         const v = await g.ev('window.__cspV || ["(listener missing)"]').catch((e) => ['(could not read: ' + e.message + ')']);
         const all = early.concat(g.csp, v);
         check(all.length === 0, pg.file + ': zero CSP violations while it loads and paints', all);
@@ -310,6 +330,8 @@ async function main() {
       setPhase('chrome: final count');
       // ---- and the chrome, after all of that ----
       await sleep(500);
+      const sameChrome = await chrome.ev('window.__cspMark').catch(() => null);
+      check(sameChrome === chromeMark, 'chrome: still the document it booted as (no guest reload took the window with it)', sameChrome);
       const chromeLines = chrome.csp.slice(expected);
       const chromeEvents = await chrome.ev('(window.__cspV || []).filter(function (s) { return !/^script-src(-elem)? <- (inline|eval)/.test(s); })');
       check(chromeLines.length === 0 && chromeEvents.length === 0, 'chrome: zero other CSP violations through boot, About, a terminal and nine guest pages', { console: chromeLines, events: chromeEvents });
