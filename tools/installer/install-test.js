@@ -165,7 +165,12 @@ async function main() {
   const inst = spawnSync(SETUP, ['/S'], { timeout: 600000 });
   check(inst.status === 0, 'silent install exits 0', { status: inst.status, error: inst.error && inst.error.message, seconds: ((Date.now() - t0) / 1000).toFixed(1) });
   for (let i = 0; i < 60 && !fs.existsSync(EXE); i++) await sleep(1000);
-  check(fs.existsSync(EXE), 'Quartz.exe installed', EXE);
+  if (!check(fs.existsSync(EXE), 'Quartz.exe installed', EXE)) {
+    let where = [];
+    try { where = fs.readdirSync(path.join(LOCAL, 'Programs')); } catch { /* none */ }
+    info('%LOCALAPPDATA%\\Programs holds: ' + (where.join(', ') || '(nothing)'));
+    throw new Error('the installer did not put Quartz.exe where the test expects it; nothing else can be checked');
+  }
   info('installed size: ' + (dirSize(INST) / 1048576).toFixed(1) + ' MB in ' + walk(INST, 200000).length + ' files');
   let installedPkg = {};
   try { installedPkg = JSON.parse(fs.readFileSync(path.join(APPDIR, 'package.json'), 'utf8')); } catch { /* checked below */ }

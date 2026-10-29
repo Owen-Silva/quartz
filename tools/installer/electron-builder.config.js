@@ -30,6 +30,12 @@ module.exports = {
 
   directories: { output: 'dist', buildResources: 'tools/installer' },
 
+  // A one-click per-user install folder is named after package.json `name`, which is `browser`
+  // for npm. The packaged copy's package.json says Quartz instead, so it installs into
+  // %LOCALAPPDATA%\Programs\Quartz. The app's own name (and so its profile folder) comes from
+  // productName either way.
+  extraMetadata: { name: 'Quartz' },
+
   electronDist: 'node_modules/electron/dist',
   electronVersion: castlabsVersion(),
 
