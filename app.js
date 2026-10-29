@@ -1388,15 +1388,23 @@ function mediaApi() {
  * muting the video is how they hand the music back, exactly as it works for
  * the Spotify auto-pause hold.
  *
- * Either signal counts: tab.audible (media-started-playing / media-paused, per
- * element) or tab.heard (Chromium's own audibility, the one the speaker follows;
- * see setTabHeard). tab.heard alone catches a Web Audio game, which fires no media
- * events, and keeps the music off while a stream plays on after one element (an
- * ad, a hover preview) paused. Both setters call syncMusicPlayback() on an edge.
+ * The answer is tab.heard, Chromium's own audibility (the one the speaker and
+ * the sleep rules follow; see setTabHeard and viewAudibleNow). It catches a Web
+ * Audio game, which fires no media events, and keeps the music off while a
+ * stream plays on after one element (an ad, a hover preview) paused.
+ *
+ * tab.audible (media-started-playing / media-paused) counts ONLY for a guest
+ * Chromium has never answered for (tab.heardRead false: no push yet, no sweep
+ * yet, or an Electron that cannot say). Everywhere else it is a stale hint:
+ * Chromium reports an AudioContext as a player but sends no media-paused when
+ * the context closes, so one Web Audio blip held the flag for the life of the
+ * page and kept the music off with nothing playing. Both setters call
+ * syncMusicPlayback() on an edge.
  */
 function anyTabAudible() {
   for (const tab of tabs) {
-    if ((tab.audible || tab.heard) && !tab.muted) return true;
+    if (tab.muted) continue;
+    if (tab.heard || (tab.audible && !tab.heardRead)) return true;
   }
   return false;
 }
@@ -6284,8 +6292,12 @@ function setTabAudible(tab, on) {
 function setTabHeard(tab, on) {
   if (!tab || tab.kind !== 'page' || isNewTabUrl(tab.url)) return;
   const heard = !!on;
+  // A push or a read is Chromium answering for this guest: from here the idle music
+  // follows tab.heard, not the media flag (anyTabAudible).
+  const firstRead = !tab.heardRead;
+  tab.heardRead = true;
   if (heard || tab.heard) tab.lastAudibleAt = Date.now();
-  if (heard === !!tab.heard) return;
+  if (heard === !!tab.heard) { if (firstRead && tab.audible) syncMusicPlayback(); return; }
   tab.heard = heard;
   syncTabAudio(tab);
   // tab.heard is one of anyTabAudible()'s two signals: an edge here moves the idle music.
@@ -6304,6 +6316,8 @@ function forgetTabAudio(tab) {
   if (!tab) return;
   // Either flag feeds anyTabAudible(), so dropping either one is the idle music's cue.
   const wasSounding = !!(tab.heard || tab.audible);
+  // The next guest has not been heard from yet: its media flag counts again until it is.
+  tab.heardRead = false;
   if (tab.heard) { tab.heard = false; syncTabAudio(tab); }
   if (tab.audible) { tab.audible = false; syncTabAudio(tab); }
   if (wasSounding) syncMusicPlayback();
@@ -8618,6 +8632,9 @@ function noteTabSound(tab, now) {
   const chromium = viewAudibleNow(tab);
   // Chromium's audibility cannot be read: the media flag is all there is.
   const sounding = chromium === null ? !!tab.audible : chromium;
+  // Chromium answered for this guest, so the idle music stops trusting the media flag
+  // for it (anyTabAudible). Cleared with the guest (forgetTabAudio).
+  if (chromium !== null && !tab.heardRead) { tab.heardRead = true; if (tab.audible) syncMusicPlayback(); }
   // The speaker's fallback: main pushes every audibility change ('tabs:audio-state'); this
   // look, at least once a sweep, catches one that never arrived.
   if (chromium !== null && chromium !== !!tab.heard) setTabHeard(tab, chromium);

@@ -456,9 +456,25 @@ const GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
     vm.runInContext(cutFunction('anyTabAudible') + '\nthis.f = anyTabAudible;', w);
     const hear = (t) => { w.tabs = t; return w.f(); };
     ok('idle music: Web Audio alone (heard, no media flag) counts', hear([{ heard: true, audible: false, muted: false }]) === true);
-    ok('idle music: the media flag alone still counts', hear([{ heard: false, audible: true, muted: false }]) === true);
+    ok('idle music: the media flag counts while Chromium has never answered for the guest', hear([{ heard: false, audible: true, muted: false }]) === true);
+    ok('idle music: a stuck media flag (closed AudioContext) does not count once Chromium answers "quiet"',
+      hear([{ heard: false, audible: true, heardRead: true, muted: false }]) === false);
+    ok('idle music: Chromium hearing it counts whatever the flag says', hear([{ heard: true, audible: false, heardRead: true, muted: false }]) === true);
     ok('idle music: a muted tab never counts', hear([{ heard: true, audible: true, muted: true }]) === false);
     ok('idle music: silence is silence', hear([{ heard: false, audible: false, muted: false }]) === false);
+  }
+  {
+    // Chromium answering for a guest (a push or a sweep's read) is what retires the media flag
+    // for the idle music, and a gone guest brings it back for the next one.
+    const T = { id: 77, kind: 'page', url: 'https://example.com/', audible: true };
+    const m1 = a.calls.music; a.setTabHeard(T, false);
+    ok('idle music: the first answer from Chromium marks the guest read', T.heardRead === true, T);
+    ok('idle music: a first "quiet" answer over a set media flag moves the music', a.calls.music === m1 + 1, a.calls.music - m1);
+    a.setTabHeard(T, false);
+    ok('idle music: a repeat answer does not', a.calls.music === m1 + 1, a.calls.music - m1);
+    ok('idle music: a sweep\'s read marks the guest read too',
+      /if \(chromium !== null && !tab\.heardRead\) \{ tab\.heardRead = true; if \(tab\.audible\) syncMusicPlayback\(\); \}/.test(cutFunction('noteTabSound')));
+    ok('idle music: a gone guest is unread again', /tab\.heardRead = false;/.test(cutFunction('forgetTabAudio')));
   }
   ok('idle music: a gone guest that was only heard still hands it back',
     /wasSounding = !!\(tab\.heard \|\| tab\.audible\)[\s\S]*if \(wasSounding\) syncMusicPlayback\(\);/.test(cutFunction('forgetTabAudio')));
