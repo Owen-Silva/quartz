@@ -1,0 +1,147 @@
+# Quartz-Setup.exe: build it, install it on the runner, use it, uninstall it, and (by default) put it
+# on a DRAFT release named v<package.json version>. Run by hand: Actions > installer > Run workflow.
+#
+# A draft is invisible to the public and to every copy's updater, and this workflow never publishes a
+# release, never creates or pushes a tag, and refuses to touch a release that is already published.
+# Publishing is a person's step (tools/RELEASING.md, "Installer").
+#
+# Judged by summary lines, never the exit code alone:
+#   quartz-installer: build OK: Quartz-Setup.exe <MB> MB, Quartz <version>, Electron <castlabs version>
+#   install-test: N passed, M failed                       (tools/installer/install-test.js)
+#
+# Every action is pinned to a full commit SHA; the comment names the release it was taken from.
+name: installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'Upload Quartz-Setup.exe to the DRAFT release v<package.json version> (never published)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    if: ${{ !github.event.repository.private }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    # contents: write only for the last step (the draft release); the token is passed to that step
+    # alone, and the checkout does not keep it in .git/config.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      # As in ci.yml's full job: install without scripts, then the castlabs Electron by hand. Then
+      # node-pty's own install script, which fetches its prebuilt Windows binary (Node-API, so it
+      # loads in Electron as is). Quartz.exe stamping (postinstall) is a clone's step: not run here.
+      - name: Install, the castlabs Electron, node-pty's binary
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          node node_modules/electron/install.js
+          npm rebuild @homebridge/node-pty-prebuilt-multiarch --foreground-scripts
+          ls -l node_modules/electron/dist/electron.exe node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/conpty.node node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node
+          node -p "'electron ' + require('./node_modules/electron/package.json').version"
+
+      - name: Build Quartz-Setup.exe
+        run: |
+          node tools/installer/prepare.js
+          ev=$(node tools/installer/prepare.js --electron-version)
+          set +e
+          npx --yes electron-builder@26.18.0 --win nsis --x64 --config tools/installer/electron-builder.yml --publish never -c.electronVersion="$ev" 2>&1 | tee build-log.txt
+          echo "electron-builder exit code: ${PIPESTATUS[0]}"
+          set -e
+          f=dist/Quartz-Setup.exe
+          if [ ! -f "$f" ]; then verdict="quartz-installer: build FAILED: no $f (see build-log.txt)"; else
+            mb=$(node -p "(require('fs').statSync('$f').size/1048576).toFixed(1)")
+            verdict="quartz-installer: build OK: Quartz-Setup.exe $mb MB, Quartz $(node -p "require('./package.json').version"), Electron $(node -p "require('./node_modules/electron/package.json').version") (castlabs, not EVS-signed; installer not code-signed)"
+          fi
+          { echo '### Build'; echo; echo '```'; echo "$verdict"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$verdict"
+          case "$verdict" in *'build OK'*) ;; *) echo "::error::$verdict"; exit 1 ;; esac
+          node -e "const c=require('crypto').createHash('sha256');c.update(require('fs').readFileSync(process.argv[1]));console.log(c.digest('hex')+'  Quartz-Setup.exe')" "$f" > dist/Quartz-Setup.exe.sha256
+          echo "sha256 $(cat dist/Quartz-Setup.exe.sha256)"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Quartz-Setup
+          path: |
+            dist/Quartz-Setup.exe
+            dist/Quartz-Setup.exe.sha256
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Install test
+        run: |
+          set +e
+          node tools/installer/install-test.js dist/Quartz-Setup.exe 2>&1 | tee install-log.txt
+          echo "install-test exit code: ${PIPESTATUS[0]}"
+          exit 0
+
+      - name: Verdict
+        run: |
+          verdict=$(grep '^install-test: ' install-log.txt | tail -n 1)
+          {
+            echo '### Install test'
+            echo
+            echo '```'
+            echo "${verdict:-install-test: NO SUMMARY LINE (the test crashed or was killed; see the log)}"
+            grep -E '^FAIL ' install-log.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$verdict" ]; then echo "::error::no install-test summary line"; exit 1; fi
+          if ! echo "$verdict" | grep -q ' 0 failed$'; then echo "::error::$verdict"; exit 1; fi
+          echo "$verdict"
+
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-logs
+          path: |
+            build-log.txt
+            install-log.txt
+            ${{ runner.temp }}/quartz-install-test-*.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # The draft: created once, then its asset replaced on each run. A published release with this
+      # tag is never touched (the step fails and says so). No tag is created: a draft names a tag
+      # that only comes into being when a person publishes it.
+      - name: Draft release
+        if: ${{ inputs.draft }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(git show HEAD:package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))")
+          tag="v$v"
+          sed "s/VERSION/$v/" tools/installer/draft-notes.md > notes.md
+          state=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "map(select(.tag_name == \"$tag\")) | if length == 0 then \"missing\" elif .[0].draft then \"draft\" else \"published\" end")
+          case "$state" in
+            missing) gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "Quartz $v" --notes-file notes.md --target "$GITHUB_SHA" dist/Quartz-Setup.exe ;;
+            draft)   gh release upload "$tag" --repo "$GITHUB_REPOSITORY" dist/Quartz-Setup.exe --clobber
+                     gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=true --target "$GITHUB_SHA" --notes-file notes.md ;;
+            *) echo "::error::release $tag is already published: this workflow never touches a published release"; exit 1 ;;
+          esac
+          info=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "map(select(.tag_name == \"$tag\"))[0] | \"draft=\(.draft) \(.html_url) assets: \([.assets[] | \"\(.name) \(.size)\"] | join(\", \"))\"")
+          line="quartz-installer: draft release $tag: $info"
+          { echo '### Draft release'; echo; echo '```'; echo "$line"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$line"
+          case "$info" in draft=true*) ;; *) echo "::error::$line"; exit 1 ;; esac

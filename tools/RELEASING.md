@@ -53,6 +53,23 @@ Rules that keep updates safe:
 - To try a release without offering it to anyone, create it with `--draft` or `--prerelease`.
 - Every release tag is signed (step 3). An unsigned one is not offered to anyone who has a key.
 
+## Installer
+
+`Quartz-Setup.exe` (per-user NSIS, unsigned) is built by the `installer` workflow, never on a
+desktop: Actions > installer > Run workflow, on `master` after the version bump. It builds the
+installer, installs it on the runner, launches it, checks the native modules, the updater and the
+default-browser registration, uninstalls it (`tools/installer/install-test.js`, summary line
+`install-test: N passed, M failed`), and puts the installer on a **draft** release `v<version>`.
+It never publishes, never creates a tag, and refuses to touch a published release.
+
+To publish that draft, the tag still has to be signed first, or every clone with a key refuses it:
+
+1. `node tools/release-tag.js --push` (step 3 above) on the same commit the draft was built from.
+2. Open the draft, check it names that tag and has `Quartz-Setup.exe`, then **Publish release**.
+
+The asset name never changes, so `releases/latest/download/Quartz-Setup.exe` always gets the newest
+one, and installed copies offer "Download the installer" once it is the latest release.
+
 ## Signed release tags
 
 The updater installs a release only when its tag is signed by a key in `release-signers` as that file

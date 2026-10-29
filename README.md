@@ -11,16 +11,19 @@ It is unofficial and not affiliated with any of the services it works with (see
 
 ## Download
 
+**[Quartz-Setup.exe](https://github.com/Owen-Silva/quartz/releases/latest/download/Quartz-Setup.exe)**
+for Windows 11 (x64): run it, and Quartz is in your Start Menu. No Node.js or git needed. See
+[Install](#install) for what it does, the SmartScreen warning, and how to uninstall.
+
+Or run it from source, which needs Node.js 22.12 or newer but below 27, and git
+([Requirements](#requirements)):
+
 ```
 git clone https://github.com/Owen-Silva/quartz.git
 cd quartz
 npm ci
 npm start
 ```
-
-There is no installer: Quartz runs from the folder you cloned. You need Windows 11 (x64),
-Node.js 22.12 or newer but below 27, and git; see [Requirements](#requirements) and
-[Install](#install) for the details.
 
 ## Features
 
@@ -62,6 +65,37 @@ Node.js 22.12 or newer but below 27, and git; see [Requirements](#requirements) 
   (`github:castlabs/electron-releases#v44.9.3+wvcus`). npm fetches it from GitHub.
 
 ## Install
+
+### With the installer
+
+1. Download `Quartz-Setup.exe` from the [latest release](https://github.com/Owen-Silva/quartz/releases/latest)
+   and run it.
+2. Windows SmartScreen says "Windows protected your PC", because the installer is not code-signed.
+   Click **More info**, check the app is `Quartz-Setup.exe`, then **Run anyway**.
+3. It installs for your Windows user only, into `%LOCALAPPDATA%\Programs\Quartz`, with no
+   administrator prompt; adds Quartz to the Start Menu (not the desktop); and opens Quartz. A
+   first-run screen offers to make Quartz your default browser; that last step is always yours,
+   in Windows Settings.
+
+What is inside: Quartz itself and the castlabs Electron it runs on, as `Quartz.exe`. Not inside:
+Claude Code (Claude tabs need it installed separately) and a streaming signature for protected
+video (see [Widevine and DRM](#widevine-and-drm): Netflix, Disney+, Prime Video and similar
+refuse to play in this build).
+
+**Updates.** An installed Quartz checks this repository's releases about 30 seconds after it starts
+and then every 6 hours (Settings > About > Check for updates turns that off). When a newer one is out, the card in the corner and Settings > About offer **Download the installer**; run it
+over the old copy, and your tabs, logins and settings stay.
+
+**Uninstall.** Settings > Apps > Installed apps > Quartz > Uninstall. It removes the program, its
+Start Menu entry and, if Quartz was registered as a browser, that registration. Your profile in
+`%APPDATA%\Quartz` is kept; delete that folder as well to remove everything.
+
+An installed copy and a clone on the same machine share that profile, so only one of them runs at
+a time (starting the other hands its link to the one that is running). The installer's Start Menu
+`Quartz.lnk` replaces one made by `relink-shortcut.ps1` for a clone; run that script again after
+uninstalling to get the clone's back.
+
+### From source
 
 ```
 git clone https://github.com/Owen-Silva/quartz.git
