@@ -3,7 +3,7 @@ require('./tools/lowcpu-optional.js');   // first: one capped browser at a time
 // with tests/claude-standin.js in place of claude.exe (pty.js's --test-profile seam). Never the
 // real Claude CLI, never the user's profile.
 //
-//   node askclaude-e2e.js [--cdp 9452] [--keep]
+//   node askclaude-e2e.js [--cdp 9452] [--profile <name>] [--keep]
 //
 // The page sets its own text to an ESC[201~ break-out (plus a C1 CSI and a bidi override) and its
 // title to one too. Checks:
@@ -35,7 +35,8 @@ const CDP_PORT = Number(opt('cdp', '9452'));
 const KEEP = argv.includes('--keep');
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
-const PROFILE = 'zl-askclaude';
+// --profile <name>: a lane's own test profile (letters, digits, dashes), so two worktrees never share one.
+const PROFILE = /^[a-z0-9-]{1,40}$/i.test(opt('profile', '')) ? opt('profile', '') : 'zl-askclaude';
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const LOG = path.join(os.tmpdir(), 'askclaude-e2e-standin-' + process.pid + '.log');
 const STANDIN = path.join(APP, 'tests', 'claude-standin.js');
@@ -67,6 +68,33 @@ async function waitRows(pred, ms, what) {
   throw new Error('timed out waiting for the stand-in: ' + what);
 }
 const inputOf = (pid) => rows().filter((r) => r.pid === pid && typeof r.in === 'string').map((r) => r.in).join('');
+
+// The words a note bar shows, as the user reads them: showAppNote() leads with an aria-hidden icon
+// glyph (a private-use character in the bar's textContent), so the bar's raw textContent never
+// starts with the sentence. `expr` is a chrome-side expression for the bar element (or null).
+const NOTE_WORDS = (expr) => `(() => { const b = ${expr}; if (!b) return '';
+  const c = b.cloneNode(true); c.querySelectorAll('[aria-hidden="true"]').forEach((x) => x.remove());
+  return c.textContent.trim(); })()`;
+// Every toast the chrome shows, kept for diagnose() (one toast element is reused, so only the last shows).
+const RECORD_TOASTS = `(() => { const T = window.Toast; if (T && !T.__e2e) { const show = T.show; window.__e2eToasts = [];
+  T.show = function (m) { window.__e2eToasts.push(String(m)); return show.apply(this, arguments); }; T.__e2e = true; } return 1; })()`;
+// On a harness error: what each stand-in logged and what the chrome shows, so a timeout names its cause.
+// Lines start "[diag]": they are never counted as checks.
+async function diagnose(chrome) {
+  const ins = {};
+  for (const r of rows()) {
+    if (typeof r.in === 'string') { ins[r.pid] = (ins[r.pid] || '') + r.in; continue; }
+    console.log('[diag] stand-in ' + JSON.stringify(r).slice(0, 280));
+  }
+  for (const pid of Object.keys(ins)) console.log('[diag] stand-in ' + pid + ' read ' + JSON.stringify(ins[pid].slice(0, 160)));
+  if (!chrome) return;
+  try {
+    console.log('[diag] chrome ' + JSON.stringify(await chrome.ev(`(() => ({ toasts: (window.__e2eToasts || []).slice(-8),
+      tabs: tabs.map((t) => ({ id: t.id, kind: t.kind, pageText: t.pageText === true, tools: t.toolsAttached,
+        asks: (t.toolAsks || []).length, live: !!(t.term && t.term.isLive && t.term.isLive()),
+        note: t.noteEl ? t.noteEl.textContent : '' })) }))()`)).slice(0, 1800));
+  } catch (e) { console.log('[diag] chrome not reachable: ' + (e && e.message)); }
+}
 
 // The page: its text and title are set from script, so the control characters are exactly these.
 const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script>'
@@ -106,6 +134,7 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     await chrome.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await chrome.waitFor('!!(window.api && window.ClaudeTerminal && typeof askClaudeAboutTab === "function" && Array.isArray(tabs) && tabs.length > 0)', 30000);
     const profile = await chrome.ev('window.api.app.profile()');
+    await chrome.ev(RECORD_TOASTS);
     const scratchRoot = path.join(profile.userData, 'claude-scratch').toLowerCase();
     check(profile.test === true && !!profile.userData, 'test profile, userData named', profile.userData);
 
@@ -138,7 +167,8 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     check(fs.readdirSync(askStart.cwd).length === 0, 'ask: the scratch folder is empty');
     const ui = await chrome.ev(`(() => { const c = splitPartner(${PT}); return c ? { pageText: c.pageText, title: c.title, cwd: c.cwd, note: c.noteEl ? c.noteEl.textContent : '' } : null; })()`);
     check(!!ui && ui.pageText === true && ui.cwd.toLowerCase() === askStart.cwd.toLowerCase(), 'ask: a NEW page-text chamber beside the page, in that folder', ui);
-    check(!!ui && /^Asked from a web page: permission prompts are on, and this session runs in a scratch folder/.test(ui.note), 'ask: the chamber says so in plain words', ui && ui.note);
+    const words = await chrome.ev(NOTE_WORDS(`(splitPartner(${PT}) || {}).noteEl`));
+    check(/^Asked from a web page: permission prompts are on, and this session runs in a scratch folder/.test(words), 'ask: the chamber says so in plain words', words);
     const toast = await chrome.waitFor("document.body.innerText.indexOf('is still in the tab strip') !== -1", 4000).catch(() => false);
     check(toast === true, 'ask: a toast says the plain pane is still in the strip');
 
@@ -173,6 +203,7 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     check(again.argv.indexOf(SKIP) === -1 && again.cwd.toLowerCase() === askStart.cwd.toLowerCase(), 'restart: no skip flag (preload adds it, pty.js strips it), same scratch folder', again);
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));
+    await diagnose(chrome);
   } finally {
     for (const c of [guest, chrome]) { try { if (c) c.close(); } catch (e) { /* gone */ } }
     if (child && !KEEP) {

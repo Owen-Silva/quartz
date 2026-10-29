@@ -12822,13 +12822,22 @@ function answerToolQuery(q) {
   try { api.reply(q.reqId, result); } catch (err) { /* main times out and says so */ }
 }
 
+/**
+ * The line over a pane. A page-text chamber's own note (permission prompts
+ * on, a scratch folder) is what it IS, so it stays first: a tool line never
+ * pushes it off the bar.
+ */
+function toolPaneLine(pane, line) {
+  return pane && pane.pageText ? MSG_PAGE_TEXT_CHAMBER + ' ' + line : line;
+}
+
 function showToolActivity(p) {
   const line = String((p && p.line) || '');
   if (!line) return;
   const pane = p.paneId ? claudePaneById(p.paneId) : null;
   // A question waiting over the pane keeps its bar: the line goes to a toast.
   const asking = !!(pane && pane.toolAsks && pane.toolAsks.length);
-  if (pane && !asking) showAppNote(pane, line, '');
+  if (pane && !asking) showAppNote(pane, toolPaneLine(pane, line), '');
   // The note only shows while its pane does: off screen, say it where the user is.
   if (!pane || asking || !isTabOnScreen(pane)) claudeToast(line);
 }
@@ -12896,6 +12905,9 @@ function answerToolAsk(pane, askId, choice) {
   }
   if (pane.noteEl && pane.noteEl.dataset && pane.noteEl.dataset.askId === String(askId)) clearAppNote(pane);
   showToolAsk(pane);
+  // The last question answered: a page-text chamber says what it is again
+  // (the tool line that follows keeps that note first, see toolPaneLine).
+  if (!pane.toolAsks.length && !pane.noteEl && pane.pageText && tabs.includes(pane)) notePageTextChamber(pane);
 }
 
 /** Main stopped waiting (60 s): the bar goes; main's own line says it was not allowed. */
@@ -12926,7 +12938,7 @@ function noteToolPane(p) {
   const line = why === 'off in Settings > Claude' ? MSG_TOOLS_OFF
     : "Claude can't read your tabs in this pane: " + why + '.';
   // A page-text chamber keeps its own note first.
-  showAppNote(pane, pane.pageText ? MSG_PAGE_TEXT_CHAMBER + ' ' + line : line, '');
+  showAppNote(pane, toolPaneLine(pane, line), '');
 }
 
 (function wireClaudePaneTools() {

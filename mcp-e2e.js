@@ -5,7 +5,7 @@ require('./tools/lowcpu-optional.js');   // first: one capped browser at a time
 // exactly as Claude Code would and calls the tools. Never the real Claude CLI, never the user's
 // profile.
 //
-//   node mcp-e2e.js [--cdp 9457] [--keep]
+//   node mcp-e2e.js [--cdp 9457] [--profile <name>] [--keep]
 //
 // The page has a known title, more than 48,000 characters of text (so read_page cuts and says so), a
 // unique sentence to highlight, and password inputs whose values must never be read. Checks:
@@ -42,7 +42,8 @@ const CDP_PORT = Number(opt('cdp', '9457'));
 const KEEP = argv.includes('--keep');
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
-const PROFILE = 'zl-mcp';
+// --profile <name>: a lane's own test profile (letters, digits, dashes), so two worktrees never share one.
+const PROFILE = /^[a-z0-9-]{1,40}$/i.test(opt('profile', '')) ? opt('profile', '') : 'zl-mcp';
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const LOG = path.join(os.tmpdir(), 'mcp-e2e-standin-' + process.pid + '.log');
 const STANDIN = path.join(APP, 'tests', 'mcp-claude-standin.js');
@@ -94,6 +95,29 @@ function killIfOurs(pid, script) {
 }
 const resOk = (row) => !!(row && row.res && row.res.result && row.res.result.isError === false);
 const resErr = (row) => !!(row && row.res && row.res.result && row.res.result.isError === true);
+
+// Every toast the chrome shows, kept for diagnose() (one toast element is reused, so only the last shows).
+const RECORD_TOASTS = `(() => { const T = window.Toast; if (T && !T.__e2e) { const show = T.show; window.__e2eToasts = [];
+  T.show = function (m) { window.__e2eToasts.push(String(m)); return show.apply(this, arguments); }; T.__e2e = true; } return 1; })()`;
+// On a harness error: what each stand-in logged and what the chrome shows, so a timeout names its cause.
+// Lines start "[diag]": they are never counted as checks.
+async function diagnose(chrome) {
+  const ins = {};
+  for (const r of rows()) {
+    if (typeof r.in === 'string') { ins[r.pid] = (ins[r.pid] || '') + r.in; continue; }
+    const brief = Object.assign({}, r);
+    if (brief.res) brief.res = resText(r).slice(0, 140) || JSON.stringify(r.res).slice(0, 140);
+    console.log('[diag] stand-in ' + JSON.stringify(brief).slice(0, 280));
+  }
+  for (const pid of Object.keys(ins)) console.log('[diag] stand-in ' + pid + ' read ' + JSON.stringify(ins[pid].slice(0, 160)));
+  if (!chrome) return;
+  try {
+    console.log('[diag] chrome ' + JSON.stringify(await chrome.ev(`(() => ({ toasts: (window.__e2eToasts || []).slice(-8),
+      tabs: tabs.map((t) => ({ id: t.id, kind: t.kind, asleep: !!t.asleep, pageText: t.pageText === true, tools: t.toolsAttached,
+        asks: (t.toolAsks || []).length, live: !!(t.term && t.term.isLive && t.term.isLive()),
+        note: t.noteEl ? t.noteEl.textContent : '' })) }))()`)).slice(0, 1800));
+  } catch (e) { console.log('[diag] chrome not reachable: ' + (e && e.message)); }
+}
 
 // ASK FIRST: the bar app.js puts over a Claude pane (tab.noteEl, classes app-note mcp-ask, data-ask-id).
 const ASK_BAR = (paneId) => `(() => {
@@ -170,6 +194,7 @@ const PAGE2 = '<!doctype html><title>Second page</title><p>A short second page f
     await chrome.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await chrome.waitFor('!!(window.api && window.ClaudeTerminal && typeof askClaudeAboutTab === "function" && typeof claudeReadTabs === "function" && Array.isArray(tabs) && tabs.length > 0)', 30000);
     const profile = await chrome.ev('window.api.app.profile()');
+    await chrome.ev(RECORD_TOASTS);
     check(profile.test === true && !!profile.userData, 'test profile, userData named', profile.userData);
     check(await chrome.ev('claudeReadTabs()') === true, 'Settings: "Let Claude panes read your open tabs" is on by default');
 
@@ -348,6 +373,7 @@ const PAGE2 = '<!doctype html><title>Second page</title><p>A short second page f
     check(!step(offStart.pid, 'config'), 'off: the stand-in never saw a config');
   } catch (e) {
     check(false, 'HARNESS ERROR ' + (e && e.stack || e));
+    await diagnose(chrome);
   } finally {
     for (const c of [guest, chrome]) { try { if (c) c.close(); } catch (e) { /* gone */ } }
     if (child && !KEEP) {
