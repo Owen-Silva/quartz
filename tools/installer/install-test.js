@@ -57,11 +57,17 @@ function reg(key, name) {
   return line ? line.replace(/^.*?\sREG_\w+\s+/, '').trim() : '';
 }
 function regKeyExists(key) { return spawnSync('reg.exe', ['query', key], { encoding: 'utf8' }).status === 0; }
+/** The whole uninstall key whose DisplayName is Quartz (its values as text), or null. */
 function uninstallEntry() {
+  // /f /d lists only the values that matched, so find the key first, then read all of it.
   const r = spawnSync('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'Quartz', '/d'], { encoding: 'utf8' });
   if (r.status !== 0) return null;
-  const blocks = r.stdout.split(/\r?\n\r?\n/).filter((b) => /DisplayName\s+REG_SZ\s+Quartz/.test(b));
-  return blocks.length ? blocks[0].trim() : null;
+  const keys = [...new Set(r.stdout.split(/\r?\n/).filter((l) => /^HKEY_/.test(l)).map((l) => l.trim()))];
+  for (const k of keys) {
+    const full = spawnSync('reg.exe', ['query', k], { encoding: 'utf8' });
+    if (full.status === 0 && /DisplayName\s+REG_SZ\s+Quartz\s*$/m.test(full.stdout)) return full.stdout.trim();
+  }
+  return null;
 }
 function ps(cmd) {
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8' });
@@ -189,8 +195,10 @@ async function main() {
   const uninstaller = path.join(INST, 'Uninstall Quartz.exe');
   check(fs.existsSync(uninstaller), 'uninstaller installed', uninstaller);
   check(fs.existsSync(SHORTCUT), 'Start Menu shortcut', SHORTCUT);
-  const apps = ps("Get-StartApps | ? { $_.Name -eq 'Quartz' } | % { $_.AppID }");
-  check(apps.out.split(/\r?\n/).map((s) => s.trim()).includes(AUMID), 'Start Menu entry carries the app id ' + AUMID + ' (toasts, taskbar grouping)', apps.out || apps.err);
+  // The shortcut's own property store (what Windows matches toasts and taskbar buttons by).
+  const lnkDir = path.dirname(SHORTCUT).replace(/'/g, "''");
+  const aumid = ps("(New-Object -ComObject Shell.Application).NameSpace('" + lnkDir + "').ParseName('Quartz.lnk').ExtendedProperty('System.AppUserModel.ID')");
+  check(aumid.out === AUMID, 'Start Menu shortcut carries the app id ' + AUMID + ' (toasts, taskbar grouping)', aumid.out || aumid.err || '(empty)');
   const entry = uninstallEntry();
   check(!!entry, 'listed in Settings > Apps (HKCU uninstall entry, DisplayName Quartz)', entry ? entry.split(/\r?\n/).filter((l) => /DisplayName|DisplayVersion|InstallLocation|QuietUninstallString/.test(l)).map((l) => l.trim()).join('; ') : 'missing');
   check(!!entry && new RegExp('DisplayVersion\\s+REG_SZ\\s+' + VERSION.replace(/\./g, '\\.')).test(entry), 'uninstall entry version ' + VERSION);

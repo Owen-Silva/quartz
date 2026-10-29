@@ -91,5 +91,12 @@ module.exports = {
     include: 'tools/installer/installer.nsh',
   },
 
+  // electronDist is copied whole, Electron's default app included. resources\app wins over it, so it
+  // never runs, but nothing should ship that is never used.
+  afterPack: async (ctx) => {
+    const p = path.join(ctx.appOutDir, 'resources', 'default_app.asar');
+    if (fs.existsSync(p)) { fs.unlinkSync(p); console.log('  • removed resources/default_app.asar (Electron\'s default app)'); }
+  },
+
   publish: null,
 };
