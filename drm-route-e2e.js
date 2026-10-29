@@ -20,7 +20,7 @@ const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const WS = require(path.join(__dirname, 'node_modules', 'ws'));
-const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher, waitChromeBooted } = require('./testwatch');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 let CDP_PORT = Number(opt('cdp', '9431'));
@@ -84,7 +84,7 @@ const TITLES = [
 ];
 
 async function run(mode, port, watcher) {
-  const tag = 'drmroute' + mode + process.pid;
+  const tag = opt('profile', 'drmroute') + mode + process.pid; // --profile <prefix>: a lane's own name
   const profileDir = path.join(os.tmpdir(), 'browser-test-profile-' + tag);
   const edgeStub = path.join(os.tmpdir(), 'quartz-' + tag + '-edge.txt');
   const openStub = path.join(os.tmpdir(), 'quartz-' + tag + '-open.txt');
@@ -109,7 +109,9 @@ async function run(mode, port, watcher) {
     watcher.watch(child.pid);
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 40000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
-    await chrome.waitFor('!!(window.Drm && typeof openWatchTab === "function" && window.Drm.state())', 20000);
+    // Booted, not just loaded: init() has bound the strip and the first tab is up (testwatch.js
+    // waitChromeBooted). Acting on app.js's functions before that got a null tab on some runs.
+    await waitChromeBooted((e) => chrome.ev(e), '!!(window.Drm && typeof openWatchTab === "function" && window.Drm.state())', 30000, (l) => console.log('[e2e] ' + mode + ': ' + l));
     // A fresh profile downloads the CDM on first run, possibly after main's 4 s cap.
     if (mode !== 'missing') await chrome.waitFor('window.api.drm.state().then((s) => !!(s && s.widevine && s.widevine.available))', 90000).catch(() => null);
     const st = await chrome.ev('window.api.drm.state()');
