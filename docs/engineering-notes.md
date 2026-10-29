@@ -447,7 +447,10 @@ chamber says what it is ("Asked from a web page: permission prompts are on, and 
 a scratch folder, not your home folder."). A plain chamber the page was split with stays in the
 strip and a toast says so; there is no fallback to any other chamber. Plain "Open Claude beside this
 page" keeps the user's setting. Under `--test-profile`, `QUARTZ_TEST_CLAUDE` runs a node stand-in
-in place of `claude.exe`, so tests never start a real Claude Code session.
+in place of `claude.exe`, so tests never start a real Claude Code session. It runs under the
+console `node.exe` the test names in `QUARTZ_TEST_NODE`, never under electron.exe (see
+Development, "Writing an e2e test"); under Electron on Windows without one, the spawn is refused
+and the pane says why.
 
 Pasting goes in through xterm's bracketed paste, so a multi-line quote arrives as one block
 rather than as N submitted lines, which is what the Claude Code input box wants. The PTY boundary
@@ -556,8 +559,24 @@ and is re-applied on `dom-ready`, since a fresh guest is born unmuted. The speak
 tabsleep-main.js as `tabs:audio-state`; the sleep sweep re-reads `isCurrentlyAudible()` once a
 minute as a fallback). It used to follow the media-started-playing / media-paused level
 (`tab.audible`), which is per element: an ad or preview pausing cleared the speaker while the
-stream played on, and Web Audio never lit it. The idle music's "a tab is making sound" fact
-(`anyTabAudible()`) reads either flag on an unmuted tab, and every edge of either moves it.
+stream played on, and Web Audio never lit it. `tab.heard` measures what really comes out of the
+guest, so it holds a stream that plays on after one of its elements paused, Web Audio (games,
+radio and music players), and a tab the user muted that keeps playing (only the output is
+silenced; Chromium still hears the page, which is why Chrome draws a struck-out speaker there).
+
+The media flag is wrong in both directions: one element pausing clears it while the stream plays
+on, and a source can start it and never clear it. Chromium 152 reports an AudioContext as a player
+(`media-started-playing`) but sends no `media-paused` when the context closes, so a page that had
+once played a Web Audio blip held the flag for the rest of its life (sleep-e2e caught it as
+`mediaFlag: true, chromium: false`). So nothing trusts it where Chromium can be read. Sleep uses it
+only where it is the only signal: no usable guest, an Electron without `isCurrentlyAudible`, the
+call threw, or it answered something that is not a boolean (`tabSoundReason()`, see Tab sleeping).
+The idle music's "a tab is making sound" fact (`anyTabAudible()`) is `tab.heard` on an unmuted tab;
+`tab.audible` counts only while `tab.heardRead` is false, i.e. Chromium has never answered for this
+guest (no push yet, no sweep read yet, or an Electron that cannot say). The first push or read sets
+`tab.heardRead`; it is cleared with the guest (`forgetTabAudio`) and when a new guest replaces it,
+so the next guest's media flag counts again until Chromium speaks for it. Before this, one Web
+Audio blip kept the idle music off with nothing playing.
 Pinning makes a chip icon-only and moves it into the pinned group at the left of the strip — both
 directions land on the same index, so it is reversible — and a pinned chip ignores middle-click
 close.
@@ -589,7 +608,15 @@ for 20 minutes and then switched away from sleeps 30 minutes later, a split half
 counting as used, and raising a tab in another workspace starts that workspace's clock. Never
 slept: the tab on screen, a pinned tab, a tab making sound or heard in the last 2 minutes
 (`AUDIBLE_SPARE_MS`; every rule asks Chromium's own audibility through `tabSoundReason()`, and
-`sleepTab()` re-checks at the moment of sleeping), a crashed tab, a Claude chamber. The Sleep tab
+`sleepTab()` re-checks at the moment of sleeping), a crashed tab, a Claude chamber. "Making sound"
+is `<webview>.isCurrentlyAudible()` read at the moment of every decision and `tab.heard` as main
+pushes it, never the media flag (see Tab audio and pinning for why, and the one case where the
+flag still counts; `media-paused` stamps the 2-minute window only then). The 2 minutes count from
+the moment Chromium went quiet, plus one sweep of slack. So a stream with any sound never sleeps,
+muted or not, but a stream that has been silent for more than 2 minutes (nothing coming out) can
+sleep once it is past the idle limit, like Chrome's own memory saver; and a page that once played
+a Web Audio sound sleeps again (before, the stuck flag spared it from the idle sweep, Sleep tab and
+the workspace rule alike). The Sleep tab
 menu item is disabled with the reason, and the `tab-slept` log event carries the sound state it
 was judged on. A new tab page that sits in the background of the workspace on screen for 15 s is
 slept unless it holds typed text or an open dialog (its own `HOME_BUSY_PROBE`). At boot only the
@@ -652,7 +679,13 @@ console, so one broken snippet cannot stop the chain.
 runs `@mozilla/readability` over the active page and opens the article in the bundled
 `reader.html`, next to the tab it came from. Readability is not in index.html: it is ~100KB that
 only the reader ever touches, so `loadReadability()` injects it on the first open and every later
-open reuses the global it leaves behind. Everything coming back out of a guest is treated as
+open reuses the global it leaves behind. Relative urls in the article resolve against the page it
+came from, not the chrome's `file://` address, and not with a `<base>`: a document parsed in the
+chrome lives under the chrome's policy, whose `base-uri 'none'` refuses one, and the images then
+pointed at `file:///`, which `reader.html` refuses in turn, so most sites lost their pictures.
+Readability reads `doc.baseURI` in one place only (`_fixRelativeUris`), so `parseArticle` defines
+`baseURI` on the parsed document as the page's address and the policy stays strict; a url that is
+not absolute leaves the links as the page wrote them. Everything coming back out of a guest is treated as
 hostile, in two passes — see Security notes. The reading page owns its top bar — back to the
 source, A- / A+, narrow / wide — saved to `localStorage['reader']` and applied before first paint.
 A reader tab's URL is `reader.html?src=<article url>`, but the
@@ -843,8 +876,8 @@ track name, Play / Pause / Turn on, and a Next control for your own tracks.
 back as `newtab:music` console lines.
 
 music.js is the player. It plays only when the setting is on, you have not paused it by hand, the
-window is focused, no unmuted tab is making sound (its media flag or Chromium's own audibility, see
-"Tab audio and pinning"), the machine is not already playing something (Spotify, or any
+window is focused, no unmuted tab is making sound (Chromium's own audibility; the media flag only
+for a guest Chromium has not answered for yet, see "Tab audio and pinning"), the machine is not already playing something (Spotify, or any
 Windows media session), the "Where it plays" setting is satisfied and the source is ready. A 300ms
 settle sits in front of that decision, and the fades are 800ms in and 400ms out. Two sinks sit behind
 one contract: the ambient engine, and one `<audio>` element on `file://` for your own tracks, with
@@ -1282,6 +1315,14 @@ marks the quote with a CSS custom highlight (`::highlight(quartz-claude)`, in a 
 stylesheet so the page cannot hide it), scrolls it to the middle of the view and clears it after
 60 s; no element is inserted and nothing reflows, and spacing and case in the quote need not match.
 
+The ask bar and the pane lines share the one note slot over a pane (`showAppNote`). A page-text
+chamber's own note (permission prompts on, a scratch folder) is what that pane is, so it stays
+first: a pane line goes under it (`toolPaneLine`, the rule the "can't read your tabs" line already
+followed), and the note comes back once the last question is answered or main gives up on it. A
+question itself still takes the whole bar while it waits. Before, the first "Claude read: ..." line
+replaced the note and answering the last question left the bar empty. mcp-harness section I runs
+app.js's own bar functions against a stand-in note slot.
+
 **Other programs in a chamber.** pty.js is no longer claude-only. A static PROGRAMS table names
 claude, PowerShell, pwsh, cmd, Python, Node and Git Bash, each with its own fixed arguments and its
 own allowlist: only claude accepts `--continue`, `--resume` and skip-permissions, and the shells take
@@ -1653,7 +1694,9 @@ fonts, fetches and frames. Inline style is the one exception there: xterm's DOM 
 Electron's `<webview>` shadow root and `userstyle.js` each add a `<style>` element at run time. The
 guest pages refuse inline style. `reader.html`, which shows another site's article HTML, gets only
 web and `data:` images. `file:` is named rather than `'self'` because a `file://` page has an
-opaque origin. `csp-harness.js` checks every page statically, and `csp-e2e.js` opens each page in
+opaque origin. The chrome's `base-uri 'none'` also binds every document the chrome parses, so code
+that needs relative urls resolved against another page hands the address over directly (the
+reader sets `doc.baseURI`, see Reader view) instead of inserting a `<base>`. `csp-harness.js` checks every page statically, and `csp-e2e.js` opens each page in
 a test instance and fails on any `securitypolicyviolation`. A new bundled page fails the harness
 until it has a policy.
 
@@ -1912,6 +1955,63 @@ under any policy; csp-e2e tries eval and `new Function` from a page timer instea
 scope. A check that cannot run in a given place prints `SKIP <check>: <reason>`, is never counted as
 a pass, and run-suite lists those lines under their file's row.
 
+**Writing an e2e test.** These rules each came from a test that passed one night and failed (or
+hung) the next, on the same commit; every one was a race or a trap in the test, not in Quartz.
+
+- *Act once the chrome has booted, never when a function is merely defined.* `createTab` being a
+  function and Drm's state being in are both true as soon as app.js is evaluated and main answers
+  the window's first IPC. But app.js is one `<script>` of many in index.html: the DOM refs
+  `createTab` needs (the tab strip, the views well) are bound in `init()`, which runs on
+  DOMContentLoaded after ~30 more scripts have loaded, and the first tab comes one IPC turn after
+  that (the session read). A CDP `Runtime.evaluate` runs between those script tasks, so a test that
+  attached early acted in the gap: `createTab()` returned null ("Cannot read properties of null
+  (reading 'id')") and `openWatchTab()` quietly opened nothing. How wide the gap is depends on the
+  machine and on how soon the test attaches. The app side is right (main queues `open-url` until
+  index.html has loaded, and every user path into `createTab` comes after `init()`).
+  `testwatch.js` `waitChromeBooted(ev, extra, ms, say)` waits for the predicate e2e-kit.js has
+  always used (`viewsEl` bound, the boot strip built, not mid-restore) ANDed with the test's own
+  condition, and prints one line per run: when the scripts alone first answered and when the boot
+  finished, i.e. how wide the gap was. drm-e2e, drm-castlabs-e2e, drm-route-e2e and log-e2e use
+  it; `testwatch-harness.js` runs the real expression through a simulated boot and checks the old
+  predicate would have passed in the gap. bravesearch-e2e and search-page-e2e still wait on
+  `window.Settings` plus a function, a narrower gap of the same shape, not seen failing.
+- *Never CDP `Page.reload` a `<webview>` guest.* Chromium sends a guest's `Page.reload` to its
+  outermost main frame (so a PDF viewer's reload works), and for an Electron `<webview>` that is
+  the embedder: the whole chrome window reloads, every guest goes with it, and each guest's DevTools
+  session closes (`Inspector.detached`, reason `target_closed`); a probe on Electron 44.9.3 /
+  Chromium 152 saw the chrome's `performance.timeOrigin` change. Reload a guest from its own task
+  (`setTimeout(() => location.reload())` through `Runtime.evaluate`): the chrome and the guest's
+  session both survive that.
+- *A call on a closed DevTools socket must fail at once.* The `ws` library drops a `send()` on a
+  CLOSED socket with no callback and no throw, so a `Cdp.send` waiting for its answer waited for
+  ever. That is what hung csp-e2e for 240 s, locally and on the hosted runner: the reload above
+  closed the newtab guest's session, the next call never answered, and the watchdog could not end
+  the run either, because every later call (the finally block's own `window.close` first) waited
+  the same way. e2e-kit's `Cdp.send` now answers `{error: connection closed}` when the socket is
+  not open. csp-e2e also races the whole run against its watchdog, checks the chrome is still the
+  document it booted as before it trusts its final count, and with `--trace` prints every step and
+  DevTools call with its time and every session close.
+- *Run the Claude stand-in under a console program.* ConPTY gives its console only to console
+  programs, and electron.exe is a Windows GUI program (PE subsystem 2; node.exe and claude.exe are
+  3). Run as node inside a PTY, electron.exe's stdin and stdout are not the PTY at all: nothing it
+  prints reaches xterm, nothing typed reaches it, and with nothing else to keep it alive it exits
+  at once. In Quartz that was a pane whose stand-in had started (its argv row was logged) but whose
+  screen stayed empty: terminal.js never saw the first quiet or bracketed paste turn on, held every
+  paste, and askclaude-e2e and mcp-e2e timed out waiting for input. pty.js's test seam
+  (`testClaudeStandin`) runs the script with the node.exe in `QUARTZ_TEST_NODE` (the e2e passes
+  its own `process.execPath`); askclaude-harness C10-C14 pin that choice in main's context and
+  read both PE headers (its block D runs under node.exe and could never have caught this). Both
+  tests check the stand-in's banner is on the pane's screen before they paste.
+- *Read a note bar the way the user does.* Its `textContent` starts with `showAppNote()`'s
+  aria-hidden icon glyph (a private-use character), so a regex anchored at the start of the bar's
+  text can never pass. Clone the bar, drop the aria-hidden parts, trim (askclaude-e2e `NOTE_WORDS`).
+- *A timeout names its cause.* On a harness error mcp-e2e and askclaude-e2e print `[diag]` lines:
+  every stand-in row and what each stand-in read, each Claude pane's screen text, and the chrome's
+  tabs, notes, pending asks and every toast since launch. mcp-e2e and askclaude-e2e take
+  `--profile <name>` (a test profile of the run's own) and the three drm e2e tests
+  `--profile <prefix>` (the test profile's name before the pid), so two runs never share a profile
+  and each can find its own processes.
+
 **npm audit.** The `ci` workflow's third job, `audit`, runs on every push, PR, night and manual run:
 `npm audit --omit=dev` over package-lock.json (no install), the full table printed, failing on any
 high or critical advisory in the runtime dependencies. The verdict is one line from
@@ -1963,6 +2063,6 @@ npx electron . --test-profile --profile-name=nav --remote-debugging-port=9223
 npx electron . --test-profile --profile-name=perf --remote-debugging-port=9224
 ```
 
-Never kill every `electron.exe` — I run my own Claude Code instance on Electron and it will go
+Never kill every `electron.exe`: other Electron apps on the machine (the user's own tools included) go
 down with it. Kill only the test instance: find the PID whose command line contains
 `remote-debugging-port=9222` and no `--type=`.
