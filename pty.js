@@ -242,12 +242,37 @@ function pruneScratch(root, keep) {
 // of claude.exe (QUARTZ_TEST_CLAUDE = absolute path to a .js file), so an e2e
 // can watch exactly what reaches a Claude session's argv, cwd and input
 // without ever starting the real CLI. A live Quartz ignores the variable.
-function testClaudeStandin(prog) {
+//
+// What runs the script matters on Windows. ConPTY gives its console only to a
+// CONSOLE program (claude.exe is one), and electron.exe is a Windows GUI
+// program: run as node inside a PTY, its stdin and stdout are not the PTY at
+// all. Nothing it prints reaches xterm (so terminal.js never sees the first
+// quiet or bracketed paste turn on, and holds every paste), nothing typed
+// reaches it, and a script with nothing else to wait on exits at once. So a
+// test names a console node.exe in QUARTZ_TEST_NODE (an e2e passes its own
+// process.execPath), and under Electron on Windows without one the spawn is
+// refused with that reason (the pane shows it) instead of starting a stand-in
+// that can never be typed into. `ctx` is for the harness; main passes none.
+function testClaudeStandin(prog, ctx) {
   if (!prog || prog.id !== 'claude') return null;
-  if (!process.argv.includes('--test-profile')) return null;
-  const script = process.env.QUARTZ_TEST_CLAUDE;
+  const c = Object.assign({
+    argv: process.argv,
+    env: process.env,
+    platform: process.platform,
+    electron: !!(process.versions && process.versions.electron),
+    execPath: process.execPath,
+  }, ctx || {});
+  if (!c.argv.includes('--test-profile')) return null;
+  const script = c.env.QUARTZ_TEST_CLAUDE;
   if (!script || !path.isAbsolute(script) || !isFile(script)) return null;
-  return { bin: process.execPath, pre: [script], env: { ELECTRON_RUN_AS_NODE: '1' } };
+  const node = c.env.QUARTZ_TEST_NODE;
+  if (node && path.isAbsolute(node) && isFile(node)) return { bin: node, pre: [script], env: {} };
+  if (c.platform === 'win32' && c.electron) {
+    throw new Error('the test stand-in needs QUARTZ_TEST_NODE (an absolute path to node.exe): '
+      + 'electron.exe is a Windows GUI program, so run as node in a PTY it gets no console and '
+      + 'nothing typed into the pane would ever reach it');
+  }
+  return { bin: c.execPath, pre: [script], env: c.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {} };
 }
 
 // ---------------------------------------------------------------------------
