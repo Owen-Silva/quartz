@@ -8,7 +8,9 @@
 // holding typed text awake), run against a tiny fake document.
 // Plus the early rules (memoryPressure / earlySleepPlan: memory low, very heavy pages), the probe-gated
 // sweep (sleepTabChecked with main faked: busy, no answer, retry timing, reasons shown and logged),
-// the speaker following Chromium (setTabHeard), and tabsleep-main.js: tabMemory, the
+// the speaker following Chromium (setTabHeard), the sound rule (Chromium's audibility decides, a
+// stuck media flag never holds a tab awake, the flag only where Chromium cannot be read, a
+// playing stream never sleeps), and tabsleep-main.js: tabMemory, the
 // isolated-world PROBE and its input TRACKER, against small fakes.
 // The live paths (a real restore, a real sleep and wake) are sessions-e2e.js / sleep-e2e.js.
 const fs = require('fs');
@@ -276,17 +278,68 @@ function sweepUntil(api, from, to, id) {
   ok('bug2: and slept within a sweep or two after that', at !== null && at <= 64, at);
 }
 {
-  // Web Audio only (never any media event): spared the same way; a muted media element still counts.
+  // Web Audio only (never any media event): spared the same way.
   const a = sweepWorld();
   const A = a.page('A'); const C = a.page('C', { audible: true }); a.page('B');
   a.set(0); a.activate('B');
   A.viewEl.audibleNow = true;
   ok('bug2: Web Audio tab (no media events) is not a candidate', a.canSleepTab(A) === false);
-  ok('bug2: media flag alone (muted element playing) still spares', a.canSleepTab(C) === false);
+  // The media flag with nothing coming out (a muted element playing, a closed AudioContext whose
+  // media-paused never came) is not sound: Chromium's audibility is the answer when it can be read.
+  ok('bug2: a media flag Chromium cannot hear no longer spares', a.canSleepTab(C) === true && a.tabSoundReason(C) === '', a.tabSoundReason(C));
   ok('bug2: sleepTab itself refuses a tab making sound (moment of sleeping)', /const sound = tabSoundReason\(tab\);\s*if \(sound\)/.test(cutFunction('sleepTab')));
   ok('bug2: workspace "all" rule uses the real audibility', /tabSoundReason\(tab\)/.test(cutFunction('canSleepInWorkspace')));
   ok('bug2: the slept log line carries the sound state', /sound: heardAgo === null \? 'was not making sound'/.test(cutFunction('sleepTab')));
-  ok('bug2: media-paused stamps lastAudibleAt', /if \(tab\.audible\) tab\.lastAudibleAt = Date\.now\(\);\s*setTabAudible\(tab, false\)/.test(src));
+  ok('bug2: media-paused stamps lastAudibleAt only when Chromium cannot be read',
+    /if \(tab\.audible && viewAudibleNow\(tab\) === null\) tab\.lastAudibleAt = Date\.now\(\);\s*setTabAudible\(tab, false\)/.test(src));
+}
+{
+  // BUG 3 (live): Chromium reports an AudioContext as a player (media-started-playing) and sends no
+  // media-paused when the context closes. The flag stood for ever, the tab read "making sound" for
+  // the rest of its life and never slept. Now: spared 2 min after Chromium went quiet, then slept.
+  const a = sweepWorld();
+  const A = a.page('A'); a.page('B');
+  a.set(0); a.activate('A'); a.set(1 * MIN); a.activate('B');
+  A.audible = true; A.viewEl.audibleNow = true;          // the oscillator plays
+  ok('bug3: Web Audio playing (flag and Chromium): never slept in 60 min', sweepUntil(a, 2, 60, 'A') === null);
+  a.set(60 * MIN + 30000); A.viewEl.audibleNow = false; a.setTabHeard(A, false); // closed: main's push
+  ok('bug3: the flag is still stuck on (no media-paused came)', A.audible === true);
+  a.set(61 * MIN);
+  ok('bug3: just stopped: "made sound in the last 2 minutes", not "making sound"', a.tabSoundReason(A) === 'made sound in the last 2 minutes', a.tabSoundReason(A));
+  const at = sweepUntil(a, 61, 120, 'A');
+  ok('bug3: slept once the 2-minute window is over, stale flag and all', at !== null && at <= 64, at);
+  ok('bug3: never sooner than 2 min after the sound really stopped', at !== null && at * MIN - (60 * MIN + 30000) >= AUDIBLE_SPARE_OK, at);
+}
+{
+  // A Twitch-style stream that really plays never sleeps, whatever the media flag says.
+  const a = sweepWorld();
+  const S = a.page('S'); const T = a.page('T'); const M = a.page('M', { muted: true }); a.page('B');
+  a.set(0); a.activate('B');
+  S.audible = true; S.viewEl.audibleNow = true;   // the stream, flag on
+  T.audible = false; T.viewEl.audibleNow = true;  // the same stream after an ad element paused
+  M.audible = true; M.viewEl.audibleNow = true;   // muted by the user: Chromium still hears it (sleep-e2e checks this premise)
+  for (let m = 1; m <= 6 * 60; m++) { a.set(m * MIN); a.sweep(); }
+  ok('stream: audible to Chromium, never slept in 6 h (flag on)', !S.asleep);
+  ok('stream: audible to Chromium, never slept in 6 h (flag cleared by an ad)', !T.asleep);
+  ok('stream: muted by the user but still playing, never slept in 6 h', !M.asleep);
+  ok('stream: the reason is "making sound"', a.tabSoundReason(S) === 'making sound' && a.tabSoundReason(T) === 'making sound');
+}
+{
+  // Where Chromium's audibility cannot be read, the media flag is the only signal: it decides.
+  const a = sweepWorld();
+  const N = a.page('N', { audible: true }); const Q = a.page('Q', { audible: false }); const P = a.page('P', { audible: false }); const X = a.page('X', { audible: true }); a.page('B');
+  a.set(0); a.activate('B');
+  delete N.viewEl.isCurrentlyAudible; N.viewEl.isCurrentlyAudible = undefined;  // an Electron without it
+  Q.viewEl.isCurrentlyAudible = () => { throw new Error('guest gone'); };
+  P.viewEl.isCurrentlyAudible = () => Promise.resolve(false);                 // a future async API
+  X.viewEl.isCurrentlyAudible = () => Promise.resolve(false);
+  ok('fallback: no isCurrentlyAudible, media flag on: "making sound"', a.tabSoundReason(N) === 'making sound', a.tabSoundReason(N));
+  ok('fallback: isCurrentlyAudible threw, media flag off: free to sleep', a.tabSoundReason(Q) === '' && a.canSleepTab(Q) === true, a.tabSoundReason(Q));
+  ok('fallback: a Promise is not "always playing" (flag off: free)', a.tabSoundReason(P) === '', a.tabSoundReason(P));
+  ok('fallback: a Promise defers to the flag (flag on: spared)', a.tabSoundReason(X) === 'making sound', a.tabSoundReason(X));
+  N.heard = true;
+  a.tabSoundReason(N);
+  ok('fallback: an unreadable guest leaves the speaker as main last pushed it', N.heard === true);
 }
 
 // --- sleeping early: memory pressure and very heavy pages (earlySleepPlan) --------------------

@@ -15,7 +15,9 @@
 //
 // Plus one push: each guest's 'audio-state-changed' (Chromium's own audibility, the signal behind
 // Chrome's speaker icon) is forwarded to the chrome as 'tabs:audio-state', so the speaker on a
-// chip follows real sound instead of the per-element media-started-playing / media-paused events.
+// chip follows real sound instead of the per-element media-started-playing / media-paused events,
+// and the sleep rules' 2-minute spare window starts when the sound really stops (app.js
+// tabSoundReason reads the same audibility; the media flag only where it cannot be read).
 //
 // Nothing here throws at the renderer: every answer is a value with a plain-words reason.
 
