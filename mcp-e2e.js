@@ -47,6 +47,13 @@ const PROFILE = /^[a-z0-9-]{1,40}$/i.test(opt('profile', '')) ? opt('profile', '
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const LOG = path.join(os.tmpdir(), 'mcp-e2e-standin-' + process.pid + '.log');
 const STANDIN = path.join(APP, 'tests', 'mcp-claude-standin.js');
+// What runs the stand-in: this test's own node.exe (QUARTZ_TEST_NODE). electron.exe is a Windows GUI
+// program, so run as node in a PTY it gets no console: the pane never shows its banner and never
+// types into it (pty.js testClaudeStandin refuses that spawn now, and says why in the pane).
+const STANDIN_NODE = process.execPath;
+// The words a pane's terminal shows (xterm's DOM renderer). `tab` is a chrome-side expression.
+const SCREEN = (tab) => `(() => { const st = ${tab}; const r = st && st.viewEl && st.viewEl.querySelector('.xterm-rows');
+  return r ? r.textContent.replace(/\\s+/g, ' ').trim() : ''; })()`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TITLE = 'Lanternfish Migration Field Notes';
@@ -115,7 +122,8 @@ async function diagnose(chrome) {
     console.log('[diag] chrome ' + JSON.stringify(await chrome.ev(`(() => ({ toasts: (window.__e2eToasts || []).slice(-8),
       tabs: tabs.map((t) => ({ id: t.id, kind: t.kind, asleep: !!t.asleep, pageText: t.pageText === true, tools: t.toolsAttached,
         asks: (t.toolAsks || []).length, live: !!(t.term && t.term.isLive && t.term.isLive()),
-        note: t.noteEl ? t.noteEl.textContent : '' })) }))()`)).slice(0, 1800));
+        note: t.noteEl ? t.noteEl.textContent : '',
+        screen: t.kind === 'claude' ? ${SCREEN('t')}.slice(0, 160) : undefined })) }))()`)).slice(0, 2400));
   } catch (e) { console.log('[diag] chrome not reachable: ' + (e && e.message)); }
 }
 
@@ -185,7 +193,7 @@ const PAGE2 = '<!doctype html><title>Second page</title><p>A short second page f
     const page2Url = 'http://127.0.0.1:' + site.port + '/page2.html';
     watcher = startWatcher((l) => console.log('[e2e] ' + l));
     await watcher.ready;
-    const env = Object.assign({}, process.env, { QUARTZ_TEST_CLAUDE: STANDIN, QUARTZ_STANDIN_LOG: LOG, QUARTZ_STANDIN_QUOTE: QUOTE });
+    const env = Object.assign({}, process.env, { QUARTZ_TEST_CLAUDE: STANDIN, QUARTZ_TEST_NODE: STANDIN_NODE, QUARTZ_STANDIN_LOG: LOG, QUARTZ_STANDIN_QUOTE: QUOTE });
     child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
     watcher.watch(child.pid);
     console.log('[e2e] quartz pid ' + child.pid + ', stand-in log ' + LOG);
@@ -230,6 +238,12 @@ const PAGE2 = '<!doctype html><title>Second page</title><p>A short second page f
     const spawned = await waitRows((r) => r.find((x) => x.pid === start.pid && x.mcp === 'spawned'), 10000, 'server spawned');
     if (spawned.serverPid) servers.add(spawned.serverPid);
     await waitRows((r) => r.find((x) => x.pid === start.pid && (x.mcp === 'waiting' || x.mcp === 'error')), 30000, 'the MCP client ready');
+
+    // The pane's terminal IS the stand-in's console: its banner is on screen. Without that, terminal.js
+    // never sees the first quiet and holds every paste, and the calls below never start.
+    const PANE = `tabs.find((x) => x.id === ${paneId})`;
+    const banner = await chrome.waitFor(`${SCREEN(PANE)}.indexOf('claude stand-in') !== -1`, 10000).catch(() => false);
+    check(banner === true, 'pane: the stand-in\'s banner is on screen (its output reaches the PTY)', banner === true ? '' : await chrome.ev(SCREEN(PANE)));
 
     // The stand-in runs its calls when told; each read waits on the user's answer, given here.
     const answered = new Set();

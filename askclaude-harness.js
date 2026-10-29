@@ -359,6 +359,38 @@ function bracketBody(bytes) {
   ok('C9 the claude stand-in needs --test-profile (env alone does nothing)',
     (process.env.QUARTZ_TEST_CLAUDE = path.join(__dirname, 'tests', 'claude-standin.js'), P.testClaudeStandin(claude) === null));
 
+  // What RUNS the stand-in. ConPTY gives its console only to a console program; electron.exe is a
+  // Windows GUI program, so as node in a PTY it never sees the PTY (nothing it prints arrives, nothing
+  // typed reaches it). Block D below runs under node.exe and cannot see that, so the choice is pinned
+  // here with the context main would have (Electron on Windows).
+  const standinScript = path.join(__dirname, 'tests', 'claude-standin.js');
+  const inMain = (env, more) => Object.assign({ argv: ['--test-profile'], env, platform: 'win32', electron: true, execPath: 'C:\\x\\electron.exe' }, more || {});
+  let noNodeErr = '';
+  try { P.testClaudeStandin(claude, inMain({ QUARTZ_TEST_CLAUDE: standinScript })); } catch (err) { noNodeErr = err.message; }
+  ok('C10 Electron on Windows, no QUARTZ_TEST_NODE: refused, and the reason names the GUI program',
+    /QUARTZ_TEST_NODE/.test(noNodeErr) && /GUI program/.test(noNodeErr), noNodeErr || 'not refused');
+  const viaNode = P.testClaudeStandin(claude, inMain({ QUARTZ_TEST_CLAUDE: standinScript, QUARTZ_TEST_NODE: process.execPath }));
+  ok('C11 QUARTZ_TEST_NODE runs the script, with no ELECTRON_RUN_AS_NODE',
+    !!viaNode && viaNode.bin === process.execPath && viaNode.pre[0] === standinScript && !('ELECTRON_RUN_AS_NODE' in viaNode.env), JSON.stringify(viaNode));
+  let relErr = '';
+  try { P.testClaudeStandin(claude, inMain({ QUARTZ_TEST_CLAUDE: standinScript, QUARTZ_TEST_NODE: 'node.exe' })); } catch (err) { relErr = err.message; }
+  ok('C12 a relative or missing QUARTZ_TEST_NODE is not used (still refused under Electron on Windows)', /QUARTZ_TEST_NODE/.test(relErr), relErr || 'not refused');
+  const elsewhere = P.testClaudeStandin(claude, inMain({ QUARTZ_TEST_CLAUDE: standinScript }, { platform: 'linux', execPath: '/x/electron' }));
+  ok('C13 Electron elsewhere: its own binary as node, as before', !!elsewhere && elsewhere.bin === '/x/electron' && elsewhere.env.ELECTRON_RUN_AS_NODE === '1', JSON.stringify(elsewhere));
+  ok('C13 env alone, without --test-profile, still does nothing (and never throws)',
+    P.testClaudeStandin(claude, inMain({ QUARTZ_TEST_CLAUDE: standinScript }, { argv: [] })) === null);
+  if (process.platform === 'win32') {
+    // The reason, measured: the PE header's Subsystem field (2 = Windows GUI, 3 = console).
+    const subsystem = (file) => {
+      const fd = fs.openSync(file, 'r');
+      try { const b = Buffer.alloc(4096); fs.readSync(fd, b, 0, 4096, 0); return b.readUInt16LE(b.readUInt32LE(0x3c) + 24 + 68); } finally { fs.closeSync(fd); }
+    };
+    eq('C14 node.exe (what block D and the e2e run the stand-in with) is a console program', subsystem(process.execPath), 3);
+    const electronExe = path.join(__dirname, 'node_modules', 'electron', 'dist', 'electron.exe');
+    if (fs.existsSync(electronExe)) eq('C14 electron.exe is a Windows GUI program (why it cannot host the stand-in)', subsystem(electronExe), 2);
+    else console.log('SKIP C14 electron.exe: not installed in this tree (' + electronExe + ')');
+  }
+
   // ============================================================ D. a real PTY, stand-in ==
   P.setScratchRoot(root);
   const logFile = path.join(tmp, 'standin.log');
