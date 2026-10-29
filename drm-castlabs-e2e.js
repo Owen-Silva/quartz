@@ -65,17 +65,28 @@ const server = http.createServer((req, res) => {
 const listen = (srv, port) => new Promise((r, j) => { srv.once('error', j); srv.listen(port, '127.0.0.1', () => r(srv.address().port)); });
 
 /* ---- CDP ----------------------------------------------------------------------------------- */
+const CALL_MS = 60000; // longest single DevTools call any step makes (the licence round trip awaits a promise)
 class Cdp {
   constructor(wsUrl) { this.wsUrl = wsUrl; this.id = 0; this.pending = new Map(); }
   async open() {
     this.ws = new WS(this.wsUrl, { perMessageDeflate: false });
     await new Promise((r, j) => { this.ws.on('open', r); this.ws.on('error', j); });
     this.ws.on('message', (raw) => { const m = JSON.parse(String(raw)); const p = this.pending.get(m.id); if (p) { this.pending.delete(m.id); p(m); } });
+    // A closed socket answers every waiting call (ws never will), so a page that went away names itself.
+    this.ws.on('close', () => { for (const p of this.pending.values()) p({ error: { message: 'connection closed' } }); this.pending.clear(); });
     return this;
   }
   send(method, params) {
     const id = ++this.id;
-    return new Promise((resolve) => { this.pending.set(id, resolve); this.ws.send(JSON.stringify({ id, method, params: params || {} })); });
+    return new Promise((resolve) => {
+      // ws DROPS a send() on a closed socket (no callback, no throw): answer now, or the caller waits for ever.
+      if (!this.ws || this.ws.readyState !== WS.OPEN) { resolve({ error: { message: 'connection closed' } }); return; }
+      // A renderer that never answers (hung, or blocked in main) fails this call by name instead of
+      // running the whole file into the suite's 300 s limit with nothing in the log.
+      const timer = setTimeout(() => { if (this.pending.delete(id)) resolve({ error: { message: method + ' got no answer in ' + CALL_MS + ' ms' } }); }, CALL_MS);
+      this.pending.set(id, (m) => { clearTimeout(timer); resolve(m); });
+      try { this.ws.send(JSON.stringify({ id, method, params: params || {} })); } catch (e) { clearTimeout(timer); this.pending.delete(id); resolve({ error: { message: String(e.message || e) } }); }
+    });
   }
   async ev(expr) {
     const m = await this.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
@@ -114,10 +125,12 @@ async function guest(urlRe) {
     watcher = startWatcher((l) => console.log('[e2e] ' + l));
     await watcher.ready;
     const env = Object.assign({}, process.env, { QUARTZ_EDGE_STUB: STUB, QUARTZ_DRM_TEST_SITE: 'localhost' });
+    const tLaunch = Date.now();
     child = spawn(ELECTRON, ['.', '--remote-debugging-port=' + CDP_PORT, '--test-profile', '--profile-name=' + PROFILE, ...OFFSCREEN_ARGS], { cwd: APP, stdio: 'ignore', env });
     watcher.watch(child.pid);
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 40000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
+    console.log('[e2e] chrome page found and DevTools attached ' + (Date.now() - tLaunch) + ' ms after launch');
     // Booted, not just loaded: init() has bound the strip and the first tab is up (testwatch.js
     // waitChromeBooted). Acting on app.js's functions before that got a null tab on some runs.
     await waitChromeBooted((e) => chrome.ev(e), '!!(window.Drm && window.Drm.state())', 30000, (l) => console.log('[e2e] ' + l));
