@@ -2,7 +2,8 @@
 // csp-e2e.js - the live half of csp-harness.js: every bundled page's Content-Security-Policy in a
 // REAL Quartz test instance, with zero violations while the page does its work.
 //
-//   node csp-e2e.js [--cdp 9454] [--profile-name=csp-e2e]
+//   node csp-e2e.js [--cdp 9454] [--profile-name=csp-e2e] [--trace]
+//   (--trace prints every step and every DevTools call with its time: where a hang sits)
 //
 // A meta policy that refuses something the page needs does not crash anything: the feature just
 // stops, and the only trace is a console line. So this opens each page and counts BOTH traces of a
@@ -56,18 +57,60 @@ const LISTENER = `(function(){window.__cspV=[];document.addEventListener('securi
 /*
  * A step that never answers (a CDP call into a stuck page, a websocket that never opens) used to
  * hold the run until the suite's limit killed it, with no summary and no hint where. `phase` names
- * the step in progress; the watchdog in main() closes every DevTools session after WATCHDOG_S, so
- * the pending calls fail, the run reports "hung in: <phase>" as a FAIL and still cleans up.
+ * the step in progress; the watchdog in main() closes every DevTools session after WATCHDOG_S and
+ * ends the run itself (main() races it), the run reports "no step hung: <phase>" as a FAIL and the
+ * finally block still quits the instance and deletes its profile (openSession says why that needed
+ * more than closing the sessions).
  */
 const WATCHDOG_S = 240;
 let phase = 'launch';
 let hungIn = '';
 const sessions = [];
 
+const TRACE = argv.includes('--trace');   // --trace: every step and every DevTools call, timed
+const T0 = Date.now();
+function setPhase(p) { phase = p; if (TRACE) say('step +' + ((Date.now() - T0) / 1000).toFixed(1) + ' s: ' + p); }
+
+/**
+ * Opens a DevTools session the watchdog can always end. Three holes made the first watchdog useless:
+ *   - the session joined `sessions` only AFTER its websocket opened, so a socket that never opened
+ *     was out of the watchdog's reach: it is registered first now, and an open has 15 s;
+ *   - the ws library DROPS a send() on a closed socket without calling back or throwing, so after
+ *     the watchdog closed the sessions every later call (the finally block's own window.close
+ *     included) waited forever: a call on a socket that is not open answers with an error at once;
+ *   - a step awaiting something that is not a DevTools call (a sleep loop, a fetch) was never
+ *     ended at all: main() races the whole run against the watchdog as well.
+ */
+async function openSession(wsUrl) {
+  const c = new Cdp(wsUrl);
+  const opening = c.open();                 // sets c.ws before its first await
+  sessions.push(c);
+  const tag = String(wsUrl).split('/').pop().slice(0, 6);
+  const send = c.send.bind(c);
+  c.send = async (method, params) => {
+    if (!c.ws || c.ws.readyState !== 1) return { error: { message: 'the DevTools session is closed (' + method + ')' } };
+    if (!TRACE) return send(method, params);
+    const t = Date.now();
+    say('  ' + tag + ' -> ' + method + (method === 'Runtime.evaluate' ? ' ' + String(params.expression).slice(0, 60).replace(/\s+/g, ' ') : ''));
+    const m = await send(method, params);
+    say('  ' + tag + ' <- ' + method + ' ' + (Date.now() - t) + ' ms' + (m.error ? ' ERROR ' + JSON.stringify(m.error).slice(0, 120) : ''));
+    return m;
+  };
+  if (TRACE) say('  ' + tag + ' opening ' + wsUrl);
+  let timer;
+  try {
+    await Promise.race([opening, new Promise((_, j) => { timer = setTimeout(() => j(new Error('the DevTools websocket did not open in 15 s: ' + wsUrl)), 15000); })]);
+  } catch (e) {
+    try { c.ws.terminate(); } catch (e2) { /* never opened */ }
+    throw e;
+  } finally { clearTimeout(timer); }
+  if (TRACE) say('  ' + tag + ' open');
+  return c;
+}
+
 /** A CDP session that also keeps every console line about CSP. */
 async function attach(wsUrl) {
-  const c = await new Cdp(wsUrl).open();
-  sessions.push(c);
+  const c = await openSession(wsUrl);
   c.csp = [];
   c.ws.on('message', (raw) => {
     let m; try { m = JSON.parse(String(raw)); } catch (e) { return; }
@@ -124,150 +167,155 @@ async function main() {
     return null;
   }
 
+  let barked;
+  const dog = new Promise((_, j) => { barked = j; });
   const watchdog = setTimeout(() => {
     hungIn = phase;
     say('watchdog: still in "' + phase + '" after ' + WATCHDOG_S + ' s; closing the DevTools sessions so the run ends with its summary');
     for (const s of sessions) { try { s.ws.terminate(); } catch (e) { /* already closed */ } }
+    barked(new Error('the watchdog ended the run in "' + phase + '"'));
   }, WATCHDOG_S * 1000);
 
   let chrome = null;
   try {
-    phase = 'chrome: boot';
-    const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 30000);
-    if (!ct) throw new Error('the chrome page never came up on :' + PORT + (gone ? ' (the process exited)' : ''));
-    chrome = await attach(ct.webSocketDebuggerUrl);
-    await chrome.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    await chrome.ev(LISTENER + '1');
-    await chrome.waitFor('typeof createTab === "function" && typeof activateTab === "function" && Array.isArray(tabs) && tabs.length > 0 && !restoring', 30000);
-    check(true, 'chrome: booted with its policy (every script file ran: app.js globals are up)');
-    check(await chrome.ev('typeof Terminal === "function" && !!window.Settings && !!window.Reader'), 'chrome: xterm, settings.js and reader.js loaded under script-src file:');
+    // The run races the watchdog, so a step stuck on anything (not only a DevTools call) still ends.
+    await Promise.race([dog, (async () => {
+      setPhase('chrome: boot');
+      const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 30000);
+      if (!ct) throw new Error('the chrome page never came up on :' + PORT + (gone ? ' (the process exited)' : ''));
+      chrome = await attach(ct.webSocketDebuggerUrl);
+      await chrome.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      await chrome.ev(LISTENER + '1');
+      await chrome.waitFor('typeof createTab === "function" && typeof activateTab === "function" && Array.isArray(tabs) && tabs.length > 0 && !restoring', 30000);
+      check(true, 'chrome: booted with its policy (every script file ran: app.js globals are up)');
+      check(await chrome.ev('typeof Terminal === "function" && !!window.Settings && !!window.Reader'), 'chrome: xterm, settings.js and reader.js loaded under script-src file:');
 
-    await sleep(1500);
-    const boot = chrome.csp.slice();       // the console since the chrome loaded (Log replay)
-    check(boot.length === 0, 'chrome: zero CSP violations during boot', boot);
-
-    phase = 'chrome: inline script and eval probes';
-    // The policy is really in force: an inline script must not run, eval must throw.
-    const inl = await chrome.ev(`(function(){var s=document.createElement('script');s.textContent='window.__inlineRan=1';document.head.appendChild(s);s.remove();return window.__inlineRan===1;})()`);
-    check(inl === false, 'chrome: an injected inline <script> does NOT run');
-    // eval is tried from a task of the PAGE's own (a timer), never inside the DevTools evaluation:
-    // Runtime.evaluate lifts 'unsafe-eval' for the code it runs (its allowUnsafeEvalBlockedByCSP
-    // parameter defaults to true), so an eval typed straight into it runs on ANY policy and proves
-    // nothing. A timer callback is outside that scope and gets exactly what the chrome's own scripts get.
-    const ev = await chrome.ev(`new Promise(function (done) { setTimeout(function () {
-      var r = {};
-      try { (0, eval)('1'); r.eval = 'ran'; } catch (e) { r.eval = e.name; }
-      try { Function('return 1')(); r.fn = 'ran'; } catch (e) { r.fn = e.name; }
-      done(r);
-    }, 0); })`);
-    check(ev && ev.eval === 'EvalError' && ev.fn === 'EvalError', 'chrome: eval and new Function are refused (tried from a page task, outside DevTools)', ev);
-    await sleep(300);
-    const expected = chrome.csp.length;  // boot + those two refusals, counted out below
-    check(expected > boot.length, 'chrome: the console reports those refusals (the detector works)', chrome.csp.slice(boot.length));
-
-    phase = 'chrome: Settings > About';
-    // Settings > About and its age sentence.
-    await chrome.ev(`window.Settings.open('About'), 1`);
-    const about = await chrome.waitFor(`(function(){var a=document.querySelector('#settings-panel .set-about');if(!a)return '';var n=a.nextElementSibling;return a.textContent+' | '+(n?n.textContent:'');})()`, 10000).catch((e) => 'ERR ' + e.message);
-    check(/Chromium \d+/.test(about) && /(was built on|cannot be shown)/.test(about), 'chrome: About shows Chromium and its age (or why not)', about);
-    say('About reads: ' + about);
-    await chrome.ev(`(function(){var b=document.getElementById('settings');if(b)b.click();return 1})()`).catch(() => 0);
-
-    phase = 'chrome: a terminal tab opens';
-    // A terminal tab: xterm's DOM renderer adds <style> elements (inline style is allowed here).
-    const termBefore = await chrome.ev('tabs.length');
-    await chrome.ev(`Promise.resolve(openTerminalTab('term:cmd')).then(function(){return 1})`).catch((e) => say('terminal: ' + e.message));
-    const xt = await chrome.waitFor(`!!document.querySelector('.xterm .xterm-rows, .xterm-screen')`, 15000).catch(() => false);
-    check(!!xt, 'chrome: a terminal tab draws its xterm screen');
-    const termTab = await chrome.ev(`(tabs.length > ${termBefore}) ? tabs[tabs.length - 1].id : null`);
-    phase = 'chrome: the terminal tab closes';
-    if (termTab != null) await chrome.ev(`closeTab(${JSON.stringify(termTab)}), 1`).catch(() => 0);
-
-    // ---- the guest pages ----
-    const base = await chrome.ev('location.href.replace(/index\\.html.*$/, "")');
-    const pages = [
-      { file: 'newtab.html', open: `createTab()` },
-      { file: 'historypage.html', open: `createTab(${JSON.stringify(base + 'historypage.html')})` },
-      { file: 'files.html', open: `openFilesTab()` },
-      { file: 'search.html', open: `createTab(${JSON.stringify(base + 'search.html?q=tides')})` },
-      { file: 'watch.html', open: `openWatchTab()` },
-      { file: 'welcome.html', open: `(window.FirstRun && window.FirstRun.open ? window.FirstRun.open() : createTab(${JSON.stringify(base + 'welcome.html')}))` },
-      { file: 'phone.html', open: `createTab(${JSON.stringify(base + 'phone.html')})` },
-      { file: 'score-pin.html', open: `createTab(${JSON.stringify(base + 'score-pin.html')})` },
-    ];
-    let control = null;
-    for (const pg of pages) {
-      phase = pg.file + ': open';
-      const re = new RegExp('/' + pg.file.replace('.', '\\.') + '(?:[?#]|$)');
-      const before = new Set((await targets()).map((t) => t.id));
-      await chrome.ev(pg.open + ', 1').catch((e) => say(pg.file + ' open: ' + e.message));
-      const t = await waitTarget((x) => x.type === 'webview' && re.test(String(x.url)) && !before.has(x.id), 12000)
-        || await waitTarget((x) => x.type === 'webview' && re.test(String(x.url)), 2000);
-      if (!t) { check(false, pg.file + ': opened as a tab', 'no webview target for it'); continue; }
-      phase = pg.file + ': attach and reload';
-      const g = await attach(t.webSocketDebuggerUrl);
       await sleep(1500);
-      const early = g.csp.slice();             // the console since the page first loaded
-      await g.send('Page.enable');
-      await g.send('Page.addScriptToEvaluateOnNewDocument', { source: LISTENER });
-      g.csp.length = 0;
-      await g.send('Page.reload', { ignoreCache: true });
-      await sleep(3000);
-      const v = await g.ev('window.__cspV || ["(listener missing)"]').catch((e) => ['(could not read: ' + e.message + ')']);
-      const all = early.concat(g.csp, v);
-      check(all.length === 0, pg.file + ': zero CSP violations while it loads and paints', all);
-      if (pg.file === 'historypage.html') control = g; else g.close();
-    }
+      const boot = chrome.csp.slice();       // the console since the chrome loaded (Log replay)
+      check(boot.length === 0, 'chrome: zero CSP violations during boot', boot);
 
-    phase = 'control: forced violation on historypage';
-    // Positive control: a refused inline style on a guest IS seen by both detectors.
-    if (control) {
-      control.csp.length = 0;
-      await control.ev(`document.body.setAttribute('style','outline:1px solid red'), 1`);
-      await sleep(500);
-      const seen = await control.ev('window.__cspV.length');
-      check(seen >= 1 && control.csp.length >= 1, 'control: a forced inline-style violation on historypage IS detected (event + console)', { events: seen, console: control.csp.length });
-      control.close();
-    }
+      setPhase('chrome: inline script and eval probes');
+      // The policy is really in force: an inline script must not run, eval must throw.
+      const inl = await chrome.ev(`(function(){var s=document.createElement('script');s.textContent='window.__inlineRan=1';document.head.appendChild(s);s.remove();return window.__inlineRan===1;})()`);
+      check(inl === false, 'chrome: an injected inline <script> does NOT run');
+      // eval is tried from a task of the PAGE's own (a timer), never inside the DevTools evaluation:
+      // Runtime.evaluate lifts 'unsafe-eval' for the code it runs (its allowUnsafeEvalBlockedByCSP
+      // parameter defaults to true), so an eval typed straight into it runs on ANY policy and proves
+      // nothing. A timer callback is outside that scope and gets exactly what the chrome's own scripts get.
+      const ev = await chrome.ev(`new Promise(function (done) { setTimeout(function () {
+        var r = {};
+        try { (0, eval)('1'); r.eval = 'ran'; } catch (e) { r.eval = e.name; }
+        try { Function('return 1')(); r.fn = 'ran'; } catch (e) { r.fn = e.name; }
+        done(r);
+      }, 0); })`);
+      check(ev && ev.eval === 'EvalError' && ev.fn === 'EvalError', 'chrome: eval and new Function are refused (tried from a page task, outside DevTools)', ev);
+      await sleep(300);
+      const expected = chrome.csp.length;  // boot + those two refusals, counted out below
+      check(expected > boot.length, 'chrome: the console reports those refusals (the detector works)', chrome.csp.slice(boot.length));
 
-    phase = 'reader: article and reader.html';
-    // ---- reader.html on a served article ----
-    const art = 'http://127.0.0.1:' + srv.port + '/article.html';
-    await chrome.ev(`createTab(${JSON.stringify(art)}), 1`);
-    const at = await waitTarget((x) => x.type === 'webview' && String(x.url) === art, 12000);
-    check(!!at, 'reader: the article tab loaded');
-    if (at) {
-      const ag = await new Cdp(at.webSocketDebuggerUrl).open();
-      sessions.push(ag);
-      await ag.waitFor('document.readyState === "complete"', 10000).catch(() => 0);
-      ag.close();
-      await sleep(500);
-      await chrome.ev('window.Reader.open(), 1');
-      const rt = await waitTarget((x) => x.type === 'webview' && /\/reader\.html/.test(String(x.url)), 15000);
-      check(!!rt, 'reader: reader.html opened for it');
-      if (rt) {
-        const rg = await attach(rt.webSocketDebuggerUrl);
-        const filled = await rg.waitFor(`document.querySelector('.is-filled') ? 1 : 0`, 15000).catch(() => 0);
-        check(!!filled, 'reader: the article is shown');
-        const st = await rg.ev(`(function(){var c=document.querySelector('.is-filled');if(!c)return null;var img=c.querySelector('img');
-          return {styled:c.querySelectorAll('[style]').length,handlers:c.querySelectorAll('[onclick]').length,scripts:c.querySelectorAll('script').length,
-          ran:window.__articleScript===1,img:!!img,imgLoaded:!!(img&&img.complete&&img.naturalWidth>0)};})()`);
-        check(st && st.styled === 0 && st.handlers === 0 && st.scripts === 0 && !st.ran, 'reader: no style=, no on*= handler, no <script> reached the page', st);
-        check(st && st.img && st.imgLoaded, 'reader: the article image loaded under img-src http:', st);
-        await sleep(500);
-        check(rg.csp.length === 0, 'reader: zero CSP console lines while the article was applied', rg.csp);
-        rg.close();
+      setPhase('chrome: Settings > About');
+      // Settings > About and its age sentence.
+      await chrome.ev(`window.Settings.open('About'), 1`);
+      const about = await chrome.waitFor(`(function(){var a=document.querySelector('#settings-panel .set-about');if(!a)return '';var n=a.nextElementSibling;return a.textContent+' | '+(n?n.textContent:'');})()`, 10000).catch((e) => 'ERR ' + e.message);
+      check(/Chromium \d+/.test(about) && /(was built on|cannot be shown)/.test(about), 'chrome: About shows Chromium and its age (or why not)', about);
+      say('About reads: ' + about);
+      await chrome.ev(`(function(){var b=document.getElementById('settings');if(b)b.click();return 1})()`).catch(() => 0);
+
+      setPhase('chrome: a terminal tab opens');
+      // A terminal tab: xterm's DOM renderer adds <style> elements (inline style is allowed here).
+      const termBefore = await chrome.ev('tabs.length');
+      await chrome.ev(`Promise.resolve(openTerminalTab('term:cmd')).then(function(){return 1})`).catch((e) => say('terminal: ' + e.message));
+      const xt = await chrome.waitFor(`!!document.querySelector('.xterm .xterm-rows, .xterm-screen')`, 15000).catch(() => false);
+      check(!!xt, 'chrome: a terminal tab draws its xterm screen');
+      const termTab = await chrome.ev(`(tabs.length > ${termBefore}) ? tabs[tabs.length - 1].id : null`);
+      setPhase('chrome: the terminal tab closes');
+      if (termTab != null) await chrome.ev(`closeTab(${JSON.stringify(termTab)}), 1`).catch(() => 0);
+
+      // ---- the guest pages ----
+      const base = await chrome.ev('location.href.replace(/index\\.html.*$/, "")');
+      const pages = [
+        { file: 'newtab.html', open: `createTab()` },
+        { file: 'historypage.html', open: `createTab(${JSON.stringify(base + 'historypage.html')})` },
+        { file: 'files.html', open: `openFilesTab()` },
+        { file: 'search.html', open: `createTab(${JSON.stringify(base + 'search.html?q=tides')})` },
+        { file: 'watch.html', open: `openWatchTab()` },
+        { file: 'welcome.html', open: `(window.FirstRun && window.FirstRun.open ? window.FirstRun.open() : createTab(${JSON.stringify(base + 'welcome.html')}))` },
+        { file: 'phone.html', open: `createTab(${JSON.stringify(base + 'phone.html')})` },
+        { file: 'score-pin.html', open: `createTab(${JSON.stringify(base + 'score-pin.html')})` },
+      ];
+      let control = null;
+      for (const pg of pages) {
+        setPhase(pg.file + ': open');
+        const re = new RegExp('/' + pg.file.replace('.', '\\.') + '(?:[?#]|$)');
+        const before = new Set((await targets()).map((t) => t.id));
+        await chrome.ev(pg.open + ', 1').catch((e) => say(pg.file + ' open: ' + e.message));
+        const t = await waitTarget((x) => x.type === 'webview' && re.test(String(x.url)) && !before.has(x.id), 12000)
+          || await waitTarget((x) => x.type === 'webview' && re.test(String(x.url)), 2000);
+        if (!t) { check(false, pg.file + ': opened as a tab', 'no webview target for it'); continue; }
+        setPhase(pg.file + ': attach and reload');
+        const g = await attach(t.webSocketDebuggerUrl);
+        await sleep(1500);
+        const early = g.csp.slice();             // the console since the page first loaded
+        await g.send('Page.enable');
+        await g.send('Page.addScriptToEvaluateOnNewDocument', { source: LISTENER });
+        g.csp.length = 0;
+        await g.send('Page.reload', { ignoreCache: true });
+        await sleep(3000);
+        const v = await g.ev('window.__cspV || ["(listener missing)"]').catch((e) => ['(could not read: ' + e.message + ')']);
+        const all = early.concat(g.csp, v);
+        check(all.length === 0, pg.file + ': zero CSP violations while it loads and paints', all);
+        if (pg.file === 'historypage.html') control = g; else g.close();
       }
-    }
 
-    phase = 'chrome: final count';
-    // ---- and the chrome, after all of that ----
-    await sleep(500);
-    const chromeLines = chrome.csp.slice(expected);
-    const chromeEvents = await chrome.ev('(window.__cspV || []).filter(function (s) { return !/^script-src(-elem)? <- (inline|eval)/.test(s); })');
-    check(chromeLines.length === 0 && chromeEvents.length === 0, 'chrome: zero other CSP violations through boot, About, a terminal and nine guest pages', { console: chromeLines, events: chromeEvents });
+      setPhase('control: forced violation on historypage');
+      // Positive control: a refused inline style on a guest IS seen by both detectors.
+      if (control) {
+        control.csp.length = 0;
+        await control.ev(`document.body.setAttribute('style','outline:1px solid red'), 1`);
+        await sleep(500);
+        const seen = await control.ev('window.__cspV.length');
+        check(seen >= 1 && control.csp.length >= 1, 'control: a forced inline-style violation on historypage IS detected (event + console)', { events: seen, console: control.csp.length });
+        control.close();
+      }
+
+      setPhase('reader: article and reader.html');
+      // ---- reader.html on a served article ----
+      const art = 'http://127.0.0.1:' + srv.port + '/article.html';
+      await chrome.ev(`createTab(${JSON.stringify(art)}), 1`);
+      const at = await waitTarget((x) => x.type === 'webview' && String(x.url) === art, 12000);
+      check(!!at, 'reader: the article tab loaded');
+      if (at) {
+        const ag = await openSession(at.webSocketDebuggerUrl);
+        await ag.waitFor('document.readyState === "complete"', 10000).catch(() => 0);
+        ag.close();
+        await sleep(500);
+        await chrome.ev('window.Reader.open(), 1');
+        const rt = await waitTarget((x) => x.type === 'webview' && /\/reader\.html/.test(String(x.url)), 15000);
+        check(!!rt, 'reader: reader.html opened for it');
+        if (rt) {
+          const rg = await attach(rt.webSocketDebuggerUrl);
+          const filled = await rg.waitFor(`document.querySelector('.is-filled') ? 1 : 0`, 15000).catch(() => 0);
+          check(!!filled, 'reader: the article is shown');
+          const st = await rg.ev(`(function(){var c=document.querySelector('.is-filled');if(!c)return null;var img=c.querySelector('img');
+            return {styled:c.querySelectorAll('[style]').length,handlers:c.querySelectorAll('[onclick]').length,scripts:c.querySelectorAll('script').length,
+            ran:window.__articleScript===1,img:!!img,imgLoaded:!!(img&&img.complete&&img.naturalWidth>0)};})()`);
+          check(st && st.styled === 0 && st.handlers === 0 && st.scripts === 0 && !st.ran, 'reader: no style=, no on*= handler, no <script> reached the page', st);
+          check(st && st.img && st.imgLoaded, 'reader: the article image loaded under img-src http:', st);
+          await sleep(500);
+          check(rg.csp.length === 0, 'reader: zero CSP console lines while the article was applied', rg.csp);
+          rg.close();
+        }
+      }
+
+      setPhase('chrome: final count');
+      // ---- and the chrome, after all of that ----
+      await sleep(500);
+      const chromeLines = chrome.csp.slice(expected);
+      const chromeEvents = await chrome.ev('(window.__cspV || []).filter(function (s) { return !/^script-src(-elem)? <- (inline|eval)/.test(s); })');
+      check(chromeLines.length === 0 && chromeEvents.length === 0, 'chrome: zero other CSP violations through boot, About, a terminal and nine guest pages', { console: chromeLines, events: chromeEvents });
+    })()]);
   } catch (e) {
-    check(false, 'run', e && e.message || String(e));
+    if (!hungIn) check(false, 'run', e && e.message || String(e)); // a hang is the FAIL just below
   } finally {
     clearTimeout(watchdog);
     if (hungIn) check(false, 'no step hung: "' + hungIn + '" had not answered after ' + WATCHDOG_S + ' s (the DevTools sessions were closed to end the run)');
