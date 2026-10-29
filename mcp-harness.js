@@ -965,7 +965,8 @@ function makeGuest(o) {
   // first, and once the last question is answered it is back. The functions are app.js's own, run
   // against a stand-in note slot.
   {
-    const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+    // LF only: a Windows checkout (core.autocrlf, as on the CI runner) has CRLF, and the patterns below end in \n.
+    const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
     const fn = (name) => { const m = new RegExp('\\nfunction ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}').exec(src); return m ? m[0] : ''; };
     const konst = (name) => { const m = new RegExp('\\nconst ' + name + ' = [\\s\\S]*?;\\n').exec(src); return m ? m[0] : ''; };
     const names = ['claudePaneById', 'toolPaneLine', 'showToolActivity', 'onToolAsk', 'showToolAsk', 'answerToolAsk',
