@@ -25,7 +25,7 @@ const http = require('http');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const WS = require(path.join(__dirname, 'node_modules', 'ws'));
-const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher } = require('./testwatch');
+const { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher, waitChromeBooted } = require('./testwatch');
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -35,7 +35,8 @@ const KEEP = argv.includes('--keep');
 const LIVE = argv.includes('--live');
 const APP = __dirname;
 const ELECTRON = path.join(APP, 'node_modules', 'electron', 'dist', 'electron.exe');
-const PROFILE = 'drme2e' + process.pid;
+// --profile <prefix>: the test profile's name before the pid (a lane's own name, to find its processes).
+const PROFILE = opt('profile', 'drme2e') + process.pid;
 const PROFILE_DIR = path.join(os.tmpdir(), 'browser-test-profile-' + PROFILE);
 const STUB = path.join(os.tmpdir(), 'quartz-drm-edge-stub-' + process.pid + '.txt');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -180,7 +181,9 @@ async function guest(urlRe) {
 
     const ct = await waitTarget((x) => x.type === 'page' && /index\.html/.test(String(x.url)), 30000);
     chrome = await new Cdp(ct.webSocketDebuggerUrl).open();
-    await chrome.waitFor('!!(window.Drm && window.DrmSites && typeof createTab === "function" && window.Drm.state())', 20000);
+    // Booted, not just loaded: init() has bound the strip and the first tab is up (testwatch.js
+    // waitChromeBooted). Acting on app.js's functions before that got a null tab on some runs.
+    await waitChromeBooted((e) => chrome.ev(e), '!!(window.Drm && window.DrmSites && window.Drm.state())', 30000, (l) => console.log('[e2e] ' + l));
     check(true, 'chrome up with Drm and its state');
     const st0 = await chrome.ev('window.Drm.state()');
     check(st0.widevine && st0.widevine.available === false, 'no Widevine (stock, or castlabs with QUARTZ_TEST_CDM=missing): reported missing', st0.widevine);

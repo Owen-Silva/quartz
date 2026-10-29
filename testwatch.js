@@ -110,4 +110,64 @@ function startWatcher(log) {
   return w;
 }
 
-module.exports = { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher };
+/*
+ * "The chrome is up" means init() has run and the boot strip is built, not that app.js has loaded.
+ *
+ * app.js is one <script> of many in index.html. createTab, openWatchTab and the rest exist the moment
+ * it is evaluated, but the DOM refs they need (the tab strip, the views well) are bound in init(),
+ * which runs on DOMContentLoaded, after every later script (settings.js and ~30 others) has loaded;
+ * the first tab comes one IPC turn after that (the session read). A CDP Runtime.evaluate runs between
+ * those script tasks, so a test that only waits for `typeof createTab === "function"` (plus whatever
+ * main answers early, such as Drm's state) can act in that gap: createTab() returns null ("Cannot
+ * read properties of null (reading 'id')") and openWatchTab() quietly opens nothing. How wide the gap
+ * is depends on the machine and on how soon the test attaches, so the same commit passed one night
+ * and failed the next. CHROME_BOOTED is what e2e-kit.js has always waited for.
+ */
+const CHROME_SCRIPTS = 'typeof createTab === "function"';
+const CHROME_BOOTED = '(typeof createTab === "function" && typeof viewsEl !== "undefined" && !!viewsEl'
+  + ' && typeof tabs !== "undefined" && Array.isArray(tabs) && tabs.length > 0 && !restoring)';
+
+/**
+ * Wait until the chrome has booted. ev(expr) evaluates in the chrome window (resolves to the value,
+ * rejects on an exception: a page still loading is retried, never fatal). extra is the test's own
+ * readiness expression (e.g. Drm's state is in), ANDed into both phases. Resolves to
+ * { scriptsMs, bootedMs }: ms after the call that the scripts alone first answered (null when the
+ * first answer was already the booted one) and that the boot was done; say(line) gets that as one
+ * line, the evidence of how wide the gap was on this run. Rejects after ms with both phases named.
+ * opts.now / opts.sleep are the harness's seams (testwatch-harness.js).
+ */
+async function waitChromeBooted(ev, extra, ms, say, opts) {
+  const o = opts || {};
+  const now = o.now || Date.now;
+  const pause = o.sleep || ((n) => new Promise((r) => setTimeout(r, n)));
+  const poll = o.poll || 50;
+  const limit = ms || 30000;
+  const and = extra ? ' && (' + extra + ')' : '';
+  const expr = '(() => { try { return { s: !!(' + CHROME_SCRIPTS + and + '), b: !!(' + CHROME_BOOTED + and + ') }; }'
+    + ' catch (e) { return { s: false, b: false, e: String(e && e.message || e) }; } })()';
+  const t0 = now();
+  let scriptsMs = null, last = null;
+  while (now() - t0 < limit) {
+    let r = null;
+    try { r = await ev(expr); } catch (e) { last = String(e && e.message || e); }
+    if (r && typeof r === 'object') {
+      last = r.e || null;
+      const t = now() - t0;
+      if (r.b) {
+        const res = { scriptsMs: scriptsMs, bootedMs: t };
+        if (say) say(scriptsMs === null
+          ? 'chrome booted ' + t + ' ms into the wait (its scripts and the boot answered together)'
+          : 'chrome booted ' + t + ' ms into the wait; its scripts alone answered at ' + scriptsMs
+            + ' ms (a test acting in those ' + (t - scriptsMs) + ' ms gets a null tab)');
+        return res;
+      }
+      if (r.s && scriptsMs === null) scriptsMs = t;
+    }
+    await pause(poll);
+  }
+  throw new Error('the chrome never booted in ' + limit + ' ms (scripts '
+    + (scriptsMs === null ? 'never answered' : 'answered at ' + scriptsMs + ' ms, init()/the boot strip never followed')
+    + (last ? '; last: ' + String(last).slice(0, 160) : '') + ')');
+}
+
+module.exports = { OFFSCREEN_ARGS, MIN_FREE_GB, freeRamGb, startWatcher, CHROME_BOOTED, waitChromeBooted };

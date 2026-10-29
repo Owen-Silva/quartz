@@ -82,6 +82,9 @@ const TESTS = [
   // and nothing in the page or its scripts that the policy would refuse (csp-e2e.js is the live half).
   { name: 'csp', file: 'csp-harness.js' },
   { name: 'drm', file: 'drm-harness.js' },
+  // testwatch.js waitChromeBooted: an e2e acts only once init() has run and the boot strip is built,
+  // never in the gap after app.js loads (createTab() is null there).
+  { name: 'testwatch', file: 'testwatch-harness.js' },
   { name: 'favicons', file: 'favicons-harness.js' },
   // Which page may open a file:// URL (filenav.js): file -> file yes, the web never.
   { name: 'filenav', file: 'filenav-harness.js' },
