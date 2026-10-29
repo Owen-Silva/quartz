@@ -8564,43 +8564,64 @@ function noteScreenEdges(now) {
 }
 
 /*
- * Is this tab making sound? tab.audible follows the <webview>'s
- * media-started-playing / media-paused, and those are per webContents, fired
- * for EVERY media element: one element pausing (an ad ending, a hover preview,
- * a quality switch, a rebuffer) sets the flag false while the main stream is
- * still playing, and Web Audio (games, many radio and music players) never
- * sets it at all. So it is a hint, not the answer. The answer is Chromium's
- * own audibility, the same signal as Chrome's speaker icon:
- * <webview>.isCurrentlyAudible(), read at the moment it matters.
+ * Is this tab making sound? The answer is Chromium's own audibility, the
+ * signal behind Chrome's speaker icon: <webview>.isCurrentlyAudible(), read at
+ * the moment it matters (and pushed by main on every change, setTabHeard). It
+ * is a measurement of the audio actually coming out of the guest, so it is
+ * true for a stream that plays on while one of its elements paused, for Web
+ * Audio (games, many radio and music players), and for a tab the user muted
+ * (Chromium still hears the page; only the output is silenced, which is why
+ * Chrome shows a struck-out speaker there), and false once the sound stops.
+ *
+ * NOT tab.audible, the <webview>'s media-started-playing / media-paused level.
+ * It is per webContents and fired for every media element, so it is wrong in
+ * both directions: one element pausing (an ad ending, a hover preview, a
+ * quality switch) clears it while the stream is still playing, and a source
+ * that starts it can stop without ever clearing it. Chromium reports an
+ * AudioContext as a player but sends no media-paused when the context is
+ * closed, so a page that once played a Web Audio blip held "making sound"
+ * for the rest of its life and never slept. The flag is used in exactly one
+ * case, where it is the only signal there is: Chromium's audibility cannot be
+ * read for this guest (viewAudibleNow() answers null: no guest attached yet, an
+ * Electron without isCurrentlyAudible, or the call threw).
  *
  * A tab that STOPPED making sound less than AUDIBLE_SPARE_MS ago is spared too,
  * so a pause between tracks or an ad break does not lose it. The sound is
- * looked at once per sweep (observeTabSound) and on every media-paused, so the
- * window is measured from the last time it was SEEN making sound, plus one
+ * looked at once per sweep (observeTabSound) and on every audibility push, so
+ * the window is measured from the last time it was SEEN making sound, plus one
  * sweep of slack: a tab is never slept less than AUDIBLE_SPARE_MS after its
  * sound really stopped.
  */
 const AUDIBLE_SPARE_MS = 2 * 60000;
 
-/** Chromium's audibility of this tab's guest, right now. False with no guest. */
+/**
+ * Chromium's audibility of this tab's guest, right now: true or false, or null
+ * when it cannot be read (no usable guest, no isCurrentlyAudible, it threw, or
+ * it answered something that is not a boolean). null sends the caller back to
+ * the media flag, never to "silent" and never to "playing".
+ */
 function viewAudibleNow(tab) {
-  if (!isViewUsable(tab)) return false;
+  if (!isViewUsable(tab)) return null;
   const viewEl = tab.viewEl;
-  if (typeof viewEl.isCurrentlyAudible !== 'function') return false;
-  // Strictly true: the call is synchronous on Electron 44's <webview>, and if
-  // a future one made it a Promise, a truthy Promise must not read as "always
-  // playing" (nothing would ever sleep again). The media flag still applies.
-  try { return viewEl.isCurrentlyAudible() === true; } catch (err) { return false; }
+  if (typeof viewEl.isCurrentlyAudible !== 'function') return null;
+  // Strictly a boolean: the call is synchronous on Electron 44's <webview>,
+  // and if a future one made it a Promise, a truthy Promise must not read as
+  // "always playing" (nothing would ever sleep again).
+  let v;
+  try { v = viewEl.isCurrentlyAudible(); } catch (err) { return null; }
+  return typeof v === 'boolean' ? v : null;
 }
 
 /** Look at one tab's sound and remember when it was last heard. */
 function noteTabSound(tab, now) {
   if (!tab || tab.kind !== 'page' || tab.asleep) return false;
   const chromium = viewAudibleNow(tab);
+  // Chromium's audibility cannot be read: the media flag is all there is.
+  const sounding = chromium === null ? !!tab.audible : chromium;
   // The speaker's fallback: main pushes every audibility change ('tabs:audio-state'); this
   // look, at least once a sweep, catches one that never arrived.
-  if (chromium !== !!tab.heard) setTabHeard(tab, chromium);
-  if (tab.audible || chromium) {
+  if (chromium !== null && chromium !== !!tab.heard) setTabHeard(tab, chromium);
+  if (sounding) {
     tab.lastAudibleAt = now || Date.now();
     return true;
   }
@@ -8631,9 +8652,10 @@ function tabSoundReason(tab, now) {
 /**
  * Whether a tab may be slept right now, idle time aside. Everything excluded
  * here is something the user would notice losing: the tab on screen, a pinned
- * tab, anything playing (muted or not — media-started-playing fires either
- * way), a blank new tab (nothing to reload), a broken one (its card is the
- * page), and anything with no live guest to give back.
+ * tab, anything making sound now or in the last 2 minutes (Chromium's
+ * audibility, which still hears a tab the user muted: tabSoundReason), a blank
+ * new tab (nothing to reload), a broken one (its card is the page), and
+ * anything with no live guest to give back.
  */
 function canSleepTab(tab) {
   if (!tab || tab.kind !== 'page') return false;
@@ -11583,11 +11605,13 @@ function wireViewEvents(tab) {
   });
   viewEl.addEventListener('media-paused', () => {
     if (stale()) return;
-    // It was making sound until this instant (or another element still is):
-    // the sleep rules' 2-minute spare window counts from here. This event is
-    // per webContents, not per element, so it is NOT proof the tab is quiet;
-    // tabSoundReason() asks Chromium before anything is put to sleep.
-    if (tab.audible) tab.lastAudibleAt = Date.now();
+    // Only where Chromium's audibility cannot be read (see viewAudibleNow) is
+    // this the end of the sound, and the sleep rules' 2-minute spare window
+    // counts from here. Everywhere else the window counts from Chromium going
+    // quiet (setTabHeard): this event is per webContents, not per element, so
+    // it is neither proof the tab is quiet nor proof it ever made a sound (a
+    // muted preview pausing).
+    if (tab.audible && viewAudibleNow(tab) === null) tab.lastAudibleAt = Date.now();
     setTabAudible(tab, false);
   });
 

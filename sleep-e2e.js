@@ -17,7 +17,9 @@
 //     with its scroll, comes back asleep (not fetched), and wakes at that scroll.
 //   - sound: a page with two players (one pauses, which clears the media flag, the other keeps
 //     playing) and a Web Audio oscillator page are never slept by the idle sweep, sleepTab, "sleep
-//     other tabs" or the workspace rule; once quiet they are spared 2 more minutes, then sleep.
+//     other tabs" or the workspace rule; once quiet they are spared 2 more minutes, then sleep,
+//     even though the closed AudioContext left the media flag on (Chromium decides, not the flag);
+//     a tab the user muted that plays on is still heard by Chromium and never slept.
 //   - a new tab page sent to the background of the workspace on screen sleeps after its 15 s grace,
 //     wakes as a fresh Home with theme/settings/layout/Saved/apps/readout re-pushed and the stats
 //     subscription back on it; one holding typed text is kept awake; workspace sleep "off" stands it down.
@@ -207,6 +209,16 @@ run('sleep-e2e', async ({ check, launch, say, profileDir }) => {
   const longQuiet = await c.ev(`({ asleep: ${T('osc')}.asleep, mediaFlag: !!${T('osc')}.audible, reason: ${T('osc')}.asleep ? '' : tabSoundReason(${T('osc')}) })`).catch((e) => 'threw ' + e.message);
   check(longQuiet.asleep === true, 'sound: quiet for longer than the window, the idle sweep sleeps it', longQuiet);
   check(await c.ev(`${T('two')}.asleep`) === false && await audibleNow('two') === true, 'sound: the two-player tab is still awake and playing');
+  // The sound rule's premise for a tab the USER muted: only the output is silenced, Chromium still
+  // hears the page (Chrome's struck-out speaker), so a muted stream that plays on is "making sound"
+  // and is never slept. If this Chromium stopped hearing muted tabs, this is where it shows.
+  await c.ev(`setTabMuted(${T('two')}, true), 1`);
+  await sleep(2500); // past Chromium's audible hold, so a muted-means-silent answer would show
+  const mutedTwo = await c.ev(`({ muted: ${T('two')}.viewEl.isAudioMuted(), chromium: ${T('two')}.viewEl.isCurrentlyAudible(), reason: tabSoundReason(${T('two')}) })`).catch((e) => 'threw ' + e.message);
+  check(mutedTwo.muted === true && mutedTwo.chromium === true && mutedTwo.reason === 'making sound', 'sound: a tab the user muted that plays on is still heard by Chromium ("making sound")', mutedTwo);
+  for (let i = 0; i < 2; i++) { await c.ev('sleepIdleTabs()'); await sleep(300); }
+  check(await c.ev(`${T('two')}.asleep`) === false, 'sound: the idle sweep never sleeps a muted tab that is still playing');
+  await c.ev(`setTabMuted(${T('two')}, false), 1`);
   await c.ev(`closeTab(${T('two')}.id), 1`);
 
   // ---- the safe-to-sleep probe, early-sleep reasons, memory figures --------------------------
