@@ -35,6 +35,8 @@ class Cdp {
   send(method, params) {
     const id = ++this.id;
     return new Promise((resolve) => {
+      // ws DROPS a send() on a closed socket (no callback, no throw): answer now, or the caller waits for ever.
+      if (!this.ws || this.ws.readyState !== WS.OPEN) { resolve({ error: { message: 'connection closed' } }); return; }
       this.pending.set(id, resolve);
       try { this.ws.send(JSON.stringify({ id, method, params: params || {} })); } catch (e) { this.pending.delete(id); resolve({ error: { message: String(e.message || e) } }); }
     });
