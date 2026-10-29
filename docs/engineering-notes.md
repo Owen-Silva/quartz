@@ -2063,6 +2063,6 @@ npx electron . --test-profile --profile-name=nav --remote-debugging-port=9223
 npx electron . --test-profile --profile-name=perf --remote-debugging-port=9224
 ```
 
-Never kill every `electron.exe` — I run my own Claude Code instance on Electron and it will go
+Never kill every `electron.exe`: other Electron apps on the machine (the user's own tools included) go
 down with it. Kill only the test instance: find the PID whose command line contains
 `remote-debugging-port=9222` and no `--type=`.
