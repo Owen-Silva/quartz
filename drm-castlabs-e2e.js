@@ -101,14 +101,16 @@ class Cdp {
   }
   close() { try { this.ws.close(); } catch (e) { /* gone */ } }
 }
-async function targets() { return (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); }
+// A 3 s cap: a debugging port wedged by an orphaned listener accepts the connection and never answers,
+// which once hung this file to the suite's 300 s limit with nothing logged.
+async function targets() { return (await fetch('http://127.0.0.1:' + CDP_PORT + '/json', { signal: AbortSignal.timeout(3000) })).json(); }
 async function waitTarget(pred, ms) {
-  const t0 = Date.now();
+  const t0 = Date.now(); let last = 'never asked';
   while (Date.now() - t0 < (ms || 10000)) {
-    try { const t = (await targets()).find(pred); if (t) return t; } catch (e) { /* not up yet */ }
+    try { const t = (await targets()).find(pred); if (t) return t; last = 'listed, no match'; } catch (e) { last = String(e && (e.name === 'TimeoutError' ? 'port ' + CDP_PORT + ' accepted but never answered' : e.message) || e); }
     await sleep(150);
   }
-  throw new Error('no such target');
+  throw new Error('no such target on port ' + CDP_PORT + ' (last: ' + last + ')');
 }
 async function guest(urlRe) {
   const t = await waitTarget((x) => x.type === 'webview' && urlRe.test(String(x.url)), 15000);
