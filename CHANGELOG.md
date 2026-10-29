@@ -74,6 +74,10 @@ or use Restart browser in Settings → About — to pick any of this up.
   shows a line over the pane. "Ask Claude about this page" now has Claude read the page itself,
   without asking again for that tab. Settings → Claude → "Let Claude panes read your open tabs"
   turns it off.
+- A pane opened by "Ask Claude about this page" keeps saying that it asks before acting and works
+  in a scratch folder while Claude reads your tabs; before, the first "Claude read: ..." line
+  replaced that note, and answering Claude's last question left the bar over the pane empty. The
+  note now stays first under each read line and comes back once the last question is answered.
 
 ### Tabs
 
@@ -143,6 +147,11 @@ or use Restart browser in Settings → About — to pick any of this up.
 - The speaker icon on a tab now shows whenever the tab is really making sound: it no longer
   disappears when one video on a page pauses while another keeps playing, and it now appears for
   games and players that use Web Audio.
+- A tab that had once played a sound through Web Audio (a game, a web radio, a notification blip)
+  was never put to sleep afterwards, by the idle timer, "Sleep tab" or a workspace going to sleep.
+  Tab sleep now follows the sound Chromium really hears, as the tab's speaker icon does: a playing
+  stream, muted or not, still never sleeps, and a tab that has gone quiet can sleep 2 minutes after
+  its sound stopped, once it is past your "Sleep tabs after" time.
 
 ### Address bar and pages
 
@@ -152,6 +161,10 @@ or use Restart browser in Settings → About — to pick any of this up.
 - Find on page (Ctrl+F) with a live match count.
 - Reader view (Ctrl+Shift+R) parses the article in the chrome and pushes it into a glass reading
   page with adjustable text size and column width that follows the theme.
+- Reader view keeps an article's pictures again on most sites. Images linked with a relative
+  address pointed at the wrong place, because the window's own security policy refused the way
+  the reader told the article which page it came from; the reader now hands that address over
+  directly and the policy stays strict.
 - Site info popover behind the lock button: connection state, per-permission Ask/Allow/Block, zoom
   controls and a two-step clear-site-data button.
 - Per-host zoom is remembered and shown as a badge; Ctrl+= / Ctrl+- / Ctrl+0.
@@ -569,6 +582,9 @@ machine.
 - Idle music now steps aside for any tab that is really making sound, including games and players
   that use Web Audio, and no longer comes back when an ad or a preview pauses while the main video
   keeps playing.
+- Idle music no longer stays off for good after a page that once played a Web Audio sound (a game,
+  a notification blip). It now follows the sound Chromium really hears from each tab, as the tab's
+  speaker icon does.
 
 ### Now playing
 
@@ -1249,7 +1265,8 @@ Found, and not ours to fix:
 
 Times are local. 21:26 through 23:54 are 10 September; 00:29 through 23:51 are 11 September; 00:08
 through 04:30 are the small hours after that same 11 September evening; 09:53 through 19:55 are
-12 September; 14:19 through 20:34 are 13 September.
+12 September; 14:19 through 20:34 are 13 September. The rows after 1402fb9 skip ahead: 00:05
+through 03:43 at the end are 29 October, a round of fixes; `git log` has everything between.
 
 | Hash | Time | Summary |
 | --- | --- | --- |
@@ -1389,3 +1406,15 @@ through 04:30 are the small hours after that same 11 September evening; 09:53 th
 | 1660003 | 20:34 | Workspaces sleep: only the workspace you are looking at keeps its pages running |
 | 54d6a57 | 20:46 | Phone: Wake sends display-on before the wake key (the server otherwise forces the display off again), a server child flushing after a restart no longer crashes main, page sheds stay temporary and never reach phone.json, and the black note names the screen-off-while-mirroring setting |
 | 1402fb9 | 20:52 | Phone: Screen off says what this phone does — on recent Android the mirror goes black with the panel, Wake brings both back; the rail, the black note and the setting row all say so |
+| 6a89d30 | 00:05 | Tests: the DRM e2e tests act only once the chrome has booted (`waitChromeBooted`), not as soon as app.js has loaded |
+| 39e50e2 | 00:06 | Tabs: "making sound" follows Chromium's audibility, not a media flag that a closed Web Audio context left stuck, so such tabs sleep again |
+| 040cb90 | 00:07 | Tests: askclaude-e2e and mcp-e2e read a note's words without its icon and print `[diag]` lines naming why a wait timed out |
+| 7e431ae | 00:18 | Claude: a page-text chamber keeps its own note under tool lines and asks |
+| 0eeedf2 | 02:12 | Tests: log-e2e waits for the booted chrome before acting |
+| c5b8da5 | 02:58 | Tests: csp-e2e's watchdog really ends a hung run; `--trace` times every step |
+| 6ddda90 | 03:22 | Tests: csp-e2e reloads each guest from its own task, never with DevTools `Page.reload` (which reloads the whole window) |
+| c0501a1 | 03:28 | Reader view: article images resolve against the page through `doc.baseURI`, not a `<base>` the window's policy refused |
+| b0b496f | 03:28 | Tests: an e2e-kit call on a closed DevTools socket fails at once instead of waiting for ever |
+| 9859904 | 03:33 | Idle music: follows Chromium's audibility; the media flag counts only for a tab Chromium never answered for |
+| 798e9ff | 03:43 | Tests: the Claude stand-in runs under a console node.exe named by the test, not electron.exe, which gets no console in a PTY |
+| 0901af6 | 03:43 | Tests: mcp-e2e and askclaude-e2e run the stand-in under node and check its banner reaches the pane before pasting |
