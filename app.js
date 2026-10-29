@@ -12873,7 +12873,7 @@ function showToolAsk(pane) {
     b.type = 'button';
     b.textContent = label;
     b.dataset.choice = choice;
-    b.style.cssText = 'flex:0 0 auto;font:inherit;color:var(--fg);cursor:pointer;'
+    b.style.cssText = 'flex:0 0 auto;font:inherit;color:var(--text);cursor:pointer;'
       + 'background:var(--glass-2);border:1px solid rgba(128,128,128,.28);'
       + 'border-radius:6px;padding:3px 10px;';
     b.addEventListener('click', () => answerToolAsk(pane, p.askId, choice));
