@@ -9,8 +9,9 @@
  * %LOCALAPPDATA%\Programs\Quartz, launches the installed Quartz twice, makes it register as a
  * browser, and uninstalls it again. On a person's machine that would replace their Quartz.
  *
- *   1. silent install (/S); the files, the Start Menu shortcut and its app id, the uninstall entry;
- *      no test or developer files shipped
+ *   1. silent install (/S); the files, the Start Menu shortcut and its app id, the uninstall entry
+ *      and its publisher, the company in the exes' file properties; no test or developer files
+ *      shipped
  *   2. native modules under the installed runtime (native-check.js): node-pty runs a real ConPTY
  *      session, koffi calls kernel32
  *   3. launch on a test profile (off-screen): the window boots, the chrome is there, a Command
@@ -36,6 +37,7 @@ const APPDIR = path.join(INST, 'resources', 'app');
 const SHORTCUT = path.join(ROAMING, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Quartz.lnk');
 const PROFILE = path.join(ROAMING, 'Quartz');
 const AUMID = 'com.owensilva.quartz';
+const PUBLISHER = 'Atlas Studio'; // electron-builder.config.js extraMetadata.author.name
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 
 let pass = 0, fail = 0;
@@ -202,6 +204,15 @@ async function main() {
   const entry = uninstallEntry();
   check(!!entry, 'listed in Settings > Apps (HKCU uninstall entry, DisplayName Quartz)', entry ? entry.split(/\r?\n/).filter((l) => /DisplayName|DisplayVersion|InstallLocation|QuietUninstallString/.test(l)).map((l) => l.trim()).join('; ') : 'missing');
   check(!!entry && new RegExp('DisplayVersion\\s+REG_SZ\\s+' + VERSION.replace(/\./g, '\\.')).test(entry), 'uninstall entry version ' + VERSION);
+  // The publisher, as Settings > Apps shows it and as file Properties > Details shows it.
+  const regValue = (name) => ((new RegExp('^\\s*' + name + '\\s+REG_SZ\\s+(.*?)\\s*$', 'm').exec(entry || '') || [])[1] || '');
+  const publisher = regValue('Publisher');
+  check(publisher === PUBLISHER, "Apps entry 'Quartz' " + (regValue('DisplayVersion') || '?') + " by '" + publisher + "'", 'expected publisher ' + PUBLISHER);
+  for (const [what, file] of [['Quartz.exe', EXE], ['Quartz-Setup.exe', SETUP]]) {
+    const vi = ps("$v = (Get-Item -LiteralPath '" + file.replace(/'/g, "''") + "').VersionInfo; $v.CompanyName + ' | ' + $v.LegalCopyright");
+    const company = vi.out.split(' | ')[0];
+    check(company === PUBLISHER, what + " file properties: company '" + company + "'", vi.out || vi.err || '(empty)');
+  }
   const runningAfter = ps("Get-CimInstance Win32_Process | ? { $_.ExecutablePath -like '" + INST.replace(/'/g, "''") + "\\*' } | Measure-Object | % Count").out;
   info('processes from the install folder right after /S: ' + runningAfter + ' (a silent install does not start the app)');
 

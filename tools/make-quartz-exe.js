@@ -57,7 +57,7 @@ const STRINGS = {
   ProductName: 'Quartz',
   InternalName: 'Quartz',
   OriginalFilename: 'Quartz.exe',
-  CompanyName: 'Owen Silva',
+  CompanyName: 'Atlas Studio',
 };
 
 class Fail extends Error {}

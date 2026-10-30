@@ -34,7 +34,9 @@ module.exports = {
   // for npm. The packaged copy's package.json says Quartz instead, so it installs into
   // %LOCALAPPDATA%\Programs\Quartz. The app's own name (and so its profile folder) comes from
   // productName either way.
-  extraMetadata: { name: 'Quartz' },
+  // author.name is the publisher: the Publisher of the Settings > Apps entry, and CompanyName in
+  // the file properties of Quartz.exe and the installer. Set here, for the packaged copy only.
+  extraMetadata: { name: 'Quartz', author: { name: 'Atlas Studio' } },
 
   electronDist: 'node_modules/electron/dist',
   electronVersion: castlabsVersion(),
