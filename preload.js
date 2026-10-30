@@ -130,6 +130,19 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('open-url', handler);
     return () => ipcRenderer.removeListener('open-url', handler);
   },
+  // A command line asked to close tabs by address (closetabs.js; main.js reads the line).
+  //   onRequest(fn(request)) -> unsubscribe: { ok: true, close: [prefix], keep: [prefix] }
+  //                             or { ok: false, reason, droppedUrl? } (refused: show why)
+  //   done({ ok, closed, matched, kept, pinned, notWeb, spared, prefixes } | { ok: false, reason })
+  //                             counts only; main writes the quartz.log line from them.
+  closeTabs: {
+    onRequest: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on('close-tabs', handler);
+      return () => ipcRenderer.removeListener('close-tabs', handler);
+    },
+    done: (result) => ipcRenderer.send('close-tabs:result', result),
+  },
   // A page tried to open a file:// URL and main refused (filenav.js):
   // { wcId, url, text }. The chrome puts `text` on that tab's note bar.
   onFileNavBlocked: (cb) => {

@@ -59,6 +59,8 @@ const profileMove = require('./profilemove');
 // cannot tell them apart). Every installed-only path below keys off this one value.
 const INSTALLED = require('./install-mode').detect(app);
 const { urlFromArgv } = require('./argvurl');
+// --close-tabs=<prefix> [--keep=<prefix>...]: close tabs by address from a command line.
+const closeTabs = require('./closetabs');
 const spellModule = require('./spell');
 const drmModule = require('./drm-main');
 // quartz.log (log.js): start/quit, crashes, hangs, failed loads, adblock, tab
@@ -314,8 +316,32 @@ if (!app.requestSingleInstanceLock()) {
   // requestSingleInstanceLock() has already delivered this copy's command line
   // to the first one, so there is nothing left to do. quit() only ASKS, and
   // everything below this line would still register handlers and open a window.
+  //
+  // A close command (closetabs.js) is the one case with something to say here:
+  // whoever ran it hears at once whether it was refused and why, on this copy's
+  // own console, before the running window shows the result.
+  const closing = closeTabs.requestFromArgv(process.argv);
+  if (closing) console.log(closeTabs.handedText(closing));
   app.quit();
   process.exit(0);
+}
+
+/*
+ * A close command with no browser to close tabs in. Starting Quartz for it would
+ * open the very window that command exists to tidy, take the foreground, and
+ * leave a whole browser running that nobody asked for; so it says why and goes.
+ * The same line with a link on it does start Quartz: the link is the request,
+ * and the close then runs over the restored tabs before the link opens.
+ */
+{
+  const closing = closeTabs.requestFromArgv(process.argv);
+  if (closing && !closeTabs.commandPlan(closing, urlFromArgv(process.argv)).url) {
+    console.log(closing.ok
+      ? '[close-tabs] Quartz is not running, so there are no tabs to close; it was not started for a close command.'
+      : closeTabs.handedText(closing) + ' (Quartz is not running, and was not started.)');
+    app.quit();
+    process.exit(0);
+  }
 }
 
 /** id -> session handle returned by pty.createSession */
@@ -1253,7 +1279,9 @@ function createWindow() {
     const w = liveWin();
     if (!w) return;
     send('win:focus', { focused: w.isFocused() });
-    // …and a link that arrived before the chrome was listening (see openUrlTab).
+    // …and a link that arrived before the chrome was listening (see openUrlTab),
+    // after any close command that came first (it must not close the link's tab).
+    flushPendingCloseTabs();
     flushPendingOpenUrl();
   });
 
@@ -1369,13 +1397,79 @@ function flushPendingOpenUrl() {
 }
 
 /*
+ * Closing tabs by address (closetabs.js): `--close-tabs=<prefix>` and any number
+ * of `--keep=<prefix>` on a command line. Main only reads the line and says
+ * whether it was refused; the chrome owns the tabs, so it decides which close
+ * (CloseTabs.planClose), closes them, shows the toast and sends back what it
+ * did for the log line. Requests that beat the chrome to it wait, in order.
+ */
+let pendingCloseTabs = [];
+const DROPPED_LINK_WORDS = 'The link on the same command line was not opened either.';
+
+/** Hand a close request (ok or refused) to the chrome, or park it until it can take one. */
+function deliverCloseTabs(request) {
+  if (!request) return;
+  // A refusal is logged here, where the line was read: the chrome only shows it.
+  if (request.ok !== true) {
+    const line = closeTabs.logText(request) + (request.droppedUrl ? ' ' + DROPPED_LINK_WORDS : '');
+    console.log('[close-tabs] ' + line);
+    if (qlog) qlog.log.line(line);
+  }
+  if (!canSend() || win.webContents.isLoadingMainFrame()) {
+    pendingCloseTabs.push(request);
+    return;
+  }
+  send('close-tabs', request);
+}
+
+/** The parked requests, now that the chrome is listening. */
+function flushPendingCloseTabs() {
+  if (!pendingCloseTabs.length) return;
+  const list = pendingCloseTabs;
+  pendingCloseTabs = [];
+  for (const request of list) send('close-tabs', request);
+}
+
+// What the chrome did with a request: counts and the prefixes, from which the
+// line's words are made here (the chrome's text is never written as-is).
+ipcMain.on('close-tabs:result', (event, payload) => {
+  if (!isChromeSender(event)) return;
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const count = (v) => (Number.isInteger(v) && v >= 0 && v < 100000 ? v : 0);
+  const prefixes = (Array.isArray(p.prefixes) ? p.prefixes : []).slice(0, 20)
+    .map((x) => closeTabs.checkPrefix(x)).filter((c) => c.ok).map((c) => c.prefix);
+  const line = p.ok === true
+    ? closeTabs.logText({
+      ok: true, close: new Array(count(p.closed)).fill(0), matched: count(p.matched), kept: count(p.kept),
+      pinned: count(p.pinned), notWeb: count(p.notWeb), spared: count(p.spared), prefixes,
+    })
+    : 'Closing tabs from the command line did not finish: '
+      + String(p.reason || 'the chrome gave no reason').replace(/\s+/g, ' ').slice(0, 300).replace(/\.?$/, '.');
+  console.log('[close-tabs] ' + line);
+  if (qlog) qlog.log.line(line);
+});
+
+/*
  * The copy that kept the lock hears every copy that did not. A person just
  * clicked a link, so this is the one place where taking the foreground is the
  * right thing to do -- including for a bare second launch, which raises the
  * window that already exists instead of opening another one.
+ *
+ * A close command is the exception (CloseTabs.commandPlan): on its own it opens
+ * nothing and leaves the window exactly where it is in the z-order, focus and
+ * all. With a link on the same line, the close goes first (so it cannot close
+ * the link's new tab) and the link then opens and raises as any link does. A
+ * refused close runs nothing on its line, the link included.
  */
 app.on('second-instance', (_event, argv) => {
-  openUrlTab(urlFromArgv(argv));
+  const plan = closeTabs.commandPlan(closeTabs.requestFromArgv(argv), urlFromArgv(argv));
+  if (plan.close) {
+    // A refused line says so, and says when a link on it was dropped as well.
+    const dropped = plan.close.ok !== true && !!urlFromArgv(argv);
+    deliverCloseTabs(dropped ? Object.assign({}, plan.close, { droppedUrl: true }) : plan.close);
+  }
+  openUrlTab(plan.url);
+  if (!plan.raise) return;
   const w = liveWin();
   if (!w) return;
   if (w.isMinimized()) w.restore();
@@ -1447,8 +1541,13 @@ app.whenReady().then(async () => {
 
   // A link that STARTED the browser: its tab goes in on top of the session the
   // strip restores, never instead of it. No URL on the command line changes
-  // nothing at all.
-  openUrlTab(urlFromArgv(process.argv));
+  // nothing at all. A close command on the same line goes first (a close on
+  // its own never got this far: see the single-instance lock above).
+  {
+    const plan = closeTabs.commandPlan(closeTabs.requestFromArgv(process.argv), urlFromArgv(process.argv));
+    if (plan.close) deliverCloseTabs(plan.close);
+    openUrlTab(plan.url);
+  }
 
   /*
    * A KILLED session's leftovers, repaired once, here (see embed.recoverOrphans).

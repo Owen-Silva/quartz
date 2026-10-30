@@ -51,6 +51,7 @@ const TESTS = [
   // bundled page reaches tokens.css, so one block really covers the whole app.
   { name: 'a11y-switch', file: 'a11y-switch-harness.js' },
   { name: 'argvurl', file: 'argvurl-harness.js' },
+  { name: 'closetabs', file: 'closetabs-harness.js' },
   // Spotify auto-pause: config migration, the hold machine -> link -> engine, the SMTC helper's wrapper
   // (a fake child), and test mode never sending. Then the shared host protocol (byte-identical with Mantle's).
   { name: 'autopause', file: 'autopause-harness.js' },
@@ -204,6 +205,7 @@ const TESTS = [
   // The daily paths (tests/e2e-kit.js): session restore across restarts, tab sleep and wake,
   // find in page, downloads, the address bar.
   { name: 'sessions-e2e', file: 'sessions-e2e.js', e2e: true },
+  { name: 'closetabs-e2e', file: 'closetabs-e2e.js', e2e: true },
   { name: 'sleep-e2e', file: 'sleep-e2e.js', e2e: true },
   { name: 'find-e2e', file: 'find-e2e.js', e2e: true },
   // Links on a local page: file -> file navigates, target=_blank opens a tab, the web is refused

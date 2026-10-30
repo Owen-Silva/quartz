@@ -10480,6 +10480,99 @@ function closeTabsToRight(id) {
   closeSweep(strip.slice(index + 1));
 }
 
+/*
+ * The third sweep comes from outside: a command line carrying
+ * `--close-tabs=<prefix>` and any `--keep=<prefix>`, handed over by main.js
+ * through 'second-instance'. closetabs.js (window.CloseTabs) holds the rules
+ * and the words: plain web pages only, never pinned, never a workspace's last
+ * tab. This builds its rows from the WHOLE window (every workspace), closes
+ * the plan through closeTab() -- so Ctrl+Shift+T brings any of them back --
+ * says what happened in the toast, and sends main the counts for quartz.log.
+ * It never activates, raises or focuses anything itself.
+ */
+const CLOSE_TABS_TOAST_MS = 3000;
+const CLOSE_TABS_REFUSED_MS = 6000;   // a refusal carries its reason: room to read it
+const CLOSE_TABS_DROPPED_LINK = 'The link on the same command line was not opened either.';
+
+// False until openStrip() has rebuilt the session: a close that arrived sooner
+// would judge half a strip. It waits here, and so does any link behind it, in
+// order, so the close can never take the link's own new tab with it.
+let stripReady = false;
+let stripWaiting = [];
+
+/** The toast is settings.js's and loads after this file; without it the note bar says it. */
+function closeTabsToast(text, ms) {
+  const toast = window.Toast;
+  if (toast && typeof toast.show === 'function') {
+    try { toast.show(text, ms); return; } catch (err) { /* the note bar says it instead */ }
+  }
+  const tab = getActiveTab();
+  if (tab) showAppNote(tab, text, '');
+}
+
+function reportCloseTabs(result) {
+  const api = window.api && window.api.closeTabs;
+  if (!api || typeof api.done !== 'function') return;
+  try { api.done(result); } catch (err) { /* the toast has already said it */ }
+}
+
+function runCloseTabsCommand(request) {
+  const CT = window.CloseTabs;
+  if (!CT || typeof CT.planClose !== 'function') {
+    const reason = 'closetabs.js did not load, so this window cannot read the request';
+    closeTabsToast("Didn't close any tabs: " + reason, CLOSE_TABS_REFUSED_MS);
+    reportCloseTabs({ ok: false, reason });
+    return;
+  }
+  // Refused where the line was read (main logged it): the toast says why.
+  if (!request || request.ok !== true) {
+    closeTabsToast(CT.toastText(request, request && request.droppedUrl ? CLOSE_TABS_DROPPED_LINK : ''), CLOSE_TABS_REFUSED_MS);
+    return;
+  }
+  try {
+    const lastActive = {};
+    for (const ws of workspaces) if (ws && ws.lastActiveTabId != null) lastActive[ws.id] = ws.lastActiveTabId;
+    const rows = tabs.map((tab) => ({
+      id: tab.id,
+      kind: tab.kind,
+      // The address the guest is on now (cached per navigation, as saveSession reads it).
+      url: tab.kind === 'page' ? String(readCurrentUrl(tab) || tab.url || '') : '',
+      pinned: !!tab.pinned,
+      app: isAppTab(tab),
+      kept: isKeptPhoneTab(tab),
+      workspace: tabWorkspace(tab),
+    }));
+    const plan = CT.planClose(rows, request, { activeId: activeTabId, lastActive });
+    if (!plan.ok) {
+      closeTabsToast(CT.toastText(plan), CLOSE_TABS_REFUSED_MS);
+      reportCloseTabs({ ok: false, reason: plan.reason });
+      return;
+    }
+    for (const id of plan.close) closeTab(id);
+    // What actually went: closeTab() keeps its own refusals (the phone tab).
+    const done = Object.assign({}, plan, { close: plan.close.filter((id) => !tabs.some((t) => t.id === id)) });
+    closeTabsToast(CT.toastText(done), CLOSE_TABS_TOAST_MS);
+    reportCloseTabs({
+      ok: true, closed: done.close.length, matched: done.matched, kept: done.kept,
+      pinned: done.pinned, notWeb: done.notWeb, spared: done.spared, prefixes: done.prefixes,
+    });
+  } catch (err) {
+    const reason = 'closing them failed part-way: ' + String((err && err.message) || err).slice(0, 160);
+    closeTabsToast("Couldn't finish closing tabs: " + reason, CLOSE_TABS_REFUSED_MS);
+    reportCloseTabs({ ok: false, reason });
+  }
+}
+
+/** openStrip() is done (or gave up): run what waited for it, in the order it came. */
+function releaseStripWaiting() {
+  stripReady = true;
+  const waiting = stripWaiting;
+  stripWaiting = [];
+  for (const run of waiting) {
+    try { run(); } catch (err) { console.error('[close-tabs] a request that waited for the strip failed:', err); }
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Tab context menu                                                    */
 /* ------------------------------------------------------------------ */
@@ -13181,7 +13274,18 @@ function wireWindowControls() {
       const search = payload && typeof payload.search === 'string' ? payload.search.trim() : '';
       const url = search ? searchUrlFor(search) : payload && payload.url;
       if (!url) return;
-      createTab(url, { background: !!(payload && payload.background) });
+      const open = () => createTab(url, { background: !!(payload && payload.background) });
+      // A close command waiting for the strip goes first (runCloseTabsCommand).
+      if (stripWaiting.length) { stripWaiting.push(open); return; }
+      open();
+    });
+  }
+
+  // `--close-tabs=<prefix>` from a command line (closetabs.js; main.js reads it).
+  if (window.api && window.api.closeTabs && typeof window.api.closeTabs.onRequest === 'function') {
+    window.api.closeTabs.onRequest((request) => {
+      if (!stripReady) { stripWaiting.push(() => runCloseTabsCommand(request)); return; }
+      runCloseTabsCommand(request);
     });
   }
 
@@ -13905,12 +14009,18 @@ function init() {
     });
   };
 
+  // A close command and the links behind it wait for the whole strip, and run
+  // even when the build throws part-way (releaseStripWaiting).
+  const openStripThenWaiting = (session) => {
+    try { openStrip(session); } finally { releaseStripWaiting(); }
+  };
+
   let pending = null;
   try { pending = loadSession(); } catch (err) { pending = null; }
   if (pending && typeof pending.then === 'function') {
-    pending.then(openStrip, () => openStrip(readSession()));
+    pending.then(openStripThenWaiting, () => openStripThenWaiting(readSession()));
   } else {
-    openStrip(readSession());
+    openStripThenWaiting(readSession());
   }
 }
 
